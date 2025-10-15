@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": false,
+    "resolveJsonModule": true,
+    "paths": {
+      "@databricks-apps/types": ["packages/types/src"],
+      "@databricks-apps/types/*": ["packages/types/src/*"],
+      "@databricks-apps/auth": ["packages/backend/auth/src"],
+      "@databricks-apps/cache": ["packages/backend/cache/src"],
+      "@databricks-apps/core": ["packages/backend/core/src"],
+      "@databricks-apps/plugin": ["packages/backend/plugin/src"],
+      "@databricks-apps/server": ["packages/backend/server/src"],
+      "@databricks-apps/utils": ["packages/backend/utils/src"],
+      "@databricks-apps/react": ["packages/frontend/react/src"]
+    }
+  },
+  "exclude": ["node_modules", "dist"]
+}

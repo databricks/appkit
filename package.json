@@ -1,16 +1,22 @@
 {
-  "name": "apps-sdk",
+  "name": "root",
+  "type": "module",
   "private": true,
   "version": "1.0.0",
   "scripts": {
-    "dev": "pnpm -r dev",
+    "dev": "pnpm -r --stream --parallel --color=always dev",
     "build": "pnpm -r build",
-    "clean": "pnpm -r exec rm -rf dist",
-    "create-package": "NODE_OPTIONS='--import tsx' plop --plopfile tools/create-sdk-package.ts"
+    "clean": "pnpm exec rm -rf dist && pnpm -r exec rm -rf dist tsconfig.tsbuildinfo",
+    "clean:full": "pnpm exec rm -rf dist node_modules && pnpm -r exec rm -rf dist tsconfig.tsbuildinfo node_modules",
+    "build:sdk": "pnpm build && tsdown --config tools/sdk-build/tsdown.config.ts",
+    "create-package": "NODE_OPTIONS='--import tsx' plop --plopfile tools/create-sdk-package.ts",
+    "playground": "tsx --env-file=apps/dev-playground/.env apps/dev-playground/dev-server.ts",
+    "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
+    "@types/node": "^24.7.2",
     "plop": "^4.0.4",
-    "tsup": "^8.0.0",
+    "tsdown": "^0.15.7",
     "tsx": "^4.20.6",
     "typescript": "^5.6.0"
   }

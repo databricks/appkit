@@ -1,10 +1,14 @@
 {
   "name": "@databricks-apps/react",
   "version": "1.0.0",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "dev": "tsc -w"
+    "build": "tsdown src/index.ts --dts",
+    "dev": "tsdown --watch ./src"
+  },
+  "dependencies": {
+    "@databricks-apps/types": "workspace:*"
   }
 }

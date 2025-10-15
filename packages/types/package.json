@@ -1,9 +1,14 @@
 {
   "name": "@databricks-apps/types",
   "version": "1.0.0",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "types": "./src/index.ts",
+
   "scripts": {
-    "build": "tsup src/index.ts --dts"
+    "build": "tsdown src/index.ts --dts",
+    "dev": "tsdown --watch ./src",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21"
   }
 }

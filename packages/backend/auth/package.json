@@ -1,13 +1,15 @@
 {
   "name": "@databricks-apps/auth",
+  "type": "module",
   "version": "1.0.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsup src/index.ts --dts"
+    "build": "tsdown src/index.ts --dts",
+    "dev": "tsdown --watch ./src",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@databricks-apps/core": "workspace:*",
     "@databricks-apps/types": "workspace:*"
   }
 }

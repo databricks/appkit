@@ -1,11 +1,13 @@
 {
-  "name": "@databricks-apps/{{name}}",
+  "name": "@databricks-apps/cache",
+  "type": "module",
   "version": "1.0.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsdown src/index.ts --dts",
-    "typecheck": "tsc --noEmit"
+    "dev": "tsdown --watch ./src",
+    "typecheck": "tsc -p ./tsconfig.json --noEmit"
   },
   "dependencies": {
     "@databricks-apps/types": "workspace:*"

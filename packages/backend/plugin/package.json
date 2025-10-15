@@ -1,5 +1,5 @@
 {
-  "name": "@databricks-apps/core",
+  "name": "@databricks-apps/plugin",
   "type": "module",
   "version": "1.0.0",
   "main": "dist/index.js",
@@ -11,8 +11,9 @@
   },
   "dependencies": {
     "@databricks-apps/auth": "workspace:*",
-    "@databricks-apps/utils": "workspace:*",
+    "@databricks-apps/cache": "workspace:*",
     "@databricks-apps/types": "workspace:*",
+    "@databricks-apps/utils": "workspace:*",
     "@types/express": "^4.17.21"
   }
 }
