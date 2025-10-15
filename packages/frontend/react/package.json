@@ -9,6 +9,12 @@
     "dev": "tsdown --watch ./src"
   },
   "dependencies": {
-    "@databricks-apps/types": "workspace:*"
+    "@databricks-apps/types": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0"
   }
 }
