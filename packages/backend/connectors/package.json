@@ -1,0 +1,14 @@
+{
+  "name": "@databricks-apps/connectors",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsdown src/index.ts --dts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@databricks-apps/auth": "workspace:*",
+    "@databricks-apps/types": "workspace:*"
+  }
+}

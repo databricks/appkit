@@ -1,12 +1,12 @@
-import path from "path";
+import path, { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { NodePlopAPI } from "plop";
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const getTemplateDir = (type: string) => path.join(__dirname, "templates", type);
+const getTemplateDir = (type: string) =>
+  path.join(__dirname, "templates", type);
 
 export default function (plop: NodePlopAPI) {
   plop.setGenerator("package", {

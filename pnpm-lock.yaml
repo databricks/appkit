@@ -54,6 +54,15 @@ importers:
         specifier: workspace:*
         version: link:../../types
 
+  packages/backend/connectors:
+    dependencies:
+      '@databricks-apps/auth':
+        specifier: workspace:*
+        version: link:../auth
+      '@databricks-apps/types':
+        specifier: workspace:*
+        version: link:../../types
+
   packages/backend/core:
     dependencies:
       '@databricks-apps/auth':
