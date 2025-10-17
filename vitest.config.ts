@@ -1,5 +1,5 @@
-import { defineConfig } from 'vitest/config'
-import react from '@vitejs/plugin-react'
+import { defineConfig } from "vitest/config";
+import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   test: {
@@ -8,18 +8,18 @@ export default defineConfig({
       {
         plugins: [react()],
         test: {
-          name: 'frontend',
-          root: './packages/frontend',
-          environment: 'jsdom',
+          name: "frontend",
+          root: "./packages/frontend",
+          environment: "jsdom",
         },
       },
       {
         test: {
-          name: 'backend',
-          root: './packages/backend',
-          environment: 'node',
+          name: "backend",
+          root: "./packages/backend",
+          environment: "node",
         },
       },
     ],
   },
-})
+});

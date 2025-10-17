@@ -1,12 +1,12 @@
 import type { Server as HTTPServer } from "node:http";
 import path from "node:path";
-import express from "express";
 import { Plugin, toPlugin } from "@databricks-apps/plugin";
 import type {
   BasePluginConfig,
+  IAuthManager,
   PluginPhase,
 } from "@databricks-apps/types";
-import type { AuthManager } from "@databricks-apps/auth";
+import express from "express";
 
 export interface ServerConfig extends BasePluginConfig {
   port?: number;
@@ -30,7 +30,7 @@ export class ServerPlugin extends Plugin {
 
   static phase: PluginPhase = "deferred";
 
-  constructor(config: ServerConfig, auth: AuthManager) {
+  constructor(config: ServerConfig, auth: IAuthManager) {
     super(config, auth);
     this.config = config;
     this.app = express();
@@ -44,7 +44,7 @@ export class ServerPlugin extends Plugin {
   }
 
   getConfig() {
-    const { plugins, ...config } = this.config;
+    const { plugins: _plugins, ...config } = this.config;
 
     return config;
   }
@@ -69,12 +69,12 @@ export class ServerPlugin extends Plugin {
         console.log(
           `Server is running on port ${
             this.config.port || ServerPlugin.DEFAULT_CONFIG.port
-          }`
+          }`,
         );
         if (this.config.staticPath) {
           console.log(`Serving static files from: ${this.config.staticPath}`);
         }
-      }
+      },
     );
 
     this.server = server;
@@ -120,7 +120,7 @@ export class ServerPlugin extends Plugin {
   private _setupStaticServing() {
     if (!this.config.staticPath) return;
 
-    this.app.get("/", (req, res) => {
+    this.app.get("/", (_, res) => {
       this._renderFE(res);
     });
 
@@ -160,7 +160,7 @@ export class ServerPlugin extends Plugin {
           } catch (err) {
             console.error(
               `Error aborting operations for plugin ${plugin.name}:`,
-              err
+              err,
             );
           }
         }
@@ -189,18 +189,18 @@ const EXCLUDED_PLUGINS = [ServerPlugin.name];
 
 export const server = toPlugin<typeof ServerPlugin, ServerConfig, "server">(
   ServerPlugin,
-  "server"
+  "server",
 );
 
-function getRoutes(stack: any[], basePath = "") {
-  const routes: any[] = [];
+function getRoutes(stack: unknown[], basePath = "") {
+  const routes: Array<{ path: string; methods: string[] }> = [];
 
-  stack.forEach((layer) => {
+  stack.forEach((layer: any) => {
     if (layer.route) {
       // normal route
       const path = basePath + layer.route.path;
       const methods = Object.keys(layer.route.methods).map((m) =>
-        m.toUpperCase()
+        m.toUpperCase(),
       );
       routes.push({ path, methods });
     } else if (layer.name === "router" && layer.handle.stack) {

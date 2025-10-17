@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      '@biomejs/biome':
+        specifier: 2.2.6
+        version: 2.2.6
       '@commitlint/cli':
         specifier: ^19.8.0
         version: 19.8.1(@types/node@24.7.2)(typescript@5.9.3)
@@ -35,9 +38,6 @@ importers:
       lint-staged:
         specifier: ^15.5.1
         version: 15.5.2
-      oxlint:
-        specifier: ^1.23.0
-        version: 1.23.0
       plop:
         specifier: ^4.0.4
         version: 4.0.4(@types/node@24.7.2)
@@ -258,6 +258,59 @@ packages:
   '@babel/types@7.28.4':
     resolution: {integrity: sha512-bkFqkLhh3pMBUQQkpVgWDWq/lqzc2678eUyDlTBhRqhCHFguYYGM0Efga7tYk4TogG/3x0EEl66/OQ+WGbWB/Q==}
     engines: {node: '>=6.9.0'}
+
+  '@biomejs/biome@2.2.6':
+    resolution: {integrity: sha512-yKTCNGhek0rL5OEW1jbLeZX8LHaM8yk7+3JRGv08my+gkpmtb5dDE+54r2ZjZx0ediFEn1pYBOJSmOdDP9xtFw==}
+    engines: {node: '>=14.21.3'}
+    hasBin: true
+
+  '@biomejs/cli-darwin-arm64@2.2.6':
+    resolution: {integrity: sha512-UZPmn3M45CjTYulgcrFJFZv7YmK3pTxTJDrFYlNElT2FNnkkX4fsxjExTSMeWKQYoZjvekpH5cvrYZZlWu3yfA==}
+    engines: {node: '>=14.21.3'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@biomejs/cli-darwin-x64@2.2.6':
+    resolution: {integrity: sha512-HOUIquhHVgh/jvxyClpwlpl/oeMqntlteL89YqjuFDiZ091P0vhHccwz+8muu3nTyHWM5FQslt+4Jdcd67+xWQ==}
+    engines: {node: '>=14.21.3'}
+    cpu: [x64]
+    os: [darwin]
+
+  '@biomejs/cli-linux-arm64-musl@2.2.6':
+    resolution: {integrity: sha512-TjCenQq3N6g1C+5UT3jE1bIiJb5MWQvulpUngTIpFsL4StVAUXucWD0SL9MCW89Tm6awWfeXBbZBAhJwjyFbRQ==}
+    engines: {node: '>=14.21.3'}
+    cpu: [arm64]
+    os: [linux]
+
+  '@biomejs/cli-linux-arm64@2.2.6':
+    resolution: {integrity: sha512-BpGtuMJGN+o8pQjvYsUKZ+4JEErxdSmcRD/JG3mXoWc6zrcA7OkuyGFN1mDggO0Q1n7qXxo/PcupHk8gzijt5g==}
+    engines: {node: '>=14.21.3'}
+    cpu: [arm64]
+    os: [linux]
+
+  '@biomejs/cli-linux-x64-musl@2.2.6':
+    resolution: {integrity: sha512-1ZcBux8zVM3JhWN2ZCPaYf0+ogxXG316uaoXJdgoPZcdK/rmRcRY7PqHdAos2ExzvjIdvhQp72UcveI98hgOog==}
+    engines: {node: '>=14.21.3'}
+    cpu: [x64]
+    os: [linux]
+
+  '@biomejs/cli-linux-x64@2.2.6':
+    resolution: {integrity: sha512-1HaM/dpI/1Z68zp8ZdT6EiBq+/O/z97a2AiHMl+VAdv5/ELckFt9EvRb8hDHpk8hUMoz03gXkC7VPXOVtU7faA==}
+    engines: {node: '>=14.21.3'}
+    cpu: [x64]
+    os: [linux]
+
+  '@biomejs/cli-win32-arm64@2.2.6':
+    resolution: {integrity: sha512-h3A88G8PGM1ryTeZyLlSdfC/gz3e95EJw9BZmA6Po412DRqwqPBa2Y9U+4ZSGUAXCsnSQE00jLV8Pyrh0d+jQw==}
+    engines: {node: '>=14.21.3'}
+    cpu: [arm64]
+    os: [win32]
+
+  '@biomejs/cli-win32-x64@2.2.6':
+    resolution: {integrity: sha512-yx0CqeOhPjYQ5ZXgPfu8QYkgBhVJyvWe36as7jRuPrKPO5ylVDfwVtPQ+K/mooNTADW0IhxOZm3aPu16dP8yNQ==}
+    engines: {node: '>=14.21.3'}
+    cpu: [x64]
+    os: [win32]
 
   '@commitlint/cli@19.8.1':
     resolution: {integrity: sha512-LXUdNIkspyxrlV6VDHWBmCZRtkEVRpBKxi2Gtw3J54cGWhLCTouVD/Q6ZSaSvd2YaDObWK8mDjrz3TIKtaQMAA==}
@@ -561,46 +614,6 @@ packages:
 
   '@oxc-project/types@0.94.0':
     resolution: {integrity: sha512-+UgQT/4o59cZfH6Cp7G0hwmqEQ0wE+AdIwhikdwnhWI9Dp8CgSY081+Q3O67/wq3VJu8mgUEB93J9EHHn70fOw==}
-
-  '@oxlint/darwin-arm64@1.23.0':
-    resolution: {integrity: sha512-sbxoftgEMKmZQO7O4wHR9Rs7MfiHa2UH2x4QJDoc4LXqSCsI4lUIJbFQ05vX+zOUbt7CQMPdxEzExd4DqeKY2w==}
-    cpu: [arm64]
-    os: [darwin]
-
-  '@oxlint/darwin-x64@1.23.0':
-    resolution: {integrity: sha512-PjByWr1TlwHQiOqEc8CPyXCT4wnujSK3n9l1m4un0Eh0uLJEDG5WM9tyDWOGuakC0Ika9/SMp0HDRg3ySchRRA==}
-    cpu: [x64]
-    os: [darwin]
-
-  '@oxlint/linux-arm64-gnu@1.23.0':
-    resolution: {integrity: sha512-sWlCwQ6xKeKC08qU3SfozqpRGCLJiO/onPYFJKEHbjzHkFp+OubOacFaT4ePcka28jCU1TvQ7Gi5BVQRncr0Xg==}
-    cpu: [arm64]
-    os: [linux]
-
-  '@oxlint/linux-arm64-musl@1.23.0':
-    resolution: {integrity: sha512-MPkmSiezuVgjMbzDSkRhENdnb038JOI+OTpBrOho2crbCAuqSRvyFwkMRhncJGZskzo1yeKxrKXB8T83ofmSXw==}
-    cpu: [arm64]
-    os: [linux]
-
-  '@oxlint/linux-x64-gnu@1.23.0':
-    resolution: {integrity: sha512-F6H9wmLfjBoNqtsgyg3P9abLnkVjNbCAnISKdRtDl7HvkMs4s/eU8np9+tSnqPeKOTBhkS+h/VSWgPGZTqIWQA==}
-    cpu: [x64]
-    os: [linux]
-
-  '@oxlint/linux-x64-musl@1.23.0':
-    resolution: {integrity: sha512-Xra0Cow35mAku8mbUbviPRalTU4Ct6MXQ1Eue8GmN4HFkjosrNa5qfy7QkJBqzjiI+JdnHxPXwackGn92/XOQw==}
-    cpu: [x64]
-    os: [linux]
-
-  '@oxlint/win32-arm64@1.23.0':
-    resolution: {integrity: sha512-FR+I+uGD3eFzTfBw87QRr+Y1jBYil3TqPM0wkSvuf3gOJTEXAfSkh9QHCgQqrseW3HDW7YJJ8ty1+sU31H/N4g==}
-    cpu: [arm64]
-    os: [win32]
-
-  '@oxlint/win32-x64@1.23.0':
-    resolution: {integrity: sha512-/oX0b26YIC1OgS5B+G8Ux1Vs/PIjOP4CBRzsPpYr0T+RoboJ3ZuV32bztLRggJKQqIlozcqiRo9fl/UMOMp8kQ==}
-    cpu: [x64]
-    os: [win32]
 
   '@quansync/fs@0.1.5':
     resolution: {integrity: sha512-lNS9hL2aS2NZgNW7BBj+6EBl4rOf8l+tQ0eRY6JWCI8jI2kc53gSoqbjojU0OnAWhzoXiOjFyGsHcDGePB3lhA==}
@@ -1927,16 +1940,6 @@ packages:
     resolution: {integrity: sha512-5b6Y85tPxZZ7QytO+BQzysW31HJku27cRIlkbAXaNx+BdcVi+LlRFmVXzeF6a7JCwJpyw5c4b+YSVImQIrBpuQ==}
     engines: {node: '>=10'}
 
-  oxlint@1.23.0:
-    resolution: {integrity: sha512-cLVdSE7Bza8npm+PffU0oufs15+M5uSMbQn0k2fJCayWU0xqQ3dyA3w9tEk8lgNOk1j1VJEdYctz64Vik8VG1w==}
-    engines: {node: ^20.19.0 || >=22.12.0}
-    hasBin: true
-    peerDependencies:
-      oxlint-tsgolint: '>=0.2.0'
-    peerDependenciesMeta:
-      oxlint-tsgolint:
-        optional: true
-
   p-limit@4.0.0:
     resolution: {integrity: sha512-5b0R4txpzjPWVw/cXXUResoD4hb6U/x9BH08L7nw+GN1sezDzPdxeRvpc9c433fZhBan/wusjbCsqwqm4EIBIQ==}
     engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
@@ -2770,6 +2773,41 @@ snapshots:
       '@babel/helper-string-parser': 7.27.1
       '@babel/helper-validator-identifier': 7.27.1
 
+  '@biomejs/biome@2.2.6':
+    optionalDependencies:
+      '@biomejs/cli-darwin-arm64': 2.2.6
+      '@biomejs/cli-darwin-x64': 2.2.6
+      '@biomejs/cli-linux-arm64': 2.2.6
+      '@biomejs/cli-linux-arm64-musl': 2.2.6
+      '@biomejs/cli-linux-x64': 2.2.6
+      '@biomejs/cli-linux-x64-musl': 2.2.6
+      '@biomejs/cli-win32-arm64': 2.2.6
+      '@biomejs/cli-win32-x64': 2.2.6
+
+  '@biomejs/cli-darwin-arm64@2.2.6':
+    optional: true
+
+  '@biomejs/cli-darwin-x64@2.2.6':
+    optional: true
+
+  '@biomejs/cli-linux-arm64-musl@2.2.6':
+    optional: true
+
+  '@biomejs/cli-linux-arm64@2.2.6':
+    optional: true
+
+  '@biomejs/cli-linux-x64-musl@2.2.6':
+    optional: true
+
+  '@biomejs/cli-linux-x64@2.2.6':
+    optional: true
+
+  '@biomejs/cli-win32-arm64@2.2.6':
+    optional: true
+
+  '@biomejs/cli-win32-x64@2.2.6':
+    optional: true
+
   '@commitlint/cli@19.8.1(@types/node@24.7.2)(typescript@5.9.3)':
     dependencies:
       '@commitlint/format': 19.8.1
@@ -3034,30 +3072,6 @@ snapshots:
     optional: true
 
   '@oxc-project/types@0.94.0': {}
-
-  '@oxlint/darwin-arm64@1.23.0':
-    optional: true
-
-  '@oxlint/darwin-x64@1.23.0':
-    optional: true
-
-  '@oxlint/linux-arm64-gnu@1.23.0':
-    optional: true
-
-  '@oxlint/linux-arm64-musl@1.23.0':
-    optional: true
-
-  '@oxlint/linux-x64-gnu@1.23.0':
-    optional: true
-
-  '@oxlint/linux-x64-musl@1.23.0':
-    optional: true
-
-  '@oxlint/win32-arm64@1.23.0':
-    optional: true
-
-  '@oxlint/win32-x64@1.23.0':
-    optional: true
 
   '@quansync/fs@0.1.5':
     dependencies:
@@ -4338,17 +4352,6 @@ snapshots:
       log-symbols: 4.1.0
       strip-ansi: 6.0.1
       wcwidth: 1.0.1
-
-  oxlint@1.23.0:
-    optionalDependencies:
-      '@oxlint/darwin-arm64': 1.23.0
-      '@oxlint/darwin-x64': 1.23.0
-      '@oxlint/linux-arm64-gnu': 1.23.0
-      '@oxlint/linux-arm64-musl': 1.23.0
-      '@oxlint/linux-x64-gnu': 1.23.0
-      '@oxlint/linux-x64-musl': 1.23.0
-      '@oxlint/win32-arm64': 1.23.0
-      '@oxlint/win32-x64': 1.23.0
 
   p-limit@4.0.0:
     dependencies:

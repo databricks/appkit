@@ -1,4 +1,4 @@
-// import { DBX, server } from "../../dist/@databricks/apps"; 
+// import { DBX, server } from "../../dist/@databricks/apps";
 import { DBX } from "@databricks-apps/core";
 import { server } from "@databricks-apps/server";
 
@@ -8,20 +8,22 @@ DBX.init({
     // genie(),
     server({
       autoStart: false,
-      staticPath: './',
+      staticPath: "./",
     }),
-  ]
+  ],
 }).then((dbx) => {
-  dbx.server.extend(app => {
-    app.get("/ping", async (req, res) => {
-      res.send("pong");
-    });
-  }).start();
+  dbx.server
+    .extend((app) => {
+      app.get("/ping", async (_req, res) => {
+        res.send("pong");
+      });
+    })
+    .start();
   // dbx.server.start().then(app => {
   //   app.get("/ping", async (req, res) => {
   //     // res.send("pong");
 
-      // dbx.genie.asUser('token').conversation.list();
+  // dbx.genie.asUser('token').conversation.list();
   //     // dbx.genie.conversation.asUser('token').list();
   //     // dbx.genie.asUser('token');
 

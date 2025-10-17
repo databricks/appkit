@@ -1,5 +1,6 @@
 import { AuthManager } from "@databricks-apps/auth";
 import type {
+  BasePlugin,
   InputPluginMap,
   OptionalConfigPluginDef,
   PluginConstructor,
@@ -12,9 +13,8 @@ import { envVars } from "./env";
 
 export class DBX<TPlugins extends InputPluginMap> {
   private config: { plugins: TPlugins };
-  private static initialized = false;
-  private static _instance: any = null;
-  private pluginInstances: Record<string, any> = {};
+  private static _instance: DBX<InputPluginMap> | null = null;
+  private pluginInstances: Record<string, BasePlugin> = {};
   private auth: AuthManager;
   private setupPromises: Promise<void>[] = [];
 
@@ -34,55 +34,49 @@ export class DBX<TPlugins extends InputPluginMap> {
       return (p?.plugin?.phase ?? "normal") === "core";
     });
     const normalPlugins = pluginEntries.filter(
-      ([_, p]) => (p?.plugin?.phase ?? "normal") === "normal"
+      ([_, p]) => (p?.plugin?.phase ?? "normal") === "normal",
     );
     const deferredPlugins = pluginEntries.filter(
-      ([_, p]) => (p?.plugin?.phase ?? "normal") === "deferred"
+      ([_, p]) => (p?.plugin?.phase ?? "normal") === "deferred",
     );
 
     for (const [name, pluginData] of corePlugins) {
-      this.createAndRegisterPlugin(
-        globalConfig,
-        name,
-        pluginData as OptionalConfigPluginDef<any>
-      );
+      if (pluginData) {
+        this.createAndRegisterPlugin(globalConfig, name, pluginData);
+      }
     }
 
     for (const [name, pluginData] of normalPlugins) {
-      this.createAndRegisterPlugin(
-        globalConfig,
-        name,
-        pluginData as OptionalConfigPluginDef<any>
-      );
+      if (pluginData) {
+        this.createAndRegisterPlugin(globalConfig, name, pluginData);
+      }
     }
 
     for (const [name, pluginData] of deferredPlugins) {
-      this.createAndRegisterPlugin(
-        globalConfig,
-        name,
-        pluginData as OptionalConfigPluginDef<any>,
-        { plugins: this.pluginInstances }
-      );
+      if (pluginData) {
+        this.createAndRegisterPlugin(globalConfig, name, pluginData, {
+          plugins: this.pluginInstances,
+        });
+      }
     }
   }
 
   private createAndRegisterPlugin<T extends PluginConstructor>(
-    config: any,
+    config: Omit<{ plugins: TPlugins }, "plugins">,
     name: string,
     pluginData: OptionalConfigPluginDef<T>,
-    extraData?: { [key: string]: any }
+    extraData?: Record<string, unknown>,
   ) {
-    const { plugins, ...globalConfig } = config;
     const { plugin: Plugin, config: pluginConfig } = pluginData;
-    const pluginInstance = new (Plugin as any)(
+    const pluginInstance = new Plugin(
       {
-        ...globalConfig,
+        ...config,
         ...Plugin.DEFAULT_CONFIG,
         ...pluginConfig,
         name,
         ...extraData,
       },
-      this.auth
+      this.auth,
     );
 
     this.pluginInstances[name] = pluginInstance;
@@ -99,8 +93,8 @@ export class DBX<TPlugins extends InputPluginMap> {
     });
   }
 
-  static async init<T extends PluginData<any, any, string>[]>(
-    config: { plugins?: T } = {}
+  static async init<T extends PluginData<PluginConstructor, unknown, string>[]>(
+    config: { plugins?: T } = {},
   ): Promise<PluginMap<T>> {
     const rawPlugins = config.plugins as T;
     const preparedPlugins = DBX.preparePlugins(rawPlugins);
@@ -112,20 +106,19 @@ export class DBX<TPlugins extends InputPluginMap> {
 
     await Promise.all(DBX._instance.setupPromises);
 
-    DBX.initialized = true;
-
-    return DBX._instance;
+    return DBX._instance as unknown as PluginMap<T>;
   }
 
-  private static preparePlugins(plugins: PluginData<any, any, string>[]) {
-    return plugins.reduce((acc, currentPlugin) => {
-      return {
-        ...acc,
-        [currentPlugin.name]: {
-          plugin: currentPlugin.plugin,
-          config: currentPlugin.config,
-        },
+  private static preparePlugins(
+    plugins: PluginData<PluginConstructor, unknown, string>[],
+  ) {
+    const result: InputPluginMap = {};
+    for (const currentPlugin of plugins) {
+      result[currentPlugin.name] = {
+        plugin: currentPlugin.plugin,
+        config: currentPlugin.config as Record<string, unknown>,
       };
-    }, {} as Record<string, { plugin: any; config: any }>);
+    }
+    return result;
   }
 }

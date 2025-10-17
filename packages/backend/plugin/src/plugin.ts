@@ -1,16 +1,20 @@
-import type express from "express";
 import { CacheManager } from "@databricks-apps/cache";
 import type {
   BasePlugin,
-  WithInjectedToken,
-  PluginPhase,
+  BasePluginConfig,
+  CacheConfig,
+  ExecuteOptions,
   IAuthManager,
+  PluginPhase,
+  WithInjectedToken,
 } from "@databricks-apps/types";
-import type { CacheConfig } from "@databricks-apps/types";
-import type { ExecuteOptions } from "@databricks-apps/types";
-import { validateEnv, deepMerge } from "@databricks-apps/utils";
+import { deepMerge, validateEnv } from "@databricks-apps/utils";
+import type express from "express";
 
-export abstract class Plugin implements BasePlugin {
+export abstract class Plugin<
+  TConfig extends BasePluginConfig = BasePluginConfig,
+> implements BasePlugin
+{
   protected isReady = false;
   protected auth: IAuthManager;
   protected cache: CacheManager;
@@ -22,9 +26,12 @@ export abstract class Plugin implements BasePlugin {
 
   abortActiveOperations?(): void;
 
-  constructor(protected config: any, auth: IAuthManager) {
-    this.name = config.name;
-    
+  constructor(
+    protected config: TConfig,
+    auth: IAuthManager,
+  ) {
+    this.name = config.name ?? "plugin";
+
     this.auth = auth;
     this.cache = new CacheManager();
 
@@ -35,35 +42,33 @@ export abstract class Plugin implements BasePlugin {
     validateEnv(this.envVars);
   }
 
-  injectRoutes(router: express.Router) {
+  injectRoutes(_: express.Router) {
     return;
   }
 
   async setup() {}
-  
+
   asUser(userToken: string): WithInjectedToken<typeof this> {
     if (!userToken) {
       throw new Error("User token is required");
     }
-
-    const runner = this;
     const handler = {
       get: (target: this, prop: keyof this) => {
         const orig = target[prop];
         if (typeof orig === "function") {
-          return (...args: any[]) => {
-            runner._userToken = userToken;
+          return (...args: unknown[]) => {
+            this._userToken = userToken;
             try {
-              return orig.apply(runner, args);
+              return orig.apply(this, args);
             } finally {
-              runner._userToken = undefined;
+              this._userToken = undefined;
             }
           };
         }
         return orig;
       },
     };
-    // @ts-ignore
+    // @ts-expect-error
     return new Proxy(this, handler) as WithInjectedToken<typeof this>;
   }
 
@@ -74,11 +79,11 @@ export abstract class Plugin implements BasePlugin {
   // executes a method with the provided execution options + execution chain
   protected async executeMethod<T>(
     fn: () => Promise<T>,
-    options: { default: ExecuteOptions; user?: ExecuteOptions }
+    options: { default: ExecuteOptions; user?: ExecuteOptions },
   ): Promise<T | undefined> {
     const executeOptions = this._buildExecutionOptions(
       options.default,
-      options?.user
+      options?.user,
     );
 
     let executionFn = fn;
@@ -86,7 +91,7 @@ export abstract class Plugin implements BasePlugin {
     try {
       executionFn = this._buildExecutionChain(executionFn, executeOptions);
       return await executionFn();
-    } catch (err) {
+    } catch (_err) {
       // sdk should not crash
       return undefined;
     }
@@ -95,7 +100,7 @@ export abstract class Plugin implements BasePlugin {
   // builds the execution chain based on enabled core plugins
   protected _buildExecutionChain<T>(
     fn: () => Promise<T>,
-    options: ExecuteOptions
+    options: ExecuteOptions,
   ) {
     const isCacheEnabled = options.cache?.enabled && options.cache?.cacheKey;
 
@@ -107,9 +112,10 @@ export abstract class Plugin implements BasePlugin {
     // 4. Abort       - Handles abort signals (user cancel or graceful shutdown)
     // 5. Transform   - Transforms the final result
 
-    if (isCacheEnabled) {
+    if (isCacheEnabled && options.cache) {
       const cachedFn = executionFn;
-      executionFn = () => this._executeWithCache(cachedFn, options.cache!);
+      const cacheConfig = options.cache;
+      executionFn = () => this._executeWithCache(cachedFn, cacheConfig);
     }
 
     return executionFn;
@@ -118,7 +124,7 @@ export abstract class Plugin implements BasePlugin {
   // builds the execution options based on prioritization
   protected _buildExecutionOptions(
     methodDefaults: ExecuteOptions,
-    userOverride?: ExecuteOptions
+    userOverride?: ExecuteOptions,
   ): ExecuteOptions {
     // method defaults (lowest priority)
     let result = methodDefaults;
@@ -127,7 +133,6 @@ export abstract class Plugin implements BasePlugin {
     const globalConfig: Partial<ExecuteOptions> = {};
     Object.keys(methodDefaults).forEach((key) => {
       if (this.config[key]) {
-        // @ts-ignore
         globalConfig[key as keyof ExecuteOptions] = this.config[key];
       }
     });
@@ -146,7 +151,7 @@ export abstract class Plugin implements BasePlugin {
 
   private async _executeWithCache<T>(
     fn: () => Promise<T>,
-    options: CacheConfig
+    options: CacheConfig,
   ) {
     const cacheKeyParts = options.cacheKey;
 

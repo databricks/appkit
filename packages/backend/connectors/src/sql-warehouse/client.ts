@@ -199,7 +199,7 @@ export class SQLWarehouseConnector {
     const columns = response.manifest.schema.columns;
 
     const transformedData = response.result.data_array.map((row) => {
-      const obj: Record<string, any> = {};
+      const obj: Record<string, unknown> = {};
       row.forEach((value, index) => {
         const column = columns[index];
         const columnName = column?.name || `column_${index}`;
@@ -225,7 +225,7 @@ export class SQLWarehouseConnector {
     });
 
     // remove data_array
-    const { data_array, ...restResult } = response.result;
+    const { data_array: _data_array, ...restResult } = response.result;
     return {
       ...response,
       result: {

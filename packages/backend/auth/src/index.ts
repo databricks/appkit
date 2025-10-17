@@ -43,7 +43,7 @@ export class AuthManager implements IAuthManager {
     }
 
     throw new Error(
-      "No authentication method available. Please provide either OAuth credentials or a user token."
+      "No authentication method available. Please provide either OAuth credentials or a user token.",
     );
   }
 
@@ -69,14 +69,14 @@ export class AuthManager implements IAuthManager {
     }
 
     throw new Error(
-      "Failed to obtain OAuth token. Please check your credentials."
+      "Failed to obtain OAuth token. Please check your credentials.",
     );
   }
 
   private async getUserToken(config: UserAuthConfig): Promise<string> {
     if (!config.userToken) {
       throw new Error(
-        "No user token provided. User authentication requires a valid token."
+        "No user token provided. User authentication requires a valid token.",
       );
     }
     return config.userToken;
@@ -106,7 +106,7 @@ export class AuthManager implements IAuthManager {
       }
 
       throw new Error(
-        "No authentication credentials available. Please provide OAuth credentials (client_id/client_secret) or a token."
+        "No authentication credentials available. Please provide OAuth credentials (client_id/client_secret) or a token.",
       );
     }
 
@@ -120,7 +120,7 @@ export class AuthManager implements IAuthManager {
   }
 
   private async mintOauthToken(
-    config: OAuthConfig
+    config: OAuthConfig,
   ): Promise<OAuthToken | null> {
     try {
       const { clientId, clientSecret, scope } = config;
@@ -140,7 +140,7 @@ export class AuthManager implements IAuthManager {
       params.set("scope", scope || "all-apis");
 
       const basic = Buffer.from(`${clientId}:${clientSecret}`).toString(
-        "base64"
+        "base64",
       );
 
       const response = await fetch(url, {
@@ -155,7 +155,7 @@ export class AuthManager implements IAuthManager {
       if (!response.ok) {
         const errorText = await response.text();
         console.error(
-          `OAuth token request failed: ${response.status} - ${errorText}`
+          `OAuth token request failed: ${response.status} - ${errorText}`,
         );
         return null;
       }
