@@ -1,16 +1,8 @@
 # apps-sdk
 
+## Contributing
 
-## Adding new packages
-
-To add a new sdk package, run the following command
-
-```
-pnpm create-package
-```
-
-It will prompt for a name and the type of package (backend or frontend).
-
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and contribution guidelines.
 
 👉 For AI/code assistants:  
 - Use [llms-compact.txt](./llms-compact.txt) for quick usage patterns.  

@@ -1,0 +1,36 @@
+{
+  "name": "app-template",
+  "version": "1.0.0",
+  "main": "build/index.js",
+  "scripts": {
+    "start": "pm2 start build/index.mjs --env-file=./server/.env",
+    "start:local": "NODE_ENV=production node --env-file=./server/.env build/index.mjs",
+    "pm2": "pm2",
+    "dev": "tsx --env-file ./server/.env --watch ./server",
+    "build:app": "tsdown --out-dir build server/index.ts && cd client && npm run build",
+    "build:server": "tsdown --out-dir build server/index.ts",
+    "install": "cd client && npm install && cd ..",
+    "preview": "vite preview",
+    "check": "tsc",
+    "clean": "rm -rf build && cd client && rm -rf dist",
+    "clean:full": "rm -rf build node_modules && cd client && rm -rf dist node_modules"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@databricks/apps": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@vitejs/plugin-react": "^5.0.4",
+    "pm2": "^6.0.13",
+    "tsx": "^4.20.6",
+    "tsdown": "^0.15.7",
+    "vite": "npm:rolldown-vite@7.1.14"
+  },
+  "overrides": {
+    "vite": "npm:rolldown-vite@7.1.14"
+  }
+}

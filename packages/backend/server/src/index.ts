@@ -1,5 +1,6 @@
 import type { Server as HTTPServer } from "node:http";
 import path from "node:path";
+import fs from "node:fs";
 import { Plugin, toPlugin } from "@databricks-apps/plugin";
 import type {
   BasePluginConfig,
@@ -14,6 +15,7 @@ export interface ServerConfig extends BasePluginConfig {
   staticPath?: string;
   autoStart?: boolean;
   host?: string;
+  watch?: boolean;
 }
 
 export class ServerPlugin extends Plugin {
@@ -23,6 +25,7 @@ export class ServerPlugin extends Plugin {
     autoStart: true,
     host: process.env.FLASK_RUN_HOST || "0.0.0.0",
     port: Number(process.env.DATABRICKS_APP_PORT) || 8000,
+    watch: process.env.NODE_ENV === "development",
   };
   private app: express.Application;
   private server: HTTPServer | null;
@@ -58,7 +61,11 @@ export class ServerPlugin extends Plugin {
 
     this.extendRoutes();
 
-    if (this.config.staticPath) {
+    if (this.config.watch) {
+      await this._setupWatching();
+    }
+
+    if (this.config.staticPath && !this.config.watch) {
       this._setupStaticServing();
     }
 
@@ -71,8 +78,11 @@ export class ServerPlugin extends Plugin {
             this.config.port || ServerPlugin.DEFAULT_CONFIG.port
           }`,
         );
-        if (this.config.staticPath) {
+        if (this.config.staticPath && !this.config.watch) {
           console.log(`Serving static files from: ${this.config.staticPath}`);
+        }
+        if (this.config.watch) {
+          console.log("Vite is watching for changes...");
         }
       },
     );
@@ -114,6 +124,44 @@ export class ServerPlugin extends Plugin {
 
         this.app.use(`/api/${plugin.name}`, router);
       }
+    }
+  }
+
+  private async _setupWatching() {
+    if (!this.config.watch) return;
+
+    if (process.env.NODE_ENV !== "production") {
+      const { createServer: createViteServer } = require("vite");
+      const { default: react } = require("@vitejs/plugin-react");
+
+      const clientRoot = path.resolve(process.cwd(), "client");
+      const vite = await createViteServer({
+        configFile: false,
+        root: clientRoot,
+        server: { middlewareMode: true },
+        plugins: [react()],
+      });
+
+      this.app.use(vite.middlewares);
+
+      this.app.use("*", async (req, res, next) => {
+        try {
+          if (!req.path.startsWith("/api")) {
+            const url = req.originalUrl;
+            const indexHtmlPath = path.resolve(clientRoot, "index.html");
+            let template = fs.readFileSync(indexHtmlPath, "utf-8");
+
+            template = await vite.transformIndexHtml(url, template);
+
+            res.status(200).set({ "Content-Type": "text/html" }).end(template);
+          } else {
+            next();
+          }
+        } catch (e) {
+          vite.ssrFixStacktrace(e as Error);
+          next(e);
+        }
+      });
     }
   }
 

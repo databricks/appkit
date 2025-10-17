@@ -1,16 +1,28 @@
 {
-  "name": "root",
+  "name": "@databricks/apps",
   "type": "module",
   "private": true,
   "version": "1.0.0",
+  "types": "dist/@databricks/apps/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/@databricks/apps/index.js",
+      "require": "./dist/@databricks/apps/index.js"
+    },
+    "./react": {
+      "import": "./dist/@databricks/apps/react/index.js",
+      "require": "./dist/@databricks/apps/react/index.js"
+    }
+  },
   "scripts": {
-    "dev": "pnpm -r --stream --parallel --color=always dev",
+    "dev": "pnpm -r build && pnpm build:sdk && NODE_ENV=development pnpm -r --stream --parallel --color=always dev",
+    "start": "NODE_ENV=production pnpm build:sdk && pnpm --filter=app-template build:app && pnpm --filter=app-template start:local",
     "build": "pnpm -r build",
     "build:sdk": "pnpm build && tsdown --config tools/sdk-build/tsdown.config.ts",
-    "clean": "pnpm exec rm -rf dist && pnpm -r exec rm -rf dist tsconfig.tsbuildinfo",
-    "clean:full": "pnpm exec rm -rf dist node_modules && pnpm -r exec rm -rf dist tsconfig.tsbuildinfo node_modules",
+    "clean": "pnpm exec rm -rf dist && pnpm -r exec rm -rf dist tsconfig.tsbuildinfo && pnpm -r clean",
+    "clean:full": "pnpm exec rm -rf dist node_modules && pnpm -r exec rm -rf dist tsconfig.tsbuildinfo node_modules && pnpm -r clean:full",
     "create-package": "NODE_OPTIONS='--import tsx' plop --plopfile tools/create-sdk-package.ts",
-    "playground": "tsx --env-file=apps/dev-playground/.env apps/dev-playground/dev-server.ts",
+    "playground": "tsx --env-file=apps/dev-playground/server/.env apps/dev-playground/server/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "pnpm -r typecheck",
@@ -20,7 +32,8 @@
     "format:check": "biome format .",
     "check": "biome check .",
     "check:fix": "biome check --write .",
-    "prepare": "husky"
+    "prepare": "husky",
+    "setup:repo": "./tools/setup.sh"
   },
   "lint-staged": {
     "(*.ts|*.tsx|*.js|*.jsx|*.json|*.md|*.yml|*.yaml|*.css)": [

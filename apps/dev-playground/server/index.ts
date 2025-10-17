@@ -1,6 +1,10 @@
-// import { DBX, server } from "../../dist/@databricks/apps";
-import { DBX } from "@databricks-apps/core";
-import { server } from "@databricks-apps/server";
+import { DBX, server } from "@databricks/apps";
+// import { DBX, server } from "../../../dist/@databricks/apps";
+import path from "node:path";
+// import { DBX } from "@databricks-apps/core";
+// import { server } from "@databricks-apps/server";
+
+const staticPath = path.resolve(process.cwd(), "client", "dist");
 
 DBX.init({
   plugins: [
@@ -8,14 +12,15 @@ DBX.init({
     // genie(),
     server({
       autoStart: false,
-      staticPath: "./",
+      watch: process.env.NODE_ENV === "development",
+      staticPath,
     }),
   ],
 }).then((dbx) => {
   dbx.server
-    .extend((app) => {
-      app.get("/ping", async (_req, res) => {
-        res.send("pong");
+    .extend(async (app) => {
+      app.get("/api/ping", async (_req, res) => {
+        res.send({ message: "pongggg" });
       });
     })
     .start();

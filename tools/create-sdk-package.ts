@@ -1,9 +1,9 @@
-import path, { dirname } from "node:path";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { NodePlopAPI } from "plop";
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __dirname = path.dirname(__filename);
 
 const getTemplateDir = (type: string) =>
   path.join(__dirname, "templates", type);

@@ -20,7 +20,9 @@
       "@databricks-apps/plugin": ["packages/backend/plugin/src"],
       "@databricks-apps/server": ["packages/backend/server/src"],
       "@databricks-apps/utils": ["packages/backend/utils/src"],
-      "@databricks-apps/react": ["packages/frontend/react/src"]
+      "@databricks-apps/react": ["packages/frontend/react/src"],
+      "@databricks/apps": ["packages/backend/*"],
+      "@databricks/apps/react": ["packages/frontend/*"]
     }
   },
   "exclude": ["node_modules", "dist"]
