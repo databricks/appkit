@@ -15,14 +15,24 @@
     "test:watch": "vitest",
     "typecheck": "pnpm -r typecheck",
     "lint": "oxlint .",
-    "lint:fix": "oxlint . --fix --fix-suggestions"
+    "lint:fix": "oxlint . --fix --fix-suggestions",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "(*.ts|*.tsx|*.js|*.jsx|*.json|*.md|*.yml|*.yaml|*.css)": [
+      "pnpm lint:fix"
+    ]
   },
   "devDependencies": {
+    "@commitlint/cli": "^19.8.0",
+    "@commitlint/config-conventional": "^19.8.0",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.0",
     "@types/node": "^24.7.2",
     "@vitejs/plugin-react": "^5.0.4",
+    "husky": "^9.1.7",
     "jsdom": "^27.0.0",
+    "lint-staged": "^15.5.1",
     "oxlint": "^1.23.0",
     "plop": "^4.0.4",
     "tsdown": "^0.15.7",
