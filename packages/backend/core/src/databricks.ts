@@ -77,7 +77,7 @@ export class DBX<TPlugins extends InputPluginMap> {
     const pluginInstance = new (Plugin as any)(
       {
         ...globalConfig,
-        ...(Plugin.DEFAULT_CONFIG || {}),
+        ...Plugin.DEFAULT_CONFIG,
         ...pluginConfig,
         name,
         ...extraData,

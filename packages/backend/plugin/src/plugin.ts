@@ -24,7 +24,7 @@ export abstract class Plugin implements BasePlugin {
 
   constructor(protected config: any, auth: IAuthManager) {
     this.name = config.name;
-    this.config = config;
+    
     this.auth = auth;
     this.cache = new CacheManager();
 
