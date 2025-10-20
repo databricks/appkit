@@ -3,37 +3,51 @@
   "type": "module",
   "private": true,
   "version": "1.0.0",
-  "types": "dist/@databricks/apps/index.d.ts",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "llms.txt",
+    "README.md"
+  ],
   "exports": {
     ".": {
-      "import": "./dist/@databricks/apps/index.js",
-      "require": "./dist/@databricks/apps/index.js"
+      "import": "./dist/server/index.js",
+      "require": "./dist/server/index.js",
+      "types": {
+        "default": "./dist/server/index.d.ts",
+        "browser": "./dist/server/browser-stub.d.ts"
+      },
+      "browser": "./dist/server/browser-stub.js"
     },
     "./react": {
-      "import": "./dist/@databricks/apps/react/index.js",
-      "require": "./dist/@databricks/apps/react/index.js"
+      "import": "./dist/react/index.js",
+      "require": "./dist/react/index.js"
     }
   },
   "scripts": {
-    "dev": "pnpm -r build && pnpm build:sdk && NODE_ENV=development pnpm -r --stream --parallel --color=always dev",
-    "start": "NODE_ENV=production pnpm build:sdk && pnpm --filter=app-template build:app && pnpm --filter=app-template start:local",
-    "build": "pnpm -r build",
     "build:sdk": "pnpm build && tsdown --config tools/sdk-build/tsdown.config.ts",
-    "clean": "pnpm exec rm -rf dist && pnpm -r exec rm -rf dist tsconfig.tsbuildinfo && pnpm -r clean",
-    "clean:full": "pnpm exec rm -rf dist node_modules && pnpm -r exec rm -rf dist tsconfig.tsbuildinfo node_modules && pnpm -r clean:full",
-    "create-package": "NODE_OPTIONS='--import tsx' plop --plopfile tools/create-sdk-package.ts",
-    "playground": "tsx --env-file=apps/dev-playground/server/.env apps/dev-playground/server/index.ts",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "typecheck": "pnpm -r typecheck",
-    "lint": "biome lint .",
-    "lint:fix": "biome lint --write .",
-    "format": "biome format --write .",
-    "format:check": "biome format .",
-    "check": "biome check .",
+    "build": "pnpm -r build",
     "check:fix": "biome check --write .",
+    "check": "biome check .",
+    "clean:full": "pnpm exec rm -rf dist node_modules && pnpm -r exec rm -rf dist tsconfig.tsbuildinfo node_modules && pnpm -r clean:full",
+    "clean": "pnpm exec rm -rf dist && pnpm -r exec rm -rf dist tsconfig.tsbuildinfo && pnpm -r clean",
+    "create-package": "NODE_OPTIONS='--import tsx' plop --plopfile tools/create-sdk-package.ts",
+    "dev": "pnpm -r build && pnpm build:sdk && NODE_ENV=development pnpm -r --stream --parallel --color=always dev",
+    "format:check": "biome format .",
+    "format": "biome format --write .",
+    "lint:fix": "biome lint --write .",
+    "lint": "biome lint .",
+    "pack": "pnpm pack",
+    "playground": "tsx --env-file=apps/dev-playground/server/.env apps/dev-playground/server/index.ts",
     "prepare": "husky",
-    "setup:repo": "./tools/setup.sh"
+    "publish:dry": "pnpm publish --dry-run",
+    "release:dry": "pnpm run build:sdk && pnpm run pack && pnpm run publish:dry",
+    "release": "pnpm run build:sdk && pnpm run pack && pnpm run publish",
+    "setup:repo": "./tools/setup.sh",
+    "start": "NODE_ENV=production pnpm build:sdk && pnpm --filter=app-template build:app && pnpm --filter=app-template start:local",
+    "test:watch": "vitest",
+    "test": "vitest run",
+    "typecheck": "pnpm -r typecheck"
   },
   "lint-staged": {
     "(*.ts|*.tsx|*.js|*.jsx|*.json|*.md|*.yml|*.yaml|*.css)": [

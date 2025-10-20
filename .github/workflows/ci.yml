@@ -1,0 +1,42 @@
+name: CI
+
+# on:
+#   pull_request:
+#     branches:
+#       - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  setup:
+    name: Setup
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+
+  lint_and_typecheck:
+    name: Lint & Type Check
+    needs: setup
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Lint
+        run: pnpm run lint
+      - name: Run Types Check
+        run: pnpm run typecheck
+
+  test:
+    name: Unit Tests
+    needs: lint_and_typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Tests
+        run: pnpm test
+

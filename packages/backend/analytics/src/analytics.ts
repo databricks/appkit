@@ -14,7 +14,7 @@ export class AnalyticsPlugin extends Plugin {
   envVars = ["DATABRICKS_HOST", "DATABRICKS_WAREHOUSE_ID"];
 
   protected static description = "Analytics plugin for data analysis";
-  declare protected config: IAnalyticsConfig;
+  protected declare config: IAnalyticsConfig;
 
   // analytics services
   private SQLClient: SQLWarehouseConnector;

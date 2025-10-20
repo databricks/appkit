@@ -135,16 +135,19 @@ export class ServerPlugin extends Plugin {
       const { default: react } = require("@vitejs/plugin-react");
 
       const clientRoot = path.resolve(process.cwd(), "client");
-      const vite = await createViteServer({
+
+      const config = {
         configFile: false,
         root: clientRoot,
-        server: { middlewareMode: true },
+        server: { middlewareMode: true, watch: false },
         plugins: [react()],
-      });
+      };
 
-      this.app.use(vite.middlewares);
+      const vite = await createViteServer(config);
 
-      this.app.use("*", async (req, res, next) => {
+      this.serverApplication.use(vite.middlewares);
+
+      this.serverApplication.use("*", async (req, res, next) => {
         try {
           if (!req.path.startsWith("/api")) {
             const url = req.originalUrl;
