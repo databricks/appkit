@@ -73,7 +73,10 @@ export class CacheManager {
     return true;
   }
 
-  generateKey(parts: (string | number | object)[]): string {
+  generateKey(parts: (string | number | object)[], userToken?: string): string {
+    if (userToken) {
+      parts = [userToken, ...parts];
+    }
     return parts.map((p) => JSON.stringify(p)).join(":");
   }
 

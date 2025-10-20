@@ -1,5 +1,5 @@
 {
-  "name": "@databricks-apps/{{name}}",
+  "name": "@databricks-apps/app",
   "type": "module",
   "version": "1.0.0",
   "main": "dist/index.js",

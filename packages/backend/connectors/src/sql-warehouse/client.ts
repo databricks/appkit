@@ -18,7 +18,11 @@ export class SQLWarehouseConnector {
     this.config = config;
   }
 
-  async executeStatement(input: ExecuteStatementRequest, signal?: AbortSignal) {
+  async executeStatement(
+    input: ExecuteStatementRequest,
+    signal?: AbortSignal,
+    authOptions?: { userToken?: string },
+  ) {
     // validate required fields
     if (!input.statement) {
       throw new Error(
@@ -55,6 +59,7 @@ export class SQLWarehouseConnector {
         body: JSON.stringify(body),
       },
       signal,
+      authOptions,
     );
 
     if (!response) {
@@ -68,6 +73,7 @@ export class SQLWarehouseConnector {
           response.statement_id,
           this.config.timeout,
           signal,
+          authOptions,
         );
       case "SUCCEEDED":
         return this._transformDataArray(response);
@@ -93,8 +99,11 @@ export class SQLWarehouseConnector {
       body?: string;
     },
     signal?: AbortSignal,
+    authOptions?: { userToken?: string },
   ): Promise<T> {
-    const token = await this.config.auth.getAuthToken();
+    const token = authOptions?.userToken
+      ? authOptions.userToken
+      : await this.config.auth.getAuthToken();
 
     if (!token) {
       throw new Error("No authentication token provided for SQL Warehouse API");
@@ -135,6 +144,7 @@ export class SQLWarehouseConnector {
     statementId: string,
     timeout = executeStatementDefaults.timeout,
     signal?: AbortSignal,
+    authOptions?: { userToken?: string },
   ) {
     const startTime = Date.now();
     let delay = 1000;
@@ -158,6 +168,7 @@ export class SQLWarehouseConnector {
         endpoint,
         { method: "GET" },
         signal,
+        authOptions,
       );
 
       if (!response) {

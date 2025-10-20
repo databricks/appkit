@@ -1,3 +1,4 @@
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { NodePlopAPI } from "plop";
@@ -64,6 +65,42 @@ export default function (plop: NodePlopAPI) {
           type: "add",
           path: `${basePath}/src/index.test.ts`,
           templateFile: path.join(templateDir, "index.test.ts.hbs"),
+        },
+        // update the root tsconfig.json
+        function updateTsConfig(answers) {
+          const tsconfigPath = path.join(process.cwd(), "tsconfig.json");
+          const tsconfig = JSON.parse(readFileSync(tsconfigPath, "utf-8"));
+
+          const packageName = `@databricks-apps/${answers.name}`;
+          const packagePath = [`packages/${answers.type}/${answers.name}/src`];
+
+          // add the new path mapping
+          if (!tsconfig.compilerOptions) {
+            tsconfig.compilerOptions = {};
+          }
+          if (!tsconfig.compilerOptions.paths) {
+            tsconfig.compilerOptions.paths = {};
+          }
+
+          // insert in sorted order
+          const paths = tsconfig.compilerOptions.paths;
+          const sortedPaths: Record<string, string[]> = {};
+          const allKeys = [...Object.keys(paths), packageName].sort();
+
+          for (const key of allKeys) {
+            sortedPaths[key] = key === packageName ? packagePath : paths[key];
+          }
+
+          tsconfig.compilerOptions.paths = sortedPaths;
+
+          // write back the updated tsconfig.json
+          writeFileSync(
+            tsconfigPath,
+            `${JSON.stringify(tsconfig, null, 2)} \n`,
+            "utf-8",
+          );
+
+          return `Updated tsconfig.json with path mapping for ${packageName}`;
         },
       ];
     },

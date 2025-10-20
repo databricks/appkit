@@ -34,7 +34,7 @@ importers:
         version: 9.1.7
       jsdom:
         specifier: ^27.0.0
-        version: 27.0.0(postcss@8.5.6)
+        version: 27.0.0(bufferutil@4.0.9)(postcss@8.5.6)
       lint-staged:
         specifier: ^15.5.1
         version: 15.5.2
@@ -55,7 +55,7 @@ importers:
         version: 5.1.4(typescript@5.9.3)(vite@7.1.10(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.20.6)(yaml@2.8.1))
       vitest:
         specifier: ^3.2.4
-        version: 3.2.4(@types/node@24.7.2)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.2)(tsx@4.20.6)(yaml@2.8.1)
+        version: 3.2.4(@types/node@24.7.2)(jiti@2.6.1)(jsdom@27.0.0(bufferutil@4.0.9)(postcss@8.5.6))(lightningcss@1.30.2)(tsx@4.20.6)(yaml@2.8.1)
 
   apps/dev-playground:
     dependencies:
@@ -71,7 +71,7 @@ importers:
         version: 5.0.4(rolldown-vite@7.1.14(@types/node@20.19.21)(esbuild@0.25.10)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))
       pm2:
         specifier: ^6.0.13
-        version: 6.0.13
+        version: 6.0.13(bufferutil@4.0.9)
       tsdown:
         specifier: ^0.15.7
         version: 0.15.7(typescript@5.9.3)
@@ -81,6 +81,24 @@ importers:
       vite:
         specifier: npm:rolldown-vite@7.1.14
         version: rolldown-vite@7.1.14(@types/node@20.19.21)(esbuild@0.25.10)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)
+
+  packages/backend/analytics:
+    dependencies:
+      '@databricks-apps/cache':
+        specifier: workspace:*
+        version: link:../cache
+      '@databricks-apps/connectors':
+        specifier: workspace:*
+        version: link:../connectors
+      '@databricks-apps/types':
+        specifier: workspace:*
+        version: link:../../types
+
+  packages/backend/app:
+    dependencies:
+      '@databricks-apps/types':
+        specifier: workspace:*
+        version: link:../../types
 
   packages/backend/auth:
     dependencies:
@@ -120,12 +138,18 @@ importers:
 
   packages/backend/plugin:
     dependencies:
+      '@databricks-apps/app':
+        specifier: workspace:*
+        version: link:../app
       '@databricks-apps/auth':
         specifier: workspace:*
         version: link:../auth
       '@databricks-apps/cache':
         specifier: workspace:*
         version: link:../cache
+      '@databricks-apps/stream':
+        specifier: workspace:*
+        version: link:../stream
       '@databricks-apps/types':
         specifier: workspace:*
         version: link:../../types
@@ -160,6 +184,12 @@ importers:
       '@types/express':
         specifier: ^4.17.21
         version: 4.17.23
+
+  packages/backend/stream:
+    dependencies:
+      '@databricks-apps/types':
+        specifier: workspace:*
+        version: link:../../types
 
   packages/backend/utils:
     dependencies:
@@ -1258,6 +1288,10 @@ packages:
   buffer@5.7.1:
     resolution: {integrity: sha512-EHcyIPBQ4BSGlvjB16k5KgAJ27CIsHY/2JBmCRReo48y9rQ3MaUzWX3KVlBa4U7MyX02HdVj0K7C3WaB3ju7FQ==}
 
+  bufferutil@4.0.9:
+    resolution: {integrity: sha512-WDtdLmJvAuNNPzByAYpRo2rF1Mmradw6gvWsQKf63476DDXmomT9zUiGypLcG4ibIM67vhAj8jJRdbmEws2Aqw==}
+    engines: {node: '>=6.14.2'}
+
   bytes@3.1.2:
     resolution: {integrity: sha512-/Nf7TyzTx6S3yRJObOAV7956r8cr2+Oj8AC5dt8wSP3BQAoeX58NoHyCU8P8zGkNXStjTSi6fzO6F0pBdcYbEg==}
     engines: {node: '>= 0.8'}
@@ -2330,6 +2364,10 @@ packages:
   netmask@2.0.2:
     resolution: {integrity: sha512-dBpDMdxv9Irdq66304OLfEmQ9tbNRFnFTuZiLo+bD+r332bBmMJ8GBLXklIXXgxd3+v9+KUnZaUR5PJMa75Gsg==}
     engines: {node: '>= 0.4.0'}
+
+  node-gyp-build@4.8.4:
+    resolution: {integrity: sha512-LA4ZjwlnUblHVgq0oBF3Jl/6h/Nvs5fzBLwdEF4nuxnFdsfajde4WfxtJr3CaiH+F6ewcIB/q4jQ4UzPyid+CQ==}
+    hasBin: true
 
   node-plop@0.32.3:
     resolution: {integrity: sha512-tn+OxutdqhvoByKJ7p84FZBSUDfUB76bcvj0ugLBvgE9V52LFcnz8cauCDKi6otnctvFCqa9XkrU35pBY5Baig==}
@@ -3699,7 +3737,7 @@ snapshots:
 
   '@oxc-project/types@0.94.0': {}
 
-  '@pm2/agent@2.1.1':
+  '@pm2/agent@2.1.1(bufferutil@4.0.9)':
     dependencies:
       async: 3.2.6
       chalk: 3.0.0
@@ -3712,7 +3750,7 @@ snapshots:
       pm2-axon-rpc: 0.7.1
       proxy-agent: 6.4.0
       semver: 7.5.4
-      ws: 7.5.10
+      ws: 7.5.10(bufferutil@4.0.9)
     transitivePeerDependencies:
       - bufferutil
       - supports-color
@@ -3733,13 +3771,13 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@pm2/js-api@0.8.0':
+  '@pm2/js-api@0.8.0(bufferutil@4.0.9)':
     dependencies:
       async: 2.6.4
       debug: 4.3.7
       eventemitter2: 6.4.9
       extrareqp2: 1.0.0(debug@4.3.7)
-      ws: 7.5.10
+      ws: 7.5.10(bufferutil@4.0.9)
     transitivePeerDependencies:
       - bufferutil
       - supports-color
@@ -4280,6 +4318,11 @@ snapshots:
     dependencies:
       base64-js: 1.5.1
       ieee754: 1.2.1
+
+  bufferutil@4.0.9:
+    dependencies:
+      node-gyp-build: 4.8.4
+    optional: true
 
   bytes@3.1.2: {}
 
@@ -5020,7 +5063,7 @@ snapshots:
     dependencies:
       argparse: 2.0.1
 
-  jsdom@27.0.0(postcss@8.5.6):
+  jsdom@27.0.0(bufferutil@4.0.9)(postcss@8.5.6):
     dependencies:
       '@asamuzakjp/dom-selector': 6.6.2
       cssstyle: 5.3.1(postcss@8.5.6)
@@ -5040,7 +5083,7 @@ snapshots:
       whatwg-encoding: 3.1.1
       whatwg-mimetype: 4.0.0
       whatwg-url: 15.1.0
-      ws: 8.18.3
+      ws: 8.18.3(bufferutil@4.0.9)
       xml-name-validator: 5.0.0
     transitivePeerDependencies:
       - bufferutil
@@ -5274,6 +5317,9 @@ snapshots:
 
   netmask@2.0.2: {}
 
+  node-gyp-build@4.8.4:
+    optional: true
+
   node-plop@0.32.3(@types/node@24.7.2):
     dependencies:
       '@types/inquirer': 9.0.9
@@ -5476,12 +5522,12 @@ snapshots:
       - supports-color
     optional: true
 
-  pm2@6.0.13:
+  pm2@6.0.13(bufferutil@4.0.9):
     dependencies:
-      '@pm2/agent': 2.1.1
+      '@pm2/agent': 2.1.1(bufferutil@4.0.9)
       '@pm2/blessed': 0.1.81
       '@pm2/io': 6.1.0
-      '@pm2/js-api': 0.8.0
+      '@pm2/js-api': 0.8.0(bufferutil@4.0.9)
       '@pm2/pm2-version-check': 1.0.4
       ansis: 4.0.0-node10
       async: 3.2.6
@@ -6134,7 +6180,7 @@ snapshots:
       tsx: 4.20.6
       yaml: 2.8.1
 
-  vitest@3.2.4(@types/node@24.7.2)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.2)(tsx@4.20.6)(yaml@2.8.1):
+  vitest@3.2.4(@types/node@24.7.2)(jiti@2.6.1)(jsdom@27.0.0(bufferutil@4.0.9)(postcss@8.5.6))(lightningcss@1.30.2)(tsx@4.20.6)(yaml@2.8.1):
     dependencies:
       '@types/chai': 5.2.2
       '@vitest/expect': 3.2.4
@@ -6161,7 +6207,7 @@ snapshots:
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 24.7.2
-      jsdom: 27.0.0(postcss@8.5.6)
+      jsdom: 27.0.0(bufferutil@4.0.9)(postcss@8.5.6)
     transitivePeerDependencies:
       - jiti
       - less
@@ -6237,9 +6283,13 @@ snapshots:
       string-width: 7.2.0
       strip-ansi: 7.1.2
 
-  ws@7.5.10: {}
+  ws@7.5.10(bufferutil@4.0.9):
+    optionalDependencies:
+      bufferutil: 4.0.9
 
-  ws@8.18.3: {}
+  ws@8.18.3(bufferutil@4.0.9):
+    optionalDependencies:
+      bufferutil: 4.0.9
 
   xml-name-validator@5.0.0: {}
 

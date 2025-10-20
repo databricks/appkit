@@ -21,10 +21,10 @@ export class DBX<TPlugins extends InputPluginMap> {
   private constructor(config: { plugins: TPlugins }) {
     validateEnv(envVars);
 
-    this.config = config;
     // TODO: think about a way of injecting the auth manager into the plugins instead of creating a new instance here
     // We will probably want to create some kind of context that provides more services like auth, telemetry, etc.
     this.auth = new AuthManager();
+    this.config = config;
 
     const { plugins, ...globalConfig } = config;
 

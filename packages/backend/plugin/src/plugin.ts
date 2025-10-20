@@ -1,15 +1,24 @@
+import { AppManager } from "@databricks-apps/app";
 import { CacheManager } from "@databricks-apps/cache";
+import { StreamManager } from "@databricks-apps/stream";
 import type {
   BasePlugin,
   BasePluginConfig,
-  CacheConfig,
   ExecuteOptions,
+  IAppResponse,
   IAuthManager,
   PluginPhase,
   WithInjectedToken,
 } from "@databricks-apps/types";
 import { deepMerge, validateEnv } from "@databricks-apps/utils";
 import type express from "express";
+import { CacheInterceptor } from "./interceptors/cache";
+import { RetryInterceptor } from "./interceptors/retry";
+import { TimeoutInterceptor } from "./interceptors/timeout";
+import type {
+  ExecutionContext,
+  ExecutionInterceptor,
+} from "./interceptors/types";
 
 export abstract class Plugin<
   TConfig extends BasePluginConfig = BasePluginConfig,
@@ -18,22 +27,23 @@ export abstract class Plugin<
   protected isReady = false;
   protected auth: IAuthManager;
   protected cache: CacheManager;
+  protected app: AppManager;
+  protected streamManager: StreamManager;
   protected abstract envVars: string[];
   private _userToken?: string;
 
   static phase: PluginPhase = "normal";
   name: string;
 
-  abortActiveOperations?(): void;
-
   constructor(
     protected config: TConfig,
     auth: IAuthManager,
   ) {
     this.name = config.name ?? "plugin";
-
     this.auth = auth;
+    this.streamManager = new StreamManager();
     this.cache = new CacheManager();
+    this.app = new AppManager();
 
     this.isReady = true;
   }
@@ -48,6 +58,10 @@ export abstract class Plugin<
 
   async setup() {}
 
+  abortActiveOperations(): void {
+    this.streamManager.abortAll();
+  }
+
   asUser(userToken: string): WithInjectedToken<typeof this> {
     if (!userToken) {
       throw new Error("User token is required");
@@ -59,9 +73,20 @@ export abstract class Plugin<
           return (...args: unknown[]) => {
             this._userToken = userToken;
             try {
-              return orig.apply(this, args);
-            } finally {
+              const result = orig.apply(this, args);
+              // if result is promise, clear token after it resolves
+              if (result instanceof Promise) {
+                return result.finally(() => {
+                  this._userToken = undefined;
+                });
+              }
+              // clear token for sync methods
               this._userToken = undefined;
+              return result;
+            } catch (error) {
+              // clear token on error
+              this._userToken = undefined;
+              throw error;
             }
           };
         }
@@ -76,102 +101,121 @@ export abstract class Plugin<
     return this._userToken;
   }
 
-  // executes a method with the provided execution options + execution chain
-  protected async executeMethod<T>(
-    fn: () => Promise<T>,
-    options: { default: ExecuteOptions; user?: ExecuteOptions },
-  ): Promise<T | undefined> {
-    const executeOptions = this._buildExecutionOptions(
-      options.default,
-      options?.user,
-    );
+  // streaming execution with interceptors
+  protected async executeStream<T>(
+    res: IAppResponse,
+    fn: (signal?: AbortSignal) => Promise<T>,
+    options: {
+      default: ExecuteOptions;
+      user?: ExecuteOptions;
+    },
+  ) {
+    const executeOptions = this._buildExecutionOptions(options);
 
-    let executionFn = fn;
+    const self = this;
+    const capturedUserToken = this.userToken;
+
+    const asyncWrapperFn = async function* (streamSignal?: AbortSignal) {
+      const interceptors = self._buildInterceptors(executeOptions);
+      const context: ExecutionContext = {
+        signal: streamSignal,
+        metadata: new Map(),
+        userToken: capturedUserToken,
+      };
+
+      const result = await self._executeWithInterceptors(
+        fn,
+        interceptors,
+        context,
+      );
+      yield result;
+    };
+
+    await this.streamManager.stream(res, asyncWrapperFn);
+  }
+
+  // single sync execution with interceptors
+  protected async execute<T>(
+    fn: (signal?: AbortSignal) => Promise<T>,
+    options: {
+      default: ExecuteOptions;
+      user?: ExecuteOptions;
+    },
+  ): Promise<T | undefined> {
+    const executeOptions = this._buildExecutionOptions(options);
+
+    const interceptors = this._buildInterceptors(executeOptions);
+
+    const context: ExecutionContext = {
+      metadata: new Map(),
+      userToken: this.userToken,
+    };
 
     try {
-      executionFn = this._buildExecutionChain(executionFn, executeOptions);
-      return await executionFn();
-    } catch (_err) {
-      // sdk should not crash
+      return await this._executeWithInterceptors(fn, interceptors, context);
+    } catch (_error) {
+      // production-safe, don't crash sdk
       return undefined;
     }
   }
 
-  // builds the execution chain based on enabled core plugins
-  protected _buildExecutionChain<T>(
-    fn: () => Promise<T>,
-    options: ExecuteOptions,
-  ) {
-    const isCacheEnabled = options.cache?.enabled && options.cache?.cacheKey;
+  // build execution options by merging defaults, plugin config, and user overrides
+  private _buildExecutionOptions(options: {
+    default: ExecuteOptions;
+    user?: ExecuteOptions;
+  }): ExecuteOptions {
+    const { default: methodDefaults, user: userOverride } = options;
 
-    let executionFn = fn;
-
-    // 1. Cache       - Returns cached result if available
-    // 2. Retry       - Retries on failure with exponential backoff
-    // 3. Timeout     - Adds timeout limit (receives abort signal for cleanup)
-    // 4. Abort       - Handles abort signals (user cancel or graceful shutdown)
-    // 5. Transform   - Transforms the final result
-
-    if (isCacheEnabled && options.cache) {
-      const cachedFn = executionFn;
-      const cacheConfig = options.cache;
-      executionFn = () => this._executeWithCache(cachedFn, cacheConfig);
-    }
-
-    return executionFn;
+    // Merge: method defaults <- plugin config <- user override (highest priority)
+    return deepMerge(
+      deepMerge(methodDefaults, this.config),
+      userOverride ?? {},
+    ) as ExecuteOptions;
   }
 
-  // builds the execution options based on prioritization
-  protected _buildExecutionOptions(
-    methodDefaults: ExecuteOptions,
-    userOverride?: ExecuteOptions,
-  ): ExecuteOptions {
-    // method defaults (lowest priority)
-    let result = methodDefaults;
+  // build interceptors based on execute options
+  private _buildInterceptors(options: ExecuteOptions): ExecutionInterceptor[] {
+    const interceptors: ExecutionInterceptor[] = [];
 
-    // apply global config (medium priority)
-    const globalConfig: Partial<ExecuteOptions> = {};
-    Object.keys(methodDefaults).forEach((key) => {
-      if (this.config[key]) {
-        globalConfig[key as keyof ExecuteOptions] = this.config[key];
-      }
-    });
-
-    if (Object.keys(globalConfig).length > 0) {
-      result = deepMerge(result, globalConfig);
+    // order matters: timeout → retry → cache (innermost to outermost)
+    if (options.timeout && options.timeout > 0) {
+      interceptors.push(new TimeoutInterceptor(options.timeout));
     }
 
-    // apply user override (highest priority)
-    if (userOverride) {
-      result = deepMerge(result, userOverride);
+    if (
+      options.retry?.enabled &&
+      options.retry.attempts &&
+      options.retry.attempts > 1
+    ) {
+      interceptors.push(new RetryInterceptor(options.retry));
     }
 
-    return result;
+    if (options.cache?.enabled && options.cache.cacheKey?.length) {
+      interceptors.push(new CacheInterceptor(this.cache, options.cache));
+    }
+
+    return interceptors;
   }
 
-  private async _executeWithCache<T>(
-    fn: () => Promise<T>,
-    options: CacheConfig,
-  ) {
-    const cacheKeyParts = options.cacheKey;
+  // execute method wrapped with interceptors
+  private async _executeWithInterceptors<T>(
+    fn: (signal?: AbortSignal) => Promise<T>,
+    interceptors: ExecutionInterceptor[],
+    context: ExecutionContext,
+  ): Promise<T> {
+    // no interceptors, execute directly
+    if (interceptors.length === 0) {
+      return fn(context.signal);
+    }
+    // build nested execution chain from interceptors
+    let wrappedFn = () => fn(context.signal);
 
-    // if no cache key parts, execute directly
-    if (!cacheKeyParts || cacheKeyParts?.length === 0) {
-      return fn();
+    // wrap each interceptor around the previous function
+    for (const interceptor of interceptors) {
+      const previousFn = wrappedFn;
+      wrappedFn = () => interceptor.intercept(previousFn, context);
     }
 
-    const cacheKey = this.cache.generateKey(cacheKeyParts);
-
-    // check cache
-    const cached = this.cache.get<T>(cacheKey);
-    if (cached !== null) {
-      return cached;
-    }
-
-    // execute and cache
-    const result = await fn();
-    this.cache.set(cacheKey, result);
-
-    return result;
+    return wrappedFn();
   }
 }

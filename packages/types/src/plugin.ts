@@ -77,3 +77,6 @@ export type PluginData<T, U, N> = { plugin: T; config: U; name: N };
 export type ToPlugin<T, U, N extends string> = (
   config?: U,
 ) => PluginData<T, U, N>;
+
+export type IAppRouter = express.Router;
+export type IAppResponse = express.Response;

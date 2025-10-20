@@ -1,9 +1,9 @@
 import type {
-  IAuthManager,
   AuthConfig,
-  UserAuthConfig,
-  OAuthConfig,
+  IAuthManager,
   OAuth,
+  OAuthConfig,
+  UserAuthConfig,
 } from "@databricks-apps/types";
 
 type ValidatedConfig = UserAuthConfig | OAuthConfig;

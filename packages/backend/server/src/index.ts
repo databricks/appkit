@@ -27,7 +27,7 @@ export class ServerPlugin extends Plugin {
     port: Number(process.env.DATABRICKS_APP_PORT) || 8000,
     watch: process.env.NODE_ENV === "development",
   };
-  private app: express.Application;
+  private serverApplication: express.Application;
   private server: HTTPServer | null;
   protected declare config: ServerConfig;
 
@@ -36,7 +36,7 @@ export class ServerPlugin extends Plugin {
   constructor(config: ServerConfig, auth: IAuthManager) {
     super(config, auth);
     this.config = config;
-    this.app = express();
+    this.serverApplication = express();
     this.server = null;
   }
 
@@ -57,7 +57,7 @@ export class ServerPlugin extends Plugin {
   }
 
   async start(): Promise<express.Application> {
-    this.app.use(express.json());
+    this.serverApplication.use(express.json());
 
     this.extendRoutes();
 
@@ -69,7 +69,7 @@ export class ServerPlugin extends Plugin {
       this._setupStaticServing();
     }
 
-    const server = this.app.listen(
+    const server = this.serverApplication.listen(
       this.config.port || ServerPlugin.DEFAULT_CONFIG.port,
       this.config.host || ServerPlugin.DEFAULT_CONFIG.host,
       () => {
@@ -94,11 +94,11 @@ export class ServerPlugin extends Plugin {
 
     if (process.env.NODE_ENV === "development") {
       // TODO: improve this
-      const allRoutes = getRoutes(this.app._router.stack);
+      const allRoutes = getRoutes(this.serverApplication._router.stack);
       console.log(allRoutes);
     }
 
-    return this.app;
+    return this.serverApplication;
   }
 
   extend(fn: (app: express.Application) => void) {
@@ -106,7 +106,7 @@ export class ServerPlugin extends Plugin {
       throw new Error("Cannot extend server when autoStart is true.");
     }
 
-    fn(this.app);
+    fn(this.serverApplication);
 
     return this;
   }
@@ -122,7 +122,7 @@ export class ServerPlugin extends Plugin {
 
         plugin.injectRoutes(router);
 
-        this.app.use(`/api/${plugin.name}`, router);
+        this.serverApplication.use(`/api/${plugin.name}`, router);
       }
     }
   }
@@ -168,13 +168,13 @@ export class ServerPlugin extends Plugin {
   private _setupStaticServing() {
     if (!this.config.staticPath) return;
 
-    this.app.get("/", (_, res) => {
+    this.serverApplication.get("/", (_, res) => {
       this._renderFE(res);
     });
 
-    this.app.use(express.static(this.config.staticPath));
+    this.serverApplication.use(express.static(this.config.staticPath));
 
-    this.app.get("*", (req, res) => {
+    this.serverApplication.get("*", (req, res) => {
       if (!req.path.startsWith("/api") && !req.path.startsWith("/query")) {
         this._renderFE(res);
       }

@@ -1,0 +1,158 @@
+import { CacheManager } from "@databricks-apps/cache";
+import type { CacheConfig } from "@databricks-apps/types";
+import { beforeEach, describe, expect, test, vi } from "vitest";
+import { CacheInterceptor } from "../src/interceptors/cache";
+import type { ExecutionContext } from "../src/interceptors/types";
+
+describe("CacheInterceptor", () => {
+  let cacheManager: CacheManager;
+  let context: ExecutionContext;
+
+  beforeEach(() => {
+    cacheManager = new CacheManager();
+    context = {
+      metadata: new Map(),
+    };
+  });
+
+  test("should bypass cache when disabled", async () => {
+    const config: CacheConfig = {
+      enabled: false,
+      cacheKey: ["test"],
+    };
+    const interceptor = new CacheInterceptor(cacheManager, config);
+    const fn = vi.fn().mockResolvedValue("result");
+
+    const result = await interceptor.intercept(fn, context);
+
+    expect(result).toBe("result");
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  test("should bypass cache when no cacheKey provided", async () => {
+    const config: CacheConfig = {
+      enabled: true,
+      cacheKey: [],
+    };
+    const interceptor = new CacheInterceptor(cacheManager, config);
+    const fn = vi.fn().mockResolvedValue("result");
+
+    const result = await interceptor.intercept(fn, context);
+
+    expect(result).toBe("result");
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  test("should return cached result on cache hit", async () => {
+    const config: CacheConfig = {
+      enabled: true,
+      cacheKey: ["test", "key"],
+    };
+    const interceptor = new CacheInterceptor(cacheManager, config);
+
+    // Pre-populate cache
+    const cacheKey = cacheManager.generateKey(["test", "key"]);
+    cacheManager.set(cacheKey, "cached-result");
+
+    const fn = vi.fn().mockResolvedValue("new-result");
+
+    const result = await interceptor.intercept(fn, context);
+
+    expect(result).toBe("cached-result");
+    expect(fn).not.toHaveBeenCalled(); // Function should not execute
+  });
+
+  test("should execute function and cache result on cache miss", async () => {
+    const config: CacheConfig = {
+      enabled: true,
+      cacheKey: ["test", "key"],
+      ttl: 3600,
+    };
+    const interceptor = new CacheInterceptor(cacheManager, config);
+    const fn = vi.fn().mockResolvedValue("fresh-result");
+
+    const result = await interceptor.intercept(fn, context);
+
+    expect(result).toBe("fresh-result");
+    expect(fn).toHaveBeenCalledTimes(1);
+
+    // Verify result was cached
+    const cacheKey = cacheManager.generateKey(["test", "key"]);
+    const cached = cacheManager.get(cacheKey);
+    expect(cached).toBe("fresh-result");
+  });
+
+  test("should include userToken in cache key when present", async () => {
+    const config: CacheConfig = {
+      enabled: true,
+      cacheKey: ["query", "sales"],
+    };
+    const contextWithToken: ExecutionContext = {
+      metadata: new Map(),
+      userToken: "user-123",
+    };
+    const interceptor = new CacheInterceptor(cacheManager, config);
+    const fn = vi.fn().mockResolvedValue("user-result");
+
+    await interceptor.intercept(fn, contextWithToken);
+
+    // Cache key should include userToken
+    const cacheKey = cacheManager.generateKey(["query", "sales"], "user-123");
+    const cached = cacheManager.get(cacheKey);
+    expect(cached).toBe("user-result");
+  });
+
+  test("should cache different results for different users", async () => {
+    const config: CacheConfig = {
+      enabled: true,
+      cacheKey: ["query", "profile"],
+    };
+    const interceptor = new CacheInterceptor(cacheManager, config);
+
+    // User 1
+    const context1: ExecutionContext = {
+      metadata: new Map(),
+      userToken: "user-1",
+    };
+    const fn1 = vi.fn().mockResolvedValue("user-1-data");
+    await interceptor.intercept(fn1, context1);
+
+    // User 2
+    const context2: ExecutionContext = {
+      metadata: new Map(),
+      userToken: "user-2",
+    };
+    const fn2 = vi.fn().mockResolvedValue("user-2-data");
+    await interceptor.intercept(fn2, context2);
+
+    // Both should have executed
+    expect(fn1).toHaveBeenCalledTimes(1);
+    expect(fn2).toHaveBeenCalledTimes(1);
+
+    // Verify separate cache entries
+    const key1 = cacheManager.generateKey(["query", "profile"], "user-1");
+    const key2 = cacheManager.generateKey(["query", "profile"], "user-2");
+    expect(cacheManager.get(key1)).toBe("user-1-data");
+    expect(cacheManager.get(key2)).toBe("user-2-data");
+  });
+
+  test("should respect TTL setting", async () => {
+    const config: CacheConfig = {
+      enabled: true,
+      cacheKey: ["test"],
+      ttl: 1, // 1 second
+    };
+    const interceptor = new CacheInterceptor(cacheManager, config);
+    const fn = vi.fn().mockResolvedValue("result");
+
+    await interceptor.intercept(fn, context);
+
+    // Wait for TTL to expire
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+
+    // Second call should execute function again
+    await interceptor.intercept(fn, context);
+
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+});
