@@ -81,12 +81,8 @@ export class AnalyticsPlugin extends Plugin {
         );
 
         const result = userToken
-          ? await this.asUser(userToken).executeQueryHandler(
-              query,
-              processedParams,
-              signal,
-            )
-          : await this.executeQueryHandler(query, processedParams, signal);
+          ? await this.asUser(userToken).query(query, processedParams, signal)
+          : await this.query(query, processedParams, signal);
 
         return { type: "result", ...result };
       },
@@ -97,9 +93,9 @@ export class AnalyticsPlugin extends Plugin {
     );
   }
 
-  private async executeQueryHandler(
+  async query(
     query: string,
-    parameters: Record<string, any>,
+    parameters?: Record<string, any>,
     signal?: AbortSignal,
   ): Promise<any> {
     const { statement, parameters: sqlParameters } =

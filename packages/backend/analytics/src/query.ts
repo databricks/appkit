@@ -11,11 +11,11 @@ export class QueryProcessor {
     const paramMatches = query.matchAll(/:([a-zA-Z_]\w*)/g);
     const queryParams = new Set(Array.from(paramMatches, (m) => m[1]));
 
-    // auto-inject workspace_id if needed and not provided
-    if (queryParams.has("workspace_id") && !processed.workspace_id) {
+    // auto-inject workspaceId if needed and not provided
+    if (queryParams.has("workspaceId") && !processed.workspaceId) {
       const workspaceId = process.env.DATABRICKS_WORKSPACE_ID;
       if (workspaceId) {
-        processed.workspace_id = workspaceId;
+        processed.workspaceId = workspaceId;
       }
     }
 

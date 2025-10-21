@@ -10,6 +10,7 @@ export class CacheManager {
   private accessOrder = new Map<string, number>();
   private accessCounter = 0;
   private config: Required<CacheConfig>;
+  private inFlightRequests = new Map<string, Promise<any>>();
 
   constructor(config: CacheConfig = {}) {
     this.config = {
@@ -18,6 +19,40 @@ export class CacheManager {
       maxSize: config.maxSize ?? 1000, // default max 1000 entries
       cacheKey: config.cacheKey ?? [],
     };
+  }
+
+  // get or execute a function and cache the result
+  async getOrExecute<T>(
+    key: (string | number | object)[],
+    fn: () => Promise<T>,
+    userToken?: string,
+    options?: { ttl?: number },
+  ): Promise<T> {
+    const cacheKey = this.generateKey(key, userToken);
+
+    // check cache first
+    const cached = this.get<T>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    // check in flight requests for deduplication
+    const inFlight = this.inFlightRequests.get(cacheKey);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const promise = fn()
+      .then((result) => {
+        this.set(cacheKey, result, options);
+        return result;
+      })
+      .finally(() => {
+        this.inFlightRequests.delete(cacheKey);
+      });
+
+    this.inFlightRequests.set(cacheKey, promise);
+    return promise;
   }
 
   get<T>(key: string): T | null {

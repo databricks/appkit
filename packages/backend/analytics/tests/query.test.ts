@@ -132,12 +132,12 @@ describe("QueryProcessor", () => {
       const originalEnv = process.env.DATABRICKS_WORKSPACE_ID;
       process.env.DATABRICKS_WORKSPACE_ID = "workspace-123";
 
-      const query = "SELECT * FROM data WHERE workspace_id = :workspace_id";
+      const query = "SELECT * FROM data WHERE workspace_id = :workspaceId";
       const parameters = {};
 
       const result = processor.processQueryParams(query, parameters);
 
-      expect(result.workspace_id).toBe("workspace-123");
+      expect(result.workspaceId).toBe("workspace-123");
 
       process.env.DATABRICKS_WORKSPACE_ID = originalEnv;
     });
@@ -146,12 +146,12 @@ describe("QueryProcessor", () => {
       const originalEnv = process.env.DATABRICKS_WORKSPACE_ID;
       process.env.DATABRICKS_WORKSPACE_ID = "workspace-123";
 
-      const query = "SELECT * FROM data WHERE workspace_id = :workspace_id";
-      const parameters = { workspace_id: "custom-workspace" };
+      const query = "SELECT * FROM data WHERE workspace_id = :workspaceId";
+      const parameters = { workspaceId: "custom-workspace" };
 
       const result = processor.processQueryParams(query, parameters);
 
-      expect(result.workspace_id).toBe("custom-workspace");
+      expect(result.workspaceId).toBe("custom-workspace");
 
       process.env.DATABRICKS_WORKSPACE_ID = originalEnv;
     });

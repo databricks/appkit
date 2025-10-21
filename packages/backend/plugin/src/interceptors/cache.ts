@@ -18,22 +18,11 @@ export class CacheInterceptor implements ExecutionInterceptor {
       return fn();
     }
 
-    // generate cache key and check cache
-    const cacheKey = this.cacheManager.generateKey(
+    return this.cacheManager.getOrExecute(
       this.config.cacheKey,
+      fn,
       context?.userToken,
+      { ttl: this.config.ttl },
     );
-    const cached = this.cacheManager.get<T>(cacheKey);
-
-    if (cached !== null) {
-      return cached;
-    }
-
-    const result = await fn();
-
-    // store in cache
-    this.cacheManager.set(cacheKey, result, { ttl: this.config.ttl });
-
-    return result;
   }
 }

@@ -38,7 +38,6 @@
     "lint:fix": "biome lint --write .",
     "lint": "biome lint .",
     "pack": "pnpm pack",
-    "playground": "tsx --env-file=apps/dev-playground/server/.env apps/dev-playground/server/index.ts",
     "prepare": "husky",
     "publish:dry": "pnpm publish --dry-run",
     "release:dry": "pnpm run build:sdk && pnpm run pack && pnpm run publish:dry",
