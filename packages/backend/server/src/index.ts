@@ -1,6 +1,6 @@
+import fs from "node:fs";
 import type { Server as HTTPServer } from "node:http";
 import path from "node:path";
-import fs from "node:fs";
 import { Plugin, toPlugin } from "@databricks-apps/plugin";
 import type {
   BasePluginConfig,
