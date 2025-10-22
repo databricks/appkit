@@ -1,9 +1,10 @@
 import { SQLWarehouseConnector } from "@databricks-apps/connectors";
 import { Plugin, toPlugin } from "@databricks-apps/plugin";
 import type {
-  ExecuteOptions,
+  PluginExecuteConfig,
   IAppRouter,
   IAuthManager,
+  StreamExecutionSettings,
 } from "@databricks-apps/types";
 import { queryDefaults } from "./defaults";
 import { QueryProcessor } from "./query";
@@ -62,12 +63,16 @@ export class AnalyticsPlugin extends Plugin {
     }
 
     // build execution options with dynamic cache key
-    const defaultOptions: ExecuteOptions = {
+    const defaultConfig: PluginExecuteConfig = {
       ...queryDefaults,
       cache: {
         ...queryDefaults.cache,
         cacheKey: ["analytics:query", query_key, JSON.stringify(parameters)], // @TODO: need to handle key ordering issues
       },
+    };
+
+    const streamExecutionSettings: StreamExecutionSettings = {
+      default: defaultConfig,
     };
 
     await this.executeStream(
@@ -86,10 +91,7 @@ export class AnalyticsPlugin extends Plugin {
 
         return { type: "result", ...result };
       },
-      {
-        default: defaultOptions,
-        user: undefined,
-      },
+      streamExecutionSettings,
     );
   }
 

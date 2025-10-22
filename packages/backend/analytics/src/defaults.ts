@@ -1,6 +1,6 @@
-import type { ExecuteOptions } from "@databricks-apps/types";
+import type { PluginExecuteConfig } from "@databricks-apps/types";
 
-export const queryDefaults: ExecuteOptions = {
+export const queryDefaults: PluginExecuteConfig = {
   cache: {
     enabled: true,
     ttl: 3600,

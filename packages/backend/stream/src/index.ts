@@ -1,7 +1,6 @@
 export { streamDefaults } from "./defaults";
+export { StreamManager } from "./stream-manager";
 export {
   type BufferedEvent,
-  type StreamOptions,
   SSEWarningCode,
 } from "./types";
-export { StreamManager } from "./stream-manager";

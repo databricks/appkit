@@ -3,11 +3,14 @@ import reactLogo from "./assets/react.svg";
 import viteLogo from "/vite.svg";
 import "./App.css";
 import { Analytics } from "./pages/analytics";
+import { Reconnect } from "./pages/reconnect";
 
 function App() {
   const [count, setCount] = useState(0);
   const [data, setData] = useState<{ message: string } | null>(null);
-  const [currentPage, setCurrentPage] = useState<"home" | "analytics">("home");
+  const [currentPage, setCurrentPage] = useState<
+    "home" | "analytics" | "reconnect"
+  >("home");
 
   useEffect(() => {
     fetch("/api/ping")
@@ -37,6 +40,10 @@ function App() {
     );
   }
 
+  if (currentPage === "reconnect") {
+    return <Reconnect />;
+  }
+
   return (
     <>
       <div>
@@ -56,7 +63,7 @@ function App() {
           Edit <code>src/App.tsx</code> and save to test HMR
         </p>
       </div>
-      <div style={{ marginTop: "20px" }}>
+      <div style={{ marginTop: "20px", display: "flex", gap: "10px" }}>
         <button
           type="button"
           onClick={() => setCurrentPage("analytics")}
@@ -71,6 +78,18 @@ function App() {
           }}
         >
           View Analytics Dashboard
+        </button>
+        <button
+          type="button"
+          onClick={() => setCurrentPage("reconnect")}
+          style={{
+            padding: "10px 20px",
+            fontSize: "16px",
+            border: "2px solid #1976d2",
+            borderRadius: "4px",
+          }}
+        >
+          View Reconnect
         </button>
       </div>
       <p className="read-the-docs">

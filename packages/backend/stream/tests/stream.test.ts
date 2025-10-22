@@ -208,7 +208,9 @@ describe("StreamManager", () => {
 
       expect(events).toContain('data: {"type":"start"}\n\n');
       expect(events).toContain("event: error\n");
-      expect(events).toContain('data: {"error":"Test error"}\n\n');
+      expect(events).toContain(
+        'data: {"error":"Test error","code":"INTERNAL_ERROR"}\n\n',
+      );
       expect(mockRes.end).toHaveBeenCalled();
     });
 
@@ -223,7 +225,9 @@ describe("StreamManager", () => {
       await streamManager.stream(mockRes as any, generator);
 
       expect(events).toContain("event: error\n");
-      expect(events).toContain('data: {"error":"Internal server error"}\n\n');
+      expect(events).toContain(
+        'data: {"error":"Internal server error","code":"INTERNAL_ERROR"}\n\n',
+      );
     });
 
     test("should not crash if client disconnects during error", async () => {
@@ -448,7 +452,7 @@ describe("StreamManager", () => {
       expect(replayedError).toBe(true);
     });
 
-    test("should detect buffer overflow and restart stream", async () => {
+    test("should detect buffer overflow on completed stream and close connection", async () => {
       const streamId = "overflow-test-123";
 
       const { mockRes: mockRes1 } = createMockResponse();
@@ -487,14 +491,20 @@ describe("StreamManager", () => {
 
       await streamManager.stream(mockRes2 as any, generator2, { streamId });
 
+      // Should send buffer overflow warning
       const hasWarning = events2.some(
         (e) =>
           e.includes("event: warning") || e.includes("BUFFER_OVERFLOW_RESTART"),
       );
       expect(hasWarning).toBe(true);
 
+      // Should close connection since stream is already completed
+      // (In the new architecture, completed streams don't restart)
+      expect(mockRes2.end).toHaveBeenCalled();
+
+      // New generator should NOT run since we're attaching to completed stream
       const hasNewStream = events2.some((e) => e.includes("restarted"));
-      expect(hasNewStream).toBe(true);
+      expect(hasNewStream).toBe(false);
     });
 
     test("should replay successfully when within buffer capacity", async () => {

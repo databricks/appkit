@@ -31,7 +31,7 @@ export function useAnalyticsQuery<T>(
           headers: {
             "Content-Type": "application/json",
           },
-          body: params
+          body: params,
         });
 
         if (!response.ok) {

@@ -1,137 +1,52 @@
-import { randomUUID } from "node:crypto";
-import type { IAppResponse } from "@databricks-apps/types";
-import { BufferManager } from "./buffer-manager";
+import type { IAppResponse, StreamConfig } from "@databricks-apps/types";
 import { streamDefaults } from "./defaults";
-import { SSEWriter } from "./sse-writer";
-import type { StreamOperation, StreamOptions } from "./types";
+import { type StreamEntry, type StreamOperation, SSEErrorCode } from "./types";
+import { randomUUID } from "node:crypto";
 import { StreamValidator } from "./validator";
+import { SSEWriter } from "./sse-writer";
+import { StreamRegistry } from "./stream-registry";
+import { EventRingBuffer } from "./buffers";
 
+// main entry point for Server-Sent events streaming
 export class StreamManager {
-  protected activeOperations: Set<StreamOperation> = new Set();
-  private bufferManager: BufferManager;
+  private activeOperations: Set<StreamOperation>;
+  private streamRegistry: StreamRegistry;
   private sseWriter: SSEWriter;
   private maxEventSize: number;
+  private bufferTTL: number;
 
-  constructor(options?: StreamOptions) {
-    this.bufferManager = new BufferManager(options);
+  constructor(options?: StreamConfig) {
+    this.streamRegistry = new StreamRegistry(
+      options?.maxActiveStreams ?? streamDefaults.maxActiveStreams,
+    );
     this.sseWriter = new SSEWriter();
     this.maxEventSize = options?.maxEventSize ?? streamDefaults.maxEventSize;
+    this.bufferTTL = options?.bufferTTL ?? streamDefaults.bufferTTL;
+    this.activeOperations = new Set();
   }
 
-  async stream(
+  // main streaming method - handles new connection and reconnection
+  stream(
     res: IAppResponse,
     handler: (signal: AbortSignal) => AsyncGenerator<any, void, unknown>,
-    options?: StreamOptions,
+    options?: StreamConfig,
   ): Promise<void> {
+    const { streamId } = options || {};
+
     // setup SSE headers
     this.sseWriter.setupHeaders(res);
 
     // handle reconnection
-    const didReconnect = this._handleReconnection(res, options);
-    if (didReconnect) return;
-
-    // setup signals and heartbeat
-    const streamController = new AbortController();
-    const combinedSignal = this._combineSignals(
-      streamController.signal,
-      options?.userSignal,
-    );
-    const heartbeat = this.sseWriter.startHeartbeat(res, combinedSignal);
-
-    // track operation
-    const streamOperation: StreamOperation = {
-      controller: streamController,
-      type: "stream",
-      heartbeat,
-    };
-    this.activeOperations.add(streamOperation);
-
-    // get buffer
-    const eventBuffer = this.bufferManager.getOrCreateBuffer(options);
-
-    let clientDisconnected = false;
-    res.on("close", () => {
-      clearInterval(heartbeat);
-      clientDisconnected = true;
-      this.activeOperations.delete(streamOperation);
-    });
-
-    try {
-      const eventStream = handler(combinedSignal);
-
-      // retrieve all events from generator
-      for await (const event of eventStream) {
-        if (combinedSignal.aborted) break;
-
-        const eventId = randomUUID();
-        const eventData = JSON.stringify(event);
-
-        // validate event size
-
-        if (eventData.length > this.maxEventSize) {
-          if (!clientDisconnected && !res.writableEnded) {
-            this.sseWriter.writeError(
-              res,
-              eventId,
-              `Event data exceeds max size of ${this.maxEventSize} bytes`,
-            );
-          }
-          continue;
-        }
-
-        // store event in buffer for reconnection
-        eventBuffer.add({
-          id: eventId,
-          type: event.type,
-          data: eventData,
-          timestamp: Date.now(),
-        });
-
-        // send event if client still connected
-        if (!clientDisconnected && !res.writableEnded) {
-          this.sseWriter.writeEvent(res, eventId, event);
-        }
+    if (streamId && StreamValidator.validateStreamId(streamId)) {
+      const existingStream = this.streamRegistry.get(streamId);
+      // if stream exists, attach to it
+      if (existingStream) {
+        return this._attachToExistingStream(res, existingStream, options);
       }
-
-      if (
-        !clientDisconnected &&
-        !combinedSignal.aborted &&
-        !res.writableEnded
-      ) {
-        res.end();
-      }
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Internal server error";
-      const errorEventId = randomUUID();
-
-      // buffer error
-      try {
-        eventBuffer.add({
-          id: errorEventId,
-          type: "error",
-          data: JSON.stringify({ error: errorMessage }),
-          timestamp: Date.now(),
-        });
-      } catch (_bufferError) {
-        // if buffering fails, try generic error event
-        eventBuffer.add({
-          id: errorEventId,
-          type: "error",
-          data: JSON.stringify({ error: "Internal server error" }),
-          timestamp: Date.now(),
-        });
-      }
-      if (!combinedSignal.aborted && !res.writableEnded) {
-        try {
-          this.sseWriter.writeError(res, errorEventId, errorMessage);
-        } catch (_error) {}
-        res.end();
-      }
-    } finally {
-      clearInterval(heartbeat);
-      this.activeOperations.delete(streamOperation);
     }
+
+    // if stream does not exist, create a new one
+    return this._createNewStream(res, handler, options);
   }
 
   // abort all active operations
@@ -141,7 +56,7 @@ export class StreamManager {
       operation.controller.abort("Server shutdown");
     });
     this.activeOperations.clear();
-    this.bufferManager.clear();
+    this.streamRegistry.clear();
   }
 
   // get the number of active operations
@@ -149,51 +64,197 @@ export class StreamManager {
     return this.activeOperations.size;
   }
 
-  // handle reconnection from client
-  private _handleReconnection(
+  // attach to existing stream
+  private async _attachToExistingStream(
     res: IAppResponse,
-    options?: StreamOptions,
-  ): boolean {
-    const { streamId, userSignal } = options || {};
-    if (!res.req?.headers) return false;
+    streamEntry: StreamEntry,
+    options?: StreamConfig,
+  ): Promise<void> {
+    // handle reconnection - replay missed events
+    const lastEventId = res.req?.headers["last-event-id"];
 
-    const lastEventId = res.req.headers["last-event-id"] as string | undefined;
-    if (!lastEventId) {
-      return false;
-    }
-
-    if (!streamId) return false;
-
-    // validate UUID
-    if (!StreamValidator.isValidUUID(lastEventId)) return false;
-
-    // validate streamId
-    StreamValidator.validateStreamId(streamId);
-
-    const bufferEntry = this.bufferManager.getBuffer(streamId);
-    if (!bufferEntry) return false;
-
-    // check if lastEventId is in buffer
-    if (bufferEntry.buffer.has(lastEventId)) {
-      bufferEntry.lastAccess = Date.now();
-      // get missed events since lastEventId
-      const missedEvents = bufferEntry.buffer.getEventsSince(lastEventId);
-
-      if (missedEvents.length > 0) {
+    if (StreamValidator.validateEventId(lastEventId)) {
+      // cast to string after validation
+      const validEventId = lastEventId as string;
+      if (streamEntry.eventBuffer.has(validEventId)) {
+        const missedEvents =
+          streamEntry.eventBuffer.getEventsSince(validEventId);
+        // broadcast missed events to client
         for (const event of missedEvents) {
-          if (userSignal?.aborted) break;
-          this.sseWriter.writeRawEvent(res, event);
+          if (options?.userSignal?.aborted) break;
+          this.sseWriter.writeBufferedEvent(res, event);
         }
-        res.end();
-        return true;
+      } else {
+        // buffer overflow - send warning
+        this.sseWriter.writeBufferOverflowWarning(res, validEventId);
       }
-    } else {
-      // if lastEventId not found, overflow - notify client
-      this.sseWriter.writeBufferOverflowWarning(res, lastEventId);
-      this.bufferManager.deleteBuffer(streamId);
-      return false;
     }
-    return false;
+
+    // add client to stream entry
+    streamEntry.clients.add(res);
+    streamEntry.lastAccess = Date.now();
+
+    // start heartbeat
+    const combinedSignal = this._combineSignals(
+      streamEntry.abortController.signal,
+      options?.userSignal,
+    );
+    const heartbeat = this.sseWriter.startHeartbeat(res, combinedSignal);
+
+    // track operation
+    const streamOperation: StreamOperation = {
+      controller: streamEntry.abortController,
+      type: "stream",
+      heartbeat,
+    };
+    this.activeOperations.add(streamOperation);
+
+    // handle client disconnect
+    res.on("close", () => {
+      clearInterval(heartbeat);
+      streamEntry.clients.delete(res);
+      this.activeOperations.delete(streamOperation);
+
+      // cleanup if stream is completed and no clients are connected
+      if (streamEntry.isCompleted && streamEntry.clients.size === 0) {
+        setTimeout(() => {
+          if (streamEntry.clients.size === 0) {
+            this.streamRegistry.remove(streamEntry.streamId);
+          }
+        }, this.bufferTTL);
+      }
+    });
+
+    // if stream is completed, close connection
+    if (streamEntry.isCompleted) {
+      res.end();
+      // cleanup operation
+      this.activeOperations.delete(streamOperation);
+      clearInterval(heartbeat);
+    }
+  }
+  private async _createNewStream(
+    res: IAppResponse,
+    handler: (signal: AbortSignal) => AsyncGenerator<any, void, unknown>,
+    options?: StreamConfig,
+  ): Promise<void> {
+    const streamId = options?.streamId ?? randomUUID();
+    const abortController = new AbortController();
+
+    // create event buffer
+    const eventBuffer = new EventRingBuffer(
+      options?.bufferSize ?? streamDefaults.bufferSize,
+    );
+
+    // setup signals and heartbeat
+    const combinedSignal = this._combineSignals(
+      abortController.signal,
+      options?.userSignal,
+    );
+    const heartbeat = this.sseWriter.startHeartbeat(res, combinedSignal);
+
+    // create stream entry
+    const streamEntry: StreamEntry = {
+      streamId,
+      generator: handler(combinedSignal),
+      eventBuffer,
+      clients: new Set([res]),
+      isCompleted: false,
+      lastAccess: Date.now(),
+      abortController,
+    };
+    this.streamRegistry.add(streamEntry);
+
+    // track operation
+    const streamOperation: StreamOperation = {
+      controller: abortController,
+      type: "stream",
+      heartbeat,
+    };
+    this.activeOperations.add(streamOperation);
+
+    // handle client disconnect
+    res.on("close", () => {
+      clearInterval(heartbeat);
+      this.activeOperations.delete(streamOperation);
+      streamEntry.clients.delete(res);
+    });
+
+    await this._processGeneratorInBackground(streamEntry);
+
+    // cleanup
+    clearInterval(heartbeat);
+    this.activeOperations.delete(streamOperation);
+  }
+
+  private async _processGeneratorInBackground(
+    streamEntry: StreamEntry,
+  ): Promise<void> {
+    try {
+      // retrieve all events from generator
+      for await (const event of streamEntry.generator) {
+        if (streamEntry.abortController.signal.aborted) break;
+        const eventId = randomUUID();
+        const eventData = JSON.stringify(event);
+
+        // validate event size
+        if (eventData.length > this.maxEventSize) {
+          const errorMsg = `Event exceeds max size of ${this.maxEventSize} bytes`;
+          const errorCode = SSEErrorCode.INVALID_REQUEST;
+          // broadcast error to all connected clients
+          this._broadcastErrorToClients(
+            streamEntry,
+            eventId,
+            errorMsg,
+            errorCode,
+          );
+          continue;
+        }
+
+        // buffer event for reconnection
+        streamEntry.eventBuffer.add({
+          id: eventId,
+          type: event.type,
+          data: eventData,
+          timestamp: Date.now(),
+        });
+
+        // broadcast to all connected clients
+        this._broadcastEventsToClients(streamEntry, eventId, event);
+        streamEntry.lastAccess = Date.now();
+      }
+
+      streamEntry.isCompleted = true;
+
+      // close all clients
+      this._closeAllClients(streamEntry);
+
+      // cleanup if no clients are connected
+      this._cleanupStream(streamEntry);
+    } catch (error) {
+      const errorMsg =
+        error instanceof Error ? error.message : "Internal server error";
+      const errorEventId = randomUUID();
+      const errorCode = this._categorizeError(error);
+
+      // buffer error event
+      streamEntry.eventBuffer.add({
+        id: errorEventId,
+        type: "error",
+        data: JSON.stringify({ error: errorMsg, code: errorCode }),
+        timestamp: Date.now(),
+      });
+
+      // send error event to all connected clients
+      this._broadcastErrorToClients(
+        streamEntry,
+        errorEventId,
+        errorMsg,
+        errorCode,
+        true,
+      );
+      streamEntry.isCompleted = true;
+    }
   }
 
   private _combineSignals(
@@ -202,26 +263,95 @@ export class StreamManager {
   ): AbortSignal {
     if (!userSignal) return internalSignal || new AbortController().signal;
 
-    const signals = [internalSignal];
-    if (userSignal) signals.push(userSignal);
-
+    const signals = [internalSignal, userSignal].filter(
+      Boolean,
+    ) as AbortSignal[];
     const controller = new AbortController();
 
     signals.forEach((signal) => {
       if (signal?.aborted) {
         controller.abort(signal.reason);
         return;
-      } else {
-        signal?.addEventListener(
-          "abort",
-          () => {
-            controller.abort(signal.reason);
-          },
-          { once: true },
-        );
       }
-    });
 
+      signal?.addEventListener(
+        "abort",
+        () => {
+          controller.abort(signal.reason);
+        },
+        { once: true },
+      );
+    });
     return controller.signal;
+  }
+
+  // broadcast events to all connected clients
+  private _broadcastEventsToClients(
+    streamEntry: StreamEntry,
+    eventId: string,
+    event: any,
+  ): void {
+    for (const client of streamEntry.clients) {
+      if (!client.writableEnded) {
+        this.sseWriter.writeEvent(client, eventId, event);
+      }
+    }
+  }
+
+  // broadcast error to all connected clients
+  private _broadcastErrorToClients(
+    streamEntry: StreamEntry,
+    eventId: string,
+    errorMessage: string,
+    errorCode: SSEErrorCode,
+    closeClients: boolean = false,
+  ): void {
+    for (const client of streamEntry.clients) {
+      if (!client.writableEnded) {
+        this.sseWriter.writeError(client, eventId, errorMessage, errorCode);
+        if (closeClients) {
+          client.end();
+        }
+      }
+    }
+  }
+
+  // close all connected clients
+  private _closeAllClients(streamEntry: StreamEntry): void {
+    for (const client of streamEntry.clients) {
+      if (!client.writableEnded) {
+        client.end();
+      }
+    }
+  }
+
+  // cleanup stream if no clients are connected
+  private _cleanupStream(streamEntry: StreamEntry): void {
+    if (streamEntry.clients.size === 0) {
+      setTimeout(() => {
+        if (streamEntry.clients.size === 0) {
+          this.streamRegistry.remove(streamEntry.streamId);
+        }
+      }, this.bufferTTL);
+    }
+  }
+
+  private _categorizeError(error: unknown): SSEErrorCode {
+    if (error instanceof Error) {
+      const message = error.message.toLowerCase();
+      if (message.includes("timeout") || message.includes("timed out")) {
+        return SSEErrorCode.TIMEOUT;
+      }
+
+      if (message.includes("unavailable") || message.includes("econnrefused")) {
+        return SSEErrorCode.TEMPORARY_UNAVAILABLE;
+      }
+
+      if (error.name === "AbortError") {
+        return SSEErrorCode.STREAM_ABORTED;
+      }
+    }
+
+    return SSEErrorCode.INTERNAL_ERROR;
   }
 }

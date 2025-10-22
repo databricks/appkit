@@ -5,10 +5,13 @@ import { StreamManager } from "@databricks-apps/stream";
 import type {
   BasePlugin,
   BasePluginConfig,
-  ExecuteOptions,
+  PluginExecuteConfig,
+  PluginExecutionSettings,
   IAppResponse,
   IAuthManager,
   PluginPhase,
+  StreamExecuteHandler,
+  StreamExecutionSettings,
   WithInjectedToken,
 } from "@databricks-apps/types";
 import { deepMerge, validateEnv } from "@databricks-apps/utils";
@@ -94,47 +97,74 @@ export abstract class Plugin<
   // streaming execution with interceptors
   protected async executeStream<T>(
     res: IAppResponse,
-    fn: (signal?: AbortSignal) => Promise<T>,
-    options: {
-      default: ExecuteOptions;
-      user?: ExecuteOptions;
-    },
+    fn: StreamExecuteHandler<T>,
+    options: StreamExecutionSettings,
   ) {
-    const executeOptions = this._buildExecutionOptions(options);
+    // destructure options
+    const {
+      stream: streamConfig,
+      default: defaultConfig,
+      user: userConfig,
+    } = options;
+
+    // build execution options
+    const executeConfig = this._buildExecutionConfig({
+      default: defaultConfig,
+      user: userConfig,
+    });
 
     const self = this;
     const capturedUserToken = this.userToken;
 
+    // wrapper function to ensure it returns a generator
     const asyncWrapperFn = async function* (streamSignal?: AbortSignal) {
-      const interceptors = self._buildInterceptors(executeOptions);
+      // build execution context
       const context: ExecutionContext = {
         signal: streamSignal,
         metadata: new Map(),
         userToken: capturedUserToken,
       };
 
+      // build interceptors
+      const interceptors = self._buildInterceptors(executeConfig);
+
+      // wrap the function to ensure it returns a promise
+      const wrappedFn = async () => {
+        const result = await fn(context.signal);
+        return result;
+      };
+
+      // execute the function with interceptors
       const result = await self._executeWithInterceptors(
-        fn,
+        wrappedFn as (signal?: AbortSignal) => Promise<T>,
         interceptors,
         context,
       );
-      yield result;
+
+      // check if result is a generator
+      if (self._checkIfGenerator(result)) {
+        // if result is a generator, iterate over it and yield each item
+        for await (const item of result as AsyncGenerator<T, void, unknown>) {
+          yield item;
+        }
+      } else {
+        // if result is not a generator, yield the result
+        yield result;
+      }
     };
 
-    await this.streamManager.stream(res, asyncWrapperFn);
+    // stream the result to the client
+    await this.streamManager.stream(res, asyncWrapperFn, streamConfig);
   }
 
   // single sync execution with interceptors
   protected async execute<T>(
     fn: (signal?: AbortSignal) => Promise<T>,
-    options: {
-      default: ExecuteOptions;
-      user?: ExecuteOptions;
-    },
+    options: PluginExecutionSettings,
   ): Promise<T | undefined> {
-    const executeOptions = this._buildExecutionOptions(options);
+    const executeConfig = this._buildExecutionConfig(options);
 
-    const interceptors = this._buildInterceptors(executeOptions);
+    const interceptors = this._buildInterceptors(executeConfig);
 
     const context: ExecutionContext = {
       metadata: new Map(),
@@ -150,21 +180,22 @@ export abstract class Plugin<
   }
 
   // build execution options by merging defaults, plugin config, and user overrides
-  private _buildExecutionOptions(options: {
-    default: ExecuteOptions;
-    user?: ExecuteOptions;
-  }): ExecuteOptions {
+  private _buildExecutionConfig(
+    options: PluginExecutionSettings,
+  ): PluginExecuteConfig {
     const { default: methodDefaults, user: userOverride } = options;
 
     // Merge: method defaults <- plugin config <- user override (highest priority)
     return deepMerge(
       deepMerge(methodDefaults, this.config),
       userOverride ?? {},
-    ) as ExecuteOptions;
+    ) as PluginExecuteConfig;
   }
 
   // build interceptors based on execute options
-  private _buildInterceptors(options: ExecuteOptions): ExecutionInterceptor[] {
+  private _buildInterceptors(
+    options: PluginExecuteConfig,
+  ): ExecutionInterceptor[] {
     const interceptors: ExecutionInterceptor[] = [];
 
     // order matters: timeout → retry → cache (innermost to outermost)
@@ -207,5 +238,13 @@ export abstract class Plugin<
     }
 
     return wrappedFn();
+  }
+
+  private _checkIfGenerator(
+    result: any,
+  ): result is AsyncGenerator<any, void, unknown> {
+    return (
+      result && typeof result === "object" && Symbol.asyncIterator in result
+    );
   }
 }
