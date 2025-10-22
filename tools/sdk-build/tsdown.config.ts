@@ -11,6 +11,7 @@ export default defineConfig([
     dts: true,
     sourcemap: false,
     clean: true,
+    external: ["vite", "@vitejs/plugin-react"],
     onSuccess: (config) => writeBrowserStub(config.outDir),
   },
   {

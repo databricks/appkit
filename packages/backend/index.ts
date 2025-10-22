@@ -1,3 +1,3 @@
-export { DBX } from "./core";
-export { server } from "./server";
-export { analytics } from "./analytics";
+export { analytics } from "@databricks-apps/analytics";
+export { DBX } from "@databricks-apps/core";
+export { server } from "@databricks-apps/server";

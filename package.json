@@ -32,7 +32,7 @@
     "clean:full": "pnpm exec rm -rf dist node_modules && pnpm -r exec rm -rf dist tsconfig.tsbuildinfo node_modules && pnpm -r clean:full",
     "clean": "pnpm exec rm -rf dist && pnpm -r exec rm -rf dist tsconfig.tsbuildinfo && pnpm -r clean",
     "create-package": "NODE_OPTIONS='--import tsx' plop --plopfile tools/create-sdk-package.ts",
-    "dev": "pnpm -r build && pnpm build:sdk && NODE_ENV=development pnpm -r --stream --parallel --color=always dev",
+    "dev": "NODE_ENV=development pnpm --filter=app-template dev",
     "format:check": "biome format .",
     "format": "biome format --write .",
     "lint:fix": "biome lint --write .",
@@ -45,12 +45,12 @@
     "setup:repo": "./tools/setup.sh",
     "start": "NODE_ENV=production pnpm build:sdk && pnpm --filter=app-template build:app && pnpm --filter=app-template start:local",
     "test:watch": "vitest",
-    "test": "vitest run",
+    "test": "vitest run --coverage",
     "typecheck": "pnpm -r typecheck"
   },
   "lint-staged": {
     "(*.ts|*.tsx|*.js|*.jsx|*.json|*.md|*.yml|*.yaml|*.css)": [
-      "pnpm lint:fix"
+      "pnpm lint:fix && pnpm format"
     ]
   },
   "devDependencies": {
@@ -61,6 +61,7 @@
     "@testing-library/react": "^16.3.0",
     "@types/node": "^24.7.2",
     "@vitejs/plugin-react": "^5.0.4",
+    "@vitest/coverage-istanbul": "3.2.4",
     "husky": "^9.1.7",
     "jsdom": "^27.0.0",
     "lint-staged": "^15.5.1",

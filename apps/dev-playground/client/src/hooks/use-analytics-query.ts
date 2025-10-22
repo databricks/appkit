@@ -14,7 +14,7 @@ export function useAnalyticsQuery<T>(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const params = JSON.stringify(parameters);
+  const params = JSON.stringify({ parameters });
 
   useEffect(() => {
     let isCancelled = false;
@@ -29,7 +29,7 @@ export function useAnalyticsQuery<T>(
           headers: {
             "Content-Type": "application/json",
           },
-          body: params,
+          body: params
         });
 
         if (!response.ok) {

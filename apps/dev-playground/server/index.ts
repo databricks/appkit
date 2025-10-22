@@ -13,7 +13,6 @@ DBX.init({
   plugins: [
     analytics(),
     server({
-      autoStart: true,
       watch: process.env.NODE_ENV === "development",
       staticPath,
     }),

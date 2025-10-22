@@ -95,7 +95,7 @@ export class ServerPlugin extends Plugin {
     if (process.env.NODE_ENV === "development") {
       // TODO: improve this
       const allRoutes = getRoutes(this.serverApplication._router.stack);
-      console.log(allRoutes);
+      console.dir(allRoutes, { depth: null });
     }
 
     return this.serverApplication;
@@ -113,6 +113,10 @@ export class ServerPlugin extends Plugin {
 
   private extendRoutes() {
     if (!this.config.plugins) return;
+
+    this.serverApplication.get("/health", (_, res) => {
+      res.status(200).json({ status: "ok" });
+    });
 
     for (const plugin of Object.values(this.config.plugins)) {
       if (EXCLUDED_PLUGINS.includes(plugin.name)) continue;

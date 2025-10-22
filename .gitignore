@@ -3,5 +3,7 @@ build
 node_modules
 .env
 
+coverage
+
 *.tsbuildinfo
 docs

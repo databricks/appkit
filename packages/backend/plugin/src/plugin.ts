@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { AppManager } from "@databricks-apps/app";
 import { CacheManager } from "@databricks-apps/cache";
 import { StreamManager } from "@databricks-apps/stream";
@@ -20,6 +21,8 @@ import type {
   ExecutionInterceptor,
 } from "./interceptors/types";
 
+const tokenContext = new AsyncLocalStorage<{ token: string }>();
+
 export abstract class Plugin<
   TConfig extends BasePluginConfig = BasePluginConfig,
 > implements BasePlugin
@@ -30,7 +33,6 @@ export abstract class Plugin<
   protected app: AppManager;
   protected streamManager: StreamManager;
   protected abstract envVars: string[];
-  private _userToken?: string;
 
   static phase: PluginPhase = "normal";
   name: string;
@@ -63,42 +65,30 @@ export abstract class Plugin<
   }
 
   asUser(userToken: string): WithInjectedToken<typeof this> {
-    if (!userToken) {
-      throw new Error("User token is required");
-    }
-    const handler = {
-      get: (target: this, prop: keyof this) => {
-        const orig = target[prop];
+    if (!userToken) throw new Error("User token is required");
+
+    const runner = this;
+    const handler: ProxyHandler<typeof this> = {
+      get(target, prop, receiver) {
+        const orig = Reflect.get(target, prop, receiver);
+
         if (typeof orig === "function") {
-          return (...args: unknown[]) => {
-            this._userToken = userToken;
-            try {
-              const result = orig.apply(this, args);
-              // if result is promise, clear token after it resolves
-              if (result instanceof Promise) {
-                return result.finally(() => {
-                  this._userToken = undefined;
-                });
-              }
-              // clear token for sync methods
-              this._userToken = undefined;
-              return result;
-            } catch (error) {
-              // clear token on error
-              this._userToken = undefined;
-              throw error;
-            }
+          return (...args: any[]) => {
+            return tokenContext.run({ token: userToken }, () =>
+              orig.apply(runner, args),
+            );
           };
         }
+
         return orig;
       },
     };
-    // @ts-expect-error
-    return new Proxy(this, handler) as WithInjectedToken<typeof this>;
+
+    return new Proxy(runner, handler) as WithInjectedToken<typeof this>;
   }
 
   protected get userToken(): string | undefined {
-    return this._userToken;
+    return tokenContext.getStore()?.token;
   }
 
   // streaming execution with interceptors
