@@ -1,0 +1,1 @@
+export { useAnalyticsQuery } from "./use-analytics-query";

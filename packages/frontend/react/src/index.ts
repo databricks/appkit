@@ -1,3 +1,1 @@
-export function helloReact() {
-  console.log("Hello from React package!");
-}
+export * from "./hooks";

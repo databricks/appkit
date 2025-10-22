@@ -33,6 +33,7 @@
     "clean": "pnpm exec rm -rf dist && pnpm -r exec rm -rf dist tsconfig.tsbuildinfo && pnpm -r clean",
     "create-package": "NODE_OPTIONS='--import tsx' plop --plopfile tools/create-sdk-package.ts",
     "dev": "NODE_ENV=development pnpm --filter=app-template dev",
+    "dev:inspect": "NODE_ENV=development pnpm --filter=app-template dev:inspect",
     "format:check": "biome format .",
     "format": "biome format --write .",
     "lint:fix": "biome lint --write .",

@@ -24,5 +24,8 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
+  "paths": {
+    "@databricks/apps/react": ["packages/frontend/index.ts"]
+  },
   "include": ["src"]
 }

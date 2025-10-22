@@ -1,4 +1,4 @@
-import { useAnalyticsQuery } from "../../hooks/use-analytics-query";
+import { useAnalyticsQuery } from "@databricks/apps/react";
 
 interface TopContributor {
   app_name: string;

@@ -8,6 +8,7 @@ import type {
   PluginPhase,
 } from "@databricks-apps/types";
 import express from "express";
+import { mergeConfigDedup } from "@databricks-apps/utils";
 
 export interface ServerConfig extends BasePluginConfig {
   port?: number;
@@ -30,7 +31,6 @@ export class ServerPlugin extends Plugin {
   private serverApplication: express.Application;
   private server: HTTPServer | null;
   protected declare config: ServerConfig;
-
   static phase: PluginPhase = "deferred";
 
   constructor(config: ServerConfig, auth: IAuthManager) {
@@ -76,7 +76,7 @@ export class ServerPlugin extends Plugin {
         console.log(
           `Server is running on port ${
             this.config.port || ServerPlugin.DEFAULT_CONFIG.port
-          }`,
+          }`
         );
         if (this.config.staticPath && !this.config.watch) {
           console.log(`Serving static files from: ${this.config.staticPath}`);
@@ -84,7 +84,7 @@ export class ServerPlugin extends Plugin {
         if (this.config.watch) {
           console.log("Vite is watching for changes...");
         }
-      },
+      }
     );
 
     this.server = server;
@@ -135,19 +135,28 @@ export class ServerPlugin extends Plugin {
     if (!this.config.watch) return;
 
     if (process.env.NODE_ENV !== "production") {
-      const { createServer: createViteServer } = require("vite");
+      const { createServer: createViteServer, loadConfigFromFile, mergeConfig } = require("vite");
       const { default: react } = require("@vitejs/plugin-react");
 
       const clientRoot = path.resolve(process.cwd(), "client");
 
-      const config = {
+      const loadedConfig = await loadConfigFromFile(
+        {
+          mode: "development",
+          command: "serve",
+        },
+        undefined,
+        clientRoot
+      );
+      const userConfig = loadedConfig?.config ?? {};
+      const coreConfig = {
         configFile: false,
         root: clientRoot,
-        server: { middlewareMode: true, watch: false },
+        server: { middlewareMode: true, watch: { useFsEvents: true } },
         plugins: [react()],
       };
-
-      const vite = await createViteServer(config);
+      const mergedConfigs = mergeConfigDedup(userConfig, coreConfig, mergeConfig);
+      const vite = await createViteServer(mergedConfigs);
 
       this.serverApplication.use(vite.middlewares);
 
@@ -215,7 +224,7 @@ export class ServerPlugin extends Plugin {
           } catch (err) {
             console.error(
               `Error aborting operations for plugin ${plugin.name}:`,
-              err,
+              err
             );
           }
         }
@@ -244,7 +253,7 @@ const EXCLUDED_PLUGINS = [ServerPlugin.name];
 
 export const server = toPlugin<typeof ServerPlugin, ServerConfig, "server">(
   ServerPlugin,
-  "server",
+  "server"
 );
 
 function getRoutes(stack: unknown[], basePath = "") {
@@ -255,7 +264,7 @@ function getRoutes(stack: unknown[], basePath = "") {
       // normal route
       const path = basePath + layer.route.path;
       const methods = Object.keys(layer.route.methods).map((m) =>
-        m.toUpperCase(),
+        m.toUpperCase()
       );
       routes.push({ path, methods });
     } else if (layer.name === "router" && layer.handle.stack) {

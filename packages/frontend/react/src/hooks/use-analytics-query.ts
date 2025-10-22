@@ -1,3 +1,5 @@
+// TODO: NOT FINAL VERSION, JUST FOR TESTING PURPOSES
+
 import { useEffect, useState } from "react";
 
 interface UseAnalyticsQueryResult<T> {
