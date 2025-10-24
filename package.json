@@ -29,6 +29,7 @@
     "build": "pnpm -r build",
     "check:fix": "biome check --write .",
     "check": "biome check .",
+    "check:licenses": "tsx tools/check-licenses.ts",
     "clean:full": "pnpm exec rm -rf dist node_modules && pnpm -r exec rm -rf dist tsconfig.tsbuildinfo node_modules && pnpm -r clean:full",
     "clean": "pnpm exec rm -rf dist && pnpm -r exec rm -rf dist tsconfig.tsbuildinfo && pnpm -r clean",
     "create-package": "NODE_OPTIONS='--import tsx' plop --plopfile tools/create-sdk-package.ts",
