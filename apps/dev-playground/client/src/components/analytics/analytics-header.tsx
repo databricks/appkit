@@ -1,0 +1,17 @@
+import { DatabricksLogo } from "./databricks-logo";
+
+export function AnalyticsHeader() {
+  return (
+    <header className="bg-white border-b border-gray-200 p-4">
+      <div className="max-w-7xl mx-auto flex items-center justify-between">
+        <div className="flex items-center gap-4 items-center">
+          <DatabricksLogo />
+          <p className="leading-7">Apps Cost Insights</p>
+        </div>
+        <div className="w-8 h-8 bg-databricks-red rounded-full flex items-center justify-center">
+          <span className="text-white text-sm font-medium">S</span>
+        </div>
+      </div>
+    </header>
+  );
+}

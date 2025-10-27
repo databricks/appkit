@@ -143,12 +143,8 @@ export abstract class Plugin<
 
       // check if result is a generator
       if (self._checkIfGenerator(result)) {
-        // if result is a generator, iterate over it and yield each item
-        for await (const item of result as AsyncGenerator<T, void, unknown>) {
-          yield item;
-        }
+        yield* result;
       } else {
-        // if result is not a generator, yield the result
         yield result;
       }
     };
