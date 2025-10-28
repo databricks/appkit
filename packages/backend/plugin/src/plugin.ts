@@ -243,4 +243,35 @@ export abstract class Plugin<
       result && typeof result === "object" && Symbol.asyncIterator in result
     );
   }
+
+  protected abstract getArrowData(jobId: string): Promise<any>;
+
+  protected injectCoreArrowRoutes(router: any): void {
+    router.get("/arrow-result/:jobId", async (req: any, res: any) => {
+      try {
+        const { jobId } = req.params;
+        
+        console.log(`Processing Arrow job request: ${jobId} for plugin: ${this.name}`);
+        
+        const result = await this.getArrowData(jobId);
+        
+        res.setHeader('Content-Type', 'application/octet-stream');
+        res.setHeader('Content-Length', result.data.length.toString());
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        
+        if (result.metadata) {
+          res.setHeader('X-Arrow-Metadata', JSON.stringify(result.metadata));
+        }
+        
+        console.log(`Sending Arrow buffer: ${result.data.length} bytes for job ${jobId}`);
+        res.send(Buffer.from(result.data));
+      } catch (error) {
+        console.error(`Arrow job error for ${this.name}:`, error);
+        res.status(404).json({ 
+          error: error instanceof Error ? error.message : 'Arrow job not found',
+          plugin: this.name
+        });
+      }
+    });
+  }
 }

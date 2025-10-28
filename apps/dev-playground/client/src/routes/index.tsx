@@ -22,7 +22,7 @@ function IndexRoute() {
           </p>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto mb-16">
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto mb-16">
           <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
             <div className="flex flex-col h-full">
               <h3 className="text-2xl font-semibold text-gray-900 mb-3">
@@ -38,6 +38,26 @@ function IndexRoute() {
                 className="w-full"
               >
                 Explore real-time analytics
+              </Button>
+            </div>
+          </Card>
+
+          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
+            <div className="flex flex-col h-full">
+              <h3 className="text-2xl font-semibold text-gray-900 mb-3">
+                Arrow Analytics
+              </h3>
+              <p className="text-gray-600 mb-6 flex-grow">
+                Experience high-performance analytics powered by Apache Arrow
+                streaming with real-time progress updates and zero-copy data
+                processing.
+              </p>
+              <Button
+                onClick={() => navigate({ to: "/analytics-arrow" })}
+                className="w-full"
+                variant="outline"
+              >
+                Arrow Analytics
               </Button>
             </div>
           </Card>

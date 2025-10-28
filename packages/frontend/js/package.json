@@ -1,5 +1,5 @@
 {
-  "name": "@databricks-apps/stream",
+  "name": "@databricks-apps/js",
   "type": "module",
   "version": "1.0.0",
   "main": "dist/index.js",
@@ -7,9 +7,7 @@
   "scripts": {
     "build": "tsdown src/index.ts --dts",
     "dev": "tsdown --watch ./src",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@databricks-apps/types": "workspace:*",

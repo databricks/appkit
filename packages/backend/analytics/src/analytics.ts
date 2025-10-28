@@ -1,9 +1,9 @@
 import { SQLWarehouseConnector } from "@databricks-apps/connectors";
 import { Plugin, toPlugin } from "@databricks-apps/plugin";
 import type {
-  PluginExecuteConfig,
   IAppRouter,
   IAuthManager,
+  PluginExecuteConfig,
   StreamExecutionSettings,
 } from "@databricks-apps/types";
 import { queryDefaults } from "./defaults";
@@ -34,6 +34,9 @@ export class AnalyticsPlugin extends Plugin {
   }
 
   injectRoutes(router: IAppRouter) {
+    // Inject core Arrow routes first (provides /arrow-result/:jobId endpoint)
+    this.injectCoreArrowRoutes(router);
+
     // query router: user-level
     router.post("/users/me/query/:query_key", async (req, res) => {
       const userToken = req.header("x-forwarded-access-token");
@@ -53,10 +56,14 @@ export class AnalyticsPlugin extends Plugin {
   private async _handleQueryRoute(
     req: any,
     res: any,
-    userToken?: string,
+    userToken?: string
   ): Promise<void> {
     const { query_key } = req.params;
-    const { parameters } = req.body as IAnalyticsQueryRequest;
+    const { parameters, format = "JSON" } = req.body as IAnalyticsQueryRequest;
+    const formatParameters =
+      format === "ARROW"
+        ? { disposition: "EXTERNAL_LINKS", format: "ARROW_STREAM" }
+        : {};
 
     if (!query_key) {
       return res.status(400).json({ error: "query_key is required" });
@@ -67,7 +74,12 @@ export class AnalyticsPlugin extends Plugin {
       ...queryDefaults,
       cache: {
         ...queryDefaults.cache,
-        cacheKey: ["analytics:query", query_key, JSON.stringify(parameters)], // @TODO: need to handle key ordering issues
+        cacheKey: [
+          "analytics:query",
+          query_key,
+          JSON.stringify(parameters),
+          JSON.stringify(format),
+        ], // @TODO: need to handle key ordering issues
       },
     };
 
@@ -82,23 +94,32 @@ export class AnalyticsPlugin extends Plugin {
 
         const processedParams = this.queryProcessor.processQueryParams(
           query,
-          parameters,
+          parameters
         );
 
         const result = userToken
-          ? await this.asUser(userToken).query(query, processedParams, signal)
-          : await this.query(query, processedParams, signal);
+          ? await this.asUser(userToken).query(
+              query,
+              processedParams,
+              formatParameters,
+              signal
+            )
+          : await this.query(query, processedParams, formatParameters, signal);
 
-        return { type: "result", ...result };
+        const type =
+          formatParameters.format === "ARROW_STREAM" ? "arrow" : "result";
+
+        return { type, ...result };
       },
-      streamExecutionSettings,
+      streamExecutionSettings
     );
   }
 
   async query(
     query: string,
     parameters?: Record<string, any>,
-    signal?: AbortSignal,
+    formatParameters?: Record<string, any>,
+    signal?: AbortSignal
   ): Promise<any> {
     const { statement, parameters: sqlParameters } =
       this.queryProcessor.convertToSQLParameters(query, parameters);
@@ -114,15 +135,21 @@ export class AnalyticsPlugin extends Plugin {
           statement,
           parameters: sqlParameters,
           warehouse_id: warehouseId,
+          ...formatParameters,
         },
         signal,
-        this.userToken ? { userToken: this.userToken } : undefined,
+        this.userToken ? { userToken: this.userToken } : undefined
       );
 
       return response.result;
     } catch (_error) {
+      console.error("Query execution failed", _error);
       throw new Error("Query execution failed");
     }
+  }
+
+  protected async getArrowData(jobId: string): Promise<any> {
+    return await this.SQLClient.getArrowData(jobId);
   }
 
   async shutdown(): Promise<void> {

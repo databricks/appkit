@@ -18,14 +18,19 @@
     "@tanstack/react-router-devtools": "^1.133.22",
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/router-plugin": "^1.133.22",
+    "apache-arrow": "^21.1.0",
+    "arquero": "8.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.546.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "react-vega": "8.0.0",
     "recharts": "^2.15.4",
     "tailwind-merge": "^3.3.1",
-    "tailwindcss-animate": "^1.0.7"
+    "tailwindcss-animate": "^1.0.7",
+    "vega-embed": "7.1.0",
+    "vega-loader-arrow": "0.3.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",

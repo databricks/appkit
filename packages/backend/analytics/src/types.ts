@@ -6,4 +6,5 @@ export interface IAnalyticsConfig extends BasePluginConfig {
 
 export interface IAnalyticsQueryRequest {
   parameters?: Record<string, any>;
+  format?: "JSON" | "ARROW";
 }

@@ -1,94 +1,72 @@
-// TODO: NOT FINAL VERSION, JUST FOR TESTING PURPOSES
-
-import { useEffect, useState } from "react";
+import { ArrowClient, connectSSE } from "@databricks-apps/js";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 interface UseAnalyticsQueryResult<T> {
   data: T | null;
+  arrowData: Uint8Array | null;
   loading: boolean;
   error: string | null;
+}
+
+function getArrowStreamUrl(id: string) {
+  return `/api/analytics/arrow-result/${id}`;
 }
 
 export function useAnalyticsQuery<T>(
   queryKey: string,
   parameters: Record<string, any>,
+  format: "ARROW" | "JSON" = "ARROW"
 ): UseAnalyticsQueryResult<T> {
   const [data, setData] = useState<T | null>(null);
+  const [arrowData, setArrowData] = useState<Uint8Array | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  const params = JSON.stringify({ parameters });
+  const params = useMemo(
+    () => JSON.stringify({ parameters, format }),
+    [parameters, format]
+  );
 
   useEffect(() => {
-    let isCancelled = false;
-
-    const fetchData = async () => {
+    async function fetchData() {
       setLoading(true);
       setError(null);
 
-      try {
-        const response = await fetch(`/api/analytics/query/${queryKey}`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: params,
-        });
+      abortControllerRef.current = new AbortController();
+      connectSSE({
+        url: `/api/analytics/query/${queryKey}`,
+        payload: params,
+        signal: abortControllerRef.current?.signal,
+        onMessage: async (message) => {
+          try {
+            const parsed = JSON.parse(message.data);
 
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const reader = response.body?.getReader();
-        if (!reader) {
-          throw new Error("No reader found");
-        }
-
-        const decoder = new TextDecoder();
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done || isCancelled) break;
-
-          const chunk = decoder.decode(value);
-          const lines = chunk.split("\n");
-
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              const jsonData = line.slice(6);
-              try {
-                const parsed = JSON.parse(jsonData);
-                if (parsed.type === "result") {
-                  setData(parsed.data);
-                }
-              } catch {
-                // Ignore JSON parsing errors
-              }
-            } else if (line.startsWith("event: error")) {
-              const errorLine = lines[lines.indexOf(line) + 1];
-              if (errorLine?.startsWith("data: ")) {
-                const errorData = JSON.parse(errorLine.slice(6));
-                setError(errorData.error || "Unknown error");
-              }
+            if (parsed.type === "result") {
+              setLoading(false);
+              setData(parsed.data);
             }
+
+            if (parsed.type === "arrow") {
+              const arrowData = await ArrowClient.fetchArrow(
+                getArrowStreamUrl(parsed.statement_id)
+              );
+              setLoading(false);
+              setArrowData(arrowData);
+            }
+          } catch {
+            // Ignore JSON parsing errors
           }
-        }
-      } catch (error) {
-        if (!isCancelled) {
-          setError(error instanceof Error ? error.message : "Unknown error");
-        }
-      } finally {
-        if (!isCancelled) {
-          setLoading(false);
-        }
-      }
-    };
+        },
+      });
+    }
 
     fetchData();
 
     return () => {
-      isCancelled = true;
+      abortControllerRef.current?.abort();
     };
   }, [queryKey, params]);
 
-  return { data, loading, error };
+  return { data, arrowData, loading, error };
 }

@@ -1,4 +1,5 @@
 export { AnalyticsHeader } from "./analytics-header";
+export { ArrowVegaChart } from "./arrow-visualization";
 export { DatabricksLogo } from "./databricks-logo";
 export { FilterBar } from "./filter-bar";
 export { SummaryCards } from "./summary-cards";

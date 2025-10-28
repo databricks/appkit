@@ -10,12 +10,18 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as ReconnectRouteRouteImport } from './routes/reconnect.route'
+import { Route as AnalyticsArrowRouteRouteImport } from './routes/analytics-arrow.route'
 import { Route as AnalyticsRouteRouteImport } from './routes/analytics.route'
 import { Route as IndexRouteImport } from './routes/index'
 
 const ReconnectRouteRoute = ReconnectRouteRouteImport.update({
   id: '/reconnect',
   path: '/reconnect',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AnalyticsArrowRouteRoute = AnalyticsArrowRouteRouteImport.update({
+  id: '/analytics-arrow',
+  path: '/analytics-arrow',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AnalyticsRouteRoute = AnalyticsRouteRouteImport.update({
@@ -32,30 +38,34 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRouteRoute
+  '/analytics-arrow': typeof AnalyticsArrowRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRouteRoute
+  '/analytics-arrow': typeof AnalyticsArrowRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRouteRoute
+  '/analytics-arrow': typeof AnalyticsArrowRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/analytics' | '/reconnect'
+  fullPaths: '/' | '/analytics' | '/analytics-arrow' | '/reconnect'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/analytics' | '/reconnect'
-  id: '__root__' | '/' | '/analytics' | '/reconnect'
+  to: '/' | '/analytics' | '/analytics-arrow' | '/reconnect'
+  id: '__root__' | '/' | '/analytics' | '/analytics-arrow' | '/reconnect'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AnalyticsRouteRoute: typeof AnalyticsRouteRoute
+  AnalyticsArrowRouteRoute: typeof AnalyticsArrowRouteRoute
   ReconnectRouteRoute: typeof ReconnectRouteRoute
 }
 
@@ -66,6 +76,13 @@ declare module '@tanstack/react-router' {
       path: '/reconnect'
       fullPath: '/reconnect'
       preLoaderRoute: typeof ReconnectRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/analytics-arrow': {
+      id: '/analytics-arrow'
+      path: '/analytics-arrow'
+      fullPath: '/analytics-arrow'
+      preLoaderRoute: typeof AnalyticsArrowRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/analytics': {
@@ -88,6 +105,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AnalyticsRouteRoute: AnalyticsRouteRoute,
+  AnalyticsArrowRouteRoute: AnalyticsArrowRouteRoute,
   ReconnectRouteRoute: ReconnectRouteRoute,
 }
 export const routeTree = rootRouteImport

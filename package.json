@@ -19,6 +19,10 @@
       },
       "browser": "./dist/server/browser-stub.js"
     },
+    "./js": {
+      "import": "./dist/js/index.js",
+      "require": "./dist/js/index.js"
+    },
     "./react": {
       "import": "./dist/react/index.js",
       "require": "./dist/react/index.js"

@@ -1,8 +1,10 @@
 import type { IAuthManager } from "@databricks-apps/types";
+import { ArrowStreamProcessor } from "@databricks-apps/stream";
 import { executeStatementDefaults } from "./defaults";
 import type {
   ExecuteStatementRequest,
   ExecuteStatementResponse,
+  StatementStatus,
 } from "./types";
 
 export interface SQLWarehouseConfig {
@@ -13,26 +15,32 @@ export interface SQLWarehouseConfig {
 
 export class SQLWarehouseConnector {
   private config: SQLWarehouseConfig;
+  private arrowProcessor: ArrowStreamProcessor;
 
   constructor(config: SQLWarehouseConfig) {
     this.config = config;
+    this.arrowProcessor = new ArrowStreamProcessor({
+      maxConcurrentDownloads: 5,
+      timeout: config.timeout || executeStatementDefaults.timeout,
+      retries: 3,
+    });
   }
 
   async executeStatement(
     input: ExecuteStatementRequest,
     signal?: AbortSignal,
-    authOptions?: { userToken?: string },
+    authOptions?: { userToken?: string }
   ) {
     // validate required fields
     if (!input.statement) {
       throw new Error(
-        "Statement is required: Please provide a SQL statement to execute",
+        "Statement is required: Please provide a SQL statement to execute"
       );
     }
 
     if (!input.warehouse_id) {
       throw new Error(
-        "Warehouse ID is required: Please provide a warehouse_id to execute the statement",
+        "Warehouse ID is required: Please provide a warehouse_id to execute the statement"
       );
     }
 
@@ -59,7 +67,7 @@ export class SQLWarehouseConnector {
         body: JSON.stringify(body),
       },
       signal,
-      authOptions,
+      authOptions
     );
 
     if (!response) {
@@ -73,19 +81,21 @@ export class SQLWarehouseConnector {
           response.statement_id,
           this.config.timeout,
           signal,
-          authOptions,
+          authOptions
         );
       case "SUCCEEDED":
         return this._transformDataArray(response);
       case "FAILED":
         throw new Error(
-          `Statement failed: ${response.status.error?.message || "Unknown error"}`,
+          `Statement failed: ${
+            response.status.error?.message || "Unknown error"
+          }`
         );
       case "CANCELED":
         throw new Error("Statement was canceled");
       case "CLOSED":
         throw new Error(
-          "Statement execution completed but results are no longer available (CLOSED state)",
+          "Statement execution completed but results are no longer available (CLOSED state)"
         );
       default:
         throw new Error(`Unknown statement state: ${response.status.state}`);
@@ -99,7 +109,7 @@ export class SQLWarehouseConnector {
       body?: string;
     },
     signal?: AbortSignal,
-    authOptions?: { userToken?: string },
+    authOptions?: { userToken?: string }
   ): Promise<T> {
     const token = authOptions?.userToken
       ? authOptions.userToken
@@ -111,7 +121,7 @@ export class SQLWarehouseConnector {
 
     if (!this.config.host) {
       throw new Error(
-        "No host configured: Please provide a host in SQLWarehouseConfig",
+        "No host configured: Please provide a host in SQLWarehouseConfig"
       );
     }
 
@@ -128,7 +138,7 @@ export class SQLWarehouseConnector {
 
     if (!response.ok) {
       throw new Error(
-        `SQL Warehouse API error: ${response.status} ${response.statusText}`,
+        `SQL Warehouse API error: ${response.status} ${response.statusText}`
       );
     }
 
@@ -144,7 +154,7 @@ export class SQLWarehouseConnector {
     statementId: string,
     timeout = executeStatementDefaults.timeout,
     signal?: AbortSignal,
-    authOptions?: { userToken?: string },
+    authOptions?: { userToken?: string }
   ) {
     const startTime = Date.now();
     let delay = 1000;
@@ -155,7 +165,7 @@ export class SQLWarehouseConnector {
       const elapsedTime = Date.now() - startTime;
       if (elapsedTime > timeout) {
         throw new Error(
-          `Statement polling timeout exceeded after ${timeout}ms (elapsed: ${elapsedTime}ms)`,
+          `Statement polling timeout exceeded after ${timeout}ms (elapsed: ${elapsedTime}ms)`
         );
       }
 
@@ -168,7 +178,7 @@ export class SQLWarehouseConnector {
         endpoint,
         { method: "GET" },
         signal,
-        authOptions,
+        authOptions
       );
 
       if (!response) {
@@ -184,13 +194,15 @@ export class SQLWarehouseConnector {
           return this._transformDataArray(response);
         case "FAILED":
           throw new Error(
-            `Statement failed: ${response.status.error?.message || "Unknown error"}`,
+            `Statement failed: ${
+              response.status.error?.message || "Unknown error"
+            }`
           );
         case "CANCELED":
           throw new Error("Statement was canceled");
         case "CLOSED":
           throw new Error(
-            "Statement execution completed but results are no longer available (CLOSED state)",
+            "Statement execution completed but results are no longer available (CLOSED state)"
           );
         default:
           throw new Error(`Unknown statement state: ${response.status.state}`);
@@ -203,6 +215,10 @@ export class SQLWarehouseConnector {
   }
 
   private _transformDataArray(response: ExecuteStatementResponse) {
+    if (response.manifest?.format === "ARROW_STREAM") {
+      return this.updateWithArrowStatus(response);
+    }
+
     if (!response.result?.data_array || !response.manifest?.schema?.columns) {
       return response;
     }
@@ -244,5 +260,48 @@ export class SQLWarehouseConnector {
         data: transformedData,
       },
     };
+  }
+
+  private async updateWithArrowStatus(
+    response: ExecuteStatementResponse
+  ): Promise<{ result: { statement_id: string; status: StatementStatus } }> {
+    return {
+      result: {
+        statement_id: response.statement_id,
+        status: {
+          state: response.status.state,
+          error: response.status.error,
+        },
+      },
+    };
+  }
+
+  async getArrowData(
+    jobId: string,
+    signal?: AbortSignal,
+    authOptions?: { userToken?: string }
+  ): Promise<ReturnType<typeof this.arrowProcessor.processChunks>> {
+    try {
+      const endpoint = `/api/2.0/sql/statements/${jobId}`;
+      const response = await this._makeRequest<ExecuteStatementResponse>(
+        endpoint,
+        {
+          method: "GET",
+        },
+        signal,
+        authOptions
+      );
+      const chunks = response.result?.external_links;
+      const schema = response.manifest?.schema;
+
+      if (!chunks || !schema) {
+        throw new Error("No chunks or schema found in response");
+      }
+
+      return await this.arrowProcessor.processChunks(chunks, schema);
+    } catch (error) {
+      console.error(`Failed Arrow job: ${jobId}`, error);
+      throw error;
+    }
   }
 }

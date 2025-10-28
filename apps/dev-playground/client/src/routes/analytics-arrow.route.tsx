@@ -11,12 +11,13 @@ import {
 } from "@/components/analytics";
 import type { Aggregation, DashboardFilters } from "@/lib/types";
 import { buildWorkflowParams } from "@/lib/utils/filter-utils";
+import { ArrowVegaChart } from "@/components/analytics/arrow-visualization";
 
-export const Route = createFileRoute("/analytics")({
-  component: AnalyticsRoute,
+export const Route = createFileRoute("/analytics-arrow")({
+  component: AnalyticsArrowRoute,
 });
 
-function AnalyticsRoute() {
+function AnalyticsArrowRoute() {
   const [filters, setFilters] = useState<DashboardFilters>({
     apps: "all",
     creator: "all",
@@ -64,8 +65,7 @@ function AnalyticsRoute() {
       average: number;
       forecasted: number;
     }>
-  >("spend_summary", summaryParams, "JSON");
-
+  >("spend_summary", summaryParams);
 
   const { data: appsListData } = useAnalyticsQuery<
     Array<{
@@ -76,7 +76,7 @@ function AnalyticsRoute() {
       totalSpend: number;
       createdAt: string;
     }>
-  >("apps_list", {}, "JSON");
+  >("apps_list", {});
 
   const spendDataParams = useMemo(() => {
     return { ...queryParams, groupBy: usageTrendsGroupBy };
@@ -84,6 +84,7 @@ function AnalyticsRoute() {
 
   const {
     data: spendData,
+    arrowData: spendArrowData,
     loading: spendLoading,
     error: spendError,
   } = useAnalyticsQuery<
@@ -92,10 +93,11 @@ function AnalyticsRoute() {
       aggregation_period: string;
       cost_usd: number;
     }>
-  >("spend_data", spendDataParams, "JSON");
+  >("spend_data", spendDataParams);
 
   const {
     data: topContributorsData,
+    arrowData: topContributorsArrowData,
     loading: topContributorsLoading,
     error: topContributorsError,
   } = useAnalyticsQuery<
@@ -103,7 +105,7 @@ function AnalyticsRoute() {
       app_name: string;
       total_cost_usd: number;
     }>
-  >("top_contributors", topContributorsParams, "JSON");
+  >("top_contributors", topContributorsParams);
 
   const untaggedAppsParams = useMemo(() => {
     return {
@@ -115,6 +117,7 @@ function AnalyticsRoute() {
 
   const {
     data: untaggedAppsData,
+    arrowData: untaggedAppsArrowData,
     loading: untaggedAppsLoading,
     error: untaggedAppsError,
   } = useAnalyticsQuery<
@@ -124,7 +127,7 @@ function AnalyticsRoute() {
       total_cost_usd: number;
       avg_period_cost_usd: number;
     }>
-  >("untagged_apps", untaggedAppsParams, "JSON");
+  >("untagged_apps", untaggedAppsParams);
 
   const metrics = useMemo(() => {
     if (!summaryDataRaw || summaryDataRaw.length === 0) {
@@ -220,6 +223,30 @@ function AnalyticsRoute() {
             onFiltersChange={setFilters}
             onAggregationChange={setAggregation}
           />
+
+          {topContributorsArrowData && (
+            <div className="bg-white p-6 rounded-lg shadow">
+              <ArrowVegaChart 
+                buffer={topContributorsArrowData} 
+                type="bar" 
+                description="Top Contributors (Arrow Data)"
+                xConfig={{ field: "app_name", title: "App Name" }}
+                yConfig={{ field: "total_cost_usd", title: "Total Cost USD" }}
+              />
+            </div>
+          )}
+          
+          {untaggedAppsArrowData && (
+            <div className="bg-white p-6 rounded-lg shadow">
+              <ArrowVegaChart 
+                buffer={untaggedAppsArrowData} 
+                type="trail" 
+                description="Untagged Apps Analysis (Arrow Data)"
+                xConfig={{ field: "app_name", title: "App Name" }}
+                yConfig={{ field: "total_cost_usd", title: "Total Cost USD" }}
+              />
+            </div>
+          )}
 
           <SummaryCards
             metrics={metrics}
