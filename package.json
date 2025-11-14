@@ -3,6 +3,7 @@
   "type": "module",
   "private": true,
   "version": "1.0.0",
+  "packageManager": "pnpm@10.21.0",
   "types": "dist/index.d.ts",
   "files": [
     "dist",
@@ -11,13 +12,13 @@
   ],
   "exports": {
     ".": {
-      "import": "./dist/server/index.js",
-      "require": "./dist/server/index.js",
       "types": {
-        "default": "./dist/server/index.d.ts",
-        "browser": "./dist/server/browser-stub.d.ts"
+        "browser": "./dist/server/browser-stub.d.ts",
+        "default": "./dist/server/index.d.ts"
       },
-      "browser": "./dist/server/browser-stub.js"
+      "browser": "./dist/server/browser-stub.js",
+      "import": "./dist/server/index.js",
+      "require": "./dist/server/index.js"
     },
     "./react": {
       "import": "./dist/react/index.js",

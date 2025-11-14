@@ -8,6 +8,14 @@ export default defineConfig({
     coverage: {
       provider: "istanbul",
       reporter: ["text", "json", "html"],
+      exclude: [
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/apps/**",
+        "**/*.config.*",
+        "**/*.test.*",
+        "**/tests/**",
+      ],
     },
     projects: [
       {

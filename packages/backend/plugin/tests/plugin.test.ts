@@ -657,6 +657,7 @@ describe("Plugin", () => {
       expect(mockStreamManager.stream).toHaveBeenCalledWith(
         mockResponse,
         expect.any(Function),
+        undefined,
       );
     });
 
@@ -774,7 +775,7 @@ describe("Plugin", () => {
       const methodDefaults = { timeout: 1000, retry: { attempts: 2 } };
       const userOverride = { timeout: 5000 };
 
-      const result = plugin._buildExecutionOptions({
+      const result = (plugin as any)._buildExecutionConfig({
         default: methodDefaults,
         user: userOverride,
       });
@@ -792,7 +793,7 @@ describe("Plugin", () => {
 
       const methodDefaults = { timeout: 1000 };
 
-      const result = plugin._buildExecutionOptions({
+      const result = (plugin as any)._buildExecutionConfig({
         default: methodDefaults,
       });
 
