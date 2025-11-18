@@ -15,8 +15,19 @@ export default defineConfig([
     onSuccess: (config) => writeBrowserStub(config.outDir),
   },
   {
+    name: "js",
+    entry: "packages/frontend/js/src/index.ts",
+    outDir: "dist/js",
+    platform: "browser",
+    minify: true,
+    dts: true,
+    sourcemap: false,
+    clean: true,
+    hash: false,
+  },
+  {
     name: "react",
-    entry: "packages/frontend/index.ts",
+    entry: "packages/frontend/react/src/index.ts",
     outDir: "dist/react",
     platform: "browser",
     minify: true,
@@ -24,5 +35,6 @@ export default defineConfig([
     sourcemap: false,
     clean: true,
     external: ["react", "react-dom"],
+    hash: false,
   },
 ]);

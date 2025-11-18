@@ -9,6 +9,7 @@
     "dev": "tsdown --watch ./src"
   },
   "dependencies": {
+    "@databricks-apps/js": "workspace:*",
     "@databricks-apps/types": "workspace:*"
   },
   "peerDependencies": {

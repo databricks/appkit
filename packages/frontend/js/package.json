@@ -1,0 +1,16 @@
+{
+  "name": "@databricks-apps/js",
+  "type": "module",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsdown src/index.ts --dts",
+    "dev": "tsdown --watch ./src",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@databricks-apps/types": "workspace:*",
+    "apache-arrow": "^21.1.0"
+  }
+}

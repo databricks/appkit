@@ -1,7 +1,7 @@
 import path from "node:path";
+import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
-import { tanstackRouter } from "@tanstack/router-plugin/vite";
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -29,6 +29,10 @@ export default defineConfig({
       "@databricks/apps/react": path.resolve(
         __dirname,
         "../../../packages/frontend/react/src/index.ts",
+      ),
+      "@databricks/apps/js": path.resolve(
+        __dirname,
+        "../../../packages/frontend/js/src/index.ts",
       ),
     },
   },

@@ -18,6 +18,7 @@
       "@databricks-apps/cache": ["packages/backend/cache/src"],
       "@databricks-apps/connectors": ["packages/backend/connectors/src"],
       "@databricks-apps/core": ["packages/backend/core/src"],
+      "@databricks-apps/js": ["packages/frontend/js/src"],
       "@databricks-apps/plugin": ["packages/backend/plugin/src"],
       "@databricks-apps/react": ["packages/frontend/react/src"],
       "@databricks-apps/server": ["packages/backend/server/src"],

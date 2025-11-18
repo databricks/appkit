@@ -20,9 +20,15 @@
       "import": "./dist/server/index.js",
       "require": "./dist/server/index.js"
     },
+    "./js": {
+      "import": "./dist/js/index.js",
+      "require": "./dist/js/index.js",
+      "types": "./dist/js/index.d.ts"
+    },
     "./react": {
       "import": "./dist/react/index.js",
-      "require": "./dist/react/index.js"
+      "require": "./dist/react/index.js",
+      "types": "./dist/react/index.d.ts"
     }
   },
   "scripts": {
