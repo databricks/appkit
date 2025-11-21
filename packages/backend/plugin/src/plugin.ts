@@ -5,10 +5,10 @@ import { StreamManager } from "@databricks-apps/stream";
 import type {
   BasePlugin,
   BasePluginConfig,
-  PluginExecuteConfig,
-  PluginExecutionSettings,
   IAppResponse,
   IAuthManager,
+  PluginExecuteConfig,
+  PluginExecutionSettings,
   PluginPhase,
   StreamExecuteHandler,
   StreamExecutionSettings,
@@ -23,6 +23,7 @@ import type {
   ExecutionContext,
   ExecutionInterceptor,
 } from "./interceptors/types";
+import { DevFileReader } from "./dev-reader";
 
 const tokenContext = new AsyncLocalStorage<{ token: string }>();
 
@@ -34,6 +35,7 @@ export abstract class Plugin<
   protected auth: IAuthManager;
   protected cache: CacheManager;
   protected app: AppManager;
+  protected devFileReader: DevFileReader;
   protected streamManager: StreamManager;
   protected abstract envVars: string[];
 
@@ -49,6 +51,7 @@ export abstract class Plugin<
     this.streamManager = new StreamManager();
     this.cache = new CacheManager();
     this.app = new AppManager();
+    this.devFileReader = DevFileReader.getInstance();
 
     this.isReady = true;
   }

@@ -11,6 +11,7 @@
     "declarationMap": true,
     "sourceMap": false,
     "resolveJsonModule": true,
+    "lib": ["ES2021"],
     "paths": {
       "@databricks-apps/analytics": ["packages/backend/analytics/src"],
       "@databricks-apps/app": ["packages/backend/app/src"],

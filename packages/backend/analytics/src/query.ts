@@ -1,9 +1,10 @@
+import { createHash } from "node:crypto";
 import type { ParameterInput } from "@databricks-apps/connectors";
 
 export class QueryProcessor {
   processQueryParams(
     query: string,
-    parameters?: Record<string, any>,
+    parameters?: Record<string, any>
   ): Record<string, any> {
     const processed = { ...parameters };
 
@@ -21,9 +22,14 @@ export class QueryProcessor {
 
     return processed;
   }
+
+  hashQuery(query: string): string {
+    return createHash("md5").update(query).digest("hex");
+  }
+
   convertToSQLParameters(
     query: string,
-    parameters?: Record<string, any>,
+    parameters?: Record<string, any>
   ): { statement: string; parameters: ParameterInput[] } {
     const sqlParameters: ParameterInput[] = [];
 
@@ -36,7 +42,9 @@ export class QueryProcessor {
       for (const key of Object.keys(parameters)) {
         if (!queryParams.has(key)) {
           throw new Error(
-            `Parameter "${key}" not found in query. Valid parameters: ${Array.from(queryParams).join(", ") || "none"}`,
+            `Parameter "${key}" not found in query. Valid parameters: ${
+              Array.from(queryParams).join(", ") || "none"
+            }`
           );
         }
       }
@@ -102,7 +110,9 @@ export class QueryProcessor {
       const validLevels = ["hour", "day", "week", "month", "year"];
       if (!validLevels.includes(value)) {
         throw new Error(
-          `Invalid aggregation level: ${value}. Must be one of: ${validLevels.join(", ")}`,
+          `Invalid aggregation level: ${value}. Must be one of: ${validLevels.join(
+            ", "
+          )}`
         );
       }
       return {

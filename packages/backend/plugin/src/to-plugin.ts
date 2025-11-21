@@ -1,4 +1,4 @@
-import type { ToPlugin, PluginData } from "@databricks-apps/types";
+import type { PluginData, ToPlugin } from "@databricks-apps/types";
 
 export function toPlugin<T, U, N extends string>(
   plugin: T,

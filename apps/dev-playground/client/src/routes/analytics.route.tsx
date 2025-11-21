@@ -1,5 +1,5 @@
 import { useAnalyticsQuery } from "@databricks/apps/react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import {
   AnalyticsHeader,
@@ -14,6 +14,9 @@ import { buildWorkflowParams } from "@/lib/utils/filter-utils";
 
 export const Route = createFileRoute("/analytics")({
   component: AnalyticsRoute,
+  search: {
+    middlewares: [retainSearchParams(true)],
+  },
 });
 
 function AnalyticsRoute() {

@@ -1,9 +1,18 @@
 import { connectSSE } from "@databricks-apps/js";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   UseAnalyticsQueryOptions,
   UseAnalyticsQueryResult,
 } from "./types";
+import { useQueryHMR } from "./use-query-hmr";
+
+function getDevMode() {
+  const url = new URL(window.location.href);
+  const searchParams = url.searchParams;
+  const dev = searchParams.get("dev");
+
+  return dev ? `?dev=${dev}` : "";
+}
 
 /**
  * Subscribe to an analytics query over SSE and returns its latest result
@@ -15,11 +24,11 @@ import type {
  */
 export function useAnalyticsQuery<
   T,
-  P extends Record<string, unknown> = Record<string, unknown>,
+  P extends Record<string, unknown> = Record<string, unknown>
 >(
   queryKey: string,
   parameters?: P | null,
-  options?: UseAnalyticsQueryOptions,
+  options: UseAnalyticsQueryOptions = { autoStart: true }
 ): UseAnalyticsQueryResult<T> {
   const format = options?.format;
   const maxParametersSize = options?.maxParametersSize ?? 100 * 1024;
@@ -27,10 +36,11 @@ export function useAnalyticsQuery<
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   if (!queryKey || queryKey.trim().length === 0) {
     throw new Error(
-      "useAnalyticsQuery: 'queryKey' must be a non-empty string.",
+      "useAnalyticsQuery: 'queryKey' must be a non-empty string."
     );
   }
 
@@ -40,7 +50,7 @@ export function useAnalyticsQuery<
       const sizeInBytes = new Blob([serialized]).size;
       if (sizeInBytes > maxParametersSize) {
         throw new Error(
-          "useAnalyticsQuery: Parameters size exceeds the maximum allowed size",
+          "useAnalyticsQuery: Parameters size exceeds the maximum allowed size"
         );
       }
 
@@ -51,10 +61,15 @@ export function useAnalyticsQuery<
     }
   }, [parameters, format, maxParametersSize]);
 
-  useEffect(() => {
+  const start = useCallback(() => {
     if (payload === null) {
       setError("Failed to serialize query parameters");
       return;
+    }
+
+    // Abort previous request if exists
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
     }
 
     setLoading(true);
@@ -62,9 +77,12 @@ export function useAnalyticsQuery<
     setData(null);
 
     const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    const devMode = getDevMode();
 
     connectSSE({
-      url: `/api/analytics/query/${encodeURIComponent(queryKey)}`,
+      url: `/api/analytics/query/${encodeURIComponent(queryKey)}${devMode}`,
       payload: payload,
       signal: abortController.signal,
       onMessage: (message) => {
@@ -88,7 +106,7 @@ export function useAnalyticsQuery<
 
             if (parsed.code) {
               console.error(
-                `[useAnalyticsQuery] Code: ${parsed.code}, Message: ${errorMsg}`,
+                `[useAnalyticsQuery] Code: ${parsed.code}, Message: ${errorMsg}`
               );
             }
             return;
@@ -119,11 +137,20 @@ export function useAnalyticsQuery<
         setError(userMessage);
       },
     });
+  }, [queryKey, payload]);
+
+  useEffect(() => {
+    if (options?.autoStart) {
+      start();
+    }
 
     return () => {
-      abortController.abort();
+      abortControllerRef.current?.abort();
     };
-  }, [queryKey, payload]);
+  }, [start, options?.autoStart]);
+
+  // Enable HMR for query updates in dev mode
+  useQueryHMR(queryKey, start);
 
   return { data, loading, error };
 }

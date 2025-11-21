@@ -6,6 +6,7 @@ export default defineConfig([
     name: "server",
     entry: "packages/backend/index.ts",
     outDir: "dist/server",
+    hash: false,
     platform: "node",
     minify: true,
     dts: true,
@@ -13,6 +14,23 @@ export default defineConfig([
     clean: true,
     external: ["vite", "@vitejs/plugin-react"],
     onSuccess: (config) => writeBrowserStub(config.outDir),
+    copy: [
+      "packages/backend/server/src/index.html",
+      {
+        from: "packages/backend/server/src/index.html",
+        to: "dist/server/index.html",
+      },
+      "packages/backend/server/src/wait.html",
+      {
+        from: "packages/backend/server/src/wait.html",
+        to: "dist/server/wait.html",
+      },
+      "packages/backend/server/src/denied.html",
+      {
+        from: "packages/backend/server/src/denied.html",
+        to: "dist/server/denied.html",
+      },
+    ],
   },
   {
     name: "js",
@@ -29,12 +47,12 @@ export default defineConfig([
     name: "react",
     entry: "packages/frontend/react/src/index.ts",
     outDir: "dist/react",
+    hash: false,
     platform: "browser",
     minify: true,
     dts: true,
     sourcemap: false,
     clean: true,
     external: ["react", "react-dom"],
-    hash: false,
   },
 ]);

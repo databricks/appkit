@@ -1,0 +1,68 @@
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Access Denied</title>
+    <style>
+      body {
+        background: #1b1b1d;
+        height: 100vh;
+        margin: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica", "Arial", sans-serif;
+      }
+      .container {
+        text-align: center;
+        padding: 50px 70px;
+        max-width: 500px;
+      }
+      .icon {
+        font-size: 64px;
+        margin-bottom: 24px;
+      }
+      h1 {
+        font-size: 1.5rem;
+        color: #ffffff;
+        margin: 0 0 16px 0;
+        font-weight: 500;
+      }
+      p {
+        font-size: 0.875rem;
+        color: rgba(255, 255, 255, 0.6);
+        line-height: 1.6;
+        margin: 0 0 24px 0;
+      }
+      .retry-btn {
+        background: #ff3621;
+        color: white;
+        border: none;
+        padding: 12px 24px;
+        border-radius: 6px;
+        font-size: 0.875rem;
+        font-weight: 500;
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-block;
+      }
+      .retry-btn:hover {
+        background: #e62e1a;
+      }
+      .tunnel-id {
+        font-size: 0.75rem;
+        color: rgba(255, 255, 255, 0.4);
+        margin-top: 24px;
+        font-family: monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="icon">🚫</div>
+      <h1>Access Denied</h1>
+      <p>The tunnel owner has declined your request to view their local environment.</p>
+      <a href="?dev={{tunnelId}}&retry=true" class="retry-btn">Request Access Again</a>
+      <div class="tunnel-id">Tunnel ID: {{tunnelId}}</div>
+    </div>
+  </body>
+</html>

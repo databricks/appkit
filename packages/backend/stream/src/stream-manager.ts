@@ -1,11 +1,11 @@
-import type { IAppResponse, StreamConfig } from "@databricks-apps/types";
-import { streamDefaults } from "./defaults";
-import { type StreamEntry, type StreamOperation, SSEErrorCode } from "./types";
 import { randomUUID } from "node:crypto";
-import { StreamValidator } from "./validator";
+import type { IAppResponse, StreamConfig } from "@databricks-apps/types";
+import { EventRingBuffer } from "./buffers";
+import { streamDefaults } from "./defaults";
 import { SSEWriter } from "./sse-writer";
 import { StreamRegistry } from "./stream-registry";
-import { EventRingBuffer } from "./buffers";
+import { SSEErrorCode, type StreamEntry, type StreamOperation } from "./types";
+import { StreamValidator } from "./validator";
 
 // main entry point for Server-Sent events streaming
 export class StreamManager {

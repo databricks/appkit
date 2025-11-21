@@ -11,5 +11,11 @@
   },
   "dependencies": {
     "@databricks-apps/types": "workspace:*"
+  },
+  "devDependencies": {
+    "vite": "npm:rolldown-vite@7.1.14"
+  },
+  "overrides": {
+    "vite": "npm:rolldown-vite@7.1.14"
   }
 }

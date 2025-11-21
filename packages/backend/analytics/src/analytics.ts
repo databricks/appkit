@@ -1,9 +1,9 @@
 import { SQLWarehouseConnector } from "@databricks-apps/connectors";
 import { Plugin, toPlugin } from "@databricks-apps/plugin";
 import type {
-  PluginExecuteConfig,
   IAppRouter,
   IAuthManager,
+  PluginExecuteConfig,
   StreamExecutionSettings,
 } from "@databricks-apps/types";
 import { queryDefaults } from "./defaults";
@@ -53,7 +53,7 @@ export class AnalyticsPlugin extends Plugin {
   private async _handleQueryRoute(
     req: any,
     res: any,
-    userToken?: string,
+    userToken?: string
   ): Promise<void> {
     const { query_key } = req.params;
     const { parameters } = req.body as IAnalyticsQueryRequest;
@@ -62,12 +62,28 @@ export class AnalyticsPlugin extends Plugin {
       return res.status(400).json({ error: "query_key is required" });
     }
 
-    // build execution options with dynamic cache key
+    const query = await this.app.getAppQuery(
+      query_key,
+      req,
+      this.devFileReader
+    );
+
+    if (!query) {
+      return res.status(404).json({ error: "Query not found" });
+    }
+
+    const hashedQuery = this.queryProcessor.hashQuery(query);
+
     const defaultConfig: PluginExecuteConfig = {
       ...queryDefaults,
       cache: {
         ...queryDefaults.cache,
-        cacheKey: ["analytics:query", query_key, JSON.stringify(parameters)], // @TODO: need to handle key ordering issues
+        cacheKey: [
+          "analytics:query",
+          query_key,
+          JSON.stringify(parameters),
+          hashedQuery,
+        ], // @TODO: need to handle key ordering issues
       },
     };
 
@@ -78,11 +94,9 @@ export class AnalyticsPlugin extends Plugin {
     await this.executeStream(
       res,
       async (signal) => {
-        const query = await this.app.getAppQuery(query_key);
-
         const processedParams = this.queryProcessor.processQueryParams(
           query,
-          parameters,
+          parameters
         );
 
         const result = userToken
@@ -91,14 +105,14 @@ export class AnalyticsPlugin extends Plugin {
 
         return { type: "result", ...result };
       },
-      streamExecutionSettings,
+      streamExecutionSettings
     );
   }
 
   async query(
     query: string,
     parameters?: Record<string, any>,
-    signal?: AbortSignal,
+    signal?: AbortSignal
   ): Promise<any> {
     const { statement, parameters: sqlParameters } =
       this.queryProcessor.convertToSQLParameters(query, parameters);
@@ -116,7 +130,7 @@ export class AnalyticsPlugin extends Plugin {
           warehouse_id: warehouseId,
         },
         signal,
-        this.userToken ? { userToken: this.userToken } : undefined,
+        this.userToken ? { userToken: this.userToken } : undefined
       );
 
       return response.result;

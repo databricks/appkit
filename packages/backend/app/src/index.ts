@@ -1,19 +1,30 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+interface RequestLike {
+  query?: Record<string, any>;
+  headers: Record<string, string | string[] | undefined>;
+}
+
+interface DevFileReader {
+  readFile(filePath: string, req: RequestLike): Promise<string>;
+}
+
 export class AppManager {
   /**
    * Retrieves a query file by key from the queries directory
+   * In dev mode with a request context, reads from local filesystem via WebSocket
    * @param queryKey - The query file name (without extension)
+   * @param req - Optional request object to detect dev mode
+   * @param devFileReader - Optional DevFileReader instance to read files from local filesystem
    * @returns The query content as a string
    * @throws Error if query key is invalid or file not found
    */
-  async getAppQuery(queryKey: string): Promise<string> {
+  async getAppQuery(queryKey: string, req?: RequestLike, devFileReader?: DevFileReader): Promise<string | null> {
     // Security: Sanitize query key to prevent path traversal
     if (!queryKey || !/^[a-zA-Z0-9_-]+$/.test(queryKey)) {
-      throw new Error(
-        `Invalid query key format: "${queryKey}". Only alphanumeric characters, underscores, and hyphens are allowed.`,
-      );
+      console.error(`Invalid query key format: "${queryKey}". Only alphanumeric characters, underscores, and hyphens are allowed.`);
+      return null;
     }
 
     const queryFilePath = path.join(
@@ -27,19 +38,37 @@ export class AppManager {
     const queriesDir = path.resolve(process.cwd(), "config/queries");
 
     if (!resolvedPath.startsWith(queriesDir)) {
-      throw new Error(`Invalid query path: path traversal detected`);
+      console.error(`Invalid query path: path traversal detected`);
+      return null;
     }
 
+    // Check if we're in dev mode and should use WebSocket
+    const isDevMode = req?.query?.dev !== undefined;
+    
+    if (isDevMode && devFileReader && req) {
+      try {
+        // Read from local filesystem via WebSocket tunnel
+        const relativePath = path.relative(process.cwd(), resolvedPath);
+        return await devFileReader.readFile(relativePath, req);
+      } catch (error) {
+        console.error(`Failed to read query "${queryKey}" from dev tunnel: ${(error as Error).message}`);
+        return null;
+      }
+    }
+
+    // Production mode: read from server filesystem
     try {
       const query = await fs.readFile(resolvedPath, "utf8");
       return query;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        throw new Error(
-          `Query "${queryKey}" not found at path: ${resolvedPath}`,
-        );
+        console.error(`Query "${queryKey}" not found at path: ${resolvedPath}`);
+        return null;
       }
-      throw error;
+      console.error(`Failed to read query "${queryKey}" from server filesystem: ${(error as Error).message}`);
+      return null;
     }
   }
 }
+
+export type { DevFileReader, RequestLike };

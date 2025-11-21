@@ -5,6 +5,9 @@ export interface UseAnalyticsQueryOptions {
 
   /** Maximum size of serialized parameters in bytes */
   maxParametersSize?: number;
+
+  /** Whether to automatically start the query when the hook is mounted. Default is true. */
+  autoStart?: boolean;
 }
 
 /** Result state returned by useAnalyticsQuery */

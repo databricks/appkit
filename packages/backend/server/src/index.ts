@@ -8,7 +8,9 @@ import type {
   PluginPhase,
 } from "@databricks-apps/types";
 import express from "express";
-import { mergeConfigDedup } from "@databricks-apps/utils";
+import { getQueries, getRoutes } from "./utils";
+import { DevModeManager } from "./dev-mode";
+import { isRemoteServerEnabled } from "@databricks-apps/utils";
 
 export interface ServerConfig extends BasePluginConfig {
   port?: number;
@@ -30,6 +32,7 @@ export class ServerPlugin extends Plugin {
   };
   private serverApplication: express.Application;
   private server: HTTPServer | null;
+  private devModeManager?: DevModeManager;
   protected declare config: ServerConfig;
   static phase: PluginPhase = "deferred";
 
@@ -56,14 +59,30 @@ export class ServerPlugin extends Plugin {
     return this.config.autoStart ?? ServerPlugin.DEFAULT_CONFIG.autoStart;
   }
 
+  isRemoteServingEnabled() {
+    return isRemoteServerEnabled();
+  }
+
   async start(): Promise<express.Application> {
     this.serverApplication.use(express.json());
 
-    this.extendRoutes();
+    const isRemoteDevModeEnabled = this.isRemoteServingEnabled();
 
-    if (this.config.watch) {
-      await this._setupWatching();
+    if (isRemoteDevModeEnabled) {
+      this.devModeManager = new DevModeManager(this.devFileReader);
+
+      if (this.config.watch) {
+        await this.devModeManager.setupViteWatching(this.serverApplication);
+      }
+
+      this.serverApplication.use(this.devModeManager.devModeMiddleware());
+      this.serverApplication.use(
+        DevModeManager.ASSETS_MIDDLEWARE_PATHS,
+        this.devModeManager.assetMiddleware()
+      );
     }
+
+    this.extendRoutes();
 
     if (this.config.staticPath && !this.config.watch) {
       this._setupStaticServing();
@@ -76,7 +95,7 @@ export class ServerPlugin extends Plugin {
         console.log(
           `Server is running on port ${
             this.config.port || ServerPlugin.DEFAULT_CONFIG.port
-          }`,
+          }`
         );
         if (this.config.staticPath && !this.config.watch) {
           console.log(`Serving static files from: ${this.config.staticPath}`);
@@ -84,10 +103,15 @@ export class ServerPlugin extends Plugin {
         if (this.config.watch) {
           console.log("Vite is watching for changes...");
         }
-      },
+      }
     );
 
     this.server = server;
+
+    if (isRemoteDevModeEnabled && this.devModeManager) {
+      this.devModeManager.setServer(server);
+      this.devModeManager.setupWebSocket();
+    }
 
     process.on("SIGTERM", () => this._gracefulShutdown());
     process.on("SIGINT", () => this._gracefulShutdown());
@@ -131,72 +155,14 @@ export class ServerPlugin extends Plugin {
     }
   }
 
-  private async _setupWatching() {
-    if (!this.config.watch) return;
-
-    if (process.env.NODE_ENV !== "production") {
-      const {
-        createServer: createViteServer,
-        loadConfigFromFile,
-        mergeConfig,
-      } = require("vite");
-      const { default: react } = require("@vitejs/plugin-react");
-
-      const clientRoot = path.resolve(process.cwd(), "client");
-
-      const loadedConfig = await loadConfigFromFile(
-        {
-          mode: "development",
-          command: "serve",
-        },
-        undefined,
-        clientRoot,
-      );
-      const userConfig = loadedConfig?.config ?? {};
-      const coreConfig = {
-        configFile: false,
-        root: clientRoot,
-        server: { middlewareMode: true, watch: { useFsEvents: true } },
-        plugins: [react()],
-      };
-      const mergedConfigs = mergeConfigDedup(
-        userConfig,
-        coreConfig,
-        mergeConfig,
-      );
-      const vite = await createViteServer(mergedConfigs);
-
-      this.serverApplication.use(vite.middlewares);
-
-      this.serverApplication.use("*", async (req, res, next) => {
-        try {
-          if (!req.path.startsWith("/api")) {
-            const url = req.originalUrl;
-            const indexHtmlPath = path.resolve(clientRoot, "index.html");
-            let template = fs.readFileSync(indexHtmlPath, "utf-8");
-
-            template = await vite.transformIndexHtml(url, template);
-
-            res.status(200).set({ "Content-Type": "text/html" }).end(template);
-          } else {
-            next();
-          }
-        } catch (e) {
-          vite.ssrFixStacktrace(e as Error);
-          next(e);
-        }
-      });
-    }
-  }
-
   private _setupStaticServing() {
     if (!this.config.staticPath) return;
 
-    this.serverApplication.get("/", (_, res) => {
-      this._renderFE(res);
-    });
-
-    this.serverApplication.use(express.static(this.config.staticPath));
+    this.serverApplication.use(
+      express.static(this.config.staticPath, {
+        index: false,
+      })
+    );
 
     this.serverApplication.get("*", (req, res) => {
       if (!req.path.startsWith("/api") && !req.path.startsWith("/query")) {
@@ -211,17 +177,36 @@ export class ServerPlugin extends Plugin {
     }
 
     const indexPath = path.join(this.config.staticPath, "index.html");
+    const configObject = this._configInjection();
+    const configScript = `
+      <script>
+        window.__CONFIG__ = ${JSON.stringify(configObject)};
+      </script>
+    `;
+    let html = fs.readFileSync(indexPath, "utf-8");
 
-    res.sendFile(indexPath, (err) => {
-      if (err)
-        res
-          .status(404)
-          .json({ error: "Frontend not found", details: err.message });
-    });
+    html = html.replace("<body>", `<body>${configScript}`);
+
+    res.send(html);
+  }
+
+  private _configInjection() {
+    const configFolder = path.join(process.cwd(), "config");
+
+    const configObject = {
+      appName: process.env.DATABRICKS_APP_NAME || "",
+      queries: getQueries(configFolder),
+    };
+
+    return configObject;
   }
 
   private _gracefulShutdown() {
     console.log("Starting graceful shutdown...");
+
+    if (this.devModeManager) {
+      this.devModeManager.cleanup();
+    }
 
     // 1. abort active operations from plugins
     if (this.config.plugins) {
@@ -232,7 +217,7 @@ export class ServerPlugin extends Plugin {
           } catch (err) {
             console.error(
               `Error aborting operations for plugin ${plugin.name}:`,
-              err,
+              err
             );
           }
         }
@@ -261,32 +246,5 @@ const EXCLUDED_PLUGINS = [ServerPlugin.name];
 
 export const server = toPlugin<typeof ServerPlugin, ServerConfig, "server">(
   ServerPlugin,
-  "server",
+  "server"
 );
-
-function getRoutes(stack: unknown[], basePath = "") {
-  const routes: Array<{ path: string; methods: string[] }> = [];
-
-  stack.forEach((layer: any) => {
-    if (layer.route) {
-      // normal route
-      const path = basePath + layer.route.path;
-      const methods = Object.keys(layer.route.methods).map((m) =>
-        m.toUpperCase(),
-      );
-      routes.push({ path, methods });
-    } else if (layer.name === "router" && layer.handle.stack) {
-      // nested router
-      const nestedBase =
-        basePath +
-          layer.regexp.source
-            .replace("^\\", "")
-            .replace("\\/?(?=\\/|$)", "")
-            .replace(/\\\//g, "/") // convert escaped slashes
-            .replace(/\$$/, "") || "";
-      routes.push(...getRoutes(layer.handle.stack, nestedBase));
-    }
-  });
-
-  return routes;
-}

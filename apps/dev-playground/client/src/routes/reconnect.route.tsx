@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
 import { useState } from "react";
 import {
   ConnectionStatus,
@@ -10,6 +10,9 @@ import { useReconnectStream } from "@/hooks/use-reconnect-stream";
 
 export const Route = createFileRoute("/reconnect")({
   component: ReconnectRoute,
+  search: {
+    middlewares: [retainSearchParams(true)],
+  },
 });
 
 function ReconnectRoute() {

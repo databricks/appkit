@@ -1,3 +1,5 @@
+import type { Plugin } from "vite";
+
 export function mergeConfigDedup(
   base: any,
   override: any,

@@ -35,5 +35,8 @@ export default defineConfig({
         },
       },
     ],
+    alias: {
+      "@databricks-apps/js": "./packages/frontend/js/src/index.ts",
+    }
   },
 });

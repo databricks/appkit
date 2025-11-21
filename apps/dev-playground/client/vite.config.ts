@@ -6,15 +6,12 @@ import { defineConfig } from "vite";
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
+    react(),
     tanstackRouter({
       target: "react",
-      autoCodeSplitting: true,
+      autoCodeSplitting: process.env.NODE_ENV !== "development",
     }),
-    react(),
   ],
-  server: {
-    middlewareMode: true,
-  },
   optimizeDeps: {
     include: [
       "react",
@@ -24,16 +21,19 @@ export default defineConfig({
     ],
   },
   resolve: {
+    preserveSymlinks: true,
     alias: {
       "@": path.resolve(__dirname, "./src"),
       "@databricks/apps/react": path.resolve(
         __dirname,
-        "../../../packages/frontend/react/src/index.ts",
+        "../../../packages/frontend/react/src/index.ts"
       ),
       "@databricks/apps/js": path.resolve(
         __dirname,
         "../../../packages/frontend/js/src/index.ts",
       ),
+      react: path.resolve(__dirname, "node_modules/react"),
+      "react-dom": path.resolve(__dirname, "node_modules/react-dom"),
     },
   },
 });

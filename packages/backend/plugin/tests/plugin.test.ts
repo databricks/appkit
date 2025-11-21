@@ -8,10 +8,10 @@ import type {
   IAuthManager,
 } from "@databricks-apps/types";
 import { validateEnv } from "@databricks-apps/utils";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type express from "express";
-import { Plugin } from "../src/plugin";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { ExecutionContext } from "../src/interceptors/types";
+import { Plugin } from "../src/plugin";
 
 // Mock all dependencies
 vi.mock("@databricks-apps/app");

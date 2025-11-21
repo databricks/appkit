@@ -1,9 +1,16 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  retainSearchParams,
+  useNavigate,
+} from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
 export const Route = createFileRoute("/")({
   component: IndexRoute,
+  search: {
+    middlewares: [retainSearchParams(true)],
+  },
 });
 
 function IndexRoute() {
