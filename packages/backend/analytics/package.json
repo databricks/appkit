@@ -13,6 +13,7 @@
     "@databricks-apps/cache": "workspace:*",
     "@databricks-apps/connectors": "workspace:*",
     "@databricks-apps/types": "workspace:*",
+    "@databricks-apps/utils": "workspace:*",
     "@databricks/sdk-experimental": "^0.14.2"
   }
 }

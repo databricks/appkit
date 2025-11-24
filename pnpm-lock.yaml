@@ -99,6 +99,9 @@ importers:
       '@databricks-apps/types':
         specifier: workspace:*
         version: link:../../types
+      '@databricks-apps/utils':
+        specifier: workspace:*
+        version: link:../utils
       '@databricks/sdk-experimental':
         specifier: ^0.14.2
         version: 0.14.2
@@ -199,7 +202,13 @@ importers:
       '@databricks-apps/types':
         specifier: workspace:*
         version: link:../../types
+      '@databricks/sdk-experimental':
+        specifier: ^0.14.2
+        version: 0.14.2
     devDependencies:
+      '@types/express':
+        specifier: ^4.17.21
+        version: 4.17.23
       vite:
         specifier: npm:rolldown-vite@7.1.14
         version: rolldown-vite@7.1.14(@types/node@24.7.2)(esbuild@0.25.10)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)

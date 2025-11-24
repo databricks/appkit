@@ -60,7 +60,7 @@ export class SQLWarehouseConnector {
       case "PENDING":
         return await this._pollForStatementResult(
           workspaceClient,
-          response.statement_id!,
+          response.statement_id as string,
           this.config.timeout,
           signal,
         );

@@ -8,8 +8,8 @@ import type {
 import { queryDefaults } from "./defaults";
 import { QueryProcessor } from "./query";
 import type { IAnalyticsConfig, IAnalyticsQueryRequest } from "./types";
-import type { Request, Response } from "@databricks-apps/server";
-import { getRequestContext } from "@databricks-apps/server";
+import type { Request, Response } from "@databricks-apps/utils";
+import { getRequestContext } from "@databricks-apps/utils";
 
 export class AnalyticsPlugin extends Plugin {
   name = "analytics";

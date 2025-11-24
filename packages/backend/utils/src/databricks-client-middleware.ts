@@ -19,7 +19,11 @@ export async function databricksClientMiddleware(): Promise<express.RequestHandl
 
   const warehouseId = getWarehouseId(serviceDatabricksClient);
   const workspaceId = getWorkspaceId(serviceDatabricksClient);
-  const serviceUserId = (await serviceDatabricksClient.currentUser.me()).id!;
+  const serviceUserId = (await serviceDatabricksClient.currentUser.me()).id;
+
+  if (!serviceUserId) {
+    throw new Error("Service user ID not found");
+  }
 
   return async (
     req: express.Request,
@@ -120,7 +124,9 @@ async function getWarehouseId(
     };
 
     const warehouses = (response.warehouses || []).sort((a, b) => {
-      return priorities[a.state!] - priorities[b.state!];
+      return (
+        priorities[a.state as sql.State] - priorities[b.state as sql.State]
+      );
     });
 
     if (response.warehouses.length === 0) {
@@ -132,17 +138,21 @@ async function getWarehouseId(
     const firstWarehouse = warehouses[0];
     if (
       firstWarehouse.state === "DELETED" ||
-      firstWarehouse.state === "DELETING"
+      firstWarehouse.state === "DELETING" ||
+      !firstWarehouse.id
     ) {
       throw new Error(
         "Warehouse ID not found. Please configure the DATABRICKS_WAREHOUSE_ID environment variable.",
       );
     }
 
-    return firstWarehouse?.id!;
+    return firstWarehouse.id;
   }
 
   throw new Error(
     "Warehouse ID not found. Please configure the DATABRICKS_WAREHOUSE_ID environment variable.",
   );
 }
+
+export type Request = express.Request;
+export type Response = express.Response;

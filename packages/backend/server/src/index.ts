@@ -4,12 +4,12 @@ import path from "node:path";
 import { Plugin, toPlugin } from "@databricks-apps/plugin";
 import type { BasePluginConfig, PluginPhase } from "@databricks-apps/types";
 import express from "express";
-export type { Request, Response } from "express";
-import { isRemoteServerEnabled } from "@databricks-apps/utils";
-import { databricksClientMiddleware } from "./databricks-client-middleware";
+import {
+  isRemoteServerEnabled,
+  databricksClientMiddleware,
+} from "@databricks-apps/utils";
 import { DevModeManager } from "./dev-mode";
 import { getQueries, getRoutes } from "./utils";
-export { getRequestContext } from "./databricks-client-middleware";
 
 export interface ServerConfig extends BasePluginConfig {
   port?: number;

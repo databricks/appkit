@@ -1,6 +1,6 @@
 import type { IAppRouter } from "@databricks-apps/types";
 import { vi } from "vitest";
-import type { RequestContext } from "@databricks-apps/server";
+import type { RequestContext } from "@databricks-apps/utils";
 
 /**
  * Creates a mock Express router with route handler capturing
@@ -143,7 +143,7 @@ export async function runWithRequestContext<T>(
   };
 
   // Use vi.spyOn to mock getRequestContext
-  const serverModule = await import("@databricks-apps/server");
+  const serverModule = await import("@databricks-apps/utils");
   const spy = vi
     .spyOn(serverModule, "getRequestContext")
     .mockReturnValue(defaultContext);

@@ -1,4 +1,4 @@
-import { getRequestContext } from "@databricks-apps/server";
+import { getRequestContext } from "@databricks-apps/utils";
 import type { sql } from "@databricks/sdk-experimental";
 import { createHash } from "node:crypto";
 
