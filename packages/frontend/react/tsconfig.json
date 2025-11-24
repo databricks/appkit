@@ -2,8 +2,15 @@
   "extends": "../../../tsconfig.json",
   "compilerOptions": {
     "outDir": "dist",
-    "jsx": "react",
-    "lib": ["ES2021", "DOM"]
+    "jsx": "react-jsx",
+    "lib": ["ES2021", "DOM"],
+    "baseUrl": ".",
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": false,
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
   "include": ["src"]
 }

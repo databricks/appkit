@@ -1,10 +1,5 @@
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { BarChart } from "@databricks/app-kit/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-} from "@/components/ui/chart";
 import {
   Select,
   SelectContent,
@@ -12,30 +7,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
 
 interface UsageTrendsChartProps {
-  data: Array<{ date: string; spend: number }>;
-  loading: boolean;
-  error: string | null;
   groupBy: "default" | "app" | "user";
   onGroupByChange: (groupBy: "default" | "app" | "user") => void;
+  queryParams: Record<string, any>;
 }
 
-const chartConfig = {
-  spend: {
-    label: "Total Spend",
-    color: "hsl(160, 84%, 39%)",
-  },
-};
-
 export function UsageTrendsChart({
-  data,
-  loading,
-  error,
   groupBy,
   onGroupByChange,
+  queryParams,
 }: UsageTrendsChartProps) {
+  const spendDataParams = {
+    ...queryParams,
+    groupBy,
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -57,54 +45,7 @@ export function UsageTrendsChart({
         </div>
       </CardHeader>
       <CardContent>
-        {loading ? (
-          <div className="space-y-3">
-            <Skeleton className="h-[300px] w-full" />
-          </div>
-        ) : error ? (
-          <div className="p-10 text-center">
-            <p className="text-sm text-destructive">
-              Error loading data: {error}
-            </p>
-          </div>
-        ) : data.length === 0 ? (
-          <div className="p-10 text-center">
-            <p className="text-sm text-muted-foreground">
-              No data available for the selected period
-            </p>
-          </div>
-        ) : (
-          <ChartContainer config={chartConfig} className="h-[300px] w-full">
-            <BarChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis
-                dataKey="date"
-                tickLine={false}
-                axisLine={false}
-                tickMargin={8}
-                tickFormatter={(value) => {
-                  const date = new Date(value);
-                  return date.toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                  });
-                }}
-              />
-              <YAxis
-                tickLine={false}
-                axisLine={false}
-                tickMargin={8}
-                tickFormatter={(value) => `$${value}`}
-              />
-              <ChartTooltip content={<ChartTooltipContent />} />
-              <Bar
-                dataKey="spend"
-                fill="var(--color-spend)"
-                radius={[4, 4, 0, 0]}
-              />
-            </BarChart>
-          </ChartContainer>
-        )}
+        <BarChart queryKey="spend_data" parameters={spendDataParams} />
       </CardContent>
     </Card>
   );

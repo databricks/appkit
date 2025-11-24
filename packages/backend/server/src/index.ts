@@ -3,13 +3,16 @@ import type { Server as HTTPServer } from "node:http";
 import path from "node:path";
 import { Plugin, toPlugin } from "@databricks-apps/plugin";
 import type { BasePluginConfig, PluginPhase } from "@databricks-apps/types";
-import express from "express";
 import {
-  isRemoteServerEnabled,
   databricksClientMiddleware,
+  isRemoteServerEnabled,
 } from "@databricks-apps/utils";
+import dotenv from "dotenv";
+import express from "express";
 import { DevModeManager } from "./dev-mode";
 import { getQueries, getRoutes } from "./utils";
+
+dotenv.config({ path: path.resolve(process.cwd(), "./server/.env") });
 
 export interface ServerConfig extends BasePluginConfig {
   port?: number;

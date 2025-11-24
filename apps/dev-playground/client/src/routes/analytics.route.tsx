@@ -80,33 +80,6 @@ function AnalyticsRoute() {
     }>
   >("apps_list", {});
 
-  const spendDataParams = useMemo(() => {
-    return { ...queryParams, groupBy: usageTrendsGroupBy };
-  }, [queryParams, usageTrendsGroupBy]);
-
-  const {
-    data: spendData,
-    loading: spendLoading,
-    error: spendError,
-  } = useAnalyticsQuery<
-    Array<{
-      group_key: string;
-      aggregation_period: string;
-      cost_usd: number;
-    }>
-  >("spend_data", spendDataParams);
-
-  const {
-    data: topContributorsData,
-    loading: topContributorsLoading,
-    error: topContributorsError,
-  } = useAnalyticsQuery<
-    Array<{
-      app_name: string;
-      total_cost_usd: number;
-    }>
-  >("top_contributors", topContributorsParams);
-
   const untaggedAppsParams = useMemo(() => {
     return {
       startDate: queryParams.startDate,
@@ -134,27 +107,6 @@ function AnalyticsRoute() {
     }
     return summaryDataRaw[0];
   }, [summaryDataRaw]);
-
-  const usageTrendsData = useMemo(() => {
-    if (!spendData || spendData.length === 0) return [];
-    return spendData.map((item) => ({
-      date: item.aggregation_period,
-      spend: Math.round(item.cost_usd),
-    }));
-  }, [spendData]);
-
-  const topContributors = useMemo(() => {
-    if (!topContributorsData || topContributorsData.length === 0) return [];
-    const total = topContributorsData.reduce(
-      (sum, item) => sum + item.total_cost_usd,
-      0,
-    );
-    return topContributorsData.map((item) => ({
-      name: item.app_name,
-      spend: Math.round(item.total_cost_usd),
-      percentage: total > 0 ? (item.total_cost_usd / total) * 100 : 0,
-    }));
-  }, [topContributorsData]);
 
   const appsList = useMemo(() => {
     if (!appsListData || appsListData.length === 0) {
@@ -233,9 +185,7 @@ function AnalyticsRoute() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <UsageTrendsChart
-              data={usageTrendsData}
-              loading={spendLoading}
-              error={spendError}
+              queryParams={queryParams}
               groupBy={usageTrendsGroupBy}
               onGroupByChange={(value) =>
                 setUsageTrendsGroupBy(value as "default" | "app" | "user")
@@ -243,9 +193,7 @@ function AnalyticsRoute() {
             />
 
             <TopContributorsChart
-              data={topContributors}
-              loading={topContributorsLoading}
-              error={topContributorsError}
+              queryParams={queryParams}
               groupBy={topContributorsGroupBy}
               onGroupByChange={(value) =>
                 setTopContributorsGroupBy(value as "app" | "user")

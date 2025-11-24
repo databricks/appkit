@@ -5,21 +5,25 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsdown src/index.ts --dts",
+    "build": "tsdown src/index.ts --dts --format=esm --clean && tsc --emitDeclarationOnly",
     "dev": "tsdown --watch ./src"
   },
   "dependencies": {
     "@databricks-apps/js": "workspace:*",
-    "@databricks-apps/types": "workspace:*"
+    "@databricks-apps/types": "workspace:*",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.4.0"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0",
-    "react-dom": "^18.0.0 || ^19.0.0"
+    "react-dom": "^18.0.0 || ^19.0.0",
+    "recharts": "^2.0.0 || ^3.0.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "recharts": "^3.4.1"
   }
 }

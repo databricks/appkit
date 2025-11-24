@@ -25,6 +25,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "@types/react-syntax-highlighter": "^15.5.13",
     "@vitejs/plugin-react": "^5.0.4",
     "dotenv": "^16.0.0",
     "pm2": "^6.0.13",

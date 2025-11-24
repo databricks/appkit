@@ -1,9 +1,9 @@
 import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
 import { useState } from "react";
+import { Header } from "@/components/layout/header";
 import {
   ConnectionStatus,
   MessageStream,
-  PageHeader,
   TestPlan,
 } from "@/components/reconnect";
 import { useReconnectStream } from "@/hooks/use-reconnect-stream";
@@ -29,7 +29,12 @@ function ReconnectRoute() {
   return (
     <div className="min-h-[calc(100vh-73px)] bg-gray-50">
       <div className="max-w-[1200px] mx-auto px-6 py-12">
-        <PageHeader />
+        <Header
+          title="Stream Reconnection Test"
+          description="Watch automatic stream reconnection in action"
+          tooltip="Tests SSE (Server-Sent Events) stream reconnection with
+            Last-Event-ID tracking"
+        />
 
         <ConnectionStatus
           status={status}

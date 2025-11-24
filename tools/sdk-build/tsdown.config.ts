@@ -53,6 +53,6 @@ export default defineConfig([
     dts: true,
     sourcemap: false,
     clean: true,
-    external: ["react", "react-dom"],
+    external: ["react", "react-dom", "recharts"],
   },
 ]);
