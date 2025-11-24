@@ -2,15 +2,14 @@ import fs from "node:fs";
 import type { Server as HTTPServer } from "node:http";
 import path from "node:path";
 import { Plugin, toPlugin } from "@databricks-apps/plugin";
-import type {
-  BasePluginConfig,
-  IAuthManager,
-  PluginPhase,
-} from "@databricks-apps/types";
+import type { BasePluginConfig, PluginPhase } from "@databricks-apps/types";
 import express from "express";
-import { getQueries, getRoutes } from "./utils";
-import { DevModeManager } from "./dev-mode";
+export type { Request, Response } from "express";
 import { isRemoteServerEnabled } from "@databricks-apps/utils";
+import { databricksClientMiddleware } from "./databricks-client-middleware";
+import { DevModeManager } from "./dev-mode";
+import { getQueries, getRoutes } from "./utils";
+export { getRequestContext } from "./databricks-client-middleware";
 
 export interface ServerConfig extends BasePluginConfig {
   port?: number;
@@ -36,8 +35,8 @@ export class ServerPlugin extends Plugin {
   protected declare config: ServerConfig;
   static phase: PluginPhase = "deferred";
 
-  constructor(config: ServerConfig, auth: IAuthManager) {
-    super(config, auth);
+  constructor(config: ServerConfig) {
+    super(config);
     this.config = config;
     this.serverApplication = express();
     this.server = null;
@@ -65,11 +64,11 @@ export class ServerPlugin extends Plugin {
 
   async start(): Promise<express.Application> {
     this.serverApplication.use(express.json());
+    this.serverApplication.use(await databricksClientMiddleware());
 
     this.extendRoutes();
 
     const isRemoteDevModeEnabled = this.isRemoteServingEnabled();
-    
     if (isRemoteDevModeEnabled) {
       this.devModeManager = new DevModeManager(this.devFileReader);
 

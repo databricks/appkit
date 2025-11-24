@@ -1,5 +1,4 @@
 import type express from "express";
-import type { IAuthManager } from "./auth";
 
 export interface BasePlugin {
   name: string;
@@ -7,12 +6,7 @@ export interface BasePlugin {
   validateEnv(): void;
   setup(): Promise<void>;
   injectRoutes(router: express.Router): void;
-  asUser(userToken: string): WithInjectedToken<BasePlugin>;
 }
-
-export type WithInjectedToken<T> = T & {
-  asUser(token: string): T;
-};
 
 export interface BasePluginConfig {
   name?: string;
@@ -30,10 +24,8 @@ export type PluginPhase = "core" | "normal" | "deferred";
 export type PluginConstructor<
   C = BasePluginConfig,
   I extends BasePlugin = BasePlugin,
-  A = IAuthManager,
 > = (new (
   config: C,
-  auth: A,
 ) => I) & {
   DEFAULT_CONFIG?: Record<string, unknown>;
   phase?: PluginPhase;

@@ -1,15 +1,6 @@
-import type { IAppRouter, IAuthManager } from "@databricks-apps/types";
+import type { IAppRouter } from "@databricks-apps/types";
 import { vi } from "vitest";
-
-/**
- * Creates a mock auth manager for testing
- */
-export function createMockAuth(): IAuthManager {
-  return {
-    getAccessToken: vi.fn(),
-    validateToken: vi.fn(),
-  } as any;
-}
+import type { RequestContext } from "@databricks-apps/server";
 
 /**
  * Creates a mock Express router with route handler capturing
@@ -51,11 +42,24 @@ export function createMockRouter(): {
  * Creates a mock Express request object
  */
 export function createMockRequest(overrides: any = {}) {
+  const mockWorkspaceClient = {
+    statementExecution: {
+      executeStatement: vi.fn().mockResolvedValue({
+        status: { state: "SUCCEEDED" },
+        result: { data: [] },
+      }),
+    },
+  };
+
   const req = {
     params: {},
     query: {},
     body: {},
     headers: {},
+    userWorkspaceClient: mockWorkspaceClient,
+    serviceWorkspaceClient: mockWorkspaceClient,
+    getWarehouseId: vi.fn().mockResolvedValue("test-warehouse-id"),
+    getWorkspaceId: vi.fn().mockResolvedValue("test-workspace-id"),
     header: function (name: string) {
       return this.headers[name.toLowerCase()];
     },
@@ -111,4 +115,42 @@ export function setupDatabricksEnv(overrides: Record<string, string> = {}) {
   process.env.DATABRICKS_HOST = "https://test.databricks.com";
   process.env.DATABRICKS_WAREHOUSE_ID = "test-warehouse-id";
   Object.assign(process.env, overrides);
+}
+
+/**
+ * Runs a test function within a request context
+ */
+export async function runWithRequestContext<T>(
+  fn: () => T | Promise<T>,
+  context?: Partial<RequestContext>,
+): Promise<T> {
+  const mockWorkspaceClient = {
+    statementExecution: {
+      executeStatement: vi.fn().mockResolvedValue({
+        status: { state: "SUCCEEDED" },
+        result: { data: [] },
+      }),
+    },
+  };
+
+  const defaultContext: RequestContext = {
+    userDatabricksClient: mockWorkspaceClient as any,
+    serviceDatabricksClient: mockWorkspaceClient as any,
+    userName: "test-user",
+    warehouseId: Promise.resolve("test-warehouse-id"),
+    workspaceId: Promise.resolve("test-workspace-id"),
+    ...context,
+  };
+
+  // Use vi.spyOn to mock getRequestContext
+  const serverModule = await import("@databricks-apps/server");
+  const spy = vi
+    .spyOn(serverModule, "getRequestContext")
+    .mockReturnValue(defaultContext);
+
+  try {
+    return await fn();
+  } finally {
+    spy.mockRestore();
+  }
 }

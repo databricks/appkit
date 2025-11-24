@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { QueryProcessor } from "../src/query";
+import { runWithRequestContext } from "@tools/test-helpers";
 
 describe("QueryProcessor", () => {
   const processor = new QueryProcessor();
@@ -128,32 +129,36 @@ describe("QueryProcessor", () => {
   });
 
   describe("processQueryParams", () => {
-    test("should auto-inject workspace_id when needed and not provided", () => {
-      const originalEnv = process.env.DATABRICKS_WORKSPACE_ID;
-      process.env.DATABRICKS_WORKSPACE_ID = "workspace-123";
-
+    test("should auto-inject workspace_id when needed and not provided", async () => {
       const query = "SELECT * FROM data WHERE workspace_id = :workspaceId";
       const parameters = {};
 
-      const result = processor.processQueryParams(query, parameters);
+      const result = await runWithRequestContext(
+        async () => {
+          return await processor.processQueryParams(query, parameters);
+        },
+        {
+          workspaceId: Promise.resolve("workspace-123"),
+        },
+      );
 
       expect(result.workspaceId).toBe("workspace-123");
-
-      process.env.DATABRICKS_WORKSPACE_ID = originalEnv;
     });
 
-    test("should not override workspace_id if already provided", () => {
-      const originalEnv = process.env.DATABRICKS_WORKSPACE_ID;
-      process.env.DATABRICKS_WORKSPACE_ID = "workspace-123";
-
+    test("should not override workspace_id if already provided", async () => {
       const query = "SELECT * FROM data WHERE workspace_id = :workspaceId";
       const parameters = { workspaceId: "custom-workspace" };
 
-      const result = processor.processQueryParams(query, parameters);
+      const result = await runWithRequestContext(
+        async () => {
+          return await processor.processQueryParams(query, parameters);
+        },
+        {
+          workspaceId: Promise.resolve("workspace-123"),
+        },
+      );
 
       expect(result.workspaceId).toBe("custom-workspace");
-
-      process.env.DATABRICKS_WORKSPACE_ID = originalEnv;
     });
   });
 

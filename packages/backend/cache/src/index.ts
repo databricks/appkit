@@ -25,10 +25,10 @@ export class CacheManager {
   async getOrExecute<T>(
     key: (string | number | object)[],
     fn: () => Promise<T>,
-    userToken?: string,
+    userKey: string,
     options?: { ttl?: number },
   ): Promise<T> {
-    const cacheKey = this.generateKey(key, userToken);
+    const cacheKey = this.generateKey(key, userKey);
 
     // check cache first
     const cached = this.get<T>(cacheKey);
@@ -108,10 +108,8 @@ export class CacheManager {
     return true;
   }
 
-  generateKey(parts: (string | number | object)[], userToken?: string): string {
-    if (userToken) {
-      parts = [userToken, ...parts];
-    }
+  generateKey(parts: (string | number | object)[], userKey: string): string {
+    parts = [userKey, ...parts];
     return parts.map((p) => JSON.stringify(p)).join(":");
   }
 

@@ -1,7 +1,7 @@
 export interface ExecutionContext {
   signal?: AbortSignal;
   metadata?: Map<string, any>;
-  userToken?: string;
+  userKey: string;
 }
 
 export interface ExecutionInterceptor {

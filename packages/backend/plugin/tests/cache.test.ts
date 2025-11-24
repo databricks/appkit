@@ -12,6 +12,7 @@ describe("CacheInterceptor", () => {
     cacheManager = new CacheManager();
     context = {
       metadata: new Map(),
+      userKey: "service",
     };
   });
 
@@ -51,7 +52,7 @@ describe("CacheInterceptor", () => {
     const interceptor = new CacheInterceptor(cacheManager, config);
 
     // Pre-populate cache
-    const cacheKey = cacheManager.generateKey(["test", "key"]);
+    const cacheKey = cacheManager.generateKey(["test", "key"], "service");
     cacheManager.set(cacheKey, "cached-result");
 
     const fn = vi.fn().mockResolvedValue("new-result");
@@ -77,7 +78,7 @@ describe("CacheInterceptor", () => {
     expect(fn).toHaveBeenCalledTimes(1);
 
     // Verify result was cached
-    const cacheKey = cacheManager.generateKey(["test", "key"]);
+    const cacheKey = cacheManager.generateKey(["test", "key"], "service");
     const cached = cacheManager.get(cacheKey);
     expect(cached).toBe("fresh-result");
   });
@@ -89,15 +90,15 @@ describe("CacheInterceptor", () => {
     };
     const contextWithToken: ExecutionContext = {
       metadata: new Map(),
-      userToken: "user-123",
+      userKey: "user1",
     };
     const interceptor = new CacheInterceptor(cacheManager, config);
     const fn = vi.fn().mockResolvedValue("user-result");
 
     await interceptor.intercept(fn, contextWithToken);
 
-    // Cache key should include userToken
-    const cacheKey = cacheManager.generateKey(["query", "sales"], "user-123");
+    // Cache key should include userKey
+    const cacheKey = cacheManager.generateKey(["query", "sales"], "user1");
     const cached = cacheManager.get(cacheKey);
     expect(cached).toBe("user-result");
   });
@@ -109,20 +110,20 @@ describe("CacheInterceptor", () => {
     };
     const interceptor = new CacheInterceptor(cacheManager, config);
 
-    // User 1
+    // Service account context
     const context1: ExecutionContext = {
       metadata: new Map(),
-      userToken: "user-1",
+      userKey: "service",
     };
-    const fn1 = vi.fn().mockResolvedValue("user-1-data");
+    const fn1 = vi.fn().mockResolvedValue("service-account-data");
     await interceptor.intercept(fn1, context1);
 
-    // User 2
+    // User context
     const context2: ExecutionContext = {
       metadata: new Map(),
-      userToken: "user-2",
+      userKey: "user1",
     };
-    const fn2 = vi.fn().mockResolvedValue("user-2-data");
+    const fn2 = vi.fn().mockResolvedValue("user-data");
     await interceptor.intercept(fn2, context2);
 
     // Both should have executed
@@ -130,10 +131,10 @@ describe("CacheInterceptor", () => {
     expect(fn2).toHaveBeenCalledTimes(1);
 
     // Verify separate cache entries
-    const key1 = cacheManager.generateKey(["query", "profile"], "user-1");
-    const key2 = cacheManager.generateKey(["query", "profile"], "user-2");
-    expect(cacheManager.get(key1)).toBe("user-1-data");
-    expect(cacheManager.get(key2)).toBe("user-2-data");
+    const key1 = cacheManager.generateKey(["query", "profile"], "service");
+    const key2 = cacheManager.generateKey(["query", "profile"], "user1");
+    expect(cacheManager.get(key1)).toBe("service-account-data");
+    expect(cacheManager.get(key2)).toBe("user-data");
   });
 
   test("should respect TTL setting", async () => {

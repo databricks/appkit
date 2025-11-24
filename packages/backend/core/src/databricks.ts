@@ -1,4 +1,3 @@
-import { AuthManager } from "@databricks-apps/auth";
 import type {
   BasePlugin,
   InputPluginMap,
@@ -8,22 +7,13 @@ import type {
   PluginMap,
 } from "@databricks-apps/types";
 
-import { validateEnv } from "@databricks-apps/utils";
-import { envVars } from "./env";
-
 export class DBX<TPlugins extends InputPluginMap> {
   private config: { plugins: TPlugins };
   private static _instance: DBX<InputPluginMap> | null = null;
   private pluginInstances: Record<string, BasePlugin> = {};
-  private auth: AuthManager;
   private setupPromises: Promise<void>[] = [];
 
   private constructor(config: { plugins: TPlugins }) {
-    validateEnv(envVars);
-
-    // TODO: think about a way of injecting the auth manager into the plugins instead of creating a new instance here
-    // We will probably want to create some kind of context that provides more services like auth, telemetry, etc.
-    this.auth = new AuthManager();
     this.config = config;
 
     const { plugins, ...globalConfig } = config;
@@ -68,16 +58,13 @@ export class DBX<TPlugins extends InputPluginMap> {
     extraData?: Record<string, unknown>,
   ) {
     const { plugin: Plugin, config: pluginConfig } = pluginData;
-    const pluginInstance = new Plugin(
-      {
-        ...config,
-        ...Plugin.DEFAULT_CONFIG,
-        ...pluginConfig,
-        name,
-        ...extraData,
-      },
-      this.auth,
-    );
+    const pluginInstance = new Plugin({
+      ...config,
+      ...Plugin.DEFAULT_CONFIG,
+      ...pluginConfig,
+      name,
+      ...extraData,
+    });
 
     this.pluginInstances[name] = pluginInstance;
 

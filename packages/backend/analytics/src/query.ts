@@ -1,11 +1,12 @@
+import { getRequestContext } from "@databricks-apps/server";
+import type { sql } from "@databricks/sdk-experimental";
 import { createHash } from "node:crypto";
-import type { ParameterInput } from "@databricks-apps/connectors";
 
 export class QueryProcessor {
-  processQueryParams(
+  async processQueryParams(
     query: string,
     parameters?: Record<string, any>,
-  ): Record<string, any> {
+  ): Promise<Record<string, any>> {
     const processed = { ...parameters };
 
     // extract all params from the query
@@ -14,7 +15,8 @@ export class QueryProcessor {
 
     // auto-inject workspaceId if needed and not provided
     if (queryParams.has("workspaceId") && !processed.workspaceId) {
-      const workspaceId = process.env.DATABRICKS_WORKSPACE_ID;
+      const requestContext = getRequestContext();
+      const workspaceId = await requestContext.workspaceId;
       if (workspaceId) {
         processed.workspaceId = workspaceId;
       }
@@ -30,8 +32,8 @@ export class QueryProcessor {
   convertToSQLParameters(
     query: string,
     parameters?: Record<string, any>,
-  ): { statement: string; parameters: ParameterInput[] } {
-    const sqlParameters: ParameterInput[] = [];
+  ): { statement: string; parameters: sql.StatementParameterListItem[] } {
+    const sqlParameters: sql.StatementParameterListItem[] = [];
 
     if (parameters) {
       // extract all params from the query
@@ -61,7 +63,10 @@ export class QueryProcessor {
     return { statement: query, parameters: sqlParameters };
   }
 
-  private _createParameter(key: string, value: any): ParameterInput | null {
+  private _createParameter(
+    key: string,
+    value: any,
+  ): sql.StatementParameterListItem | null {
     if (value === null || value === undefined) {
       return null;
     }

@@ -12,6 +12,7 @@
   "dependencies": {
     "@databricks-apps/cache": "workspace:*",
     "@databricks-apps/connectors": "workspace:*",
-    "@databricks-apps/types": "workspace:*"
+    "@databricks-apps/types": "workspace:*",
+    "@databricks/sdk-experimental": "^0.14.2"
   }
 }

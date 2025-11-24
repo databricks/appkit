@@ -1,10 +1,9 @@
-import type { Disposition, Format, OnWaitTimeout } from "./types";
-
+import type { sql } from "@databricks/sdk-experimental";
 interface ExecuteStatementDefaults {
   wait_timeout: string;
-  disposition: Disposition;
-  format: Format;
-  on_wait_timeout: OnWaitTimeout;
+  disposition: sql.ExecuteStatementRequest["disposition"];
+  format: sql.ExecuteStatementRequest["format"];
+  on_wait_timeout: sql.ExecuteStatementRequest["on_wait_timeout"];
   timeout: number;
 }
 

@@ -1,9 +1,9 @@
 import {
-  createMockAuth,
   createMockRequest,
   createMockResponse,
   createMockRouter,
   setupDatabricksEnv,
+  runWithRequestContext,
 } from "@tools/test-helpers";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { AnalyticsPlugin, analytics } from "../src/analytics";
@@ -23,20 +23,14 @@ describe("Analytics Plugin", () => {
   });
 
   test("Plugin instance should be created with correct configuration", () => {
-    const mockAuth = createMockAuth();
-    const plugin = new AnalyticsPlugin(config, mockAuth);
+    const plugin = new AnalyticsPlugin(config);
 
     expect(plugin.name).toBe("analytics");
-    expect(plugin.envVars).toEqual([
-      "DATABRICKS_HOST",
-      "DATABRICKS_WAREHOUSE_ID",
-    ]);
   });
 
   describe("injectRoutes", () => {
     test("should register POST routes", () => {
-      const mockAuth = createMockAuth();
-      const plugin = new AnalyticsPlugin(config, mockAuth);
+      const plugin = new AnalyticsPlugin(config);
       const { router } = createMockRouter();
 
       plugin.injectRoutes(router);
@@ -53,8 +47,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("/query/:query_key should return 400 when query_key is missing", async () => {
-      const mockAuth = createMockAuth();
-      const plugin = new AnalyticsPlugin(config, mockAuth);
+      const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       plugin.injectRoutes(router);
@@ -66,7 +59,9 @@ describe("Analytics Plugin", () => {
       });
       const mockRes = createMockResponse();
 
-      await handler(mockReq, mockRes);
+      await runWithRequestContext(async () => {
+        await handler(mockReq, mockRes);
+      });
 
       expect(mockRes.status).toHaveBeenCalledWith(400);
       expect(mockRes.json).toHaveBeenCalledWith({
@@ -75,22 +70,23 @@ describe("Analytics Plugin", () => {
     });
 
     test("/query/:query_key should execute as service account without user token", async () => {
-      const mockAuth = createMockAuth();
-      const plugin = new AnalyticsPlugin(config, mockAuth);
+      const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi
         .fn()
         .mockResolvedValue("SELECT * FROM test");
 
-      let capturedUserToken: string | undefined = "not-set";
-      const executeMock = vi.fn().mockImplementation((..._args) => {
-        // Capture the userToken from this.userToken at execution time
-        capturedUserToken = (plugin as any).userToken;
-        return Promise.resolve({
-          result: { data: [{ id: 1, name: "test" }] },
+      let capturedWorkspaceClient: any;
+      const executeMock = vi
+        .fn()
+        .mockImplementation((workspaceClient, ..._args) => {
+          // Capture the workspaceClient passed
+          capturedWorkspaceClient = workspaceClient;
+          return Promise.resolve({
+            result: { data: [{ id: 1, name: "test" }] },
+          });
         });
-      });
       (plugin as any).SQLClient.executeStatement = executeMock;
 
       plugin.injectRoutes(router);
@@ -102,19 +98,27 @@ describe("Analytics Plugin", () => {
       });
       const mockRes = createMockResponse();
 
-      await handler(mockReq, mockRes);
+      const mockServiceClient = { service: "client" };
+      await runWithRequestContext(
+        async () => {
+          await handler(mockReq, mockRes);
+        },
+        {
+          serviceDatabricksClient: mockServiceClient as any,
+        },
+      );
 
-      // Verify this.userToken is undefined for service account queries
-      expect(capturedUserToken).toBeUndefined();
+      // Verify service workspace client is used
+      expect(capturedWorkspaceClient).toBe(mockServiceClient);
 
-      // Verify NO user token is passed for service account queries
+      // Verify executeStatement is called with service workspace client
       expect(executeMock).toHaveBeenCalledWith(
+        mockServiceClient,
         expect.objectContaining({
           statement: "SELECT * FROM test",
           warehouse_id: "test-warehouse-id",
         }),
         expect.any(AbortSignal),
-        undefined,
       );
 
       expect(mockRes.setHeader).toHaveBeenCalledWith(
@@ -138,44 +142,24 @@ describe("Analytics Plugin", () => {
       expect(mockRes.end).toHaveBeenCalled();
     });
 
-    test("/users/me/query/:query_key should return 401 when token is missing", async () => {
-      const mockAuth = createMockAuth();
-      const plugin = new AnalyticsPlugin(config, mockAuth);
-      const { router, getHandler } = createMockRouter();
-
-      plugin.injectRoutes(router);
-
-      const handler = getHandler("POST", "/users/me/query/:query_key");
-      const mockReq = createMockRequest({
-        params: { query_key: "test_query" },
-        body: { parameters: {} },
-        headers: {},
-      });
-      const mockRes = createMockResponse();
-
-      await handler(mockReq, mockRes);
-
-      expect(mockRes.status).toHaveBeenCalledWith(401);
-      expect(mockRes.json).toHaveBeenCalledWith({ error: "Unauthorized" });
-    });
-
-    test("/users/me/query/:query_key should execute query with user token via asUser()", async () => {
-      const mockAuth = createMockAuth();
-      const plugin = new AnalyticsPlugin(config, mockAuth);
+    test("/users/me/query/:query_key should execute query with user workspace client", async () => {
+      const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi
         .fn()
         .mockResolvedValue("SELECT * FROM users WHERE id = :user_id");
 
-      let capturedUserToken: string | undefined;
-      const executeMock = vi.fn().mockImplementation((...args: any[]) => {
-        // Capture the userToken from the third argument (options parameter)
-        capturedUserToken = args[2]?.userToken;
-        return Promise.resolve({
-          result: { data: [{ user_id: 123, name: "Alice" }] },
+      let capturedWorkspaceClient: any;
+      const executeMock = vi
+        .fn()
+        .mockImplementation((workspaceClient, ..._args: any[]) => {
+          // Capture the workspaceClient parameter
+          capturedWorkspaceClient = workspaceClient;
+          return Promise.resolve({
+            result: { data: [{ user_id: 123, name: "Alice" }] },
+          });
         });
-      });
       (plugin as any).SQLClient.executeStatement = executeMock;
 
       plugin.injectRoutes(router);
@@ -188,19 +172,28 @@ describe("Analytics Plugin", () => {
       });
       const mockRes = createMockResponse();
 
-      await handler(mockReq, mockRes);
+      const mockUserClient = { user: "client" };
+      await runWithRequestContext(
+        async () => {
+          await handler(mockReq, mockRes);
+        },
+        {
+          userDatabricksClient: mockUserClient as any,
+          userName: "user-token-123",
+        },
+      );
 
-      // Verify asUser() correctly set this.userToken during execution
-      expect(capturedUserToken).toBe("user-token-123");
+      // Verify user workspace client is used
+      expect(capturedWorkspaceClient).toBe(mockUserClient);
 
-      // Verify the user token is passed to SQL connector
+      // Verify the user workspace client is passed to SQL connector
       expect(executeMock).toHaveBeenCalledWith(
+        mockUserClient,
         expect.objectContaining({
           statement: "SELECT * FROM users WHERE id = :user_id",
           warehouse_id: "test-warehouse-id",
         }),
         expect.any(AbortSignal),
-        { userToken: "user-token-123" },
       );
 
       expect(mockRes.setHeader).toHaveBeenCalledWith(
@@ -217,8 +210,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("should return cached result on second request", async () => {
-      const mockAuth = createMockAuth();
-      const plugin = new AnalyticsPlugin(config, mockAuth);
+      const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi
@@ -238,21 +230,22 @@ describe("Analytics Plugin", () => {
         body: { parameters: { foo: "bar" } },
       });
 
-      const mockRes1 = createMockResponse();
-      await handler(mockReq, mockRes1);
+      await runWithRequestContext(async () => {
+        const mockRes1 = createMockResponse();
+        await handler(mockReq, mockRes1);
 
-      const mockRes2 = createMockResponse();
-      await handler(mockReq, mockRes2);
+        const mockRes2 = createMockResponse();
+        await handler(mockReq, mockRes2);
 
-      expect(executeMock).toHaveBeenCalledTimes(1);
+        expect(executeMock).toHaveBeenCalledTimes(1);
 
-      expect(mockRes1.write).toHaveBeenCalledWith("event: result\n");
-      expect(mockRes2.write).toHaveBeenCalledWith("event: result\n");
+        expect(mockRes1.write).toHaveBeenCalledWith("event: result\n");
+        expect(mockRes2.write).toHaveBeenCalledWith("event: result\n");
+      });
     });
 
     test("should cache user-scoped queries separately per user", async () => {
-      const mockAuth = createMockAuth();
-      const plugin = new AnalyticsPlugin(config, mockAuth);
+      const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi
@@ -279,7 +272,12 @@ describe("Analytics Plugin", () => {
         headers: { "x-forwarded-access-token": "user-token-1" },
       });
       const mockRes1 = createMockResponse();
-      await handler(mockReq1, mockRes1);
+      await runWithRequestContext(
+        async () => {
+          await handler(mockReq1, mockRes1);
+        },
+        { userName: "user-token-1" },
+      );
 
       const mockReq2 = createMockRequest({
         params: { query_key: "user_profile" },
@@ -287,7 +285,12 @@ describe("Analytics Plugin", () => {
         headers: { "x-forwarded-access-token": "user-token-2" },
       });
       const mockRes2 = createMockResponse();
-      await handler(mockReq2, mockRes2);
+      await runWithRequestContext(
+        async () => {
+          await handler(mockReq2, mockRes2);
+        },
+        { userName: "user-token-2" },
+      );
 
       const mockReq1Again = createMockRequest({
         params: { query_key: "user_profile" },
@@ -295,7 +298,12 @@ describe("Analytics Plugin", () => {
         headers: { "x-forwarded-access-token": "user-token-1" },
       });
       const mockRes1Again = createMockResponse();
-      await handler(mockReq1Again, mockRes1Again);
+      await runWithRequestContext(
+        async () => {
+          await handler(mockReq1Again, mockRes1Again);
+        },
+        { userName: "user-token-1" },
+      );
 
       expect(executeMock).toHaveBeenCalledTimes(2);
 
@@ -312,8 +320,7 @@ describe("Analytics Plugin", () => {
     });
 
     test("should handle AbortSignal cancellation", async () => {
-      const mockAuth = createMockAuth();
-      const plugin = new AnalyticsPlugin(config, mockAuth);
+      const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi
@@ -322,11 +329,13 @@ describe("Analytics Plugin", () => {
 
       const executeMock = vi
         .fn()
-        .mockImplementation(async (_params: any, signal: AbortSignal) => {
-          expect(signal).toBeDefined();
-          expect(signal).toBeInstanceOf(AbortSignal);
-          return { result: { data: [{ id: 1 }] } };
-        });
+        .mockImplementation(
+          async (_workspaceClient: any, _params: any, signal: AbortSignal) => {
+            expect(signal).toBeDefined();
+            expect(signal).toBeInstanceOf(AbortSignal);
+            return { result: { data: [{ id: 1 }] } };
+          },
+        );
       (plugin as any).SQLClient.executeStatement = executeMock;
 
       plugin.injectRoutes(router);
@@ -338,16 +347,24 @@ describe("Analytics Plugin", () => {
       });
       const mockRes = createMockResponse();
 
-      await handler(mockReq, mockRes);
+      const mockServiceClient = { service: "client" };
+      await runWithRequestContext(
+        async () => {
+          await handler(mockReq, mockRes);
+        },
+        {
+          serviceDatabricksClient: mockServiceClient as any,
+        },
+      );
 
       expect(executeMock).toHaveBeenCalledWith(
+        mockServiceClient,
         expect.objectContaining({
           statement: "SELECT * FROM test",
           parameters: [],
           warehouse_id: "test-warehouse-id",
         }),
         expect.any(AbortSignal),
-        undefined,
       );
     });
   });

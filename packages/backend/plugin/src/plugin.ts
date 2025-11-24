@@ -1,4 +1,3 @@
-import { AsyncLocalStorage } from "node:async_hooks";
 import { AppManager } from "@databricks-apps/app";
 import { CacheManager } from "@databricks-apps/cache";
 import { StreamManager } from "@databricks-apps/stream";
@@ -6,13 +5,11 @@ import type {
   BasePlugin,
   BasePluginConfig,
   IAppResponse,
-  IAuthManager,
   PluginExecuteConfig,
   PluginExecutionSettings,
   PluginPhase,
   StreamExecuteHandler,
   StreamExecutionSettings,
-  WithInjectedToken,
 } from "@databricks-apps/types";
 import { deepMerge, validateEnv } from "@databricks-apps/utils";
 import type express from "express";
@@ -25,14 +22,11 @@ import type {
 } from "./interceptors/types";
 import { DevFileReader } from "./dev-reader";
 
-const tokenContext = new AsyncLocalStorage<{ token: string }>();
-
 export abstract class Plugin<
   TConfig extends BasePluginConfig = BasePluginConfig,
 > implements BasePlugin
 {
   protected isReady = false;
-  protected auth: IAuthManager;
   protected cache: CacheManager;
   protected app: AppManager;
   protected devFileReader: DevFileReader;
@@ -42,12 +36,8 @@ export abstract class Plugin<
   static phase: PluginPhase = "normal";
   name: string;
 
-  constructor(
-    protected config: TConfig,
-    auth: IAuthManager,
-  ) {
+  constructor(protected config: TConfig) {
     this.name = config.name ?? "plugin";
-    this.auth = auth;
     this.streamManager = new StreamManager();
     this.cache = new CacheManager();
     this.app = new AppManager();
@@ -70,38 +60,12 @@ export abstract class Plugin<
     this.streamManager.abortAll();
   }
 
-  asUser(userToken: string): WithInjectedToken<typeof this> {
-    if (!userToken) throw new Error("User token is required");
-
-    const runner = this;
-    const handler: ProxyHandler<typeof this> = {
-      get(target, prop, receiver) {
-        const orig = Reflect.get(target, prop, receiver);
-
-        if (typeof orig === "function") {
-          return (...args: any[]) => {
-            return tokenContext.run({ token: userToken }, () =>
-              orig.apply(runner, args),
-            );
-          };
-        }
-
-        return orig;
-      },
-    };
-
-    return new Proxy(runner, handler) as WithInjectedToken<typeof this>;
-  }
-
-  protected get userToken(): string | undefined {
-    return tokenContext.getStore()?.token;
-  }
-
   // streaming execution with interceptors
   protected async executeStream<T>(
     res: IAppResponse,
     fn: StreamExecuteHandler<T>,
     options: StreamExecutionSettings,
+    userKey: string,
   ) {
     // destructure options
     const {
@@ -117,7 +81,6 @@ export abstract class Plugin<
     });
 
     const self = this;
-    const capturedUserToken = this.userToken;
 
     // wrapper function to ensure it returns a generator
     const asyncWrapperFn = async function* (streamSignal?: AbortSignal) {
@@ -125,7 +88,7 @@ export abstract class Plugin<
       const context: ExecutionContext = {
         signal: streamSignal,
         metadata: new Map(),
-        userToken: capturedUserToken,
+        userKey: userKey,
       };
 
       // build interceptors
@@ -160,6 +123,7 @@ export abstract class Plugin<
   protected async execute<T>(
     fn: (signal?: AbortSignal) => Promise<T>,
     options: PluginExecutionSettings,
+    userKey: string,
   ): Promise<T | undefined> {
     const executeConfig = this._buildExecutionConfig(options);
 
@@ -167,7 +131,7 @@ export abstract class Plugin<
 
     const context: ExecutionContext = {
       metadata: new Map(),
-      userToken: this.userToken,
+      userKey: userKey,
     };
 
     try {

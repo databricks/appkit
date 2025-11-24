@@ -21,7 +21,7 @@ export class CacheInterceptor implements ExecutionInterceptor {
     return this.cacheManager.getOrExecute(
       this.config.cacheKey,
       fn,
-      context?.userToken,
+      context.userKey,
       { ttl: this.config.ttl },
     );
   }

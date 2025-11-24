@@ -1,16 +1,11 @@
 import type { BasePlugin } from "@databricks-apps/types";
-import { createMockAuth, setupDatabricksEnv } from "@tools/test-helpers";
+import { setupDatabricksEnv } from "@tools/test-helpers";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { DBX } from "../src/databricks";
 
 // Mock environment validation
 vi.mock("@databricks-apps/utils", () => ({
   validateEnv: vi.fn(),
-}));
-
-// Mock auth manager
-vi.mock("@databricks-apps/auth", () => ({
-  AuthManager: vi.fn().mockImplementation(() => createMockAuth()),
 }));
 
 // Test plugin classes for different phases
@@ -451,31 +446,6 @@ describe("DBX", () => {
       await expect(DBX.init({ plugins: pluginData })).rejects.toThrow(
         "Async setup failure",
       );
-    });
-  });
-
-  describe("AuthManager integration", () => {
-    test("should create AuthManager instance for each DBX instance", async () => {
-      const { AuthManager } = await import("@databricks-apps/auth");
-
-      await DBX.init({ plugins: [] });
-
-      expect(AuthManager).toHaveBeenCalledTimes(1);
-    });
-
-    test("should pass AuthManager to all plugins", async () => {
-      const mockAuth = createMockAuth();
-      const { AuthManager } = await import("@databricks-apps/auth");
-      (AuthManager as any).mockImplementation(() => mockAuth);
-
-      const pluginData = [{ plugin: CoreTestPlugin, config: {}, name: "test" }];
-
-      await DBX.init({ plugins: pluginData });
-
-      // The plugin should receive the auth manager instance
-      // We can't directly test the constructor call, but we can verify
-      // the AuthManager was instantiated
-      expect(AuthManager).toHaveBeenCalledTimes(1);
     });
   });
 });

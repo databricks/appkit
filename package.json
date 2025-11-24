@@ -21,14 +21,14 @@
       "require": "./dist/server/index.js"
     },
     "./js": {
+      "types": "./dist/js/index.d.ts",
       "import": "./dist/js/index.js",
-      "require": "./dist/js/index.js",
-      "types": "./dist/js/index.d.ts"
+      "require": "./dist/js/index.js"
     },
     "./react": {
+      "types": "./dist/react/index.d.ts",
       "import": "./dist/react/index.js",
-      "require": "./dist/react/index.js",
-      "types": "./dist/react/index.d.ts"
+      "require": "./dist/react/index.js"
     }
   },
   "scripts": {

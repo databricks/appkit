@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@databricks-apps/auth": "workspace:*",
-    "@databricks-apps/types": "workspace:*"
+    "@databricks-apps/types": "workspace:*",
+    "@databricks/sdk-experimental": "^0.14.2"
   }
 }

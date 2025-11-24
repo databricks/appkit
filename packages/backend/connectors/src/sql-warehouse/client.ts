@@ -1,13 +1,11 @@
-import type { IAuthManager } from "@databricks-apps/types";
 import { executeStatementDefaults } from "./defaults";
-import type {
-  ExecuteStatementRequest,
-  ExecuteStatementResponse,
-} from "./types";
+import {
+  Context,
+  type WorkspaceClient,
+  type sql,
+} from "@databricks/sdk-experimental";
 
 export interface SQLWarehouseConfig {
-  host: string;
-  auth: IAuthManager;
   timeout?: number;
 }
 
@@ -19,9 +17,9 @@ export class SQLWarehouseConnector {
   }
 
   async executeStatement(
-    input: ExecuteStatementRequest,
+    workspaceClient: WorkspaceClient,
+    input: sql.ExecuteStatementRequest,
     signal?: AbortSignal,
-    authOptions?: { userToken?: string },
   ) {
     // validate required fields
     if (!input.statement) {
@@ -36,7 +34,7 @@ export class SQLWarehouseConnector {
       );
     }
 
-    const body: ExecuteStatementRequest = {
+    const body: sql.ExecuteStatementRequest = {
       statement: input.statement,
       parameters: input.parameters,
       warehouse_id: input.warehouse_id,
@@ -51,35 +49,26 @@ export class SQLWarehouseConnector {
         input.on_wait_timeout || executeStatementDefaults.on_wait_timeout,
     };
 
-    const endpoint = "/api/2.0/sql/statements/";
-    const response = await this._makeRequest<ExecuteStatementResponse>(
-      endpoint,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      },
-      signal,
-      authOptions,
+    const response = await workspaceClient.statementExecution.executeStatement(
+      body,
+      this._createContext(signal),
     );
+    const status = response.status;
 
-    if (!response) {
-      throw new Error("No response received from SQL Warehouse API");
-    }
-
-    switch (response.status.state) {
+    switch (status?.state) {
       case "RUNNING":
       case "PENDING":
         return await this._pollForStatementResult(
-          response.statement_id,
+          workspaceClient,
+          response.statement_id!,
           this.config.timeout,
           signal,
-          authOptions,
         );
       case "SUCCEEDED":
         return this._transformDataArray(response);
       case "FAILED":
         throw new Error(
-          `Statement failed: ${response.status.error?.message || "Unknown error"}`,
+          `Statement failed: ${status.error?.message || "Unknown error"}`,
         );
       case "CANCELED":
         throw new Error("Statement was canceled");
@@ -88,63 +77,15 @@ export class SQLWarehouseConnector {
           "Statement execution completed but results are no longer available (CLOSED state)",
         );
       default:
-        throw new Error(`Unknown statement state: ${response.status.state}`);
+        throw new Error(`Unknown statement state: ${status?.state}`);
     }
-  }
-
-  private async _makeRequest<T>(
-    endpoint: string,
-    options: {
-      method: "GET" | "POST" | "DELETE";
-      body?: string;
-    },
-    signal?: AbortSignal,
-    authOptions?: { userToken?: string },
-  ): Promise<T> {
-    const token = authOptions?.userToken
-      ? authOptions.userToken
-      : await this.config.auth.getAuthToken();
-
-    if (!token) {
-      throw new Error("No authentication token provided for SQL Warehouse API");
-    }
-
-    if (!this.config.host) {
-      throw new Error(
-        "No host configured: Please provide a host in SQLWarehouseConfig",
-      );
-    }
-
-    const url = `https://${this.config.host}${endpoint}`;
-    const response = await fetch(url, {
-      method: options.method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-type": "application/json",
-      },
-      body: options.body,
-      signal,
-    });
-
-    if (!response.ok) {
-      throw new Error(
-        `SQL Warehouse API error: ${response.status} ${response.statusText}`,
-      );
-    }
-
-    if (response.status === 204 || options.method === "DELETE") {
-      throw new Error("No content returned from SQL Warehouse API");
-    }
-
-    const responseData = (await response.json()) as T;
-    return responseData;
   }
 
   private async _pollForStatementResult(
+    workspaceClient: WorkspaceClient,
     statementId: string,
     timeout = executeStatementDefaults.timeout,
     signal?: AbortSignal,
-    authOptions?: { userToken?: string },
   ) {
     const startTime = Date.now();
     let delay = 1000;
@@ -163,19 +104,16 @@ export class SQLWarehouseConnector {
         throw new Error("Request aborted");
       }
 
-      const endpoint = `/api/2.0/sql/statements/${statementId}`;
-      const response = await this._makeRequest<ExecuteStatementResponse>(
-        endpoint,
-        { method: "GET" },
-        signal,
-        authOptions,
+      const response = await workspaceClient.statementExecution.getStatement(
+        {
+          statement_id: statementId,
+        },
+        this._createContext(signal),
       );
 
-      if (!response) {
-        throw new Error("No response received from SQL Warehouse API");
-      }
+      const status = response.status;
 
-      switch (response.status.state) {
+      switch (status?.state) {
         case "PENDING":
         case "RUNNING":
           // continue polling
@@ -184,7 +122,7 @@ export class SQLWarehouseConnector {
           return this._transformDataArray(response);
         case "FAILED":
           throw new Error(
-            `Statement failed: ${response.status.error?.message || "Unknown error"}`,
+            `Statement failed: ${status.error?.message || "Unknown error"}`,
           );
         case "CANCELED":
           throw new Error("Statement was canceled");
@@ -193,7 +131,7 @@ export class SQLWarehouseConnector {
             "Statement execution completed but results are no longer available (CLOSED state)",
           );
         default:
-          throw new Error(`Unknown statement state: ${response.status.state}`);
+          throw new Error(`Unknown statement state: ${status?.state}`);
       }
 
       // continue polling after delay
@@ -202,7 +140,7 @@ export class SQLWarehouseConnector {
     }
   }
 
-  private _transformDataArray(response: ExecuteStatementResponse) {
+  private _transformDataArray(response: sql.StatementResponse) {
     if (!response.result?.data_array || !response.manifest?.schema?.columns) {
       return response;
     }
@@ -244,5 +182,17 @@ export class SQLWarehouseConnector {
         data: transformedData,
       },
     };
+  }
+
+  // create context for cancellation token
+  private _createContext(signal?: AbortSignal) {
+    return new Context({
+      cancellationToken: {
+        isCancellationRequested: signal?.aborted ?? false,
+        onCancellationRequested: (cb: () => void) => {
+          signal?.addEventListener("abort", cb, { once: true });
+        },
+      },
+    });
   }
 }

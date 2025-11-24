@@ -2,17 +2,18 @@ import { SQLWarehouseConnector } from "@databricks-apps/connectors";
 import { Plugin, toPlugin } from "@databricks-apps/plugin";
 import type {
   IAppRouter,
-  IAuthManager,
   PluginExecuteConfig,
   StreamExecutionSettings,
 } from "@databricks-apps/types";
 import { queryDefaults } from "./defaults";
 import { QueryProcessor } from "./query";
 import type { IAnalyticsConfig, IAnalyticsQueryRequest } from "./types";
+import type { Request, Response } from "@databricks-apps/server";
+import { getRequestContext } from "@databricks-apps/server";
 
 export class AnalyticsPlugin extends Plugin {
   name = "analytics";
-  envVars = ["DATABRICKS_HOST", "DATABRICKS_WAREHOUSE_ID"];
+  envVars = [];
 
   protected static description = "Analytics plugin for data analysis";
   protected declare config: IAnalyticsConfig;
@@ -21,45 +22,43 @@ export class AnalyticsPlugin extends Plugin {
   private SQLClient: SQLWarehouseConnector;
   private queryProcessor: QueryProcessor;
 
-  constructor(config: IAnalyticsConfig, auth: IAuthManager) {
-    super(config, auth);
+  constructor(config: IAnalyticsConfig) {
+    super(config);
     this.config = config;
     this.queryProcessor = new QueryProcessor();
 
     this.SQLClient = new SQLWarehouseConnector({
-      host: process.env.DATABRICKS_HOST || "",
       timeout: config.timeout,
-      auth: this.auth,
     });
   }
 
   injectRoutes(router: IAppRouter) {
     // query router: user-level
     router.post("/users/me/query/:query_key", async (req, res) => {
-      const userToken = req.header("x-forwarded-access-token");
-      if (!userToken) {
-        return res.status(401).json({ error: "Unauthorized" });
-      }
-
-      await this._handleQueryRoute(req, res, userToken);
+      await this._handleQueryRoute(req, res, { asUser: true });
     });
 
     // query-router: app-service level
     router.post("/query/:query_key", async (req, res) => {
-      await this._handleQueryRoute(req, res);
+      await this._handleQueryRoute(req, res, { asUser: false });
     });
   }
 
   private async _handleQueryRoute(
-    req: any,
-    res: any,
-    userToken?: string,
+    req: Request,
+    res: Response,
+    { asUser = false }: { asUser?: boolean } = {},
   ): Promise<void> {
     const { query_key } = req.params;
     const { parameters } = req.body as IAnalyticsQueryRequest;
+    const requestContext = getRequestContext();
+    const userKey = asUser
+      ? requestContext.userId
+      : requestContext.serviceUserId;
 
     if (!query_key) {
-      return res.status(400).json({ error: "query_key is required" });
+      res.status(400).json({ error: "query_key is required" });
+      return;
     }
 
     const query = await this.app.getAppQuery(
@@ -69,7 +68,8 @@ export class AnalyticsPlugin extends Plugin {
     );
 
     if (!query) {
-      return res.status(404).json({ error: "Query not found" });
+      res.status(404).json({ error: "Query not found" });
+      return;
     }
 
     const hashedQuery = this.queryProcessor.hashQuery(query);
@@ -83,7 +83,8 @@ export class AnalyticsPlugin extends Plugin {
           query_key,
           JSON.stringify(parameters),
           hashedQuery,
-        ], // @TODO: need to handle key ordering issues
+          userKey,
+        ],
       },
     };
 
@@ -94,18 +95,19 @@ export class AnalyticsPlugin extends Plugin {
     await this.executeStream(
       res,
       async (signal) => {
-        const processedParams = this.queryProcessor.processQueryParams(
+        const processedParams = await this.queryProcessor.processQueryParams(
           query,
           parameters,
         );
 
-        const result = userToken
-          ? await this.asUser(userToken).query(query, processedParams, signal)
-          : await this.query(query, processedParams, signal);
+        const result = await this.query(query, processedParams, signal, {
+          asUser,
+        });
 
         return { type: "result", ...result };
       },
       streamExecutionSettings,
+      userKey,
     );
   }
 
@@ -113,28 +115,30 @@ export class AnalyticsPlugin extends Plugin {
     query: string,
     parameters?: Record<string, any>,
     signal?: AbortSignal,
+    { asUser = false }: { asUser?: boolean } = {},
   ): Promise<any> {
+    const requestContext = getRequestContext();
     const { statement, parameters: sqlParameters } =
       this.queryProcessor.convertToSQLParameters(query, parameters);
-    const warehouseId = process.env.DATABRICKS_WAREHOUSE_ID;
 
-    if (!warehouseId) {
-      throw new Error("Analytics service is not configured");
-    }
+    const workspaceClient = asUser
+      ? requestContext.userDatabricksClient
+      : requestContext.serviceDatabricksClient;
 
     try {
       const response = await this.SQLClient.executeStatement(
+        workspaceClient,
         {
           statement,
+          warehouse_id: await requestContext.warehouseId,
           parameters: sqlParameters,
-          warehouse_id: warehouseId,
         },
         signal,
-        this.userToken ? { userToken: this.userToken } : undefined,
       );
 
       return response.result;
-    } catch (_error) {
+    } catch (error) {
+      console.error(error);
       throw new Error("Query execution failed");
     }
   }

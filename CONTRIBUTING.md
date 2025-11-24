@@ -21,7 +21,7 @@ Now you can run the following command to setup your environment
 pnpm setup:repo
 ```
 
-After running this, you will need to write the DATABRICKS_HOST and your DEV_TOKEN in the .env file created in the app template [here](./apps/dev-playground/server/.env)
+After running this, you will need to write the DATABRICKS_HOST in the .env file created in the app template [here](./apps/dev-playground/server/.env)
 
 Documentation to obtain the dev token [here](https://docs.databricks.com/aws/en/dev-tools/auth/pat#databricks-personal-access-tokens-for-workspace-users)
 
@@ -46,8 +46,6 @@ will run all the builds and then start the app project. In order to make this wo
 
 ```
 DATABRICKS_HOST=
-DATABRICKS_CLIENT_ID= 
-DATABRICKS_CLIENT_SECRET=
 ```
 
 ## Adding new packages
