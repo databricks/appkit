@@ -4,8 +4,8 @@
     "baseUrl": "../..",
     "outDir": "./build",
     "paths": {
-      "@databricks/apps": ["packages/backend/index.ts"],
-      "@databricks/apps/react": ["packages/frontend/index.ts"],
+      "@databricks/app-kit": ["packages/backend/index.ts"],
+      "@databricks/app-kit/react": ["packages/frontend/index.ts"],
       "@databricks-apps/analytics": ["packages/backend/analytics/src"],
       "@databricks-apps/app": ["packages/backend/app/src"],
       "@databricks-apps/auth": ["packages/backend/auth/src"],

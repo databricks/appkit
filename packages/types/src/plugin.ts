@@ -45,13 +45,13 @@ export type OptionalConfigPluginDef<P extends PluginConstructor> = {
   config?: Partial<ConfigFor<P>>;
 };
 
-// Input plugin map type (used internally by DBX)
+// Input plugin map type (used internally by AppKit)
 export type InputPluginMap = {
   [key: string]: OptionalConfigPluginDef<PluginConstructor> | undefined;
 };
 
-// DBX with plugins - extracts instances from plugin map
-export type DBXWithPlugins<T extends InputPluginMap> = {
+// AppKit with plugins - extracts instances from plugin map
+export type AppKitWithPlugins<T extends InputPluginMap> = {
   [K in keyof T]: T[K] extends {
     plugin: PluginConstructor<BasePluginConfig, infer I>;
   }

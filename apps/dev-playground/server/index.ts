@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { analytics, DBX, server } from "@databricks/apps";
+import { analytics, createApp, server } from "@databricks/app-kit";
 import dotenv from "dotenv";
 import { reconnect } from "./reconnect-plugin";
 
@@ -12,7 +12,7 @@ dotenv.config({ path: path.resolve(__dirname, ".env") });
 // define path to static files
 const staticPath = path.resolve(__dirname, "..", "client", "dist");
 
-DBX.init({
+createApp({
   plugins: [
     server({
       watch: process.env.NODE_ENV === "development",

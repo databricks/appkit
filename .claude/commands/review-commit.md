@@ -1,14 +1,14 @@
 ---
-description: Review staged changes against DBX SDK principles
+description: Review staged changes against Databricks AppKit principles
 ---
 
 # Code Review for Staged Changes
 
-Please review the **staged changes** (git diff --cached) in this repository against the DBX SDK Core Principles.
+Please review the **staged changes** (git diff --cached) in this repository against the Databricks AppKit Core Principles.
 
 ## Context
 
-This is the **DBX Apps SDK** (@dbx/sdk) - a modular TypeScript SDK for building Databricks apps with workflows and plugins.
+This is the **Databricks Apps Kit** (@databricks/app-kit) - a modular TypeScript SDK for building Databricks apps with workflows and plugins.
 
 ## SDK Core Principles
 

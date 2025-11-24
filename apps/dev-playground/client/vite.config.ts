@@ -24,11 +24,11 @@ export default defineConfig({
     preserveSymlinks: true,
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      "@databricks/apps/react": path.resolve(
+      "@databricks/app-kit/react": path.resolve(
         __dirname,
         "../../../packages/frontend/react/src/index.ts",
       ),
-      "@databricks/apps/js": path.resolve(
+      "@databricks/app-kit/js": path.resolve(
         __dirname,
         "../../../packages/frontend/js/src/index.ts",
       ),

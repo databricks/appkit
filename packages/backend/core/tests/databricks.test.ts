@@ -1,7 +1,8 @@
 import type { BasePlugin } from "@databricks-apps/types";
 import { setupDatabricksEnv } from "@tools/test-helpers";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { DBX } from "../src/databricks";
+import { createApp } from "../src/app-kit";
+import { AppKit } from "../src/app-kit";
 
 // Mock environment validation
 vi.mock("@databricks-apps/utils", () => ({
@@ -135,19 +136,19 @@ class FailingPlugin implements BasePlugin {
   }
 }
 
-describe("DBX", () => {
+describe("AppKit", () => {
   beforeEach(() => {
     setupDatabricksEnv();
     vi.clearAllMocks();
     // Reset singleton instance
-    (DBX as any)._instance = null;
+    (AppKit as any)._instance = null;
   });
 
-  describe("init", () => {
+  describe("createApp", () => {
     test("should initialize with empty plugins", async () => {
-      const instance = await DBX.init({ plugins: [] });
+      const instance = await createApp({ plugins: [] });
       expect(instance).toBeDefined();
-      expect(instance).toBeInstanceOf(DBX);
+      expect(instance).toBeInstanceOf(AppKit);
     });
 
     test("should initialize with single plugin", async () => {
@@ -159,7 +160,7 @@ describe("DBX", () => {
         },
       ];
 
-      const instance = (await DBX.init({ plugins: pluginData })) as any;
+      const instance = (await createApp({ plugins: pluginData })) as any;
 
       expect(instance.coreTest).toBeDefined();
       expect(instance.coreTest).toBeInstanceOf(CoreTestPlugin);
@@ -176,7 +177,7 @@ describe("DBX", () => {
         },
       ];
 
-      const instance = (await DBX.init({ plugins: pluginData })) as any;
+      const instance = (await createApp({ plugins: pluginData })) as any;
 
       expect(instance.coreTest.injectedConfig).toMatchObject({
         coreDefault: "core-value",
@@ -215,7 +216,7 @@ describe("DBX", () => {
         { plugin: NormalWithTracking, config: {}, name: "normalTest" },
       ];
 
-      await DBX.init({ plugins: pluginData });
+      await createApp({ plugins: pluginData });
 
       expect(setupOrder).toEqual(["core", "normal", "deferred"]);
     });
@@ -226,7 +227,7 @@ describe("DBX", () => {
         { plugin: DeferredTestPlugin, config: {}, name: "deferredTest" },
       ];
 
-      const instance = (await DBX.init({ plugins: pluginData })) as any;
+      const instance = (await createApp({ plugins: pluginData })) as any;
 
       expect(instance.deferredTest.injectedPlugins).toBeDefined();
       expect(instance.deferredTest.injectedPlugins.coreTest).toBe(
@@ -240,7 +241,7 @@ describe("DBX", () => {
         { plugin: NormalTestPlugin, config: {}, name: "normalTest" },
       ];
 
-      const instance = (await DBX.init({ plugins: pluginData })) as any;
+      const instance = (await createApp({ plugins: pluginData })) as any;
 
       expect(instance.coreTest).toBeInstanceOf(CoreTestPlugin);
       expect(instance.normalTest).toBeInstanceOf(NormalTestPlugin);
@@ -258,7 +259,7 @@ describe("DBX", () => {
       ];
 
       const startTime = Date.now();
-      const instance = (await DBX.init({ plugins: pluginData })) as any;
+      const instance = (await createApp({ plugins: pluginData })) as any;
       const endTime = Date.now();
 
       // Should run in parallel, so total time should be closer to max delay (100ms)
@@ -274,7 +275,7 @@ describe("DBX", () => {
         { plugin: NormalTestPlugin, config: {}, name: "normalTest" },
       ];
 
-      const instance = (await DBX.init({ plugins: pluginData })) as any;
+      const instance = (await createApp({ plugins: pluginData })) as any;
 
       expect(instance.coreTest.validateEnvCalled).toBe(true);
       expect(instance.normalTest.validateEnvCalled).toBe(true);
@@ -285,7 +286,7 @@ describe("DBX", () => {
         { plugin: FailingPlugin, config: {}, name: "failing" },
       ];
 
-      await expect(DBX.init({ plugins: pluginData })).rejects.toThrow(
+      await expect(createApp({ plugins: pluginData })).rejects.toThrow(
         "Environment validation failed",
       );
     });
@@ -301,7 +302,7 @@ describe("DBX", () => {
         { plugin: FailingSetupPlugin, config: {}, name: "failing" },
       ];
 
-      await expect(DBX.init({ plugins: pluginData })).rejects.toThrow(
+      await expect(createApp({ plugins: pluginData })).rejects.toThrow(
         "Setup failed",
       );
     });
@@ -313,7 +314,7 @@ describe("DBX", () => {
         { plugin: NoPhasePlugin, config: {}, name: "noPhase" },
       ];
 
-      const instance = (await DBX.init({ plugins: pluginData })) as any;
+      const instance = (await createApp({ plugins: pluginData })) as any;
 
       expect(instance.noPhase).toBeInstanceOf(NoPhasePlugin);
     });
@@ -323,21 +324,21 @@ describe("DBX", () => {
         { plugin: CoreTestPlugin, config: undefined, name: "coreTest" },
       ];
 
-      const instance = (await DBX.init({ plugins: pluginData })) as any;
+      const instance = (await createApp({ plugins: pluginData })) as any;
 
       expect(instance.coreTest).toBeInstanceOf(CoreTestPlugin);
       expect(instance.coreTest.injectedConfig.name).toBe("coreTest");
     });
 
     test("should create singleton instance", async () => {
-      const instance1 = await DBX.init({ plugins: [] });
-      const instance2 = await DBX.init({ plugins: [] });
+      const instance1 = await createApp({ plugins: [] });
+      const instance2 = await createApp({ plugins: [] });
 
       // Should return new instance each time init is called
       expect(instance2).not.toBe(instance1);
 
       // But internal _instance should be updated
-      expect((DBX as any)._instance).toBe(instance2);
+      expect((AppKit as any)._instance).toBe(instance2);
     });
   });
 
@@ -352,7 +353,7 @@ describe("DBX", () => {
         },
       ];
 
-      const result = (DBX as any).preparePlugins(pluginData);
+      const result = (AppKit as any).preparePlugins(pluginData);
 
       expect(result).toEqual({
         test1: {
@@ -367,14 +368,14 @@ describe("DBX", () => {
     });
 
     test("should handle empty plugin array", () => {
-      const result = (DBX as any).preparePlugins([]);
+      const result = (AppKit as any).preparePlugins([]);
       expect(result).toEqual({});
     });
   });
 
   describe("constructor", () => {
     test("should be private and not directly callable", () => {
-      expect(() => new (DBX as any)({})).toThrow();
+      expect(() => new (AppKit as any)({})).toThrow();
     });
   });
 
@@ -385,7 +386,7 @@ describe("DBX", () => {
         { plugin: CoreTestPlugin, config: {}, name: "plugin2" },
       ];
 
-      const instance = (await DBX.init({ plugins: pluginData })) as any;
+      const instance = (await createApp({ plugins: pluginData })) as any;
 
       expect(instance.plugin1).toBeInstanceOf(CoreTestPlugin);
       expect(instance.plugin2).toBeInstanceOf(CoreTestPlugin);
@@ -401,7 +402,7 @@ describe("DBX", () => {
         },
       ];
 
-      const instance = (await DBX.init({ plugins: pluginData })) as any;
+      const instance = (await createApp({ plugins: pluginData })) as any;
 
       expect(instance.testPlugin.injectedConfig.name).toBe("testPlugin");
     });
@@ -409,7 +410,7 @@ describe("DBX", () => {
     test("should create property getters that return plugin instances", async () => {
       const pluginData = [{ plugin: CoreTestPlugin, config: {}, name: "test" }];
 
-      const instance = (await DBX.init({ plugins: pluginData })) as any;
+      const instance = (await createApp({ plugins: pluginData })) as any;
       const descriptor = Object.getOwnPropertyDescriptor(instance, "test");
 
       expect(descriptor).toBeDefined();
@@ -427,7 +428,7 @@ describe("DBX", () => {
         null,
       ].filter(Boolean) as any;
 
-      const instance = (await DBX.init({ plugins: pluginData })) as any;
+      const instance = (await createApp({ plugins: pluginData })) as any;
 
       expect(instance.valid).toBeInstanceOf(CoreTestPlugin);
     });
@@ -443,7 +444,7 @@ describe("DBX", () => {
         { plugin: FailingSetupPlugin, config: {}, name: "failing" },
       ];
 
-      await expect(DBX.init({ plugins: pluginData })).rejects.toThrow(
+      await expect(createApp({ plugins: pluginData })).rejects.toThrow(
         "Async setup failure",
       );
     });

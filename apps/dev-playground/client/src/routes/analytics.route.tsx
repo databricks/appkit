@@ -1,4 +1,4 @@
-import { useAnalyticsQuery } from "@databricks/apps/react";
+import { useAnalyticsQuery } from "@databricks/app-kit/react";
 import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import {

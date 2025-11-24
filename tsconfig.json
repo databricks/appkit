@@ -27,8 +27,8 @@
       "@databricks-apps/types": ["packages/types/src"],
       "@databricks-apps/types/*": ["packages/types/src/*"],
       "@databricks-apps/utils": ["packages/backend/utils/src"],
-      "@databricks/apps": ["packages/backend/*"],
-      "@databricks/apps/react": ["packages/frontend/*"],
+      "@databricks/app-kit": ["packages/backend/*"],
+      "@databricks/app-kit/react": ["packages/frontend/*"],
       "@tools/*": ["tools/*"]
     }
   },

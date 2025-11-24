@@ -7,15 +7,12 @@ import type {
   PluginMap,
 } from "@databricks-apps/types";
 
-export class DBX<TPlugins extends InputPluginMap> {
-  private config: { plugins: TPlugins };
-  private static _instance: DBX<InputPluginMap> | null = null;
+export class AppKit<TPlugins extends InputPluginMap> {
+  private static _instance: AppKit<InputPluginMap> | null = null;
   private pluginInstances: Record<string, BasePlugin> = {};
   private setupPromises: Promise<void>[] = [];
 
   private constructor(config: { plugins: TPlugins }) {
-    this.config = config;
-
     const { plugins, ...globalConfig } = config;
 
     const pluginEntries = Object.entries(plugins);
@@ -80,20 +77,20 @@ export class DBX<TPlugins extends InputPluginMap> {
     });
   }
 
-  static async init<T extends PluginData<PluginConstructor, unknown, string>[]>(
-    config: { plugins?: T } = {},
-  ): Promise<PluginMap<T>> {
+  static async _createApp<
+    T extends PluginData<PluginConstructor, unknown, string>[],
+  >(config: { plugins?: T } = {}): Promise<PluginMap<T>> {
     const rawPlugins = config.plugins as T;
-    const preparedPlugins = DBX.preparePlugins(rawPlugins);
+    const preparedPlugins = AppKit.preparePlugins(rawPlugins);
     const mergedConfig = {
       plugins: preparedPlugins,
     };
 
-    DBX._instance = new DBX(mergedConfig);
+    AppKit._instance = new AppKit(mergedConfig);
 
-    await Promise.all(DBX._instance.setupPromises);
+    await Promise.all(AppKit._instance.setupPromises);
 
-    return DBX._instance as unknown as PluginMap<T>;
+    return AppKit._instance as unknown as PluginMap<T>;
   }
 
   private static preparePlugins(
@@ -108,4 +105,10 @@ export class DBX<TPlugins extends InputPluginMap> {
     }
     return result;
   }
+}
+
+export async function createApp<
+  T extends PluginData<PluginConstructor, unknown, string>[],
+>(config: { plugins?: T } = {}): Promise<PluginMap<T>> {
+  return AppKit._createApp(config);
 }

@@ -30,7 +30,7 @@
     }
   },
   "paths": {
-    "@databricks/apps/react": ["packages/frontend/index.ts"]
+    "@databricks/app-kit/react": ["packages/frontend/index.ts"]
   },
   "include": ["src"]
 }

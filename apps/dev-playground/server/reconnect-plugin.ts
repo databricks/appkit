@@ -1,4 +1,4 @@
-import { Plugin, toPlugin } from "@databricks/apps";
+import { Plugin, toPlugin } from "@databricks/app-kit";
 import type {
   IAppRouter,
   StreamExecutionSettings,

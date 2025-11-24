@@ -62,7 +62,7 @@ importers:
 
   apps/dev-playground:
     dependencies:
-      '@databricks/apps':
+      '@databricks/app-kit':
         specifier: workspace:*
         version: link:../..
     devDependencies:

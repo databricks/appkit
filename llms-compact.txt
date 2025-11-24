@@ -1,46 +1,22 @@
-# llms-compact.txt — Quick AI reference for @dbx/sdk
+# llms-compact.txt — Quick AI reference for @databricks/app-kit
 
-Project: DBX SDK
+Project: Databricks AppKit
 Version: 1.0.0
 
 # Core Pattern
-- Always call: DBX.init({ plugins })
-- Plugins available at: dbx[pluginName]
+- Always call: createApp({ plugins })
+- Plugins available at: AppKit[pluginName]
 - Use async/await only (no .then)
 - ESModules (import/export)
 
 # Server Plugin
-- dbx.server.start(): Promise<Express.Application>
+- AppKit.server.start(): Promise<Express.Application>
 
 # Analytics Plugin
-- dbx.analytics.query.executeQuery({ query, parameters }: { query: string; parameters?: Record<string, any> }, options?: ExecuteOptions): Promise<ExecuteStatementOutput>;
-
-# Genie Plugin
-- dbx.genie.conversation.getMessages(conversationId: string): Promise<{ messages: ConversationMessage[] }>
-- dbx.genie.conversation.listConversations(): Promise<GenieConversation[]>
-- dbx.genie.conversation.sendMessage({ message: string; conversationId?: string; createIfNotExists?: boolean; }): AsyncGenerator<ConversationEvent, void, unknown>
-- dbx.genie.autocompletion.suggestions(): Promise<string>
-
-# Example
-import { DBX, server, analytics, genie } from "@dbx/sdk";
-
-const dbx = await DBX.init({
-  plugins: [
-    server({ port: 8000 }),
-    analytics(),
-    genie(),
-  ],
-});
-
-const app = await dbx.server.start();
-app.get("/ping", (req, res) => res.send("pong"));
-
-for await (const chunk of dbx.genie.sendMessage({ message: "Explain gravity" })) {
-  console.log(chunk);
-}
+- AppKit.analytics.query.executeQuery({ query, parameters }: { query: string; parameters?: Record<string, any> }, options?: ExecuteOptions): Promise<ExecuteStatementOutput>;
 
 # Rules
 - Explicit config in examples (no hidden defaults)
 - Show async/await
-- Never access dbx internals directly
+- Never access AppKit internals directly
 - if something is not clear enough check [llms.txt](./llms.txt)

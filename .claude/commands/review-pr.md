@@ -1,15 +1,15 @@
 ---
-description: Review current branch changes against DBX SDK principles
+description: Review current branch changes against Databricks AppKit principles
 argument-hint: [base-branch]
 ---
 
 # Code Review for Pull Request / Branch
 
-Please review **all changes in the current branch** (compared to $ARGUMENTS or main) against the DBX SDK Core Principles.
+Please review **all changes in the current branch** (compared to $ARGUMENTS or main) against the Databricks AppKit Core Principles.
 
 ## Context
 
-This is the **DBX Apps SDK** (@dbx/sdk) - a modular TypeScript SDK for building Databricks apps with workflows and plugins.
+This is the **Databricks AppKit** (@databricks/app-kit) - a modular TypeScript SDK for building Databricks apps with workflows and plugins.
 
 ## SDK Core Principles
 
