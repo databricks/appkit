@@ -80,7 +80,7 @@ export class ServerPlugin extends Plugin {
       this.serverApplication.use(this.devModeManager.devModeMiddleware());
       this.serverApplication.use(
         DevModeManager.ASSETS_MIDDLEWARE_PATHS,
-        this.devModeManager.assetMiddleware()
+        this.devModeManager.assetMiddleware(),
       );
     }
 
@@ -95,7 +95,7 @@ export class ServerPlugin extends Plugin {
         console.log(
           `Server is running on port ${
             this.config.port || ServerPlugin.DEFAULT_CONFIG.port
-          }`
+          }`,
         );
         if (this.config.staticPath && !this.config.watch) {
           console.log(`Serving static files from: ${this.config.staticPath}`);
@@ -103,7 +103,7 @@ export class ServerPlugin extends Plugin {
         if (this.config.watch) {
           console.log("Vite is watching for changes...");
         }
-      }
+      },
     );
 
     this.server = server;
@@ -161,7 +161,7 @@ export class ServerPlugin extends Plugin {
     this.serverApplication.use(
       express.static(this.config.staticPath, {
         index: false,
-      })
+      }),
     );
 
     this.serverApplication.get("*", (req, res) => {
@@ -217,7 +217,7 @@ export class ServerPlugin extends Plugin {
           } catch (err) {
             console.error(
               `Error aborting operations for plugin ${plugin.name}:`,
-              err
+              err,
             );
           }
         }
@@ -246,5 +246,5 @@ const EXCLUDED_PLUGINS = [ServerPlugin.name];
 
 export const server = toPlugin<typeof ServerPlugin, ServerConfig, "server">(
   ServerPlugin,
-  "server"
+  "server",
 );

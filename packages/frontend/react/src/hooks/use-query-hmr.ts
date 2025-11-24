@@ -1,6 +1,9 @@
 import { useEffect } from "react";
 
-export function useQueryHMR(key: string, onUpdate: (timestamp: number) => void) {
+export function useQueryHMR(
+  key: string,
+  onUpdate: (timestamp: number) => void,
+) {
   useEffect(() => {
     // 1. only run in dev mode with HMR
     if (!import.meta.env.DEV || !import.meta.hot) return;

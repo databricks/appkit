@@ -4,7 +4,7 @@ import path from "node:path";
 import fs from "node:fs";
 
 export function parseCookies(
-  req: http.IncomingMessage
+  req: http.IncomingMessage,
 ): Record<string, string> {
   const cookieHeader = req.headers.cookie;
   if (!cookieHeader) return {};
@@ -53,7 +53,7 @@ export function getRoutes(stack: unknown[], basePath = "") {
       // normal route
       const path = basePath + layer.route.path;
       const methods = Object.keys(layer.route.methods).map((m) =>
-        m.toUpperCase()
+        m.toUpperCase(),
       );
       routes.push({ path, methods });
     } else if (layer.name === "router" && layer.handle.stack) {
@@ -83,6 +83,6 @@ export function getQueries(configFolder: string) {
     fs
       .readdirSync(queriesFolder)
       .filter((f) => path.extname(f) === ".sql")
-      .map((f) => [path.basename(f, ".sql"), path.basename(f, ".sql")])
+      .map((f) => [path.basename(f, ".sql"), path.basename(f, ".sql")]),
   );
 }

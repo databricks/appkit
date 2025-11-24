@@ -20,10 +20,16 @@ export class AppManager {
    * @returns The query content as a string
    * @throws Error if query key is invalid or file not found
    */
-  async getAppQuery(queryKey: string, req?: RequestLike, devFileReader?: DevFileReader): Promise<string | null> {
+  async getAppQuery(
+    queryKey: string,
+    req?: RequestLike,
+    devFileReader?: DevFileReader,
+  ): Promise<string | null> {
     // Security: Sanitize query key to prevent path traversal
     if (!queryKey || !/^[a-zA-Z0-9_-]+$/.test(queryKey)) {
-      console.error(`Invalid query key format: "${queryKey}". Only alphanumeric characters, underscores, and hyphens are allowed.`);
+      console.error(
+        `Invalid query key format: "${queryKey}". Only alphanumeric characters, underscores, and hyphens are allowed.`,
+      );
       return null;
     }
 
@@ -44,14 +50,16 @@ export class AppManager {
 
     // Check if we're in dev mode and should use WebSocket
     const isDevMode = req?.query?.dev !== undefined;
-    
+
     if (isDevMode && devFileReader && req) {
       try {
         // Read from local filesystem via WebSocket tunnel
         const relativePath = path.relative(process.cwd(), resolvedPath);
         return await devFileReader.readFile(relativePath, req);
       } catch (error) {
-        console.error(`Failed to read query "${queryKey}" from dev tunnel: ${(error as Error).message}`);
+        console.error(
+          `Failed to read query "${queryKey}" from dev tunnel: ${(error as Error).message}`,
+        );
         return null;
       }
     }
@@ -65,7 +73,9 @@ export class AppManager {
         console.error(`Query "${queryKey}" not found at path: ${resolvedPath}`);
         return null;
       }
-      console.error(`Failed to read query "${queryKey}" from server filesystem: ${(error as Error).message}`);
+      console.error(
+        `Failed to read query "${queryKey}" from server filesystem: ${(error as Error).message}`,
+      );
       return null;
     }
   }

@@ -4,7 +4,7 @@ import type { ParameterInput } from "@databricks-apps/connectors";
 export class QueryProcessor {
   processQueryParams(
     query: string,
-    parameters?: Record<string, any>
+    parameters?: Record<string, any>,
   ): Record<string, any> {
     const processed = { ...parameters };
 
@@ -29,7 +29,7 @@ export class QueryProcessor {
 
   convertToSQLParameters(
     query: string,
-    parameters?: Record<string, any>
+    parameters?: Record<string, any>,
   ): { statement: string; parameters: ParameterInput[] } {
     const sqlParameters: ParameterInput[] = [];
 
@@ -44,7 +44,7 @@ export class QueryProcessor {
           throw new Error(
             `Parameter "${key}" not found in query. Valid parameters: ${
               Array.from(queryParams).join(", ") || "none"
-            }`
+            }`,
           );
         }
       }
@@ -111,8 +111,8 @@ export class QueryProcessor {
       if (!validLevels.includes(value)) {
         throw new Error(
           `Invalid aggregation level: ${value}. Must be one of: ${validLevels.join(
-            ", "
-          )}`
+            ", ",
+          )}`,
         );
       }
       return {

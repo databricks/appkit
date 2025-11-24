@@ -14,7 +14,7 @@ const __dirname = path.dirname(__filename);
 
 interface DevFileReader {
   registerTunnelGetter(
-    getter: (req: express.Request) => TunnelConnection | null
+    getter: (req: express.Request) => TunnelConnection | null,
   ): void;
 }
 
@@ -110,7 +110,7 @@ export class DevModeManager {
     return async (
       req: express.Request,
       res: express.Response,
-      next: express.NextFunction
+      next: express.NextFunction,
     ) => {
       const dev = req.query.dev;
 
@@ -129,7 +129,7 @@ export class DevModeManager {
       const viewerEmail = req.headers["x-forwarded-email"] as string;
       const isOwnerMode = dev === "" || dev === "true";
 
-      const tunnelId = isOwnerMode 
+      const tunnelId = isOwnerMode
         ? generateTunnelIdFromEmail(viewerEmail)
         : dev.toString();
 
@@ -142,9 +142,9 @@ export class DevModeManager {
           tunnelId,
           viewerEmail,
           req.query.retry === "true",
-          res
+          res,
         );
-        
+
         if (approvalResponse) {
           return approvalResponse;
         }
@@ -173,7 +173,7 @@ export class DevModeManager {
 
   private loadHtmlTemplate(
     filename: string,
-    replacements: Record<string, string>
+    replacements: Record<string, string>,
   ): string {
     const filePath = path.join(__dirname, filename);
     let content = fs.readFileSync(filePath, "utf-8");
@@ -189,7 +189,7 @@ export class DevModeManager {
     tunnelId: string,
     viewerEmail: string,
     retry: boolean,
-    res: express.Response
+    res: express.Response,
   ): express.Response | null {
     const tunnel = this.tunnels.get(tunnelId);
 
@@ -222,7 +222,7 @@ export class DevModeManager {
           type: "connection:request",
           requestId,
           viewer: viewerEmail,
-        })
+        }),
       );
     }
 
@@ -266,7 +266,7 @@ export class DevModeManager {
         if (isBinary) {
           if (!tunnel.waitingForBinaryBody) {
             console.warn(
-              "Received binary message but no requestId is waiting for body"
+              "Received binary message but no requestId is waiting for body",
             );
             return;
           }
@@ -302,7 +302,7 @@ export class DevModeManager {
               if (data.approved) {
                 tunnel.approvedViewers.add(data.viewer);
                 console.log(
-                  `✅ Approved ${data.viewer} for tunnel ${tunnelId}`
+                  `✅ Approved ${data.viewer} for tunnel ${tunnelId}`,
                 );
               } else {
                 tunnel.rejectedViewers.add(data.viewer);
@@ -393,7 +393,7 @@ export class DevModeManager {
             type: "hmr:message",
             body: msg.toString(),
             timestamp: hmrStart,
-          })
+          }),
         );
       });
 
@@ -411,7 +411,7 @@ export class DevModeManager {
         } catch {
           console.error(
             "Failed to parse CLI message for HMR:",
-            msg.toString().substring(0, 100)
+            msg.toString().substring(0, 100),
           );
         }
       };
@@ -440,7 +440,7 @@ export class DevModeManager {
 
   registerTunnelGetter() {
     this.devFileReader.registerTunnelGetter(
-      this.getTunnelForRequest.bind(this)
+      this.getTunnelForRequest.bind(this),
     );
   }
 
@@ -460,7 +460,7 @@ export class DevModeManager {
         command: "serve",
       },
       undefined,
-      clientRoot
+      clientRoot,
     );
     const userConfig = loadedConfig?.config ?? {};
     const coreConfig = {
@@ -474,24 +474,31 @@ export class DevModeManager {
 
     serverApplication.use(vite.middlewares);
 
-    serverApplication.use("*", async (req: express.Request, res: express.Response, next: express.NextFunction) => {
-      try {
-        if (!req.path.startsWith("/api")) {
-          const url = req.originalUrl;
-          const indexHtmlPath = path.resolve(clientRoot, "index.html");
-          let template = fs.readFileSync(indexHtmlPath, "utf-8");
+    serverApplication.use(
+      "*",
+      async (
+        req: express.Request,
+        res: express.Response,
+        next: express.NextFunction,
+      ) => {
+        try {
+          if (!req.path.startsWith("/api")) {
+            const url = req.originalUrl;
+            const indexHtmlPath = path.resolve(clientRoot, "index.html");
+            let template = fs.readFileSync(indexHtmlPath, "utf-8");
 
-          template = await vite.transformIndexHtml(url, template);
+            template = await vite.transformIndexHtml(url, template);
 
-          res.status(200).set({ "Content-Type": "text/html" }).end(template);
-        } else {
-          next();
+            res.status(200).set({ "Content-Type": "text/html" }).end(template);
+          } else {
+            next();
+          }
+        } catch (e) {
+          vite.ssrFixStacktrace(e as Error);
+          next(e);
         }
-      } catch (e) {
-        vite.ssrFixStacktrace(e as Error);
-        next(e);
-      }
-    });
+      },
+    );
   }
 
   getTunnelForRequest(req: express.Request) {

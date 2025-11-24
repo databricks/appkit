@@ -26,7 +26,7 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
       "@databricks/apps/react": path.resolve(
         __dirname,
-        "../../../packages/frontend/react/src/index.ts"
+        "../../../packages/frontend/react/src/index.ts",
       ),
       "@databricks/apps/js": path.resolve(
         __dirname,

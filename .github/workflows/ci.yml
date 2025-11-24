@@ -17,7 +17,7 @@ jobs:
     runs-on:
       group: databricks-eng-protected-runner-group
       labels: linux-ubuntu-latest
-  
+
     name: Setup
     steps:
       - uses: actions/checkout@v4
@@ -35,7 +35,7 @@ jobs:
     runs-on:
       group: databricks-eng-protected-runner-group
       labels: linux-ubuntu-latest
-  
+
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -47,6 +47,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Run Lint
         run: pnpm run lint
+      - name: Run Format Check
+        run: pnpm run format:check
       - name: Run Types Check
         run: pnpm run typecheck
 
@@ -56,7 +58,7 @@ jobs:
     runs-on:
       group: databricks-eng-protected-runner-group
       labels: linux-ubuntu-latest
-  
+
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

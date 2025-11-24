@@ -24,11 +24,11 @@ function getDevMode() {
  */
 export function useAnalyticsQuery<
   T,
-  P extends Record<string, unknown> = Record<string, unknown>
+  P extends Record<string, unknown> = Record<string, unknown>,
 >(
   queryKey: string,
   parameters?: P | null,
-  options: UseAnalyticsQueryOptions = { autoStart: true }
+  options: UseAnalyticsQueryOptions = { autoStart: true },
 ): UseAnalyticsQueryResult<T> {
   const format = options?.format;
   const maxParametersSize = options?.maxParametersSize ?? 100 * 1024;
@@ -40,7 +40,7 @@ export function useAnalyticsQuery<
 
   if (!queryKey || queryKey.trim().length === 0) {
     throw new Error(
-      "useAnalyticsQuery: 'queryKey' must be a non-empty string."
+      "useAnalyticsQuery: 'queryKey' must be a non-empty string.",
     );
   }
 
@@ -50,7 +50,7 @@ export function useAnalyticsQuery<
       const sizeInBytes = new Blob([serialized]).size;
       if (sizeInBytes > maxParametersSize) {
         throw new Error(
-          "useAnalyticsQuery: Parameters size exceeds the maximum allowed size"
+          "useAnalyticsQuery: Parameters size exceeds the maximum allowed size",
         );
       }
 
@@ -106,7 +106,7 @@ export function useAnalyticsQuery<
 
             if (parsed.code) {
               console.error(
-                `[useAnalyticsQuery] Code: ${parsed.code}, Message: ${errorMsg}`
+                `[useAnalyticsQuery] Code: ${parsed.code}, Message: ${errorMsg}`,
               );
             }
             return;

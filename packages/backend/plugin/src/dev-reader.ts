@@ -3,7 +3,7 @@ import type { TunnelConnection } from "@databricks-apps/types";
 import { isRemoteServerEnabled } from "@databricks-apps/utils";
 
 type TunnelConnectionGetter = (
-  req: import("express").Request
+  req: import("express").Request,
 ) => TunnelConnection | null;
 
 /**
@@ -53,11 +53,11 @@ export class DevFileReader {
 
   async readFile(
     filePath: string,
-    req: import("express").Request
+    req: import("express").Request,
   ): Promise<string> {
     if (!this.getTunnelForRequest) {
       throw new Error(
-        "Tunnel getter not registered for DevFileReader singleton"
+        "Tunnel getter not registered for DevFileReader singleton",
       );
     }
     const tunnel = this.getTunnelForRequest(req);
@@ -82,7 +82,7 @@ export class DevFileReader {
           type: "file:read",
           requestId,
           path: filePath,
-        })
+        }),
       );
     });
   }
