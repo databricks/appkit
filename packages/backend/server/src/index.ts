@@ -66,8 +66,10 @@ export class ServerPlugin extends Plugin {
   async start(): Promise<express.Application> {
     this.serverApplication.use(express.json());
 
-    const isRemoteDevModeEnabled = this.isRemoteServingEnabled();
+    this.extendRoutes();
 
+    const isRemoteDevModeEnabled = this.isRemoteServingEnabled();
+    
     if (isRemoteDevModeEnabled) {
       this.devModeManager = new DevModeManager(this.devFileReader);
 
@@ -81,8 +83,6 @@ export class ServerPlugin extends Plugin {
         this.devModeManager.assetMiddleware()
       );
     }
-
-    this.extendRoutes();
 
     if (this.config.staticPath && !this.config.watch) {
       this._setupStaticServing();
