@@ -10,6 +10,7 @@ import { QueryProcessor } from "./query";
 import type { IAnalyticsConfig, IAnalyticsQueryRequest } from "./types";
 import type { Request, Response } from "@databricks-apps/utils";
 import { getRequestContext } from "@databricks-apps/utils";
+import type { WorkspaceClient } from "@databricks/sdk-experimental";
 
 export class AnalyticsPlugin extends Plugin {
   name = "analytics";
@@ -121,9 +122,17 @@ export class AnalyticsPlugin extends Plugin {
     const { statement, parameters: sqlParameters } =
       this.queryProcessor.convertToSQLParameters(query, parameters);
 
-    const workspaceClient = asUser
-      ? requestContext.userDatabricksClient
-      : requestContext.serviceDatabricksClient;
+    let workspaceClient: WorkspaceClient;
+    if (asUser) {
+      if (!requestContext.userDatabricksClient) {
+        throw new Error(
+          `User token passthrough feature is not enabled for workspace ${requestContext.workspaceId}.`,
+        );
+      }
+      workspaceClient = requestContext.userDatabricksClient;
+    } else {
+      workspaceClient = requestContext.serviceDatabricksClient;
+    }
 
     try {
       const response = await this.SQLClient.executeStatement(

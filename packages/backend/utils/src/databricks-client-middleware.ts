@@ -4,7 +4,7 @@ import { WorkspaceClient, type sql } from "@databricks/sdk-experimental";
 import { AsyncLocalStorage } from "node:async_hooks";
 
 export type RequestContext = {
-  userDatabricksClient: WorkspaceClient;
+  userDatabricksClient?: WorkspaceClient;
   serviceDatabricksClient: WorkspaceClient;
   userId: string;
   serviceUserId: string;
@@ -31,7 +31,7 @@ export async function databricksClientMiddleware(): Promise<express.RequestHandl
     next: express.NextFunction,
   ) => {
     const userToken = req.headers["x-forwarded-access-token"] as string;
-    let userDatabricksClient: WorkspaceClient;
+    let userDatabricksClient: WorkspaceClient | undefined;
     if (userToken) {
       userDatabricksClient = new WorkspaceClient({
         token: userToken,
@@ -40,9 +40,6 @@ export async function databricksClientMiddleware(): Promise<express.RequestHandl
       // in local development service and no user token are the same
       // TODO: use `databricks apps run-local` to fix this
       userDatabricksClient = serviceDatabricksClient;
-    } else {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
     }
 
     let userName = req.headers["x-forwarded-user"] as string;
@@ -103,6 +100,10 @@ async function getWorkspaceId(
 async function getWarehouseId(
   workspaceClient: WorkspaceClient,
 ): Promise<string> {
+  if (process.env.DATABRICKS_WAREHOUSE_ID) {
+    return process.env.DATABRICKS_WAREHOUSE_ID;
+  }
+
   if (process.env.NODE_ENV === "development") {
     const response = (await workspaceClient.apiClient.request({
       path: "/api/2.0/sql/warehouses",
