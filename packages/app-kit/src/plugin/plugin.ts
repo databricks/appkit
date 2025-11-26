@@ -51,7 +51,7 @@ export abstract class Plugin<
     this.name = config.name ?? "plugin";
     this.telemetry = TelemetryManager.getProvider(this.name, config.telemetry);
     this.streamManager = new StreamManager();
-    this.cache = new CacheManager(undefined, this.telemetry);
+    this.cache = CacheManager.getInstanceSync();
     this.app = new AppManager();
     this.devFileReader = DevFileReader.getInstance();
 

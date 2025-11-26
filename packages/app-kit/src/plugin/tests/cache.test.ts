@@ -16,21 +16,75 @@ vi.mock("../../telemetry", () => ({
   },
 }));
 
+/** Mock CacheManager for testing */
+class MockCacheManager {
+  private cache = new Map<string, { value: unknown; expiry: number }>();
+  private inFlightRequests = new Map<string, Promise<unknown>>();
+
+  async getOrExecute<T>(
+    key: (string | number | object)[],
+    fn: () => Promise<T>,
+    userKey: string,
+    options?: { ttl?: number },
+  ): Promise<T> {
+    const cacheKey = this.generateKey(key, userKey);
+    const cached = await this.get<T>(cacheKey);
+    if (cached !== null) {
+      return cached;
+    }
+
+    const inFlight = this.inFlightRequests.get(cacheKey);
+    if (inFlight) {
+      return inFlight as Promise<T>;
+    }
+
+    const promise = fn()
+      .then(async (result) => {
+        await this.set(cacheKey, result, options);
+        return result;
+      })
+      .finally(() => {
+        this.inFlightRequests.delete(cacheKey);
+      });
+
+    this.inFlightRequests.set(cacheKey, promise);
+    return promise;
+  }
+
+  async get<T>(key: string): Promise<T | null> {
+    const entry = this.cache.get(key);
+    if (!entry) return null;
+
+    if (Date.now() > entry.expiry) {
+      this.cache.delete(key);
+      return null;
+    }
+    return entry.value as T;
+  }
+
+  async set<T>(
+    key: string,
+    value: T,
+    options?: { ttl?: number },
+  ): Promise<void> {
+    const expiryTime = Date.now() + (options?.ttl ?? 3600) * 1000;
+    this.cache.set(key, { value, expiry: expiryTime });
+  }
+
+  generateKey(parts: (string | number | object)[], userKey: string): string {
+    const { createHash } = require("crypto");
+    const allParts = [userKey, ...parts];
+    const serialized = JSON.stringify(allParts);
+    return createHash("sha256").update(serialized).digest("hex");
+  }
+}
+
 describe("CacheInterceptor", () => {
-  let cacheManager: CacheManager;
+  let cacheManager: MockCacheManager;
   let context: ExecutionContext;
 
   beforeEach(() => {
-    const mockTelemetry = createMockTelemetry();
-    vi.mocked(TelemetryManager.getProvider).mockReturnValue(
-      mockTelemetry as TelemetryProvider,
-    );
-    const telemetry = TelemetryManager.getProvider("cache-test", {
-      traces: false,
-      metrics: false,
-      logs: false,
-    });
-    cacheManager = new CacheManager({}, telemetry);
+    cacheManager = new MockCacheManager();
     context = {
       metadata: new Map(),
       userKey: "service",
@@ -42,7 +96,10 @@ describe("CacheInterceptor", () => {
       enabled: false,
       cacheKey: ["test"],
     };
-    const interceptor = new CacheInterceptor(cacheManager, config);
+    const interceptor = new CacheInterceptor(
+      cacheManager as unknown as Parameters<typeof CacheInterceptor>[0],
+      config,
+    );
     const fn = vi.fn().mockResolvedValue("result");
 
     const result = await interceptor.intercept(fn, context);
@@ -56,7 +113,10 @@ describe("CacheInterceptor", () => {
       enabled: true,
       cacheKey: [],
     };
-    const interceptor = new CacheInterceptor(cacheManager, config);
+    const interceptor = new CacheInterceptor(
+      cacheManager as unknown as Parameters<typeof CacheInterceptor>[0],
+      config,
+    );
     const fn = vi.fn().mockResolvedValue("result");
 
     const result = await interceptor.intercept(fn, context);
@@ -70,11 +130,14 @@ describe("CacheInterceptor", () => {
       enabled: true,
       cacheKey: ["test", "key"],
     };
-    const interceptor = new CacheInterceptor(cacheManager, config);
+    const interceptor = new CacheInterceptor(
+      cacheManager as unknown as Parameters<typeof CacheInterceptor>[0],
+      config,
+    );
 
     // Pre-populate cache
     const cacheKey = cacheManager.generateKey(["test", "key"], "service");
-    cacheManager.set(cacheKey, "cached-result");
+    await cacheManager.set(cacheKey, "cached-result");
 
     const fn = vi.fn().mockResolvedValue("new-result");
 
@@ -90,7 +153,10 @@ describe("CacheInterceptor", () => {
       cacheKey: ["test", "key"],
       ttl: 3600,
     };
-    const interceptor = new CacheInterceptor(cacheManager, config);
+    const interceptor = new CacheInterceptor(
+      cacheManager as unknown as Parameters<typeof CacheInterceptor>[0],
+      config,
+    );
     const fn = vi.fn().mockResolvedValue("fresh-result");
 
     const result = await interceptor.intercept(fn, context);
@@ -100,7 +166,7 @@ describe("CacheInterceptor", () => {
 
     // Verify result was cached
     const cacheKey = cacheManager.generateKey(["test", "key"], "service");
-    const cached = cacheManager.get(cacheKey);
+    const cached = await cacheManager.get(cacheKey);
     expect(cached).toBe("fresh-result");
   });
 
@@ -113,14 +179,17 @@ describe("CacheInterceptor", () => {
       metadata: new Map(),
       userKey: "user1",
     };
-    const interceptor = new CacheInterceptor(cacheManager, config);
+    const interceptor = new CacheInterceptor(
+      cacheManager as unknown as Parameters<typeof CacheInterceptor>[0],
+      config,
+    );
     const fn = vi.fn().mockResolvedValue("user-result");
 
     await interceptor.intercept(fn, contextWithToken);
 
     // Cache key should include userKey
     const cacheKey = cacheManager.generateKey(["query", "sales"], "user1");
-    const cached = cacheManager.get(cacheKey);
+    const cached = await cacheManager.get(cacheKey);
     expect(cached).toBe("user-result");
   });
 
@@ -129,7 +198,10 @@ describe("CacheInterceptor", () => {
       enabled: true,
       cacheKey: ["query", "profile"],
     };
-    const interceptor = new CacheInterceptor(cacheManager, config);
+    const interceptor = new CacheInterceptor(
+      cacheManager as unknown as Parameters<typeof CacheInterceptor>[0],
+      config,
+    );
 
     // Service account context
     const context1: ExecutionContext = {
@@ -154,8 +226,8 @@ describe("CacheInterceptor", () => {
     // Verify separate cache entries
     const key1 = cacheManager.generateKey(["query", "profile"], "service");
     const key2 = cacheManager.generateKey(["query", "profile"], "user1");
-    expect(cacheManager.get(key1)).toBe("service-account-data");
-    expect(cacheManager.get(key2)).toBe("user-data");
+    expect(await cacheManager.get(key1)).toBe("service-account-data");
+    expect(await cacheManager.get(key2)).toBe("user-data");
   });
 
   test("should respect TTL setting", async () => {
@@ -164,7 +236,10 @@ describe("CacheInterceptor", () => {
       cacheKey: ["test"],
       ttl: 1, // 1 second
     };
-    const interceptor = new CacheInterceptor(cacheManager, config);
+    const interceptor = new CacheInterceptor(
+      cacheManager as unknown as Parameters<typeof CacheInterceptor>[0],
+      config,
+    );
     const fn = vi.fn().mockResolvedValue("result");
 
     await interceptor.intercept(fn, context);

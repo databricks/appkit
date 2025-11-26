@@ -6,6 +6,7 @@ import type {
   PluginData,
   PluginMap,
 } from "shared";
+import { CacheManager } from "../cache";
 import type { TelemetryConfig } from "../telemetry";
 import { TelemetryManager } from "../telemetry";
 
@@ -86,6 +87,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
     config: { plugins?: T; telemetry?: TelemetryConfig } = {},
   ): Promise<PluginMap<T>> {
     TelemetryManager.initialize(config.telemetry);
+    await CacheManager.getInstance();
 
     const rawPlugins = config.plugins as T;
     const preparedPlugins = AppKit.preparePlugins(rawPlugins);

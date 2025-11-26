@@ -9,7 +9,6 @@ import type {
   LakebaseConnectionConfig,
   LakebaseCredentials,
 } from "./types";
-import { parseConnectionString } from "./utils";
 
 /**
  * Enterprise-grade connector for Databricks Lakebase
@@ -383,19 +382,7 @@ export class LakebaseConnector {
 
   /** Parse connection configuration from config or environment */
   private parseConnectionConfig(): LakebaseConnectionConfig {
-    if (this.config.connectionString) {
-      const { connectionParams } = parseConnectionString(
-        this.config.connectionString,
-      );
-      return connectionParams;
-    }
-
-    const envConnectionString = process.env.LAKEBASE_CONNECTION_STRING;
-    if (envConnectionString) {
-      const { connectionParams } = parseConnectionString(envConnectionString);
-      return connectionParams;
-    }
-
+    // get connection from config
     if (this.config.host && this.config.database) {
       return {
         host: this.config.host,
@@ -405,8 +392,22 @@ export class LakebaseConnector {
       };
     }
 
+    // get connection from environment variables
+    const pgHost = process.env.PGHOST;
+    const pgDatabase = process.env.PGDATABASE;
+    const pgPort = process.env.PGPORT;
+    const pgSslMode = process.env.PGSSLMODE;
+    if (pgHost && pgDatabase && pgPort && pgSslMode) {
+      return {
+        host: pgHost,
+        database: pgDatabase,
+        port: Number(pgPort) ?? 5432,
+        sslMode: (pgSslMode as "require" | "disable" | "prefer") ?? "require",
+      };
+    }
+
     throw new Error(
-      "Lakebase connection not configured. Either set LAKEBASE_CONNECTION_STRING env var or provide config in constructor.",
+      "Lakebase connection not configured. Set PGHOST/PGDATABASE env vars or provide host/database in config.",
     );
   }
 }
