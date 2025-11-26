@@ -4,20 +4,20 @@ import { lakebaseStorageDefaults } from "./defaults";
 import type { CacheEntry, CacheStorage } from "./types";
 
 /**
- * Lakebase cache storage implementation. Uses a least recently used (LRU) eviction policy
+ * Persistent cache storage implementation. Uses a least recently used (LRU) eviction policy
  * to manage memory usage and ensure efficient cache operations.
  *
  * @example
- * const lakebaseStorage = new LakebaseStorage(config, connector);
- * await lakebaseStorage.initialize();
- * await lakebaseStorage.get("my-key");
- * await lakebaseStorage.set("my-key", "my-value");
- * await lakebaseStorage.delete("my-key");
- * await lakebaseStorage.clear();
- * await lakebaseStorage.has("my-key");
+ * const persistentStorage = new PersistentStorage(config, connector);
+ * await persistentStorage.initialize();
+ * await persistentStorage.get("my-key");
+ * await persistentStorage.set("my-key", "my-value");
+ * await persistentStorage.delete("my-key");
+ * await persistentStorage.clear();
+ * await persistentStorage.has("my-key");
  *
  */
-export class LakebaseStorage implements CacheStorage {
+export class PersistentStorage implements CacheStorage {
   private readonly connector: LakebaseConnector;
   private readonly tableName: string;
   private readonly maxSize: number;
@@ -32,7 +32,7 @@ export class LakebaseStorage implements CacheStorage {
     this.initialized = false;
   }
 
-  /** Initialize the Lakebase storage and run migrations if necessary */
+  /** Initialize the persistent storage and run migrations if necessary */
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
@@ -40,13 +40,13 @@ export class LakebaseStorage implements CacheStorage {
       await this.runMigrations();
       this.initialized = true;
     } catch (error) {
-      console.error("Error in for Lakebase storage initialization:", error);
+      console.error("Error in for persistent storage initialization:", error);
       throw error;
     }
   }
 
   /**
-   * Get a cached value from the Lakebase storage
+   * Get a cached value from the persistent storage
    * @param key - Cache key
    * @returns Promise of the cached value or null if not found
    */
@@ -79,7 +79,7 @@ export class LakebaseStorage implements CacheStorage {
   }
 
   /**
-   * Set a value in the Lakebase storage
+   * Set a value in the persistent storage
    * @param key - Cache key
    * @param entry - Cache entry
    * @returns Promise of the result
@@ -106,7 +106,7 @@ export class LakebaseStorage implements CacheStorage {
   }
 
   /**
-   * Delete a value from the Lakebase storage
+   * Delete a value from the persistent storage
    * @param key - Cache key
    * @returns Promise of the result
    */
@@ -118,14 +118,14 @@ export class LakebaseStorage implements CacheStorage {
     );
   }
 
-  /** Clear the Lakebase storage */
+  /** Clear the persistent storage */
   async clear(): Promise<void> {
     await this.ensureInitialized();
     await this.connector.query(`TRUNCATE TABLE ${this.tableName}`);
   }
 
   /**
-   * Check if a value exists in the Lakebase storage
+   * Check if a value exists in the persistent storage
    * @param key - Cache key
    * @returns Promise of true if the value exists, false otherwise
    */
@@ -141,7 +141,7 @@ export class LakebaseStorage implements CacheStorage {
   }
 
   /**
-   * Get the size of the Lakebase storage
+   * Get the size of the persistent storage
    * @returns Promise of the size of the storage
    */
   async size(): Promise<number> {
@@ -154,7 +154,7 @@ export class LakebaseStorage implements CacheStorage {
   }
 
   /**
-   * Check if the Lakebase storage is persistent
+   * Check if the persistent storage is persistent
    * @returns true if the storage is persistent, false otherwise
    */
   isPersistent(): boolean {
@@ -162,7 +162,7 @@ export class LakebaseStorage implements CacheStorage {
   }
 
   /**
-   * Check if the Lakebase storage is healthy
+   * Check if the persistent storage is healthy
    * @returns Promise of true if the storage is healthy, false otherwise
    */
   async healthCheck(): Promise<boolean> {
@@ -173,13 +173,13 @@ export class LakebaseStorage implements CacheStorage {
     }
   }
 
-  /** Close the Lakebase storage */
+  /** Close the persistent storage */
   async close(): Promise<void> {
     await this.connector.close();
   }
 
   /**
-   * Cleanup expired entries from the Lakebase storage
+   * Cleanup expired entries from the persistent storage
    * @returns Promise of the number of expired entries
    */
   async cleanupExpired(): Promise<number> {
@@ -191,7 +191,7 @@ export class LakebaseStorage implements CacheStorage {
     return parseInt(result.rows[0]?.count ?? "0", 10);
   }
 
-  /** Evict the least recently used entries from the Lakebase storage (batched) */
+  /** Evict the least recently used entries from the persistent storage (batched) */
   private async evictLRU(): Promise<void> {
     await this.connector.query(
       `DELETE FROM ${this.tableName} WHERE cache_key IN (
@@ -201,14 +201,14 @@ export class LakebaseStorage implements CacheStorage {
     );
   }
 
-  /** Ensure the Lakebase storage is initialized */
+  /** Ensure the persistent storage is initialized */
   private async ensureInitialized(): Promise<void> {
     if (!this.initialized) {
       await this.initialize();
     }
   }
 
-  /** Run migrations for the Lakebase storage */
+  /** Run migrations for the persistent storage */
   private async runMigrations(): Promise<void> {
     try {
       await this.connector.query(`
@@ -228,7 +228,10 @@ export class LakebaseStorage implements CacheStorage {
                 CREATE INDEX IF NOT EXISTS idx_${this.tableName}_last_accessed ON ${this.tableName} (last_accessed);
             `);
     } catch (error) {
-      console.error("Error in running migrations for Lakebase storage:", error);
+      console.error(
+        "Error in running migrations for persistent storage:",
+        error,
+      );
       throw error;
     }
   }
