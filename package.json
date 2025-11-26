@@ -32,7 +32,8 @@
   },
   "lint-staged": {
     "(*.ts|*.tsx|*.js|*.jsx|*.json|*.md|*.yml|*.yaml|*.css)": [
-      "pnpm lint:fix && pnpm format"
+      "biome lint --write",
+      "biome format --write"
     ]
   },
   "devDependencies": {

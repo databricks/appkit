@@ -47,6 +47,7 @@
     "@opentelemetry/semantic-conventions": "^1.38.0",
     "dotenv": "^16.6.1",
     "express": "^4.22.0",
+    "pg": "^8.16.3",
     "shared": "workspace:*",
     "vite": "npm:rolldown-vite@7.1.14",
     "ws": "^8.18.3",
@@ -54,6 +55,7 @@
   },
   "devDependencies": {
     "@types/express": "^4.17.25",
+    "@types/pg": "^8.15.6",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.1.1"
   },
