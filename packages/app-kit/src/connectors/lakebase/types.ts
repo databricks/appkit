@@ -14,6 +14,9 @@ export interface LakebaseConfig {
   /** Database port */
   port: number;
 
+  /** App name */
+  appName?: string;
+
   /** SSL mode */
   sslMode: "require" | "disable" | "prefer";
 
@@ -53,4 +56,6 @@ export interface LakebaseConnectionConfig {
   readonly port: number;
   /** SSL mode */
   readonly sslMode: "require" | "disable" | "prefer";
+  /** App name */
+  readonly appName?: string;
 }

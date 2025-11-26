@@ -285,31 +285,12 @@ export class LakebaseConnector {
 
   /** Fetch password (OAuth token) from Databricks */
   private async fetchPassword(): Promise<string> {
-    const host = this.connectionConfig.host;
-
-    const uid = host.split(".")[0]?.replace("instance-", "");
-    if (!uid) {
-      throw new Error(
-        `Invalid lakebase hostname: ${host}. Expected format: instance-<uuid>.database.<region>.databricks.com`,
-      );
-    }
-
     const workspaceClient = this.getWorkspaceClient();
     const config = new Config({ host: workspaceClient.config.host });
     const apiClient = new ApiClient(config);
 
-    // find database instance
-    const dbInfo = await apiClient.request({
-      path: `/api/2.0/database/instances:findByUid`,
-      method: "GET",
-      query: { uid },
-      payload: { uid },
-      headers: new Headers(),
-      raw: false,
-    });
-
-    if (!this.hasName(dbInfo)) {
-      throw new Error(`Database instance not found for uid: ${uid}`);
+    if (!this.connectionConfig.appName) {
+      throw new Error(`Database app name not found in connection config`);
     }
 
     const credentials = await apiClient.request({
@@ -318,14 +299,14 @@ export class LakebaseConnector {
       headers: new Headers(),
       raw: false,
       payload: {
-        instance_names: [dbInfo.name],
+        instance_names: [this.connectionConfig.appName],
         request_id: randomUUID(),
       },
     });
 
     if (!this.hasToken(credentials)) {
       throw new Error(
-        `Failed to generate credentials for instance: ${dbInfo.name}`,
+        `Failed to generate credentials for instance: ${this.connectionConfig.appName}`,
       );
     }
 
@@ -360,16 +341,6 @@ export class LakebaseConnector {
     );
   }
 
-  /** Type guard for database instance */
-  private hasName(value: unknown): value is { name: string } {
-    return (
-      typeof value === "object" &&
-      value !== null &&
-      "name" in value &&
-      typeof (value as any).name === "string"
-    );
-  }
-
   /** Type guard for credentials */
   private hasToken(value: unknown): value is { token: string } {
     return (
@@ -383,31 +354,43 @@ export class LakebaseConnector {
   /** Parse connection configuration from config or environment */
   private parseConnectionConfig(): LakebaseConnectionConfig {
     // get connection from config
-    if (this.config.host && this.config.database) {
+    if (this.config.host && this.config.database && this.config.appName) {
       return {
         host: this.config.host,
         database: this.config.database,
-        port: this.config.port,
-        sslMode: this.config.sslMode,
+        port: this.config.port ?? 5432,
+        sslMode: this.config.sslMode ?? "require",
+        appName: this.config.appName,
       };
     }
 
     // get connection from environment variables
     const pgHost = process.env.PGHOST;
     const pgDatabase = process.env.PGDATABASE;
+    const pgAppName = process.env.PGAPPNAME;
+    if (!pgHost || !pgDatabase || !pgAppName) {
+      throw new Error(
+        "Lakebase connection not configured. Required env vars: PGHOST, PGDATABASE, PGAPPNAME. " +
+          "Optional: PGPORT (default: 5432), PGSSLMODE (default: require).",
+      );
+    }
     const pgPort = process.env.PGPORT;
-    const pgSslMode = process.env.PGSSLMODE;
-    if (pgHost && pgDatabase && pgPort && pgSslMode) {
-      return {
-        host: pgHost,
-        database: pgDatabase,
-        port: Number(pgPort) ?? 5432,
-        sslMode: (pgSslMode as "require" | "disable" | "prefer") ?? "require",
-      };
+    const port = pgPort ? parseInt(pgPort, 10) : 5432;
+
+    if (Number.isNaN(port)) {
+      throw new Error(`Invalid port: ${pgPort}. Must be a number.`);
     }
 
-    throw new Error(
-      "Lakebase connection not configured. Set PGHOST/PGDATABASE env vars or provide host/database in config.",
-    );
+    const pgSSLMode = process.env.PGSSLMODE;
+    const sslMode =
+      (pgSSLMode as "require" | "disable" | "prefer") || "require";
+
+    return {
+      host: pgHost,
+      database: pgDatabase,
+      port,
+      sslMode,
+      appName: pgAppName,
+    };
   }
 }
