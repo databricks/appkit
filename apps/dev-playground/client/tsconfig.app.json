@@ -29,8 +29,5 @@
       "@/*": ["./src/*"]
     }
   },
-  "paths": {
-    "@databricks/app-kit/react": ["packages/frontend/index.ts"]
-  },
   "include": ["src"]
 }

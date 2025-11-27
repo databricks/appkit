@@ -21,22 +21,19 @@ export default defineConfig({
       {
         plugins: [react()],
         test: {
-          name: "frontend",
-          root: "./packages/frontend",
+          name: "app-kit-ui",
+          root: "./packages/app-kit-ui",
           environment: "jsdom",
         },
       },
       {
         plugins: [tsconfigPaths()],
         test: {
-          name: "backend",
-          root: "./packages/backend",
+          name: "app-kit",
+          root: "./packages/app-kit",
           environment: "node",
         },
       },
     ],
-    alias: {
-      "@databricks-apps/js": "./packages/frontend/js/src/index.ts",
-    },
   },
 });

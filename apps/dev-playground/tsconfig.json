@@ -1,25 +1,8 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "baseUrl": "../..",
-    "outDir": "./build",
-    "paths": {
-      "@databricks/app-kit": ["packages/backend/index.ts"],
-      "@databricks/app-kit/react": ["packages/frontend/index.ts"],
-      "@databricks-apps/analytics": ["packages/backend/analytics/src"],
-      "@databricks-apps/app": ["packages/backend/app/src"],
-      "@databricks-apps/cache": ["packages/backend/cache/src"],
-      "@databricks-apps/connectors": ["packages/backend/connectors/src"],
-      "@databricks-apps/core": ["packages/backend/core/src"],
-      "@databricks-apps/plugin": ["packages/backend/plugin/src"],
-      "@databricks-apps/react": ["packages/frontend/react/src"],
-      "@databricks-apps/server": ["packages/backend/server/src"],
-      "@databricks-apps/stream": ["packages/backend/stream/src"],
-      "@databricks-apps/types": ["packages/types/src"],
-      "@databricks-apps/types/*": ["packages/types/src/*"],
-      "@databricks-apps/utils": ["packages/backend/utils/src"]
-    }
+    "baseUrl": ".",
+    "outDir": "./build"
   },
-  "include": ["./server/**/*"],
   "exclude": ["node_modules", "build"]
 }

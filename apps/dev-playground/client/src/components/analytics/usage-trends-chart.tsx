@@ -1,4 +1,4 @@
-import { BarChart } from "@databricks/app-kit/react";
+import { BarChart } from "@databricks/app-kit-ui/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,

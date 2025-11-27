@@ -9,3 +9,5 @@ coverage
 docs
 
 routeTree.gen.ts
+
+.turbo

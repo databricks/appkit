@@ -1,52 +1,25 @@
 {
-  "name": "@databricks/app-kit",
+  "name": "root",
   "type": "module",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.0.0",
   "packageManager": "pnpm@10.21.0",
-  "types": "dist/index.d.ts",
-  "files": [
-    "dist",
-    "llms.txt",
-    "README.md"
-  ],
-  "exports": {
-    ".": {
-      "types": {
-        "browser": "./dist/server/browser-stub.d.ts",
-        "default": "./dist/server/index.d.ts"
-      },
-      "browser": "./dist/server/browser-stub.js",
-      "import": "./dist/server/index.js",
-      "require": "./dist/server/index.js"
-    },
-    "./js": {
-      "types": "./dist/js/index.d.ts",
-      "import": "./dist/js/index.js",
-      "require": "./dist/js/index.js"
-    },
-    "./react": {
-      "types": "./dist/react/index.d.ts",
-      "import": "./dist/react/index.js",
-      "require": "./dist/react/index.js"
-    }
-  },
   "scripts": {
-    "build:sdk": "pnpm build && tsdown --config tools/sdk-build/tsdown.config.ts",
-    "build": "pnpm -r --filter=!sdk-playground build",
+    "build": "pnpm -r build:package",
+    "build:watch": "pnpm -r --filter=!sdk-playground build:watch",
     "check:fix": "biome check --write .",
     "check": "biome check .",
     "check:licenses": "tsx tools/check-licenses.ts",
-    "clean:full": "pnpm exec rm -rf dist node_modules && pnpm -r exec rm -rf dist tsconfig.tsbuildinfo node_modules && pnpm -r clean:full",
-    "clean": "pnpm exec rm -rf dist && pnpm -r exec rm -rf dist tsconfig.tsbuildinfo && pnpm -r clean",
-    "create-package": "NODE_OPTIONS='--import tsx' plop --plopfile tools/create-sdk-package.ts",
-    "dev": "NODE_ENV=development pnpm --filter=sdk-playground dev",
+    "build:notice": "tsx tools/build-notice.ts > NOTICE.md",
+    "clean:full": "rm -rf node_modules dist coverage && pnpm -r clean:full",
+    "clean": "pnpm -r clean",
+    "dev": "pnpm build && NODE_ENV=development turbo watch build:watch dev",
     "dev:inspect": "NODE_ENV=development pnpm --filter=sdk-playground dev:inspect",
     "format:check": "biome format .",
     "format": "biome format --write .",
     "lint:fix": "biome lint --write .",
     "lint": "biome lint .",
-    "pack": "pnpm pack",
+    "pack:sdk": "pnpm build && pnpm --filter=@databricks/app-kit --filter=@databricks/app-kit-ui pack",
     "prepare": "husky",
     "publish:dry": "pnpm publish --dry-run",
     "release:dry": "pnpm run build:sdk && pnpm run pack && pnpm run publish:dry",
@@ -77,6 +50,7 @@
     "plop": "^4.0.4",
     "tsdown": "^0.15.7",
     "tsx": "^4.20.6",
+    "turbo": "^2.6.1",
     "typescript": "^5.6.0",
     "vite-tsconfig-paths": "^5.1.4",
     "vitest": "^3.2.4"

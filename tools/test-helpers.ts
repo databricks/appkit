@@ -1,13 +1,19 @@
-import type { ITelemetry } from "@databricks-apps/telemetry";
-import type { IAppRouter } from "@databricks-apps/types";
-import type { RequestContext } from "@databricks-apps/utils";
+import type { IAppRouter } from "shared";
+import type {
+  InstrumentConfig,
+  ITelemetry,
+} from "../packages/app-kit/src/telemetry/types";
+import type { RequestContext } from "../packages/app-kit/src/utils/databricks-client-middleware";
 import { vi } from "vitest";
+import type { SpanOptions, Span } from "@opentelemetry/api";
 
 /**
  * Creates a mock telemetry provider for testing
  */
 export function createMockTelemetry(): ITelemetry {
-  const mockSpan = {
+  const mockSpan: Span = {
+    addLink: vi.fn(),
+    addLinks: vi.fn(),
     end: vi.fn(),
     setAttribute: vi.fn(),
     setAttributes: vi.fn(),
@@ -39,9 +45,16 @@ export function createMockTelemetry(): ITelemetry {
     emit: vi.fn(),
     startActiveSpan: vi
       .fn()
-      .mockImplementation(async (_name: string, _options: any, fn: any) => {
-        return await fn(mockSpan);
-      }),
+      .mockImplementation(
+        async (
+          _name: string,
+          _options: SpanOptions,
+          fn: (span: Span) => Promise<any>,
+          _tracerOptions?: InstrumentConfig,
+        ) => {
+          return await fn(mockSpan);
+        },
+      ),
     registerInstrumentations: vi.fn(),
   };
 }
@@ -180,16 +193,19 @@ export async function runWithRequestContext<T>(
   const defaultContext: RequestContext = {
     userDatabricksClient: mockWorkspaceClient as any,
     serviceDatabricksClient: mockWorkspaceClient as any,
-    userName: "test-user",
+    userId: "test-user",
+    serviceUserId: "test-service-user",
     warehouseId: Promise.resolve("test-warehouse-id"),
     workspaceId: Promise.resolve("test-workspace-id"),
     ...context,
   };
 
   // Use vi.spyOn to mock getRequestContext
-  const serverModule = await import("@databricks-apps/utils");
+  const utilsModule = await import(
+    "../packages/app-kit/src/utils/databricks-client-middleware"
+  );
   const spy = vi
-    .spyOn(serverModule, "getRequestContext")
+    .spyOn(utilsModule, "getRequestContext")
     .mockReturnValue(defaultContext);
 
   try {

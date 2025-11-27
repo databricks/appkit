@@ -19,22 +19,17 @@ export default defineConfig({
       "react/jsx-dev-runtime",
       "react/jsx-runtime",
     ],
+    exclude: ["@databricks/app-kit-ui", "@databricks/app-kit"],
   },
   resolve: {
     dedupe: ["react", "react-dom", "recharts"],
     preserveSymlinks: true,
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      "@databricks/app-kit/react": path.resolve(
+      "@databricks/app-kit-ui": path.resolve(
         __dirname,
-        "../../../packages/frontend/react/src/index.ts",
+        "../../../packages/app-kit-ui/dist",
       ),
-      "@databricks/app-kit/js": path.resolve(
-        __dirname,
-        "../../../packages/frontend/js/src/index.ts",
-      ),
-      react: path.resolve(__dirname, "node_modules/react"),
-      "react-dom": path.resolve(__dirname, "node_modules/react-dom"),
     },
   },
 });

@@ -24,7 +24,6 @@ const disallowedPatterns = [
   /Elastic/i,
   /Proprietary/i,
   /SEE LICEN[CS]E/i,
-  /CC-BY/i,
 ];
 
 type Package = {

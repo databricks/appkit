@@ -5,7 +5,7 @@ import {
   LineChart,
   PieChart,
   RadarChart,
-} from "@databricks/app-kit/react";
+} from "@databricks/app-kit-ui/react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { codeToHtml } from "shiki";

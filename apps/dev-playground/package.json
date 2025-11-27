@@ -21,7 +21,6 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@databricks-apps/react": "workspace:*",
     "@databricks/app-kit": "workspace:*",
     "react-syntax-highlighter": "^16.1.0"
   },
@@ -30,7 +29,6 @@
     "@types/react-syntax-highlighter": "^15.5.13",
     "@vitejs/plugin-react": "^5.0.4",
     "dotenv": "^16.0.0",
-    "pm2": "^6.0.13",
     "tsdown": "^0.15.7",
     "tsx": "^4.20.6",
     "vite": "npm:rolldown-vite@7.1.14"

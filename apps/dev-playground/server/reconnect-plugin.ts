@@ -1,8 +1,5 @@
 import { Plugin, toPlugin } from "@databricks/app-kit";
-import type {
-  IAppRouter,
-  StreamExecutionSettings,
-} from "@databricks-apps/types";
+import type { IAppRouter, StreamExecutionSettings } from "shared";
 
 export class ReconnectPlugin extends Plugin {
   public name = "reconnect";

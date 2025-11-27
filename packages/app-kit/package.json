@@ -1,0 +1,66 @@
+{
+  "name": "@databricks/app-kit",
+  "type": "module",
+  "version": "0.0.1",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "packageManager": "pnpm@10.21.0",
+  "files": [
+    "dist",
+    "llms.txt",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build:package": "tsdown --config tsdown.config.ts",
+    "build:watch": "tsdown --config tsdown.config.ts --watch",
+    "typecheck": "tsc --noEmit",
+    "pack": "cd tmp && npm pack",
+    "clean": "rm -rf dist",
+    "clean:full": "rm -rf dist node_modules"
+  },
+  "dependencies": {
+    "@databricks/sdk-experimental": "^0.14.2",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/api-logs": "^0.53.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.50.0",
+    "@opentelemetry/context-async-hooks": "^1.26.0",
+    "@opentelemetry/exporter-logs-otlp-proto": "^0.53.0",
+    "@opentelemetry/exporter-metrics-otlp-proto": "^0.53.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "^0.53.0",
+    "@opentelemetry/instrumentation": "^0.53.0",
+    "@opentelemetry/resources": "^1.26.0",
+    "@opentelemetry/sdk-logs": "^0.53.0",
+    "@opentelemetry/sdk-metrics": "^1.26.0",
+    "@opentelemetry/sdk-node": "^0.53.0",
+    "@opentelemetry/sdk-trace-base": "^1.26.0",
+    "@opentelemetry/sdk-trace-node": "^1.26.0",
+    "@opentelemetry/semantic-conventions": "^1.27.0",
+    "shared": "workspace:*",
+    "dotenv": "^16.6.1",
+    "express": "^4.18.2",
+    "vite": "npm:rolldown-vite@7.1.14",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^5.0.4"
+  },
+  "overrides": {
+    "vite": "npm:rolldown-vite@7.1.14"
+  },
+  "module": "./dist/index.js",
+  "publishConfig": {
+    "exports": {
+      ".": "./dist/index.js",
+      "./package.json": "./package.json"
+    }
+  }
+}
