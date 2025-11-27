@@ -8,8 +8,8 @@ export const inMemoryStorageDefaults = {
 export const lakebaseStorageDefaults = {
   /** Table name for the cache */
   tableName: "appkit_cache_entries",
-  /** Maximum number of entries in the cache */
-  maxSize: 5000,
+  /** Maximum number of bytes in the cache */
+  maxBytes: 256 * 1024 * 1024, // 256MB
   /** Number of entries to evict when cache is full */
   evictionBatchSize: 100,
 };

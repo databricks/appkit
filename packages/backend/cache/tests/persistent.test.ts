@@ -18,7 +18,10 @@ describe("PersistentStorage", () => {
     // Default: migrations succeed
     mockConnector.query.mockResolvedValue({ rows: [] });
 
-    storage = new PersistentStorage({ maxSize: 100 }, mockConnector as any);
+    storage = new PersistentStorage(
+      { maxBytes: 1024 * 1024 }, // 1MB
+      mockConnector as any,
+    );
   });
 
   describe("initialization", () => {
@@ -30,9 +33,9 @@ describe("PersistentStorage", () => {
         expect.stringContaining("CREATE TABLE IF NOT EXISTS"),
       );
 
-      // Should create indexes
+      // Should create unique index on key_hash
       expect(mockConnector.query).toHaveBeenCalledWith(
-        expect.stringContaining("CREATE INDEX IF NOT EXISTS"),
+        expect.stringContaining("CREATE UNIQUE INDEX IF NOT EXISTS"),
       );
     });
 
@@ -68,8 +71,13 @@ describe("PersistentStorage", () => {
 
     test("should return cached entry", async () => {
       const expiry = Date.now() + 10000;
+      const valueBuffer = Buffer.from(
+        JSON.stringify({ data: "test" }),
+        "utf-8",
+      );
+
       mockConnector.query.mockResolvedValueOnce({
-        rows: [{ value: { data: "test" }, expiry: String(expiry) }],
+        rows: [{ value: valueBuffer, expiry: String(expiry) }],
       });
 
       const result = await storage.get("test-key");
@@ -80,7 +88,7 @@ describe("PersistentStorage", () => {
       });
       expect(mockConnector.query).toHaveBeenCalledWith(
         expect.stringContaining("SELECT value, expiry"),
-        ["test-key"],
+        [expect.any(BigInt)], // key_hash is bigint
       );
     });
 
@@ -94,9 +102,14 @@ describe("PersistentStorage", () => {
 
     test("should update last_accessed on get (fire-and-forget)", async () => {
       const expiry = Date.now() + 10000;
+      const valueBuffer = Buffer.from(
+        JSON.stringify({ data: "test" }),
+        "utf-8",
+      );
+
       mockConnector.query
         .mockResolvedValueOnce({
-          rows: [{ value: { data: "test" }, expiry: String(expiry) }],
+          rows: [{ value: valueBuffer, expiry: String(expiry) }],
         })
         .mockResolvedValue({ rows: [] });
 
@@ -107,7 +120,7 @@ describe("PersistentStorage", () => {
 
       expect(mockConnector.query).toHaveBeenCalledWith(
         expect.stringContaining("UPDATE"),
-        expect.arrayContaining([expect.any(Number), "test-key"]),
+        [expect.any(BigInt)], // key_hash
       );
     });
   });
@@ -119,13 +132,9 @@ describe("PersistentStorage", () => {
     });
 
     test("should insert new entry", async () => {
-      // has() returns false
+      // totalBytes() returns 0
       mockConnector.query.mockResolvedValueOnce({
-        rows: [{ exists: false }],
-      });
-      // size() returns 0
-      mockConnector.query.mockResolvedValueOnce({
-        rows: [{ count: "0" }],
+        rows: [{ total: "0" }],
       });
       // INSERT succeeds
       mockConnector.query.mockResolvedValueOnce({ rows: [] });
@@ -137,39 +146,26 @@ describe("PersistentStorage", () => {
 
       expect(mockConnector.query).toHaveBeenCalledWith(
         expect.stringContaining("INSERT INTO"),
-        expect.arrayContaining(["test-key", expect.any(String)]),
+        expect.arrayContaining([
+          expect.any(BigInt), // key_hash
+          expect.any(Buffer), // key
+          expect.any(Buffer), // value
+          expect.any(Number), // byte_size
+          expect.any(Number), // expiry
+        ]),
       );
     });
 
-    test("should update existing entry", async () => {
-      // has() returns true
+    test("should evict when maxBytes exceeded", async () => {
+      // totalBytes() returns maxBytes (triggers eviction)
       mockConnector.query.mockResolvedValueOnce({
-        rows: [{ exists: true }],
+        rows: [{ total: String(1024 * 1024) }], // 1MB (at limit)
       });
-      // INSERT/UPDATE succeeds
-      mockConnector.query.mockResolvedValueOnce({ rows: [] });
-
-      await storage.set("test-key", {
-        value: { data: "updated" },
-        expiry: Date.now() + 10000,
-      });
-
-      expect(mockConnector.query).toHaveBeenCalledWith(
-        expect.stringContaining("ON CONFLICT"),
-        expect.any(Array),
-      );
-    });
-
-    test("should evict LRU when full", async () => {
-      // has() returns false
+      // cleanupExpired returns 0
       mockConnector.query.mockResolvedValueOnce({
-        rows: [{ exists: false }],
+        rows: [{ count: "0" }],
       });
-      // size() returns maxSize (100)
-      mockConnector.query.mockResolvedValueOnce({
-        rows: [{ count: "100" }],
-      });
-      // DELETE (eviction) succeeds
+      // eviction DELETE succeeds
       mockConnector.query.mockResolvedValueOnce({ rows: [] });
       // INSERT succeeds
       mockConnector.query.mockResolvedValueOnce({ rows: [] });
@@ -186,12 +182,9 @@ describe("PersistentStorage", () => {
       );
     });
 
-    test("should serialize value as JSON", async () => {
+    test("should serialize value to Buffer", async () => {
       mockConnector.query.mockResolvedValueOnce({
-        rows: [{ exists: false }],
-      });
-      mockConnector.query.mockResolvedValueOnce({
-        rows: [{ count: "0" }],
+        rows: [{ total: "0" }],
       });
       mockConnector.query.mockResolvedValueOnce({ rows: [] });
 
@@ -205,7 +198,10 @@ describe("PersistentStorage", () => {
         call[0].includes("INSERT"),
       );
 
-      expect(insertCall?.[1]?.[1]).toBe(JSON.stringify(value));
+      // value is at index 2 (key_hash, key, value, ...)
+      const valueBuffer = insertCall?.[1]?.[2] as Buffer;
+      expect(valueBuffer).toBeInstanceOf(Buffer);
+      expect(valueBuffer.toString("utf-8")).toBe(JSON.stringify(value));
     });
   });
 
@@ -215,14 +211,14 @@ describe("PersistentStorage", () => {
       mockConnector.query.mockClear();
     });
 
-    test("should delete entry", async () => {
+    test("should delete entry by key_hash", async () => {
       mockConnector.query.mockResolvedValueOnce({ rows: [] });
 
       await storage.delete("test-key");
 
       expect(mockConnector.query).toHaveBeenCalledWith(
         expect.stringContaining("DELETE FROM"),
-        ["test-key"],
+        [expect.any(BigInt)], // key_hash
       );
     });
   });
@@ -258,6 +254,10 @@ describe("PersistentStorage", () => {
       const result = await storage.has("test-key");
 
       expect(result).toBe(true);
+      expect(mockConnector.query).toHaveBeenCalledWith(
+        expect.stringContaining("SELECT EXISTS"),
+        [expect.any(BigInt)], // key_hash
+      );
     });
 
     test("should return false when key does not exist", async () => {
@@ -309,6 +309,33 @@ describe("PersistentStorage", () => {
       mockConnector.query.mockResolvedValueOnce({ rows: [] });
 
       const result = await storage.size();
+
+      expect(result).toBe(0);
+    });
+  });
+
+  describe("totalBytes", () => {
+    beforeEach(async () => {
+      await storage.initialize();
+      mockConnector.query.mockClear();
+    });
+
+    test("should return sum of byte_size", async () => {
+      mockConnector.query.mockResolvedValueOnce({
+        rows: [{ total: "1048576" }], // 1MB
+      });
+
+      const result = await storage.totalBytes();
+
+      expect(result).toBe(1048576);
+    });
+
+    test("should return 0 when empty", async () => {
+      mockConnector.query.mockResolvedValueOnce({
+        rows: [{ total: "0" }],
+      });
+
+      const result = await storage.totalBytes();
 
       expect(result).toBe(0);
     });
@@ -377,7 +404,7 @@ describe("PersistentStorage", () => {
   describe("auto-initialization", () => {
     test("should auto-initialize on get if not initialized", async () => {
       const uninitializedStorage = new PersistentStorage(
-        { maxSize: 100 },
+        { maxBytes: 1024 * 1024 },
         mockConnector as any,
       );
 
@@ -393,7 +420,7 @@ describe("PersistentStorage", () => {
 
     test("should auto-initialize on set if not initialized", async () => {
       const uninitializedStorage = new PersistentStorage(
-        { maxSize: 100 },
+        { maxBytes: 1024 * 1024 },
         mockConnector as any,
       );
 

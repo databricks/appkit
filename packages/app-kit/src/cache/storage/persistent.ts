@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { LakebaseConnector } from "../../connectors";
 import type { CacheConfig } from "shared";
 import { lakebaseStorageDefaults } from "./defaults";
@@ -20,13 +21,13 @@ import type { CacheEntry, CacheStorage } from "./types";
 export class PersistentStorage implements CacheStorage {
   private readonly connector: LakebaseConnector;
   private readonly tableName: string;
-  private readonly maxSize: number;
+  private readonly maxBytes: number;
   private readonly evictionBatchSize: number;
   private initialized: boolean;
 
   constructor(config: CacheConfig, connector: LakebaseConnector) {
     this.connector = connector;
-    this.maxSize = config.maxSize ?? lakebaseStorageDefaults.maxSize;
+    this.maxBytes = config.maxBytes ?? lakebaseStorageDefaults.maxBytes;
     this.evictionBatchSize = lakebaseStorageDefaults.evictionBatchSize;
     this.tableName = lakebaseStorageDefaults.tableName;
     this.initialized = false;
@@ -53,10 +54,14 @@ export class PersistentStorage implements CacheStorage {
   async get<T>(key: string): Promise<CacheEntry<T> | null> {
     await this.ensureInitialized();
 
-    const result = await this.connector.query<{ value: T; expiry: string }>(
-      `SELECT value, expiry FROM ${this.tableName} WHERE cache_key = $1`,
-      [key],
-    );
+    const keyHash = this.hashKey(key);
+
+    const result = await this.connector.query<{
+      value: Buffer;
+      expiry: string;
+    }>(`SELECT value, expiry FROM ${this.tableName} WHERE key_hash = $1`, [
+      keyHash,
+    ]);
 
     if (result.rows.length === 0) return null;
 
@@ -65,15 +70,15 @@ export class PersistentStorage implements CacheStorage {
     // fire-and-forget update
     this.connector
       .query(
-        `UPDATE ${this.tableName} SET last_accessed = $1 WHERE cache_key = $2`,
-        [Date.now(), key],
+        `UPDATE ${this.tableName} SET last_accessed = NOW() WHERE key_hash = $1`,
+        [keyHash],
       )
       .catch(() => {
         console.debug("Error updating last_accessed time for key:", key);
       });
 
     return {
-      value: entry.value as T,
+      value: this.deserializeValue<T>(entry.value),
       expiry: Number(entry.expiry),
     };
   }
@@ -87,21 +92,23 @@ export class PersistentStorage implements CacheStorage {
   async set<T>(key: string, entry: CacheEntry<T>): Promise<void> {
     await this.ensureInitialized();
 
-    const exists = await this.has(key);
-    if (!exists) {
-      const currentSize = await this.size();
-      if (currentSize >= this.maxSize) {
-        await this.evictLRU();
-      }
+    const keyHash = this.hashKey(key);
+    const keyBytes = Buffer.from(key, "utf-8");
+    const valueBytes = this.serializeValue(entry.value);
+    const byteSize = keyBytes.length + valueBytes.length;
+
+    const totalBytes = await this.totalBytes();
+    if (totalBytes + byteSize > this.maxBytes) {
+      await this.evictBySize(byteSize);
     }
 
     await this.connector.query(
-      `INSERT INTO ${this.tableName} (cache_key, value, expiry, last_accessed)
-      VALUES ($1, $2, $3, $4)
-      ON CONFLICT (cache_key)
-      DO UPDATE SET value = $2, expiry = $3, last_accessed = $4
+      `INSERT INTO ${this.tableName} (key_hash, key, value, byte_size, expiry, created_at, last_accessed)
+      VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+      ON CONFLICT (key_hash)
+      DO UPDATE SET value = $3, byte_size = $4, expiry = $5, last_accessed = NOW()
       `,
-      [key, JSON.stringify(entry.value), entry.expiry, Date.now()],
+      [keyHash, keyBytes, valueBytes, byteSize, entry.expiry],
     );
   }
 
@@ -112,9 +119,10 @@ export class PersistentStorage implements CacheStorage {
    */
   async delete(key: string): Promise<void> {
     await this.ensureInitialized();
+    const keyHash = this.hashKey(key);
     await this.connector.query(
-      `DELETE FROM ${this.tableName} WHERE cache_key = $1`,
-      [key],
+      `DELETE FROM ${this.tableName} WHERE key_hash = $1`,
+      [keyHash],
     );
   }
 
@@ -131,10 +139,11 @@ export class PersistentStorage implements CacheStorage {
    */
   async has(key: string): Promise<boolean> {
     await this.ensureInitialized();
+    const keyHash = this.hashKey(key);
 
     const result = await this.connector.query<{ exists: boolean }>(
-      `SELECT EXISTS(SELECT 1 FROM ${this.tableName} WHERE cache_key = $1) as exists`,
-      [key],
+      `SELECT EXISTS(SELECT 1 FROM ${this.tableName} WHERE key_hash = $1) as exists`,
+      [keyHash],
     );
 
     return result.rows[0]?.exists ?? false;
@@ -151,6 +160,16 @@ export class PersistentStorage implements CacheStorage {
       `SELECT COUNT(*) as count FROM ${this.tableName}`,
     );
     return parseInt(result.rows[0]?.count ?? "0", 10);
+  }
+
+  /** Get the total number of bytes in the persistent storage */
+  async totalBytes(): Promise<number> {
+    await this.ensureInitialized();
+
+    const result = await this.connector.query<{ total: string }>(
+      `SELECT COALESCE(SUM(byte_size), 0) as total FROM ${this.tableName}`,
+    );
+    return parseInt(result.rows[0]?.total ?? "0", 10);
   }
 
   /**
@@ -191,12 +210,19 @@ export class PersistentStorage implements CacheStorage {
     return parseInt(result.rows[0]?.count ?? "0", 10);
   }
 
-  /** Evict the least recently used entries from the persistent storage (batched) */
-  private async evictLRU(): Promise<void> {
+  /** Evict entries from the persistent storage by size */
+  private async evictBySize(requiredBytes: number): Promise<void> {
+    const freedByExpiry = await this.cleanupExpired();
+    if (freedByExpiry > 0) {
+      const currentBytes = await this.totalBytes();
+      if (currentBytes + requiredBytes <= this.maxBytes) {
+        return;
+      }
+    }
+
     await this.connector.query(
-      `DELETE FROM ${this.tableName} WHERE cache_key IN (
-        SELECT cache_key FROM ${this.tableName} ORDER BY last_accessed ASC LIMIT $1
-      )`,
+      `DELETE FROM ${this.tableName} WHERE key_hash IN
+      (SELECT key_hash FROM ${this.tableName} ORDER BY last_accessed ASC LIMIT $1)`,
       [this.evictionBatchSize],
     );
   }
@@ -208,25 +234,58 @@ export class PersistentStorage implements CacheStorage {
     }
   }
 
+  /** Generate a 64-bit hash for the cache key using SHA256 */
+  private hashKey(key: string): bigint {
+    if (!key) throw new Error("Cache key cannot be empty");
+    const hash = createHash("sha256").update(key).digest();
+    return hash.readBigInt64BE(0);
+  }
+
+  /** Serialize a value to a buffer */
+  private serializeValue<T>(value: T): Buffer {
+    return Buffer.from(JSON.stringify(value), "utf-8");
+  }
+
+  /** Deserialize a value from a buffer */
+  private deserializeValue<T>(buffer: Buffer): T {
+    return JSON.parse(buffer.toString("utf-8")) as T;
+  }
+
   /** Run migrations for the persistent storage */
   private async runMigrations(): Promise<void> {
     try {
       await this.connector.query(`
             CREATE TABLE IF NOT EXISTS ${this.tableName} (
-                cache_key VARCHAR(255) PRIMARY KEY,
-                value JSONB NOT NULL,
+                id BIGSERIAL PRIMARY KEY,
+                key_hash BIGINT NOT NULL,
+                key BYTEA NOT NULL,
+                value BYTEA NOT NULL,
+                byte_size INTEGER NOT NULL,
                 expiry BIGINT NOT NULL,
-                last_accessed BIGINT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                last_accessed TIMESTAMP NOT NULL DEFAULT NOW()
             )
             `);
 
-      await this.connector.query(`
-                CREATE INDEX IF NOT EXISTS idx_${this.tableName}_expiry ON ${this.tableName} (expiry);
-            `);
-      await this.connector.query(`
-                CREATE INDEX IF NOT EXISTS idx_${this.tableName}_last_accessed ON ${this.tableName} (last_accessed);
-            `);
+      // unique index on key_hash for fast lookups
+      await this.connector.query(
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_${this.tableName}_key_hash ON ${this.tableName} (key_hash);`,
+      );
+
+      // index on expiry for cleanup queries
+      await this.connector.query(
+        `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_expiry ON ${this.tableName} (expiry); `,
+      );
+
+      // index on last_accessed for LRU eviction
+      await this.connector.query(
+        `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_last_accessed ON ${this.tableName} (last_accessed); `,
+      );
+
+      // index on byte_size for monitoring
+      await this.connector.query(
+        `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_byte_size ON ${this.tableName} (byte_size); `,
+      );
     } catch (error) {
       console.error(
         "Error in running migrations for persistent storage:",

@@ -4,8 +4,8 @@ export interface CacheConfig {
   enabled?: boolean;
   /** Time to live in seconds */
   ttl?: number;
-  /** Maximum number of entries in the cache */
-  maxSize?: number;
+  /** Maximum number of bytes in the cache */
+  maxBytes?: number;
   /** Cache key */
   cacheKey?: (string | number | object)[];
   /** Whether to use persistent cache */
