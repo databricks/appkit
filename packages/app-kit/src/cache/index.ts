@@ -89,6 +89,7 @@ export class CacheManager {
               "cache.key": cacheKey,
               "cache.deduplication": "true",
             });
+            span.end();
             return inFlight;
           }
 

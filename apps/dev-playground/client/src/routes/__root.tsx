@@ -48,6 +48,14 @@ function RootComponent() {
                     Reconnect
                   </Button>
                 </Link>
+                <Link to="/telemetry" className="no-underline">
+                  <Button
+                    variant="ghost"
+                    className="text-gray-700 hover:text-gray-900"
+                  >
+                    Telemetry
+                  </Button>
+                </Link>
               </div>
             </nav>
           </div>
