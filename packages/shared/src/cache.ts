@@ -6,6 +6,8 @@ export interface CacheConfig {
   ttl?: number;
   /** Maximum number of bytes in the cache */
   maxBytes?: number;
+  /** Maximum number of entries in the cache */
+  maxSize?: number;
   /** Cache key */
   cacheKey?: (string | number | object)[];
   /** Whether to use persistent cache */
