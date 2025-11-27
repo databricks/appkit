@@ -36,6 +36,7 @@ export class ServerPlugin extends Plugin {
   private server: HTTPServer | null;
   private devModeManager?: DevModeManager;
   protected declare config: ServerConfig;
+  private serverExtensions: ((app: express.Application) => void)[] = [];
   static phase: PluginPhase = "deferred";
 
   constructor(config: ServerConfig) {
@@ -43,6 +44,7 @@ export class ServerPlugin extends Plugin {
     this.config = config;
     this.serverApplication = express();
     this.server = null;
+    this.serverExtensions = [];
   }
 
   async setup() {
@@ -70,6 +72,9 @@ export class ServerPlugin extends Plugin {
     this.serverApplication.use(await databricksClientMiddleware());
 
     this.extendRoutes();
+    for (const extension of this.serverExtensions) {
+      extension(this.serverApplication);
+    }
 
     const isRemoteDevModeEnabled = this.isRemoteServingEnabled();
     if (isRemoteDevModeEnabled) {
@@ -127,13 +132,34 @@ export class ServerPlugin extends Plugin {
     return this.serverApplication;
   }
 
+  /**
+   * Get the low level node.js http server instance.
+   *
+   * Only use this method if you need to access the server instance for advanced usage like a custom websocket server, etc.
+   *
+   * @throws {Error} If the server is not started or autoStart is true.
+   * @returns {HTTPServer} The server instance.
+   */
+  getServer() {
+    if (this.shouldAutoStart()) {
+      throw new Error("Cannot get server when autoStart is true.");
+    }
+
+    if (!this.server) {
+      throw new Error(
+        "Server not started. Please start the server first by calling the start() method.",
+      );
+    }
+
+    return this.server;
+  }
+
   extend(fn: (app: express.Application) => void) {
     if (this.shouldAutoStart()) {
       throw new Error("Cannot extend server when autoStart is true.");
     }
 
-    fn(this.serverApplication);
-
+    this.serverExtensions.push(fn);
     return this;
   }
 
