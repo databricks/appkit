@@ -15,7 +15,7 @@ const { mockCacheStore, mockCacheInstance } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
 
   const generateKey = (parts: unknown[], userKey: string): string => {
-    const { createHash } = require("crypto");
+    const { createHash } = require("node:crypto");
     const allParts = [userKey, ...parts];
     const serialized = JSON.stringify(allParts);
     return createHash("sha256").update(serialized).digest("hex");
@@ -221,7 +221,7 @@ describe("Analytics Plugin", () => {
         },
         {
           userDatabricksClient: mockUserClient as any,
-          userName: "user-token-123",
+          userId: "user-token-123",
         },
       );
 
@@ -318,7 +318,7 @@ describe("Analytics Plugin", () => {
         async () => {
           await handler(mockReq1, mockRes1);
         },
-        { userName: "user-token-1" },
+        { userId: "user-token-1" },
       );
 
       const mockReq2 = createMockRequest({
@@ -331,7 +331,7 @@ describe("Analytics Plugin", () => {
         async () => {
           await handler(mockReq2, mockRes2);
         },
-        { userName: "user-token-2" },
+        { userId: "user-token-2" },
       );
 
       const mockReq1Again = createMockRequest({
@@ -344,7 +344,7 @@ describe("Analytics Plugin", () => {
         async () => {
           await handler(mockReq1Again, mockRes1Again);
         },
-        { userName: "user-token-1" },
+        { userId: "user-token-1" },
       );
 
       expect(executeMock).toHaveBeenCalledTimes(2);

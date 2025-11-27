@@ -72,7 +72,7 @@ class MockCacheManager {
   }
 
   generateKey(parts: (string | number | object)[], userKey: string): string {
-    const { createHash } = require("crypto");
+    const { createHash } = require("node:crypto");
     const allParts = [userKey, ...parts];
     const serialized = JSON.stringify(allParts);
     return createHash("sha256").update(serialized).digest("hex");
@@ -97,7 +97,9 @@ describe("CacheInterceptor", () => {
       cacheKey: ["test"],
     };
     const interceptor = new CacheInterceptor(
-      cacheManager as unknown as Parameters<typeof CacheInterceptor>[0],
+      cacheManager as unknown as ConstructorParameters<
+        typeof CacheInterceptor
+      >[0],
       config,
     );
     const fn = vi.fn().mockResolvedValue("result");
@@ -114,7 +116,9 @@ describe("CacheInterceptor", () => {
       cacheKey: [],
     };
     const interceptor = new CacheInterceptor(
-      cacheManager as unknown as Parameters<typeof CacheInterceptor>[0],
+      cacheManager as unknown as ConstructorParameters<
+        typeof CacheInterceptor
+      >[0],
       config,
     );
     const fn = vi.fn().mockResolvedValue("result");
@@ -131,7 +135,9 @@ describe("CacheInterceptor", () => {
       cacheKey: ["test", "key"],
     };
     const interceptor = new CacheInterceptor(
-      cacheManager as unknown as Parameters<typeof CacheInterceptor>[0],
+      cacheManager as unknown as ConstructorParameters<
+        typeof CacheInterceptor
+      >[0],
       config,
     );
 
@@ -154,7 +160,9 @@ describe("CacheInterceptor", () => {
       ttl: 3600,
     };
     const interceptor = new CacheInterceptor(
-      cacheManager as unknown as Parameters<typeof CacheInterceptor>[0],
+      cacheManager as unknown as ConstructorParameters<
+        typeof CacheInterceptor
+      >[0],
       config,
     );
     const fn = vi.fn().mockResolvedValue("fresh-result");
@@ -180,7 +188,9 @@ describe("CacheInterceptor", () => {
       userKey: "user1",
     };
     const interceptor = new CacheInterceptor(
-      cacheManager as unknown as Parameters<typeof CacheInterceptor>[0],
+      cacheManager as unknown as ConstructorParameters<
+        typeof CacheInterceptor
+      >[0],
       config,
     );
     const fn = vi.fn().mockResolvedValue("user-result");
@@ -199,7 +209,9 @@ describe("CacheInterceptor", () => {
       cacheKey: ["query", "profile"],
     };
     const interceptor = new CacheInterceptor(
-      cacheManager as unknown as Parameters<typeof CacheInterceptor>[0],
+      cacheManager as unknown as ConstructorParameters<
+        typeof CacheInterceptor
+      >[0],
       config,
     );
 
@@ -237,7 +249,9 @@ describe("CacheInterceptor", () => {
       ttl: 1, // 1 second
     };
     const interceptor = new CacheInterceptor(
-      cacheManager as unknown as Parameters<typeof CacheInterceptor>[0],
+      cacheManager as unknown as ConstructorParameters<
+        typeof CacheInterceptor
+      >[0],
       config,
     );
     const fn = vi.fn().mockResolvedValue("result");
