@@ -44,7 +44,7 @@ const { mockCacheStore, mockCacheInstance } = vi.hoisted(() => {
   return { mockCacheStore: store, mockCacheInstance: instance };
 });
 
-vi.mock("@databricks-apps/cache", () => ({
+vi.mock("../../cache", () => ({
   CacheManager: {
     getInstanceSync: vi.fn(() => mockCacheInstance),
   },

@@ -1,6 +1,3 @@
-import { TelemetryManager, type TelemetryProvider } from "../../telemetry";
-import { createMockTelemetry } from "@tools/test-helpers";
-import { CacheManager } from "../../cache";
 import type { CacheConfig } from "shared";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { CacheInterceptor } from "../interceptors/cache";
@@ -265,30 +262,5 @@ describe("CacheInterceptor", () => {
     await interceptor.intercept(fn, context);
 
     expect(fn).toHaveBeenCalledTimes(2);
-  });
-
-  test("should work correctly with telemetry enabled", async () => {
-    // Create telemetry with traces enabled
-    const mockTelemetryWithTraces = createMockTelemetry();
-    vi.mocked(TelemetryManager.getProvider).mockReturnValue(
-      mockTelemetryWithTraces as TelemetryProvider,
-    );
-
-    const telemetryProvider =
-      TelemetryManager.getProvider("cache-test-enabled");
-    const cacheManagerWithTelemetry = new CacheManager({}, telemetryProvider);
-
-    const config: CacheConfig = {
-      enabled: true,
-      cacheKey: ["telemetry-test"],
-    };
-    const interceptor = new CacheInterceptor(cacheManagerWithTelemetry, config);
-    const fn = vi.fn().mockResolvedValue("result");
-
-    const result = await interceptor.intercept(fn, context);
-
-    // Verify the cache works correctly with telemetry
-    expect(result).toBe("result");
-    expect(fn).toHaveBeenCalledTimes(1);
   });
 });

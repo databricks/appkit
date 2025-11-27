@@ -1,43 +1,64 @@
+import { createHash } from "node:crypto";
+import { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { CacheConfig } from "shared";
-import type { ITelemetry } from "../telemetry";
-import { type Counter, SpanStatusCode } from "../telemetry";
+import { LakebaseConnector } from "../connectors";
+import type { Counter, ITelemetry } from "../telemetry";
+import { SpanStatusCode, TelemetryManager } from "../telemetry";
+import { deepMerge } from "../utils";
+import { cacheDefaults } from "./defaults";
+import {
+  type CacheStorage,
+  InMemoryStorage,
+  PersistentStorage,
+} from "./storage";
 
-export interface CacheEntry<T = any> {
-  value: T;
-  expiry: number;
-}
+export type { CacheEntry, CacheStorage } from "./storage";
 
+/**
+ * Cache manager class to handle cache operations.
+ * Can be used with in-memory storage or persistent storage (Lakebase).
+ *
+ * The cache is automatically initialized by AppKit. Use `getInstanceSync()` to access
+ * the singleton instance after initialization.
+ *
+ * @example
+ * ```typescript
+ * const cache = CacheManager.getInstanceSync();
+ * const result = await cache.getOrExecute(["users", userId], () => fetchUser(userId), userKey);
+ * ```
+ */
 export class CacheManager {
-  private static readonly TELEMETRY_INSTRUMENT_CONFIG = {
-    name: "cache-manager",
-    includePrefix: true,
-  };
-  private static readonly DEFAULT_ENABLED = true;
-  private static readonly DEFAULT_TTL = 3600; // 1 hour
-  private static readonly DEFAULT_MAX_SIZE = 1000; // default max 1000 entries
+  private static readonly CLEANUP_PROBABILITY = 0.01;
+  private static readonly NAME: string = "cache-manager";
+  private static instance: CacheManager | null = null;
+  private static initPromise: Promise<CacheManager> | null = null;
 
-  private cache = new Map<string, CacheEntry>();
-  private accessOrder = new Map<string, number>();
-  private accessCounter = 0;
-  private config: Required<CacheConfig>;
-  private inFlightRequests = new Map<string, Promise<any>>();
+  private storage: CacheStorage;
+  private config: CacheConfig;
+  private inFlightRequests: Map<string, Promise<unknown>>;
+  private cleanupInProgress: boolean;
+
+  // Telemetry
   private telemetry: ITelemetry;
-
-  // Create metrics once at class level
   private cacheHitCounter: Counter;
   private cacheMissCounter: Counter;
 
-  constructor(config: CacheConfig = {}, telemetry: ITelemetry) {
-    this.config = {
-      enabled: config.enabled ?? CacheManager.DEFAULT_ENABLED,
-      ttl: config.ttl ?? CacheManager.DEFAULT_TTL,
-      maxSize: config.maxSize ?? CacheManager.DEFAULT_MAX_SIZE,
-      cacheKey: config.cacheKey ?? [],
-    };
+  private constructor(
+    storage: CacheStorage,
+    config: CacheConfig,
+    telemetry: ITelemetry,
+  ) {
+    this.storage = storage;
+    this.config = config;
+    this.inFlightRequests = new Map();
+    this.cleanupInProgress = false;
+
     this.telemetry = telemetry;
-    const meter = this.telemetry.getMeter(
-      CacheManager.TELEMETRY_INSTRUMENT_CONFIG,
-    );
+    const meter = this.telemetry.getMeter({
+      name: CacheManager.NAME,
+      includePrefix: true,
+    });
+
     this.cacheHitCounter = meter.createCounter("cache.hit", {
       description: "Total number of cache hits",
       unit: "1",
@@ -48,13 +69,109 @@ export class CacheManager {
     });
   }
 
-  // Get or execute a function and cache the result
+  /**
+   * Get the singleton instance of the cache manager (sync version).
+   * Throws if not initialized - ensure AppKit.create() has completed first.
+   * @returns CacheManager instance
+   */
+  static getInstanceSync(): CacheManager {
+    if (!CacheManager.instance) {
+      throw new Error(
+        "CacheManager not initialized. Ensure AppKit.create() has completed before accessing the cache.",
+      );
+    }
+
+    return CacheManager.instance;
+  }
+
+  /**
+   * Initialize and get the singleton instance of the cache manager.
+   * Called internally by AppKit - prefer `getInstanceSync()` for plugin access.
+   * @param userConfig - User configuration for the cache manager
+   * @returns CacheManager instance
+   * @internal
+   */
+  static async getInstance(
+    userConfig?: Partial<CacheConfig>,
+  ): Promise<CacheManager> {
+    if (CacheManager.instance) {
+      return CacheManager.instance;
+    }
+
+    if (!CacheManager.initPromise) {
+      CacheManager.initPromise = CacheManager.create(userConfig).then(
+        (instance) => {
+          CacheManager.instance = instance;
+          return instance;
+        },
+      );
+    }
+
+    return CacheManager.initPromise;
+  }
+
+  /**
+   * Create a new cache manager instance
+   * @param userConfig - User configuration for the cache manager
+   * @returns CacheManager instance
+   */
+  private static async create(
+    userConfig?: Partial<CacheConfig>,
+  ): Promise<CacheManager> {
+    const config = deepMerge(cacheDefaults, userConfig);
+    const telemetry = TelemetryManager.getProvider(CacheManager.NAME);
+
+    if (!config.persistentCache) {
+      return new CacheManager(new InMemoryStorage(config), config, telemetry);
+    }
+
+    try {
+      const workspaceClient = new WorkspaceClient({});
+      const connector = new LakebaseConnector({ workspaceClient });
+      const isHealthy = await connector.healthCheck();
+
+      if (isHealthy) {
+        const persistentStorage = new PersistentStorage(config, connector);
+        await persistentStorage.initialize();
+        return new CacheManager(persistentStorage, config, telemetry);
+      }
+    } catch (error) {
+      console.warn("[Cache] Persistent storage unavailable:", error);
+    }
+
+    // if strict persistence is enabled, do not fallback to in-memory storage
+    if (config.strictPersistence) {
+      console.warn(
+        "[Cache] strictPersistence enabled but persistent storage unavailable. Cache disabled.",
+      );
+      const disabledConfig = { ...config, enabled: false };
+      return new CacheManager(
+        new InMemoryStorage(disabledConfig),
+        disabledConfig,
+        telemetry,
+      );
+    }
+
+    console.warn("[Cache] Falling back to in-memory cache.");
+    return new CacheManager(new InMemoryStorage(config), config, telemetry);
+  }
+
+  /**
+   * Get or execute a function and cache the result
+   * @param key - Cache key
+   * @param fn - Function to execute
+   * @param userKey - User key
+   * @param options - Options for the cache
+   * @returns Promise of the result
+   */
   async getOrExecute<T>(
     key: (string | number | object)[],
     fn: () => Promise<T>,
     userKey: string,
     options?: { ttl?: number },
   ): Promise<T> {
+    if (!this.config.enabled) return fn();
+
     const cacheKey = this.generateKey(key, userKey);
 
     return this.telemetry.startActiveSpan(
@@ -63,17 +180,18 @@ export class CacheManager {
         attributes: {
           "cache.key": cacheKey,
           "cache.enabled": this.config.enabled,
+          "cache.persistent": this.storage.isPersistent(),
         },
       },
       async (span) => {
         try {
           // Check cache first
-          const cached = this.get<T>(cacheKey);
-          if (cached) {
+          const cached = await this.storage.get<T>(cacheKey);
+          if (cached !== null) {
             span.setAttribute("cache.hit", true);
             span.setStatus({ code: SpanStatusCode.OK });
             this.cacheHitCounter.add(1, { "cache.key": cacheKey });
-            return cached;
+            return cached.value as T;
           }
 
           // Check in-flight requests for deduplication
@@ -90,7 +208,7 @@ export class CacheManager {
               "cache.deduplication": "true",
             });
             span.end();
-            return inFlight;
+            return inFlight as Promise<T>;
           }
 
           // Cache miss - execute function
@@ -99,11 +217,11 @@ export class CacheManager {
           this.cacheMissCounter.add(1, { "cache.key": cacheKey });
 
           const promise = fn()
-            .then((result) => {
-              this.set(cacheKey, result, options);
+            .then(async (result) => {
+              await this.set(cacheKey, result, options);
               span.addEvent("cache.value_stored", {
                 "cache.key": cacheKey,
-                "cache.ttl": options?.ttl ?? this.config.ttl,
+                "cache.ttl": options?.ttl ?? this.config.ttl ?? 3600,
               });
               return result;
             })
@@ -129,84 +247,123 @@ export class CacheManager {
           span.end();
         }
       },
-      CacheManager.TELEMETRY_INSTRUMENT_CONFIG,
+      { name: CacheManager.NAME, includePrefix: true },
     );
   }
 
-  get<T>(key: string): T | null {
+  /**
+   * Get a cached value
+   * @param key - Cache key
+   * @returns Promise of the value or null if not found or expired
+   */
+  async get<T>(key: string): Promise<T | null> {
     if (!this.config.enabled) return null;
 
-    const entry = this.cache.get(key);
+    // probabilistic cleanup trigger
+    this.maybeCleanup();
+
+    const entry = await this.storage.get<T>(key);
     if (!entry) return null;
 
     if (Date.now() > entry.expiry) {
-      this.cache.delete(key);
-      this.accessOrder.delete(key);
+      await this.storage.delete(key);
       return null;
     }
-
-    // Update access order for LRU
-    this.accessOrder.set(key, ++this.accessCounter);
     return entry.value as T;
   }
 
-  set<T>(key: string, value: T, options?: { ttl?: number }): void {
+  /** Probabilistically trigger cleanup of expired entries (fire-and-forget) */
+  private maybeCleanup(): void {
+    if (this.cleanupInProgress) return;
+    if (!this.storage.isPersistent()) return;
+    if (Math.random() > CacheManager.CLEANUP_PROBABILITY) return;
+
+    this.cleanupInProgress = true;
+    (this.storage as PersistentStorage)
+      .cleanupExpired()
+      .catch((error) => {
+        console.debug("Error cleaning up expired entries:", error);
+      })
+      .finally(() => {
+        this.cleanupInProgress = false;
+      });
+  }
+
+  /**
+   * Set a value in the cache
+   * @param key - Cache key
+   * @param value - Value to set
+   * @param options - Options for the cache
+   * @returns Promise of the result
+   */
+  async set<T>(
+    key: string,
+    value: T,
+    options?: { ttl?: number },
+  ): Promise<void> {
     if (!this.config.enabled) return;
 
-    if (this.cache.size >= this.config.maxSize && !this.cache.has(key)) {
-      this.evictLRU();
-    }
-
-    const expiryTime = Date.now() + (options?.ttl ?? this.config.ttl) * 1000;
-    this.cache.set(key, { value, expiry: expiryTime });
-    this.accessOrder.set(key, ++this.accessCounter);
+    const ttl = options?.ttl ?? this.config.ttl ?? 3600;
+    const expiryTime = Date.now() + ttl * 1000;
+    await this.storage.set(key, { value, expiry: expiryTime });
   }
 
-  delete(key: string): void {
-    this.cache.delete(key);
-    this.accessOrder.delete(key);
+  /**
+   * Delete a value from the cache
+   * @param key - Cache key
+   * @returns Promise of the result
+   */
+  async delete(key: string): Promise<void> {
+    if (!this.config.enabled) return;
+    await this.storage.delete(key);
   }
 
-  clear(): void {
-    this.cache.clear();
-    this.accessOrder.clear();
-    this.accessCounter = 0;
+  /** Clear the cache */
+  async clear(): Promise<void> {
+    await this.storage.clear();
     this.inFlightRequests.clear();
   }
 
-  has(key: string): boolean {
+  /**
+   * Check if a value exists in the cache
+   * @param key - Cache key
+   * @returns Promise of true if the value exists, false otherwise
+   */
+  async has(key: string): Promise<boolean> {
     if (!this.config.enabled) return false;
-    const entry = this.cache.get(key);
+
+    const entry = await this.storage.get(key);
     if (!entry) return false;
 
     if (Date.now() > entry.expiry) {
-      this.cache.delete(key);
-      this.accessOrder.delete(key);
+      await this.storage.delete(key);
       return false;
     }
     return true;
   }
 
+  /**
+   * Generate a cache key
+   * @param parts - Parts of the key
+   * @param userKey - User key
+   * @returns Cache key
+   */
   generateKey(parts: (string | number | object)[], userKey: string): string {
-    parts = [userKey, ...parts];
-    return parts.map((p) => JSON.stringify(p)).join(":");
+    const allParts = [userKey, ...parts];
+    const serialized = JSON.stringify(allParts);
+    return createHash("sha256").update(serialized).digest("hex");
   }
 
-  // Evict the least recently used entry (LRU)
-  private evictLRU(): void {
-    let oldestKey: string | null = null;
-    let oldestAccess = Infinity;
+  /** Close the cache */
+  async close(): Promise<void> {
+    await this.storage.close();
+  }
 
-    for (const [key, accessTime] of this.accessOrder) {
-      if (accessTime < oldestAccess) {
-        oldestAccess = accessTime;
-        oldestKey = key;
-      }
-    }
-
-    if (oldestKey) {
-      this.cache.delete(oldestKey);
-      this.accessOrder.delete(oldestKey);
-    }
+  /**
+   * Check if the storage is healthy
+   * @returns Promise of true if the storage is healthy, false otherwise
+   */
+  async isStorageHealthy(): Promise<boolean> {
+    return this.storage.healthCheck();
   }
 }
