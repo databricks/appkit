@@ -1,6 +1,50 @@
+import type { ITelemetry } from "@databricks-apps/telemetry";
 import type { IAppRouter } from "@databricks-apps/types";
-import { vi } from "vitest";
 import type { RequestContext } from "@databricks-apps/utils";
+import { vi } from "vitest";
+
+/**
+ * Creates a mock telemetry provider for testing
+ */
+export function createMockTelemetry(): ITelemetry {
+  const mockSpan = {
+    end: vi.fn(),
+    setAttribute: vi.fn(),
+    setAttributes: vi.fn(),
+    setStatus: vi.fn(),
+    recordException: vi.fn(),
+    updateName: vi.fn(),
+    addEvent: vi.fn(),
+    isRecording: vi.fn().mockReturnValue(false),
+    spanContext: vi.fn(),
+  };
+
+  return {
+    getTracer: vi.fn().mockReturnValue({
+      startActiveSpan: vi.fn().mockImplementation((...args: any[]) => {
+        const fn = args[args.length - 1];
+        if (typeof fn === "function") {
+          return fn(mockSpan);
+        }
+        return undefined;
+      }),
+    }),
+    getMeter: vi.fn().mockReturnValue({
+      createCounter: vi.fn().mockReturnValue({ add: vi.fn() }),
+      createHistogram: vi.fn().mockReturnValue({ record: vi.fn() }),
+    }),
+    getLogger: vi.fn().mockReturnValue({
+      emit: vi.fn(),
+    }),
+    emit: vi.fn(),
+    startActiveSpan: vi
+      .fn()
+      .mockImplementation(async (_name: string, _options: any, fn: any) => {
+        return await fn(mockSpan);
+      }),
+    registerInstrumentations: vi.fn(),
+  };
+}
 
 /**
  * Creates a mock Express router with route handler capturing

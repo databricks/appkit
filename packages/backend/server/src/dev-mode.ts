@@ -1,13 +1,13 @@
-import type { TunnelConnection } from "@databricks-apps/types";
-import type express from "express";
-import { generateTunnelIdFromEmail, getQueries, parseCookies } from "./utils";
-import path from "node:path";
-import fs from "node:fs";
 import { randomUUID } from "node:crypto";
-import { fileURLToPath } from "node:url";
-import { WebSocketServer } from "ws";
+import fs from "node:fs";
 import type { Server as HTTPServer } from "node:http";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import type { TunnelConnection } from "@databricks-apps/types";
 import { mergeConfigDedup } from "@databricks-apps/utils";
+import type express from "express";
+import { WebSocketServer } from "ws";
+import { generateTunnelIdFromEmail, getQueries, parseCookies } from "./utils";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

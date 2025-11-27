@@ -49,14 +49,6 @@ function AnalyticsRoute() {
     };
   }, [queryParams]);
 
-  const topContributorsParams = useMemo(() => {
-    return {
-      startDate: queryParams.startDate,
-      endDate: queryParams.endDate,
-      aggregationLevel: queryParams.aggregationLevel,
-    };
-  }, [queryParams]);
-
   const {
     data: summaryDataRaw,
     loading: summaryLoading,

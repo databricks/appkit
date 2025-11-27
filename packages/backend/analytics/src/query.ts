@@ -1,6 +1,6 @@
-import { getRequestContext } from "@databricks-apps/utils";
-import type { sql } from "@databricks/sdk-experimental";
 import { createHash } from "node:crypto";
+import type { sql } from "@databricks/sdk-experimental";
+import { getRequestContext } from "@databricks-apps/utils";
 
 export class QueryProcessor {
   async processQueryParams(

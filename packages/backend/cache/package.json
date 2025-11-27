@@ -10,6 +10,7 @@
     "typecheck": "tsc -p ./tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@databricks-apps/telemetry": "workspace:*",
     "@databricks-apps/types": "workspace:*"
   }
 }

@@ -1,3 +1,4 @@
+import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import { SQLWarehouseConnector } from "@databricks-apps/connectors";
 import { Plugin, toPlugin } from "@databricks-apps/plugin";
 import type {
@@ -5,12 +6,11 @@ import type {
   PluginExecuteConfig,
   StreamExecutionSettings,
 } from "@databricks-apps/types";
+import type { Request, Response } from "@databricks-apps/utils";
+import { getRequestContext } from "@databricks-apps/utils";
 import { queryDefaults } from "./defaults";
 import { QueryProcessor } from "./query";
 import type { IAnalyticsConfig, IAnalyticsQueryRequest } from "./types";
-import type { Request, Response } from "@databricks-apps/utils";
-import { getRequestContext } from "@databricks-apps/utils";
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
 
 export class AnalyticsPlugin extends Plugin {
   name = "analytics";
@@ -30,6 +30,7 @@ export class AnalyticsPlugin extends Plugin {
 
     this.SQLClient = new SQLWarehouseConnector({
       timeout: config.timeout,
+      telemetry: this.telemetry,
     });
   }
 
@@ -134,22 +135,17 @@ export class AnalyticsPlugin extends Plugin {
       workspaceClient = requestContext.serviceDatabricksClient;
     }
 
-    try {
-      const response = await this.SQLClient.executeStatement(
-        workspaceClient,
-        {
-          statement,
-          warehouse_id: await requestContext.warehouseId,
-          parameters: sqlParameters,
-        },
-        signal,
-      );
+    const response = await this.SQLClient.executeStatement(
+      workspaceClient,
+      {
+        statement,
+        warehouse_id: await requestContext.warehouseId,
+        parameters: sqlParameters,
+      },
+      signal,
+    );
 
-      return response.result;
-    } catch (error) {
-      console.error(error);
-      throw new Error("Query execution failed");
-    }
+    return response.result;
   }
 
   async shutdown(): Promise<void> {

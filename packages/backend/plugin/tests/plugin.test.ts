@@ -1,12 +1,15 @@
 import { AppManager } from "@databricks-apps/app";
 import { CacheManager } from "@databricks-apps/cache";
 import { StreamManager } from "@databricks-apps/stream";
+import type { ITelemetry } from "@databricks-apps/telemetry";
+import { TelemetryManager } from "@databricks-apps/telemetry";
 import type {
   BasePluginConfig,
   ExecuteOptions,
   IAppResponse,
 } from "@databricks-apps/types";
 import { validateEnv } from "@databricks-apps/utils";
+import { createMockTelemetry } from "@tools/test-helpers";
 import type express from "express";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { ExecutionContext } from "../src/interceptors/types";
@@ -16,6 +19,17 @@ import { Plugin } from "../src/plugin";
 vi.mock("@databricks-apps/app");
 vi.mock("@databricks-apps/cache");
 vi.mock("@databricks-apps/stream");
+vi.mock("@databricks-apps/telemetry", () => ({
+  TelemetryManager: {
+    getProvider: vi.fn(),
+  },
+  normalizeTelemetryOptions: vi.fn((config) => {
+    if (typeof config === "boolean") {
+      return { traces: config, metrics: config, logs: config };
+    }
+    return config || { traces: true, metrics: true, logs: true };
+  }),
+}));
 vi.mock("@databricks-apps/utils", () => ({
   validateEnv: vi.fn(),
   deepMerge: vi.fn((a, b) => {
@@ -54,6 +68,12 @@ vi.mock("../src/interceptors/retry", () => ({
 
 vi.mock("../src/interceptors/timeout", () => ({
   TimeoutInterceptor: vi.fn().mockImplementation((_timeout) => ({
+    intercept: vi.fn().mockImplementation((fn, _context) => fn()),
+  })),
+}));
+
+vi.mock("../src/interceptors/telemetry", () => ({
+  TelemetryInterceptor: vi.fn().mockImplementation((_telemetry, _config) => ({
     intercept: vi.fn().mockImplementation((fn, _context) => fn()),
   })),
 }));
@@ -98,6 +118,7 @@ class PluginWithRoutes extends TestPlugin {
 }
 
 describe("Plugin", () => {
+  let mockTelemetry: ITelemetry;
   let mockCache: CacheManager;
   let mockApp: AppManager;
   let mockStreamManager: StreamManager;
@@ -106,7 +127,8 @@ describe("Plugin", () => {
   beforeEach(() => {
     vi.useFakeTimers();
 
-    // Setup mocks
+    mockTelemetry = createMockTelemetry();
+
     mockCache = {
       get: vi.fn(),
       set: vi.fn(),
@@ -133,6 +155,7 @@ describe("Plugin", () => {
     vi.mocked(CacheManager).mockImplementation(() => mockCache);
     vi.mocked(AppManager).mockImplementation(() => mockApp);
     vi.mocked(StreamManager).mockImplementation(() => mockStreamManager);
+    vi.mocked(TelemetryManager.getProvider).mockReturnValue(mockTelemetry);
     vi.mocked(validateEnv).mockImplementation(() => {});
 
     vi.clearAllMocks();
@@ -361,15 +384,22 @@ describe("Plugin", () => {
 
       const interceptors = plugin._buildInterceptors(options);
 
-      expect(interceptors).toHaveLength(3);
+      expect(interceptors).toHaveLength(4); // telemetry + timeout + retry + cache
 
       // Import interceptor classes dynamically to avoid module resolution issues
+      const { TelemetryInterceptor } = await import(
+        "../src/interceptors/telemetry"
+      );
       const { TimeoutInterceptor } = await import(
         "../src/interceptors/timeout"
       );
       const { RetryInterceptor } = await import("../src/interceptors/retry");
       const { CacheInterceptor } = await import("../src/interceptors/cache");
 
+      expect(TelemetryInterceptor).toHaveBeenCalledWith(
+        mockTelemetry,
+        options.telemetryInterceptor,
+      );
       expect(TimeoutInterceptor).toHaveBeenCalledWith(5000);
       expect(RetryInterceptor).toHaveBeenCalledWith({
         enabled: true,
@@ -382,7 +412,8 @@ describe("Plugin", () => {
     });
 
     test("should skip disabled interceptors", () => {
-      const plugin = new TestPlugin(config);
+      const configWithoutTelemetry = { ...config, telemetry: false };
+      const plugin = new TestPlugin(configWithoutTelemetry);
 
       const options: ExecuteOptions = {
         timeout: 0, // disabled
@@ -396,7 +427,8 @@ describe("Plugin", () => {
     });
 
     test("should skip timeout interceptor when timeout is 0 or negative", () => {
-      const plugin = new TestPlugin(config);
+      const configWithoutTelemetry = { ...config, telemetry: false };
+      const plugin = new TestPlugin(configWithoutTelemetry);
 
       const options1: ExecuteOptions = { timeout: 0 };
       const options2: ExecuteOptions = { timeout: -100 };
@@ -409,7 +441,8 @@ describe("Plugin", () => {
     });
 
     test("should skip retry interceptor when attempts <= 1", () => {
-      const plugin = new TestPlugin(config);
+      const configWithoutTelemetry = { ...config, telemetry: false };
+      const plugin = new TestPlugin(configWithoutTelemetry);
 
       const options: ExecuteOptions = {
         retry: { enabled: true, attempts: 1 },
@@ -421,7 +454,11 @@ describe("Plugin", () => {
     });
 
     test("should skip cache interceptor when cacheKey is empty", () => {
-      const plugin = new TestPlugin(config);
+      const configWithoutTelemetry = {
+        ...config,
+        telemetry: false,
+      };
+      const plugin = new TestPlugin(configWithoutTelemetry);
 
       const options: ExecuteOptions = {
         cache: { enabled: true, cacheKey: [] },

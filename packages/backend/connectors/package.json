@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@databricks-apps/types": "workspace:*",
-    "@databricks/sdk-experimental": "^0.14.2"
+    "@databricks/sdk-experimental": "^0.14.2",
+    "@databricks-apps/telemetry": "workspace:*"
   }
 }

@@ -97,8 +97,8 @@ class OpenWeatherPlugin extends Plugin {
   private apiKey: string;
   private url: string;
 
-  constructor(config: any, auth: AuthManager) {
-    super(config, auth);
+  constructor(config: any, auth: IAuthManager, telemetry: ITelemetryManager) {
+    super(config, auth, telemetry);
 
     this.apiKey = process.env.OPEN_WEATHER_API_KEY!;
     this.url = process.env.OPEN_WEATHER_URL || "https://api.openweathermap.org/data/3.0/onecall";

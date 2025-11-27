@@ -1,3 +1,5 @@
+import type { TelemetryConfig } from "@databricks-apps/telemetry";
+import { TelemetryManager } from "@databricks-apps/telemetry";
 import type {
   BasePlugin,
   InputPluginMap,
@@ -55,13 +57,14 @@ export class AppKit<TPlugins extends InputPluginMap> {
     extraData?: Record<string, unknown>,
   ) {
     const { plugin: Plugin, config: pluginConfig } = pluginData;
-    const pluginInstance = new Plugin({
+    const baseConfig = {
       ...config,
       ...Plugin.DEFAULT_CONFIG,
       ...pluginConfig,
       name,
       ...extraData,
-    });
+    };
+    const pluginInstance = new Plugin(baseConfig);
 
     this.pluginInstances[name] = pluginInstance;
 
@@ -79,7 +82,11 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
   static async _createApp<
     T extends PluginData<PluginConstructor, unknown, string>[],
-  >(config: { plugins?: T } = {}): Promise<PluginMap<T>> {
+  >(
+    config: { plugins?: T; telemetry?: TelemetryConfig } = {},
+  ): Promise<PluginMap<T>> {
+    TelemetryManager.initialize(config.telemetry);
+
     const rawPlugins = config.plugins as T;
     const preparedPlugins = AppKit.preparePlugins(rawPlugins);
     const mergedConfig = {

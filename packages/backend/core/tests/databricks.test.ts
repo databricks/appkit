@@ -1,8 +1,7 @@
 import type { BasePlugin } from "@databricks-apps/types";
 import { setupDatabricksEnv } from "@tools/test-helpers";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { createApp } from "../src/app-kit";
-import { AppKit } from "../src/app-kit";
+import { AppKit, createApp } from "../src/app-kit";
 
 // Mock environment validation
 vi.mock("@databricks-apps/utils", () => ({

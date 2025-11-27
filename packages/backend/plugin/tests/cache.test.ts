@@ -1,15 +1,30 @@
 import { CacheManager } from "@databricks-apps/cache";
+import { TelemetryManager } from "@databricks-apps/telemetry";
 import type { CacheConfig } from "@databricks-apps/types";
+import { createMockTelemetry } from "@tools/test-helpers";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { CacheInterceptor } from "../src/interceptors/cache";
 import type { ExecutionContext } from "../src/interceptors/types";
+
+vi.mock("@databricks-apps/telemetry", () => ({
+  TelemetryManager: {
+    getProvider: vi.fn(),
+  },
+  SpanStatusCode: {
+    OK: 1,
+    ERROR: 2,
+  },
+}));
 
 describe("CacheInterceptor", () => {
   let cacheManager: CacheManager;
   let context: ExecutionContext;
 
   beforeEach(() => {
-    cacheManager = new CacheManager();
+    const mockTelemetry = createMockTelemetry();
+    vi.mocked(TelemetryManager.getProvider).mockReturnValue(mockTelemetry);
+    const telemetry = TelemetryManager.getProvider("cache-test", false);
+    cacheManager = new CacheManager({}, telemetry);
     context = {
       metadata: new Map(),
       userKey: "service",
@@ -155,5 +170,32 @@ describe("CacheInterceptor", () => {
     await interceptor.intercept(fn, context);
 
     expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  test("should work correctly with telemetry enabled", async () => {
+    // Create telemetry with traces enabled
+    const mockTelemetryWithTraces = createMockTelemetry();
+    vi.mocked(TelemetryManager.getProvider).mockReturnValue(
+      mockTelemetryWithTraces,
+    );
+
+    const telemetryProvider = TelemetryManager.getProvider(
+      "cache-test-enabled",
+      true,
+    );
+    const cacheManagerWithTelemetry = new CacheManager({}, telemetryProvider);
+
+    const config: CacheConfig = {
+      enabled: true,
+      cacheKey: ["telemetry-test"],
+    };
+    const interceptor = new CacheInterceptor(cacheManagerWithTelemetry, config);
+    const fn = vi.fn().mockResolvedValue("result");
+
+    const result = await interceptor.intercept(fn, context);
+
+    // Verify the cache works correctly with telemetry
+    expect(result).toBe("result");
+    expect(fn).toHaveBeenCalledTimes(1);
   });
 });

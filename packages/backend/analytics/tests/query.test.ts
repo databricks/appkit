@@ -1,6 +1,6 @@
+import { runWithRequestContext } from "@tools/test-helpers";
 import { describe, expect, test } from "vitest";
 import { QueryProcessor } from "../src/query";
-import { runWithRequestContext } from "@tools/test-helpers";
 
 describe("QueryProcessor", () => {
   const processor = new QueryProcessor();

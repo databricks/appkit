@@ -1,4 +1,5 @@
 import type { sql } from "@databricks/sdk-experimental";
+
 interface ExecuteStatementDefaults {
   wait_timeout: string;
   disposition: sql.ExecuteStatementRequest["disposition"];

@@ -2,8 +2,9 @@ import {
   createMockRequest,
   createMockResponse,
   createMockRouter,
-  setupDatabricksEnv,
+  createMockTelemetry,
   runWithRequestContext,
+  setupDatabricksEnv,
 } from "@tools/test-helpers";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { AnalyticsPlugin, analytics } from "../src/analytics";
@@ -23,14 +24,16 @@ describe("Analytics Plugin", () => {
   });
 
   test("Plugin instance should be created with correct configuration", () => {
-    const plugin = new AnalyticsPlugin(config);
+    const mockTelemetry = createMockTelemetry();
+    const plugin = new AnalyticsPlugin(config, mockTelemetry);
 
     expect(plugin.name).toBe("analytics");
   });
 
   describe("injectRoutes", () => {
     test("should register POST routes", () => {
-      const plugin = new AnalyticsPlugin(config);
+      const mockTelemetry = createMockTelemetry();
+      const plugin = new AnalyticsPlugin(config, mockTelemetry);
       const { router } = createMockRouter();
 
       plugin.injectRoutes(router);
@@ -47,7 +50,8 @@ describe("Analytics Plugin", () => {
     });
 
     test("/query/:query_key should return 400 when query_key is missing", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const mockTelemetry = createMockTelemetry();
+      const plugin = new AnalyticsPlugin(config, mockTelemetry);
       const { router, getHandler } = createMockRouter();
 
       plugin.injectRoutes(router);
@@ -70,7 +74,8 @@ describe("Analytics Plugin", () => {
     });
 
     test("/query/:query_key should execute as service account without user token", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const mockTelemetry = createMockTelemetry();
+      const plugin = new AnalyticsPlugin(config, mockTelemetry);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi
@@ -143,7 +148,8 @@ describe("Analytics Plugin", () => {
     });
 
     test("/users/me/query/:query_key should execute query with user workspace client", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const mockTelemetry = createMockTelemetry();
+      const plugin = new AnalyticsPlugin(config, mockTelemetry);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi
@@ -210,7 +216,8 @@ describe("Analytics Plugin", () => {
     });
 
     test("should return cached result on second request", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const mockTelemetry = createMockTelemetry();
+      const plugin = new AnalyticsPlugin(config, mockTelemetry);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi
@@ -245,7 +252,8 @@ describe("Analytics Plugin", () => {
     });
 
     test("should cache user-scoped queries separately per user", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const mockTelemetry = createMockTelemetry();
+      const plugin = new AnalyticsPlugin(config, mockTelemetry);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi
@@ -320,7 +328,8 @@ describe("Analytics Plugin", () => {
     });
 
     test("should handle AbortSignal cancellation", async () => {
-      const plugin = new AnalyticsPlugin(config);
+      const mockTelemetry = createMockTelemetry();
+      const plugin = new AnalyticsPlugin(config, mockTelemetry);
       const { router, getHandler } = createMockRouter();
 
       (plugin as any).app.getAppQuery = vi

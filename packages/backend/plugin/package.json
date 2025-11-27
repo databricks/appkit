@@ -13,6 +13,7 @@
     "@databricks-apps/app": "workspace:*",
     "@databricks-apps/cache": "workspace:*",
     "@databricks-apps/stream": "workspace:*",
+    "@databricks-apps/telemetry": "workspace:*",
     "@databricks-apps/types": "workspace:*",
     "@databricks-apps/utils": "workspace:*",
     "@types/express": "^4.17.21"

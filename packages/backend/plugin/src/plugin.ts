@@ -1,6 +1,11 @@
 import { AppManager } from "@databricks-apps/app";
 import { CacheManager } from "@databricks-apps/cache";
 import { StreamManager } from "@databricks-apps/stream";
+import {
+  type ITelemetry,
+  normalizeTelemetryOptions,
+  TelemetryManager,
+} from "@databricks-apps/telemetry";
 import type {
   BasePlugin,
   BasePluginConfig,
@@ -13,14 +18,15 @@ import type {
 } from "@databricks-apps/types";
 import { deepMerge, validateEnv } from "@databricks-apps/utils";
 import type express from "express";
+import { DevFileReader } from "./dev-reader";
 import { CacheInterceptor } from "./interceptors/cache";
 import { RetryInterceptor } from "./interceptors/retry";
+import { TelemetryInterceptor } from "./interceptors/telemetry";
 import { TimeoutInterceptor } from "./interceptors/timeout";
 import type {
   ExecutionContext,
   ExecutionInterceptor,
 } from "./interceptors/types";
-import { DevFileReader } from "./dev-reader";
 
 export abstract class Plugin<
   TConfig extends BasePluginConfig = BasePluginConfig,
@@ -31,6 +37,7 @@ export abstract class Plugin<
   protected app: AppManager;
   protected devFileReader: DevFileReader;
   protected streamManager: StreamManager;
+  protected telemetry: ITelemetry;
   protected abstract envVars: string[];
 
   static phase: PluginPhase = "normal";
@@ -38,8 +45,9 @@ export abstract class Plugin<
 
   constructor(protected config: TConfig) {
     this.name = config.name ?? "plugin";
+    this.telemetry = TelemetryManager.getProvider(this.name, config.telemetry);
     this.streamManager = new StreamManager();
-    this.cache = new CacheManager();
+    this.cache = new CacheManager(undefined, this.telemetry);
     this.app = new AppManager();
     this.devFileReader = DevFileReader.getInstance();
 
@@ -161,7 +169,19 @@ export abstract class Plugin<
   ): ExecutionInterceptor[] {
     const interceptors: ExecutionInterceptor[] = [];
 
-    // order matters: timeout → retry → cache (innermost to outermost)
+    // order matters: telemetry → timeout → retry → cache (innermost to outermost)
+
+    // Only add telemetry interceptor if traces are enabled
+    const telemetryConfig = normalizeTelemetryOptions(this.config.telemetry);
+    if (
+      telemetryConfig.traces &&
+      (options.telemetryInterceptor?.enabled ?? true)
+    ) {
+      interceptors.push(
+        new TelemetryInterceptor(this.telemetry, options.telemetryInterceptor),
+      );
+    }
+
     if (options.timeout && options.timeout > 0) {
       interceptors.push(new TimeoutInterceptor(options.timeout));
     }

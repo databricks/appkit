@@ -1,7 +1,6 @@
-import type express from "express";
-import { WorkspaceClient, type sql } from "@databricks/sdk-experimental";
-
 import { AsyncLocalStorage } from "node:async_hooks";
+import { type sql, WorkspaceClient } from "@databricks/sdk-experimental";
+import type express from "express";
 
 export type RequestContext = {
   userDatabricksClient?: WorkspaceClient;

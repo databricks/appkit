@@ -2,17 +2,34 @@ import type express from "express";
 
 export interface BasePlugin {
   name: string;
+
   abortActiveOperations?(): void;
+
   validateEnv(): void;
+
   setup(): Promise<void>;
+
   injectRoutes(router: express.Router): void;
 }
 
 export interface BasePluginConfig {
   name?: string;
   host?: string;
+
   [key: string]: unknown;
+
+  /*
+   * Telemetry configuration
+   * @default true for all telemetry types
+   */
+  telemetry?: TelemetryOptions;
 }
+
+export type TelemetryOptions = {
+  traces?: boolean;
+  metrics?: boolean;
+  logs?: boolean;
+};
 
 export interface PluginConfig {
   config?: unknown;
