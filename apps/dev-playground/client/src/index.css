@@ -70,9 +70,6 @@
     @apply font-medium text-databricks-red no-underline hover:text-databricks-red-hover transition-colors duration-200;
   }
 
-  button {
-    @apply rounded-md border border-transparent px-5 py-2.5 text-sm font-medium cursor-pointer transition-all duration-200;
-  }
   .dark {
     --background: 0 0% 3.9%;
     --foreground: 0 0% 98%;

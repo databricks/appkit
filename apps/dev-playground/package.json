@@ -21,7 +21,9 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@databricks/app-kit": "workspace:*"
+    "@databricks-apps/react": "workspace:*",
+    "@databricks/app-kit": "workspace:*",
+    "react-syntax-highlighter": "^16.1.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

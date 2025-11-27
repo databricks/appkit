@@ -1,6 +1,7 @@
 import {
   AreaChart,
   BarChart,
+  DataTable,
   LineChart,
   PieChart,
   RadarChart,
@@ -305,6 +306,74 @@ function DataVisualizationRoute() {
   parameters={spendDataParams}
   showDots={true}
   fillOpacity={0.4}
+/>`}
+              />
+            </CardContent>
+          </Card>
+
+          {/* DataTable - Simple */}
+          <Card className="md:col-span-2">
+            <CardHeader>
+              <CardTitle>Simple Data Table</CardTitle>
+              <CardDescription>
+                Basic table with automatic column generation
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <DataTable queryKey="untagged_apps" parameters={commonParams} />
+              <CodeSnippet
+                code={`<DataTable
+  queryKey="untagged_apps"
+  parameters={commonParams}
+/>`}
+              />
+            </CardContent>
+          </Card>
+
+          {/* DataTable - All Features */}
+          <Card className="md:col-span-2">
+            <CardHeader>
+              <CardTitle>Advanced Data Table</CardTitle>
+              <CardDescription>
+                Table with row selection, column resizing, custom filter, and
+                custom labels
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <DataTable
+                queryKey="untagged_apps"
+                parameters={commonParams}
+                enableRowSelection={true}
+                onRowSelectionChange={(selection) => {
+                  console.log("Selected rows:", selection);
+                }}
+                filterColumn="name"
+                filterPlaceholder="Search apps..."
+                labels={{
+                  columnsButton: "Manage Columns",
+                  noResults: "No apps found",
+                  rowsFound: `\${count} app(s) displayed`,
+                  previousButton: "Prev",
+                  nextButton: "Next",
+                }}
+              />
+              <CodeSnippet
+                code={`<DataTable
+  queryKey="untagged_apps"
+  parameters={commonParams}
+  enableRowSelection={true}
+  onRowSelectionChange={(selection) => {
+    console.log("Selected rows:", selection);
+  }}
+  filterColumn="name"
+  filterPlaceholder="Search apps..."
+  labels={{
+    columnsButton: "Manage Columns",
+    noResults: "No apps found",
+    rowsFound: "\${count} app(s) displayed",
+    previousButton: "Prev",
+    nextButton: "Next",
+  }}
 />`}
               />
             </CardContent>
