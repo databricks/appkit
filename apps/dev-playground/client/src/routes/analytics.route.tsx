@@ -53,24 +53,9 @@ function AnalyticsRoute() {
     data: summaryDataRaw,
     loading: summaryLoading,
     error: summaryError,
-  } = useAnalyticsQuery<
-    Array<{
-      total: number;
-      average: number;
-      forecasted: number;
-    }>
-  >("spend_summary", summaryParams);
+  } = useAnalyticsQuery("spend_summary", summaryParams);
 
-  const { data: appsListData } = useAnalyticsQuery<
-    Array<{
-      id: string;
-      name: string;
-      creator: string;
-      tags: string;
-      totalSpend: number;
-      createdAt: string;
-    }>
-  >("apps_list", {});
+  const { data: appsListData } = useAnalyticsQuery("apps_list", {});
 
   const untaggedAppsParams = useMemo(() => {
     return {
@@ -84,14 +69,7 @@ function AnalyticsRoute() {
     data: untaggedAppsData,
     loading: untaggedAppsLoading,
     error: untaggedAppsError,
-  } = useAnalyticsQuery<
-    Array<{
-      app_name: string;
-      creator: string;
-      total_cost_usd: number;
-      avg_period_cost_usd: number;
-    }>
-  >("untagged_apps", untaggedAppsParams);
+  } = useAnalyticsQuery("untagged_apps", untaggedAppsParams);
 
   const metrics = useMemo(() => {
     if (!summaryDataRaw || summaryDataRaw.length === 0) {
@@ -104,39 +82,15 @@ function AnalyticsRoute() {
     if (!appsListData || appsListData.length === 0) {
       return [];
     }
-    return appsListData.map((app, index) => {
-      let tags: string[] = [];
-      if (app.tags) {
-        try {
-          if (Array.isArray(app.tags)) {
-            tags = app.tags;
-          } else if (typeof app.tags === "string") {
-            const trimmedTags = app.tags.trim();
-            if (trimmedTags.startsWith("[") || trimmedTags.startsWith("{")) {
-              tags = JSON.parse(trimmedTags);
-            } else if (trimmedTags) {
-              tags = trimmedTags
-                .split(",")
-                .map((t: string) => t.trim())
-                .filter(Boolean);
-            }
-          }
-        } catch (error) {
-          console.warn("Failed to parse tags for app", app.name, ":", error);
-          tags = [];
-        }
-      }
-
-      return {
-        id: `${app.id}-${app.creator}-${index}`,
-        name: app.name,
-        creator: app.creator,
-        spend: Math.round(app.totalSpend),
-        status: "unknown" as const,
-        tags,
-        lastRun: app.createdAt,
-      };
-    });
+    return appsListData.map((app, index) => ({
+      id: `${app.id}-${app.creator}-${index}`,
+      name: app.name,
+      creator: app.creator,
+      spend: Math.round(app.totalSpend),
+      status: "unknown" as const,
+      tags: app.tags ?? [],
+      lastRun: app.createdAt,
+    }));
   }, [appsListData]);
 
   const untaggedAppsList = useMemo(() => {

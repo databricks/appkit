@@ -13,11 +13,13 @@ import type {
   PluginExecuteConfig,
   PluginExecutionSettings,
   PluginPhase,
+  RouteConfig,
   StreamExecuteHandler,
   StreamExecutionSettings,
 } from "shared";
 import { deepMerge, validateEnv } from "../utils";
 import type express from "express";
+import type { z } from "zod";
 import { DevFileReader } from "./dev-reader";
 import { CacheInterceptor } from "./interceptors/cache";
 import { RetryInterceptor } from "./interceptors/retry";
@@ -27,6 +29,8 @@ import type {
   ExecutionContext,
   ExecutionInterceptor,
 } from "./interceptors/types";
+
+export const routeSchemaRegistry = new Map<string, Map<string, z.ZodType>>();
 
 export abstract class Plugin<
   TConfig extends BasePluginConfig = BasePluginConfig,
@@ -148,6 +152,23 @@ export abstract class Plugin<
       // production-safe, don't crash sdk
       return undefined;
     }
+  }
+
+  protected route<T extends z.ZodType>(
+    router: express.Router,
+    config: RouteConfig<T>,
+  ): void {
+    const { method, path, schema, handler } = config;
+
+    let pluginRoutes = routeSchemaRegistry.get(this.name);
+
+    if (!pluginRoutes) {
+      pluginRoutes = new Map();
+      routeSchemaRegistry.set(this.name, pluginRoutes);
+    }
+
+    pluginRoutes.set(path, schema);
+    router[method](path, handler);
   }
 
   // build execution options by merging defaults, plugin config, and user overrides

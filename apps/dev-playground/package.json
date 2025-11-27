@@ -22,7 +22,7 @@
   "description": "",
   "dependencies": {
     "@databricks/app-kit": "workspace:*",
-    "react-syntax-highlighter": "^16.1.0"
+    "zod": "^4.1.13"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

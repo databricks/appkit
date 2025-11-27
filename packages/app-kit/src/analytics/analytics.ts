@@ -7,7 +7,11 @@ import type {
 } from "shared";
 import { queryDefaults } from "./defaults";
 import { QueryProcessor } from "./query";
-import type { IAnalyticsConfig, IAnalyticsQueryRequest } from "./types";
+import {
+  analyticsQueryResponseSchema,
+  type IAnalyticsConfig,
+  type IAnalyticsQueryRequest,
+} from "./types";
 import type { Request, Response } from "../utils";
 import { getRequestContext } from "../utils";
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
@@ -35,14 +39,22 @@ export class AnalyticsPlugin extends Plugin {
   }
 
   injectRoutes(router: IAppRouter) {
-    // query router: user-level
-    router.post("/users/me/query/:query_key", async (req, res) => {
-      await this._handleQueryRoute(req, res, { asUser: true });
+    this.route(router, {
+      method: "post",
+      path: "/users/me/query/:query_key",
+      schema: analyticsQueryResponseSchema,
+      handler: async (req, res) => {
+        await this._handleQueryRoute(req, res, { asUser: true });
+      },
     });
 
-    // query-router: app-service level
-    router.post("/query/:query_key", async (req, res) => {
-      await this._handleQueryRoute(req, res, { asUser: false });
+    this.route(router, {
+      method: "post",
+      path: "/query/:query_key",
+      schema: analyticsQueryResponseSchema,
+      handler: async (req, res) => {
+        await this._handleQueryRoute(req, res, { asUser: false });
+      },
     });
   }
 

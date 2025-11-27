@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { connectSSE } from "@/js";
 import type {
+  QueryKey,
+  QueryRegistry,
   UseAnalyticsQueryOptions,
   UseAnalyticsQueryResult,
 } from "./types";
 import { useQueryHMR } from "./use-query-hmr";
+
+/**
+ * Infers result type: uses QueryRegistry if key exists, otherwise falls back to explicit type T
+ */
+type InferResult<T, K> = K extends keyof QueryRegistry ? QueryRegistry[K] : T;
 
 function getDevMode() {
   const url = new URL(window.location.href);
@@ -23,17 +30,18 @@ function getDevMode() {
  * @returns - Query result state
  */
 export function useAnalyticsQuery<
-  T,
+  T = unknown,
+  K extends QueryKey = QueryKey,
   P extends Record<string, unknown> = Record<string, unknown>,
 >(
-  queryKey: string,
+  queryKey: K,
   parameters?: P | null,
   options: UseAnalyticsQueryOptions = { autoStart: true },
-): UseAnalyticsQueryResult<T> {
+): UseAnalyticsQueryResult<InferResult<T, K>> {
   const format = options?.format;
   const maxParametersSize = options?.maxParametersSize ?? 100 * 1024;
 
-  const [data, setData] = useState<T | null>(null);
+  const [data, setData] = useState<InferResult<T, K> | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);

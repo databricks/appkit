@@ -1,4 +1,5 @@
 import type express from "express";
+import type z from "zod";
 
 export interface BasePlugin {
   name: string;
@@ -89,3 +90,17 @@ export type ToPlugin<T, U, N extends string> = (
 
 export type IAppRouter = express.Router;
 export type IAppResponse = express.Response;
+export type IAppRequest = express.Request;
+
+export type HttpMethod = "get" | "post" | "put" | "delete" | "patch" | "head";
+
+export type RouteConfig<T extends z.ZodType> = {
+  method: HttpMethod;
+  path: string;
+  schema: T;
+  handler: (req: IAppRequest, res: IAppResponse) => Promise<void>;
+};
+
+export interface QuerySchemas {
+  [key: string]: z.ZodType;
+}
