@@ -81,7 +81,7 @@ function DataVisualizationRoute() {
       <div className="max-w-[1200px] mx-auto px-6 py-12">
         <Header
           title="Data Visualization"
-          description="Explore powerful and customizable chart components from the Apps SDK."
+          description="Explore powerful and customizable chart components from the App Kit."
           tooltip="Showcase of BarChart, AreaChart, LineChart, PieChart, and RadarChart components"
         />
 

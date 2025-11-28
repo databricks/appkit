@@ -26,6 +26,7 @@ export class ServerPlugin extends Plugin {
   public envVars = ["DATABRICKS_APP_PORT", "FLASK_RUN_HOST"];
   public static DEFAULT_CONFIG = {
     autoStart: true,
+    staticPath: path.resolve(process.cwd(), "client", "dist"),
     host: process.env.FLASK_RUN_HOST || "0.0.0.0",
     port: Number(process.env.DATABRICKS_APP_PORT) || 8000,
     watch: process.env.NODE_ENV === "development",

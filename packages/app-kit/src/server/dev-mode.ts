@@ -11,6 +11,7 @@ import { mergeConfigDedup } from "../utils";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const MAX_ASSET_FETCH_TIMEOUT = 30_000;
 
 interface DevFileReader {
   registerTunnelGetter(
@@ -87,7 +88,7 @@ export class DevModeManager {
         const timeout = setTimeout(() => {
           pendingFetches.delete(requestId);
           reject(new Error("Asset fetch timeout"));
-        }, 15_000);
+        }, MAX_ASSET_FETCH_TIMEOUT);
 
         pendingFetches.set(requestId, { resolve, reject, timeout });
 

@@ -1,5 +1,6 @@
 dist
 build
+tmp
 node_modules
 .env
 
@@ -7,7 +8,5 @@ coverage
 
 *.tsbuildinfo
 docs
-
-routeTree.gen.ts
 
 .turbo

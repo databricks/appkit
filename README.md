@@ -1,4 +1,4 @@
-# apps-sdk
+# App Kit
 
 ## Contributing
 

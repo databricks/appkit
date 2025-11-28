@@ -22,9 +22,10 @@
   "scripts": {
     "build:package": "tsdown --config tsdown.config.ts",
     "build:watch": "tsdown --config tsdown.config.ts --watch",
+    "dist": "tsx ../../tools/dist.ts && npm pack ./tmp --pack-destination ./tmp",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist",
-    "clean:full": "rm -rf dist node_modules"
+    "clean": "rm -rf dist tmp",
+    "clean:full": "rm -rf dist node_modules tmp"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.3",

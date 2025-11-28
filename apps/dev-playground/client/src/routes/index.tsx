@@ -21,10 +21,10 @@ function IndexRoute() {
       <div className="max-w-6xl mx-auto px-6 py-20">
         <div className="text-center mb-16">
           <h1 className="text-5xl font-bold text-gray-900 mb-4">
-            Apps SDK Playground
+            App Kit Playground
           </h1>
           <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-            Explore the capabilities of the Apps SDK with interactive examples
+            Explore the capabilities of the App Kit with interactive examples
             and demos
           </p>
         </div>
@@ -107,7 +107,7 @@ function IndexRoute() {
 
         <div className="text-center pt-12 border-t border-gray-200">
           <p className="text-sm text-gray-500">
-            built by databricks using apps sdk
+            built by databricks using app-kit
           </p>
         </div>
       </div>

@@ -67,13 +67,3 @@ will run all the builds and then start the app project. In order to make this wo
 ```
 DATABRICKS_HOST=
 ```
-
-## Adding new packages
-
-To add a new sdk package, run the following command
-
-```
-pnpm create-package
-```
-
-It will prompt for a name and the type of package (backend or frontend).

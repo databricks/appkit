@@ -28,7 +28,7 @@ function RootComponent() {
                 className="no-underline text-inherit hover:opacity-80 transition-opacity"
               >
                 <h4 className="text-xl font-semibold tracking-tight">
-                  Apps SDK
+                  App Kit Playground
                 </h4>
               </Link>
               <div className="flex gap-3">

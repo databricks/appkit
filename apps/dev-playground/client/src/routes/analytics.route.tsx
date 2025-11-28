@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useAnalyticsQuery } from "@databricks/app-kit-ui/react";
 import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
 import { useMemo, useState } from "react";

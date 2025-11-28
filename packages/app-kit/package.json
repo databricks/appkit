@@ -21,9 +21,9 @@
     "build:package": "tsdown --config tsdown.config.ts",
     "build:watch": "tsdown --config tsdown.config.ts --watch",
     "typecheck": "tsc --noEmit",
-    "pack": "cd tmp && npm pack",
-    "clean": "rm -rf dist",
-    "clean:full": "rm -rf dist node_modules"
+    "dist": "tsx ../../tools/dist.ts && npm pack ./tmp --pack-destination ./tmp",
+    "clean": "rm -rf dist tmp",
+    "clean:full": "rm -rf dist node_modules tmp"
   },
   "dependencies": {
     "@databricks/sdk-experimental": "^0.14.2",
