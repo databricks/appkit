@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { LakebaseConnector } from "../src/lakebase/client";
+import { LakebaseConnector } from "../lakebase";
 
 // Mock pg module
 vi.mock("pg", () => {

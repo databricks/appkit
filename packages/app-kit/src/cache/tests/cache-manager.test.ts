@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { CacheManager } from "../src/index";
-import type { CacheStorage } from "../src/storage/types";
+import { CacheManager } from "../../index";
+import type { CacheStorage } from "../storage";
 
 // Mock the storage modules
-vi.mock("../src/storage/memory", () => ({
+vi.mock("../storage/memory", () => ({
   InMemoryStorage: vi.fn().mockImplementation(() => createMockStorage()),
 }));
 

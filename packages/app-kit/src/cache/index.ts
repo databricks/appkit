@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { CacheConfig } from "shared";
 import { LakebaseConnector } from "../connectors";
-import type { Counter, ITelemetry } from "../telemetry";
+import type { Counter, TelemetryProvider } from "../telemetry";
 import { SpanStatusCode, TelemetryManager } from "../telemetry";
 import { deepMerge } from "../utils";
 import { cacheDefaults } from "./defaults";
@@ -29,7 +29,7 @@ export type { CacheEntry, CacheStorage } from "./storage";
  */
 export class CacheManager {
   private static readonly CLEANUP_PROBABILITY = 0.01;
-  private static readonly NAME: string = "cache-manager";
+  private readonly name: string = "cache-manager";
   private static instance: CacheManager | null = null;
   private static initPromise: Promise<CacheManager> | null = null;
 
@@ -39,34 +39,32 @@ export class CacheManager {
   private cleanupInProgress: boolean;
 
   // Telemetry
-  private telemetry: ITelemetry;
-  private cacheHitCounter: Counter;
-  private cacheMissCounter: Counter;
+  private telemetry: TelemetryProvider;
+  private telemetryMetrics: {
+    cacheHitCount: Counter;
+    cacheMissCount: Counter;
+  };
 
-  private constructor(
-    storage: CacheStorage,
-    config: CacheConfig,
-    telemetry: ITelemetry,
-  ) {
+  private constructor(storage: CacheStorage, config: CacheConfig) {
     this.storage = storage;
     this.config = config;
     this.inFlightRequests = new Map();
     this.cleanupInProgress = false;
 
-    this.telemetry = telemetry;
-    const meter = this.telemetry.getMeter({
-      name: CacheManager.NAME,
-      includePrefix: true,
-    });
-
-    this.cacheHitCounter = meter.createCounter("cache.hit", {
-      description: "Total number of cache hits",
-      unit: "1",
-    });
-    this.cacheMissCounter = meter.createCounter("cache.miss", {
-      description: "Total number of cache misses",
-      unit: "1",
-    });
+    this.telemetry = TelemetryManager.getProvider(
+      this.name,
+      this.config.telemetry,
+    );
+    this.telemetryMetrics = {
+      cacheHitCount: this.telemetry.getMeter().createCounter("cache.hit", {
+        description: "Total number of cache hits",
+        unit: "1",
+      }),
+      cacheMissCount: this.telemetry.getMeter().createCounter("cache.miss", {
+        description: "Total number of cache misses",
+        unit: "1",
+      }),
+    };
   }
 
   /**
@@ -119,10 +117,9 @@ export class CacheManager {
     userConfig?: Partial<CacheConfig>,
   ): Promise<CacheManager> {
     const config = deepMerge(cacheDefaults, userConfig);
-    const telemetry = TelemetryManager.getProvider(CacheManager.NAME);
 
     if (!config.persistentCache) {
-      return new CacheManager(new InMemoryStorage(config), config, telemetry);
+      return new CacheManager(new InMemoryStorage(config), config);
     }
 
     try {
@@ -133,7 +130,7 @@ export class CacheManager {
       if (isHealthy) {
         const persistentStorage = new PersistentStorage(config, connector);
         await persistentStorage.initialize();
-        return new CacheManager(persistentStorage, config, telemetry);
+        return new CacheManager(persistentStorage, config);
       }
     } catch (error) {
       console.warn("[Cache] Persistent storage unavailable:", error);
@@ -148,12 +145,11 @@ export class CacheManager {
       return new CacheManager(
         new InMemoryStorage(disabledConfig),
         disabledConfig,
-        telemetry,
       );
     }
 
     console.warn("[Cache] Falling back to in-memory cache.");
-    return new CacheManager(new InMemoryStorage(config), config, telemetry);
+    return new CacheManager(new InMemoryStorage(config), config);
   }
 
   /**
@@ -190,7 +186,9 @@ export class CacheManager {
           if (cached !== null) {
             span.setAttribute("cache.hit", true);
             span.setStatus({ code: SpanStatusCode.OK });
-            this.cacheHitCounter.add(1, { "cache.key": cacheKey });
+            this.telemetryMetrics.cacheHitCount.add(1, {
+              "cache.key": cacheKey,
+            });
             return cached.value as T;
           }
 
@@ -203,7 +201,7 @@ export class CacheManager {
               "cache.key": cacheKey,
             });
             span.setStatus({ code: SpanStatusCode.OK });
-            this.cacheHitCounter.add(1, {
+            this.telemetryMetrics.cacheHitCount.add(1, {
               "cache.key": cacheKey,
               "cache.deduplication": "true",
             });
@@ -214,7 +212,9 @@ export class CacheManager {
           // Cache miss - execute function
           span.setAttribute("cache.hit", false);
           span.addEvent("cache.miss", { "cache.key": cacheKey });
-          this.cacheMissCounter.add(1, { "cache.key": cacheKey });
+          this.telemetryMetrics.cacheMissCount.add(1, {
+            "cache.key": cacheKey,
+          });
 
           const promise = fn()
             .then(async (result) => {
@@ -247,7 +247,7 @@ export class CacheManager {
           span.end();
         }
       },
-      { name: CacheManager.NAME, includePrefix: true },
+      { name: this.name, includePrefix: true },
     );
   }
 

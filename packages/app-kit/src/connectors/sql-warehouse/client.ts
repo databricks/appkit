@@ -3,48 +3,54 @@ import {
   type sql,
   type WorkspaceClient,
 } from "@databricks/sdk-experimental";
-import type { ITelemetry } from "../../telemetry";
+import type { TelemetryProvider } from "../../telemetry";
 import {
   type Counter,
   type Histogram,
-  type Meter,
   type Span,
   SpanKind,
   SpanStatusCode,
+  TelemetryManager,
 } from "../../telemetry";
 import { executeStatementDefaults } from "./defaults";
+import type { TelemetryOptions } from "shared";
 
 export interface SQLWarehouseConfig {
   timeout?: number;
-  telemetry: ITelemetry;
+  telemetry?: TelemetryOptions;
 }
 
 export class SQLWarehouseConnector {
-  private static readonly TELEMETRY_INSTRUMENT_CONFIG = {
-    name: "sql-warehouse",
-    includePrefix: true,
-  };
+  private readonly name = "sql-warehouse";
 
   private config: SQLWarehouseConfig;
 
-  private meter: Meter;
-  private queryCounter: Counter;
-  private queryDuration: Histogram;
+  // telemetry
+  private readonly telemetry: TelemetryProvider;
+  private readonly telemetryMetrics: {
+    queryCount: Counter;
+    queryDuration: Histogram;
+  };
 
   constructor(config: SQLWarehouseConfig) {
     this.config = config;
-    this.meter = this.config.telemetry.getMeter(
-      SQLWarehouseConnector.TELEMETRY_INSTRUMENT_CONFIG,
-    );
 
-    this.queryCounter = this.meter.createCounter("db.query.count", {
-      description: "Total number of database queries",
-      unit: "1",
-    });
-    this.queryDuration = this.meter.createHistogram("db.query.duration", {
-      description: "Duration of database queries",
-      unit: "ms",
-    });
+    this.telemetry = TelemetryManager.getProvider(
+      this.name,
+      this.config.telemetry,
+    );
+    this.telemetryMetrics = {
+      queryCount: this.telemetry.getMeter().createCounter("query.count", {
+        description: "Total number of queries executed",
+        unit: "1",
+      }),
+      queryDuration: this.telemetry
+        .getMeter()
+        .createHistogram("query.duration", {
+          description: "Duration of queries executed",
+          unit: "ms",
+        }),
+    };
   }
 
   async executeStatement(
@@ -55,7 +61,7 @@ export class SQLWarehouseConnector {
     const startTime = Date.now();
     let success = false;
 
-    return this.config.telemetry.startActiveSpan(
+    return this.telemetry.startActiveSpan(
       "sql.query",
       {
         kind: SpanKind.CLIENT,
@@ -185,11 +191,11 @@ export class SQLWarehouseConnector {
             success: success.toString(),
           };
 
-          this.queryCounter.add(1, attributes);
-          this.queryDuration.record(duration, attributes);
+          this.telemetryMetrics.queryCount.add(1, attributes);
+          this.telemetryMetrics.queryDuration.record(duration, attributes);
         }
       },
-      SQLWarehouseConnector.TELEMETRY_INSTRUMENT_CONFIG,
+      { name: this.name, includePrefix: true },
     );
   }
 
@@ -199,7 +205,7 @@ export class SQLWarehouseConnector {
     timeout = executeStatementDefaults.timeout,
     signal?: AbortSignal,
   ) {
-    return this.config.telemetry.startActiveSpan(
+    return this.telemetry.startActiveSpan(
       "sql.poll",
       {
         attributes: {
@@ -303,7 +309,7 @@ export class SQLWarehouseConnector {
           span.end();
         }
       },
-      SQLWarehouseConnector.TELEMETRY_INSTRUMENT_CONFIG,
+      { name: this.name, includePrefix: true },
     );
   }
 

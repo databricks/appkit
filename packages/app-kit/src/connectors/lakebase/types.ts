@@ -1,4 +1,5 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
+import type { TelemetryOptions } from "shared";
 
 /** Configuration for LakebaseConnector */
 export interface LakebaseConfig {
@@ -31,6 +32,9 @@ export interface LakebaseConfig {
 
   /** How long credentials are valid (milliseconds) */
   credentialTTLMs: number;
+
+  /** Telemetry configuration */
+  telemetry?: TelemetryOptions;
 
   /** Additional configuration options */
   [key: string]: unknown;

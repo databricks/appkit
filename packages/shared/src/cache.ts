@@ -1,3 +1,5 @@
+import type { TelemetryOptions } from "./plugin";
+
 /** Configuration for caching */
 export interface CacheConfig {
   /** Whether caching is enabled */
@@ -14,6 +16,8 @@ export interface CacheConfig {
   persistentCache?: boolean;
   /** Whether to enforce strict persistence */
   strictPersistence?: boolean;
+  /** Telemetry configuration */
+  telemetry?: TelemetryOptions;
 
   [key: string]: unknown;
 }

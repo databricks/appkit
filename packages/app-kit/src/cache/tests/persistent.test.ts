@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { PersistentStorage } from "../src/storage/persistent";
+import { PersistentStorage } from "../storage";
 
 /** Mock LakebaseConnector for testing */
 const createMockConnector = () => ({

@@ -17,5 +17,7 @@ export { TelemetryProvider } from "./telemetry-provider";
 export type {
   InstrumentConfig,
   ITelemetry,
+  MetricsSchema,
   TelemetryConfig,
+  TelemetryInstrumentation,
 } from "./types";

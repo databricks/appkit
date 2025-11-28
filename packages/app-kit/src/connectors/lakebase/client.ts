@@ -1,8 +1,15 @@
 import { randomUUID } from "node:crypto";
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import { ApiClient, Config } from "@databricks/sdk-experimental";
-import { deepMerge } from "../../utils";
 import pg from "pg";
+import {
+  type Counter,
+  type Histogram,
+  SpanStatusCode,
+  TelemetryManager,
+  type TelemetryProvider,
+} from "@/telemetry";
+import { deepMerge } from "../../utils";
 import { lakebaseDefaults } from "./defaults";
 import type {
   LakebaseConfig,
@@ -26,16 +33,42 @@ import type {
  * ```
  */
 export class LakebaseConnector {
+  private readonly name: string = "lakebase";
   private readonly CACHE_BUFFER_MS = 2 * 60 * 1000;
   private readonly config: LakebaseConfig;
   private readonly connectionConfig: LakebaseConnectionConfig;
   private pool: pg.Pool | null = null;
   private credentials: LakebaseCredentials | null = null;
 
+  // telemetry
+  private readonly telemetry: TelemetryProvider;
+  private readonly telemetryMetrics: {
+    queryCount: Counter;
+    queryDuration: Histogram;
+  };
+
   constructor(userConfig?: Partial<LakebaseConfig>) {
     this.config = deepMerge(lakebaseDefaults, userConfig);
-
     this.connectionConfig = this.parseConnectionConfig();
+
+    this.telemetry = TelemetryManager.getProvider(
+      this.name,
+      this.config.telemetry,
+    );
+    this.telemetryMetrics = {
+      queryCount: this.telemetry
+        .getMeter()
+        .createCounter("lakebase.query.count", {
+          description: "Total number of queries executed",
+          unit: "1",
+        }),
+      queryDuration: this.telemetry
+        .getMeter()
+        .createHistogram("lakebase.query.duration", {
+          description: "Duration of queries executed",
+          unit: "ms",
+        }),
+    };
 
     // validate configuration
     if (this.config.maxPoolSize < 1) {
@@ -60,26 +93,52 @@ export class LakebaseConnector {
     params?: any[],
     retryCount: number = 0,
   ): Promise<pg.QueryResult<T>> {
-    const pool = await this.getPool();
+    const startTime = Date.now();
 
-    try {
-      return await pool.query<T>(sql, params);
-    } catch (error) {
-      // retry on auth failure
-      if (this.isAuthError(error)) {
-        await this.rotateCredentials();
-        const newPool = await this.getPool();
-        return await newPool.query<T>(sql, params);
-      }
+    return this.telemetry.startActiveSpan(
+      "lakebase.query",
+      {
+        attributes: {
+          "db.system": "lakebase",
+          "db.statement": sql.substring(0, 500),
+          "db.retry_count": retryCount,
+        },
+      },
+      async (span) => {
+        try {
+          const pool = await this.getPool();
+          const result = await pool.query<T>(sql, params);
+          span.setAttribute("db.rows_affected", result.rowCount ?? 0);
+          span.setStatus({ code: SpanStatusCode.OK });
+          return result;
+        } catch (error) {
+          // retry on auth failure
+          if (this.isAuthError(error)) {
+            span.addEvent("auth_error_retry");
+            await this.rotateCredentials();
+            const newPool = await this.getPool();
+            return await newPool.query<T>(sql, params);
+          }
 
-      // retry on transient errors, but only once
-      if (this.isTransientError(error) && retryCount < 1) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        return await this.query<T>(sql, params, retryCount + 1);
-      }
+          // retry on transient errors, but only once
+          if (this.isTransientError(error) && retryCount < 1) {
+            span.addEvent("transient_error_retry");
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            return await this.query<T>(sql, params, retryCount + 1);
+          }
 
-      throw error;
-    }
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+
+          throw error;
+        } finally {
+          const duration = Date.now() - startTime;
+          this.telemetryMetrics.queryCount.add(1);
+          this.telemetryMetrics.queryDuration.record(duration);
+          span.end();
+        }
+      },
+    );
   }
 
   /**
@@ -99,57 +158,87 @@ export class LakebaseConnector {
     callback: (client: pg.PoolClient) => Promise<T>,
     retryCount: number = 0,
   ): Promise<T> {
-    const pool = await this.getPool();
-    const client = await pool.connect();
-
-    try {
-      return await callback(client);
-    } catch (error) {
-      // retry on auth failure
-      if (this.isAuthError(error)) {
-        client.release();
-        await this.rotateCredentials();
-        const newPool = await this.getPool();
-        const retryClient = await newPool.connect();
+    const startTime = Date.now();
+    return this.telemetry.startActiveSpan(
+      "lakebase.transaction",
+      {
+        attributes: {
+          "db.system": "lakebase",
+          "db.retry_count": retryCount,
+        },
+      },
+      async (span) => {
+        const pool = await this.getPool();
+        const client = await pool.connect();
         try {
-          return await callback(retryClient);
-        } finally {
-          retryClient.release();
-        }
-      }
+          const result = await callback(client);
+          span.setStatus({ code: SpanStatusCode.OK });
+          return result;
+        } catch (error) {
+          // retry on auth failure
+          if (this.isAuthError(error)) {
+            span.addEvent("auth_error_retry");
+            client.release();
+            await this.rotateCredentials();
+            const newPool = await this.getPool();
+            const retryClient = await newPool.connect();
+            try {
+              return await callback(retryClient);
+            } finally {
+              retryClient.release();
+            }
+          }
 
-      // retry on transient errors, but only once
-      if (this.isTransientError(error) && retryCount < 1) {
-        client.release();
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        const retryClient = await pool.connect();
-        try {
-          return await this.transaction<T>(callback, retryCount + 1);
+          // retry on transient errors, but only once
+          if (this.isTransientError(error) && retryCount < 1) {
+            span.addEvent("transaction_error_retry");
+            client.release();
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            return await this.transaction<T>(callback, retryCount + 1);
+          }
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
         } finally {
-          retryClient.release();
+          client.release();
+          const duration = Date.now() - startTime;
+          this.telemetryMetrics.queryCount.add(1);
+          this.telemetryMetrics.queryDuration.record(duration);
+          span.end();
         }
-      }
-
-      throw error;
-    } finally {
-      client.release();
-    }
+      },
+    );
   }
 
   /** Check if database connection is healthy */
   async healthCheck(): Promise<boolean> {
-    try {
-      const result = await this.query<{ result: number }>("SELECT 1 as result");
-      return result.rows[0]?.result === 1;
-    } catch {
-      return false;
-    }
+    return this.telemetry.startActiveSpan(
+      "lakebase.healthCheck",
+      {},
+      async (span) => {
+        try {
+          const result = await this.query<{ result: number }>(
+            "SELECT 1 as result",
+          );
+          const healthy = result.rows[0]?.result === 1;
+          span.setAttribute("db.healthy", healthy);
+          span.setStatus({ code: SpanStatusCode.OK });
+          return healthy;
+        } catch {
+          span.setAttribute("db.healthy", false);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          return false;
+        } finally {
+          span.end();
+        }
+      },
+    );
   }
 
   /** Close connection pool (call on shutdown) */
   async close(): Promise<void> {
     if (this.pool) {
-      await this.pool.end().catch((error) => {
+      await this.pool.end().catch((error: unknown) => {
         console.error("Error closing connection pool:", error);
       });
       this.pool = null;
@@ -219,9 +308,9 @@ export class LakebaseConnector {
       ssl: sslMode === "require" ? { rejectUnauthorized: true } : false,
     });
 
-    pool.on("error", (error) => {
+    pool.on("error", (error: Error & { code?: string }) => {
       console.error("Connection pool error:", error.message, {
-        code: (error as any).code,
+        code: error.code,
       });
     });
 
@@ -264,7 +353,7 @@ export class LakebaseConnector {
     if (this.pool) {
       const oldPool = this.pool;
       this.pool = null;
-      oldPool.end().catch((error) => {
+      oldPool.end().catch((error: unknown) => {
         console.error(
           "Error closing old connection pool during rotation:",
           error,

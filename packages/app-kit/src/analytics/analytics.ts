@@ -41,7 +41,7 @@ export class AnalyticsPlugin extends Plugin {
 
     this.SQLClient = new SQLWarehouseConnector({
       timeout: config.timeout,
-      telemetry: this.telemetry,
+      telemetry: config.telemetry,
     });
 
     if (process.env.NODE_ENV === "development") {
