@@ -1,8 +1,6 @@
 import fs from "node:fs";
 import type { Server as HTTPServer } from "node:http";
 import path from "node:path";
-import { ExpressInstrumentation } from "@opentelemetry/instrumentation-express";
-import { HttpInstrumentation } from "@opentelemetry/instrumentation-http";
 import { Plugin, toPlugin } from "../plugin";
 import type { BasePluginConfig, PluginPhase } from "shared";
 import { databricksClientMiddleware, isRemoteServerEnabled } from "../utils";
@@ -10,6 +8,7 @@ import dotenv from "dotenv";
 import express from "express";
 import { DevModeManager } from "./dev-mode";
 import { getQueries, getRoutes } from "./utils";
+import { instrumentations } from "../telemetry";
 
 dotenv.config({ path: path.resolve(process.cwd(), "./server/.env") });
 
@@ -44,7 +43,10 @@ export class ServerPlugin extends Plugin {
     this.serverApplication = express();
     this.server = null;
     this.serverExtensions = [];
-    this.telemetry.registerInstrumentations(this.createInstrumentations());
+    this.telemetry.registerInstrumentations([
+      instrumentations.http,
+      instrumentations.express,
+    ]);
   }
 
   async setup() {
@@ -267,53 +269,6 @@ export class ServerPlugin extends Plugin {
     } else {
       process.exit(0);
     }
-  }
-
-  private createInstrumentations() {
-    return [
-      new HttpInstrumentation({
-        applyCustomAttributesOnSpan(span: any, request: any) {
-          let spanName: string | null = null;
-
-          if (request.route) {
-            const baseUrl = request.baseUrl || "";
-            const url = request.url?.split("?")[0] || "";
-            const fullPath = baseUrl + url;
-            if (fullPath) {
-              spanName = `${request.method} ${fullPath}`;
-            }
-          } else if (request.url) {
-            // No Express route (e.g., static assets) - use the raw URL path
-            // Remove query string for cleaner trace names
-            const path = request.url.split("?")[0];
-            spanName = `${request.method} ${path}`;
-          }
-
-          if (spanName) {
-            span.updateName(spanName);
-          }
-        },
-      }),
-      new ExpressInstrumentation({
-        requestHook: (span: any, info: any) => {
-          const req = info.request;
-
-          // Only update span name for route handlers (layerType: request_handler)
-          // This ensures we're not renaming middleware spans
-          if (info.layerType === "request_handler" && req.route) {
-            // Combine baseUrl with url to get full path with actual parameter values
-            // e.g., baseUrl="/api/analytics" + url="/query/spend_data" = "/api/analytics/query/spend_data"
-            const baseUrl = req.baseUrl || "";
-            const url = req.url?.split("?")[0] || "";
-            const fullPath = baseUrl + url;
-            if (fullPath) {
-              const spanName = `${req.method} ${fullPath}`;
-              span.updateName(spanName);
-            }
-          }
-        },
-      }),
-    ];
   }
 }
 

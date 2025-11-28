@@ -11,7 +11,7 @@ export class ReconnectPlugin extends Plugin {
       method: "get",
       path: "/",
       schema: z.object({ message: z.string() }),
-      handler: async (req, res) => {
+      handler: async (_req, res) => {
         res.json({ message: "Reconnected" });
       },
     });

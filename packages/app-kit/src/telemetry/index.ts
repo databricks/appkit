@@ -11,6 +11,7 @@ export { context, SpanKind, SpanStatusCode } from "@opentelemetry/api";
 export type { LogAttributes, Logger, LogRecord } from "@opentelemetry/api-logs";
 export { SeverityNumber } from "@opentelemetry/api-logs";
 export { normalizeTelemetryOptions } from "./config";
+export { instrumentations } from "./instrumentations";
 export { TelemetryManager } from "./telemetry-manager";
 export { TelemetryProvider } from "./telemetry-provider";
 export type {

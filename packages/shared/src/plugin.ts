@@ -26,11 +26,13 @@ export interface BasePluginConfig {
   telemetry?: TelemetryOptions;
 }
 
-export type TelemetryOptions = {
-  traces?: boolean;
-  metrics?: boolean;
-  logs?: boolean;
-};
+export type TelemetryOptions =
+  | boolean
+  | {
+      traces?: boolean;
+      metrics?: boolean;
+      logs?: boolean;
+    };
 
 export interface PluginConfig {
   config?: unknown;
