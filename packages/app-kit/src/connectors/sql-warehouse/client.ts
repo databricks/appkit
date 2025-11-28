@@ -3,6 +3,7 @@ import {
   type sql,
   type WorkspaceClient,
 } from "@databricks/sdk-experimental";
+import type { TelemetryOptions } from "shared";
 import type { TelemetryProvider } from "../../telemetry";
 import {
   type Counter,
@@ -13,7 +14,6 @@ import {
   TelemetryManager,
 } from "../../telemetry";
 import { executeStatementDefaults } from "./defaults";
-import type { TelemetryOptions } from "shared";
 
 export interface SQLWarehouseConfig {
   timeout?: number;

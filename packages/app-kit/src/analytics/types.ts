@@ -1,10 +1,8 @@
-import type { BasePluginConfig, TelemetryOptions } from "shared";
+import type { BasePluginConfig } from "shared";
 import { z } from "zod";
 
 export interface IAnalyticsConfig extends BasePluginConfig {
   timeout?: number;
-  typePath?: string;
-  telemetry?: TelemetryOptions;
 }
 
 export interface IAnalyticsQueryRequest {
