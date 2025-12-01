@@ -1,29 +1,19 @@
 import fs from "node:fs";
 import type { Server as HTTPServer } from "node:http";
 import path from "node:path";
-import { Plugin, toPlugin } from "../plugin";
-import type { BasePluginConfig, PluginPhase } from "shared";
-import { databricksClientMiddleware, isRemoteServerEnabled } from "../utils";
 import dotenv from "dotenv";
 import express from "express";
-import { DevModeManager } from "./dev-mode";
-import { getQueries, getRoutes } from "./utils";
+import type { PluginPhase } from "shared";
+import { Plugin, toPlugin } from "../plugin";
 import { instrumentations } from "../telemetry";
+import { databricksClientMiddleware, isRemoteServerEnabled } from "../utils";
+import { DevModeManager } from "./dev-mode";
+import type { ServerConfig } from "./types";
+import { getQueries, getRoutes } from "./utils";
 
 dotenv.config({ path: path.resolve(process.cwd(), "./server/.env") });
 
-export interface ServerConfig extends BasePluginConfig {
-  port?: number;
-  plugins?: Record<string, Plugin>;
-  staticPath?: string;
-  autoStart?: boolean;
-  host?: string;
-  watch?: boolean;
-}
-
 export class ServerPlugin extends Plugin {
-  public name = "server" as const;
-  public envVars = ["DATABRICKS_APP_PORT", "FLASK_RUN_HOST"];
   public static DEFAULT_CONFIG = {
     autoStart: true,
     staticPath: path.resolve(process.cwd(), "client", "dist"),
@@ -31,6 +21,9 @@ export class ServerPlugin extends Plugin {
     port: Number(process.env.DATABRICKS_APP_PORT) || 8000,
     watch: process.env.NODE_ENV === "development",
   };
+
+  public name = "server" as const;
+  public envVars = ["DATABRICKS_APP_PORT", "FLASK_RUN_HOST"];
   private serverApplication: express.Application;
   private server: HTTPServer | null;
   private devModeManager?: DevModeManager;
@@ -63,7 +56,7 @@ export class ServerPlugin extends Plugin {
   }
 
   shouldAutoStart() {
-    return this.config.autoStart ?? ServerPlugin.DEFAULT_CONFIG.autoStart;
+    return this.config.autoStart;
   }
 
   isRemoteServingEnabled() {
@@ -99,14 +92,10 @@ export class ServerPlugin extends Plugin {
     }
 
     const server = this.serverApplication.listen(
-      this.config.port || ServerPlugin.DEFAULT_CONFIG.port,
-      this.config.host || ServerPlugin.DEFAULT_CONFIG.host,
+      this.config.port ?? ServerPlugin.DEFAULT_CONFIG.port,
+      this.config.host ?? ServerPlugin.DEFAULT_CONFIG.host,
       () => {
-        console.log(
-          `Server is running on port ${
-            this.config.port || ServerPlugin.DEFAULT_CONFIG.port
-          }`,
-        );
+        console.log(`Server is running on port ${this.config.port}`);
         if (this.config.staticPath && !this.config.watch) {
           console.log(`Serving static files from: ${this.config.staticPath}`);
         }

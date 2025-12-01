@@ -7,8 +7,7 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"],
-      "@databricks/app-kit-ui": ["../../../packages/app-kit-ui/dist"]
+      "@/*": ["./src/*"]
     }
   }
 }

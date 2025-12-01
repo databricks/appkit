@@ -1,17 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { connectSSE } from "@/js";
 import type {
+  InferResult,
   QueryKey,
-  QueryRegistry,
   UseAnalyticsQueryOptions,
   UseAnalyticsQueryResult,
 } from "./types";
 import { useQueryHMR } from "./use-query-hmr";
-
-/**
- * Infers result type: uses QueryRegistry if key exists, otherwise falls back to explicit type T
- */
-type InferResult<T, K> = K extends keyof QueryRegistry ? QueryRegistry[K] : T;
 
 function getDevMode() {
   const url = new URL(window.location.href);

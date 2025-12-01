@@ -35,24 +35,39 @@ export interface UseAnalyticsQueryResult<T> {
  * }
  * ```
  */
-// biome-ignore lint/suspicious/noEmptyInterface: Required for module augmentation
-export interface QueryRegistry {}
+export interface QueryRegistry {
+  [key: string]: any[];
+}
+
+/** Gets only literal keys from a registry (excludes index signature) */
+export type AugmentedRegistry<T> = keyof {
+  [K in keyof T as string extends K ? never : K]: T[K];
+};
 
 /** Resolves to registry keys if defined, otherwise string */
-export type QueryKey = keyof QueryRegistry extends never
+export type QueryKey = AugmentedRegistry<QueryRegistry> extends never
   ? string
-  : keyof QueryRegistry;
+  : AugmentedRegistry<QueryRegistry>;
 
-// biome-ignore lint/suspicious/noEmptyInterface: Required for module augmentation
-export interface PluginRegistry {}
+/**
+ * Infers result type: uses QueryRegistry if key exists, otherwise falls back to explicit type T
+ */
+export type InferResult<T, K> = K extends AugmentedRegistry<QueryRegistry>
+  ? QueryRegistry[K]
+  : T;
 
-export type PluginName = keyof PluginRegistry extends never
+export interface PluginRegistry {
+  [key: string]: Record<string, any>;
+}
+
+export type PluginName = AugmentedRegistry<PluginRegistry> extends never
   ? string
-  : keyof PluginRegistry;
+  : AugmentedRegistry<PluginRegistry>;
 
-export type PluginRoutes<P extends PluginName> = P extends keyof PluginRegistry
-  ? keyof PluginRegistry[P]
-  : string;
+export type PluginRoutes<P extends PluginName> =
+  P extends AugmentedRegistry<PluginRegistry>
+    ? AugmentedRegistry<PluginRegistry[P]>
+    : string;
 
 export type RouteResponse<
   P extends PluginName,

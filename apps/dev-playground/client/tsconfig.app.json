@@ -29,5 +29,5 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "../config/**/*.d.ts"]
+  "include": ["src"]
 }

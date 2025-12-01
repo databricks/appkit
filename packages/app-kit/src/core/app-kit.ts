@@ -1,7 +1,5 @@
 import { existsSync, type FSWatcher, watch } from "node:fs";
 import path from "node:path";
-import type { TelemetryConfig } from "../telemetry";
-import { TelemetryManager } from "../telemetry";
 import type {
   BasePlugin,
   InputPluginMap,
@@ -11,7 +9,10 @@ import type {
   PluginMap,
   QuerySchemas,
 } from "shared";
+import type { TelemetryConfig } from "../telemetry";
+import { TelemetryManager } from "../telemetry";
 import { generatePluginTypes } from "./type-generator";
+
 export class AppKit<TPlugins extends InputPluginMap> {
   private static _instance: AppKit<InputPluginMap> | null = null;
   private pluginInstances: Record<string, BasePlugin> = {};
@@ -131,6 +132,10 @@ export class AppKit<TPlugins extends InputPluginMap> {
   private _generatePluginTypes(
     rawPlugins: PluginData<PluginConstructor, unknown, string>[],
   ) {
+    const serverPlugin = rawPlugins.find((p) => p.name === "server");
+    const staticPath = (serverPlugin?.config as { staticPath?: string })
+      ?.staticPath;
+
     const schemaDir = path.join(process.cwd(), "config/queries");
     const querySchemaPath = path.join(schemaDir, "schema.ts");
 
@@ -152,6 +157,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
       generatePluginTypes(
         rawPlugins.map((p) => ({ name: p.name })),
         querySchemas,
+        staticPath,
       );
     };
     generate();
