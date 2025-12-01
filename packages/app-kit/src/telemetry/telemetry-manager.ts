@@ -1,8 +1,5 @@
 import type { TelemetryOptions } from "shared";
-import { metrics } from "@opentelemetry/api";
-import { logs } from "@opentelemetry/api-logs";
 import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
-import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-proto";
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-proto";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
@@ -11,47 +8,30 @@ import {
   registerInstrumentations as otelRegisterInstrumentations,
 } from "@opentelemetry/instrumentation";
 import {
-  detectResourcesSync,
+  detectResources,
   envDetector,
   hostDetector,
   processDetector,
-  Resource,
+  type Resource,
+  resourceFromAttributes,
 } from "@opentelemetry/resources";
-import {
-  BatchLogRecordProcessor,
-  LoggerProvider,
-} from "@opentelemetry/sdk-logs";
-import {
-  MeterProvider,
-  PeriodicExportingMetricReader,
-} from "@opentelemetry/sdk-metrics";
-import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
-import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
+import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
+import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
+import { AlwaysOnSampler } from "@opentelemetry/sdk-trace-base";
 import {
   ATTR_SERVICE_NAME,
   ATTR_SERVICE_VERSION,
 } from "@opentelemetry/semantic-conventions";
 import { TelemetryProvider } from "./telemetry-provider";
 import type { TelemetryConfig } from "./types";
+import { NodeSDK } from "@opentelemetry/sdk-node";
 
 export class TelemetryManager {
   private static readonly DEFAULT_EXPORT_INTERVAL_MS = 10000;
+  private static readonly DEFAULT_FALLBACK_APP_NAME = "databricks-app";
 
   private static instance?: TelemetryManager;
-  private static shutdownRegistered = false;
-  private tracerProvider?: NodeTracerProvider;
-  private meterProvider?: MeterProvider;
-  private loggerProvider?: LoggerProvider;
-  private isInitialized = false;
-
-  private constructor() {}
-
-  static getInstance(): TelemetryManager {
-    if (!TelemetryManager.instance) {
-      TelemetryManager.instance = new TelemetryManager();
-    }
-    return TelemetryManager.instance;
-  }
+  private sdk?: NodeSDK;
 
   /**
    * Create a scoped telemetry provider for a specific plugin.
@@ -68,43 +48,57 @@ export class TelemetryManager {
     return new TelemetryProvider(pluginName, globalManager, telemetryConfig);
   }
 
+  private constructor() {}
+
+  static getInstance(): TelemetryManager {
+    if (!TelemetryManager.instance) {
+      TelemetryManager.instance = new TelemetryManager();
+    }
+    return TelemetryManager.instance;
+  }
+
   static initialize(config: Partial<TelemetryConfig> = {}): void {
-    TelemetryManager.registerShutdown();
     const instance = TelemetryManager.getInstance();
     instance._initialize(config);
   }
 
   private _initialize(config: Partial<TelemetryConfig>): void {
-    if (this.isInitialized) {
-      return;
-    }
+    if (this.sdk) return;
 
     if (!process.env.OTEL_EXPORTER_OTLP_ENDPOINT) {
       console.log(
         "[Telemetry] OTEL_EXPORTER_OTLP_ENDPOINT not set; telemetry disabled",
       );
-      this.isInitialized = true;
       return;
     }
 
     try {
-      const resource = this.createResource(config);
-      this.setupTraces(resource, config);
-      this.setupMetrics(resource, config);
-      this.setupLogs(resource, config);
-
-      const instrumentations =
-        config.instrumentations || this.getDefaultInstrumentations();
-      otelRegisterInstrumentations({
-        tracerProvider: this.tracerProvider,
-        meterProvider: this.meterProvider,
-        instrumentations,
+      this.sdk = new NodeSDK({
+        resource: this.createResource(config),
+        autoDetectResources: false,
+        sampler: new AlwaysOnSampler(),
+        traceExporter: new OTLPTraceExporter({ headers: config.headers }),
+        metricReaders: [
+          new PeriodicExportingMetricReader({
+            exporter: new OTLPMetricExporter({ headers: config.headers }),
+            exportIntervalMillis:
+              config.exportIntervalMs ||
+              TelemetryManager.DEFAULT_EXPORT_INTERVAL_MS,
+          }),
+        ],
+        logRecordProcessors: [
+          new BatchLogRecordProcessor(
+            new OTLPLogExporter({ headers: config.headers }),
+          ),
+        ],
+        instrumentations: this.getDefaultInstrumentations(),
       });
 
-      this.isInitialized = true;
+      this.sdk.start();
+      this.registerShutdown();
+      console.log("[Telemetry] Initialized successfully");
     } catch (error) {
-      console.error("[Telemetry] Failed to initialize telemetry:", error);
-      this.isInitialized = true;
+      console.error("[Telemetry] Failed to initialize:", error);
     }
   }
 
@@ -115,8 +109,7 @@ export class TelemetryManager {
    */
   registerInstrumentations(instrumentations: Instrumentation[]): void {
     otelRegisterInstrumentations({
-      tracerProvider: this.tracerProvider,
-      meterProvider: this.meterProvider,
+      //  global providers set by NodeSDK.start()
       instrumentations,
     });
   }
@@ -126,81 +119,15 @@ export class TelemetryManager {
       config.serviceName ||
       process.env.OTEL_SERVICE_NAME ||
       process.env.DATABRICKS_APP_NAME ||
-      "databricks-app";
-
-    const initialResource = new Resource({
+      TelemetryManager.DEFAULT_FALLBACK_APP_NAME;
+    const initialResource = resourceFromAttributes({
       [ATTR_SERVICE_NAME]: serviceName,
       [ATTR_SERVICE_VERSION]: config.serviceVersion ?? undefined,
     });
-    const detectedResource = detectResourcesSync({
+    const detectedResource = detectResources({
       detectors: [envDetector, hostDetector, processDetector],
     });
     return initialResource.merge(detectedResource);
-  }
-
-  private setupTraces(
-    resource: Resource,
-    config: Partial<TelemetryConfig>,
-  ): void {
-    this.tracerProvider = new NodeTracerProvider({
-      resource,
-    });
-
-    const traceExporter = new OTLPTraceExporter({
-      // reads the endpoint automatically
-      headers: config.headers || {},
-    });
-
-    const spanProcessor = new BatchSpanProcessor(traceExporter);
-    this.tracerProvider.addSpanProcessor(spanProcessor);
-
-    const contextManager = new AsyncLocalStorageContextManager();
-    contextManager.enable();
-
-    this.tracerProvider.register({
-      contextManager: contextManager,
-    });
-  }
-
-  private setupMetrics(
-    resource: Resource,
-    config: Partial<TelemetryConfig>,
-  ): void {
-    this.meterProvider = new MeterProvider({
-      resource,
-    });
-
-    const metricExporter = new OTLPMetricExporter({
-      // reads the endpoint automatically
-      headers: config.headers || {},
-    });
-
-    const metricReader = new PeriodicExportingMetricReader({
-      exporter: metricExporter,
-      exportIntervalMillis:
-        config.exportIntervalMs || TelemetryManager.DEFAULT_EXPORT_INTERVAL_MS,
-    });
-
-    this.meterProvider.addMetricReader(metricReader);
-    metrics.setGlobalMeterProvider(this.meterProvider);
-  }
-
-  private setupLogs(
-    resource: Resource,
-    config: Partial<TelemetryConfig>,
-  ): void {
-    this.loggerProvider = new LoggerProvider({
-      resource,
-    });
-
-    const logExporter = new OTLPLogExporter({
-      // reads the endpoint automatically
-      headers: config.headers || {},
-    });
-
-    const logProcessor = new BatchLogRecordProcessor(logExporter);
-    this.loggerProvider.addLogRecordProcessor(logProcessor);
-    logs.setGlobalLoggerProvider(this.loggerProvider);
   }
 
   private getDefaultInstrumentations(): Instrumentation[] {
@@ -231,41 +158,22 @@ export class TelemetryManager {
     ];
   }
 
-  private static registerShutdown() {
-    if (TelemetryManager.shutdownRegistered) {
-      return;
-    }
-
+  private registerShutdown() {
     const shutdownFn = async () => {
       await TelemetryManager.getInstance().shutdown();
     };
     process.once("SIGTERM", shutdownFn);
     process.once("SIGINT", shutdownFn);
-    TelemetryManager.shutdownRegistered = true;
   }
 
   private async shutdown(): Promise<void> {
-    if (!this.isInitialized) {
+    if (!this.sdk) {
       return;
     }
 
     try {
-      if (this.tracerProvider) {
-        await this.tracerProvider.shutdown();
-        this.tracerProvider = undefined;
-      }
-
-      if (this.meterProvider) {
-        await this.meterProvider.shutdown();
-        this.meterProvider = undefined;
-      }
-
-      if (this.loggerProvider) {
-        await this.loggerProvider.shutdown();
-        this.loggerProvider = undefined;
-      }
-
-      this.isInitialized = false;
+      await this.sdk.shutdown();
+      this.sdk = undefined;
     } catch (error) {
       console.error("[Telemetry] Error shutting down:", error);
     }
