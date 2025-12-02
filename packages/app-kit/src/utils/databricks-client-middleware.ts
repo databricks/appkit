@@ -32,9 +32,12 @@ export async function databricksClientMiddleware(): Promise<express.RequestHandl
   ) => {
     const userToken = req.headers["x-forwarded-access-token"] as string;
     let userDatabricksClient: WorkspaceClient | undefined;
-    if (userToken) {
+    const host = process.env.DATABRICKS_HOST;
+    if (userToken && host) {
       userDatabricksClient = new WorkspaceClient({
         token: userToken,
+        host,
+        authType: "pat",
       });
     } else if (process.env.NODE_ENV === "development") {
       // in local development service and no user token are the same
