@@ -4,6 +4,7 @@ import path from "node:path";
 import dotenv from "dotenv";
 import express from "express";
 import type { PluginPhase } from "shared";
+import { generatePluginRegistryTypes } from "@/utils/type-generator";
 import { Plugin, toPlugin } from "../plugin";
 import { instrumentations } from "../telemetry";
 import { databricksClientMiddleware, isRemoteServerEnabled } from "../utils";
@@ -68,6 +69,11 @@ export class ServerPlugin extends Plugin {
     this.serverApplication.use(await databricksClientMiddleware());
 
     this.extendRoutes();
+
+    if (process.env.NODE_ENV === "development") {
+      generatePluginRegistryTypes(this.config.plugins, this.config.staticPath);
+    }
+
     for (const extension of this.serverExtensions) {
       extension(this.serverApplication);
     }

@@ -1,10 +1,17 @@
-import { SQLWarehouseConnector } from "../connectors";
-import { Plugin, toPlugin } from "../plugin";
+import { existsSync, type FSWatcher, watch } from "node:fs";
+import path from "node:path";
+import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type {
   IAppRouter,
   PluginExecuteConfig,
+  QuerySchemas,
   StreamExecutionSettings,
 } from "shared";
+import { generateQueryRegistryTypes } from "@/utils/type-generator";
+import { SQLWarehouseConnector } from "../connectors";
+import { Plugin, toPlugin } from "../plugin";
+import type { Request, Response } from "../utils";
+import { getRequestContext } from "../utils";
 import { queryDefaults } from "./defaults";
 import { QueryProcessor } from "./query";
 import {
@@ -12,9 +19,6 @@ import {
   type IAnalyticsConfig,
   type IAnalyticsQueryRequest,
 } from "./types";
-import type { Request, Response } from "../utils";
-import { getRequestContext } from "../utils";
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
 
 export class AnalyticsPlugin extends Plugin {
   name = "analytics";
@@ -27,6 +31,8 @@ export class AnalyticsPlugin extends Plugin {
   private SQLClient: SQLWarehouseConnector;
   private queryProcessor: QueryProcessor;
 
+  private schemaWatcher: FSWatcher | null = null;
+
   constructor(config: IAnalyticsConfig) {
     super(config);
     this.config = config;
@@ -36,6 +42,10 @@ export class AnalyticsPlugin extends Plugin {
       timeout: config.timeout,
       telemetry: this.telemetry,
     });
+
+    if (process.env.NODE_ENV === "development") {
+      this._generateQueryTypes();
+    }
   }
 
   injectRoutes(router: IAppRouter) {
@@ -162,6 +172,51 @@ export class AnalyticsPlugin extends Plugin {
 
   async shutdown(): Promise<void> {
     this.streamManager.abortAll();
+
+    if (this.schemaWatcher) {
+      this.schemaWatcher.close();
+      this.schemaWatcher = null;
+    }
+  }
+
+  // generate query types for development
+  private _generateQueryTypes() {
+    const schemaDir = path.join(process.cwd(), "config/queries");
+    const schemaPath = path.join(schemaDir, "schema.ts");
+
+    const typePath =
+      this.config.typePath || path.join(process.cwd(), "client", "src");
+
+    const generate = () => {
+      let querySchemas: QuerySchemas = {};
+      try {
+        delete require.cache[require.resolve(schemaPath)];
+        querySchemas = require(schemaPath).querySchemas;
+      } catch (error) {
+        if (existsSync(schemaPath)) {
+          console.warn(
+            `[AppKit] Failed to load query schemas from ${schemaPath}:`,
+            error instanceof Error ? error.message : error,
+          );
+        }
+      }
+      generateQueryRegistryTypes(querySchemas, typePath);
+    };
+
+    generate();
+
+    if (existsSync(schemaPath)) {
+      this.schemaWatcher = watch(
+        schemaDir,
+        { recursive: true },
+        (_event, filename) => {
+          if (filename === "schema.ts") {
+            console.log(`[AppKit] Query schema changed, regenerating types...`);
+            generate();
+          }
+        },
+      );
+    }
   }
 }
 

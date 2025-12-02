@@ -3,6 +3,7 @@ import { z } from "zod";
 
 export interface IAnalyticsConfig extends BasePluginConfig {
   timeout?: number;
+  typePath?: string;
 }
 
 export interface IAnalyticsQueryRequest {
