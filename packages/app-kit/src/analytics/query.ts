@@ -1,5 +1,6 @@
-import type { sql } from "@databricks/sdk-experimental";
 import { createHash } from "node:crypto";
+import type { sql } from "@databricks/sdk-experimental";
+import { isSQLTypeMarker } from "shared";
 import { getRequestContext } from "../utils";
 
 export class QueryProcessor {
@@ -73,6 +74,14 @@ export class QueryProcessor {
 
     if (value === "" && key.includes("Filter")) {
       return null;
+    }
+
+    if (isSQLTypeMarker(value)) {
+      return {
+        name: key,
+        value: value.value,
+        type: value.__sql_type,
+      };
     }
 
     if (key.includes("Date") || key.includes("date")) {

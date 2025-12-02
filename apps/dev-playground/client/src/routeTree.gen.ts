@@ -8,125 +8,125 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as rootRouteImport } from "./routes/__root";
-import { Route as TelemetryRouteRouteImport } from "./routes/telemetry.route";
-import { Route as ReconnectRouteRouteImport } from "./routes/reconnect.route";
-import { Route as DataVisualizationRouteRouteImport } from "./routes/data-visualization.route";
-import { Route as AnalyticsRouteRouteImport } from "./routes/analytics.route";
-import { Route as IndexRouteImport } from "./routes/index";
+import { Route as rootRouteImport } from './routes/__root'
+import { Route as TelemetryRouteRouteImport } from './routes/telemetry.route'
+import { Route as ReconnectRouteRouteImport } from './routes/reconnect.route'
+import { Route as DataVisualizationRouteRouteImport } from './routes/data-visualization.route'
+import { Route as AnalyticsRouteRouteImport } from './routes/analytics.route'
+import { Route as IndexRouteImport } from './routes/index'
 
 const TelemetryRouteRoute = TelemetryRouteRouteImport.update({
-  id: "/telemetry",
-  path: "/telemetry",
+  id: '/telemetry',
+  path: '/telemetry',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const ReconnectRouteRoute = ReconnectRouteRouteImport.update({
-  id: "/reconnect",
-  path: "/reconnect",
+  id: '/reconnect',
+  path: '/reconnect',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const DataVisualizationRouteRoute = DataVisualizationRouteRouteImport.update({
-  id: "/data-visualization",
-  path: "/data-visualization",
+  id: '/data-visualization',
+  path: '/data-visualization',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const AnalyticsRouteRoute = AnalyticsRouteRouteImport.update({
-  id: "/analytics",
-  path: "/analytics",
+  id: '/analytics',
+  path: '/analytics',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const IndexRoute = IndexRouteImport.update({
-  id: "/",
-  path: "/",
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 
 export interface FileRoutesByFullPath {
-  "/": typeof IndexRoute;
-  "/analytics": typeof AnalyticsRouteRoute;
-  "/data-visualization": typeof DataVisualizationRouteRoute;
-  "/reconnect": typeof ReconnectRouteRoute;
-  "/telemetry": typeof TelemetryRouteRoute;
+  '/': typeof IndexRoute
+  '/analytics': typeof AnalyticsRouteRoute
+  '/data-visualization': typeof DataVisualizationRouteRoute
+  '/reconnect': typeof ReconnectRouteRoute
+  '/telemetry': typeof TelemetryRouteRoute
 }
 export interface FileRoutesByTo {
-  "/": typeof IndexRoute;
-  "/analytics": typeof AnalyticsRouteRoute;
-  "/data-visualization": typeof DataVisualizationRouteRoute;
-  "/reconnect": typeof ReconnectRouteRoute;
-  "/telemetry": typeof TelemetryRouteRoute;
+  '/': typeof IndexRoute
+  '/analytics': typeof AnalyticsRouteRoute
+  '/data-visualization': typeof DataVisualizationRouteRoute
+  '/reconnect': typeof ReconnectRouteRoute
+  '/telemetry': typeof TelemetryRouteRoute
 }
 export interface FileRoutesById {
-  __root__: typeof rootRouteImport;
-  "/": typeof IndexRoute;
-  "/analytics": typeof AnalyticsRouteRoute;
-  "/data-visualization": typeof DataVisualizationRouteRoute;
-  "/reconnect": typeof ReconnectRouteRoute;
-  "/telemetry": typeof TelemetryRouteRoute;
+  __root__: typeof rootRouteImport
+  '/': typeof IndexRoute
+  '/analytics': typeof AnalyticsRouteRoute
+  '/data-visualization': typeof DataVisualizationRouteRoute
+  '/reconnect': typeof ReconnectRouteRoute
+  '/telemetry': typeof TelemetryRouteRoute
 }
 export interface FileRouteTypes {
-  fileRoutesByFullPath: FileRoutesByFullPath;
+  fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | "/"
-    | "/analytics"
-    | "/data-visualization"
-    | "/reconnect"
-    | "/telemetry";
-  fileRoutesByTo: FileRoutesByTo;
-  to: "/" | "/analytics" | "/data-visualization" | "/reconnect" | "/telemetry";
+    | '/'
+    | '/analytics'
+    | '/data-visualization'
+    | '/reconnect'
+    | '/telemetry'
+  fileRoutesByTo: FileRoutesByTo
+  to: '/' | '/analytics' | '/data-visualization' | '/reconnect' | '/telemetry'
   id:
-    | "__root__"
-    | "/"
-    | "/analytics"
-    | "/data-visualization"
-    | "/reconnect"
-    | "/telemetry";
-  fileRoutesById: FileRoutesById;
+    | '__root__'
+    | '/'
+    | '/analytics'
+    | '/data-visualization'
+    | '/reconnect'
+    | '/telemetry'
+  fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute;
-  AnalyticsRouteRoute: typeof AnalyticsRouteRoute;
-  DataVisualizationRouteRoute: typeof DataVisualizationRouteRoute;
-  ReconnectRouteRoute: typeof ReconnectRouteRoute;
-  TelemetryRouteRoute: typeof TelemetryRouteRoute;
+  IndexRoute: typeof IndexRoute
+  AnalyticsRouteRoute: typeof AnalyticsRouteRoute
+  DataVisualizationRouteRoute: typeof DataVisualizationRouteRoute
+  ReconnectRouteRoute: typeof ReconnectRouteRoute
+  TelemetryRouteRoute: typeof TelemetryRouteRoute
 }
 
-declare module "@tanstack/react-router" {
+declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    "/telemetry": {
-      id: "/telemetry";
-      path: "/telemetry";
-      fullPath: "/telemetry";
-      preLoaderRoute: typeof TelemetryRouteRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/reconnect": {
-      id: "/reconnect";
-      path: "/reconnect";
-      fullPath: "/reconnect";
-      preLoaderRoute: typeof ReconnectRouteRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/data-visualization": {
-      id: "/data-visualization";
-      path: "/data-visualization";
-      fullPath: "/data-visualization";
-      preLoaderRoute: typeof DataVisualizationRouteRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/analytics": {
-      id: "/analytics";
-      path: "/analytics";
-      fullPath: "/analytics";
-      preLoaderRoute: typeof AnalyticsRouteRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/": {
-      id: "/";
-      path: "/";
-      fullPath: "/";
-      preLoaderRoute: typeof IndexRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
+    '/telemetry': {
+      id: '/telemetry'
+      path: '/telemetry'
+      fullPath: '/telemetry'
+      preLoaderRoute: typeof TelemetryRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reconnect': {
+      id: '/reconnect'
+      path: '/reconnect'
+      fullPath: '/reconnect'
+      preLoaderRoute: typeof ReconnectRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/data-visualization': {
+      id: '/data-visualization'
+      path: '/data-visualization'
+      fullPath: '/data-visualization'
+      preLoaderRoute: typeof DataVisualizationRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/analytics': {
+      id: '/analytics'
+      path: '/analytics'
+      fullPath: '/analytics'
+      preLoaderRoute: typeof AnalyticsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -136,7 +136,7 @@ const rootRouteChildren: RootRouteChildren = {
   DataVisualizationRouteRoute: DataVisualizationRouteRoute,
   ReconnectRouteRoute: ReconnectRouteRoute,
   TelemetryRouteRoute: TelemetryRouteRoute,
-};
+}
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
-  ._addFileTypes<FileRouteTypes>();
+  ._addFileTypes<FileRouteTypes>()

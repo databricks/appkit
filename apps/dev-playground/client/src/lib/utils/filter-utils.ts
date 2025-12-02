@@ -1,3 +1,4 @@
+import { sql } from "@databricks/app-kit-ui/react";
 import type { Aggregation, DashboardFilters } from "@/lib/types";
 
 const ALLOWED_PERIODS = ["day", "week", "month"] as const;
@@ -56,14 +57,16 @@ export function buildWorkflowParams(
 ) {
   const { startDate, endDate } = getDateRange(filters);
 
+  const aggregationLevel = sanitizeAggregationLevel(aggregation.period);
+
   return {
     filters: {
-      startDate: startDate.toISOString().split("T")[0],
-      endDate: endDate.toISOString().split("T")[0],
-      aggregationLevel: sanitizeAggregationLevel(aggregation.period),
-      appId: filters.apps !== "all" ? filters.apps : "all",
-      creator: filters.creator !== "all" ? filters.creator : "all",
-      groupBy: "default",
+      startDate: sql.date(startDate),
+      endDate: sql.date(endDate),
+      aggregationLevel: sql.string(aggregationLevel),
+      appId: sql.string(filters.apps !== "all" ? filters.apps : "all"),
+      creator: sql.string(filters.creator !== "all" ? filters.creator : "all"),
+      groupBy: sql.string("default"),
     },
   };
 }

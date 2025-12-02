@@ -34,6 +34,14 @@ export default defineConfig({
           environment: "node",
         },
       },
+      {
+        plugins: [tsconfigPaths()],
+        test: {
+          name: "shared",
+          root: "./packages/shared",
+          environment: "node",
+        },
+      },
     ],
   },
 });
