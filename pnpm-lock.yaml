@@ -100,8 +100,8 @@ importers:
   packages/app-kit:
     dependencies:
       '@databricks/sdk-experimental':
-        specifier: ^0.14.2
-        version: 0.14.2
+        specifier: ^0.15.0
+        version: 0.15.0
       '@opentelemetry/api':
         specifier: ^1.9.0
         version: 1.9.0
@@ -491,9 +491,9 @@ packages:
     resolution: {integrity: sha512-Vd/9EVDiu6PPJt9yAh6roZP6El1xHrdvIVGjyBsHR0RYwNHgL7FJPyIIW4fANJNG6FtyZfvlRPpFI4ZM/lubvw==}
     engines: {node: '>=18'}
 
-  '@databricks/sdk-experimental@0.14.2':
-    resolution: {integrity: sha512-G7lwQYOyF95IGdTiY9RRVYN5VlGZQ4xVIcfGYIBtW5VjJGKDSC3h8BN0JHKdhZceMNePF0aQ62iBiWpJZ3tQkg==}
-    engines: {node: '>=18.0', npm: '>=9.0.0'}
+  '@databricks/sdk-experimental@0.15.0':
+    resolution: {integrity: sha512-HkoMiF7dNDt6WRW0xhi7oPlBJQfxJ9suJhEZRFt08VwLMaWcw2PiF8monfHlkD4lkufEYV6CTxi5njQkciqiHA==}
+    engines: {node: '>=22.0', npm: '>=10.0.0'}
 
   '@emnapi/core@1.5.0':
     resolution: {integrity: sha512-sbP8GzB1WDzacS8fgNPpHlp6C9VZe+SJP3F90W9rLemaQj2PzIuTEl1qDOYQf58YIpyjViI24y9aPWCjEzY2cg==}
@@ -4747,7 +4747,7 @@ snapshots:
 
   '@csstools/css-tokenizer@3.0.4': {}
 
-  '@databricks/sdk-experimental@0.14.2':
+  '@databricks/sdk-experimental@0.15.0':
     dependencies:
       google-auth-library: 10.5.0
       ini: 6.0.0
