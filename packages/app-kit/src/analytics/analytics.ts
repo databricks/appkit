@@ -9,6 +9,7 @@ import type {
 } from "shared";
 import { SQLWarehouseConnector } from "../connectors";
 import { Plugin, toPlugin } from "../plugin";
+import type { SQLTypeMarker } from "../sql/helpers";
 import type { Request, Response } from "../utils";
 import { getRequestContext } from "../utils";
 import { generateQueryRegistryTypes } from "../utils/type-generator";
@@ -137,7 +138,7 @@ export class AnalyticsPlugin extends Plugin {
 
   async query(
     query: string,
-    parameters?: Record<string, any>,
+    parameters?: Record<string, SQLTypeMarker | null | undefined>,
     signal?: AbortSignal,
     { asUser = false }: { asUser?: boolean } = {},
   ): Promise<any> {

@@ -6,6 +6,7 @@ import {
   setupDatabricksEnv,
 } from "@tools/test-helpers";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { sql } from "../../sql/helpers";
 import { AnalyticsPlugin, analytics } from "../analytics";
 import type { IAnalyticsConfig } from "../types";
 
@@ -167,7 +168,7 @@ describe("Analytics Plugin", () => {
       const handler = getHandler("POST", "/users/me/query/:query_key");
       const mockReq = createMockRequest({
         params: { query_key: "user_profile" },
-        body: { parameters: { user_id: 123 } },
+        body: { parameters: { user_id: sql.number(123) } },
         headers: { "x-forwarded-access-token": "user-token-123" },
       });
       const mockRes = createMockResponse();
@@ -227,7 +228,7 @@ describe("Analytics Plugin", () => {
       const handler = getHandler("POST", "/query/:query_key");
       const mockReq = createMockRequest({
         params: { query_key: "test_query" },
-        body: { parameters: { foo: "bar" } },
+        body: { parameters: { foo: sql.string("bar") } },
       });
 
       await runWithRequestContext(async () => {
@@ -268,7 +269,7 @@ describe("Analytics Plugin", () => {
 
       const mockReq1 = createMockRequest({
         params: { query_key: "user_profile" },
-        body: { parameters: { user_id: 1 } },
+        body: { parameters: { user_id: sql.number(1) } },
         headers: { "x-forwarded-access-token": "user-token-1" },
       });
       const mockRes1 = createMockResponse();
@@ -281,7 +282,7 @@ describe("Analytics Plugin", () => {
 
       const mockReq2 = createMockRequest({
         params: { query_key: "user_profile" },
-        body: { parameters: { user_id: 2 } },
+        body: { parameters: { user_id: sql.number(2) } },
         headers: { "x-forwarded-access-token": "user-token-2" },
       });
       const mockRes2 = createMockResponse();
@@ -294,7 +295,7 @@ describe("Analytics Plugin", () => {
 
       const mockReq1Again = createMockRequest({
         params: { query_key: "user_profile" },
-        body: { parameters: { user_id: 1 } },
+        body: { parameters: { user_id: sql.number(1) } },
         headers: { "x-forwarded-access-token": "user-token-1" },
       });
       const mockRes1Again = createMockResponse();

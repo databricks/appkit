@@ -1,4 +1,4 @@
-import { sql } from "@databricks/app-kit-ui/react";
+import { sql } from "@databricks/app-kit";
 import type { Aggregation, DashboardFilters } from "@/lib/types";
 
 const ALLOWED_PERIODS = ["day", "week", "month"] as const;

@@ -1,3 +1,4 @@
+import { sql } from "@databricks/app-kit";
 import {
   AreaChart,
   BarChart,
@@ -58,22 +59,20 @@ function CodeSnippet({ code }: { code: string }) {
 
 function DataVisualizationRoute() {
   // Default params for the demo - last 30 days
-  const endDate = new Date().toISOString().split("T")[0];
-  const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-    .toISOString()
-    .split("T")[0];
+  const endDate = new Date();
+  const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
   const commonParams = {
-    startDate,
-    endDate,
-    aggregationLevel: "day",
+    startDate: sql.date(startDate),
+    endDate: sql.date(endDate),
+    aggregationLevel: sql.string("day"),
   };
 
   const spendDataParams = {
     ...commonParams,
-    appId: "all",
-    creator: "all",
-    groupBy: "default",
+    appId: sql.string("all"),
+    creator: sql.string("all"),
+    groupBy: sql.string("default"),
   };
 
   return (
