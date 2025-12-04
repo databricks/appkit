@@ -1,7 +1,14 @@
+import { Header } from "@/components/layout/header";
 import { sql } from "@databricks/app-kit-ui/js";
 import {
   AreaChart,
   BarChart,
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
   DataTable,
   LineChart,
   PieChart,
@@ -10,15 +17,6 @@ import {
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { codeToHtml } from "shiki";
-import { Header } from "@/components/layout/header";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 
 export const Route = createFileRoute("/data-visualization")({
   component: DataVisualizationRoute,
@@ -76,7 +74,7 @@ function DataVisualizationRoute() {
   };
 
   return (
-    <div className="min-h-[calc(100vh-73px)] bg-gray-50">
+    <div className="min-h-screen bg-background">
       <div className="max-w-[1200px] mx-auto px-6 py-12">
         <Header
           title="Data Visualization"

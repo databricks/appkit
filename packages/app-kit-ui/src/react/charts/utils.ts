@@ -1,4 +1,4 @@
-import type { ChartConfig } from "./ui/chart";
+import type { ChartConfig } from "../ui/chart";
 
 /** Field patterns to detect date fields */
 const DATE_FIELD_PATTERNS = ["date", "time", "period", "timestamp"];

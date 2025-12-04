@@ -3,8 +3,7 @@ import {
   retainSearchParams,
   useNavigate,
 } from "@tanstack/react-router";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Button, Card } from "@databricks/app-kit-ui/react";
 
 export const Route = createFileRoute("/")({
   component: IndexRoute,
@@ -17,13 +16,13 @@ function IndexRoute() {
   const navigate = useNavigate();
 
   return (
-    <div className="min-h-[calc(100vh-73px)] bg-gray-50">
+    <div className="min-h-screen bg-background">
       <div className="max-w-6xl mx-auto px-6 py-20">
         <div className="text-center mb-16">
-          <h1 className="text-5xl font-bold text-gray-900 mb-4">
+          <h1 className="text-5xl font-bold text-foreground mb-4">
             App Kit Playground
           </h1>
-          <p className="text-xl text-gray-600 max-w-2xl mx-auto">
+          <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
             Explore the capabilities of the App Kit with interactive examples
             and demos
           </p>
@@ -32,10 +31,10 @@ function IndexRoute() {
         <div className="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto mb-16">
           <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
             <div className="flex flex-col h-full">
-              <h3 className="text-2xl font-semibold text-gray-900 mb-3">
+              <h3 className="text-2xl font-semibold text-foreground mb-3">
                 Analytics Dashboard
               </h3>
-              <p className="text-gray-600 mb-6 flex-grow">
+              <p className="text-muted-foreground mb-6 flex-grow">
                 Explore real-time analytics with query execution, data
                 visualization, and interactive components using the Design
                 System.
@@ -51,10 +50,10 @@ function IndexRoute() {
 
           <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
             <div className="flex flex-col h-full">
-              <h3 className="text-2xl font-semibold text-gray-900 mb-3">
+              <h3 className="text-2xl font-semibold text-foreground mb-3">
                 Stream Reconnection
               </h3>
-              <p className="text-gray-600 mb-6 flex-grow">
+              <p className="text-muted-foreground mb-6 flex-grow">
                 Explore Server-Sent Events (SSE) stream reconnection with
                 automatic Last-Event-ID tracking and resilient connection
                 handling.
@@ -70,10 +69,10 @@ function IndexRoute() {
 
           <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
             <div className="flex flex-col h-full">
-              <h3 className="text-2xl font-semibold text-gray-900 mb-3">
+              <h3 className="text-2xl font-semibold text-foreground mb-3">
                 Data Visualization
               </h3>
-              <p className="text-gray-600 mb-6 flex-grow">
+              <p className="text-muted-foreground mb-6 flex-grow">
                 Explore powerful and customizable chart components from the Apps
                 SDK.
               </p>
@@ -88,10 +87,10 @@ function IndexRoute() {
 
           <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
             <div className="flex flex-col h-full">
-              <h3 className="text-2xl font-semibold text-gray-900 mb-3">
+              <h3 className="text-2xl font-semibold text-foreground mb-3">
                 Telemetry
               </h3>
-              <p className="text-gray-600 mb-6 flex-grow">
+              <p className="text-muted-foreground mb-6 flex-grow">
                 Explore OpenTelemetry-compatible tracing and metrics examples
                 with interactive demos showcasing custom observability patterns.
               </p>
@@ -106,10 +105,10 @@ function IndexRoute() {
 
           <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
             <div className="flex flex-col h-full">
-              <h3 className="text-2xl font-semibold text-gray-900 mb-3">
+              <h3 className="text-2xl font-semibold text-foreground mb-3">
                 SQL Helpers
               </h3>
-              <p className="text-gray-600 mb-6 flex-grow">
+              <p className="text-muted-foreground mb-6 flex-grow">
                 Type-safe parameter helpers for Databricks SQL queries. Test
                 each helper interactively and see the generated parameter
                 objects.
@@ -125,7 +124,7 @@ function IndexRoute() {
         </div>
 
         <div className="text-center pt-12 border-t border-gray-200">
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-muted-foreground">
             built by databricks using app-kit
           </p>
         </div>

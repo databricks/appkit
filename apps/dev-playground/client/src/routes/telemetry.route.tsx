@@ -1,6 +1,5 @@
 import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Button, Card } from "@databricks/app-kit-ui/react";
 import { useState } from "react";
 import { Activity, Loader2 } from "lucide-react";
 
@@ -104,7 +103,7 @@ function TelemetryRoute() {
   ];
 
   return (
-    <div className="min-h-[calc(100vh-73px)] bg-gray-50">
+    <div className="min-h-screen bg-background">
       <div className="max-w-6xl mx-auto px-6 py-12">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">

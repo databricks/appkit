@@ -3,7 +3,7 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@databricks/app-kit-ui/react";
 
 export function Header({
   title,
@@ -17,7 +17,7 @@ export function Header({
   return (
     <div className="mb-8">
       <div className="flex items-center gap-3 mb-2">
-        <h1 className="text-3xl font-bold">{title}</h1>
+        <h1 className="text-3xl font-bold text-foreground">{title}</h1>
         <Tooltip>
           <TooltipTrigger>
             <InfoIcon className="w-5 h-5" />
@@ -25,7 +25,7 @@ export function Header({
           <TooltipContent>{tooltip}</TooltipContent>
         </Tooltip>
       </div>
-      <p className="text-base text-gray-500">{description}</p>
+      <p className="text-foreground text-muted-foreground">{description}</p>
     </div>
   );
 }

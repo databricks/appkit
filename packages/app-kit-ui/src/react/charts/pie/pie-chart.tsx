@@ -1,7 +1,7 @@
 import { Label, Pie, PieChart as RechartsPieChart } from "recharts";
 import { ChartTooltipDefault } from "../chart-tooltip";
 import { ChartWrapper } from "../chart-wrapper";
-import { ChartContainer } from "../ui/chart";
+import { ChartContainer } from "../../ui/chart";
 import { detectFields, generateChartConfig } from "../utils";
 import type { PieChartProps } from "./types";
 

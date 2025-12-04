@@ -3,8 +3,8 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
+  Skeleton,
+} from "@databricks/app-kit-ui/react";
 import type { Aggregation, DashboardFilters } from "@/lib/types";
 
 interface SummaryCardsProps {
