@@ -33,11 +33,11 @@ vi.mock("@opentelemetry/resources", async () => {
   >("@opentelemetry/resources");
   return {
     ...actual,
-    detectResourcesSync: vi.fn().mockReturnValue(
-      new actual.Resource({
+    detectResources: vi.fn(() => {
+      return actual.resourceFromAttributes({
         "host.name": "test-host",
-      }),
-    ),
+      });
+    }),
   };
 });
 
@@ -69,17 +69,17 @@ describe("TelemetryManager", () => {
     expect(instance1).toBe(instance2);
   });
 
-  test("should call detectResourcesSync when initializing", async () => {
+  test("should call detectResources when initializing", async () => {
     process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:4318";
 
-    const { detectResourcesSync } = await import("@opentelemetry/resources");
+    const { detectResources } = await import("@opentelemetry/resources");
     vi.clearAllMocks();
 
     TelemetryManager.initialize({
       serviceName: "test-service-config",
     });
 
-    expect(detectResourcesSync).toHaveBeenCalled();
+    expect(detectResources).toHaveBeenCalled();
   });
 
   test("should initialize providers and create telemetry instances", async () => {
