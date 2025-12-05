@@ -56,6 +56,14 @@ function RootComponent() {
                     Telemetry
                   </Button>
                 </Link>
+                <Link to="/volume-serving" className="no-underline">
+                  <Button
+                    variant="ghost"
+                    className="text-gray-700 hover:text-gray-900"
+                  >
+                    Volume Serving
+                  </Button>
+                </Link>
               </div>
             </nav>
           </div>
