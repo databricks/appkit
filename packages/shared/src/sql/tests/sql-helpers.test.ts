@@ -157,6 +157,73 @@ describe("SQL Helpers", () => {
     });
   });
 
+  describe("binary()", () => {
+    it("should create a BINARY type parameter from a Uint8Array", () => {
+      // "Spark" in bytes
+      const data = new Uint8Array([0x53, 0x70, 0x61, 0x72, 0x6b]);
+      const result = sql.binary(data);
+      expect(result).toEqual({
+        __sql_type: "BINARY",
+        value: "537061726B",
+      });
+    });
+
+    it("should create a BINARY type parameter from an ArrayBuffer", () => {
+      const buffer = new Uint8Array([0x1a, 0xbf]).buffer;
+      const result = sql.binary(buffer);
+      expect(result).toEqual({
+        __sql_type: "BINARY",
+        value: "1ABF",
+      });
+    });
+
+    it("should create a BINARY type parameter from a hex string", () => {
+      const hex = "1ABF";
+      const result = sql.binary(hex);
+      expect(result).toEqual({
+        __sql_type: "BINARY",
+        value: "1ABF",
+      });
+    });
+
+    it("should normalize lowercase hex string to uppercase", () => {
+      const hex = "1abf";
+      const result = sql.binary(hex);
+      expect(result).toEqual({
+        __sql_type: "BINARY",
+        value: "1ABF",
+      });
+    });
+
+    it("should accept empty hex string", () => {
+      const result = sql.binary("");
+      expect(result).toEqual({
+        __sql_type: "BINARY",
+        value: "",
+      });
+    });
+
+    it("should accept empty Uint8Array", () => {
+      const result = sql.binary(new Uint8Array([]));
+      expect(result).toEqual({
+        __sql_type: "BINARY",
+        value: "",
+      });
+    });
+
+    it("should reject invalid hex string", () => {
+      expect(() => sql.binary("GHIJ")).toThrow(
+        "sql.binary() expects Uint8Array, ArrayBuffer, or hex-encoded string, got invalid hex: GHIJ",
+      );
+    });
+
+    it("should reject invalid type", () => {
+      expect(() => sql.binary(123 as any)).toThrow(
+        "sql.binary() expects Uint8Array, ArrayBuffer, or hex-encoded string, got: number",
+      );
+    });
+  });
+
   describe("timestamp()", () => {
     it("should create a TIMESTAMP type parameter from a Date object", () => {
       const date = new Date("2024-01-01T12:00:00Z");

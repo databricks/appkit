@@ -1,9 +1,15 @@
 /**
  * Object that identifies a typed SQL parameter.
- * Created using sql.date(), sql.string(), sql.number(), sql.boolean(), or sql.timestamp().
+ * Created using sql.date(), sql.string(), sql.number(), sql.boolean(), sql.timestamp(), sql.binary(), or sql.interval().
  */
 export interface SQLTypeMarker {
-  __sql_type: "DATE" | "TIMESTAMP" | "STRING" | "NUMERIC" | "BOOLEAN";
+  __sql_type:
+    | "DATE"
+    | "TIMESTAMP"
+    | "STRING"
+    | "NUMERIC"
+    | "BOOLEAN"
+    | "BINARY";
   value: string;
 }
 
@@ -268,6 +274,53 @@ export const sql = {
     return {
       __sql_type: "BOOLEAN",
       value: booleanValue,
+    };
+  },
+
+  /**
+   * Creates a BINARY type parameter
+   * Accepts Uint8Array, ArrayBuffer, or hex-encoded strings
+   * @param value - Uint8Array, ArrayBuffer, or hex-encoded string
+   * @returns Marker object for BINARY type parameter
+   * @example
+   * ```typescript
+   * const params = { data: sql.binary(new Uint8Array([0x53, 0x70, 0x61, 0x72, 0x6b])) };
+   * params = { data: "537061726B" }
+   * ```
+   * @example
+   * ```typescript
+   * const params = { data: sql.binary("1ABF") };
+   * params = { data: "1ABF" }
+   * ```
+   */
+  binary(value: Uint8Array | ArrayBuffer | string): SQLTypeMarker {
+    let binaryValue: string = "";
+
+    if (value instanceof Uint8Array) {
+      binaryValue = Array.from(value)
+        .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+        .join("");
+    } else if (value instanceof ArrayBuffer) {
+      binaryValue = Array.from(new Uint8Array(value))
+        .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+        .join("");
+    } else if (typeof value === "string") {
+      // validate hex string
+      if (!/^[0-9A-Fa-f]*$/.test(value)) {
+        throw new Error(
+          `sql.binary() expects Uint8Array, ArrayBuffer, or hex-encoded string, got invalid hex: ${value}`,
+        );
+      }
+      binaryValue = value.toUpperCase();
+    } else {
+      throw new Error(
+        `sql.binary() expects Uint8Array, ArrayBuffer, or hex-encoded string, got: ${typeof value}`,
+      );
+    }
+
+    return {
+      __sql_type: "BINARY",
+      value: binaryValue,
     };
   },
 };
