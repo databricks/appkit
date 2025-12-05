@@ -18,8 +18,9 @@ export default defineConfig([
     unbundle: true,
     noExternal: ["shared"],
     external: (id) => {
-      // Bundle "shared" workspace package, externalize everything else from node_modules
+      // Bundle "shared" workspace package and @/ path aliases
       if (id === "shared" || id.startsWith("shared/")) return false;
+      if (id.startsWith("@/")) return false;
       return /^[^./]/.test(id) || id.includes("/node_modules/");
     },
     tsconfig: "./tsconfig.json",
