@@ -1,4 +1,4 @@
-import { sql } from "@databricks/app-kit";
+import { sql } from "@databricks/app-kit-ui/js";
 import {
   AreaChart,
   BarChart,

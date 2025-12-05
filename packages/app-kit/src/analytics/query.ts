@@ -1,10 +1,6 @@
 import { createHash } from "node:crypto";
 import type { sql } from "@databricks/sdk-experimental";
-import {
-  isSQLTypeMarker,
-  type SQLTypeMarker,
-  sql as sqlHelpers,
-} from "../sql/helpers";
+import { isSQLTypeMarker, type SQLTypeMarker, sql as sqlHelpers } from "shared";
 import { getRequestContext } from "../utils";
 
 type SQLParameterValue = SQLTypeMarker | null | undefined;

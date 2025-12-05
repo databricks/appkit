@@ -1,6 +1,6 @@
 import { runWithRequestContext } from "@tools/test-helpers";
+import { sql } from "shared";
 import { describe, expect, test } from "vitest";
-import { sql } from "../../sql/helpers";
 import { QueryProcessor } from "../query";
 
 describe("QueryProcessor", () => {

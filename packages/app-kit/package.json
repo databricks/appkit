@@ -12,10 +12,6 @@
   ],
   "exports": {
     ".": {
-      "browser": {
-        "development": "./src/browser.ts",
-        "default": "./dist/browser.js"
-      },
       "development": "./src/index.ts",
       "default": "./dist/index.js"
     },
@@ -64,10 +60,7 @@
   "module": "./dist/index.js",
   "publishConfig": {
     "exports": {
-      ".": {
-        "browser": "./dist/browser.js",
-        "default": "./dist/index.js"
-      },
+      ".": "./dist/index.js",
       "./package.json": "./package.json"
     }
   }

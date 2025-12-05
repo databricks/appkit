@@ -2,7 +2,7 @@ import { defineConfig } from "tsdown";
 
 export default defineConfig([
   {
-    publint: false,
+    publint: true,
     name: "@databricks/app-kit",
     entry: "src/index.ts",
     outDir: "dist",
@@ -34,22 +34,5 @@ export default defineConfig([
         to: "dist/server/denied.html",
       },
     ],
-  },
-  {
-    publint: false,
-    name: "@databricks/app-kit/browser",
-    entry: "src/browser.ts",
-    outDir: "dist",
-    hash: false,
-    format: "esm",
-    platform: "browser",
-    minify: false,
-    dts: {
-      resolve: true,
-    },
-    sourcemap: false,
-    clean: false,
-    noExternal: ["shared"],
-    tsconfig: "./tsconfig.json",
   },
 ]);

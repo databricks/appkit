@@ -5,11 +5,11 @@ import type {
   IAppRouter,
   PluginExecuteConfig,
   QuerySchemas,
+  SQLTypeMarker,
   StreamExecutionSettings,
 } from "shared";
 import { SQLWarehouseConnector } from "../connectors";
 import { Plugin, toPlugin } from "../plugin";
-import type { SQLTypeMarker } from "../sql/helpers";
 import type { Request, Response } from "../utils";
 import { getRequestContext } from "../utils";
 import { generateQueryRegistryTypes } from "../utils/type-generator";

@@ -1,4 +1,4 @@
-import { sql } from "@databricks/app-kit";
+import { sql } from "@databricks/app-kit-ui/js";
 import { BarChart } from "@databricks/app-kit-ui/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {

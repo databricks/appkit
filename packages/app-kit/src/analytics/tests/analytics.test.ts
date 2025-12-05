@@ -5,8 +5,8 @@ import {
   runWithRequestContext,
   setupDatabricksEnv,
 } from "@tools/test-helpers";
+import { sql } from "shared";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { sql } from "../../sql/helpers";
 import { AnalyticsPlugin, analytics } from "../analytics";
 import type { IAnalyticsConfig } from "../types";
 
