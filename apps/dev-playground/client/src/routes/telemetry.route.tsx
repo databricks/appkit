@@ -1,8 +1,8 @@
 import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
+import { Activity, Loader2 } from "lucide-react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { useState } from "react";
-import { Activity, Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/telemetry")({
   component: TelemetryRoute,

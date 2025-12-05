@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { connectSSE } from "@/js";
+import { connectSSE } from "../../js";
 import type {
   InferResult,
   QueryKey,

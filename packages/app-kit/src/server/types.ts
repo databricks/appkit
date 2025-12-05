@@ -1,5 +1,5 @@
 import type { BasePluginConfig } from "shared";
-import type { Plugin } from "@/plugin";
+import type { Plugin } from "../plugin";
 
 export interface ServerConfig extends BasePluginConfig {
   port?: number;

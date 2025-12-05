@@ -9,12 +9,18 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from "./routes/__root";
+import { Route as VolumeServingRouteRouteImport } from "./routes/volume-serving.route";
 import { Route as TelemetryRouteRouteImport } from "./routes/telemetry.route";
 import { Route as ReconnectRouteRouteImport } from "./routes/reconnect.route";
 import { Route as DataVisualizationRouteRouteImport } from "./routes/data-visualization.route";
 import { Route as AnalyticsRouteRouteImport } from "./routes/analytics.route";
 import { Route as IndexRouteImport } from "./routes/index";
 
+const VolumeServingRouteRoute = VolumeServingRouteRouteImport.update({
+  id: "/volume-serving",
+  path: "/volume-serving",
+  getParentRoute: () => rootRouteImport,
+} as any);
 const TelemetryRouteRoute = TelemetryRouteRouteImport.update({
   id: "/telemetry",
   path: "/telemetry",
@@ -47,6 +53,7 @@ export interface FileRoutesByFullPath {
   "/data-visualization": typeof DataVisualizationRouteRoute;
   "/reconnect": typeof ReconnectRouteRoute;
   "/telemetry": typeof TelemetryRouteRoute;
+  "/volume-serving": typeof VolumeServingRouteRoute;
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute;
@@ -54,6 +61,7 @@ export interface FileRoutesByTo {
   "/data-visualization": typeof DataVisualizationRouteRoute;
   "/reconnect": typeof ReconnectRouteRoute;
   "/telemetry": typeof TelemetryRouteRoute;
+  "/volume-serving": typeof VolumeServingRouteRoute;
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
@@ -62,6 +70,7 @@ export interface FileRoutesById {
   "/data-visualization": typeof DataVisualizationRouteRoute;
   "/reconnect": typeof ReconnectRouteRoute;
   "/telemetry": typeof TelemetryRouteRoute;
+  "/volume-serving": typeof VolumeServingRouteRoute;
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
@@ -70,16 +79,24 @@ export interface FileRouteTypes {
     | "/analytics"
     | "/data-visualization"
     | "/reconnect"
-    | "/telemetry";
+    | "/telemetry"
+    | "/volume-serving";
   fileRoutesByTo: FileRoutesByTo;
-  to: "/" | "/analytics" | "/data-visualization" | "/reconnect" | "/telemetry";
+  to:
+    | "/"
+    | "/analytics"
+    | "/data-visualization"
+    | "/reconnect"
+    | "/telemetry"
+    | "/volume-serving";
   id:
     | "__root__"
     | "/"
     | "/analytics"
     | "/data-visualization"
     | "/reconnect"
-    | "/telemetry";
+    | "/telemetry"
+    | "/volume-serving";
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
@@ -88,10 +105,18 @@ export interface RootRouteChildren {
   DataVisualizationRouteRoute: typeof DataVisualizationRouteRoute;
   ReconnectRouteRoute: typeof ReconnectRouteRoute;
   TelemetryRouteRoute: typeof TelemetryRouteRoute;
+  VolumeServingRouteRoute: typeof VolumeServingRouteRoute;
 }
 
 declare module "@tanstack/react-router" {
   interface FileRoutesByPath {
+    "/volume-serving": {
+      id: "/volume-serving";
+      path: "/volume-serving";
+      fullPath: "/volume-serving";
+      preLoaderRoute: typeof VolumeServingRouteRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     "/telemetry": {
       id: "/telemetry";
       path: "/telemetry";
@@ -136,6 +161,7 @@ const rootRouteChildren: RootRouteChildren = {
   DataVisualizationRouteRoute: DataVisualizationRouteRoute,
   ReconnectRouteRoute: ReconnectRouteRoute,
   TelemetryRouteRoute: TelemetryRouteRoute,
+  VolumeServingRouteRoute: VolumeServingRouteRoute,
 };
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
