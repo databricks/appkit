@@ -159,13 +159,23 @@ describe("SQL Helpers", () => {
 
   describe("binary()", () => {
     it("should create a BINARY type parameter from a Uint8Array", () => {
-      // "Spark" in bytes
+      // "Spark" in bytes - matches Databricks docs: CAST('Spark' AS BINARY) = [53 70 61 72 6B]
       const data = new Uint8Array([0x53, 0x70, 0x61, 0x72, 0x6b]);
       const result = sql.binary(data);
       expect(result).toEqual({
         __sql_type: "BINARY",
         value: "537061726B",
       });
+    });
+
+    it("should produce hex format compatible with Databricks X literal", () => {
+      // Databricks BINARY literal: X'1ABF' produces [1A BF]
+      // Our encoding should produce the same hex string (without X'' wrapper)
+      const data = new Uint8Array([0x1a, 0xbf]);
+      const result = sql.binary(data);
+      // Databricks API expects uppercase hex string for BINARY type parameter
+      expect(result.value).toBe("1ABF");
+      expect(result.__sql_type).toBe("BINARY");
     });
 
     it("should create a BINARY type parameter from an ArrayBuffer", () => {
