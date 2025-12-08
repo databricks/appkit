@@ -19,6 +19,9 @@
     },
     "./package.json": "./package.json"
   },
+  "bin": {
+    "appkit-generate-types": "./bin/generate-types.ts"
+  },
   "scripts": {
     "build:package": "tsdown --config tsdown.config.ts",
     "build:watch": "tsdown --config tsdown.config.ts --watch",

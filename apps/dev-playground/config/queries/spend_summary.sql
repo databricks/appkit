@@ -1,3 +1,6 @@
+-- @param aggregationLevel STRING
+-- @param startDate DATE
+-- @param endDate DATE
 SELECT
   ROUND(SUM(u.usage_quantity * lp.pricing.effective_list.default)) AS total,
   ROUND(SUM(u.usage_quantity * lp.pricing.effective_list.default) /

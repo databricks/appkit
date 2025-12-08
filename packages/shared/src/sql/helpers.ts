@@ -1,17 +1,12 @@
-/**
- * Object that identifies a typed SQL parameter.
- * Created using sql.date(), sql.string(), sql.number(), sql.boolean(), sql.timestamp(), sql.binary(), or sql.interval().
- */
-export interface SQLTypeMarker {
-  __sql_type:
-    | "DATE"
-    | "TIMESTAMP"
-    | "STRING"
-    | "NUMERIC"
-    | "BOOLEAN"
-    | "BINARY";
-  value: string;
-}
+import type {
+  SQLBinaryMarker,
+  SQLBooleanMarker,
+  SQLDateMarker,
+  SQLNumberMarker,
+  SQLStringMarker,
+  SQLTimestampMarker,
+  SQLTypeMarker,
+} from "./types";
 
 /**
  * SQL helper namespace
@@ -33,7 +28,7 @@ export const sql = {
    * params = { startDate: "2024-01-01" }
    * ```
    */
-  date(value: Date | string): SQLTypeMarker {
+  date(value: Date | string): SQLDateMarker {
     let dateValue: string = "";
 
     // check if value is a Date object
@@ -84,7 +79,7 @@ export const sql = {
    * params = { createdTime: "2024-01-01T12:00:00Z" }
    * ```
    */
-  timestamp(value: Date | string | number): SQLTypeMarker {
+  timestamp(value: Date | string | number): SQLTimestampMarker {
     let timestampValue: string = "";
 
     if (value instanceof Date) {
@@ -129,7 +124,7 @@ export const sql = {
    * params = { userId: "123" }
    * ```
    */
-  number(value: number | string): SQLTypeMarker {
+  number(value: number | string): SQLNumberMarker {
     let numValue: string = "";
 
     // check if value is a number
@@ -179,7 +174,7 @@ export const sql = {
    * params = { name: "true" }
    * ```
    */
-  string(value: string | number | boolean): SQLTypeMarker {
+  string(value: string | number | boolean): SQLStringMarker {
     if (
       typeof value !== "string" &&
       typeof value !== "number" &&
@@ -236,7 +231,7 @@ export const sql = {
    * ```
    * @returns
    */
-  boolean(value: boolean | string | number): SQLTypeMarker {
+  boolean(value: boolean | string | number): SQLBooleanMarker {
     if (
       typeof value !== "boolean" &&
       typeof value !== "string" &&
@@ -298,7 +293,7 @@ export const sql = {
    * // Returns: { __sql_type: "STRING", value: "537061726B" }
    * ```
    */
-  binary(value: Uint8Array | ArrayBuffer | string): SQLTypeMarker {
+  binary(value: Uint8Array | ArrayBuffer | string): SQLBinaryMarker {
     let hexValue: string = "";
 
     if (value instanceof Uint8Array) {

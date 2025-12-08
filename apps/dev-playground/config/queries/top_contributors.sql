@@ -1,5 +1,7 @@
 -- Top contributors by app with aggregation support
--- Parameters: workspaceId, startDate, endDate, aggregationLevel (daily, weekly, monthly)
+-- @param aggregationLevel STRING
+-- @param startDate DATE
+-- @param endDate DATE
 WITH aggregated_costs AS (
   SELECT 
     u.usage_metadata.app_name AS app_name,

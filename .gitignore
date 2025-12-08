@@ -10,3 +10,6 @@ coverage
 docs
 
 .turbo
+
+# AppKit type generation cache
+.appkit-types-cache.json
