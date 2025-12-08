@@ -7,7 +7,14 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!**/dist", "!**/*.d.ts", "!**/build", "!**/coverage"]
+    "includes": [
+      "**",
+      "!**/dist",
+      "!**/*.d.ts",
+      "!**/build",
+      "!**/coverage",
+      "!**/routeTree.gen.ts"
+    ]
   },
   "formatter": {
     "enabled": true,

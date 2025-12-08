@@ -1,3 +1,4 @@
+import { sql } from "@databricks/app-kit-ui/js";
 import { BarChart } from "@databricks/app-kit-ui/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -21,7 +22,7 @@ export function UsageTrendsChart({
 }: UsageTrendsChartProps) {
   const spendDataParams = {
     ...queryParams,
-    groupBy,
+    groupBy: sql.string(groupBy),
   };
 
   return (

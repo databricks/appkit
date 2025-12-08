@@ -19,3 +19,5 @@ fs.cpSync("dist", "tmp/dist", { recursive: true });
 fs.copyFileSync(path.join(__dirname, "../llms.txt"), "tmp/llms.txt");
 fs.copyFileSync(path.join(__dirname, "../README.md"), "tmp/README.md");
 fs.copyFileSync(path.join(__dirname, "../LICENSE"), "tmp/LICENSE");
+fs.copyFileSync(path.join(__dirname, "../DCO"), "tmp/DCO");
+fs.copyFileSync(path.join(__dirname, "../NOTICE.md"), "tmp/NOTICE.md");

@@ -3,7 +3,7 @@ import "@databricks/app-kit-ui/react";
 
 declare module "@databricks/app-kit-ui/react" {
   interface PluginRegistry {
-    reconnect: {
+    "reconnect": {
       "/": {
           message: string;
       };
@@ -15,7 +15,7 @@ declare module "@databricks/app-kit-ui/react" {
           content: string;
       };
     }
-    analytics: {
+    "analytics": {
       "/users/me/query/:query_key": {
           chunk_index: number;
           row_offset: number;
@@ -32,6 +32,7 @@ declare module "@databricks/app-kit-ui/react" {
   }
 
   interface QueryRegistry {
+
     apps_list: {
         id: string;
         name: string;
@@ -60,6 +61,15 @@ declare module "@databricks/app-kit-ui/react" {
         app_name: string;
         total_cost_usd: number;
     }[];
+    sql_helpers_test: {
+        string_value: string;
+        number_value: number;
+        boolean_value: boolean;
+        date_value: string;
+        timestamp_value: string;
+        binary_value: string;
+        binary_hex: string;
+        binary_length: number;
+    };
   }
-
 }

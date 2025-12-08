@@ -43,4 +43,14 @@ export const querySchemas = {
       total_cost_usd: z.number(),
     }),
   ),
+  sql_helpers_test: z.object({
+    string_value: z.string(),
+    number_value: z.number(),
+    boolean_value: z.boolean(),
+    date_value: z.string(),
+    timestamp_value: z.string(),
+    binary_value: z.string(),
+    binary_hex: z.string(),
+    binary_length: z.number(),
+  }),
 };

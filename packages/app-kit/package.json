@@ -1,14 +1,16 @@
 {
   "name": "@databricks/app-kit",
   "type": "module",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "packageManager": "pnpm@10.21.0",
   "files": [
     "dist",
     "llms.txt",
-    "README.md"
+    "README.md",
+    "DCO",
+    "NOTICE.md"
   ],
   "exports": {
     ".": {
@@ -22,6 +24,8 @@
     "build:watch": "tsdown --config tsdown.config.ts --watch",
     "typecheck": "tsc --noEmit",
     "dist": "tsx ../../tools/dist.ts && npm pack ./tmp --pack-destination ./tmp",
+    "release:dry": "pnpm run dist && pnpm publish ./tmp --access public --dry-run --no-git-checks",
+    "release": "pnpm dist && pnpm publish ./tmp --access public --no-git-checks",
     "clean": "rm -rf dist tmp",
     "clean:full": "rm -rf dist node_modules tmp"
   },

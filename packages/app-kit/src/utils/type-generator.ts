@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { QuerySchemas } from "shared";
 import { createAuxiliaryTypeStore, printNode, zodToTs } from "zod-to-ts";
-import { type Plugin, routeSchemaRegistry } from "@/plugin";
+import { type Plugin, routeSchemaRegistry } from "../plugin";
 
 interface AppKitRegistry {
   pluginRegistry: string;

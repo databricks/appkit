@@ -38,8 +38,5 @@ export default defineConfig([
         to: "dist/server/denied.html",
       },
     ],
-    exports: {
-      devExports: "development",
-    },
   },
 ]);

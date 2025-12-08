@@ -6,7 +6,8 @@
     "lib": ["ES2021", "DOM"],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "shared": ["../shared/src"]
     }
   },
   "include": ["src/**/*"],
