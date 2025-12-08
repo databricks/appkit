@@ -182,7 +182,9 @@ function IntelliSenseDemo() {
   const [showParamHint, setShowParamHint] = useState(false);
   const [showResultHint, setShowResultHint] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const [timeoutIds, setTimeoutIds] = useState<ReturnType<typeof setTimeout>[]>([]);
+  const [timeoutIds, setTimeoutIds] = useState<ReturnType<typeof setTimeout>[]>(
+    [],
+  );
 
   const queryNames = [
     "apps_list",
@@ -209,7 +211,7 @@ function IntelliSenseDemo() {
         setTimeout(() => {
           setStep(1);
           setShowAutocomplete(true);
-        }, delay)
+        }, delay),
       );
       delay += 2000; // Wait 2s before next
     }
@@ -221,7 +223,7 @@ function IntelliSenseDemo() {
         setTimeout(() => {
           setStep(2);
           setShowAutocomplete(false);
-        }, delay)
+        }, delay),
       );
       delay += 500; // Wait 500ms before showing params
     }
@@ -232,7 +234,7 @@ function IntelliSenseDemo() {
       ids.push(
         setTimeout(() => {
           setShowParamHint(true);
-        }, delay)
+        }, delay),
       );
       delay += 2000; // Wait 2s before next
     }
@@ -244,7 +246,7 @@ function IntelliSenseDemo() {
         setTimeout(() => {
           setStep(3);
           setShowParamHint(false);
-        }, delay)
+        }, delay),
       );
       delay += 500; // Wait 500ms before showing results
     }
@@ -255,7 +257,7 @@ function IntelliSenseDemo() {
       ids.push(
         setTimeout(() => {
           setShowResultHint(true);
-        }, delay)
+        }, delay),
       );
       delay += 2000; // Wait 2s before complete
     }
@@ -266,7 +268,7 @@ function IntelliSenseDemo() {
       ids.push(
         setTimeout(() => {
           setStep(4);
-        }, delay)
+        }, delay),
       );
     }
 
@@ -447,7 +449,8 @@ function TypeSafetyRoute() {
             <CardHeader>
               <CardTitle>1. SQL File</CardTitle>
               <CardDescription>
-                Write SQL queries with @param annotations to define parameter types
+                Write SQL queries with @param annotations to define parameter
+                types
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -460,7 +463,8 @@ function TypeSafetyRoute() {
             <CardHeader>
               <CardTitle>2. Generated Types</CardTitle>
               <CardDescription>
-                Vite plugin or npx command generates appKitTypes.d.ts at build time
+                Vite plugin or npx command generates appKitTypes.d.ts at build
+                time
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -473,7 +477,8 @@ function TypeSafetyRoute() {
             <CardHeader>
               <CardTitle>3. IntelliSense</CardTitle>
               <CardDescription>
-                Your IDE provides full autocomplete for query names, parameters, and results
+                Your IDE provides full autocomplete for query names, parameters,
+                and results
               </CardDescription>
             </CardHeader>
             <CardContent>
