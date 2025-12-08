@@ -1,12 +1,11 @@
 import type { Meter, Span, SpanOptions, Tracer } from "@opentelemetry/api";
 import type { Logger, LogRecord } from "@opentelemetry/api-logs";
 import type { Instrumentation } from "@opentelemetry/instrumentation";
-import type { NodeSDKConfiguration } from "@opentelemetry/sdk-node";
 
 export interface TelemetryConfig {
   serviceName?: string;
   serviceVersion?: string;
-  instrumentations?: NodeSDKConfiguration["instrumentations"];
+  instrumentations?: Instrumentation[];
   exportIntervalMs?: number;
   headers?: Record<string, string>;
 }

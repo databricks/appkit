@@ -7,6 +7,12 @@ import ora from "ora";
 
 const exec = promisify(execChildProcess);
 
+const config = {
+  profile: process.env.DATABRICKS_PROFILE,
+  appName: process.env.DATABRICKS_APP_NAME,
+  workspaceDir: process.env.DATABRICKS_WORKSPACE_DIR,
+};
+
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const PLAYGROUND_FOLDER = path.join(process.cwd(), "apps", "dev-playground");
 const TMP_FOLDER = path.join(process.cwd(), "deployable");
@@ -121,41 +127,51 @@ async function deployPlayground() {
   process.chdir(TMP_FOLDER);
 
   const username = os.userInfo().username;
-  const scopedAppName = `${transformUsername(username)}-${appName}`;
+  const scopedAppName =
+    config.appName || `${transformUsername(username)}-${appName}`;
+  const workspaceDir = config.workspaceDir || scopedAppName;
+  const profileArgs = config.profile ? ["-p", config.profile] : [];
+  const profileArgStr =
+    profileArgs.length > 0 ? ` ${profileArgs.join(" ")}` : "";
 
   try {
-    await exec(`databricks apps get ${scopedAppName}`);
+    await exec(`databricks apps get ${scopedAppName}${profileArgStr}`);
   } catch {
-    spinner.info("Creating app...");
-    await execWithOutput("databricks", ["apps", "create", scopedAppName]);
+    spinner.info(`Creating app "${scopedAppName}"...`);
+    await execWithOutput("databricks", [
+      "apps",
+      "create",
+      scopedAppName,
+      ...profileArgs,
+    ]);
     console.log(
-      "App created successfully, you will need to add the sql-warehouse resource to the app manually now.",
+      `App "${scopedAppName}" created successfully, you will need to add the sql-warehouse resource to the app manually now.`,
     );
   }
 
-  spinner.info("Syncing playground to Databricks");
+  spinner.info(`Syncing playground to Databricks`);
   const { stderr } = await exec(
-    `databricks sync . /Workspace/Users/${username}@databricks.com/${scopedAppName}`,
+    `databricks sync . /Workspace/Users/${username}@databricks.com/${workspaceDir}${profileArgStr}`,
   );
 
   if (stderr) {
-    spinner.fail("Failed to sync playground");
+    spinner.fail(`Failed to sync playground`);
     console.error(stderr);
     return;
   }
 
-  spinner.info("Deploying playground to Databricks");
+  spinner.info(`Deploying "${scopedAppName}" to Databricks`);
   const { stderr: stderr2 } = await exec(
-    `databricks apps deploy ${scopedAppName} --source-code-path /Workspace/Users/${username}@databricks.com/${scopedAppName}`,
+    `databricks apps deploy ${scopedAppName} --source-code-path /Workspace/Users/${username}@databricks.com/${workspaceDir}${profileArgStr}`,
   );
 
   if (stderr2) {
-    spinner.fail("Failed to deploy playground");
+    spinner.fail(`Failed to deploy "${scopedAppName}"`);
     console.error(stderr2);
     return;
   }
 
-  spinner.succeed("Playground deployed successfully");
+  spinner.succeed(`App "${scopedAppName}" deployed successfully`);
 }
 
 function cleanup(folders: string[]) {
