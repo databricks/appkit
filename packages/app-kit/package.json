@@ -26,33 +26,32 @@
     "clean:full": "rm -rf dist node_modules tmp"
   },
   "dependencies": {
-    "@databricks/sdk-experimental": "^0.14.2",
+    "@databricks/sdk-experimental": "^0.15.0",
     "@opentelemetry/api": "^1.9.0",
-    "@opentelemetry/api-logs": "^0.53.0",
-    "@opentelemetry/auto-instrumentations-node": "^0.50.0",
-    "@opentelemetry/context-async-hooks": "^1.26.0",
-    "@opentelemetry/exporter-logs-otlp-proto": "^0.53.0",
-    "@opentelemetry/exporter-metrics-otlp-proto": "^0.53.0",
-    "@opentelemetry/exporter-trace-otlp-proto": "^0.53.0",
-    "@opentelemetry/instrumentation": "^0.53.0",
-    "@opentelemetry/resources": "^1.26.0",
-    "@opentelemetry/sdk-logs": "^0.53.0",
-    "@opentelemetry/sdk-metrics": "^1.26.0",
-    "@opentelemetry/sdk-node": "^0.53.0",
-    "@opentelemetry/sdk-trace-base": "^1.26.0",
-    "@opentelemetry/sdk-trace-node": "^1.26.0",
-    "@opentelemetry/semantic-conventions": "^1.27.0",
-    "shared": "workspace:*",
-    "zod-to-ts": "^2.0.0",
+    "@opentelemetry/api-logs": "^0.208.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.67.0",
+    "@opentelemetry/exporter-logs-otlp-proto": "^0.208.0",
+    "@opentelemetry/exporter-metrics-otlp-proto": "^0.208.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "^0.208.0",
+    "@opentelemetry/instrumentation": "^0.208.0",
+    "@opentelemetry/instrumentation-express": "^0.57.0",
+    "@opentelemetry/instrumentation-http": "^0.208.0",
+    "@opentelemetry/resources": "^2.2.0",
+    "@opentelemetry/sdk-logs": "^0.208.0",
+    "@opentelemetry/sdk-metrics": "^2.2.0",
+    "@opentelemetry/sdk-node": "^0.208.0",
+    "@opentelemetry/semantic-conventions": "^1.38.0",
     "dotenv": "^16.6.1",
-    "express": "^4.18.2",
+    "express": "^4.22.0",
+    "shared": "workspace:*",
     "vite": "npm:rolldown-vite@7.1.14",
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "zod-to-ts": "^2.0.0"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
+    "@types/express": "^4.17.25",
     "@types/ws": "^8.18.1",
-    "@vitejs/plugin-react": "^5.0.4"
+    "@vitejs/plugin-react": "^5.1.1"
   },
   "overrides": {
     "vite": "npm:rolldown-vite@7.1.14"

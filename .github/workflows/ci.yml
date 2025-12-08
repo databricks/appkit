@@ -15,7 +15,7 @@ permissions:
 jobs:
   setup:
     runs-on:
-      group: databricks-eng-protected-runner-group
+      group: databricks-protected-runner-group
       labels: linux-ubuntu-latest
 
     name: Setup
@@ -33,7 +33,7 @@ jobs:
     name: Lint & Type Check
     needs: setup
     runs-on:
-      group: databricks-eng-protected-runner-group
+      group: databricks-protected-runner-group
       labels: linux-ubuntu-latest
 
     steps:
@@ -56,7 +56,7 @@ jobs:
     name: Unit Tests
     needs: setup
     runs-on:
-      group: databricks-eng-protected-runner-group
+      group: databricks-protected-runner-group
       labels: linux-ubuntu-latest
 
     steps:

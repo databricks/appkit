@@ -67,3 +67,20 @@ will run all the builds and then start the app project. In order to make this wo
 ```
 DATABRICKS_HOST=
 ```
+
+## Deploying the playground app
+
+The playground app can be deployed to Databricks using the following command:
+
+```bash
+pnpm pack:sdk
+pnpm deploy:playground
+```
+
+You can set the following environment variables to the command to customize the deployment:
+
+```bash
+export DATABRICKS_PROFILE=your-profile # Databricks profile name. Used as a Databricks CLI profile argument whenever a command is executed.
+export DATABRICKS_APP_NAME=your-app-name # The name of the app to deploy. If not provided, it will be prefixed with the username.
+export DATABRICKS_WORKSPACE_DIR=your-workspace-dir # The source workspace directory to deploy the app from. It will be used to construct the absolute path: /Workspace/Users/{your-username}/{workspace-dir}
+```
