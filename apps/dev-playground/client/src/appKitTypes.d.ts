@@ -17,7 +17,7 @@ declare module "@databricks/app-kit-ui/react" {
           creator: string;
           /** @sqlType STRING */
           tags: string;
-          /** @sqlType DECIMAL */
+          /** @sqlType DECIMAL(38,6) */
           totalSpend: number;
           /** @sqlType DATE */
           createdAt: string;
@@ -60,7 +60,7 @@ declare module "@databricks/app-kit-ui/react" {
           group_key: string;
           /** @sqlType TIMESTAMP */
           aggregation_period: string;
-          /** @sqlType DECIMAL */
+          /** @sqlType DECIMAL(38,6) */
           cost_usd: number;
         }>;
       };
@@ -75,11 +75,11 @@ declare module "@databricks/app-kit-ui/react" {
           startDate: SQLDateMarker;
         };
         result: Array<{
-          /** @sqlType DECIMAL */
+          /** @sqlType DECIMAL(33,0) */
           total: number;
-          /** @sqlType DECIMAL */
+          /** @sqlType DECIMAL(33,0) */
           average: number;
-          /** @sqlType DECIMAL */
+          /** @sqlType DECIMAL(33,0) */
           forecasted: number;
         }>;
       };
@@ -131,7 +131,7 @@ declare module "@databricks/app-kit-ui/react" {
         result: Array<{
           /** @sqlType STRING */
           app_name: string;
-          /** @sqlType DECIMAL */
+          /** @sqlType DECIMAL(38,6) */
           total_cost_usd: number;
         }>;
       };
@@ -150,9 +150,9 @@ declare module "@databricks/app-kit-ui/react" {
           app_name: string;
           /** @sqlType STRING */
           creator: string;
-          /** @sqlType DECIMAL */
+          /** @sqlType DECIMAL(38,6) */
           total_cost_usd: number;
-          /** @sqlType DECIMAL */
+          /** @sqlType DECIMAL(38,10) */
           avg_period_cost_usd: number;
         }>;
       };

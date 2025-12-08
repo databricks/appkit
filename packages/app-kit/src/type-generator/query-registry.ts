@@ -32,7 +32,13 @@ export function convertToQueryType(
   sql: string,
   queryName: string,
 ): string {
-  const columns = result.manifest.schema.columns;
+  const dataRows = result.result?.data_array || [];
+  const columns = dataRows.map((row) => ({
+    name: row[0] || "",
+    type_name: row[1]?.toUpperCase() || "STRING",
+    comment: row[2] || undefined,
+  }));
+
   const params = extractParameters(sql).filter(
     (p) => !SERVER_INJECTED_PARAMS.includes(p),
   );
@@ -57,7 +63,8 @@ export function convertToQueryType(
 
   // generate result fields with JSDoc
   const resultFields = columns.map((column) => {
-    const mappedType = typeMap[column.type_name] || "unknown";
+    const normalizedType = normalizeTypeName(column.type_name);
+    const mappedType = typeMap[normalizedType] || "unknown";
     // validate column name is a valid identifier
     const name = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(column.name)
       ? column.name
@@ -95,14 +102,14 @@ export function extractParameterTypes(sql: string): Record<string, string> {
 
 /**
  * Generate query schemas from a folder of SQL files
- * It uses the EXPLAIN command to generate the query schemas
+ * It uses DESCRIBE QUERY to get the schema without executing the query
  * @param queryFolder - the folder containing the SQL files
- * @param warehouseId - the warehouse id to use for query execution
+ * @param warehouseId - the warehouse id to use for schema analysis
  * @param options - options for the query generation
  * @param options.noCache - if true, skip the cache and regenerate all types
  * @returns an array of query schemas
  */
-export async function generateQueriesFromExplain(
+export async function generateQueriesFromDescribe(
   queryFolder: string,
   warehouseId: string,
   options: { noCache?: boolean } = {},
@@ -148,16 +155,13 @@ export async function generateQueriesFromExplain(
 
     const sqlWithDefaults = sql.replace(/:([a-zA-Z_]\w*)/g, "''");
 
-    // strip limit and semicolon for limit 0
-    const cleanedSql = sqlWithDefaults
-      .trim()
-      .replace(/;\s*$/, " LIMIT 0")
-      .replace(/\bLIMIT\s+\d+\s*$/i, " LIMIT 0");
+    // strip trailing semicolon for DESCRIBE QUERY
+    const cleanedSql = sqlWithDefaults.trim().replace(/;\s*$/, "");
 
-    // execute query and get result
+    // execute DESCRIBE QUERY to get schema without running the actual query
     try {
       const result = (await client.statementExecution.executeStatement({
-        statement: `${cleanedSql}`,
+        statement: `DESCRIBE QUERY ${cleanedSql}`,
         warehouse_id: warehouseId,
       })) as DatabricksStatementExecutionResponse;
 
@@ -197,24 +201,52 @@ export async function generateQueriesFromExplain(
   return querySchemas;
 }
 
+/**
+ * Normalize SQL type name by removing parameters/generics
+ * Examples:
+ *   DECIMAL(38,6) -> DECIMAL
+ *   ARRAY<STRING> -> ARRAY
+ *   MAP<STRING,INT> -> MAP
+ *   STRUCT<name:STRING> -> STRUCT
+ *   INTERVAL DAY TO SECOND -> INTERVAL
+ *   GEOGRAPHY(4326) -> GEOGRAPHY
+ */
+export function normalizeTypeName(typeName: string): string {
+  return typeName
+    .replace(/\(.*\)$/, "") // remove (p, s) eg: DECIMAL(38,6) -> DECIMAL
+    .replace(/<.*>$/, "") // remove <T> eg: ARRAY<STRING> -> ARRAY
+    .split(" ")[0]; // take first word eg: INTERVAL DAY TO SECOND -> INTERVAL
+}
+
 /** Type Map for Databricks data types to JavaScript types */
 const typeMap: Record<string, string> = {
+  // string types
   STRING: "string",
+  BINARY: "string",
+  // boolean
   BOOLEAN: "boolean",
-  BYTE: "number",
-  SHORT: "number",
+  // numeric types
+  TINYINT: "number",
+  SMALLINT: "number",
   INT: "number",
-  INTEGER: "number",
-  LONG: "number",
   BIGINT: "number",
   FLOAT: "number",
   DOUBLE: "number",
   DECIMAL: "number",
+  // date/time types
   DATE: "string",
   TIMESTAMP: "string",
   TIMESTAMP_NTZ: "string",
-  BINARY: "string",
+  INTERVAL: "string",
+  // complex types
   ARRAY: "unknown[]",
   MAP: "Record<string, unknown>",
   STRUCT: "Record<string, unknown>",
+  OBJECT: "Record<string, unknown>",
+  VARIANT: "unknown",
+  // spatial types
+  GEOGRAPHY: "unknown",
+  GEOMETRY: "unknown",
+  // null type
+  VOID: "null",
 };

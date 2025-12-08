@@ -3,9 +3,47 @@ import {
   convertToQueryType,
   extractParameters,
   extractParameterTypes,
+  normalizeTypeName,
   SERVER_INJECTED_PARAMS,
 } from "../query-registry";
 import type { DatabricksStatementExecutionResponse } from "../types";
+
+describe("normalizeTypeName", () => {
+  test("returns simple types unchanged", () => {
+    expect(normalizeTypeName("STRING")).toBe("STRING");
+    expect(normalizeTypeName("INT")).toBe("INT");
+    expect(normalizeTypeName("BOOLEAN")).toBe("BOOLEAN");
+  });
+
+  test("removes precision/scale from DECIMAL", () => {
+    expect(normalizeTypeName("DECIMAL(38,6)")).toBe("DECIMAL");
+    expect(normalizeTypeName("DECIMAL(10,2)")).toBe("DECIMAL");
+  });
+
+  test("removes srid from spatial types", () => {
+    expect(normalizeTypeName("GEOGRAPHY(4326)")).toBe("GEOGRAPHY");
+    expect(normalizeTypeName("GEOMETRY(4326)")).toBe("GEOMETRY");
+  });
+
+  test("removes element type from ARRAY", () => {
+    expect(normalizeTypeName("ARRAY<STRING>")).toBe("ARRAY");
+    expect(normalizeTypeName("ARRAY<INT>")).toBe("ARRAY");
+  });
+
+  test("removes key/value types from MAP", () => {
+    expect(normalizeTypeName("MAP<STRING,INT>")).toBe("MAP");
+    expect(normalizeTypeName("MAP<STRING,ARRAY<INT>>")).toBe("MAP");
+  });
+
+  test("removes field definitions from STRUCT", () => {
+    expect(normalizeTypeName("STRUCT<name:STRING,age:INT>")).toBe("STRUCT");
+  });
+
+  test("removes qualifier from INTERVAL", () => {
+    expect(normalizeTypeName("INTERVAL DAY TO SECOND")).toBe("INTERVAL");
+    expect(normalizeTypeName("INTERVAL YEAR TO MONTH")).toBe("INTERVAL");
+  });
+});
 
 describe("extractParameters", () => {
   test("extracts parameters from SQL query", () => {
@@ -112,23 +150,16 @@ SELECT 1`;
 });
 
 describe("convertToQueryType", () => {
+  // DESCRIBE QUERY returns rows as [col_name, data_type, comment]
   const mockResponse: DatabricksStatementExecutionResponse = {
     statement_id: "test-123",
     status: { state: "SUCCEEDED" },
-    manifest: {
-      schema: {
-        column_count: 3,
-        columns: [
-          { name: "id", type_text: "STRING", type_name: "STRING", position: 0 },
-          {
-            name: "name",
-            type_text: "STRING",
-            type_name: "STRING",
-            position: 1,
-          },
-          { name: "count", type_text: "INT", type_name: "INT", position: 2 },
-        ],
-      },
+    result: {
+      data_array: [
+        ["id", "STRING", null],
+        ["name", "STRING", null],
+        ["count", "INT", null],
+      ],
     },
   };
 
@@ -187,20 +218,10 @@ SELECT * FROM users WHERE date = :startDate AND count = :count AND name = :name`
 
   test("uses column comment when available", () => {
     const responseWithComment: DatabricksStatementExecutionResponse = {
-      ...mockResponse,
-      manifest: {
-        schema: {
-          column_count: 1,
-          columns: [
-            {
-              name: "total",
-              type_text: "DECIMAL",
-              type_name: "DECIMAL",
-              position: 0,
-              comment: "Total amount in USD",
-            },
-          ],
-        },
+      statement_id: "test-123",
+      status: { state: "SUCCEEDED" },
+      result: {
+        data_array: [["total", "DECIMAL", "Total amount in USD"]],
       },
     };
 
@@ -211,19 +232,10 @@ SELECT * FROM users WHERE date = :startDate AND count = :count AND name = :name`
 
   test("quotes invalid column identifiers", () => {
     const responseWithInvalidName: DatabricksStatementExecutionResponse = {
-      ...mockResponse,
-      manifest: {
-        schema: {
-          column_count: 1,
-          columns: [
-            {
-              name: "(1 = 1)",
-              type_text: "BOOLEAN",
-              type_name: "BOOLEAN",
-              position: 0,
-            },
-          ],
-        },
+      statement_id: "test-123",
+      status: { state: "SUCCEEDED" },
+      result: {
+        data_array: [["(1 = 1)", "BOOLEAN", null]],
       },
     };
 

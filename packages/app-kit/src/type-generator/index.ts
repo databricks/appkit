@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import dotenv from "dotenv";
-import { generateQueriesFromExplain } from "./query-registry";
+import { generateQueriesFromDescribe } from "./query-registry";
 import type { QuerySchema } from "./types";
 
 dotenv.config();
@@ -54,9 +54,13 @@ export async function generateFromEntryPoint(options: {
 
   let queryRegistry: QuerySchema[] = [];
   if (queryFolder)
-    queryRegistry = await generateQueriesFromExplain(queryFolder, warehouseId, {
-      noCache,
-    });
+    queryRegistry = await generateQueriesFromDescribe(
+      queryFolder,
+      warehouseId,
+      {
+        noCache,
+      },
+    );
 
   const typeDeclarations = generateTypeDeclarations(queryRegistry);
 
