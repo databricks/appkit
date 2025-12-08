@@ -122,6 +122,24 @@ function IndexRoute() {
               </Button>
             </div>
           </Card>
+
+          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
+            <div className="flex flex-col h-full">
+              <h3 className="text-2xl font-semibold text-gray-900 mb-3">
+                Type-Safe SQL
+              </h3>
+              <p className="text-gray-600 mb-6 flex-grow">
+                Generate TypeScript types from SQL files at build time. Full
+                IntelliSense for query names, parameters, and results.
+              </p>
+              <Button
+                onClick={() => navigate({ to: "/type-safety" })}
+                className="w-full"
+              >
+                Explore Type Safety
+              </Button>
+            </div>
+          </Card>
         </div>
 
         <div className="text-center pt-12 border-t border-gray-200">
