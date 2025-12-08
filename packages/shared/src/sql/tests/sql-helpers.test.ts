@@ -158,57 +158,37 @@ describe("SQL Helpers", () => {
   });
 
   describe("binary()", () => {
-    it("should create a BINARY type parameter from a Uint8Array", () => {
-      // "Spark" in bytes - matches Databricks docs: CAST('Spark' AS BINARY) = [53 70 61 72 6B]
+    it("should create a STRING type with hex value from Uint8Array", () => {
+      // "Spark" in bytes → hex "537061726B"
       const data = new Uint8Array([0x53, 0x70, 0x61, 0x72, 0x6b]);
       const result = sql.binary(data);
       expect(result).toEqual({
-        __sql_type: "BINARY",
+        __sql_type: "STRING",
         value: "537061726B",
       });
     });
 
-    it("should produce hex format compatible with Databricks X literal", () => {
-      // Databricks BINARY literal: X'1ABF' produces [1A BF]
-      // Our encoding should produce the same hex string (without X'' wrapper)
-      const data = new Uint8Array([0x1a, 0xbf]);
-      const result = sql.binary(data);
-      // Databricks API expects uppercase hex string for BINARY type parameter
-      expect(result.value).toBe("1ABF");
-      expect(result.__sql_type).toBe("BINARY");
-    });
-
-    it("should create a BINARY type parameter from an ArrayBuffer", () => {
+    it("should create a STRING type with hex value from ArrayBuffer", () => {
       const buffer = new Uint8Array([0x1a, 0xbf]).buffer;
       const result = sql.binary(buffer);
       expect(result).toEqual({
-        __sql_type: "BINARY",
+        __sql_type: "STRING",
         value: "1ABF",
       });
     });
 
-    it("should create a BINARY type parameter from a hex string", () => {
-      const hex = "1ABF";
-      const result = sql.binary(hex);
+    it("should accept hex string and normalize to uppercase", () => {
+      const result = sql.binary("1abf");
       expect(result).toEqual({
-        __sql_type: "BINARY",
+        __sql_type: "STRING",
         value: "1ABF",
       });
     });
 
-    it("should normalize lowercase hex string to uppercase", () => {
-      const hex = "1abf";
-      const result = sql.binary(hex);
-      expect(result).toEqual({
-        __sql_type: "BINARY",
-        value: "1ABF",
-      });
-    });
-
-    it("should accept empty hex string", () => {
+    it("should accept empty string", () => {
       const result = sql.binary("");
       expect(result).toEqual({
-        __sql_type: "BINARY",
+        __sql_type: "STRING",
         value: "",
       });
     });
@@ -216,20 +196,30 @@ describe("SQL Helpers", () => {
     it("should accept empty Uint8Array", () => {
       const result = sql.binary(new Uint8Array([]));
       expect(result).toEqual({
-        __sql_type: "BINARY",
+        __sql_type: "STRING",
         value: "",
+      });
+    });
+
+    it("should handle arbitrary bytes including non-UTF8", () => {
+      // 0xFF 0xFE are valid hex bytes even if not valid UTF-8
+      const bytes = new Uint8Array([0xff, 0xfe]);
+      const result = sql.binary(bytes);
+      expect(result).toEqual({
+        __sql_type: "STRING",
+        value: "FFFE",
       });
     });
 
     it("should reject invalid hex string", () => {
       expect(() => sql.binary("GHIJ")).toThrow(
-        "sql.binary() expects Uint8Array, ArrayBuffer, or hex-encoded string, got invalid hex: GHIJ",
+        "sql.binary() expects Uint8Array, ArrayBuffer, or hex string, got invalid hex: GHIJ",
       );
     });
 
     it("should reject invalid type", () => {
       expect(() => sql.binary(123 as any)).toThrow(
-        "sql.binary() expects Uint8Array, ArrayBuffer, or hex-encoded string, got: number",
+        "sql.binary() expects Uint8Array, ArrayBuffer, or hex string, got: number",
       );
     });
   });

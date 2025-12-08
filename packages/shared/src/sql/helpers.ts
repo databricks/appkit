@@ -278,49 +278,56 @@ export const sql = {
   },
 
   /**
-   * Creates a BINARY type parameter
-   * Accepts Uint8Array, ArrayBuffer, or hex-encoded strings
-   * @param value - Uint8Array, ArrayBuffer, or hex-encoded string
-   * @returns Marker object for BINARY type parameter
+   * Creates a BINARY parameter as hex-encoded STRING
+   * Accepts Uint8Array, ArrayBuffer, or hex string
+   * Note: Databricks SQL Warehouse doesn't support BINARY as parameter type,
+   * so this helper returns a STRING with hex encoding. Use UNHEX(:param) in your SQL.
+   * @param value - Uint8Array, ArrayBuffer, or hex string
+   * @returns Marker object with STRING type and hex-encoded value
    * @example
    * ```typescript
+   * // From Uint8Array:
    * const params = { data: sql.binary(new Uint8Array([0x53, 0x70, 0x61, 0x72, 0x6b])) };
-   * params = { data: "537061726B" }
+   * // Returns: { __sql_type: "STRING", value: "537061726B" }
+   * // SQL: SELECT UNHEX(:data) as binary_value
    * ```
    * @example
    * ```typescript
-   * const params = { data: sql.binary("1ABF") };
-   * params = { data: "1ABF" }
+   * // From hex string:
+   * const params = { data: sql.binary("537061726B") };
+   * // Returns: { __sql_type: "STRING", value: "537061726B" }
    * ```
    */
   binary(value: Uint8Array | ArrayBuffer | string): SQLTypeMarker {
-    let binaryValue: string = "";
+    let hexValue: string = "";
 
     if (value instanceof Uint8Array) {
-      binaryValue = Array.from(value)
+      // if value is a Uint8Array, convert it to a hex string
+      hexValue = Array.from(value)
         .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
         .join("");
     } else if (value instanceof ArrayBuffer) {
-      binaryValue = Array.from(new Uint8Array(value))
+      // if value is an ArrayBuffer, convert it to a hex string
+      hexValue = Array.from(new Uint8Array(value))
         .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
         .join("");
     } else if (typeof value === "string") {
       // validate hex string
       if (!/^[0-9A-Fa-f]*$/.test(value)) {
         throw new Error(
-          `sql.binary() expects Uint8Array, ArrayBuffer, or hex-encoded string, got invalid hex: ${value}`,
+          `sql.binary() expects Uint8Array, ArrayBuffer, or hex string, got invalid hex: ${value}`,
         );
       }
-      binaryValue = value.toUpperCase();
+      hexValue = value.toUpperCase();
     } else {
       throw new Error(
-        `sql.binary() expects Uint8Array, ArrayBuffer, or hex-encoded string, got: ${typeof value}`,
+        `sql.binary() expects Uint8Array, ArrayBuffer, or hex string, got: ${typeof value}`,
       );
     }
 
     return {
-      __sql_type: "BINARY",
-      value: binaryValue,
+      __sql_type: "STRING",
+      value: hexValue,
     };
   },
 };

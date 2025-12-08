@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TelemetryRouteRouteImport } from './routes/telemetry.route'
+import { Route as SqlHelpersRouteRouteImport } from './routes/sql-helpers.route'
 import { Route as ReconnectRouteRouteImport } from './routes/reconnect.route'
 import { Route as DataVisualizationRouteRouteImport } from './routes/data-visualization.route'
 import { Route as AnalyticsRouteRouteImport } from './routes/analytics.route'
@@ -18,6 +19,11 @@ import { Route as IndexRouteImport } from './routes/index'
 const TelemetryRouteRoute = TelemetryRouteRouteImport.update({
   id: '/telemetry',
   path: '/telemetry',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SqlHelpersRouteRoute = SqlHelpersRouteRouteImport.update({
+  id: '/sql-helpers',
+  path: '/sql-helpers',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ReconnectRouteRoute = ReconnectRouteRouteImport.update({
@@ -46,6 +52,7 @@ export interface FileRoutesByFullPath {
   '/analytics': typeof AnalyticsRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
+  '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
 }
 export interface FileRoutesByTo {
@@ -53,6 +60,7 @@ export interface FileRoutesByTo {
   '/analytics': typeof AnalyticsRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
+  '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
 }
 export interface FileRoutesById {
@@ -61,6 +69,7 @@ export interface FileRoutesById {
   '/analytics': typeof AnalyticsRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
+  '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
 }
 export interface FileRouteTypes {
@@ -70,15 +79,23 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/data-visualization'
     | '/reconnect'
+    | '/sql-helpers'
     | '/telemetry'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/analytics' | '/data-visualization' | '/reconnect' | '/telemetry'
+  to:
+    | '/'
+    | '/analytics'
+    | '/data-visualization'
+    | '/reconnect'
+    | '/sql-helpers'
+    | '/telemetry'
   id:
     | '__root__'
     | '/'
     | '/analytics'
     | '/data-visualization'
     | '/reconnect'
+    | '/sql-helpers'
     | '/telemetry'
   fileRoutesById: FileRoutesById
 }
@@ -87,6 +104,7 @@ export interface RootRouteChildren {
   AnalyticsRouteRoute: typeof AnalyticsRouteRoute
   DataVisualizationRouteRoute: typeof DataVisualizationRouteRoute
   ReconnectRouteRoute: typeof ReconnectRouteRoute
+  SqlHelpersRouteRoute: typeof SqlHelpersRouteRoute
   TelemetryRouteRoute: typeof TelemetryRouteRoute
 }
 
@@ -97,6 +115,13 @@ declare module '@tanstack/react-router' {
       path: '/telemetry'
       fullPath: '/telemetry'
       preLoaderRoute: typeof TelemetryRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sql-helpers': {
+      id: '/sql-helpers'
+      path: '/sql-helpers'
+      fullPath: '/sql-helpers'
+      preLoaderRoute: typeof SqlHelpersRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/reconnect': {
@@ -135,6 +160,7 @@ const rootRouteChildren: RootRouteChildren = {
   AnalyticsRouteRoute: AnalyticsRouteRoute,
   DataVisualizationRouteRoute: DataVisualizationRouteRoute,
   ReconnectRouteRoute: ReconnectRouteRoute,
+  SqlHelpersRouteRoute: SqlHelpersRouteRoute,
   TelemetryRouteRoute: TelemetryRouteRoute,
 }
 export const routeTree = rootRouteImport
