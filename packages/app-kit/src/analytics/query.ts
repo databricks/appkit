@@ -1,12 +1,15 @@
-import type { sql } from "@databricks/sdk-experimental";
 import { createHash } from "node:crypto";
+import type { sql } from "@databricks/sdk-experimental";
+import { isSQLTypeMarker, type SQLTypeMarker, sql as sqlHelpers } from "shared";
 import { getRequestContext } from "../utils";
+
+type SQLParameterValue = SQLTypeMarker | null | undefined;
 
 export class QueryProcessor {
   async processQueryParams(
     query: string,
-    parameters?: Record<string, any>,
-  ): Promise<Record<string, any>> {
+    parameters?: Record<string, SQLParameterValue>,
+  ): Promise<Record<string, SQLParameterValue>> {
     const processed = { ...parameters };
 
     // extract all params from the query
@@ -18,7 +21,7 @@ export class QueryProcessor {
       const requestContext = getRequestContext();
       const workspaceId = await requestContext.workspaceId;
       if (workspaceId) {
-        processed.workspaceId = workspaceId;
+        processed.workspaceId = sqlHelpers.string(workspaceId);
       }
     }
 
@@ -31,7 +34,7 @@ export class QueryProcessor {
 
   convertToSQLParameters(
     query: string,
-    parameters?: Record<string, any>,
+    parameters?: Record<string, SQLParameterValue>,
   ): { statement: string; parameters: sql.StatementParameterListItem[] } {
     const sqlParameters: sql.StatementParameterListItem[] = [];
 
@@ -65,87 +68,22 @@ export class QueryProcessor {
 
   private _createParameter(
     key: string,
-    value: any,
+    value: SQLParameterValue,
   ): sql.StatementParameterListItem | null {
     if (value === null || value === undefined) {
       return null;
     }
 
-    if (value === "" && key.includes("Filter")) {
-      return null;
-    }
-
-    if (key.includes("Date") || key.includes("date")) {
-      if (typeof value === "string") {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-          throw new Error(`Invalid date format for parameter ${key}: ${value}`);
-        }
-        return {
-          name: key,
-          value: value,
-          type: "DATE",
-        };
-      }
-      if (value instanceof Date) {
-        return {
-          name: key,
-          value: value.toISOString().split("T")[0],
-          type: "DATE",
-        };
-      }
-    }
-
-    if (key.includes("Time") || key.includes("timestamp")) {
-      if (value instanceof Date) {
-        return {
-          name: key,
-          value: value.toISOString(),
-          type: "TIMESTAMP",
-        };
-      }
-
-      return {
-        name: key,
-        value: String(value),
-        type: "TIMESTAMP",
-      };
-    }
-
-    if (key === "aggregationLevel") {
-      const validLevels = ["hour", "day", "week", "month", "year"];
-      if (!validLevels.includes(value)) {
-        throw new Error(
-          `Invalid aggregation level: ${value}. Must be one of: ${validLevels.join(
-            ", ",
-          )}`,
-        );
-      }
-      return {
-        name: key,
-        value: value,
-        type: "STRING",
-      };
-    }
-    if (typeof value === "boolean") {
-      return {
-        name: key,
-        value: String(value),
-        type: "BOOLEAN",
-      };
-    }
-
-    if (typeof value === "number") {
-      return {
-        name: key,
-        value: String(value),
-        type: "NUMERIC",
-      };
+    if (!isSQLTypeMarker(value)) {
+      throw new Error(
+        `Parameter "${key}" must be a SQL type. Use sql.string(), sql.number(), sql.date(), sql.timestamp(), or sql.boolean().`,
+      );
     }
 
     return {
       name: key,
-      value: String(value),
-      type: "STRING",
+      value: value.value,
+      type: value.__sql_type,
     };
   }
 }

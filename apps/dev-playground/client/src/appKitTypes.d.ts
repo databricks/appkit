@@ -61,5 +61,15 @@ declare module "@databricks/app-kit-ui/react" {
         app_name: string;
         total_cost_usd: number;
     }[];
+    sql_helpers_test: {
+        string_value: string;
+        number_value: number;
+        boolean_value: boolean;
+        date_value: string;
+        timestamp_value: string;
+        binary_value: string;
+        binary_hex: string;
+        binary_length: number;
+    };
   }
 }

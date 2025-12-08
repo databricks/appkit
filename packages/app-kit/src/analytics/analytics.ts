@@ -5,13 +5,14 @@ import type {
   IAppRouter,
   PluginExecuteConfig,
   QuerySchemas,
+  SQLTypeMarker,
   StreamExecutionSettings,
 } from "shared";
-import { generateQueryRegistryTypes } from "@/utils/type-generator";
 import { SQLWarehouseConnector } from "../connectors";
 import { Plugin, toPlugin } from "../plugin";
 import type { Request, Response } from "../utils";
 import { getRequestContext } from "../utils";
+import { generateQueryRegistryTypes } from "../utils/type-generator";
 import { queryDefaults } from "./defaults";
 import { QueryProcessor } from "./query";
 import {
@@ -137,7 +138,7 @@ export class AnalyticsPlugin extends Plugin {
 
   async query(
     query: string,
-    parameters?: Record<string, any>,
+    parameters?: Record<string, SQLTypeMarker | null | undefined>,
     signal?: AbortSignal,
     { asUser = false }: { asUser?: boolean } = {},
   ): Promise<any> {

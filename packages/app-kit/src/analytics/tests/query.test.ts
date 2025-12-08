@@ -1,4 +1,5 @@
 import { runWithRequestContext } from "@tools/test-helpers";
+import { sql } from "shared";
 import { describe, expect, test } from "vitest";
 import { QueryProcessor } from "../query";
 
@@ -8,7 +9,10 @@ describe("QueryProcessor", () => {
   describe("convertToSQLParameters - Parameter Injection Protection", () => {
     test("should accept valid parameters that exist in query", () => {
       const query = "SELECT * FROM users WHERE id = :user_id AND name = :name";
-      const parameters = { user_id: 123, name: "Alice" };
+      const parameters = {
+        user_id: sql.number(123),
+        name: sql.string("Alice"),
+      };
 
       const result = processor.convertToSQLParameters(query, parameters);
 
@@ -22,7 +26,10 @@ describe("QueryProcessor", () => {
 
     test("should reject parameters that do not exist in query", () => {
       const query = "SELECT * FROM users WHERE id = :user_id";
-      const parameters = { user_id: 123, malicious_param: "DROP TABLE" };
+      const parameters = {
+        user_id: sql.number(123),
+        malicious_param: sql.string("DROP TABLE"),
+      };
 
       expect(() => {
         processor.convertToSQLParameters(query, parameters);
@@ -34,9 +41,9 @@ describe("QueryProcessor", () => {
     test("should reject multiple invalid parameters", () => {
       const query = "SELECT * FROM users WHERE id = :user_id";
       const parameters = {
-        user_id: 123,
-        admin_flag: true,
-        delete_all: true,
+        user_id: sql.number(123),
+        admin_flag: sql.boolean(true),
+        delete_all: sql.boolean(true),
       };
 
       expect(() => {
@@ -47,7 +54,10 @@ describe("QueryProcessor", () => {
     test("should allow parameters with underscores and mixed case", () => {
       const query =
         "SELECT * FROM orders WHERE customer_id = :customer_id AND order_Date = :order_Date";
-      const parameters = { customer_id: 456, order_Date: "2024-01-01" };
+      const parameters = {
+        customer_id: sql.number(456),
+        order_Date: sql.date("2024-01-01"),
+      };
 
       const result = processor.convertToSQLParameters(query, parameters);
 
@@ -58,7 +68,7 @@ describe("QueryProcessor", () => {
 
     test("should handle query with no parameters", () => {
       const query = "SELECT * FROM users";
-      const parameters = { user_id: 123 };
+      const parameters = { user_id: sql.number(123) };
 
       expect(() => {
         processor.convertToSQLParameters(query, parameters);
@@ -89,7 +99,7 @@ describe("QueryProcessor", () => {
     test("should handle parameters with null/undefined values (filtered out)", () => {
       const query =
         "SELECT * FROM users WHERE id = :user_id AND status = :status";
-      const parameters = { user_id: 123, status: null };
+      const parameters = { user_id: sql.number(123), status: null };
 
       const result = processor.convertToSQLParameters(query, parameters);
 
@@ -102,12 +112,12 @@ describe("QueryProcessor", () => {
       const query =
         "SELECT * FROM orders WHERE customer_id = :customer_id AND status = :status";
       const attackParameters = {
-        customer_id: 123,
-        status: "pending",
+        customer_id: sql.number(123),
+        status: sql.string("pending"),
         // Attack: try to inject additional parameters
-        admin_override: true,
-        bypass_auth: "true",
-        internal_flag: 1,
+        admin_override: sql.boolean(true),
+        bypass_auth: sql.string("true"),
+        internal_flag: sql.number(1),
       };
 
       expect(() => {
@@ -118,7 +128,7 @@ describe("QueryProcessor", () => {
     test("should handle duplicate parameter names in query correctly", () => {
       const query =
         "SELECT * FROM users WHERE (status = :status OR backup_status = :status)";
-      const parameters = { status: "active" };
+      const parameters = { status: sql.string("active") };
 
       const result = processor.convertToSQLParameters(query, parameters);
 
@@ -138,34 +148,40 @@ describe("QueryProcessor", () => {
           return await processor.processQueryParams(query, parameters);
         },
         {
-          workspaceId: Promise.resolve("workspace-123"),
+          workspaceId: Promise.resolve("1234567890"),
         },
       );
 
-      expect(result.workspaceId).toBe("workspace-123");
+      expect(result.workspaceId).toEqual({
+        __sql_type: "STRING",
+        value: "1234567890",
+      });
     });
 
     test("should not override workspace_id if already provided", async () => {
       const query = "SELECT * FROM data WHERE workspace_id = :workspaceId";
-      const parameters = { workspaceId: "custom-workspace" };
+      const parameters = { workspaceId: sql.number("9876543210") };
 
       const result = await runWithRequestContext(
         async () => {
           return await processor.processQueryParams(query, parameters);
         },
         {
-          workspaceId: Promise.resolve("workspace-123"),
+          workspaceId: Promise.resolve("1234567890"),
         },
       );
 
-      expect(result.workspaceId).toBe("custom-workspace");
+      expect(result.workspaceId).toEqual({
+        __sql_type: "NUMERIC",
+        value: "9876543210",
+      });
     });
   });
 
   describe("_createParameter - Type Handling", () => {
-    test("should handle date parameters", () => {
+    test("should handle date parameters with sql.date()", () => {
       const query = "SELECT * FROM events WHERE event_date = :startDate";
-      const parameters = { startDate: "2024-01-01" };
+      const parameters = { startDate: sql.date("2024-01-01") };
 
       const result = processor.convertToSQLParameters(query, parameters);
 
@@ -176,32 +192,24 @@ describe("QueryProcessor", () => {
       });
     });
 
-    test("should reject invalid date format", () => {
-      const query = "SELECT * FROM events WHERE event_date = :startDate";
-      const parameters = { startDate: "01/01/2024" };
-
-      expect(() => {
-        processor.convertToSQLParameters(query, parameters);
-      }).toThrow("Invalid date format for parameter startDate: 01/01/2024");
-    });
-
-    test("should handle timestamp parameters", () => {
+    test("should handle timestamp parameters with sql.timestamp()", () => {
       const query = "SELECT * FROM events WHERE created_at = :createdTime";
-      const date = new Date("2024-01-01T12:00:00Z");
-      const parameters = { createdTime: date };
+      const parameters = {
+        createdTime: sql.timestamp(new Date("2024-01-01T12:00:00Z")),
+      };
 
       const result = processor.convertToSQLParameters(query, parameters);
 
       expect(result.parameters[0]).toEqual({
         name: "createdTime",
-        value: date.toISOString(),
+        value: "2024-01-01T12:00:00Z",
         type: "TIMESTAMP",
       });
     });
 
-    test("should handle boolean parameters", () => {
+    test("should handle boolean parameters with sql.boolean()", () => {
       const query = "SELECT * FROM users WHERE is_active = :isActive";
-      const parameters = { isActive: true };
+      const parameters = { isActive: sql.boolean(true) };
 
       const result = processor.convertToSQLParameters(query, parameters);
 
@@ -212,9 +220,9 @@ describe("QueryProcessor", () => {
       });
     });
 
-    test("should handle numeric parameters", () => {
+    test("should handle numeric parameters with sql.number()", () => {
       const query = "SELECT * FROM users WHERE age = :age";
-      const parameters = { age: 25 };
+      const parameters = { age: sql.number(25) };
 
       const result = processor.convertToSQLParameters(query, parameters);
 
@@ -225,9 +233,9 @@ describe("QueryProcessor", () => {
       });
     });
 
-    test("should validate aggregationLevel parameter", () => {
+    test("should handle string parameters with sql.string()", () => {
       const query = "SELECT * FROM metrics WHERE level = :aggregationLevel";
-      const parameters = { aggregationLevel: "day" };
+      const parameters = { aggregationLevel: sql.string("day") };
 
       const result = processor.convertToSQLParameters(query, parameters);
 
@@ -238,14 +246,14 @@ describe("QueryProcessor", () => {
       });
     });
 
-    test("should reject invalid aggregationLevel", () => {
-      const query = "SELECT * FROM metrics WHERE level = :aggregationLevel";
-      const parameters = { aggregationLevel: "invalid" };
+    test("should reject non-SQL type parameters", () => {
+      const query = "SELECT * FROM users WHERE id = :userId";
+      const parameters = { userId: 123 as any };
 
       expect(() => {
         processor.convertToSQLParameters(query, parameters);
       }).toThrow(
-        "Invalid aggregation level: invalid. Must be one of: hour, day, week, month, year",
+        'Parameter "userId" must be a SQL type. Use sql.string(), sql.number(), sql.date(), sql.timestamp(), or sql.boolean().',
       );
     });
   });

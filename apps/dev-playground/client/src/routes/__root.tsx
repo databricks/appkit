@@ -56,6 +56,14 @@ function RootComponent() {
                     Telemetry
                   </Button>
                 </Link>
+                <Link to="/sql-helpers" className="no-underline">
+                  <Button
+                    variant="ghost"
+                    className="text-gray-700 hover:text-gray-900"
+                  >
+                    SQL Helpers
+                  </Button>
+                </Link>
               </div>
             </nav>
           </div>

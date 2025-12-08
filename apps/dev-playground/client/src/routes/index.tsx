@@ -103,6 +103,25 @@ function IndexRoute() {
               </Button>
             </div>
           </Card>
+
+          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
+            <div className="flex flex-col h-full">
+              <h3 className="text-2xl font-semibold text-gray-900 mb-3">
+                SQL Helpers
+              </h3>
+              <p className="text-gray-600 mb-6 flex-grow">
+                Type-safe parameter helpers for Databricks SQL queries. Test
+                each helper interactively and see the generated parameter
+                objects.
+              </p>
+              <Button
+                onClick={() => navigate({ to: "/sql-helpers" })}
+                className="w-full"
+              >
+                Try SQL Helpers
+              </Button>
+            </div>
+          </Card>
         </div>
 
         <div className="text-center pt-12 border-t border-gray-200">
