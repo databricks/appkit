@@ -7,11 +7,11 @@ import type {
   QuerySchemas,
   StreamExecutionSettings,
 } from "shared";
-import { generateQueryRegistryTypes } from "@/utils/type-generator";
 import { SQLWarehouseConnector } from "../connectors";
 import { Plugin, toPlugin } from "../plugin";
 import type { Request, Response } from "../utils";
 import { getRequestContext } from "../utils";
+import { generateQueryRegistryTypes } from "../utils/type-generator";
 import { queryDefaults } from "./defaults";
 import { QueryProcessor } from "./query";
 import {
