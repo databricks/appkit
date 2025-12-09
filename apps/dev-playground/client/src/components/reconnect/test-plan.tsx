@@ -1,4 +1,4 @@
-import { Card } from "@/components/ui/card";
+import { Card } from "@databricks/app-kit-ui/react";
 
 export function TestPlan() {
   return (
@@ -29,14 +29,14 @@ export function TestPlan() {
 
         <div>
           <p className="font-semibold mb-1">4. Resume Stream</p>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-muted-foreground">
             Should receive remaining messages (3, 4, 5)
           </p>
         </div>
 
-        <div className="mt-1 p-4 bg-gray-50 rounded border border-gray-200">
+        <div className="mt-1 p-4 bg-secondary rounded border border-gray-200">
           <p className="font-semibold text-sm mb-2">💡 Key Feature</p>
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-muted-foreground">
             The stream resumes exactly where it left off using the Last-Event-ID
             header, ensuring no messages are lost during reconnection.
           </p>

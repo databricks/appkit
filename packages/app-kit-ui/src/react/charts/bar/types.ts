@@ -1,4 +1,4 @@
-import type { ChartConfig } from "../ui/chart";
+import type { ChartConfig } from "../../ui/chart";
 
 /** Props for the BarChart component */
 export interface BarChartProps {

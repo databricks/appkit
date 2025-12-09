@@ -1,4 +1,19 @@
 import {
+  Badge,
+  Button,
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+  Input,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@databricks/app-kit-ui/react";
+import {
   type ColumnDef,
   type ColumnFiltersState,
   flexRender,
@@ -12,23 +27,6 @@ import {
 } from "@tanstack/react-table";
 import { ArrowUpDown, ChevronDown } from "lucide-react";
 import * as React from "react";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Badge } from "./ui/badge";
 
 export type AppData = {
   id: string;
@@ -86,7 +84,7 @@ export const columns: ColumnDef<AppData>[] = [
               </Badge>
             ))
           ) : (
-            <span className="text-xs text-gray-400">No tags</span>
+            <span className="text-xs text-muted-foreground">No tags</span>
           )}
         </div>
       );
@@ -162,13 +160,13 @@ export function AppsDataTable({ data, loading = false }: AppsDataTableProps) {
     return (
       <div className="w-full space-y-3">
         <div className="flex items-center justify-between">
-          <div className="h-10 w-64 bg-gray-200 animate-pulse rounded" />
-          <div className="h-10 w-24 bg-gray-200 animate-pulse rounded" />
+          <div className="h-10 w-64 bg-muted animate-pulse rounded" />
+          <div className="h-10 w-24 bg-muted animate-pulse rounded" />
         </div>
         <div className="border rounded-md">
           {["row-1", "row-2", "row-3", "row-4", "row-5"].map((id) => (
             <div key={id} className="flex gap-4 p-4 border-b last:border-b-0">
-              <div className="h-6 w-full bg-gray-200 animate-pulse rounded" />
+              <div className="h-6 w-full bg-muted animate-pulse rounded" />
             </div>
           ))}
         </div>
@@ -214,10 +212,10 @@ export function AppsDataTable({ data, loading = false }: AppsDataTableProps) {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <div className="overflow-hidden rounded-md border">
+      <div className="overflow-hidden rounded-md border border-border">
         <div className="max-h-[600px] overflow-y-auto">
           <Table>
-            <TableHeader className="sticky top-0 bg-white z-10">
+            <TableHeader className="sticky top-0 bg-background z-10">
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id}>
                   {headerGroup.headers.map((header) => {

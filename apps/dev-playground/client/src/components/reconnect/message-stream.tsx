@@ -1,5 +1,4 @@
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
+import { Badge, Card } from "@databricks/app-kit-ui/react";
 
 interface Message {
   count: number;
@@ -26,13 +25,13 @@ export function MessageStream({ messages }: MessageStreamProps) {
           {messages.map((msg, index) => (
             <div
               key={msg.timestamp}
-              className="p-4 bg-gray-50 rounded border border-gray-200 animate-slideIn"
+              className="p-4 bg-secondary rounded border border-border animate-slideIn"
               style={{
                 animation: `slideIn 0.3s ease-out ${index * 0.1}s both`,
               }}
             >
               <div className="flex items-center justify-between mb-2">
-                <p className="font-semibold">
+                <p className="font-semibold text-foreground">
                   Message {msg.count}/{msg.total}
                 </p>
                 <div className="flex gap-2">
@@ -48,8 +47,8 @@ export function MessageStream({ messages }: MessageStreamProps) {
                   )}
                 </div>
               </div>
-              <p className="text-sm text-gray-600">{msg.content}</p>
-              <p className="text-xs text-gray-400 mt-2">
+              <p className="text-sm text-foreground">{msg.content}</p>
+              <p className="text-xs text-muted-foreground mt-2">
                 {new Date(msg.timestamp).toLocaleTimeString()}
               </p>
             </div>

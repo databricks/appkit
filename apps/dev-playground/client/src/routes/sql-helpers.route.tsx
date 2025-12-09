@@ -1,20 +1,23 @@
 import { sql } from "@databricks/app-kit-ui/js";
-import { useAnalyticsQuery } from "@databricks/app-kit-ui/react";
-import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import { codeToHtml } from "shiki";
-import { Button } from "@/components/ui/button";
 import {
+  useAnalyticsQuery,
+  Button,
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+  Input,
+} from "@databricks/app-kit-ui/react";
+import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
+import { codeToHtml } from "shiki";
 
 export const Route = createFileRoute("/sql-helpers")({
   component: SqlHelpersRoute,
+  search: {
+    middlewares: [retainSearchParams(true)],
+  },
 });
 
 function CodeBlock({
@@ -52,7 +55,7 @@ function ResultDisplay({
 }) {
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-amber-600">
+      <div className="flex items-center gap-2 text-warning">
         <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
         Executing query...
       </div>
@@ -61,7 +64,7 @@ function ResultDisplay({
 
   if (error) {
     return (
-      <div className="text-red-600 bg-red-50 p-3 rounded-md border border-red-200">
+      <div className="text-destructive bg-destructive/10 p-3 rounded-md border border-destructive/20">
         <span className="font-semibold">Error:</span>{" "}
         {error.message || String(error)}
       </div>
@@ -69,12 +72,12 @@ function ResultDisplay({
   }
 
   if (!data || data.length === 0) {
-    return <div className="text-gray-500 italic">No results</div>;
+    return <div className="text-muted-foreground italic">No results</div>;
   }
 
   return (
-    <div className="bg-emerald-50 border border-emerald-200 rounded-md p-3">
-      <div className="text-emerald-700 font-semibold mb-2 flex items-center gap-2">
+    <div className="bg-success/10 border border-success/20 rounded-md p-3">
+      <div className="text-success font-semibold mb-2 flex items-center gap-2">
         <svg
           aria-label="Success checkmark"
           className="w-4 h-4"
@@ -92,7 +95,7 @@ function ResultDisplay({
         </svg>
         Query executed successfully
       </div>
-      <pre className="text-sm bg-white p-3 rounded border overflow-x-auto">
+      <pre className="text-sm bg-background p-3 rounded border overflow-x-auto">
         {JSON.stringify(data[0], null, 2)}
       </pre>
     </div>
@@ -120,7 +123,7 @@ function HelperCard({
     <Card className="overflow-hidden">
       <CardHeader className="pb-3">
         <div className="flex items-center gap-3">
-          <span className="px-2 py-1 bg-slate-800 text-slate-100 text-xs font-mono rounded">
+          <span className="px-2 py-1 bg-muted text-muted-foreground text-xs font-mono rounded">
             {type}
           </span>
           <CardTitle className="text-lg">{title}</CardTitle>
@@ -143,13 +146,13 @@ function HelperCard({
         {showCode && (
           <div className="space-y-3">
             <div>
-              <div className="text-xs text-gray-500 mb-1 font-medium">
+              <div className="text-xs text-muted-foreground mb-1 font-medium">
                 Usage:
               </div>
               <CodeBlock code={code} />
             </div>
             <div>
-              <div className="text-xs text-gray-500 mb-1 font-medium">
+              <div className="text-xs text-muted-foreground mb-1 font-medium">
                 Result object:
               </div>
               <CodeBlock code={resultCode} lang="json" />
@@ -239,19 +242,19 @@ function SqlHelpersRoute() {
   };
 
   return (
-    <div className="min-h-[calc(100vh-73px)] bg-gray-50">
+    <div className="min-h-screen bg-background">
       <div className="max-w-6xl mx-auto px-6 py-12">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">SQL Helpers</h1>
-          <p className="text-base text-gray-500">
+          <h1 className="text-3xl font-bold mb-2">SQL Helpers</h1>
+          <p className="text-base text-muted-foreground">
             Type-safe parameter helpers for Databricks SQL queries. Test each
             helper interactively and see the generated parameter objects.
           </p>
         </div>
 
         {/* Live Query Test */}
-        <Card className="mb-8 border-2 border-slate-300 bg-white shadow-lg">
-          <CardHeader className="bg-slate-800 text-white">
+        <Card className="mb-8 border-2 border-border bg-card shadow-lg">
+          <CardHeader className="bg-card text-card-foreground">
             <CardTitle className="flex items-center gap-3">
               <svg
                 className="w-5 h-5"
@@ -270,7 +273,7 @@ function SqlHelpersRoute() {
               </svg>
               Live Query Test
             </CardTitle>
-            <CardDescription className="text-slate-300">
+            <CardDescription className="text-muted-foreground">
               All parameters below are sent to the SQL warehouse in real-time
             </CardDescription>
           </CardHeader>
@@ -458,13 +461,15 @@ const params3 = {
                     .join("") || "(empty)"}
                 </div>
                 <div>
-                  As text: &quot;{(() => {
+                  As text: &quot;
+                  {(() => {
                     try {
                       return new TextDecoder().decode(binaryBytes);
                     } catch {
                       return "(invalid UTF-8)";
                     }
-                  })()}&quot;
+                  })()}
+                  &quot;
                 </div>
               </div>
             </div>

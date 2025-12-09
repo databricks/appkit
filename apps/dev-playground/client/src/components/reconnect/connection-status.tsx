@@ -1,12 +1,12 @@
-import { InfoIcon } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import {
+  Badge,
+  Button,
+  Card,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@databricks/app-kit-ui/react";
+import { InfoIcon } from "lucide-react";
 import { Timeline } from "./timeline";
 import { getStatusBadgeStyle } from "./utils";
 
@@ -25,7 +25,9 @@ export function ConnectionStatus({
     <Card className="mb-6 p-6">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <h3 className="text-xl font-semibold">Connection Status</h3>
+          <h3 className="text-xl font-semibold text-foreground">
+            Connection Status
+          </h3>
           <Tooltip>
             <TooltipTrigger>
               <InfoIcon className="w-5 h-5" />
@@ -47,8 +49,8 @@ export function ConnectionStatus({
       <Timeline status={status} messageCount={messageCount} />
 
       <div className="flex items-center justify-center gap-2">
-        <h2 className="text-4xl font-bold">{messageCount}</h2>
-        <p className="text-base text-gray-500">/ 5 messages received</p>
+        <h2 className="text-4xl font-bold text-foreground">{messageCount}</h2>
+        <p className="text-base text-muted-foreground">/ 5 messages received</p>
       </div>
     </Card>
   );
