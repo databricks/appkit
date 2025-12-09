@@ -1,15 +1,15 @@
-import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { codeToHtml } from "shiki";
-import { Header } from "@/components/layout/header";
-import { Button } from "@/components/ui/button";
 import {
+  Button,
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
+} from "@databricks/app-kit-ui/react";
+import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+import { codeToHtml } from "shiki";
+import { Header } from "@/components/layout/header";
 
 export const Route = createFileRoute("/type-safety")({
   component: TypeSafetyRoute,
@@ -34,17 +34,9 @@ function CodeBlock({
     }).then(setHtml);
   }, [code, lang]);
 
-  if (!html) {
-    return (
-      <pre className="bg-gray-800 text-gray-300 p-4 rounded-md text-sm font-mono overflow-x-auto">
-        {code}
-      </pre>
-    );
-  }
-
   return (
     <div
-      className="rounded-md overflow-hidden [&>pre]:m-0 [&>pre]:p-4 [&>pre]:text-sm"
+      className="rounded-md overflow-hidden [&>pre]:m-0 [&>pre]:p-4 [&>pre]:text-sm font-mono"
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );
@@ -128,14 +120,14 @@ function FlowStep({
     <div className="flex items-center">
       <div className="flex flex-col items-center">
         <div
-          className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm ${
-            active ? "bg-gray-900" : "bg-gray-400"
+          className={`w-10 h-10 rounded-full flex items-center justify-center text-primary-foreground font-semibold text-sm ${
+            active ? "bg-primary" : "bg-muted-foreground/40"
           }`}
         >
           {number}
         </div>
         <span
-          className={`mt-2 text-xs ${active ? "text-gray-900 font-medium" : "text-gray-500"}`}
+          className={`mt-2 text-xs ${active ? "text-foreground font-medium" : "text-muted-foreground"}`}
         >
           {title}
         </span>
@@ -167,7 +159,7 @@ function FlowDiagram() {
           />
           {index < steps.length - 1 && (
             <div
-              className={`w-8 h-0.5 mx-3 ${index < activeStep ? "bg-gray-900" : "bg-gray-300"}`}
+              className={`w-8 h-0.5 mx-3 ${index < activeStep ? "bg-primary" : "bg-border"}`}
             />
           )}
         </div>
@@ -185,6 +177,7 @@ function IntelliSenseDemo() {
   const [timeoutIds, setTimeoutIds] = useState<ReturnType<typeof setTimeout>[]>(
     [],
   );
+  const [html, setHtml] = useState("");
 
   const queryNames = [
     "apps_list",
@@ -298,63 +291,61 @@ function IntelliSenseDemo() {
     scheduleFromStep(0);
   };
 
-  const codeLines = [
-    "const { data } = useAnalyticsQuery(",
-    step >= 2 ? '  "spend_data",' : '  "|"',
-    "  {",
+  // Use a unique placeholder that shiki won't transform
+  const CURSOR_PLACEHOLDER = "___CURSOR___";
+
+  // Build code based on step - show cursor where user is "typing"
+  const code =
     step >= 3
-      ? '    startDate: sql.date("2024-01-01"),'
+      ? `const { data } = useAnalyticsQuery(
+  "spend_data",
+  {
+    startDate: sql.date("2024-01-01"),
+    endDate: sql.date("2024-12-31"),
+  }
+);
+
+data?.map(row => row.${CURSOR_PLACEHOLDER})`
       : step >= 2
-        ? "    |"
-        : "",
-    step >= 3 ? '    endDate: sql.date("2024-12-31"),' : "",
-    "  }",
-    ");",
-    "",
-    step >= 3 ? "data?.map(row => row.|)" : "",
-  ].filter(Boolean);
+        ? `const { data } = useAnalyticsQuery(
+  "spend_data",
+  {
+    ${CURSOR_PLACEHOLDER}
+  }
+);`
+        : `const { data } = useAnalyticsQuery(
+  "${CURSOR_PLACEHOLDER}"
+);`;
+
+  useEffect(() => {
+    codeToHtml(code, {
+      lang: "typescript",
+      theme: "dark-plus",
+    }).then((highlighted) => {
+      // Replace placeholder with cursor HTML
+      const cursorHtml = `<span class="animate-pulse bg-white/90 text-zinc-900 px-[1px]">|</span>`;
+      setHtml(highlighted.replace(CURSOR_PLACEHOLDER, cursorHtml));
+    });
+  }, [code]);
 
   return (
     <div>
-      <div className="relative bg-gray-800 rounded-md p-4 font-mono text-sm min-h-[240px]">
-        <pre className="text-gray-300">
-          {codeLines.map((line) => (
-            <div key={line} className="leading-6">
-              {line.includes("|") ? (
-                <>
-                  {line.split("|")[0]}
-                  <span className="bg-white text-gray-900 animate-pulse">
-                    |
-                  </span>
-                  {line.split("|")[1]}
-                </>
-              ) : (
-                <span
-                  className={
-                    line.includes('"spend_data"')
-                      ? "text-green-400"
-                      : line.includes("sql.")
-                        ? "text-green-400"
-                        : ""
-                  }
-                >
-                  {line}
-                </span>
-              )}
-            </div>
-          ))}
-        </pre>
+      <div className="relative rounded-md min-h-[300px] [&_pre]:m-0 [&_pre]:p-4 [&_pre]:text-sm [&_pre]:min-h-[300px] [&_pre]:rounded-md font-mono">
+        <div
+          className="overflow-hidden rounded-md"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
 
         {showAutocomplete && (
-          <div className="absolute left-20 top-10 bg-[#252526] border border-gray-600 rounded shadow-lg z-10 w-56">
-            <div className="text-xs text-gray-400 px-2 py-1 border-b border-gray-600">
+          <div className="absolute left-[88px] top-[52px] bg-[#252526] border border-[#454545] rounded shadow-lg z-10 w-56">
+            <div className="text-xs text-[#858585] px-2 py-1 border-b border-[#454545]">
               QueryRegistry
             </div>
             {queryNames.map((name, i) => (
               <div
                 key={name}
                 className={`px-3 py-1 text-sm font-mono ${
-                  i === 2 ? "bg-gray-700 text-white" : "text-gray-300"
+                  i === 2 ? "bg-[#04395e] text-white" : "text-[#cccccc]"
                 }`}
               >
                 {name}
@@ -364,11 +355,11 @@ function IntelliSenseDemo() {
         )}
 
         {showParamHint && (
-          <div className="absolute left-24 top-16 bg-[#252526] border border-gray-600 rounded shadow-lg z-10 w-60">
-            <div className="text-xs text-gray-400 px-2 py-1 border-b border-gray-600">
+          <div className="absolute left-[100px] top-[84px] bg-[#252526] border border-[#454545] rounded shadow-lg z-10 w-60">
+            <div className="text-xs text-[#858585] px-2 py-1 border-b border-[#454545]">
               Parameters (spend_data)
             </div>
-            <div className="p-2 text-sm font-mono text-gray-300">
+            <div className="p-2 text-sm font-mono text-[#cccccc]">
               <div>groupBy: SQLStringMarker</div>
               <div>startDate: SQLDateMarker</div>
               <div>endDate: SQLDateMarker</div>
@@ -377,8 +368,8 @@ function IntelliSenseDemo() {
         )}
 
         {showResultHint && (
-          <div className="absolute left-56 bottom-10 bg-[#252526] border border-gray-600 rounded shadow-lg z-10 w-48">
-            <div className="text-xs text-gray-400 px-2 py-1 border-b border-gray-600">
+          <div className="absolute left-[220px] bottom-[24px] bg-[#252526] border border-[#454545] rounded shadow-lg z-10 w-48 overflow-hidden">
+            <div className="text-xs text-[#858585] px-2 py-1 border-b border-[#454545]">
               Result Fields
             </div>
             {["group_key: string", "period: string", "cost_usd: number"].map(
@@ -386,7 +377,7 @@ function IntelliSenseDemo() {
                 <div
                   key={field}
                   className={`px-3 py-1 text-sm font-mono ${
-                    i === 2 ? "bg-gray-700 text-white" : "text-gray-300"
+                    i === 2 ? "bg-[#04395e] text-white" : "text-[#cccccc]"
                   }`}
                 >
                   {field}
@@ -406,7 +397,7 @@ function IntelliSenseDemo() {
             {isPaused ? "Resume" : "Pause"}
           </Button>
         )}
-        <span className="text-sm text-gray-500">
+        <span className="text-sm text-muted-foreground">
           {isPaused && "(Paused) "}
           {step === 0 && "Click to start"}
           {step === 1 && "Query name autocomplete"}
@@ -421,8 +412,8 @@ function IntelliSenseDemo() {
 
 function TypeSafetyRoute() {
   return (
-    <div className="min-h-[calc(100vh-73px)] bg-gray-50">
-      <div className="max-w-[1200px] mx-auto px-6 py-12">
+    <div className="min-h-screen bg-background">
+      <div className="max-w-6xl mx-auto px-6 py-12">
         <Header
           title="Type-Safe SQL Queries"
           description="Generate TypeScript types from SQL files at build time with full IntelliSense support."
@@ -573,14 +564,11 @@ npx appkit-generate-types --no-cache`}
                   },
                   { annotation: "@param data BINARY", helper: "sql.binary()" },
                 ].map((type) => (
-                  <div
-                    key={type.annotation}
-                    className="p-3 bg-gray-100 rounded"
-                  >
-                    <code className="text-xs text-gray-600 block">
+                  <div key={type.annotation} className="p-3 bg-muted rounded">
+                    <code className="text-xs text-muted-foreground block">
                       -- {type.annotation}
                     </code>
-                    <code className="text-sm text-gray-900 font-medium">
+                    <code className="text-sm text-foreground font-medium">
                       {type.helper}
                     </code>
                   </div>
