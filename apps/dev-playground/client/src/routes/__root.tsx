@@ -63,6 +63,14 @@ function RootComponent() {
                     SQL Helpers
                   </Button>
                 </Link>
+                <Link to="/type-safety" className="no-underline">
+                  <Button
+                    variant="ghost"
+                    className="text-gray-700 hover:text-gray-900"
+                  >
+                    Type Safety
+                  </Button>
+                </Link>
               </div>
             </nav>
           </div>

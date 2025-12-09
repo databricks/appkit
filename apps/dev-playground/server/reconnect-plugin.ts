@@ -1,31 +1,34 @@
 import { Plugin, toPlugin } from "@databricks/app-kit";
 import type { IAppRouter, StreamExecutionSettings } from "shared";
-import { z } from "zod";
+
+interface ReconnectResponse {
+  message: string;
+}
+
+interface ReconnectStreamResponse {
+  type: number;
+  count: number;
+  total: number;
+  timestamp: string;
+  content: string;
+}
 
 export class ReconnectPlugin extends Plugin {
   public name = "reconnect";
   public envVars = [];
 
   injectRoutes(router: IAppRouter): void {
-    this.route(router, {
+    this.route<ReconnectResponse>(router, {
       method: "get",
       path: "/",
-      schema: z.object({ message: z.string() }),
       handler: async (_req, res) => {
         res.json({ message: "Reconnected" });
       },
     });
 
-    this.route(router, {
+    this.route<ReconnectStreamResponse>(router, {
       method: "get",
       path: "/stream",
-      schema: z.object({
-        type: z.string(),
-        count: z.number(),
-        total: z.number(),
-        timestamp: z.string(),
-        content: z.string(),
-      }),
       handler: async (req, res) => {
         const sessionId =
           (req.query.sessionId as string) || `session-${Date.now()}`;

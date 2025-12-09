@@ -29,14 +29,21 @@ export interface UseAnalyticsQueryResult<T> {
  * // config/appKitTypes.d.ts
  * declare module "@databricks/app-kit-ui/react" {
  *   interface QueryRegistry {
- *     apps_list: AppListItem[];
- *     spend_summary: SpendSummary[];
+ *     apps_list: {
+ *       name: "apps_list";
+ *       parameters: { startDate: string; endDate: string; aggregationLevel: string };
+ *       result: Array<{ id: string; name: string }>;
+ *     };
  *   }
  * }
  * ```
  */
 export interface QueryRegistry {
-  [key: string]: any[];
+  [key: string]: {
+    name: string;
+    parameters: Record<string, unknown>;
+    result: unknown[];
+  };
 }
 
 /** Gets only literal keys from a registry (excludes index signature) */
@@ -50,30 +57,23 @@ export type QueryKey = AugmentedRegistry<QueryRegistry> extends never
   : AugmentedRegistry<QueryRegistry>;
 
 /**
- * Infers result type: uses QueryRegistry if key exists, otherwise falls back to explicit type T
+ * Infers result type from QueryRegistry[K]["result"]
  */
 export type InferResult<T, K> = K extends AugmentedRegistry<QueryRegistry>
-  ? QueryRegistry[K]
+  ? QueryRegistry[K] extends { result: infer R }
+    ? R
+    : T
   : T;
+
+/**
+ * Infers parameters type from QueryRegistry[K]["parameters"]
+ */
+export type InferParams<K> = K extends AugmentedRegistry<QueryRegistry>
+  ? QueryRegistry[K] extends { parameters: infer P }
+    ? P
+    : Record<string, unknown>
+  : Record<string, unknown>;
 
 export interface PluginRegistry {
   [key: string]: Record<string, any>;
 }
-
-export type PluginName = AugmentedRegistry<PluginRegistry> extends never
-  ? string
-  : AugmentedRegistry<PluginRegistry>;
-
-export type PluginRoutes<P extends PluginName> =
-  P extends AugmentedRegistry<PluginRegistry>
-    ? AugmentedRegistry<PluginRegistry[P]>
-    : string;
-
-export type RouteResponse<
-  P extends PluginName,
-  R extends PluginRoutes<P>,
-> = P extends keyof PluginRegistry
-  ? R extends keyof PluginRegistry[P]
-    ? PluginRegistry[P][R]
-    : unknown
-  : unknown;
