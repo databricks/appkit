@@ -66,7 +66,7 @@ function RootComponent() {
                 <Link to="/type-safety" className="no-underline">
                   <Button
                     variant="ghost"
-                    className="text-gray-700 hover:text-gray-900"
+                    className="text-foreground hover:text-secondary-foreground"
                   >
                     Type Safety
                   </Button>

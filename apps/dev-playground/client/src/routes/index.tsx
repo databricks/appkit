@@ -124,10 +124,10 @@ function IndexRoute() {
 
           <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
             <div className="flex flex-col h-full">
-              <h3 className="text-2xl font-semibold text-gray-900 mb-3">
+              <h3 className="text-2xl font-semibold text-foreground mb-3">
                 Type-Safe SQL
               </h3>
-              <p className="text-gray-600 mb-6 flex-grow">
+              <p className="text-muted-foreground mb-6 flex-grow">
                 Generate TypeScript types from SQL files at build time. Full
                 IntelliSense for query names, parameters, and results.
               </p>
@@ -141,7 +141,7 @@ function IndexRoute() {
           </Card>
         </div>
 
-        <div className="text-center pt-12 border-t border-gray-200">
+        <div className="text-center pt-12 border-t border-border">
           <p className="text-sm text-muted-foreground">
             built by databricks using app-kit
           </p>
