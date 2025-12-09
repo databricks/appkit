@@ -180,10 +180,10 @@ export function DataTable(props: DataTableProps) {
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
-            <div className="overflow-hidden rounded-md border">
+            <div className="overflow-hidden rounded-md border border-border">
               <div className="max-h-[600px] overflow-y-auto">
                 <Table>
-                  <TableHeader className="sticky top-0 bg-white z-10">
+                  <TableHeader className="sticky top-0 bg-background z-10">
                     {table.getHeaderGroups().map((headerGroup) => (
                       <TableRow key={headerGroup.id}>
                         {headerGroup.headers.map((header) => {
@@ -255,7 +255,7 @@ export function DataTable(props: DataTableProps) {
             </div>
             <div className="flex items-center justify-between py-4">
               <div className="flex items-center gap-6">
-                <div className="text-muted-foreground text-sm">
+                <div className="text-foreground text-sm">
                   {totalRows > 0
                     ? finalLabels.showing
                         .replace(`\${from}`, fromRow.toString())
@@ -264,7 +264,7 @@ export function DataTable(props: DataTableProps) {
                     : finalLabels.noResults}
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">
+                  <span className="text-sm text-foreground">
                     {finalLabels.rowsPerPage}
                   </span>
                   <Select

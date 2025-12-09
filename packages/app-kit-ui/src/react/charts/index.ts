@@ -8,4 +8,4 @@ export { PieChart } from "./pie/pie-chart";
 export type { PieChartProps } from "./pie/types";
 export { RadarChart } from "./radar/radar-chart";
 export type { RadarChartProps } from "./radar/types";
-export { ChartTooltip, ChartTooltipContent } from "./ui/chart";
+export { ChartTooltip, ChartTooltipContent } from "../ui/chart";

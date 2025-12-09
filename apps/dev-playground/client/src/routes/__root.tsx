@@ -6,8 +6,7 @@ import {
   useLocation,
 } from "@tanstack/react-router";
 import { ErrorComponent } from "@/components/error-component";
-import { Button } from "@/components/ui/button";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { Button, TooltipProvider } from "@databricks/app-kit-ui/react";
 
 export const Route = createRootRoute({
   component: RootComponent,
@@ -20,14 +19,14 @@ function RootComponent() {
   return (
     <TooltipProvider>
       {!isHomePage && (
-        <div className="border-b border-gray-200 bg-white px-6 py-4 sticky top-0 z-10 shadow-sm">
+        <div className="border-b border-gray-200 bg-background px-6 py-4 sticky top-0 z-10 shadow-sm">
           <div className="max-w-7xl mx-auto">
             <nav className="flex items-center justify-between gap-4">
               <Link
                 to="/"
                 className="no-underline text-inherit hover:opacity-80 transition-opacity"
               >
-                <h4 className="text-xl font-semibold tracking-tight">
+                <h4 className="text-xl font-semibold tracking-tight text-foreground">
                   App Kit Playground
                 </h4>
               </Link>
@@ -35,7 +34,7 @@ function RootComponent() {
                 <Link to="/analytics" className="no-underline">
                   <Button
                     variant="ghost"
-                    className="text-gray-700 hover:text-gray-900"
+                    className="text-foreground hover:text-secondary-foreground"
                   >
                     Analytics
                   </Button>
@@ -43,7 +42,7 @@ function RootComponent() {
                 <Link to="/reconnect" className="no-underline">
                   <Button
                     variant="ghost"
-                    className="text-gray-700 hover:text-gray-900"
+                    className="text-foreground hover:text-secondary-foreground"
                   >
                     Reconnect
                   </Button>
@@ -51,7 +50,7 @@ function RootComponent() {
                 <Link to="/telemetry" className="no-underline">
                   <Button
                     variant="ghost"
-                    className="text-gray-700 hover:text-gray-900"
+                    className="text-foreground hover:text-secondary-foreground"
                   >
                     Telemetry
                   </Button>
@@ -59,7 +58,7 @@ function RootComponent() {
                 <Link to="/sql-helpers" className="no-underline">
                   <Button
                     variant="ghost"
-                    className="text-gray-700 hover:text-gray-900"
+                    className="text-foreground hover:text-secondary-foreground"
                   >
                     SQL Helpers
                   </Button>

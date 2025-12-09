@@ -25,14 +25,14 @@ export function Timeline({ status, messageCount }: TimelineProps) {
               style={{ borderWidth: "3px" }}
             >
               {step.completed && (
-                <span className="text-white font-bold text-base">✓</span>
+                <span className="text-foreground font-bold text-base">✓</span>
               )}
               {step.active && !step.completed && (
-                <span className="w-3 h-3 rounded-full bg-white" />
+                <span className="w-3 h-3 rounded-full bg-background" />
               )}
             </div>
             <p
-              className={`text-xs text-center ${step.active ? "font-semibold text-gray-900" : "text-gray-500"}`}
+              className={`text-xs text-center ${step.active ? "font-semibold text-foreground" : "text-muted-foreground"}`}
             >
               {step.label}
             </p>

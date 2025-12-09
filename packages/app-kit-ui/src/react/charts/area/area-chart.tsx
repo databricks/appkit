@@ -5,9 +5,9 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { ChartContainer } from "../../ui/chart";
 import { ChartTooltipDefault } from "../chart-tooltip";
 import { ChartWrapper } from "../chart-wrapper";
-import { ChartContainer } from "../ui/chart";
 import { detectFields, formatXAxisTick, generateChartConfig } from "../utils";
 import type { AreaChartProps } from "./types";
 
