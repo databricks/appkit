@@ -278,7 +278,7 @@ export class LakebaseConnector {
     if (!this.connectionConfig) {
       throw new Error(
         "Lakebase connection not configured. " +
-          "Set LAKEBASE_CONNECTION_STRING env var or provide config in constructor.",
+          "Set PGHOST, PGDATABASE, PGAPPNAME env vars, provide a connectionString, or pass explicit config.",
       );
     }
 
@@ -442,6 +442,10 @@ export class LakebaseConnector {
 
   /** Parse connection configuration from config or environment */
   private parseConnectionConfig(): LakebaseConnectionConfig {
+    if (this.config.connectionString) {
+      return this.parseConnectionString(this.config.connectionString);
+    }
+
     // get connection from config
     if (this.config.host && this.config.database && this.config.appName) {
       return {
@@ -480,6 +484,26 @@ export class LakebaseConnector {
       port,
       sslMode,
       appName: pgAppName,
+    };
+  }
+
+  private parseConnectionString(
+    connectionString: string,
+  ): LakebaseConnectionConfig {
+    const url = new URL(connectionString);
+    const appName = url.searchParams.get("appName");
+    if (!appName) {
+      throw new Error("Connection string must include appName parameter");
+    }
+
+    return {
+      host: url.hostname,
+      database: url.pathname.slice(1), // remove leading slash
+      port: url.port ? parseInt(url.port, 10) : 5432,
+      sslMode:
+        (url.searchParams.get("sslmode") as "require" | "disable" | "prefer") ??
+        "require",
+      appName: appName,
     };
   }
 }

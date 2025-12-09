@@ -6,6 +6,9 @@ export interface LakebaseConfig {
   /** Databricks workspace client */
   workspaceClient?: WorkspaceClient;
 
+  /** Connection string */
+  connectionString?: string;
+
   /** Database host (e.g., instance-uuid.database.region.databricks.com) */
   host?: string;
 

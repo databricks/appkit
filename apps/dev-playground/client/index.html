@@ -7,6 +7,31 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      (function() {
+        const THEME_STORAGE_KEY = "app-kit-playground-theme";
+        const storedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+        const root = document.documentElement;
+        
+        if (storedTheme === "light") {
+          root.classList.add("light");
+          root.classList.remove("dark");
+        } else if (storedTheme === "dark") {
+          root.classList.add("dark");
+          root.classList.remove("light");
+        } else {
+          // System theme - use media query
+          const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          if (prefersDark) {
+            root.classList.add("dark");
+            root.classList.remove("light");
+          } else {
+            root.classList.add("light");
+            root.classList.remove("dark");
+          }
+        }
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

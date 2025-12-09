@@ -19,5 +19,11 @@ export interface CacheConfig {
   /** Telemetry configuration */
   telemetry?: TelemetryOptions;
 
+  /** Probability (0-1) of triggering cleanup on each get operation */
+  cleanupProbability?: number;
+
+  /** Maximum number of bytes per entry in the cache */
+  maxEntryBytes?: number;
+
   [key: string]: unknown;
 }

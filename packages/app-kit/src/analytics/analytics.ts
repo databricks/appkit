@@ -185,9 +185,6 @@ export class AnalyticsPlugin extends Plugin {
     const schemaDir = path.join(process.cwd(), "config/queries");
     const schemaPath = path.join(schemaDir, "schema.ts");
 
-    const typePath =
-      this.config.typePath || path.join(process.cwd(), "client", "src");
-
     const generate = () => {
       let querySchemas: QuerySchemas = {};
       try {
@@ -201,7 +198,7 @@ export class AnalyticsPlugin extends Plugin {
           );
         }
       }
-      generateQueryRegistryTypes(querySchemas, typePath);
+      generateQueryRegistryTypes(querySchemas);
     };
 
     generate();

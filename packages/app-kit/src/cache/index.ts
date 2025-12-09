@@ -28,7 +28,7 @@ export type { CacheEntry, CacheStorage } from "./storage";
  * ```
  */
 export class CacheManager {
-  private static readonly CLEANUP_PROBABILITY = 0.01;
+  private static readonly MIN_CLEANUP_INTERVAL_MS = 60_000;
   private readonly name: string = "cache-manager";
   private static instance: CacheManager | null = null;
   private static initPromise: Promise<CacheManager> | null = null;
@@ -37,6 +37,7 @@ export class CacheManager {
   private config: CacheConfig;
   private inFlightRequests: Map<string, Promise<unknown>>;
   private cleanupInProgress: boolean;
+  private lastCleanupAttempt: number;
 
   // Telemetry
   private telemetry: TelemetryProvider;
@@ -50,6 +51,7 @@ export class CacheManager {
     this.config = config;
     this.inFlightRequests = new Map();
     this.cleanupInProgress = false;
+    this.lastCleanupAttempt = 0;
 
     this.telemetry = TelemetryManager.getProvider(
       this.name,
@@ -132,8 +134,14 @@ export class CacheManager {
         await persistentStorage.initialize();
         return new CacheManager(persistentStorage, config);
       }
+
+      console.warn(
+        "[Cache] Persistent storage health check failed, storage unhealthy",
+      );
     } catch (error) {
-      console.warn("[Cache] Persistent storage unavailable:", error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.warn(`[Cache] Persistent storage unavailable: ${errorMessage}`);
     }
 
     // if strict persistence is enabled, do not fallback to in-memory storage
@@ -276,7 +284,15 @@ export class CacheManager {
   private maybeCleanup(): void {
     if (this.cleanupInProgress) return;
     if (!this.storage.isPersistent()) return;
-    if (Math.random() > CacheManager.CLEANUP_PROBABILITY) return;
+    const now = Date.now();
+    if (now - this.lastCleanupAttempt < CacheManager.MIN_CLEANUP_INTERVAL_MS)
+      return;
+
+    const probability = this.config.cleanupProbability ?? 0.01;
+
+    if (Math.random() > probability) return;
+
+    this.lastCleanupAttempt = now;
 
     this.cleanupInProgress = true;
     (this.storage as PersistentStorage)

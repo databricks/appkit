@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import type { LakebaseConnector } from "../../connectors";
 import type { CacheConfig } from "shared";
+import type { LakebaseConnector } from "../../connectors";
 import { lakebaseStorageDefaults } from "./defaults";
 import type { CacheEntry, CacheStorage } from "./types";
 
@@ -22,14 +22,17 @@ export class PersistentStorage implements CacheStorage {
   private readonly connector: LakebaseConnector;
   private readonly tableName: string;
   private readonly maxBytes: number;
+  private readonly maxEntryBytes: number;
   private readonly evictionBatchSize: number;
   private initialized: boolean;
 
   constructor(config: CacheConfig, connector: LakebaseConnector) {
     this.connector = connector;
     this.maxBytes = config.maxBytes ?? lakebaseStorageDefaults.maxBytes;
+    this.maxEntryBytes =
+      config.maxEntryBytes ?? lakebaseStorageDefaults.maxEntryBytes;
     this.evictionBatchSize = lakebaseStorageDefaults.evictionBatchSize;
-    this.tableName = lakebaseStorageDefaults.tableName;
+    this.tableName = lakebaseStorageDefaults.tableName; // hardcoded, safe for now
     this.initialized = false;
   }
 
@@ -41,7 +44,7 @@ export class PersistentStorage implements CacheStorage {
       await this.runMigrations();
       this.initialized = true;
     } catch (error) {
-      console.error("Error in for persistent storage initialization:", error);
+      console.error("Error in persistent storage initialization:", error);
       throw error;
     }
   }
@@ -96,6 +99,12 @@ export class PersistentStorage implements CacheStorage {
     const keyBytes = Buffer.from(key, "utf-8");
     const valueBytes = this.serializeValue(entry.value);
     const byteSize = keyBytes.length + valueBytes.length;
+
+    if (byteSize > this.maxEntryBytes) {
+      throw new Error(
+        `Cache entry too large: ${byteSize} bytes exceeds maximum of ${this.maxEntryBytes} bytes`,
+      );
+    }
 
     const totalBytes = await this.totalBytes();
     if (totalBytes + byteSize > this.maxBytes) {

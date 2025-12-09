@@ -10,6 +10,8 @@ export const lakebaseStorageDefaults = {
   tableName: "appkit_cache_entries",
   /** Maximum number of bytes in the cache */
   maxBytes: 256 * 1024 * 1024, // 256MB
+  /** Maximum number of bytes per entry in the cache */
+  maxEntryBytes: 10 * 1024 * 1024, // 10MB
   /** Maximum number of entries in the cache */
   maxSize: 1000,
   /** Number of entries to evict when cache is full */

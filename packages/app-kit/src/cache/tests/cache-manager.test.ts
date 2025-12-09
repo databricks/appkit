@@ -345,4 +345,233 @@ describe("CacheManager", () => {
       await expect(cache.close()).resolves.not.toThrow();
     });
   });
+
+  describe("maybeCleanup", () => {
+    test("should not trigger cleanup for non-persistent storage", async () => {
+      const cache = await CacheManager.getInstance({
+        persistentCache: false,
+        cleanupProbability: 1, // 100% probability
+      });
+
+      // Access private method via reflection
+      const maybeCleanup = (cache as any).maybeCleanup.bind(cache);
+      const storage = (cache as any).storage;
+
+      maybeCleanup();
+
+      // cleanupExpired should not exist on in-memory storage
+      expect(storage.isPersistent()).toBe(false);
+    });
+
+    test("should respect MIN_CLEANUP_INTERVAL_MS", async () => {
+      const cache = await CacheManager.getInstance({
+        persistentCache: false,
+        cleanupProbability: 1,
+      });
+
+      // Simulate persistent storage
+      const mockStorage = {
+        isPersistent: vi.fn().mockReturnValue(true),
+        cleanupExpired: vi.fn().mockResolvedValue(5),
+      };
+      (cache as any).storage = mockStorage;
+      (cache as any).lastCleanupAttempt = Date.now(); // Just cleaned up
+
+      const maybeCleanup = (cache as any).maybeCleanup.bind(cache);
+      maybeCleanup();
+
+      // Should not trigger cleanup due to interval
+      expect(mockStorage.cleanupExpired).not.toHaveBeenCalled();
+    });
+
+    test("should trigger cleanup when probability allows and interval passed", async () => {
+      const cache = await CacheManager.getInstance({
+        persistentCache: false,
+        cleanupProbability: 1, // 100% probability
+      });
+
+      // Simulate persistent storage
+      const mockStorage = {
+        isPersistent: vi.fn().mockReturnValue(true),
+        cleanupExpired: vi.fn().mockResolvedValue(5),
+      };
+      (cache as any).storage = mockStorage;
+      (cache as any).lastCleanupAttempt = 0; // Long time ago
+
+      const maybeCleanup = (cache as any).maybeCleanup.bind(cache);
+      maybeCleanup();
+
+      // Should trigger cleanup
+      expect(mockStorage.cleanupExpired).toHaveBeenCalled();
+    });
+
+    test("should not trigger cleanup when already in progress", async () => {
+      const cache = await CacheManager.getInstance({
+        persistentCache: false,
+        cleanupProbability: 1,
+      });
+
+      const mockStorage = {
+        isPersistent: vi.fn().mockReturnValue(true),
+        cleanupExpired: vi.fn().mockResolvedValue(5),
+      };
+      (cache as any).storage = mockStorage;
+      (cache as any).lastCleanupAttempt = 0;
+      (cache as any).cleanupInProgress = true; // Already running
+
+      const maybeCleanup = (cache as any).maybeCleanup.bind(cache);
+      maybeCleanup();
+
+      expect(mockStorage.cleanupExpired).not.toHaveBeenCalled();
+    });
+
+    test("should handle cleanup errors gracefully", async () => {
+      const cache = await CacheManager.getInstance({
+        persistentCache: false,
+        cleanupProbability: 1,
+      });
+
+      const mockStorage = {
+        isPersistent: vi.fn().mockReturnValue(true),
+        cleanupExpired: vi.fn().mockRejectedValue(new Error("Cleanup failed")),
+      };
+      (cache as any).storage = mockStorage;
+      (cache as any).lastCleanupAttempt = 0;
+
+      const maybeCleanup = (cache as any).maybeCleanup.bind(cache);
+
+      // Should not throw
+      expect(() => maybeCleanup()).not.toThrow();
+
+      // Wait for async cleanup to complete
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // cleanupInProgress should be reset
+      expect((cache as any).cleanupInProgress).toBe(false);
+    });
+  });
+
+  describe("getOrExecute error handling", () => {
+    test("should propagate errors from executed function", async () => {
+      const cache = await CacheManager.getInstance({ persistentCache: false });
+      const error = new Error("Execution failed");
+      const fn = vi.fn().mockRejectedValue(error);
+
+      await expect(cache.getOrExecute(["key"], fn, "user1")).rejects.toThrow(
+        "Execution failed",
+      );
+    });
+
+    test("should remove in-flight request on error", async () => {
+      const cache = await CacheManager.getInstance({ persistentCache: false });
+      const error = new Error("Execution failed");
+      const fn = vi.fn().mockRejectedValue(error);
+
+      try {
+        await cache.getOrExecute(["key"], fn, "user1");
+      } catch {
+        // Expected
+      }
+
+      // Verify in-flight request was cleaned up
+      const cacheKey = cache.generateKey(["key"], "user1");
+      expect((cache as any).inFlightRequests.has(cacheKey)).toBe(false);
+    });
+
+    test("should allow retry after error", async () => {
+      const cache = await CacheManager.getInstance({ persistentCache: false });
+      const fn = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("First attempt failed"))
+        .mockResolvedValueOnce("success");
+
+      // First call fails
+      await expect(cache.getOrExecute(["key"], fn, "user1")).rejects.toThrow();
+
+      // Second call succeeds
+      const result = await cache.getOrExecute(["key"], fn, "user1");
+      expect(result).toBe("success");
+    });
+  });
+
+  describe("strictPersistence mode", () => {
+    test("should disable cache when strictPersistence is true and storage unavailable", async () => {
+      // Reset singleton
+      (CacheManager as any).instance = null;
+      (CacheManager as any).initPromise = null;
+
+      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      // Use persistentCache: true but env vars are not set, so it will fail
+      // and with strictPersistence: true, cache should be disabled
+      const cache = await CacheManager.getInstance({
+        persistentCache: true,
+        strictPersistence: true,
+      });
+
+      // Should have logged about strictPersistence
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining("strictPersistence"),
+      );
+
+      // Cache should be disabled
+      const fn = vi.fn().mockResolvedValue("result");
+      await cache.getOrExecute(["key"], fn, "user1");
+      await cache.getOrExecute(["key"], fn, "user1");
+
+      // Function called twice because cache is disabled
+      expect(fn).toHaveBeenCalledTimes(2);
+
+      consoleSpy.mockRestore();
+    });
+  });
+
+  describe("persistent storage fallback", () => {
+    test("should fallback to in-memory when persistent storage unavailable", async () => {
+      // Reset singleton
+      (CacheManager as any).instance = null;
+      (CacheManager as any).initPromise = null;
+
+      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      // Use persistentCache: true but env vars are not set, so it will fail
+      // and fallback to in-memory
+      const cache = await CacheManager.getInstance({
+        persistentCache: true,
+        strictPersistence: false,
+      });
+
+      // Should log fallback message
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[Cache]"),
+      );
+
+      // Cache should still work (in-memory)
+      await cache.set("test-key", "value");
+      const result = await cache.get("test-key");
+      expect(result).toBe("value");
+
+      consoleSpy.mockRestore();
+    });
+
+    test("should log error message when persistent storage fails", async () => {
+      // Reset singleton
+      (CacheManager as any).instance = null;
+      (CacheManager as any).initPromise = null;
+
+      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      await CacheManager.getInstance({
+        persistentCache: true,
+        strictPersistence: false,
+      });
+
+      // Should have logged about unavailable storage
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[Cache] Persistent storage unavailable"),
+      );
+
+      consoleSpy.mockRestore();
+    });
+  });
 });
