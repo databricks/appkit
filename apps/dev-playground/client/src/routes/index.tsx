@@ -4,6 +4,7 @@ import {
   useNavigate,
 } from "@tanstack/react-router";
 import { Button, Card } from "@databricks/app-kit-ui/react";
+import { ThemeSelector } from "@/components/theme-selector";
 
 export const Route = createFileRoute("/")({
   component: IndexRoute,
@@ -17,6 +18,9 @@ function IndexRoute() {
 
   return (
     <div className="min-h-screen bg-background">
+      <div className="absolute top-4 right-4">
+        <ThemeSelector />
+      </div>
       <div className="max-w-6xl mx-auto px-6 py-20">
         <div className="text-center mb-16">
           <h1 className="text-5xl font-bold text-foreground mb-4">

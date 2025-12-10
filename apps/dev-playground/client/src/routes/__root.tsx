@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router";
 import { ErrorComponent } from "@/components/error-component";
 import { Button, TooltipProvider } from "@databricks/app-kit-ui/react";
+import { ThemeSelector } from "@/components/theme-selector";
 
 export const Route = createRootRoute({
   component: RootComponent,
@@ -30,7 +31,7 @@ function RootComponent() {
                   App Kit Playground
                 </h4>
               </Link>
-              <div className="flex gap-3">
+              <div className="flex items-center gap-3">
                 <Link to="/analytics" className="no-underline">
                   <Button
                     variant="ghost"
@@ -63,14 +64,7 @@ function RootComponent() {
                     SQL Helpers
                   </Button>
                 </Link>
-                <Link to="/type-safety" className="no-underline">
-                  <Button
-                    variant="ghost"
-                    className="text-foreground hover:text-secondary-foreground"
-                  >
-                    Type Safety
-                  </Button>
-                </Link>
+                <ThemeSelector />
               </div>
             </nav>
           </div>
