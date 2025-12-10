@@ -7,26 +7,41 @@ import type { PluginPhase } from "shared";
 import { Plugin, toPlugin } from "../plugin";
 import { instrumentations } from "../telemetry";
 import { databricksClientMiddleware, isRemoteServerEnabled } from "../utils";
-import { DevModeManager } from "./dev-mode";
+import { RemoteTunnelManager } from "./remote-tunnel-manager";
+import { StaticServer } from "./static-server";
 import type { ServerConfig } from "./types";
-import { getQueries, getRoutes } from "./utils";
+import { getRoutes } from "./utils";
+import { ViteDevServer } from "./vite-dev-server";
 
 dotenv.config({ path: path.resolve(process.cwd(), "./server/.env") });
 
+/**
+ * Server plugin for the App Kit.
+ *
+ * This plugin is responsible for starting the server and serving the static files.
+ * It also handles the remote tunneling for development purposes.
+ *
+ * @example
+ * ```ts
+ * createApp({
+ *   plugins: [server(), telemetryExamples(), analytics({})],
+ * });
+ * ```
+ *
+ */
 export class ServerPlugin extends Plugin {
   public static DEFAULT_CONFIG = {
     autoStart: true,
-    staticPath: path.resolve(process.cwd(), "client", "dist"),
     host: process.env.FLASK_RUN_HOST || "0.0.0.0",
     port: Number(process.env.DATABRICKS_APP_PORT) || 8000,
-    watch: process.env.NODE_ENV === "development",
   };
 
   public name = "server" as const;
   public envVars = ["DATABRICKS_APP_PORT", "FLASK_RUN_HOST"];
   private serverApplication: express.Application;
   private server: HTTPServer | null;
-  private devModeManager?: DevModeManager;
+  private viteDevServer?: ViteDevServer;
+  private remoteTunnelManager?: RemoteTunnelManager;
   protected declare config: ServerConfig;
   private serverExtensions: ((app: express.Application) => void)[] = [];
   static phase: PluginPhase = "deferred";
@@ -43,26 +58,38 @@ export class ServerPlugin extends Plugin {
     ]);
   }
 
+  /** Setup the server plugin. */
   async setup() {
     if (this.shouldAutoStart()) {
       await this.start();
     }
   }
 
+  /** Get the server configuration. */
   getConfig() {
     const { plugins: _plugins, ...config } = this.config;
 
     return config;
   }
 
+  /** Check if the server should auto start. */
   shouldAutoStart() {
     return this.config.autoStart;
   }
 
+  /** Check if the remote serving is enabled. */
   isRemoteServingEnabled() {
     return isRemoteServerEnabled();
   }
 
+  /**
+   * Start the server.
+   *
+   * This method starts the server and sets up the frontend.
+   * It also sets up the remote tunneling if enabled.
+   *
+   * @returns The express application.
+   */
   async start(): Promise<express.Application> {
     this.serverApplication.use(express.json());
     this.serverApplication.use(await databricksClientMiddleware());
@@ -73,55 +100,27 @@ export class ServerPlugin extends Plugin {
       extension(this.serverApplication);
     }
 
-    const isRemoteDevModeEnabled = this.isRemoteServingEnabled();
-    if (isRemoteDevModeEnabled) {
-      this.devModeManager = new DevModeManager(this.devFileReader);
-
-      if (this.config.watch) {
-        await this.devModeManager.setupViteWatching(this.serverApplication);
-      }
-
-      this.serverApplication.use(this.devModeManager.devModeMiddleware());
-      this.serverApplication.use(
-        DevModeManager.ASSETS_MIDDLEWARE_PATHS,
-        this.devModeManager.assetMiddleware(),
-      );
-    }
-
-    if (this.config.staticPath && !this.config.watch) {
-      this._setupStaticServing();
-    }
+    await this.setupFrontend();
 
     const server = this.serverApplication.listen(
       this.config.port ?? ServerPlugin.DEFAULT_CONFIG.port,
       this.config.host ?? ServerPlugin.DEFAULT_CONFIG.host,
-      () => {
-        console.log(`Server is running on port ${this.config.port}`);
-        if (this.config.staticPath && !this.config.watch) {
-          console.log(`Serving static files from: ${this.config.staticPath}`);
-        }
-        if (this.config.watch) {
-          console.log("Vite is watching for changes...");
-        }
-      },
+      () => this.logStartupInfo(),
     );
 
     this.server = server;
 
-    if (isRemoteDevModeEnabled && this.devModeManager) {
-      this.devModeManager.setServer(server);
-      this.devModeManager.setupWebSocket();
+    if (this.isRemoteServingEnabled()) {
+      this.setupRemoteTunnels();
     }
 
     process.on("SIGTERM", () => this._gracefulShutdown());
     process.on("SIGINT", () => this._gracefulShutdown());
 
     if (process.env.NODE_ENV === "development") {
-      // TODO: improve this
       const allRoutes = getRoutes(this.serverApplication._router.stack);
       console.dir(allRoutes, { depth: null });
     }
-
     return this.serverApplication;
   }
 
@@ -147,15 +146,11 @@ export class ServerPlugin extends Plugin {
     return this.server;
   }
 
-  extend(fn: (app: express.Application) => void) {
-    if (this.shouldAutoStart()) {
-      throw new Error("Cannot extend server when autoStart is true.");
-    }
-
-    this.serverExtensions.push(fn);
-    return this;
-  }
-
+  /**
+   * Setup the routes with the plugins.
+   *
+   * This method goes through all the plugins and injects the routes into the server application.
+   */
   private extendRoutes() {
     if (!this.config.plugins) return;
 
@@ -176,57 +171,79 @@ export class ServerPlugin extends Plugin {
     }
   }
 
-  private _setupStaticServing() {
-    if (!this.config.staticPath) return;
+  /**
+   * Setup the frontend.
+   *
+   * This method sets up the frontend using Vite for development and static files for production.
+   */
+  private async setupFrontend() {
+    const isDev = process.env.NODE_ENV === "development";
+    if (isDev) {
+      this.viteDevServer = new ViteDevServer(this.serverApplication);
+      await this.viteDevServer.setup();
+    } else {
+      const staticPath = this.config.staticPath ?? this.findStaticPath();
+      if (staticPath) {
+        const staticServer = new StaticServer(
+          this.serverApplication,
+          staticPath,
+        );
+        staticServer.setup();
+      }
+    }
+  }
 
-    this.serverApplication.use(
-      express.static(this.config.staticPath, {
-        index: false,
-      }),
+  /**
+   * Setup the remote tunnels.
+   *
+   * This method sets up the remote tunnels for the development server.
+   */
+  private setupRemoteTunnels() {
+    if (!this.server) return;
+
+    this.remoteTunnelManager = new RemoteTunnelManager(this.devFileReader);
+    this.remoteTunnelManager.setServer(this.server);
+    this.remoteTunnelManager.setup(this.serverApplication);
+    this.remoteTunnelManager.setupWebSocket();
+  }
+
+  private findStaticPath() {
+    const staticPaths = ["dist", "client/dist", "build", "public", "out"];
+    const cwd = process.cwd();
+    for (const p of staticPaths) {
+      const fullPath = path.resolve(cwd, p);
+      if (fs.existsSync(path.resolve(fullPath, "index.html"))) {
+        console.log(`Static files: serving from ${fullPath}`);
+        return fullPath;
+      }
+    }
+    return undefined;
+  }
+
+  private logStartupInfo() {
+    const isDev = process.env.NODE_ENV === "development";
+    const port = this.config.port ?? ServerPlugin.DEFAULT_CONFIG.port;
+    const host = this.config.host ?? ServerPlugin.DEFAULT_CONFIG.host;
+
+    console.log(`Server running on http://${host}:${port}`);
+    console.log(
+      `Mode: ${isDev ? "development (Vite HMR)" : "production (static)"}`,
     );
 
-    this.serverApplication.get("*", (req, res) => {
-      if (!req.path.startsWith("/api") && !req.path.startsWith("/query")) {
-        this._renderFE(res);
-      }
-    });
-  }
-
-  private _renderFE(res: express.Response) {
-    if (!this.config.staticPath) {
-      return res.status(500).json({ error: "No static path configured" });
+    if (this.isRemoteServingEnabled()) {
+      console.log("Remote tunnel support: enabled");
     }
-
-    const indexPath = path.join(this.config.staticPath, "index.html");
-    const configObject = this._configInjection();
-    const configScript = `
-      <script>
-        window.__CONFIG__ = ${JSON.stringify(configObject)};
-      </script>
-    `;
-    let html = fs.readFileSync(indexPath, "utf-8");
-
-    html = html.replace("<body>", `<body>${configScript}`);
-
-    res.send(html);
   }
 
-  private _configInjection() {
-    const configFolder = path.join(process.cwd(), "config");
-
-    const configObject = {
-      appName: process.env.DATABRICKS_APP_NAME || "",
-      queries: getQueries(configFolder),
-    };
-
-    return configObject;
-  }
-
-  private _gracefulShutdown() {
+  private async _gracefulShutdown() {
     console.log("Starting graceful shutdown...");
 
-    if (this.devModeManager) {
-      this.devModeManager.cleanup();
+    if (this.viteDevServer) {
+      await this.viteDevServer.close();
+    }
+
+    if (this.remoteTunnelManager) {
+      this.remoteTunnelManager.cleanup();
     }
 
     // 1. abort active operations from plugins

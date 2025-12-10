@@ -7,5 +7,4 @@ export interface ServerConfig extends BasePluginConfig {
   staticPath?: string;
   autoStart?: boolean;
   host?: string;
-  watch?: boolean;
 }

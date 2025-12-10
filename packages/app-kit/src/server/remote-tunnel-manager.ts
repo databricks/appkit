@@ -1,13 +1,12 @@
-import type { TunnelConnection } from "shared";
-import type express from "express";
-import { generateTunnelIdFromEmail, getQueries, parseCookies } from "./utils";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import type { Server as HTTPServer } from "node:http";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type express from "express";
+import type { TunnelConnection } from "shared";
 import { WebSocketServer } from "ws";
-import { mergeConfigDedup } from "../utils";
+import { generateTunnelIdFromEmail, getQueries, parseCookies } from "./utils";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,7 +18,19 @@ interface DevFileReader {
   ): void;
 }
 
-export class DevModeManager {
+/**
+ * Remote tunnel manager for the App Kit.
+ *
+ * This class is responsible for managing the remote tunnels for the development server.
+ * It also handles the asset fetching and the HMR for the development server.
+ *
+ * @example
+ * ```ts
+ * const remoteTunnelManager = new RemoteTunnelManager(devFileReader);
+ * remoteTunnelManager.setup(app);
+ * ```
+ */
+export class RemoteTunnelManager {
   private tunnels = new Map<string, TunnelConnection>();
   private wss: WebSocketServer;
   private hmrWss: WebSocketServer;
@@ -47,6 +58,7 @@ export class DevModeManager {
     this.server = server;
   }
 
+  /** Asset middleware for the development server. */
   assetMiddleware() {
     return async (req: express.Request, res: express.Response) => {
       const email = req.headers["x-forwarded-email"] as string;
@@ -107,6 +119,7 @@ export class DevModeManager {
     };
   }
 
+  /** Dev mode middleware for the development server. */
   devModeMiddleware() {
     return async (
       req: express.Request,
@@ -170,6 +183,15 @@ export class DevModeManager {
 
       res.send(html);
     };
+  }
+
+  /** Setup the dev mode middleware. */
+  setup(app: express.Application) {
+    app.use(this.devModeMiddleware());
+    app.use(
+      RemoteTunnelManager.ASSETS_MIDDLEWARE_PATHS,
+      this.assetMiddleware(),
+    );
   }
 
   private loadHtmlTemplate(
@@ -442,69 +464,6 @@ export class DevModeManager {
   registerTunnelGetter() {
     this.devFileReader.registerTunnelGetter(
       this.getTunnelForRequest.bind(this),
-    );
-  }
-
-  async setupViteWatching(serverApplication: express.Application) {
-    const {
-      createServer: createViteServer,
-      loadConfigFromFile,
-      mergeConfig,
-    } = require("vite");
-    const { default: react } = require("@vitejs/plugin-react");
-
-    const clientRoot = path.resolve(process.cwd(), "client");
-
-    const loadedConfig = await loadConfigFromFile(
-      {
-        mode: "development",
-        command: "serve",
-      },
-      undefined,
-      clientRoot,
-    );
-    const userConfig = loadedConfig?.config ?? {};
-    const coreConfig = {
-      configFile: false,
-      root: clientRoot,
-      server: {
-        middlewareMode: true,
-        watch: {
-          useFsEvents: true,
-          ignored: ["**/node_modules/**", "!**/node_modules/@databricks/**"],
-        },
-      },
-      plugins: [react()],
-    };
-    const mergedConfigs = mergeConfigDedup(userConfig, coreConfig, mergeConfig);
-    const vite = await createViteServer(mergedConfigs);
-
-    serverApplication.use(vite.middlewares);
-
-    serverApplication.use(
-      "*",
-      async (
-        req: express.Request,
-        res: express.Response,
-        next: express.NextFunction,
-      ) => {
-        try {
-          if (!req.path.startsWith("/api")) {
-            const url = req.originalUrl;
-            const indexHtmlPath = path.resolve(clientRoot, "index.html");
-            let template = fs.readFileSync(indexHtmlPath, "utf-8");
-
-            template = await vite.transformIndexHtml(url, template);
-
-            res.status(200).set({ "Content-Type": "text/html" }).end(template);
-          } else {
-            next();
-          }
-        } catch (e) {
-          vite.ssrFixStacktrace(e as Error);
-          next(e);
-        }
-      },
     );
   }
 
