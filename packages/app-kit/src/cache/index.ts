@@ -1,18 +1,12 @@
 import { createHash } from "node:crypto";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
-import type { CacheConfig } from "shared";
-import { LakebaseConnector } from "../connectors";
+import type { CacheConfig, CacheStorage } from "shared";
+import { LakebaseConnector } from "@/connectors";
 import type { Counter, TelemetryProvider } from "../telemetry";
 import { SpanStatusCode, TelemetryManager } from "../telemetry";
 import { deepMerge } from "../utils";
 import { cacheDefaults } from "./defaults";
-import {
-  type CacheStorage,
-  InMemoryStorage,
-  PersistentStorage,
-} from "./storage";
-
-export type { CacheEntry, CacheStorage } from "./storage";
+import { InMemoryStorage, PersistentStorage } from "./storage";
 
 /**
  * Cache manager class to handle cache operations.
@@ -71,6 +65,7 @@ export class CacheManager {
 
   /**
    * Get the singleton instance of the cache manager (sync version).
+   *
    * Throws if not initialized - ensure AppKit.create() has completed first.
    * @returns CacheManager instance
    */
@@ -112,6 +107,13 @@ export class CacheManager {
 
   /**
    * Create a new cache manager instance
+   *
+   * Storage selection logic:
+   * 1. If `storage` provided and healthy → use provided storage
+   * 2. If `storage` provided but unhealthy → fallback to InMemory (or disable if strictPersistence)
+   * 3. If no `storage` provided and Lakebase available → use Lakebase
+   * 4. If no `storage` provided and Lakebase unavailable → fallback to InMemory (or disable if strictPersistence)
+   *
    * @param userConfig - User configuration for the cache manager
    * @returns CacheManager instance
    */
@@ -120,10 +122,30 @@ export class CacheManager {
   ): Promise<CacheManager> {
     const config = deepMerge(cacheDefaults, userConfig);
 
-    if (!config.persistentCache) {
+    if (config.storage) {
+      const isHealthy = await config.storage.healthCheck();
+      if (isHealthy) {
+        return new CacheManager(config.storage, config);
+      }
+
+      console.warn("[Cache] Provided storage health check failed");
+
+      if (config.strictPersistence) {
+        console.warn(
+          "[Cache] strictPersistence enabled but provided storage unhealthy. Cache disabled.",
+        );
+        const disabledConfig = { ...config, enabled: false };
+        return new CacheManager(
+          new InMemoryStorage(disabledConfig),
+          disabledConfig,
+        );
+      }
+
+      console.warn("[Cache] Falling back to in-memory cache.");
       return new CacheManager(new InMemoryStorage(config), config);
     }
 
+    // try to use lakebase storage
     try {
       const workspaceClient = new WorkspaceClient({});
       const connector = new LakebaseConnector({ workspaceClient });
@@ -136,18 +158,17 @@ export class CacheManager {
       }
 
       console.warn(
-        "[Cache] Persistent storage health check failed, storage unhealthy",
+        "[Cache] Lakebase health check failed, default storage unhealthy",
       );
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
-      console.warn(`[Cache] Persistent storage unavailable: ${errorMessage}`);
+      console.warn(`[Cache] Lakebase unavailable: ${errorMessage}`);
     }
 
-    // if strict persistence is enabled, do not fallback to in-memory storage
     if (config.strictPersistence) {
       console.warn(
-        "[Cache] strictPersistence enabled but persistent storage unavailable. Cache disabled.",
+        "[Cache] strictPersistence enabled but lakebase unavailable. Cache disabled.",
       );
       const disabledConfig = { ...config, enabled: false };
       return new CacheManager(
@@ -189,7 +210,7 @@ export class CacheManager {
       },
       async (span) => {
         try {
-          // Check cache first
+          // check if the value is in the cache
           const cached = await this.storage.get<T>(cacheKey);
           if (cached !== null) {
             span.setAttribute("cache.hit", true);
@@ -200,7 +221,7 @@ export class CacheManager {
             return cached.value as T;
           }
 
-          // Check in-flight requests for deduplication
+          // check if the value is being processed by another request
           const inFlight = this.inFlightRequests.get(cacheKey);
           if (inFlight) {
             span.setAttribute("cache.hit", true);
@@ -217,7 +238,7 @@ export class CacheManager {
             return inFlight as Promise<T>;
           }
 
-          // Cache miss - execute function
+          // cache miss - execute function
           span.setAttribute("cache.hit", false);
           span.addEvent("cache.miss", { "cache.key": cacheKey });
           this.telemetryMetrics.cacheMissCount.add(1, {

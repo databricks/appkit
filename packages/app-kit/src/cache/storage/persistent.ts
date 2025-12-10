@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
-import type { CacheConfig } from "shared";
+import type { CacheConfig, CacheEntry, CacheStorage } from "shared";
 import type { LakebaseConnector } from "../../connectors";
 import { lakebaseStorageDefaults } from "./defaults";
-import type { CacheEntry, CacheStorage } from "./types";
 
 /**
  * Persistent cache storage implementation. Uses a least recently used (LRU) eviction policy

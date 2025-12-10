@@ -1,6 +1,5 @@
-import type { CacheConfig } from "shared";
+import type { CacheConfig, CacheEntry, CacheStorage } from "shared";
 import { inMemoryStorageDefaults } from "./defaults";
-import type { CacheEntry, CacheStorage } from "./types";
 
 /**
  * In-memory cache storage implementation. Uses a least recently used (LRU) eviction policy
