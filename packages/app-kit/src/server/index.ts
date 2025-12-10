@@ -16,7 +16,7 @@ dotenv.config({ path: path.resolve(process.cwd(), "./server/.env") });
 export class ServerPlugin extends Plugin {
   public static DEFAULT_CONFIG = {
     autoStart: true,
-    staticPath: path.resolve(process.cwd(), "client", "dist"),
+    staticPath: ServerPlugin.findDefaultStaticPath(),
     host: process.env.FLASK_RUN_HOST || "0.0.0.0",
     port: Number(process.env.DATABRICKS_APP_PORT) || 8000,
     watch: process.env.NODE_ENV === "development",
@@ -223,6 +223,17 @@ export class ServerPlugin extends Plugin {
     };
 
     return configObject;
+  }
+
+  private static findDefaultStaticPath() {
+    const staticPaths = ["dist", "client/dist", "build", "public", "out"];
+    const cwd = process.cwd();
+    for (const p of staticPaths) {
+      if (fs.existsSync(path.resolve(cwd, p, "index.html"))) {
+        return path.resolve(cwd, p);
+      }
+    }
+    return undefined;
   }
 
   private _gracefulShutdown() {
