@@ -14,6 +14,7 @@ import { Route as TelemetryRouteRouteImport } from './routes/telemetry.route'
 import { Route as SqlHelpersRouteRouteImport } from './routes/sql-helpers.route'
 import { Route as ReconnectRouteRouteImport } from './routes/reconnect.route'
 import { Route as DataVisualizationRouteRouteImport } from './routes/data-visualization.route'
+import { Route as ArrowAnalyticsRouteRouteImport } from './routes/arrow-analytics.route'
 import { Route as AnalyticsRouteRouteImport } from './routes/analytics.route'
 import { Route as IndexRouteImport } from './routes/index'
 
@@ -42,6 +43,11 @@ const DataVisualizationRouteRoute = DataVisualizationRouteRouteImport.update({
   path: '/data-visualization',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ArrowAnalyticsRouteRoute = ArrowAnalyticsRouteRouteImport.update({
+  id: '/arrow-analytics',
+  path: '/arrow-analytics',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AnalyticsRouteRoute = AnalyticsRouteRouteImport.update({
   id: '/analytics',
   path: '/analytics',
@@ -56,6 +62,7 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRouteRoute
+  '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
@@ -65,6 +72,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRouteRoute
+  '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
@@ -75,6 +83,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRouteRoute
+  '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
@@ -86,6 +95,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/analytics'
+    | '/arrow-analytics'
     | '/data-visualization'
     | '/reconnect'
     | '/sql-helpers'
@@ -95,6 +105,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/analytics'
+    | '/arrow-analytics'
     | '/data-visualization'
     | '/reconnect'
     | '/sql-helpers'
@@ -104,6 +115,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/analytics'
+    | '/arrow-analytics'
     | '/data-visualization'
     | '/reconnect'
     | '/sql-helpers'
@@ -114,6 +126,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AnalyticsRouteRoute: typeof AnalyticsRouteRoute
+  ArrowAnalyticsRouteRoute: typeof ArrowAnalyticsRouteRoute
   DataVisualizationRouteRoute: typeof DataVisualizationRouteRoute
   ReconnectRouteRoute: typeof ReconnectRouteRoute
   SqlHelpersRouteRoute: typeof SqlHelpersRouteRoute
@@ -158,6 +171,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DataVisualizationRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/arrow-analytics': {
+      id: '/arrow-analytics'
+      path: '/arrow-analytics'
+      fullPath: '/arrow-analytics'
+      preLoaderRoute: typeof ArrowAnalyticsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/analytics': {
       id: '/analytics'
       path: '/analytics'
@@ -178,6 +198,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AnalyticsRouteRoute: AnalyticsRouteRoute,
+  ArrowAnalyticsRouteRoute: ArrowAnalyticsRouteRoute,
   DataVisualizationRouteRoute: DataVisualizationRouteRoute,
   ReconnectRouteRoute: ReconnectRouteRoute,
   SqlHelpersRouteRoute: SqlHelpersRouteRoute,

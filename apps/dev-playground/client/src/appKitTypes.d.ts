@@ -5,6 +5,23 @@ import type { SQLTypeMarker, SQLStringMarker, SQLNumberMarker, SQLBooleanMarker,
 
 declare module "@databricks/app-kit-ui/react" {
   interface QueryRegistry {
+    app_activity_heatmap: {
+        name: "app_activity_heatmap";
+        parameters: {
+          /** DATE - use sql.date() */
+          startDate: SQLDateMarker;
+          /** DATE - use sql.date() */
+          endDate: SQLDateMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          app_name: string;
+          /** @sqlType STRING */
+          day_of_week: string;
+          /** @sqlType DECIMAL(35,2) */
+          spend: number;
+        }>;
+      };
     apps_list: {
         name: "apps_list";
         parameters: Record<string, never>;

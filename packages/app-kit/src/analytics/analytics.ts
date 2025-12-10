@@ -41,6 +41,9 @@ export class AnalyticsPlugin extends Plugin {
   }
 
   injectRoutes(router: IAppRouter) {
+    // Inject core Arrow routes first (provides /arrow-result/:jobId endpoint)
+    this.injectCoreArrowRoutes(router);
+
     this.route<AnalyticsQueryResponse>(router, {
       method: "post",
       path: "/users/me/query/:query_key",
@@ -64,7 +67,12 @@ export class AnalyticsPlugin extends Plugin {
     { asUser = false }: { asUser?: boolean } = {},
   ): Promise<void> {
     const { query_key } = req.params;
-    const { parameters } = req.body as IAnalyticsQueryRequest;
+    const { parameters, format = "JSON" } = req.body as IAnalyticsQueryRequest;
+    const formatParameters =
+      format === "ARROW"
+        ? { disposition: "EXTERNAL_LINKS", format: "ARROW_STREAM" }
+        : {};
+
     const requestContext = getRequestContext();
     const userKey = asUser
       ? requestContext.userId
@@ -96,6 +104,7 @@ export class AnalyticsPlugin extends Plugin {
           "analytics:query",
           query_key,
           JSON.stringify(parameters),
+          JSON.stringify(format),
           hashedQuery,
           userKey,
         ],
@@ -114,11 +123,20 @@ export class AnalyticsPlugin extends Plugin {
           parameters,
         );
 
-        const result = await this.query(query, processedParams, signal, {
-          asUser,
-        });
+        const result = await this.query(
+          query,
+          processedParams,
+          formatParameters,
+          signal,
+          {
+            asUser,
+          },
+        );
 
-        return { type: "result", ...result };
+        const type =
+          formatParameters.format === "ARROW_STREAM" ? "arrow" : "result";
+
+        return { type, ...result };
       },
       streamExecutionSettings,
       userKey,
@@ -128,6 +146,7 @@ export class AnalyticsPlugin extends Plugin {
   async query(
     query: string,
     parameters?: Record<string, SQLTypeMarker | null | undefined>,
+    formatParameters?: Record<string, any>,
     signal?: AbortSignal,
     { asUser = false }: { asUser?: boolean } = {},
   ): Promise<any> {
@@ -153,11 +172,19 @@ export class AnalyticsPlugin extends Plugin {
         statement,
         warehouse_id: await requestContext.warehouseId,
         parameters: sqlParameters,
+        ...formatParameters,
       },
       signal,
     );
 
     return response.result;
+  }
+
+  protected async getArrowData(
+    workspaceClient: WorkspaceClient,
+    jobId: string,
+  ): Promise<any> {
+    return await this.SQLClient.getArrowData(workspaceClient, jobId);
   }
 
   async shutdown(): Promise<void> {

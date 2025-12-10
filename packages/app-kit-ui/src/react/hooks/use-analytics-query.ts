@@ -1,8 +1,9 @@
+import { ArrowClient, connectSSE } from "@/js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { connectSSE } from "@/js";
 import type {
+  AnalyticsFormat,
   InferParams,
-  InferResult,
+  InferResultByFormat,
   QueryKey,
   UseAnalyticsQueryOptions,
   UseAnalyticsQueryResult,
@@ -17,23 +18,50 @@ function getDevMode() {
   return dev ? `?dev=${dev}` : "";
 }
 
+function getArrowStreamUrl(id: string) {
+  return `/api/analytics/arrow-result/${id}`;
+}
+
 /**
- * Subscribe to an analytics query over SSE and returns its latest result
- * Integration hook between client and analytics plugin
+ * Subscribe to an analytics query over SSE and returns its latest result.
+ * Integration hook between client and analytics plugin.
+ *
+ * The return type is automatically inferred based on the format:
+ * - `format: "JSON"` (default): Returns typed array from QueryRegistry
+ * - `format: "ARROW"`: Returns TypedArrowTable with row type preserved
+ *
  * @param queryKey - Analytics query identifier
  * @param parameters - Query parameters (type-safe based on QueryRegistry)
- * @param options - Analytics query settings
- * @returns - Query result state
+ * @param options - Analytics query settings including format
+ * @returns Query result state with format-appropriate data type
+ *
+ * @example JSON format (default)
+ * ```typescript
+ * const { data } = useAnalyticsQuery("spend_data", params);
+ * // data: Array<{ group_key: string; cost_usd: number; ... }> | null
+ * ```
+ *
+ * @example Arrow format
+ * ```typescript
+ * const { data } = useAnalyticsQuery("spend_data", params, { format: "ARROW" });
+ * // data: TypedArrowTable<{ group_key: string; cost_usd: number; ... }> | null
+ * ```
  */
-export function useAnalyticsQuery<T = unknown, K extends QueryKey = QueryKey>(
+export function useAnalyticsQuery<
+  T = unknown,
+  K extends QueryKey = QueryKey,
+  F extends AnalyticsFormat = "JSON",
+>(
   queryKey: K,
   parameters?: InferParams<K> | null,
-  options: UseAnalyticsQueryOptions = { autoStart: true },
-): UseAnalyticsQueryResult<InferResult<T, K>> {
-  const format = options?.format;
+  options: UseAnalyticsQueryOptions<F> = {} as UseAnalyticsQueryOptions<F>,
+): UseAnalyticsQueryResult<InferResultByFormat<T, K, F>> {
+  const format = options?.format ?? "JSON";
   const maxParametersSize = options?.maxParametersSize ?? 100 * 1024;
+  const autoStart = options?.autoStart ?? true;
 
-  const [data, setData] = useState<InferResult<T, K> | null>(null);
+  type ResultType = InferResultByFormat<T, K, F>;
+  const [data, setData] = useState<ResultType | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -85,14 +113,26 @@ export function useAnalyticsQuery<T = unknown, K extends QueryKey = QueryKey>(
       url: `/api/analytics/query/${encodeURIComponent(queryKey)}${devMode}`,
       payload: payload,
       signal: abortController.signal,
-      onMessage: (message) => {
+      onMessage: async (message) => {
         try {
           const parsed = JSON.parse(message.data);
 
-          // success
+          // success - JSON format
           if (parsed.type === "result") {
             setLoading(false);
-            setData(parsed.data);
+            setData(parsed.data as ResultType);
+            return;
+          }
+
+          // success - Arrow format
+          if (parsed.type === "arrow") {
+            const arrowData = await ArrowClient.fetchArrow(
+              getArrowStreamUrl(parsed.statement_id),
+            );
+            const table = await ArrowClient.processArrowBuffer(arrowData);
+            setLoading(false);
+            // Table is cast to TypedArrowTable with row type from QueryRegistry
+            setData(table as ResultType);
             return;
           }
 
@@ -140,14 +180,14 @@ export function useAnalyticsQuery<T = unknown, K extends QueryKey = QueryKey>(
   }, [queryKey, payload]);
 
   useEffect(() => {
-    if (options?.autoStart) {
+    if (autoStart) {
       start();
     }
 
     return () => {
       abortControllerRef.current?.abort();
     };
-  }, [start, options?.autoStart]);
+  }, [start, autoStart]);
 
   // Enable HMR for query updates in dev mode
   useQueryHMR(queryKey, start);

@@ -40,6 +40,14 @@ function RootComponent() {
                     Analytics
                   </Button>
                 </Link>
+                <Link to="/arrow-analytics" className="no-underline">
+                  <Button
+                    variant="ghost"
+                    className="text-foreground hover:text-secondary-foreground"
+                  >
+                    Arrow Analytics
+                  </Button>
+                </Link>
                 <Link to="/reconnect" className="no-underline">
                   <Button
                     variant="ghost"
