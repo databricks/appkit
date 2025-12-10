@@ -38,7 +38,7 @@ describe("ServerPlugin Integration", () => {
     });
 
     // Start server manually
-    const expressApp = await app.server.start();
+    await app.server.start();
     server = app.server.getServer();
     baseUrl = `http://127.0.0.1:${TEST_PORT}`;
 

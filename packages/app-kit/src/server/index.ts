@@ -13,7 +13,7 @@ import type { ServerConfig } from "./types";
 import { getRoutes } from "./utils";
 import { ViteDevServer } from "./vite-dev-server";
 
-dotenv.config({ path: path.resolve(process.cwd(), "./server/.env") });
+dotenv.config({ path: path.resolve(process.cwd(), "./.env") });
 
 /**
  * Server plugin for the App Kit.
@@ -144,6 +144,22 @@ export class ServerPlugin extends Plugin {
     }
 
     return this.server;
+  }
+
+  /**
+   * Extend the server with custom routes or middleware.
+   *
+   * @param fn - A function that receives the express application.
+   * @returns The server plugin instance for chaining.
+   * @throws {Error} If autoStart is true.
+   */
+  extend(fn: (app: express.Application) => void) {
+    if (this.shouldAutoStart()) {
+      throw new Error("Cannot extend server when autoStart is true.");
+    }
+
+    this.serverExtensions.push(fn);
+    return this;
   }
 
   /**
