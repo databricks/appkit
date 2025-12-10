@@ -23,7 +23,7 @@ export class ServerPlugin extends Plugin {
   };
 
   public name = "server" as const;
-  public envVars = ["DATABRICKS_APP_PORT", "FLASK_RUN_HOST"];
+  public envVars: string[] = [];
   private serverApplication: express.Application;
   private server: HTTPServer | null;
   private devModeManager?: DevModeManager;
