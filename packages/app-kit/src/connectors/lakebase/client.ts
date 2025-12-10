@@ -144,13 +144,14 @@ export class LakebaseConnector {
   /**
    * Execute a transaction
    *
+   * COMMIT and ROLLBACK are automatically managed by the transaction function.
+   *
+   * @param callback - Callback function to execute within the transaction context
    * @example
    * ```typescript
    * await connector.transaction(async (client) => {
-   *   await client.query('BEGIN');
    *   await client.query('INSERT INTO accounts (name) VALUES ($1)', ['Alice']);
    *   await client.query('INSERT INTO logs (action) VALUES ($1)', ['Created Alice']);
-   *   await client.query('COMMIT');
    * });
    * ```
    */
@@ -171,10 +172,15 @@ export class LakebaseConnector {
         const pool = await this.getPool();
         const client = await pool.connect();
         try {
+          await client.query("BEGIN");
           const result = await callback(client);
+          await client.query("COMMIT");
           span.setStatus({ code: SpanStatusCode.OK });
           return result;
         } catch (error) {
+          try {
+            await client.query("ROLLBACK");
+          } catch {}
           // retry on auth failure
           if (this.isAuthError(error)) {
             span.addEvent("auth_error_retry");
@@ -183,7 +189,16 @@ export class LakebaseConnector {
             const newPool = await this.getPool();
             const retryClient = await newPool.connect();
             try {
-              return await callback(retryClient);
+              await client.query("BEGIN");
+              const result = await callback(retryClient);
+              await client.query("COMMIT");
+              span.setStatus({ code: SpanStatusCode.OK });
+              return result;
+            } catch (retryError) {
+              try {
+                await retryClient.query("ROLLBACK");
+              } catch {}
+              throw retryError;
             } finally {
               retryClient.release();
             }
