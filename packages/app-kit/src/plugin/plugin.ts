@@ -41,6 +41,9 @@ export abstract class Plugin<
   protected telemetry: ITelemetry;
   protected abstract envVars: string[];
 
+  /** If the plugin requires the Databricks client to be set in the request context */
+  requiresDatabricksClient = false;
+
   static phase: PluginPhase = "normal";
   name: string;
 

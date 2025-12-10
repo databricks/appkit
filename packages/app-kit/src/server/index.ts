@@ -65,9 +65,8 @@ export class ServerPlugin extends Plugin {
 
   async start(): Promise<express.Application> {
     this.serverApplication.use(express.json());
-    this.serverApplication.use(await databricksClientMiddleware());
 
-    this.extendRoutes();
+    await this.extendRoutes();
 
     for (const extension of this.serverExtensions) {
       extension(this.serverApplication);
@@ -156,7 +155,7 @@ export class ServerPlugin extends Plugin {
     return this;
   }
 
-  private extendRoutes() {
+  private async extendRoutes() {
     if (!this.config.plugins) return;
 
     this.serverApplication.get("/health", (_, res) => {
@@ -168,6 +167,10 @@ export class ServerPlugin extends Plugin {
 
       if (plugin?.injectRoutes && typeof plugin.injectRoutes === "function") {
         const router = express.Router();
+
+        // add databricks client middleware to the router if the plugin needs the request context
+        if (plugin.requiresDatabricksClient)
+          router.use(await databricksClientMiddleware());
 
         plugin.injectRoutes(router);
 

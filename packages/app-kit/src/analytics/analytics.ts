@@ -20,6 +20,7 @@ import type {
 export class AnalyticsPlugin extends Plugin {
   name = "analytics";
   envVars = [];
+  requiresDatabricksClient = true;
 
   protected static description = "Analytics plugin for data analysis";
   protected declare config: IAnalyticsConfig;
