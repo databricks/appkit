@@ -18,8 +18,10 @@
     "clean:full": "rm -rf dist node_modules"
   },
   "devDependencies": {
+    "@types/dependency-tree": "^8.1.4",
     "@types/express": "^4.17.21",
-    "@types/ws": "^8.18.1"
+    "@types/ws": "^8.18.1",
+    "dependency-tree": "^11.2.0"
   },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -29,5 +31,8 @@
       ".": "./dist/index.js",
       "./package.json": "./package.json"
     }
+  },
+  "dependencies": {
+    "fast-glob": "^3.3.3"
   }
 }

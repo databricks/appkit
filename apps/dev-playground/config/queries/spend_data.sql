@@ -1,3 +1,9 @@
+-- @param groupBy STRING
+-- @param aggregationLevel STRING
+-- @param startDate DATE
+-- @param endDate DATE
+-- @param appId STRING
+-- @param creator STRING
 SELECT
   COALESCE(:groupBy, 'default') as group_key,
   date_trunc(COALESCE(:aggregationLevel, 'day'), u.usage_date) AS aggregation_period,

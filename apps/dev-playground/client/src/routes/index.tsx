@@ -121,9 +121,27 @@ function IndexRoute() {
               </Button>
             </div>
           </Card>
+
+          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
+            <div className="flex flex-col h-full">
+              <h3 className="text-2xl font-semibold text-foreground mb-3">
+                Type-Safe SQL
+              </h3>
+              <p className="text-muted-foreground mb-6 flex-grow">
+                Generate TypeScript types from SQL files at build time. Full
+                IntelliSense for query names, parameters, and results.
+              </p>
+              <Button
+                onClick={() => navigate({ to: "/type-safety" })}
+                className="w-full"
+              >
+                Explore Type Safety
+              </Button>
+            </div>
+          </Card>
         </div>
 
-        <div className="text-center pt-12 border-t border-gray-200">
+        <div className="text-center pt-12 border-t border-border">
           <p className="text-sm text-muted-foreground">
             built by databricks using app-kit
           </p>

@@ -7,7 +7,6 @@ import type { PluginPhase } from "shared";
 import { Plugin, toPlugin } from "../plugin";
 import { instrumentations } from "../telemetry";
 import { databricksClientMiddleware, isRemoteServerEnabled } from "../utils";
-import { generatePluginRegistryTypes } from "../utils/type-generator";
 import { DevModeManager } from "./dev-mode";
 import type { ServerConfig } from "./types";
 import { getQueries, getRoutes } from "./utils";
@@ -69,10 +68,6 @@ export class ServerPlugin extends Plugin {
     this.serverApplication.use(await databricksClientMiddleware());
 
     this.extendRoutes();
-
-    if (process.env.NODE_ENV === "development") {
-      generatePluginRegistryTypes(this.config.plugins, this.config.staticPath);
-    }
 
     for (const extension of this.serverExtensions) {
       extension(this.serverApplication);
@@ -138,7 +133,7 @@ export class ServerPlugin extends Plugin {
    * @throws {Error} If the server is not started or autoStart is true.
    * @returns {HTTPServer} The server instance.
    */
-  getServer() {
+  getServer(): HTTPServer {
     if (this.shouldAutoStart()) {
       throw new Error("Cannot get server when autoStart is true.");
     }

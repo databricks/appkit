@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { connectSSE } from "@/js";
 import type {
+  InferParams,
   InferResult,
   QueryKey,
   UseAnalyticsQueryOptions,
@@ -20,17 +21,13 @@ function getDevMode() {
  * Subscribe to an analytics query over SSE and returns its latest result
  * Integration hook between client and analytics plugin
  * @param queryKey - Analytics query identifier
- * @param parameters - Optional query parameters
+ * @param parameters - Query parameters (type-safe based on QueryRegistry)
  * @param options - Analytics query settings
  * @returns - Query result state
  */
-export function useAnalyticsQuery<
-  T = unknown,
-  K extends QueryKey = QueryKey,
-  P extends Record<string, unknown> = Record<string, unknown>,
->(
+export function useAnalyticsQuery<T = unknown, K extends QueryKey = QueryKey>(
   queryKey: K,
-  parameters?: P | null,
+  parameters?: InferParams<K> | null,
   options: UseAnalyticsQueryOptions = { autoStart: true },
 ): UseAnalyticsQueryResult<InferResult<T, K>> {
   const format = options?.format;

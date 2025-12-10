@@ -1,11 +1,4 @@
-import {
-  type ITelemetry,
-  normalizeTelemetryOptions,
-  TelemetryManager,
-} from "../telemetry";
-import { AppManager } from "../app";
-import { CacheManager } from "../cache";
-import { StreamManager } from "../stream";
+import type express from "express";
 import type {
   BasePlugin,
   BasePluginConfig,
@@ -17,9 +10,15 @@ import type {
   StreamExecuteHandler,
   StreamExecutionSettings,
 } from "shared";
+import { AppManager } from "../app";
+import { CacheManager } from "../cache";
+import { StreamManager } from "../stream";
+import {
+  type ITelemetry,
+  normalizeTelemetryOptions,
+  TelemetryManager,
+} from "../telemetry";
 import { deepMerge, validateEnv } from "../utils";
-import type express from "express";
-import type { z } from "zod";
 import { DevFileReader } from "./dev-reader";
 import { CacheInterceptor } from "./interceptors/cache";
 import { RetryInterceptor } from "./interceptors/retry";
@@ -29,8 +28,6 @@ import type {
   ExecutionContext,
   ExecutionInterceptor,
 } from "./interceptors/types";
-
-export const routeSchemaRegistry = new Map<string, Map<string, z.ZodType>>();
 
 export abstract class Plugin<
   TConfig extends BasePluginConfig = BasePluginConfig,
@@ -154,20 +151,12 @@ export abstract class Plugin<
     }
   }
 
-  protected route<T extends z.ZodType>(
+  // TResponse is used for type generation
+  protected route<_TResponse>(
     router: express.Router,
-    config: RouteConfig<T>,
+    config: RouteConfig,
   ): void {
-    const { method, path, schema, handler } = config;
-
-    let pluginRoutes = routeSchemaRegistry.get(this.name);
-
-    if (!pluginRoutes) {
-      pluginRoutes = new Map();
-      routeSchemaRegistry.set(this.name, pluginRoutes);
-    }
-
-    pluginRoutes.set(path, schema);
+    const { method, path, handler } = config;
     router[method](path, handler);
   }
 

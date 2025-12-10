@@ -1,10 +1,7 @@
-import { existsSync, type FSWatcher, watch } from "node:fs";
-import path from "node:path";
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type {
   IAppRouter,
   PluginExecuteConfig,
-  QuerySchemas,
   SQLTypeMarker,
   StreamExecutionSettings,
 } from "shared";
@@ -12,13 +9,12 @@ import { SQLWarehouseConnector } from "../connectors";
 import { Plugin, toPlugin } from "../plugin";
 import type { Request, Response } from "../utils";
 import { getRequestContext } from "../utils";
-import { generateQueryRegistryTypes } from "../utils/type-generator";
 import { queryDefaults } from "./defaults";
 import { QueryProcessor } from "./query";
-import {
-  analyticsQueryResponseSchema,
-  type IAnalyticsConfig,
-  type IAnalyticsQueryRequest,
+import type {
+  AnalyticsQueryResponse,
+  IAnalyticsConfig,
+  IAnalyticsQueryRequest,
 } from "./types";
 
 export class AnalyticsPlugin extends Plugin {
@@ -32,8 +28,6 @@ export class AnalyticsPlugin extends Plugin {
   private SQLClient: SQLWarehouseConnector;
   private queryProcessor: QueryProcessor;
 
-  private schemaWatcher: FSWatcher | null = null;
-
   constructor(config: IAnalyticsConfig) {
     super(config);
     this.config = config;
@@ -43,27 +37,21 @@ export class AnalyticsPlugin extends Plugin {
       timeout: config.timeout,
       telemetry: config.telemetry,
     });
-
-    if (process.env.NODE_ENV === "development") {
-      this._generateQueryTypes();
-    }
   }
 
   injectRoutes(router: IAppRouter) {
-    this.route(router, {
+    this.route<AnalyticsQueryResponse>(router, {
       method: "post",
       path: "/users/me/query/:query_key",
-      schema: analyticsQueryResponseSchema,
-      handler: async (req, res) => {
+      handler: async (req: Request, res: Response) => {
         await this._handleQueryRoute(req, res, { asUser: true });
       },
     });
 
-    this.route(router, {
+    this.route<AnalyticsQueryResponse>(router, {
       method: "post",
       path: "/query/:query_key",
-      schema: analyticsQueryResponseSchema,
-      handler: async (req, res) => {
+      handler: async (req: Request, res: Response) => {
         await this._handleQueryRoute(req, res, { asUser: false });
       },
     });
@@ -173,48 +161,6 @@ export class AnalyticsPlugin extends Plugin {
 
   async shutdown(): Promise<void> {
     this.streamManager.abortAll();
-
-    if (this.schemaWatcher) {
-      this.schemaWatcher.close();
-      this.schemaWatcher = null;
-    }
-  }
-
-  // generate query types for development
-  private _generateQueryTypes() {
-    const schemaDir = path.join(process.cwd(), "config/queries");
-    const schemaPath = path.join(schemaDir, "schema.ts");
-
-    const generate = () => {
-      let querySchemas: QuerySchemas = {};
-      try {
-        delete require.cache[require.resolve(schemaPath)];
-        querySchemas = require(schemaPath).querySchemas;
-      } catch (error) {
-        if (existsSync(schemaPath)) {
-          console.warn(
-            `[AppKit] Failed to load query schemas from ${schemaPath}:`,
-            error instanceof Error ? error.message : error,
-          );
-        }
-      }
-      generateQueryRegistryTypes(querySchemas);
-    };
-
-    generate();
-
-    if (existsSync(schemaPath)) {
-      this.schemaWatcher = watch(
-        schemaDir,
-        { recursive: true },
-        (_event, filename) => {
-          if (filename === "schema.ts") {
-            console.log(`[AppKit] Query schema changed, regenerating types...`);
-            generate();
-          }
-        },
-      );
-    }
   }
 }
 
