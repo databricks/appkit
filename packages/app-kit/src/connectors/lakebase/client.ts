@@ -74,9 +74,6 @@ export class LakebaseConnector {
     if (this.config.maxPoolSize < 1) {
       throw new Error("maxPoolSize must be at least 1");
     }
-    if (this.config.credentialTTLMs < 60_000) {
-      throw new Error("credentialTTLMs must be at least 60 seconds");
-    }
   }
 
   /**
@@ -337,15 +334,15 @@ export class LakebaseConnector {
 
     // fetch new credentials
     const username = await this.fetchUsername();
-    const password = await this.fetchPassword();
+    const { token, expiresAt } = await this.fetchPassword();
 
     this.credentials = {
       username,
-      password,
-      expiresAt: now + this.config.credentialTTLMs,
+      password: token,
+      expiresAt,
     };
 
-    return { username, password };
+    return { username, password: token };
   }
 
   /** Rotate credentials and recreate pool */
@@ -376,7 +373,7 @@ export class LakebaseConnector {
   }
 
   /** Fetch password (OAuth token) from Databricks */
-  private async fetchPassword(): Promise<string> {
+  private async fetchPassword(): Promise<{ token: string; expiresAt: number }> {
     const workspaceClient = this.getWorkspaceClient();
     const config = new Config({ host: workspaceClient.config.host });
     const apiClient = new ApiClient(config);
@@ -396,13 +393,15 @@ export class LakebaseConnector {
       },
     });
 
-    if (!this.hasToken(credentials)) {
+    if (!this.validateCredentials(credentials)) {
       throw new Error(
         `Failed to generate credentials for instance: ${this.connectionConfig.appName}`,
       );
     }
 
-    return credentials.token;
+    const expiresAt = new Date(credentials.expiration_time).getTime();
+
+    return { token: credentials.token, expiresAt };
   }
 
   /** Check if error is auth failure */
@@ -415,6 +414,7 @@ export class LakebaseConnector {
     );
   }
 
+  /** Check if error is transient */
   private isTransientError(error: unknown): boolean {
     if (typeof error !== "object" || error === null || !("code" in error)) {
       return false;
@@ -434,12 +434,20 @@ export class LakebaseConnector {
   }
 
   /** Type guard for credentials */
-  private hasToken(value: unknown): value is { token: string } {
+  private validateCredentials(
+    value: unknown,
+  ): value is { token: string; expiration_time: string } {
+    if (typeof value !== "object" || value === null) {
+      return false;
+    }
+
+    const credentials = value as { token: string; expiration_time: string };
     return (
-      typeof value === "object" &&
-      value !== null &&
-      "token" in value &&
-      typeof (value as any).token === "string"
+      "token" in credentials &&
+      typeof credentials.token === "string" &&
+      "expiration_time" in credentials &&
+      typeof credentials.expiration_time === "string" &&
+      new Date(credentials.expiration_time).getTime() > Date.now()
     );
   }
 

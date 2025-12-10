@@ -33,9 +33,6 @@ export interface LakebaseConfig {
   /** Connection timeout (milliseconds) */
   connectionTimeoutMs: number;
 
-  /** How long credentials are valid (milliseconds) */
-  credentialTTLMs: number;
-
   /** Telemetry configuration */
   telemetry?: TelemetryOptions;
 

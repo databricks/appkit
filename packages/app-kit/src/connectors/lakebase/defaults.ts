@@ -7,5 +7,4 @@ export const lakebaseDefaults: LakebaseConfig = {
   maxPoolSize: 10,
   idleTimeoutMs: 30_000,
   connectionTimeoutMs: 10_000,
-  credentialTTLMs: 25 * 60 * 1000, // 25 minutes
 };

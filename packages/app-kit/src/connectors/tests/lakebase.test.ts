@@ -75,16 +75,6 @@ describe("LakebaseConnector", () => {
       ).toThrow("maxPoolSize must be at least 1");
     });
 
-    test("should throw error when credentialTTLMs is less than 60 seconds", () => {
-      expect(
-        () =>
-          new LakebaseConnector({
-            credentialTTLMs: 30_000,
-            workspaceClient: {} as any,
-          }),
-      ).toThrow("credentialTTLMs must be at least 60 seconds");
-    });
-
     test("should create connector with valid config", () => {
       const connector = new LakebaseConnector({
         workspaceClient: {} as any,
@@ -148,7 +138,10 @@ describe("LakebaseConnector", () => {
 
       // Setup default mocks
       mockMe.mockResolvedValue({ userName: "test-user@example.com" });
-      mockRequest.mockResolvedValue({ token: "test-oauth-token" });
+      mockRequest.mockResolvedValue({
+        token: "test-oauth-token",
+        expiration_time: new Date(Date.now() + 3600000).toISOString(), // 1 hour from now
+      });
       mockQuery.mockResolvedValue({ rows: [{ result: 1 }] });
 
       connector = new LakebaseConnector({
@@ -247,7 +240,10 @@ describe("LakebaseConnector", () => {
       mockRequest = (sdk as any).__mockRequest;
 
       mockMe.mockResolvedValue({ userName: "test-user@example.com" });
-      mockRequest.mockResolvedValue({ token: "test-oauth-token" });
+      mockRequest.mockResolvedValue({
+        token: "test-oauth-token",
+        expiration_time: new Date(Date.now() + 3600000).toISOString(),
+      });
 
       const mockClient = {
         query: vi.fn().mockResolvedValue({ rows: [] }),
@@ -305,7 +301,10 @@ describe("LakebaseConnector", () => {
       mockRequest = (sdk as any).__mockRequest;
 
       mockMe.mockResolvedValue({ userName: "test-user@example.com" });
-      mockRequest.mockResolvedValue({ token: "test-oauth-token" });
+      mockRequest.mockResolvedValue({
+        token: "test-oauth-token",
+        expiration_time: new Date(Date.now() + 3600000).toISOString(),
+      });
 
       connector = new LakebaseConnector({
         workspaceClient: {
@@ -357,7 +356,10 @@ describe("LakebaseConnector", () => {
       mockRequest = (sdk as any).__mockRequest;
 
       mockMe.mockResolvedValue({ userName: "test-user@example.com" });
-      mockRequest.mockResolvedValue({ token: "test-oauth-token" });
+      mockRequest.mockResolvedValue({
+        token: "test-oauth-token",
+        expiration_time: new Date(Date.now() + 3600000).toISOString(),
+      });
       mockQuery.mockResolvedValue({ rows: [{ result: 1 }] });
       mockEnd.mockResolvedValue(undefined);
 
@@ -418,7 +420,7 @@ describe("LakebaseConnector", () => {
 
     test("should throw when token cannot be fetched", async () => {
       mockMe.mockResolvedValue({ userName: "test-user@example.com" });
-      mockRequest.mockResolvedValue({ error: "unauthorized" });
+      mockRequest.mockResolvedValue({ error: "unauthorized" }); // missing token and expiration_time
 
       const connector = new LakebaseConnector({
         workspaceClient: {
@@ -448,7 +450,10 @@ describe("LakebaseConnector", () => {
       mockRequest = (sdk as any).__mockRequest;
 
       mockMe.mockResolvedValue({ userName: "test-user@example.com" });
-      mockRequest.mockResolvedValue({ token: "test-oauth-token" });
+      mockRequest.mockResolvedValue({
+        token: "test-oauth-token",
+        expiration_time: new Date(Date.now() + 3600000).toISOString(),
+      });
 
       connector = new LakebaseConnector({
         workspaceClient: {
