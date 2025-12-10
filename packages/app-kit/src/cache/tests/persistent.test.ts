@@ -132,10 +132,9 @@ describe("PersistentStorage", () => {
     });
 
     test("should insert new entry", async () => {
-      // totalBytes() returns 0
-      mockConnector.query.mockResolvedValueOnce({
-        rows: [{ total: "0" }],
-      });
+      // Mock Math.random to skip eviction check (>= evictionCheckProbability)
+      const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.5);
+
       // INSERT succeeds
       mockConnector.query.mockResolvedValueOnce({ rows: [] });
 
@@ -154,9 +153,14 @@ describe("PersistentStorage", () => {
           expect.any(Number), // expiry
         ]),
       );
+
+      randomSpy.mockRestore();
     });
 
     test("should evict when maxBytes exceeded", async () => {
+      // Mock Math.random to ensure eviction check runs (< evictionCheckProbability)
+      const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.05);
+
       // totalBytes() returns maxBytes (triggers eviction)
       mockConnector.query.mockResolvedValueOnce({
         rows: [{ total: String(1024 * 1024) }], // 1MB (at limit)
@@ -180,12 +184,15 @@ describe("PersistentStorage", () => {
         expect.stringContaining("DELETE FROM"),
         expect.any(Array),
       );
+
+      randomSpy.mockRestore();
     });
 
     test("should serialize value to Buffer", async () => {
-      mockConnector.query.mockResolvedValueOnce({
-        rows: [{ total: "0" }],
-      });
+      // Mock Math.random to skip eviction check (>= evictionCheckProbability)
+      const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.5);
+
+      // INSERT succeeds
       mockConnector.query.mockResolvedValueOnce({ rows: [] });
 
       const value = { nested: { array: [1, 2, 3] } };
@@ -202,6 +209,8 @@ describe("PersistentStorage", () => {
       const valueBuffer = insertCall?.[1]?.[2] as Buffer;
       expect(valueBuffer).toBeInstanceOf(Buffer);
       expect(valueBuffer.toString("utf-8")).toBe(JSON.stringify(value));
+
+      randomSpy.mockRestore();
     });
   });
 

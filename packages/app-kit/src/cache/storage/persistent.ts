@@ -23,6 +23,7 @@ export class PersistentStorage implements CacheStorage {
   private readonly maxBytes: number;
   private readonly maxEntryBytes: number;
   private readonly evictionBatchSize: number;
+  private readonly evictionCheckProbability: number;
   private initialized: boolean;
 
   constructor(config: CacheConfig, connector: LakebaseConnector) {
@@ -31,6 +32,9 @@ export class PersistentStorage implements CacheStorage {
     this.maxEntryBytes =
       config.maxEntryBytes ?? lakebaseStorageDefaults.maxEntryBytes;
     this.evictionBatchSize = lakebaseStorageDefaults.evictionBatchSize;
+    this.evictionCheckProbability =
+      config.evictionCheckProbability ??
+      lakebaseStorageDefaults.evictionCheckProbability;
     this.tableName = lakebaseStorageDefaults.tableName; // hardcoded, safe for now
     this.initialized = false;
   }
@@ -105,9 +109,12 @@ export class PersistentStorage implements CacheStorage {
       );
     }
 
-    const totalBytes = await this.totalBytes();
-    if (totalBytes + byteSize > this.maxBytes) {
-      await this.evictBySize(byteSize);
+    // probabilistic eviction check
+    if (Math.random() < this.evictionCheckProbability) {
+      const totalBytes = await this.totalBytes();
+      if (totalBytes + byteSize > this.maxBytes) {
+        await this.evictBySize(byteSize);
+      }
     }
 
     await this.connector.query(

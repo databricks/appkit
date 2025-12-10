@@ -16,4 +16,6 @@ export const lakebaseStorageDefaults = {
   maxSize: 1000,
   /** Number of entries to evict when cache is full */
   evictionBatchSize: 100,
+  /** Probability (0-1) of checking total bytes on each write operation */
+  evictionCheckProbability: 0.1,
 };

@@ -54,6 +54,9 @@ export interface CacheConfig {
   /** Probability (0-1) of triggering cleanup on each get operation */
   cleanupProbability?: number;
 
+  /** Probability (0-1) of checking total bytes on each write operation */
+  evictionCheckProbability?: number;
+
   /** Maximum number of bytes per entry in the cache */
   maxEntryBytes?: number;
 
