@@ -1,11 +1,13 @@
 import type {
   BasePlugin,
+  CacheConfig,
   InputPluginMap,
   OptionalConfigPluginDef,
   PluginConstructor,
   PluginData,
   PluginMap,
 } from "shared";
+import { CacheManager } from "../cache";
 import type { TelemetryConfig } from "../telemetry";
 import { TelemetryManager } from "../telemetry";
 
@@ -83,9 +85,14 @@ export class AppKit<TPlugins extends InputPluginMap> {
   static async _createApp<
     T extends PluginData<PluginConstructor, unknown, string>[],
   >(
-    config: { plugins?: T; telemetry?: TelemetryConfig } = {},
+    config: {
+      plugins?: T;
+      telemetry?: TelemetryConfig;
+      cache?: CacheConfig;
+    } = {},
   ): Promise<PluginMap<T>> {
-    TelemetryManager.initialize(config.telemetry);
+    TelemetryManager.initialize(config?.telemetry);
+    await CacheManager.getInstance(config?.cache);
 
     const rawPlugins = config.plugins as T;
     const preparedPlugins = AppKit.preparePlugins(rawPlugins);
@@ -116,6 +123,12 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
 export async function createApp<
   T extends PluginData<PluginConstructor, unknown, string>[],
->(config: { plugins?: T } = {}): Promise<PluginMap<T>> {
+>(
+  config: {
+    plugins?: T;
+    telemetry?: TelemetryConfig;
+    cache?: CacheConfig;
+  } = {},
+): Promise<PluginMap<T>> {
   return AppKit._createApp(config);
 }

@@ -10,12 +10,53 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { AnalyticsPlugin, analytics } from "../analytics";
 import type { IAnalyticsConfig } from "../types";
 
+// Mock CacheManager singleton with actual caching behavior
+const { mockCacheStore, mockCacheInstance } = vi.hoisted(() => {
+  const store = new Map<string, unknown>();
+
+  const generateKey = (parts: unknown[], userKey: string): string => {
+    const { createHash } = require("node:crypto");
+    const allParts = [userKey, ...parts];
+    const serialized = JSON.stringify(allParts);
+    return createHash("sha256").update(serialized).digest("hex");
+  };
+
+  const instance = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    getOrExecute: vi.fn(
+      async (key: unknown[], fn: () => Promise<unknown>, userKey: string) => {
+        const cacheKey = generateKey(key, userKey);
+        if (store.has(cacheKey)) {
+          return store.get(cacheKey);
+        }
+        const result = await fn();
+        store.set(cacheKey, result);
+        return result;
+      },
+    ),
+    generateKey: vi.fn((parts: unknown[], userKey: string) =>
+      generateKey(parts, userKey),
+    ),
+  };
+
+  return { mockCacheStore: store, mockCacheInstance: instance };
+});
+
+vi.mock("../../cache", () => ({
+  CacheManager: {
+    getInstanceSync: vi.fn(() => mockCacheInstance),
+  },
+}));
+
 describe("Analytics Plugin", () => {
   let config: IAnalyticsConfig;
 
   beforeEach(() => {
     config = { timeout: 5000 };
     setupDatabricksEnv();
+    mockCacheStore.clear();
   });
 
   test("Analytics plugin data should have correct name", () => {
@@ -180,7 +221,7 @@ describe("Analytics Plugin", () => {
         },
         {
           userDatabricksClient: mockUserClient as any,
-          userName: "user-token-123",
+          userId: "user-token-123",
         },
       );
 
@@ -277,7 +318,7 @@ describe("Analytics Plugin", () => {
         async () => {
           await handler(mockReq1, mockRes1);
         },
-        { userName: "user-token-1" },
+        { userId: "user-token-1" },
       );
 
       const mockReq2 = createMockRequest({
@@ -290,7 +331,7 @@ describe("Analytics Plugin", () => {
         async () => {
           await handler(mockReq2, mockRes2);
         },
-        { userName: "user-token-2" },
+        { userId: "user-token-2" },
       );
 
       const mockReq1Again = createMockRequest({
@@ -303,7 +344,7 @@ describe("Analytics Plugin", () => {
         async () => {
           await handler(mockReq1Again, mockRes1Again);
         },
-        { userName: "user-token-1" },
+        { userId: "user-token-1" },
       );
 
       expect(executeMock).toHaveBeenCalledTimes(2);

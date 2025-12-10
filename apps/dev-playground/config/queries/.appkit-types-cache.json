@@ -1,0 +1,37 @@
+{
+  "version": "1",
+  "queries": {
+    "apps_list": {
+      "hash": "e2c65853cf4b332d638bdd30a3aefb69",
+      "type": "{\n    name: \"apps_list\";\n    parameters: Record<string, never>;\n    result: Array<{\n      /** @sqlType STRING */\n      id: string;\n      /** @sqlType STRING */\n      name: string;\n      /** @sqlType STRING */\n      creator: string;\n      /** @sqlType STRING */\n      tags: string;\n      /** @sqlType DECIMAL(38,6) */\n      totalSpend: number;\n      /** @sqlType DATE */\n      createdAt: string;\n    }>;\n  }"
+    },
+    "cost_recommendations": {
+      "hash": "730c7d8b5e2726981088b5975157b0da",
+      "type": "{\n    name: \"cost_recommendations\";\n    parameters: Record<string, never>;\n    result: Array<{\n      /** @sqlType INT */\n      dummy: number;\n    }>;\n  }"
+    },
+    "example": {
+      "hash": "aeb02ed3e8a6c77279099406f8709543",
+      "type": "{\n    name: \"example\";\n    parameters: Record<string, never>;\n    result: Array<{\n      /** @sqlType BOOLEAN */\n      \"(1 = 1)\": boolean;\n    }>;\n  }"
+    },
+    "spend_data": {
+      "hash": "caa0430652fe15eff658e48e6dac2446",
+      "type": "{\n    name: \"spend_data\";\n    parameters: {\n      /** STRING - use sql.string() */\n      groupBy: SQLStringMarker;\n      /** STRING - use sql.string() */\n      aggregationLevel: SQLStringMarker;\n      /** DATE - use sql.date() */\n      startDate: SQLDateMarker;\n      /** DATE - use sql.date() */\n      endDate: SQLDateMarker;\n      /** STRING - use sql.string() */\n      appId: SQLStringMarker;\n      /** STRING - use sql.string() */\n      creator: SQLStringMarker;\n    };\n    result: Array<{\n      /** @sqlType STRING */\n      group_key: string;\n      /** @sqlType TIMESTAMP */\n      aggregation_period: string;\n      /** @sqlType DECIMAL(38,6) */\n      cost_usd: number;\n    }>;\n  }"
+    },
+    "spend_summary": {
+      "hash": "bbe188624c3f5904c3a7593cb32982d5",
+      "type": "{\n    name: \"spend_summary\";\n    parameters: {\n      /** STRING - use sql.string() */\n      aggregationLevel: SQLStringMarker;\n      /** DATE - use sql.date() */\n      endDate: SQLDateMarker;\n      /** DATE - use sql.date() */\n      startDate: SQLDateMarker;\n    };\n    result: Array<{\n      /** @sqlType DECIMAL(33,0) */\n      total: number;\n      /** @sqlType DECIMAL(33,0) */\n      average: number;\n      /** @sqlType DECIMAL(33,0) */\n      forecasted: number;\n    }>;\n  }"
+    },
+    "sql_helpers_test": {
+      "hash": "1322df4ba9c107e8d23e2a04bae860c5",
+      "type": "{\n    name: \"sql_helpers_test\";\n    parameters: {\n      /** STRING - use sql.string() */\n      stringParam: SQLStringMarker;\n      /** NUMERIC - use sql.number() */\n      numberParam: SQLNumberMarker;\n      /** BOOLEAN - use sql.boolean() */\n      booleanParam: SQLBooleanMarker;\n      /** DATE - use sql.date() */\n      dateParam: SQLDateMarker;\n      /** TIMESTAMP - use sql.timestamp() */\n      timestampParam: SQLTimestampMarker;\n      /** STRING - use sql.string() */\n      binaryParam: SQLStringMarker;\n    };\n    result: Array<{\n      /** @sqlType STRING */\n      string_value: string;\n      /** @sqlType STRING */\n      number_value: string;\n      /** @sqlType STRING */\n      boolean_value: string;\n      /** @sqlType STRING */\n      date_value: string;\n      /** @sqlType STRING */\n      timestamp_value: string;\n      /** @sqlType BINARY */\n      binary_value: string;\n      /** @sqlType STRING */\n      binary_hex: string;\n      /** @sqlType INT */\n      binary_length: number;\n    }>;\n  }"
+    },
+    "top_contributors": {
+      "hash": "2d58759cca2fe31dae06475a23080120",
+      "type": "{\n    name: \"top_contributors\";\n    parameters: {\n      /** STRING - use sql.string() */\n      aggregationLevel: SQLStringMarker;\n      /** DATE - use sql.date() */\n      startDate: SQLDateMarker;\n      /** DATE - use sql.date() */\n      endDate: SQLDateMarker;\n    };\n    result: Array<{\n      /** @sqlType STRING */\n      app_name: string;\n      /** @sqlType DECIMAL(38,6) */\n      total_cost_usd: number;\n    }>;\n  }"
+    },
+    "untagged_apps": {
+      "hash": "5946262b49710b8ab458d1bf950ff8c9",
+      "type": "{\n    name: \"untagged_apps\";\n    parameters: {\n      /** STRING - use sql.string() */\n      aggregationLevel: SQLStringMarker;\n      /** DATE - use sql.date() */\n      startDate: SQLDateMarker;\n      /** DATE - use sql.date() */\n      endDate: SQLDateMarker;\n    };\n    result: Array<{\n      /** @sqlType STRING */\n      app_name: string;\n      /** @sqlType STRING */\n      creator: string;\n      /** @sqlType DECIMAL(38,6) */\n      total_cost_usd: number;\n      /** @sqlType DECIMAL(38,10) */\n      avg_period_cost_usd: number;\n    }>;\n  }"
+    }
+  }
+}
