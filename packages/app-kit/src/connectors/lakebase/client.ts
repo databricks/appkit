@@ -117,7 +117,10 @@ export class LakebaseConnector {
             span.addEvent("auth_error_retry");
             await this.rotateCredentials();
             const newPool = await this.getPool();
-            return await newPool.query<T>(sql, params);
+            const result = await newPool.query<T>(sql, params);
+            span.setAttribute("db.rows_affected", result.rowCount ?? 0);
+            span.setStatus({ code: SpanStatusCode.OK });
+            return result;
           }
 
           // retry on transient errors, but only once
