@@ -100,6 +100,12 @@ export class ServerPlugin extends Plugin {
       extension(this.serverApplication);
     }
 
+    // tunnel middlewared needs to be registered before the static/vite handlers
+    if (this.isRemoteServingEnabled()) {
+      this.remoteTunnelManager = new RemoteTunnelManager(this.devFileReader);
+      this.remoteTunnelManager.setup(this.serverApplication);
+    }
+
     await this.setupFrontend();
 
     const server = this.serverApplication.listen(
@@ -110,8 +116,10 @@ export class ServerPlugin extends Plugin {
 
     this.server = server;
 
-    if (this.isRemoteServingEnabled()) {
-      this.setupRemoteTunnels();
+    // ws needs the server instance to handle upgrades
+    if (this.isRemoteServingEnabled() && this.remoteTunnelManager) {
+      this.remoteTunnelManager.setServer(server);
+      this.remoteTunnelManager.setupWebSocket();
     }
 
     process.on("SIGTERM", () => this._gracefulShutdown());
@@ -188,16 +196,18 @@ export class ServerPlugin extends Plugin {
   }
 
   /**
-   * Setup the frontend.
-   *
-   * This method sets up the frontend using Vite for development and static files for production.
+   * Setup frontend serving based on environment:
+   * - Dev mode: Vite for HMR
+   * - Production: Static files (unless remote tunnel handles it)
    */
   private async setupFrontend() {
     const isDev = process.env.NODE_ENV === "development";
+    const isRemote = this.isRemoteServingEnabled();
+
     if (isDev) {
       this.viteDevServer = new ViteDevServer(this.serverApplication);
       await this.viteDevServer.setup();
-    } else {
+    } else if (!isRemote) {
       const staticPath = this.config.staticPath ?? this.findStaticPath();
       if (staticPath) {
         const staticServer = new StaticServer(
@@ -207,20 +217,6 @@ export class ServerPlugin extends Plugin {
         staticServer.setup();
       }
     }
-  }
-
-  /**
-   * Setup the remote tunnels.
-   *
-   * This method sets up the remote tunnels for the development server.
-   */
-  private setupRemoteTunnels() {
-    if (!this.server) return;
-
-    this.remoteTunnelManager = new RemoteTunnelManager(this.devFileReader);
-    this.remoteTunnelManager.setServer(this.server);
-    this.remoteTunnelManager.setup(this.serverApplication);
-    this.remoteTunnelManager.setupWebSocket();
   }
 
   private findStaticPath() {
