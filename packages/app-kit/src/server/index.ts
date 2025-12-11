@@ -16,14 +16,14 @@ dotenv.config({ path: path.resolve(process.cwd(), "./server/.env") });
 export class ServerPlugin extends Plugin {
   public static DEFAULT_CONFIG = {
     autoStart: true,
-    staticPath: path.resolve(process.cwd(), "client", "dist"),
+    staticPath: ServerPlugin.findDefaultStaticPath(),
     host: process.env.FLASK_RUN_HOST || "0.0.0.0",
     port: Number(process.env.DATABRICKS_APP_PORT) || 8000,
     watch: process.env.NODE_ENV === "development",
   };
 
   public name = "server" as const;
-  public envVars = ["DATABRICKS_APP_PORT", "FLASK_RUN_HOST"];
+  public envVars: string[] = [];
   private serverApplication: express.Application;
   private server: HTTPServer | null;
   private devModeManager?: DevModeManager;
@@ -65,9 +65,8 @@ export class ServerPlugin extends Plugin {
 
   async start(): Promise<express.Application> {
     this.serverApplication.use(express.json());
-    this.serverApplication.use(await databricksClientMiddleware());
 
-    this.extendRoutes();
+    await this.extendRoutes();
 
     for (const extension of this.serverExtensions) {
       extension(this.serverApplication);
@@ -156,7 +155,7 @@ export class ServerPlugin extends Plugin {
     return this;
   }
 
-  private extendRoutes() {
+  private async extendRoutes() {
     if (!this.config.plugins) return;
 
     this.serverApplication.get("/health", (_, res) => {
@@ -168,6 +167,10 @@ export class ServerPlugin extends Plugin {
 
       if (plugin?.injectRoutes && typeof plugin.injectRoutes === "function") {
         const router = express.Router();
+
+        // add databricks client middleware to the router if the plugin needs the request context
+        if (plugin.requiresDatabricksClient)
+          router.use(await databricksClientMiddleware());
 
         plugin.injectRoutes(router);
 
@@ -220,6 +223,17 @@ export class ServerPlugin extends Plugin {
     };
 
     return configObject;
+  }
+
+  private static findDefaultStaticPath() {
+    const staticPaths = ["dist", "client/dist", "build", "public", "out"];
+    const cwd = process.cwd();
+    for (const p of staticPaths) {
+      if (fs.existsSync(path.resolve(cwd, p, "index.html"))) {
+        return path.resolve(cwd, p);
+      }
+    }
+    return undefined;
   }
 
   private _gracefulShutdown() {
