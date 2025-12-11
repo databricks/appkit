@@ -60,7 +60,11 @@ export class RemoteTunnelManager {
 
   /** Asset middleware for the development server. */
   assetMiddleware() {
-    return async (req: express.Request, res: express.Response) => {
+    return async (
+      req: express.Request,
+      res: express.Response,
+      next: express.NextFunction,
+    ) => {
       const email = req.headers["x-forwarded-email"] as string;
 
       // Try cookie first, then generate from email
@@ -79,11 +83,13 @@ export class RemoteTunnelManager {
         tunnelId = generateTunnelIdFromEmail(email);
       }
 
-      if (!tunnelId) return res.status(404).send("Tunnel not ready");
+      // no tunnelID means local dev mode, let vite handle assets
+      if (!tunnelId) return next();
 
       const tunnel = this.tunnels.get(tunnelId);
 
-      if (!tunnel) return res.status(404).send("Tunnel not found");
+      // no active tunnel connection, let vite handle assets
+      if (!tunnel) return next();
 
       const { ws, approvedViewers, pendingFetches } = tunnel;
 

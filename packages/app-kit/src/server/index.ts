@@ -32,7 +32,6 @@ dotenv.config({ path: path.resolve(process.cwd(), "./.env") });
 export class ServerPlugin extends Plugin {
   public static DEFAULT_CONFIG = {
     autoStart: true,
-    staticPath: ServerPlugin.findStaticPath(),
     host: process.env.FLASK_RUN_HOST || "0.0.0.0",
     port: Number(process.env.DATABRICKS_APP_PORT) || 8000,
   };
@@ -201,19 +200,31 @@ export class ServerPlugin extends Plugin {
 
   /**
    * Setup frontend serving based on environment:
-   * - Dev mode: Vite for HMR
-   * - Production: Static files (unless remote tunnel handles it)
+   * - If staticPath is explicitly provided: use static server
+   * - Dev mode (no staticPath): Vite for HMR
+   * - Production (no staticPath): Static files auto-detected
    */
   private async setupFrontend() {
     const isDev = process.env.NODE_ENV === "development";
     const isRemote = this.isRemoteServingEnabled();
+    const hasExplicitStaticPath = this.config.staticPath !== undefined;
 
+    // explict static path provided
+    if (hasExplicitStaticPath) {
+      const staticServer = new StaticServer(
+        this.serverApplication,
+        this.config.staticPath as string,
+      );
+      staticServer.setup();
+      return;
+    }
+
+    // auto-detection based on environment
     if (isDev) {
       this.viteDevServer = new ViteDevServer(this.serverApplication);
       await this.viteDevServer.setup();
     } else if (!isRemote) {
-      const staticPath =
-        this.config.staticPath ?? ServerPlugin.findStaticPath();
+      const staticPath = ServerPlugin.findStaticPath();
       if (staticPath) {
         const staticServer = new StaticServer(
           this.serverApplication,
@@ -239,13 +250,19 @@ export class ServerPlugin extends Plugin {
 
   private logStartupInfo() {
     const isDev = process.env.NODE_ENV === "development";
+    const hasExplicitStaticPath = this.config.staticPath !== undefined;
     const port = this.config.port ?? ServerPlugin.DEFAULT_CONFIG.port;
     const host = this.config.host ?? ServerPlugin.DEFAULT_CONFIG.host;
 
     console.log(`Server running on http://${host}:${port}`);
-    console.log(
-      `Mode: ${isDev ? "development (Vite HMR)" : "production (static)"}`,
-    );
+
+    if (hasExplicitStaticPath) {
+      console.log(`Mode: static (${this.config.staticPath})`);
+    } else if (isDev) {
+      console.log("Mode: development (Vite HMR)");
+    } else {
+      console.log("Mode: production (static)");
+    }
 
     if (this.isRemoteServingEnabled()) {
       console.log("Remote tunnel support: enabled");
