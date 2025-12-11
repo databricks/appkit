@@ -51,6 +51,8 @@ jobs:
         run: pnpm run format:check
       - name: Run Types Check
         run: pnpm run typecheck
+      - name: Run License Check
+        run: pnpm run check:licenses
 
   test:
     name: Unit Tests
