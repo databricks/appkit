@@ -143,7 +143,7 @@ describe("ServerPlugin", () => {
       const plugin = new ServerPlugin({});
 
       expect(plugin.name).toBe("server");
-      expect(plugin.envVars).toEqual(["DATABRICKS_APP_PORT", "FLASK_RUN_HOST"]);
+      expect(plugin.envVars).toEqual([]);
     });
 
     test("should use provided config values", () => {

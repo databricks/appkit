@@ -571,6 +571,22 @@ describe("Plugin", () => {
     });
   });
 
+  describe("requiresDatabricksClient", () => {
+    test("should default to false", () => {
+      const plugin = new TestPlugin(config);
+      expect(plugin.requiresDatabricksClient).toBe(false);
+    });
+
+    test("should allow plugins to override to true", () => {
+      class PluginWithDatabricksClient extends TestPlugin {
+        requiresDatabricksClient = true;
+      }
+
+      const plugin = new PluginWithDatabricksClient(config);
+      expect(plugin.requiresDatabricksClient).toBe(true);
+    });
+  });
+
   describe("integration scenarios", () => {
     test("should handle complex execution flow with all interceptors", async () => {
       const plugin = new TestPlugin({

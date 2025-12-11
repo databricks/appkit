@@ -32,8 +32,8 @@
   },
   "lint-staged": {
     "(*.ts|*.tsx|*.js|*.jsx|*.json|*.md|*.yml|*.yaml|*.css)": [
-      "biome lint --write",
-      "biome format --write"
+      "biome lint --write .",
+      "biome format --write ."
     ]
   },
   "devDependencies": {

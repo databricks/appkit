@@ -32,12 +32,13 @@ dotenv.config({ path: path.resolve(process.cwd(), "./.env") });
 export class ServerPlugin extends Plugin {
   public static DEFAULT_CONFIG = {
     autoStart: true,
+    staticPath: ServerPlugin.findStaticPath(),
     host: process.env.FLASK_RUN_HOST || "0.0.0.0",
     port: Number(process.env.DATABRICKS_APP_PORT) || 8000,
   };
 
   public name = "server" as const;
-  public envVars = ["DATABRICKS_APP_PORT", "FLASK_RUN_HOST"];
+  public envVars: string[] = [];
   private serverApplication: express.Application;
   private server: HTTPServer | null;
   private viteDevServer?: ViteDevServer;
@@ -92,9 +93,8 @@ export class ServerPlugin extends Plugin {
    */
   async start(): Promise<express.Application> {
     this.serverApplication.use(express.json());
-    this.serverApplication.use(await databricksClientMiddleware());
 
-    this.extendRoutes();
+    await this.extendRoutes();
 
     for (const extension of this.serverExtensions) {
       extension(this.serverApplication);
@@ -175,7 +175,7 @@ export class ServerPlugin extends Plugin {
    *
    * This method goes through all the plugins and injects the routes into the server application.
    */
-  private extendRoutes() {
+  private async extendRoutes() {
     if (!this.config.plugins) return;
 
     this.serverApplication.get("/health", (_, res) => {
@@ -187,6 +187,10 @@ export class ServerPlugin extends Plugin {
 
       if (plugin?.injectRoutes && typeof plugin.injectRoutes === "function") {
         const router = express.Router();
+
+        // add databricks client middleware to the router if the plugin needs the request context
+        if (plugin.requiresDatabricksClient)
+          router.use(await databricksClientMiddleware());
 
         plugin.injectRoutes(router);
 
@@ -208,7 +212,8 @@ export class ServerPlugin extends Plugin {
       this.viteDevServer = new ViteDevServer(this.serverApplication);
       await this.viteDevServer.setup();
     } else if (!isRemote) {
-      const staticPath = this.config.staticPath ?? this.findStaticPath();
+      const staticPath =
+        this.config.staticPath ?? ServerPlugin.findStaticPath();
       if (staticPath) {
         const staticServer = new StaticServer(
           this.serverApplication,
@@ -219,7 +224,7 @@ export class ServerPlugin extends Plugin {
     }
   }
 
-  private findStaticPath() {
+  private static findStaticPath() {
     const staticPaths = ["dist", "client/dist", "build", "public", "out"];
     const cwd = process.cwd();
     for (const p of staticPaths) {

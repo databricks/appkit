@@ -66,9 +66,6 @@ export class TelemetryManager {
     if (this.sdk) return;
 
     if (!process.env.OTEL_EXPORTER_OTLP_ENDPOINT) {
-      console.log(
-        "[Telemetry] OTEL_EXPORTER_OTLP_ENDPOINT not set; telemetry disabled",
-      );
       return;
     }
 
