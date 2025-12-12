@@ -7,7 +7,7 @@ import type { PluginPhase } from "shared";
 import { Plugin, toPlugin } from "../plugin";
 import { instrumentations } from "../telemetry";
 import { databricksClientMiddleware } from "../utils";
-import { RemoteTunnelManager } from "./remote-tunnel-manager";
+import { RemoteTunnelController } from "./remote-tunnel/remote-tunnel-controller";
 import { StaticServer } from "./static-server";
 import type { ServerConfig } from "./types";
 import { getRoutes } from "./utils";
@@ -41,7 +41,7 @@ export class ServerPlugin extends Plugin {
   private serverApplication: express.Application;
   private server: HTTPServer | null;
   private viteDevServer?: ViteDevServer;
-  private remoteTunnelManager?: RemoteTunnelManager;
+  private remoteTunnelController?: RemoteTunnelController;
   protected declare config: ServerConfig;
   private serverExtensions: ((app: express.Application) => void)[] = [];
   static phase: PluginPhase = "deferred";
@@ -77,11 +77,6 @@ export class ServerPlugin extends Plugin {
     return this.config.autoStart;
   }
 
-  /** Check if the remote serving is enabled. */
-  isRemoteServingEnabled() {
-    return RemoteTunnelManager.isRemoteServerEnabled();
-  }
-
   /**
    * Start the server.
    *
@@ -99,11 +94,11 @@ export class ServerPlugin extends Plugin {
       extension(this.serverApplication);
     }
 
-    // tunnel middlewared needs to be registered before the static/vite handlers
-    if (this.isRemoteServingEnabled()) {
-      this.remoteTunnelManager = new RemoteTunnelManager(this.devFileReader);
-      this.remoteTunnelManager.setup(this.serverApplication);
-    }
+    // register remote tunnel controller (before static/vite)
+    this.remoteTunnelController = new RemoteTunnelController(
+      this.devFileReader,
+    );
+    this.serverApplication.use(this.remoteTunnelController.middleware);
 
     await this.setupFrontend();
 
@@ -115,11 +110,8 @@ export class ServerPlugin extends Plugin {
 
     this.server = server;
 
-    // ws needs the server instance to handle upgrades
-    if (this.isRemoteServingEnabled() && this.remoteTunnelManager) {
-      this.remoteTunnelManager.setServer(server);
-      this.remoteTunnelManager.setupWebSocket();
-    }
+    // attach server to remote tunnel controller
+    this.remoteTunnelController.setServer(server);
 
     process.on("SIGTERM", () => this._gracefulShutdown());
     process.on("SIGINT", () => this._gracefulShutdown());
@@ -206,7 +198,6 @@ export class ServerPlugin extends Plugin {
    */
   private async setupFrontend() {
     const isDev = process.env.NODE_ENV === "development";
-    const isRemote = this.isRemoteServingEnabled();
     const hasExplicitStaticPath = this.config.staticPath !== undefined;
 
     // explict static path provided
@@ -223,15 +214,14 @@ export class ServerPlugin extends Plugin {
     if (isDev) {
       this.viteDevServer = new ViteDevServer(this.serverApplication);
       await this.viteDevServer.setup();
-    } else if (!isRemote) {
-      const staticPath = ServerPlugin.findStaticPath();
-      if (staticPath) {
-        const staticServer = new StaticServer(
-          this.serverApplication,
-          staticPath,
-        );
-        staticServer.setup();
-      }
+      return;
+    }
+
+    // auto-detection based on static path
+    const staticPath = ServerPlugin.findStaticPath();
+    if (staticPath) {
+      const staticServer = new StaticServer(this.serverApplication, staticPath);
+      staticServer.setup();
     }
   }
 
@@ -264,10 +254,13 @@ export class ServerPlugin extends Plugin {
       console.log("Mode: production (static)");
     }
 
-    if (this.isRemoteServingEnabled()) {
-      console.log("Remote tunnel: enabled");
+    const remoteServerController = this.remoteTunnelController;
+    if (!remoteServerController) {
+      console.log("Remote tunnel: disabled (controller not initialized)");
     } else {
-      console.log("Remote tunnel: disabled");
+      console.log(
+        `Remote tunnel: ${remoteServerController.isAllowedByEnv() ? "allowed" : "blocked"}; ${remoteServerController.isActive() ? "active" : "inactive"}`,
+      );
     }
   }
 
@@ -278,8 +271,8 @@ export class ServerPlugin extends Plugin {
       await this.viteDevServer.close();
     }
 
-    if (this.remoteTunnelManager) {
-      this.remoteTunnelManager.cleanup();
+    if (this.remoteTunnelController) {
+      this.remoteTunnelController.cleanup();
     }
 
     // 1. abort active operations from plugins

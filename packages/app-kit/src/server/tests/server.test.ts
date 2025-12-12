@@ -1,34 +1,48 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // Use vi.hoisted for mocks that need to be available before module loading
-const { mockHttpServer, mockExpressApp, mockIsRemoteServerEnabled } =
-  vi.hoisted(() => {
-    const httpServer = {
-      close: vi.fn((cb: any) => cb?.()),
-      on: vi.fn(),
-      address: vi.fn().mockReturnValue({ port: 8000 }),
-    };
+const {
+  mockHttpServer,
+  mockExpressApp,
+  mockRemoteTunnelControllerMiddleware,
+  mockRemoteTunnelControllerInstance,
+} = vi.hoisted(() => {
+  const httpServer = {
+    close: vi.fn((cb: any) => cb?.()),
+    on: vi.fn(),
+    address: vi.fn().mockReturnValue({ port: 8000 }),
+  };
 
-    const expressApp = {
-      use: vi.fn().mockReturnThis(),
-      get: vi.fn().mockReturnThis(),
-      listen: vi.fn((_port: any, _host: any, cb: any) => {
-        cb?.();
-        return httpServer;
-      }),
-      _router: {
-        stack: [] as any[],
-      },
-    };
+  const expressApp = {
+    use: vi.fn().mockReturnThis(),
+    get: vi.fn().mockReturnThis(),
+    listen: vi.fn((_port: any, _host: any, cb: any) => {
+      cb?.();
+      return httpServer;
+    }),
+    _router: {
+      stack: [] as any[],
+    },
+  };
 
-    const isRemoteServerEnabled = vi.fn().mockReturnValue(false);
+  const remoteTunnelControllerMiddleware = vi.fn(
+    (_req: any, _res: any, next: any) => next(),
+  );
+  const remoteTunnelControllerInstance = {
+    middleware: remoteTunnelControllerMiddleware,
+    setServer: vi.fn(),
+    cleanup: vi.fn(),
+    isAllowedByEnv: vi.fn().mockReturnValue(false),
+    isActive: vi.fn().mockReturnValue(false),
+  };
 
-    return {
-      mockHttpServer: httpServer,
-      mockExpressApp: expressApp,
-      mockIsRemoteServerEnabled: isRemoteServerEnabled,
-    };
-  });
+  return {
+    mockHttpServer: httpServer,
+    mockExpressApp: expressApp,
+    mockRemoteTunnelControllerMiddleware: remoteTunnelControllerMiddleware,
+    mockRemoteTunnelControllerInstance: remoteTunnelControllerInstance,
+  };
+});
 
 // Mock express
 vi.mock("express", () => {
@@ -97,16 +111,10 @@ vi.mock("../static-server", () => ({
   })),
 }));
 
-vi.mock("../remote-tunnel-manager", () => ({
-  RemoteTunnelManager: Object.assign(
-    vi.fn().mockImplementation(() => ({
-      setServer: vi.fn(),
-      setup: vi.fn(),
-      setupWebSocket: vi.fn(),
-      cleanup: vi.fn(),
-    })),
-    { isRemoteServerEnabled: mockIsRemoteServerEnabled },
-  ),
+vi.mock("../remote-tunnel/remote-tunnel-controller", () => ({
+  RemoteTunnelController: vi.fn().mockImplementation(() => {
+    return mockRemoteTunnelControllerInstance;
+  }),
 }));
 
 vi.mock("dotenv", () => ({
@@ -126,8 +134,9 @@ vi.mock("../utils", () => ({
 }));
 
 import fs from "node:fs";
+import express from "express";
 import { ServerPlugin } from "../index";
-import { RemoteTunnelManager } from "../remote-tunnel-manager";
+import { RemoteTunnelController } from "../remote-tunnel/remote-tunnel-controller";
 import { StaticServer } from "../static-server";
 import { ViteDevServer } from "../vite-dev-server";
 
@@ -237,6 +246,47 @@ describe("ServerPlugin", () => {
       expect(viteInstance.setup).toHaveBeenCalled();
     });
 
+    test("should register RemoteTunnelController middleware and set server", async () => {
+      const plugin = new ServerPlugin({ autoStart: false });
+
+      await plugin.start();
+
+      expect(RemoteTunnelController).toHaveBeenCalledTimes(1);
+      expect(mockExpressApp.use).toHaveBeenCalledWith(
+        mockRemoteTunnelControllerMiddleware,
+      );
+      expect(mockRemoteTunnelControllerInstance.setServer).toHaveBeenCalledWith(
+        mockHttpServer,
+      );
+    });
+
+    test("extendRoutes registers databricksClientMiddleware when plugin.requiresDatabricksClient=true", async () => {
+      process.env.NODE_ENV = "production";
+
+      const injectRoutes = vi.fn();
+      const plugins: any = {
+        "needs-client": {
+          name: "needs-client",
+          requiresDatabricksClient: true,
+          injectRoutes,
+        },
+      };
+
+      const plugin = new ServerPlugin({ autoStart: false, plugins });
+      await plugin.start();
+
+      const routerFn = (express as any).Router as ReturnType<typeof vi.fn>;
+      expect(routerFn).toHaveBeenCalledTimes(1);
+      const routerInstance = routerFn.mock.results[0].value;
+
+      expect(routerInstance.use).toHaveBeenCalledWith(expect.any(Function));
+      expect(injectRoutes).toHaveBeenCalledWith(routerInstance);
+      expect(mockExpressApp.use).toHaveBeenCalledWith(
+        "/api/needs-client",
+        routerInstance,
+      );
+    });
+
     test("should setup StaticServer in production mode with valid static path", async () => {
       process.env.NODE_ENV = "production";
       vi.mocked(fs.existsSync).mockReturnValue(true);
@@ -259,31 +309,6 @@ describe("ServerPlugin", () => {
       await plugin.start();
 
       expect(StaticServer).not.toHaveBeenCalled();
-    });
-
-    test("should setup RemoteTunnelManager when remote serving is enabled", async () => {
-      mockIsRemoteServerEnabled.mockReturnValue(true);
-
-      const plugin = new ServerPlugin({ autoStart: false });
-
-      await plugin.start();
-
-      expect(RemoteTunnelManager).toHaveBeenCalled();
-      const tunnelInstance =
-        vi.mocked(RemoteTunnelManager).mock.results[0].value;
-      expect(tunnelInstance.setServer).toHaveBeenCalled();
-      expect(tunnelInstance.setup).toHaveBeenCalled();
-      expect(tunnelInstance.setupWebSocket).toHaveBeenCalled();
-    });
-
-    test("should not setup RemoteTunnelManager when remote serving is disabled", async () => {
-      mockIsRemoteServerEnabled.mockReturnValue(false);
-
-      const plugin = new ServerPlugin({ autoStart: false });
-
-      await plugin.start();
-
-      expect(RemoteTunnelManager).not.toHaveBeenCalled();
     });
   });
 
@@ -359,15 +384,94 @@ describe("ServerPlugin", () => {
     });
   });
 
-  describe("isRemoteServingEnabled", () => {
-    test("should return value from isRemoteServerEnabled util", () => {
-      mockIsRemoteServerEnabled.mockReturnValue(true);
+  describe("logStartupInfo", () => {
+    test("logs remote tunnel controller disabled when missing", () => {
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
       const plugin = new ServerPlugin({ autoStart: false });
+      (plugin as any).remoteTunnelController = undefined;
 
-      expect(plugin.isRemoteServingEnabled()).toBe(true);
+      (plugin as any).logStartupInfo();
 
-      mockIsRemoteServerEnabled.mockReturnValue(false);
-      expect(plugin.isRemoteServingEnabled()).toBe(false);
+      expect(logSpy).toHaveBeenCalledWith(
+        "Remote tunnel: disabled (controller not initialized)",
+      );
+      logSpy.mockRestore();
+    });
+
+    test("logs remote tunnel allowed/active when controller present", () => {
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const plugin = new ServerPlugin({ autoStart: false });
+      (plugin as any).remoteTunnelController = {
+        isAllowedByEnv: () => true,
+        isActive: () => true,
+      };
+
+      (plugin as any).logStartupInfo();
+
+      expect(
+        logSpy.mock.calls.some((c) =>
+          String(c[0]).includes("Remote tunnel: allowed; active"),
+        ),
+      ).toBe(true);
+      logSpy.mockRestore();
+    });
+  });
+
+  describe("findStaticPath", () => {
+    test("returns first matching static path and logs it", () => {
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      vi.mocked(fs.existsSync).mockImplementation((p: any) => {
+        return String(p).endsWith("dist/index.html");
+      });
+
+      const p = (ServerPlugin as any).findStaticPath();
+      expect(String(p)).toContain("dist");
+      expect(
+        logSpy.mock.calls.some((c) =>
+          String(c[0]).includes("Static files: serving from"),
+        ),
+      ).toBe(true);
+      logSpy.mockRestore();
+    });
+  });
+
+  describe("_gracefulShutdown", () => {
+    test("aborts plugin operations (with error isolation) and closes server", async () => {
+      vi.useFakeTimers();
+      const exitSpy = vi
+        .spyOn(process, "exit")
+        .mockImplementation(((_code?: number) => undefined) as any);
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const plugin = new ServerPlugin({
+        autoStart: false,
+        plugins: {
+          ok: {
+            name: "ok",
+            abortActiveOperations: vi.fn(),
+          } as any,
+          bad: {
+            name: "bad",
+            abortActiveOperations: vi.fn(() => {
+              throw new Error("boom");
+            }),
+          } as any,
+        },
+      });
+
+      // pretend started
+      (plugin as any).server = mockHttpServer;
+
+      await (plugin as any)._gracefulShutdown();
+      vi.runAllTimers();
+
+      expect(errSpy).toHaveBeenCalled();
+      expect(mockHttpServer.close).toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalled();
+
+      errSpy.mockRestore();
+      exitSpy.mockRestore();
+      vi.useRealTimers();
     });
   });
 });

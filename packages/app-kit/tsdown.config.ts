@@ -26,16 +26,16 @@ export default defineConfig([
     tsconfig: "./tsconfig.json",
     copy: [
       {
-        from: "src/server/index.html",
-        to: "dist/server/index.html",
+        from: "src/server/remote-tunnel/index.html",
+        to: "dist/server/remote-tunnel/index.html",
       },
       {
-        from: "src/server/wait.html",
-        to: "dist/server/wait.html",
+        from: "src/server/remote-tunnel/wait.html",
+        to: "dist/server/remote-tunnel/wait.html",
       },
       {
-        from: "src/server/denied.html",
-        to: "dist/server/denied.html",
+        from: "src/server/remote-tunnel/denied.html",
+        to: "dist/server/remote-tunnel/denied.html",
       },
     ],
   },

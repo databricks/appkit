@@ -6,11 +6,12 @@ import { fileURLToPath } from "node:url";
 import type express from "express";
 import type { TunnelConnection } from "shared";
 import { WebSocketServer } from "ws";
-import { generateTunnelIdFromEmail, getQueries, parseCookies } from "./utils";
+import { generateTunnelIdFromEmail, getQueries, parseCookies } from "../utils";
+import { REMOTE_TUNNEL_ASSET_PREFIXES } from "./gate";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const MAX_ASSET_FETCH_TIMEOUT = 30_000;
+const MAX_ASSET_FETCH_TIMEOUT = 60_000;
 
 interface DevFileReader {
   registerTunnelGetter(
@@ -36,15 +37,6 @@ export class RemoteTunnelManager {
   private hmrWss: WebSocketServer;
   private server?: HTTPServer;
   private devFileReader: DevFileReader;
-
-  public static ASSETS_MIDDLEWARE_PATHS: string[] = [
-    "/@vite/*",
-    "/@fs/*",
-    "/node_modules/.vite/deps/*",
-    "/node_modules/vite/*",
-    "/src/*",
-    "/@react-refresh",
-  ];
 
   constructor(devFileReader: DevFileReader) {
     this.devFileReader = devFileReader;
@@ -126,9 +118,9 @@ export class RemoteTunnelManager {
       res: express.Response,
       next: express.NextFunction,
     ) => {
-      const dev = req.query.dev;
+      const dev = req.query?.dev;
 
-      if (!dev) {
+      if (dev === undefined) {
         return next();
       }
 
@@ -188,10 +180,7 @@ export class RemoteTunnelManager {
   /** Setup the dev mode middleware. */
   setup(app: express.Application) {
     app.use(this.devModeMiddleware());
-    app.use(
-      RemoteTunnelManager.ASSETS_MIDDLEWARE_PATHS,
-      this.assetMiddleware(),
-    );
+    app.use(REMOTE_TUNNEL_ASSET_PREFIXES, this.assetMiddleware());
   }
 
   static isRemoteServerEnabled() {
