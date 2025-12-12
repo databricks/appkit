@@ -6,27 +6,42 @@ import express from "express";
 import type { PluginPhase } from "shared";
 import { Plugin, toPlugin } from "../plugin";
 import { instrumentations } from "../telemetry";
-import { databricksClientMiddleware, isRemoteServerEnabled } from "../utils";
-import { DevModeManager } from "./dev-mode";
+import { databricksClientMiddleware } from "../utils";
+import { RemoteTunnelController } from "./remote-tunnel/remote-tunnel-controller";
+import { StaticServer } from "./static-server";
 import type { ServerConfig } from "./types";
-import { getQueries, getRoutes } from "./utils";
+import { getRoutes } from "./utils";
+import { ViteDevServer } from "./vite-dev-server";
 
-dotenv.config({ path: path.resolve(process.cwd(), "./server/.env") });
+dotenv.config({ path: path.resolve(process.cwd(), "./.env") });
 
+/**
+ * Server plugin for the App Kit.
+ *
+ * This plugin is responsible for starting the server and serving the static files.
+ * It also handles the remote tunneling for development purposes.
+ *
+ * @example
+ * ```ts
+ * createApp({
+ *   plugins: [server(), telemetryExamples(), analytics({})],
+ * });
+ * ```
+ *
+ */
 export class ServerPlugin extends Plugin {
   public static DEFAULT_CONFIG = {
     autoStart: true,
-    staticPath: ServerPlugin.findDefaultStaticPath(),
     host: process.env.FLASK_RUN_HOST || "0.0.0.0",
     port: Number(process.env.DATABRICKS_APP_PORT) || 8000,
-    watch: process.env.NODE_ENV === "development",
   };
 
   public name = "server" as const;
   public envVars: string[] = [];
   private serverApplication: express.Application;
   private server: HTTPServer | null;
-  private devModeManager?: DevModeManager;
+  private viteDevServer?: ViteDevServer;
+  private remoteTunnelController?: RemoteTunnelController;
   protected declare config: ServerConfig;
   private serverExtensions: ((app: express.Application) => void)[] = [];
   static phase: PluginPhase = "deferred";
@@ -43,26 +58,33 @@ export class ServerPlugin extends Plugin {
     ]);
   }
 
+  /** Setup the server plugin. */
   async setup() {
     if (this.shouldAutoStart()) {
       await this.start();
     }
   }
 
+  /** Get the server configuration. */
   getConfig() {
     const { plugins: _plugins, ...config } = this.config;
 
     return config;
   }
 
+  /** Check if the server should auto start. */
   shouldAutoStart() {
     return this.config.autoStart;
   }
 
-  isRemoteServingEnabled() {
-    return isRemoteServerEnabled();
-  }
-
+  /**
+   * Start the server.
+   *
+   * This method starts the server and sets up the frontend.
+   * It also sets up the remote tunneling if enabled.
+   *
+   * @returns The express application.
+   */
   async start(): Promise<express.Application> {
     this.serverApplication.use(express.json());
 
@@ -72,55 +94,32 @@ export class ServerPlugin extends Plugin {
       extension(this.serverApplication);
     }
 
-    const isRemoteDevModeEnabled = this.isRemoteServingEnabled();
-    if (isRemoteDevModeEnabled) {
-      this.devModeManager = new DevModeManager(this.devFileReader);
+    // register remote tunnel controller (before static/vite)
+    this.remoteTunnelController = new RemoteTunnelController(
+      this.devFileReader,
+    );
+    this.serverApplication.use(this.remoteTunnelController.middleware);
 
-      if (this.config.watch) {
-        await this.devModeManager.setupViteWatching(this.serverApplication);
-      }
-
-      this.serverApplication.use(this.devModeManager.devModeMiddleware());
-      this.serverApplication.use(
-        DevModeManager.ASSETS_MIDDLEWARE_PATHS,
-        this.devModeManager.assetMiddleware(),
-      );
-    }
-
-    if (this.config.staticPath && !this.config.watch) {
-      this._setupStaticServing();
-    }
+    await this.setupFrontend();
 
     const server = this.serverApplication.listen(
       this.config.port ?? ServerPlugin.DEFAULT_CONFIG.port,
       this.config.host ?? ServerPlugin.DEFAULT_CONFIG.host,
-      () => {
-        console.log(`Server is running on port ${this.config.port}`);
-        if (this.config.staticPath && !this.config.watch) {
-          console.log(`Serving static files from: ${this.config.staticPath}`);
-        }
-        if (this.config.watch) {
-          console.log("Vite is watching for changes...");
-        }
-      },
+      () => this.logStartupInfo(),
     );
 
     this.server = server;
 
-    if (isRemoteDevModeEnabled && this.devModeManager) {
-      this.devModeManager.setServer(server);
-      this.devModeManager.setupWebSocket();
-    }
+    // attach server to remote tunnel controller
+    this.remoteTunnelController.setServer(server);
 
     process.on("SIGTERM", () => this._gracefulShutdown());
     process.on("SIGINT", () => this._gracefulShutdown());
 
     if (process.env.NODE_ENV === "development") {
-      // TODO: improve this
       const allRoutes = getRoutes(this.serverApplication._router.stack);
       console.dir(allRoutes, { depth: null });
     }
-
     return this.serverApplication;
   }
 
@@ -146,6 +145,13 @@ export class ServerPlugin extends Plugin {
     return this.server;
   }
 
+  /**
+   * Extend the server with custom routes or middleware.
+   *
+   * @param fn - A function that receives the express application.
+   * @returns The server plugin instance for chaining.
+   * @throws {Error} If autoStart is true.
+   */
   extend(fn: (app: express.Application) => void) {
     if (this.shouldAutoStart()) {
       throw new Error("Cannot extend server when autoStart is true.");
@@ -155,6 +161,11 @@ export class ServerPlugin extends Plugin {
     return this;
   }
 
+  /**
+   * Setup the routes with the plugins.
+   *
+   * This method goes through all the plugins and injects the routes into the server application.
+   */
   private async extendRoutes() {
     if (!this.config.plugins) return;
 
@@ -179,68 +190,89 @@ export class ServerPlugin extends Plugin {
     }
   }
 
-  private _setupStaticServing() {
-    if (!this.config.staticPath) return;
+  /**
+   * Setup frontend serving based on environment:
+   * - If staticPath is explicitly provided: use static server
+   * - Dev mode (no staticPath): Vite for HMR
+   * - Production (no staticPath): Static files auto-detected
+   */
+  private async setupFrontend() {
+    const isDev = process.env.NODE_ENV === "development";
+    const hasExplicitStaticPath = this.config.staticPath !== undefined;
 
-    this.serverApplication.use(
-      express.static(this.config.staticPath, {
-        index: false,
-      }),
-    );
-
-    this.serverApplication.get("*", (req, res) => {
-      if (!req.path.startsWith("/api") && !req.path.startsWith("/query")) {
-        this._renderFE(res);
-      }
-    });
-  }
-
-  private _renderFE(res: express.Response) {
-    if (!this.config.staticPath) {
-      return res.status(500).json({ error: "No static path configured" });
+    // explict static path provided
+    if (hasExplicitStaticPath) {
+      const staticServer = new StaticServer(
+        this.serverApplication,
+        this.config.staticPath as string,
+      );
+      staticServer.setup();
+      return;
     }
 
-    const indexPath = path.join(this.config.staticPath, "index.html");
-    const configObject = this._configInjection();
-    const configScript = `
-      <script>
-        window.__CONFIG__ = ${JSON.stringify(configObject)};
-      </script>
-    `;
-    let html = fs.readFileSync(indexPath, "utf-8");
+    // auto-detection based on environment
+    if (isDev) {
+      this.viteDevServer = new ViteDevServer(this.serverApplication);
+      await this.viteDevServer.setup();
+      return;
+    }
 
-    html = html.replace("<body>", `<body>${configScript}`);
-
-    res.send(html);
+    // auto-detection based on static path
+    const staticPath = ServerPlugin.findStaticPath();
+    if (staticPath) {
+      const staticServer = new StaticServer(this.serverApplication, staticPath);
+      staticServer.setup();
+    }
   }
 
-  private _configInjection() {
-    const configFolder = path.join(process.cwd(), "config");
-
-    const configObject = {
-      appName: process.env.DATABRICKS_APP_NAME || "",
-      queries: getQueries(configFolder),
-    };
-
-    return configObject;
-  }
-
-  private static findDefaultStaticPath() {
+  private static findStaticPath() {
     const staticPaths = ["dist", "client/dist", "build", "public", "out"];
     const cwd = process.cwd();
     for (const p of staticPaths) {
-      if (fs.existsSync(path.resolve(cwd, p, "index.html"))) {
-        return path.resolve(cwd, p);
+      const fullPath = path.resolve(cwd, p);
+      if (fs.existsSync(path.resolve(fullPath, "index.html"))) {
+        console.log(`Static files: serving from ${fullPath}`);
+        return fullPath;
       }
     }
     return undefined;
   }
 
-  private _gracefulShutdown() {
+  private logStartupInfo() {
+    const isDev = process.env.NODE_ENV === "development";
+    const hasExplicitStaticPath = this.config.staticPath !== undefined;
+    const port = this.config.port ?? ServerPlugin.DEFAULT_CONFIG.port;
+    const host = this.config.host ?? ServerPlugin.DEFAULT_CONFIG.host;
+
+    console.log(`Server running on http://${host}:${port}`);
+
+    if (hasExplicitStaticPath) {
+      console.log(`Mode: static (${this.config.staticPath})`);
+    } else if (isDev) {
+      console.log("Mode: development (Vite HMR)");
+    } else {
+      console.log("Mode: production (static)");
+    }
+
+    const remoteServerController = this.remoteTunnelController;
+    if (!remoteServerController) {
+      console.log("Remote tunnel: disabled (controller not initialized)");
+    } else {
+      console.log(
+        `Remote tunnel: ${remoteServerController.isAllowedByEnv() ? "allowed" : "blocked"}; ${remoteServerController.isActive() ? "active" : "inactive"}`,
+      );
+    }
+  }
+
+  private async _gracefulShutdown() {
     console.log("Starting graceful shutdown...");
 
-    if (this.devModeManager) {
-      this.devModeManager.cleanup();
+    if (this.viteDevServer) {
+      await this.viteDevServer.close();
+    }
+
+    if (this.remoteTunnelController) {
+      this.remoteTunnelController.cleanup();
     }
 
     // 1. abort active operations from plugins
