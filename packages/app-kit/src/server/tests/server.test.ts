@@ -1,27 +1,34 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // Use vi.hoisted for mocks that need to be available before module loading
-const { mockHttpServer, mockExpressApp } = vi.hoisted(() => {
-  const httpServer = {
-    close: vi.fn((cb: any) => cb?.()),
-    on: vi.fn(),
-    address: vi.fn().mockReturnValue({ port: 8000 }),
-  };
+const { mockHttpServer, mockExpressApp, mockIsRemoteServerEnabled } =
+  vi.hoisted(() => {
+    const httpServer = {
+      close: vi.fn((cb: any) => cb?.()),
+      on: vi.fn(),
+      address: vi.fn().mockReturnValue({ port: 8000 }),
+    };
 
-  const expressApp = {
-    use: vi.fn().mockReturnThis(),
-    get: vi.fn().mockReturnThis(),
-    listen: vi.fn((_port: any, _host: any, cb: any) => {
-      cb?.();
-      return httpServer;
-    }),
-    _router: {
-      stack: [] as any[],
-    },
-  };
+    const expressApp = {
+      use: vi.fn().mockReturnThis(),
+      get: vi.fn().mockReturnThis(),
+      listen: vi.fn((_port: any, _host: any, cb: any) => {
+        cb?.();
+        return httpServer;
+      }),
+      _router: {
+        stack: [] as any[],
+      },
+    };
 
-  return { mockHttpServer: httpServer, mockExpressApp: expressApp };
-});
+    const isRemoteServerEnabled = vi.fn().mockReturnValue(false);
+
+    return {
+      mockHttpServer: httpServer,
+      mockExpressApp: expressApp,
+      mockIsRemoteServerEnabled: isRemoteServerEnabled,
+    };
+  });
 
 // Mock express
 vi.mock("express", () => {
@@ -73,7 +80,6 @@ vi.mock("../../utils", () => ({
   databricksClientMiddleware: vi
     .fn()
     .mockResolvedValue((_req: any, _res: any, next: any) => next()),
-  isRemoteServerEnabled: vi.fn().mockReturnValue(false),
   validateEnv: vi.fn(),
   deepMerge: vi.fn((a, b) => ({ ...a, ...b })),
 }));
@@ -92,12 +98,15 @@ vi.mock("../static-server", () => ({
 }));
 
 vi.mock("../remote-tunnel-manager", () => ({
-  RemoteTunnelManager: vi.fn().mockImplementation(() => ({
-    setServer: vi.fn(),
-    setup: vi.fn(),
-    setupWebSocket: vi.fn(),
-    cleanup: vi.fn(),
-  })),
+  RemoteTunnelManager: Object.assign(
+    vi.fn().mockImplementation(() => ({
+      setServer: vi.fn(),
+      setup: vi.fn(),
+      setupWebSocket: vi.fn(),
+      cleanup: vi.fn(),
+    })),
+    { isRemoteServerEnabled: mockIsRemoteServerEnabled },
+  ),
 }));
 
 vi.mock("dotenv", () => ({
@@ -117,11 +126,10 @@ vi.mock("../utils", () => ({
 }));
 
 import fs from "node:fs";
-import { isRemoteServerEnabled } from "../../utils";
+import { ServerPlugin } from "../index";
 import { RemoteTunnelManager } from "../remote-tunnel-manager";
 import { StaticServer } from "../static-server";
 import { ViteDevServer } from "../vite-dev-server";
-import { ServerPlugin } from "../index";
 
 describe("ServerPlugin", () => {
   let originalEnv: NodeJS.ProcessEnv;
@@ -254,7 +262,7 @@ describe("ServerPlugin", () => {
     });
 
     test("should setup RemoteTunnelManager when remote serving is enabled", async () => {
-      vi.mocked(isRemoteServerEnabled).mockReturnValue(true);
+      mockIsRemoteServerEnabled.mockReturnValue(true);
 
       const plugin = new ServerPlugin({ autoStart: false });
 
@@ -269,7 +277,7 @@ describe("ServerPlugin", () => {
     });
 
     test("should not setup RemoteTunnelManager when remote serving is disabled", async () => {
-      vi.mocked(isRemoteServerEnabled).mockReturnValue(false);
+      mockIsRemoteServerEnabled.mockReturnValue(false);
 
       const plugin = new ServerPlugin({ autoStart: false });
 
@@ -353,12 +361,12 @@ describe("ServerPlugin", () => {
 
   describe("isRemoteServingEnabled", () => {
     test("should return value from isRemoteServerEnabled util", () => {
-      vi.mocked(isRemoteServerEnabled).mockReturnValue(true);
+      mockIsRemoteServerEnabled.mockReturnValue(true);
       const plugin = new ServerPlugin({ autoStart: false });
 
       expect(plugin.isRemoteServingEnabled()).toBe(true);
 
-      vi.mocked(isRemoteServerEnabled).mockReturnValue(false);
+      mockIsRemoteServerEnabled.mockReturnValue(false);
       expect(plugin.isRemoteServingEnabled()).toBe(false);
     });
   });

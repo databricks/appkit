@@ -60,11 +60,7 @@ export class RemoteTunnelManager {
 
   /** Asset middleware for the development server. */
   assetMiddleware() {
-    return async (
-      req: express.Request,
-      res: express.Response,
-      next: express.NextFunction,
-    ) => {
+    return async (req: express.Request, res: express.Response) => {
       const email = req.headers["x-forwarded-email"] as string;
 
       // Try cookie first, then generate from email
@@ -83,13 +79,11 @@ export class RemoteTunnelManager {
         tunnelId = generateTunnelIdFromEmail(email);
       }
 
-      // no tunnelID means local dev mode, let vite handle assets
-      if (!tunnelId) return next();
+      if (!tunnelId) return res.status(404).send("Tunnel not ready");
 
       const tunnel = this.tunnels.get(tunnelId);
 
-      // no active tunnel connection, let vite handle assets
-      if (!tunnel) return next();
+      if (!tunnel) return res.status(404).send("Tunnel not found");
 
       const { ws, approvedViewers, pendingFetches } = tunnel;
 
@@ -197,6 +191,15 @@ export class RemoteTunnelManager {
     app.use(
       RemoteTunnelManager.ASSETS_MIDDLEWARE_PATHS,
       this.assetMiddleware(),
+    );
+  }
+
+  static isRemoteServerEnabled() {
+    return (
+      process.env.NODE_ENV !== "production" &&
+      process.env.DISABLE_REMOTE_SERVING !== "true" &&
+      // DATABRICKS_CLIENT_SECRET is set in the .env file for deployed environments
+      Boolean(process.env.DATABRICKS_CLIENT_SECRET)
     );
   }
 

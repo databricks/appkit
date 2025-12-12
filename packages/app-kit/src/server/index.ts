@@ -6,7 +6,7 @@ import express from "express";
 import type { PluginPhase } from "shared";
 import { Plugin, toPlugin } from "../plugin";
 import { instrumentations } from "../telemetry";
-import { databricksClientMiddleware, isRemoteServerEnabled } from "../utils";
+import { databricksClientMiddleware } from "../utils";
 import { RemoteTunnelManager } from "./remote-tunnel-manager";
 import { StaticServer } from "./static-server";
 import type { ServerConfig } from "./types";
@@ -79,7 +79,7 @@ export class ServerPlugin extends Plugin {
 
   /** Check if the remote serving is enabled. */
   isRemoteServingEnabled() {
-    return isRemoteServerEnabled();
+    return RemoteTunnelManager.isRemoteServerEnabled();
   }
 
   /**
@@ -265,7 +265,9 @@ export class ServerPlugin extends Plugin {
     }
 
     if (this.isRemoteServingEnabled()) {
-      console.log("Remote tunnel support: enabled");
+      console.log("Remote tunnel: enabled");
+    } else {
+      console.log("Remote tunnel: disabled");
     }
   }
 
