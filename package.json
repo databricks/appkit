@@ -16,7 +16,7 @@
     "clean": "pnpm -r clean",
     "dev": "pnpm build && NODE_ENV=development turbo watch build:watch dev",
     "dev:inspect": "NODE_ENV=development pnpm --filter=sdk-playground dev:inspect",
-    "docs:dev": "pnpm --filter=docs start",
+    "docs:dev": "pnpm --filter=docs dev",
     "docs:build": "pnpm --filter=docs build",
     "docs:serve": "pnpm --filter=docs serve",
     "docs:clean": "pnpm --filter=docs clean",

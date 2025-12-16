@@ -5,7 +5,7 @@ import type * as Preset from "@docusaurus/preset-classic";
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
 const config: Config = {
-  title: "My Site",
+  title: "App Kit",
   tagline: "Dinosaurs are cool",
   favicon: "img/favicon.ico",
 
@@ -14,16 +14,11 @@ const config: Config = {
     v4: true, // Improve compatibility with the upcoming Docusaurus v4
   },
 
-  // Set the production url of your site here
-  url: "https://your-docusaurus-site.example.com",
-  // Set the /<baseUrl>/ pathname under which your site is served
-  // For GitHub pages deployment, it is often '/<projectName>/'
-  baseUrl: "/",
+  url: "https://databricks.github.io",
+  baseUrl: "/app-kit/",
 
-  // GitHub pages deployment config.
-  // If you aren't using GitHub pages, you don't need these.
-  organizationName: "facebook", // Usually your GitHub org/user name.
-  projectName: "docusaurus", // Usually your repo name.
+  organizationName: "databricks",
+  projectName: "app-kit",
 
   onBrokenLinks: "throw",
 
@@ -42,6 +37,11 @@ const config: Config = {
         docs: {
           sidebarPath: "./sidebars.ts",
           editUrl: "https://github.com/databricks/app-kit/edit/main/docs/",
+          versions: {
+            current: {
+              label: `Unreleased 🚧`,
+            },
+          },
         },
         theme: {
           customCss: "./src/css/custom.css",
@@ -50,27 +50,32 @@ const config: Config = {
     ],
   ],
 
+  plugins: [require.resolve("docusaurus-lunr-search")],
+
   themeConfig: {
-    // Replace with your project's social card
-    image: "img/docusaurus-social-card.jpg",
+    image: "img/docusaurus-social-card.jpg", // TODO:
     colorMode: {
       respectPrefersColorScheme: true,
     },
     navbar: {
-      title: "My Site",
+      title: "App Kit",
       logo: {
-        alt: "My Site Logo",
-        src: "img/logo.svg",
+        alt: "App Kit",
+        src: "img/logo.png",
       },
       items: [
         {
           type: "docSidebar",
-          sidebarId: "tutorialSidebar",
+          sidebarId: "docsSidebar",
           position: "left",
-          label: "Tutorial",
+          label: "Getting started",
         },
         {
-          href: "https://github.com/facebook/docusaurus",
+          type: "docsVersionDropdown",
+          position: "right",
+        },
+        {
+          href: "https://github.com/databricks/app-kit",
           label: "GitHub",
           position: "right",
         },
@@ -83,25 +88,8 @@ const config: Config = {
           title: "Docs",
           items: [
             {
-              label: "Tutorial",
-              to: "/docs/intro",
-            },
-          ],
-        },
-        {
-          title: "Community",
-          items: [
-            {
-              label: "Stack Overflow",
-              href: "https://stackoverflow.com/questions/tagged/docusaurus",
-            },
-            {
-              label: "Discord",
-              href: "https://discordapp.com/invite/docusaurus",
-            },
-            {
-              label: "X",
-              href: "https://x.com/docusaurus",
+              label: "Getting started",
+              to: "/docs/getting-started",
             },
           ],
         },
@@ -115,11 +103,11 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} Databricks, Inc. Built with Docusaurus.`,
+      copyright: `Copyright © ${new Date().getFullYear()} Databricks, Inc.`,
     },
     prism: {
-      theme: prismThemes.github,
-      darkTheme: prismThemes.dracula,
+      theme: prismThemes.vsLight,
+      darkTheme: prismThemes.vsDark,
     },
   } satisfies Preset.ThemeConfig,
 };
