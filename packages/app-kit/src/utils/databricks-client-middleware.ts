@@ -1,6 +1,14 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { type sql, WorkspaceClient } from "@databricks/sdk-experimental";
+import {
+  type ClientOptions,
+  type sql,
+  WorkspaceClient,
+} from "@databricks/sdk-experimental";
 import type express from "express";
+import {
+  name as productName,
+  version as productVersion,
+} from "../../package.json";
 
 export type RequestContext = {
   userDatabricksClient?: WorkspaceClient;
@@ -14,9 +22,22 @@ export type RequestContext = {
 
 const asyncLocalStorage = new AsyncLocalStorage<RequestContext>();
 
-export async function databricksClientMiddleware(): Promise<express.RequestHandler> {
-  const serviceDatabricksClient = new WorkspaceClient({});
+function getClientOptions(): ClientOptions {
+  const isDev = process.env.NODE_ENV === "development";
+  const normalizedVersion = productVersion
+    .split(".")
+    .slice(0, 3)
+    .join(".") as ClientOptions["productVersion"];
 
+  return {
+    product: productName,
+    productVersion: normalizedVersion,
+    ...(isDev && { userAgentExtra: { mode: "dev" } }),
+  };
+}
+
+export async function databricksClientMiddleware(): Promise<express.RequestHandler> {
+  const serviceDatabricksClient = new WorkspaceClient({}, getClientOptions());
   const warehouseId = getWarehouseId(serviceDatabricksClient);
   const workspaceId = getWorkspaceId(serviceDatabricksClient);
   const serviceUserId = (await serviceDatabricksClient.currentUser.me()).id;
@@ -34,11 +55,14 @@ export async function databricksClientMiddleware(): Promise<express.RequestHandl
     let userDatabricksClient: WorkspaceClient | undefined;
     const host = process.env.DATABRICKS_HOST;
     if (userToken && host) {
-      userDatabricksClient = new WorkspaceClient({
-        token: userToken,
-        host,
-        authType: "pat",
-      });
+      userDatabricksClient = new WorkspaceClient(
+        {
+          token: userToken,
+          host,
+          authType: "pat",
+        },
+        getClientOptions(),
+      );
     } else if (process.env.NODE_ENV === "development") {
       // in local development service and no user token are the same
       // TODO: use `databricks apps run-local` to fix this
