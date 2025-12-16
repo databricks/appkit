@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { TunnelConnection } from "shared";
-import { isRemoteServerEnabled } from "../utils";
+import { isRemoteTunnelAllowedByEnv } from "@/server/remote-tunnel/gate";
 
 type TunnelConnectionGetter = (
   req: import("express").Request,
@@ -23,7 +23,7 @@ export class DevFileReader {
          * We proxy the reader to return a noop function if the remote server is disabled.
          */
         get(target, prop, receiver) {
-          if (isRemoteServerEnabled()) {
+          if (isRemoteTunnelAllowedByEnv()) {
             return Reflect.get(target, prop, receiver);
           }
 

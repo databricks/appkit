@@ -3,5 +3,5 @@ import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
 
 createApp({
-  plugins: [server(), reconnect(), telemetryExamples(), analytics()],
+  plugins: [server(), reconnect(), telemetryExamples(), analytics({})],
 });

@@ -1,4 +1,4 @@
-import type { ChartConfig } from "../ui/chart";
+import type { ChartConfig } from "../../ui/chart";
 
 /** Props for the RadarChart component */
 export interface RadarChartProps {

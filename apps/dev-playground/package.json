@@ -5,7 +5,7 @@
   "scripts": {
     "start": "node build/index.mjs",
     "start:local": "NODE_ENV=production node --env-file=./server/.env build/index.mjs",
-    "dev": "tsx watch ./server --exclude '**/.vite-temp/**' --tsconfig ./tsconfig.json",
+    "dev": "NODE_ENV=development tsx watch server/index.ts",
     "dev:inspect": "tsx --inspect --tsconfig ./tsconfig.json ./server",
     "build": "npm run build:app",
     "build:app": "tsdown --out-dir build server/index.ts && cd client && npm run build",

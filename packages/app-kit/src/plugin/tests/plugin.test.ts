@@ -17,7 +17,11 @@ import { Plugin } from "../plugin";
 
 // Mock all dependencies
 vi.mock("../../app");
-vi.mock("../../cache");
+vi.mock("../../cache", () => ({
+  CacheManager: {
+    getInstanceSync: vi.fn(),
+  },
+}));
 vi.mock("../../stream");
 vi.mock("../../utils", () => ({
   validateEnv: vi.fn(),
@@ -152,7 +156,7 @@ describe("Plugin", () => {
     };
 
     // Setup constructor mocks
-    vi.mocked(CacheManager).mockImplementation(() => mockCache);
+    vi.mocked(CacheManager.getInstanceSync).mockReturnValue(mockCache);
     vi.mocked(AppManager).mockImplementation(() => mockApp);
     vi.mocked(StreamManager).mockImplementation(() => mockStreamManager);
     vi.mocked(TelemetryManager.getProvider).mockReturnValue(
@@ -187,7 +191,7 @@ describe("Plugin", () => {
     test("should initialize managers", () => {
       new TestPlugin(config);
 
-      expect(CacheManager).toHaveBeenCalledTimes(1);
+      expect(CacheManager.getInstanceSync).toHaveBeenCalledTimes(1);
       expect(AppManager).toHaveBeenCalledTimes(1);
       expect(StreamManager).toHaveBeenCalledTimes(1);
     });
@@ -564,6 +568,22 @@ describe("Plugin", () => {
   describe("static properties", () => {
     test("should have default phase of 'normal'", () => {
       expect(Plugin.phase).toBe("normal");
+    });
+  });
+
+  describe("requiresDatabricksClient", () => {
+    test("should default to false", () => {
+      const plugin = new TestPlugin(config);
+      expect(plugin.requiresDatabricksClient).toBe(false);
+    });
+
+    test("should allow plugins to override to true", () => {
+      class PluginWithDatabricksClient extends TestPlugin {
+        requiresDatabricksClient = true;
+      }
+
+      const plugin = new PluginWithDatabricksClient(config);
+      expect(plugin.requiresDatabricksClient).toBe(true);
     });
   });
 

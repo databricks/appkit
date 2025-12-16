@@ -5,7 +5,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
+} from "@databricks/app-kit-ui/react";
 
 interface UntaggedApp {
   id: string;

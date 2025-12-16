@@ -1,12 +1,15 @@
-import { BarChart } from "@databricks/app-kit-ui/react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  BarChart,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@databricks/app-kit-ui/react";
 
 interface TopContributorsChartProps {
   groupBy: "app" | "user";

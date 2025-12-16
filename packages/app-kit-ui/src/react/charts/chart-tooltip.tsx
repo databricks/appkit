@@ -1,4 +1,4 @@
-import { ChartTooltip, ChartTooltipContent } from "./ui/chart";
+import { ChartTooltip, ChartTooltipContent } from "../ui/chart";
 import { formatChartValue, formatFieldLabel } from "./utils";
 
 interface ChartTooltipDefaultProps {

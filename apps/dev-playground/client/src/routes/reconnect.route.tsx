@@ -27,7 +27,7 @@ function ReconnectRoute() {
   };
 
   return (
-    <div className="min-h-[calc(100vh-73px)] bg-gray-50">
+    <div className="min-h-screen bg-background">
       <div className="max-w-[1200px] mx-auto px-6 py-12">
         <Header
           title="Stream Reconnection Test"

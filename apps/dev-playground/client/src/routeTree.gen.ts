@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as TypeSafetyRouteRouteImport } from './routes/type-safety.route'
 import { Route as TelemetryRouteRouteImport } from './routes/telemetry.route'
 import { Route as SqlHelpersRouteRouteImport } from './routes/sql-helpers.route'
 import { Route as ReconnectRouteRouteImport } from './routes/reconnect.route'
@@ -16,6 +17,11 @@ import { Route as DataVisualizationRouteRouteImport } from './routes/data-visual
 import { Route as AnalyticsRouteRouteImport } from './routes/analytics.route'
 import { Route as IndexRouteImport } from './routes/index'
 
+const TypeSafetyRouteRoute = TypeSafetyRouteRouteImport.update({
+  id: '/type-safety',
+  path: '/type-safety',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TelemetryRouteRoute = TelemetryRouteRouteImport.update({
   id: '/telemetry',
   path: '/telemetry',
@@ -54,6 +60,7 @@ export interface FileRoutesByFullPath {
   '/reconnect': typeof ReconnectRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
+  '/type-safety': typeof TypeSafetyRouteRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -62,6 +69,7 @@ export interface FileRoutesByTo {
   '/reconnect': typeof ReconnectRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
+  '/type-safety': typeof TypeSafetyRouteRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -71,6 +79,7 @@ export interface FileRoutesById {
   '/reconnect': typeof ReconnectRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
+  '/type-safety': typeof TypeSafetyRouteRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -81,6 +90,7 @@ export interface FileRouteTypes {
     | '/reconnect'
     | '/sql-helpers'
     | '/telemetry'
+    | '/type-safety'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -89,6 +99,7 @@ export interface FileRouteTypes {
     | '/reconnect'
     | '/sql-helpers'
     | '/telemetry'
+    | '/type-safety'
   id:
     | '__root__'
     | '/'
@@ -97,6 +108,7 @@ export interface FileRouteTypes {
     | '/reconnect'
     | '/sql-helpers'
     | '/telemetry'
+    | '/type-safety'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -106,10 +118,18 @@ export interface RootRouteChildren {
   ReconnectRouteRoute: typeof ReconnectRouteRoute
   SqlHelpersRouteRoute: typeof SqlHelpersRouteRoute
   TelemetryRouteRoute: typeof TelemetryRouteRoute
+  TypeSafetyRouteRoute: typeof TypeSafetyRouteRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/type-safety': {
+      id: '/type-safety'
+      path: '/type-safety'
+      fullPath: '/type-safety'
+      preLoaderRoute: typeof TypeSafetyRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/telemetry': {
       id: '/telemetry'
       path: '/telemetry'
@@ -162,6 +182,7 @@ const rootRouteChildren: RootRouteChildren = {
   ReconnectRouteRoute: ReconnectRouteRoute,
   SqlHelpersRouteRoute: SqlHelpersRouteRoute,
   TelemetryRouteRoute: TelemetryRouteRoute,
+  TypeSafetyRouteRoute: TypeSafetyRouteRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

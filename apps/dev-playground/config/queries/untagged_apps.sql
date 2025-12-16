@@ -1,3 +1,6 @@
+-- @param aggregationLevel STRING
+-- @param startDate DATE
+-- @param endDate DATE
 WITH app_periods AS (
   SELECT
     u.usage_metadata.app_name AS app_name,

@@ -1,3 +1,9 @@
+-- @param stringParam STRING
+-- @param numberParam NUMERIC
+-- @param booleanParam BOOLEAN
+-- @param dateParam DATE
+-- @param timestampParam TIMESTAMP
+-- @param binaryParam STRING
 SELECT
   :stringParam as string_value,
   :numberParam as number_value,

@@ -6,7 +6,7 @@ import {
 } from "recharts";
 import { ChartTooltipDefault } from "../chart-tooltip";
 import { ChartWrapper } from "../chart-wrapper";
-import { ChartContainer } from "../ui/chart";
+import { ChartContainer } from "../../ui/chart";
 import { detectFields, formatXAxisTick, generateChartConfig } from "../utils";
 import type { RadarChartProps } from "./types";
 

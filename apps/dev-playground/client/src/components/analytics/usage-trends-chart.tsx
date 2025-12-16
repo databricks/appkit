@@ -1,13 +1,16 @@
 import { sql } from "@databricks/app-kit-ui/js";
 import { BarChart } from "@databricks/app-kit-ui/react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@databricks/app-kit-ui/react";
 
 interface UsageTrendsChartProps {
   groupBy: "default" | "app" | "user";

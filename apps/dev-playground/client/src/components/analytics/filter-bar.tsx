@@ -1,12 +1,13 @@
-import { Card, CardContent } from "@/components/ui/card";
+import type { Aggregation, DashboardFilters } from "@/lib/types";
 import {
+  Card,
+  CardContent,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import type { Aggregation, DashboardFilters } from "@/lib/types";
+} from "@databricks/app-kit-ui/react";
 
 interface FilterBarProps {
   filters: DashboardFilters;

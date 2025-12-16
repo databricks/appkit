@@ -1,4 +1,4 @@
-import type { ChartConfig } from "../ui/chart";
+import type { ChartConfig } from "../../ui/chart";
 
 export interface LineChartProps {
   /** Analytics query key registered with analytics plugin */
