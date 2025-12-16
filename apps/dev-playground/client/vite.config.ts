@@ -14,6 +14,11 @@ export default defineConfig({
       autoCodeSplitting: process.env.NODE_ENV !== "development",
     }),
   ],
+  server: {
+    hmr: {
+      port: 24679,
+    },
+  },
   optimizeDeps: {
     include: [
       "react",
