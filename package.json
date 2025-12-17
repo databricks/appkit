@@ -20,6 +20,8 @@
     "docs:build": "pnpm --filter=docs build",
     "docs:serve": "pnpm --filter=docs serve",
     "docs:clean": "pnpm --filter=docs clean",
+    "docs:format": "biome format --write docs/",
+    "docs:lint": "biome lint --write docs/",
     "format:check": "biome format .",
     "format": "biome format --write .",
     "lint:fix": "biome lint --write .",
