@@ -22,6 +22,10 @@
   --ifm-menu-color: var(--ifm-color-content);
   --docusaurus-highlighted-code-line-bg: rgb(252, 234, 202);
   --ifm-code-background: hsl(230, 1%, 97%);
+
+  --hero-text-color: #ffffff;
+  --hero-gradient-dark: #0b2026;
+  --hero-gradient-accent: #ff3621;
 }
 
 [data-theme="light"] {

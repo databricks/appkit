@@ -6,7 +6,7 @@ App Kit is an [Apache 2.0 licensed](https://github.com/databricks/app-kit/blob/m
 
 Follow our [contribution guidelines](https://github.com/databricks/app-kit/blob/main/CONTRIBUTING.md) for code contributions, setup instructions, and DCO requirements.
 
-Before contributing, review our [Core Principles](../docs/core-concepts/principles) to understand App Kit's design philosophy and guiding principles.
+Before contributing, review our [Core Principles](/docs/core-concepts/principles) to understand App Kit's design philosophy and guiding principles.
 
 ## Documentation Contributions
 
