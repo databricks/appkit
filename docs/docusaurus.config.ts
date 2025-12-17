@@ -128,7 +128,12 @@ const config: Config = {
           type: "docSidebar",
           sidebarId: "docsSidebar",
           position: "left",
-          label: "Getting started",
+          label: "Documentation",
+        },
+        {
+          to: "/contributing",
+          position: "left",
+          label: "Contributing",
         },
         // TODO: Uncomment once we have a first 0.1 release
         // {
@@ -152,14 +157,35 @@ const config: Config = {
               label: "Getting started",
               to: "/docs/",
             },
+            {
+              label: "API Reference",
+              to: "/docs/api/",
+            },
+          ],
+        },
+        {
+          title: "Community",
+          items: [
+            {
+              label: "Contributing",
+              to: "/contributing",
+            },
+            {
+              label: "GitHub",
+              href: "https://github.com/databricks/app-kit",
+            },
           ],
         },
         {
           title: "More",
           items: [
             {
-              label: "GitHub",
-              href: "https://github.com/databricks/app-kit",
+              label: "Databricks Apps docs",
+              href: "https://docs.databricks.com/aws/en/dev-tools/databricks-apps/",
+            },
+            {
+              label: "Databricks CLI",
+              href: "https://github.com/databricks/cli",
             },
           ],
         },
