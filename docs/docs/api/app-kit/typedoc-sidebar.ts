@@ -1,4 +1,4 @@
-import type { SidebarsConfig } from "@docusaurus/plugin-content-docs";
+import { SidebarsConfig } from "@docusaurus/plugin-content-docs";
 const typedocSidebar: SidebarsConfig = {
   items: [
     {
@@ -8,14 +8,14 @@ const typedocSidebar: SidebarsConfig = {
         {
           type: "doc",
           id: "api/app-kit/classes/CacheManager",
-          label: "CacheManager",
+          label: "CacheManager"
         },
         {
           type: "doc",
           id: "api/app-kit/classes/Plugin",
-          label: "Plugin",
-        },
-      ],
+          label: "Plugin"
+        }
+      ]
     },
     {
       type: "category",
@@ -24,19 +24,19 @@ const typedocSidebar: SidebarsConfig = {
         {
           type: "doc",
           id: "api/app-kit/interfaces/BasePluginConfig",
-          label: "BasePluginConfig",
+          label: "BasePluginConfig"
         },
         {
           type: "doc",
           id: "api/app-kit/interfaces/ITelemetry",
-          label: "ITelemetry",
+          label: "ITelemetry"
         },
         {
           type: "doc",
           id: "api/app-kit/interfaces/StreamExecutionSettings",
-          label: "StreamExecutionSettings",
-        },
-      ],
+          label: "StreamExecutionSettings"
+        }
+      ]
     },
     {
       type: "category",
@@ -45,14 +45,14 @@ const typedocSidebar: SidebarsConfig = {
         {
           type: "doc",
           id: "api/app-kit/type-aliases/IAppRouter",
-          label: "IAppRouter",
+          label: "IAppRouter"
         },
         {
           type: "doc",
           id: "api/app-kit/type-aliases/SQLTypeMarker",
-          label: "SQLTypeMarker",
-        },
-      ],
+          label: "SQLTypeMarker"
+        }
+      ]
     },
     {
       type: "category",
@@ -61,19 +61,19 @@ const typedocSidebar: SidebarsConfig = {
         {
           type: "doc",
           id: "api/app-kit/variables/analytics",
-          label: "analytics",
+          label: "analytics"
         },
         {
           type: "doc",
           id: "api/app-kit/variables/server",
-          label: "server",
+          label: "server"
         },
         {
           type: "doc",
           id: "api/app-kit/variables/sql",
-          label: "sql",
-        },
-      ],
+          label: "sql"
+        }
+      ]
     },
     {
       type: "category",
@@ -82,30 +82,30 @@ const typedocSidebar: SidebarsConfig = {
         {
           type: "doc",
           id: "api/app-kit/functions/appKitTypesPlugin",
-          label: "appKitTypesPlugin",
+          label: "appKitTypesPlugin"
         },
         {
           type: "doc",
           id: "api/app-kit/functions/createApp",
-          label: "createApp",
+          label: "createApp"
         },
         {
           type: "doc",
           id: "api/app-kit/functions/getRequestContext",
-          label: "getRequestContext",
+          label: "getRequestContext"
         },
         {
           type: "doc",
           id: "api/app-kit/functions/isSQLTypeMarker",
-          label: "isSQLTypeMarker",
+          label: "isSQLTypeMarker"
         },
         {
           type: "doc",
           id: "api/app-kit/functions/toPlugin",
-          label: "toPlugin",
-        },
-      ],
-    },
-  ],
+          label: "toPlugin"
+        }
+      ]
+    }
+  ]
 };
 export default typedocSidebar;

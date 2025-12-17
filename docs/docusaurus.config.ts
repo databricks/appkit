@@ -6,7 +6,7 @@ import type * as Preset from "@docusaurus/preset-classic";
 
 const config: Config = {
   title: "App Kit",
-  tagline: "Dinosaurs are cool",
+  tagline: "Node.js + React SDK for Databricks Apps. Built for humans and AI.",
   favicon: "img/favicon.ico",
 
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
@@ -117,6 +117,13 @@ const config: Config = {
     colorMode: {
       respectPrefersColorScheme: true,
     },
+    metadata: [
+      {
+        name: "keywords",
+        content:
+          "Databricks Apps, Node.js, React.js, SDK, TypeScript, SQL, Databricks, AI, full-stack, development",
+      },
+    ],
     navbar: {
       title: "App Kit",
       logo: {

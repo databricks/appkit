@@ -15,7 +15,8 @@
       "!**/coverage",
       "!packages/app-kit-ui/src/react/ui",
       "!**/routeTree.gen.ts",
-      "!docs/.docusaurus"
+      "!docs/.docusaurus",
+      "!**/typedoc-sidebar.ts"
     ]
   },
   "formatter": {
