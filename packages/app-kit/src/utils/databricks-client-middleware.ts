@@ -101,6 +101,28 @@ export function getRequestContext(): RequestContext {
   return store;
 }
 
+/**
+ * Get the appropriate WorkspaceClient based on whether the request
+ * should be executed as the user or as the service principal.
+ *
+ * @param asUser - If true, returns user's WorkspaceClient (requires token passthrough)
+ * @throws Error if asUser is true but user token passthrough is not enabled
+ */
+export function getWorkspaceClient(asUser: boolean): WorkspaceClient {
+  const context = getRequestContext();
+
+  if (asUser) {
+    if (!context.userDatabricksClient) {
+      throw new Error(
+        `User token passthrough is not enabled for this workspace.`,
+      );
+    }
+    return context.userDatabricksClient;
+  }
+
+  return context.serviceDatabricksClient;
+}
+
 async function getWorkspaceId(
   workspaceClient: WorkspaceClient,
 ): Promise<string> {
