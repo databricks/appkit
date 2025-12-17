@@ -10,7 +10,6 @@ import type {
   StreamExecuteHandler,
   StreamExecutionSettings,
 } from "shared";
-import type { z } from "zod";
 import { AppManager } from "../app";
 import { CacheManager } from "../cache";
 import { StreamManager } from "../stream";
@@ -29,8 +28,6 @@ import type {
   ExecutionContext,
   ExecutionInterceptor,
 } from "./interceptors/types";
-
-export const routeSchemaRegistry = new Map<string, Map<string, z.ZodType>>();
 
 export abstract class Plugin<
   TConfig extends BasePluginConfig = BasePluginConfig,
