@@ -72,11 +72,10 @@ function resolveFormat(
       return "ARROW";
     }
 
-    // Default to Arrow for better performance
-    return "ARROW";
+    return "JSON";
   }
 
-  return "ARROW";
+  return "JSON";
 }
 
 // ============================================================================

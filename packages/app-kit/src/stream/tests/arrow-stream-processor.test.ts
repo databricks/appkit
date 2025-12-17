@@ -4,41 +4,6 @@ import { ArrowStreamProcessor } from "../arrow-stream-processor";
 
 type ResultSchema = sql.ResultManifest["schema"];
 
-// Mock apache-arrow module
-vi.mock("apache-arrow", () => {
-  const mockSchema = {
-    fields: [
-      { name: "id", type: { toString: () => "Int32" } },
-      { name: "name", type: { toString: () => "Utf8" } },
-    ],
-  };
-
-  const createMockTable = (numRows: number, batches: unknown[] = [{}]) => ({
-    numRows,
-    numCols: 2,
-    schema: mockSchema,
-    batches,
-  });
-
-  return {
-    tableFromIPC: vi.fn((buffer: Uint8Array) => {
-      // Simulate different tables based on buffer content
-      const marker = buffer[0] ?? 0;
-      return createMockTable(marker * 10, [{ marker }]);
-    }),
-    tableToIPC: vi.fn(() => new Uint8Array([1, 2, 3, 4, 5])),
-    Table: vi.fn().mockImplementation((schema, batches) => ({
-      numRows: batches.reduce(
-        (sum: number, b: { numRows?: number }) => sum + (b.numRows ?? 1),
-        0,
-      ),
-      numCols: schema.fields.length,
-      schema,
-      batches,
-    })),
-  };
-});
-
 // Helper to create mock chunks
 function createMockChunks(count: number) {
   return Array.from({ length: count }, (_, i) => ({
@@ -72,17 +37,20 @@ describe("ArrowStreamProcessor", () => {
 
     originalFetch = globalThis.fetch;
 
-    // Default mock: successful fetch
+    // Default mock: successful fetch returning raw bytes
     globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
       // Extract chunk index from URL to create unique data
       const match = url.match(/chunk-(\d+)/);
       const chunkIndex = match ? parseInt(match[1], 10) : 0;
 
+      // Return raw bytes (simulating Arrow IPC data)
       return {
         ok: true,
         status: 200,
         statusText: "OK",
-        arrayBuffer: async () => new Uint8Array([chunkIndex + 1]).buffer,
+        arrayBuffer: async () =>
+          new Uint8Array([chunkIndex + 1, chunkIndex + 2, chunkIndex + 3])
+            .buffer,
       };
     });
 
@@ -97,7 +65,6 @@ describe("ArrowStreamProcessor", () => {
   describe("constructor", () => {
     test("should use default options when not provided", () => {
       const defaultProcessor = new ArrowStreamProcessor();
-      // Verify it doesn't throw
       expect(defaultProcessor).toBeDefined();
     });
 
@@ -133,9 +100,7 @@ describe("ArrowStreamProcessor", () => {
 
       expect(result).toHaveProperty("data");
       expect(result).toHaveProperty("schema", schema);
-      expect(result).toHaveProperty("metadata");
-      expect(result.metadata).toHaveProperty("rowCount");
-      expect(result.metadata).toHaveProperty("columnCount");
+      expect(result.data).toBeInstanceOf(Uint8Array);
       expect(globalThis.fetch).toHaveBeenCalledTimes(1);
     });
 
@@ -150,13 +115,25 @@ describe("ArrowStreamProcessor", () => {
       expect(globalThis.fetch).toHaveBeenCalledTimes(5);
     });
 
-    test("should return serialized Arrow data", async () => {
+    test("should concatenate raw bytes from multiple chunks", async () => {
+      const chunks = createMockChunks(3);
+      const schema = createMockSchema();
+
+      const result = await processor.processChunks(chunks, schema);
+
+      // Each chunk returns 3 bytes: [chunkIndex+1, chunkIndex+2, chunkIndex+3]
+      // Chunk 0: [1, 2, 3], Chunk 1: [2, 3, 4], Chunk 2: [3, 4, 5]
+      expect(result.data).toEqual(new Uint8Array([1, 2, 3, 2, 3, 4, 3, 4, 5]));
+    });
+
+    test("should return single chunk data without modification", async () => {
       const chunks = createMockChunks(1);
       const schema = createMockSchema();
 
       const result = await processor.processChunks(chunks, schema);
 
-      expect(result.data).toEqual(new Uint8Array([1, 2, 3, 4, 5]));
+      // Single chunk returns [1, 2, 3]
+      expect(result.data).toEqual(new Uint8Array([1, 2, 3]));
     });
 
     test("should pass abort signal to fetch", async () => {
@@ -424,45 +401,53 @@ describe("ArrowStreamProcessor", () => {
     });
   });
 
-  describe("schema validation and table concatenation", () => {
-    test("should concatenate tables from multiple chunks", async () => {
-      const { Table } = await import("apache-arrow");
+  describe("buffer concatenation", () => {
+    test("should concatenate buffers from multiple chunks", async () => {
+      // Custom fetch that returns distinct byte patterns
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        const match = url.match(/chunk-(\d+)/);
+        const index = match ? parseInt(match[1], 10) : 0;
+        // Each chunk returns a unique byte pattern
+        return {
+          ok: true,
+          arrayBuffer: async () => new Uint8Array([100 + index]).buffer,
+        };
+      });
 
       const chunks = createMockChunks(3);
-      await processor.processChunks(chunks, createMockSchema());
+      const result = await processor.processChunks(chunks, createMockSchema());
 
-      // Table constructor should be called with combined batches
-      expect(Table).toHaveBeenCalled();
+      // Should be [100, 101, 102]
+      expect(result.data).toEqual(new Uint8Array([100, 101, 102]));
     });
 
-    test("should handle single chunk without concatenation", async () => {
-      const { Table, tableFromIPC } = await import("apache-arrow");
+    test("should return single buffer without unnecessary allocation", async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        arrayBuffer: async () => new Uint8Array([42, 43, 44]).buffer,
+      });
 
       const chunks = createMockChunks(1);
-      await processor.processChunks(chunks, createMockSchema());
+      const result = await processor.processChunks(chunks, createMockSchema());
 
-      // Should parse the single chunk
-      expect(tableFromIPC).toHaveBeenCalledTimes(1);
-      // Should NOT call Table constructor for single chunk
-      expect(Table).not.toHaveBeenCalled();
+      // Single chunk should return as-is
+      expect(result.data).toEqual(new Uint8Array([42, 43, 44]));
     });
   });
 
   describe("missing external_link handling", () => {
-    test("should continue on missing external_link", async () => {
+    test("should log error and continue retrying on missing external_link", async () => {
       // Create chunk without external_link
       const chunks = [
         { chunk_index: 0, external_link: undefined },
         { chunk_index: 1, external_link: "https://example.com/chunk-1" },
       ] as any;
 
-      // Should throw because all chunks fail (first has no link, retries exhausted)
-      // But it should log error for the missing link
       const consoleSpy = vi
         .spyOn(console, "error")
         .mockImplementation(() => {});
 
-      // This will fail because chunk 0 has no external_link
+      // This will fail because chunk 0 has no external_link and retries will be exhausted
       await expect(
         processor.processChunks(chunks, createMockSchema()),
       ).rejects.toThrow();
@@ -553,7 +538,6 @@ describe("Semaphore (via ArrowStreamProcessor)", () => {
     await processor.processChunks(chunks as any, { columns: [] });
 
     // With concurrency of 1, they should complete in order
-    // (though Promise.all doesn't guarantee order, the semaphore does)
     expect(order).toHaveLength(3);
     expect(globalThis.fetch).toHaveBeenCalledTimes(3);
   });

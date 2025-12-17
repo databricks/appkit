@@ -126,14 +126,24 @@ export function useAnalyticsQuery<
 
           // success - Arrow format
           if (parsed.type === "arrow") {
-            const arrowData = await ArrowClient.fetchArrow(
-              getArrowStreamUrl(parsed.statement_id),
-            );
-            const table = await ArrowClient.processArrowBuffer(arrowData);
-            setLoading(false);
-            // Table is cast to TypedArrowTable with row type from QueryRegistry
-            setData(table as ResultType);
-            return;
+            try {
+              const arrowData = await ArrowClient.fetchArrow(
+                getArrowStreamUrl(parsed.statement_id),
+              );
+              const table = await ArrowClient.processArrowBuffer(arrowData);
+              setLoading(false);
+              // Table is cast to TypedArrowTable with row type from QueryRegistry
+              setData(table as ResultType);
+              return;
+            } catch (error) {
+              console.error(
+                "[useAnalyticsQuery] Failed to fetch Arrow data",
+                error,
+              );
+              setLoading(false);
+              setError("Unable to load data, please try again");
+              return;
+            }
           }
 
           // error

@@ -63,9 +63,10 @@ export class SQLWarehouseConnector {
   private get arrowProcessor(): ArrowStreamProcessor {
     if (!this._arrowProcessor) {
       this._arrowProcessor = new ArrowStreamProcessor({
-        maxConcurrentDownloads: 5,
         timeout: this.config.timeout || executeStatementDefaults.timeout,
-        retries: 3,
+        maxConcurrentDownloads:
+          ArrowStreamProcessor.DEFAULT_MAX_CONCURRENT_DOWNLOADS,
+        retries: ArrowStreamProcessor.DEFAULT_RETRIES,
       });
     }
     return this._arrowProcessor;
@@ -403,25 +404,68 @@ export class SQLWarehouseConnector {
     jobId: string,
     signal?: AbortSignal,
   ): Promise<ReturnType<typeof this.arrowProcessor.processChunks>> {
-    try {
-      const response = await workspaceClient.statementExecution.getStatement(
-        {
-          statement_id: jobId,
+    const startTime = Date.now();
+
+    return this.telemetry.startActiveSpan(
+      "arrow.getData",
+      {
+        kind: SpanKind.CLIENT,
+        attributes: {
+          "db.system": "databricks",
+          "arrow.job_id": jobId,
         },
-        this._createContext(signal),
-      );
-      const chunks = response.result?.external_links;
-      const schema = response.manifest?.schema;
+      },
+      async (span: Span) => {
+        try {
+          const response =
+            await workspaceClient.statementExecution.getStatement(
+              { statement_id: jobId },
+              this._createContext(signal),
+            );
 
-      if (!chunks || !schema) {
-        throw new Error("No chunks or schema found in response");
-      }
+          const chunks = response.result?.external_links;
+          const schema = response.manifest?.schema;
 
-      return await this.arrowProcessor.processChunks(chunks, schema);
-    } catch (error) {
-      console.error(`Failed Arrow job: ${jobId}`, error);
-      throw error;
-    }
+          if (!chunks || !schema) {
+            throw new Error("No chunks or schema found in response");
+          }
+
+          span.setAttribute("arrow.chunk_count", chunks.length);
+
+          const result = await this.arrowProcessor.processChunks(
+            chunks,
+            schema,
+            signal,
+          );
+
+          span.setAttribute("arrow.data_size_bytes", result.data.length);
+          span.setStatus({ code: SpanStatusCode.OK });
+
+          const duration = Date.now() - startTime;
+          this.telemetryMetrics.queryDuration.record(duration, {
+            operation: "arrow.getData",
+            status: "success",
+          });
+
+          return result;
+        } catch (error) {
+          span.setStatus({
+            code: SpanStatusCode.ERROR,
+            message: error instanceof Error ? error.message : "Unknown error",
+          });
+          span.recordException(error as Error);
+
+          const duration = Date.now() - startTime;
+          this.telemetryMetrics.queryDuration.record(duration, {
+            operation: "arrow.getData",
+            status: "error",
+          });
+
+          console.error(`Failed Arrow job: ${jobId}`, error);
+          throw error;
+        }
+      },
+    );
   }
 
   // create context for cancellation token

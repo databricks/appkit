@@ -2,8 +2,6 @@ import type express from "express";
 import type {
   BasePlugin,
   BasePluginConfig,
-  IAppRouter,
-  IAppRequest,
   IAppResponse,
   PluginExecuteConfig,
   PluginExecutionSettings,
@@ -21,7 +19,7 @@ import {
   normalizeTelemetryOptions,
   TelemetryManager,
 } from "../telemetry";
-import { deepMerge, getRequestContext, validateEnv } from "../utils";
+import { deepMerge, validateEnv } from "../utils";
 import { DevFileReader } from "./dev-reader";
 import { CacheInterceptor } from "./interceptors/cache";
 import { RetryInterceptor } from "./interceptors/retry";
@@ -31,7 +29,6 @@ import type {
   ExecutionContext,
   ExecutionInterceptor,
 } from "./interceptors/types";
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
 
 export const routeSchemaRegistry = new Map<string, Map<string, z.ZodType>>();
 
@@ -218,58 +215,6 @@ export abstract class Plugin<
     }
 
     return interceptors;
-  }
-
-  protected getArrowData(
-    _workspaceClient: WorkspaceClient,
-    _jobId: string,
-  ): Promise<{ data: Uint8Array; metadata?: Record<string, unknown> }> {
-    throw new Error(
-      `getArrowData not implemented for plugin "${this.name}". ` +
-        "Override this method in your plugin to support Arrow data retrieval.",
-    );
-  }
-
-  protected injectCoreArrowRoutes(router: IAppRouter): void {
-    router.get(
-      "/arrow-result/:jobId",
-      async (req: IAppRequest, res: IAppResponse): Promise<void> => {
-        try {
-          const { jobId } = req.params;
-
-          const requestContext = getRequestContext();
-
-          const workspaceClient: WorkspaceClient =
-            requestContext.serviceDatabricksClient;
-
-          console.log(
-            `Processing Arrow job request: ${jobId} for plugin: ${this.name}`,
-          );
-
-          const result = await this.getArrowData(workspaceClient, jobId);
-
-          res.setHeader("Content-Type", "application/octet-stream");
-          res.setHeader("Content-Length", result.data.length.toString());
-          res.setHeader("Cache-Control", "public, max-age=3600");
-
-          if (result.metadata) {
-            res.setHeader("X-Arrow-Metadata", JSON.stringify(result.metadata));
-          }
-
-          console.log(
-            `Sending Arrow buffer: ${result.data.length} bytes for job ${jobId}`,
-          );
-          res.send(Buffer.from(result.data));
-        } catch (error) {
-          console.error(`Arrow job error for ${this.name}:`, error);
-          res.status(404).json({
-            error:
-              error instanceof Error ? error.message : "Arrow job not found",
-            plugin: this.name,
-          });
-        }
-      },
-    );
   }
 
   // execute method wrapped with interceptors

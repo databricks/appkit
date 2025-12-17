@@ -205,7 +205,7 @@ describe("useChartData", () => {
       );
     });
 
-    test("auto-selects ARROW by default when no heuristics match", () => {
+    test("auto-selects JSON by default when no heuristics match", () => {
       mockUseAnalyticsQuery.mockReturnValue({
         data: [],
         loading: false,
@@ -223,11 +223,11 @@ describe("useChartData", () => {
       expect(mockUseAnalyticsQuery).toHaveBeenCalledWith(
         "test",
         { limit: 100 },
-        expect.objectContaining({ format: "ARROW" }),
+        expect.objectContaining({ format: "JSON" }),
       );
     });
 
-    test("defaults to auto format (ARROW) when format is not specified", () => {
+    test("defaults to auto format (JSON) when format is not specified", () => {
       mockUseAnalyticsQuery.mockReturnValue({
         data: [],
         loading: false,
@@ -243,7 +243,7 @@ describe("useChartData", () => {
       expect(mockUseAnalyticsQuery).toHaveBeenCalledWith(
         "test",
         undefined,
-        expect.objectContaining({ format: "ARROW" }),
+        expect.objectContaining({ format: "JSON" }),
       );
     });
   });

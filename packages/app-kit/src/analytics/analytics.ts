@@ -8,7 +8,7 @@ import type {
 import { SQLWarehouseConnector } from "../connectors";
 import { Plugin, toPlugin } from "../plugin";
 import type { Request, Response } from "../utils";
-import { getRequestContext } from "../utils";
+import { getRequestContext, getWorkspaceClient } from "../utils";
 import { queryDefaults } from "./defaults";
 import { QueryProcessor } from "./query";
 import type {
@@ -41,8 +41,21 @@ export class AnalyticsPlugin extends Plugin {
   }
 
   injectRoutes(router: IAppRouter) {
-    // Inject core Arrow routes first (provides /arrow-result/:jobId endpoint)
-    this.injectCoreArrowRoutes(router);
+    this.route(router, {
+      method: "get",
+      path: "/arrow-result/:jobId",
+      handler: async (req: Request, res: Response) => {
+        await this._handleArrowRoute(req, res);
+      },
+    });
+
+    this.route(router, {
+      method: "get",
+      path: "/users/me/arrow-result/:jobId",
+      handler: async (req: Request, res: Response) => {
+        await this._handleArrowRoute(req, res, { asUser: true });
+      },
+    });
 
     this.route<AnalyticsQueryResponse>(router, {
       method: "post",
@@ -61,6 +74,39 @@ export class AnalyticsPlugin extends Plugin {
     });
   }
 
+  private async _handleArrowRoute(
+    req: Request,
+    res: Response,
+    { asUser = false }: { asUser?: boolean } = {},
+  ): Promise<void> {
+    try {
+      const { jobId } = req.params;
+
+      const workspaceClient = getWorkspaceClient(asUser);
+
+      console.log(
+        `Processing Arrow job request: ${jobId} for plugin: ${this.name}`,
+      );
+
+      const result = await this.getArrowData(workspaceClient, jobId);
+
+      res.setHeader("Content-Type", "application/octet-stream");
+      res.setHeader("Content-Length", result.data.length.toString());
+      res.setHeader("Cache-Control", "public, max-age=3600");
+
+      console.log(
+        `Sending Arrow buffer: ${result.data.length} bytes for job ${jobId}`,
+      );
+      res.send(Buffer.from(result.data));
+    } catch (error) {
+      console.error(`Arrow job error for ${this.name}:`, error);
+      res.status(404).json({
+        error: error instanceof Error ? error.message : "Arrow job not found",
+        plugin: this.name,
+      });
+    }
+  }
+
   private async _handleQueryRoute(
     req: Request,
     res: Response,
@@ -68,10 +114,18 @@ export class AnalyticsPlugin extends Plugin {
   ): Promise<void> {
     const { query_key } = req.params;
     const { parameters, format = "JSON" } = req.body as IAnalyticsQueryRequest;
-    const formatParameters =
+    const queryParameters =
       format === "ARROW"
-        ? { disposition: "EXTERNAL_LINKS", format: "ARROW_STREAM" }
-        : {};
+        ? {
+            formatParameters: {
+              disposition: "EXTERNAL_LINKS",
+              format: "ARROW_STREAM",
+            },
+            type: "arrow",
+          }
+        : {
+            type: "result",
+          };
 
     const requestContext = getRequestContext();
     const userKey = asUser
@@ -126,17 +180,14 @@ export class AnalyticsPlugin extends Plugin {
         const result = await this.query(
           query,
           processedParams,
-          formatParameters,
+          queryParameters.formatParameters,
           signal,
           {
             asUser,
           },
         );
 
-        const type =
-          formatParameters.format === "ARROW_STREAM" ? "arrow" : "result";
-
-        return { type, ...result };
+        return { type: queryParameters.type, ...result };
       },
       streamExecutionSettings,
       userKey,
@@ -151,20 +202,10 @@ export class AnalyticsPlugin extends Plugin {
     { asUser = false }: { asUser?: boolean } = {},
   ): Promise<any> {
     const requestContext = getRequestContext();
+    const workspaceClient = getWorkspaceClient(asUser);
+
     const { statement, parameters: sqlParameters } =
       this.queryProcessor.convertToSQLParameters(query, parameters);
-
-    let workspaceClient: WorkspaceClient;
-    if (asUser) {
-      if (!requestContext.userDatabricksClient) {
-        throw new Error(
-          `User token passthrough feature is not enabled for workspace ${requestContext.workspaceId}.`,
-        );
-      }
-      workspaceClient = requestContext.userDatabricksClient;
-    } else {
-      workspaceClient = requestContext.serviceDatabricksClient;
-    }
 
     const response = await this.SQLClient.executeStatement(
       workspaceClient,
@@ -180,11 +221,14 @@ export class AnalyticsPlugin extends Plugin {
     return response.result;
   }
 
+  // If we need arrow stream in more plugins we can define this as a base method in the core plugin class
+  // and have a generic endpoint for each plugin that consumes this arrow data.
   protected async getArrowData(
     workspaceClient: WorkspaceClient,
     jobId: string,
-  ): Promise<any> {
-    return await this.SQLClient.getArrowData(workspaceClient, jobId);
+    signal?: AbortSignal,
+  ): Promise<ReturnType<typeof this.SQLClient.getArrowData>> {
+    return await this.SQLClient.getArrowData(workspaceClient, jobId, signal);
   }
 
   async shutdown(): Promise<void> {
