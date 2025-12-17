@@ -28,26 +28,35 @@ import { TableWrapper } from "./table-wrapper";
 import type { DataTableLabels, DataTableProps } from "./types";
 
 /**
- * Production-ready data table with automatic data fetching and state management
- * Features:
- *  - Automatic column generation from data structure
- *  - Integrated with useAnalyticsQuery for data fetching
- *  - Built-in loading, error, and empty states
- *  - Dynamic filtering, sorting and pagination
- *  - Column visibility controls
- *  - Responsive design
- * @param props - Props for the DataTable component
- * @param props.queryKey - The query key to fetch the data
- * @param props.parameters - The parameters to pass to the query
- * @param props.filterColumn - The column to filter by
- * @param props.filterPlaceholder - The placeholder for the filter input
- * @param props.children - Optional children for full control mode
- * @returns - The rendered data table component
+ * Data table component with automatic query execution and rich features.
+ *
+ * Provides a full-featured table with:
+ * - Automatic column generation from query results
+ * - Built-in sorting, filtering, and pagination
+ * - Column visibility controls
+ * - Loading, error, and empty states
+ * - Responsive design
+ * - Customizable labels and styling
+ *
+ * @param props - Data table configuration
+ * @param props.queryKey - Analytics query identifier
+ * @param props.parameters - Query parameters
+ * @param props.transformer - Optional data transformation function
+ * @param props.filterColumn - Column name to enable text filtering
+ * @param props.filterPlaceholder - Placeholder text for filter input
+ * @param props.labels - Custom labels for UI elements
+ * @param props.children - Optional custom column definitions for full control
+ * @returns Rendered data table with all features
  *
  * @example
- * // Opinionated mode
- * <DataTable
- *  queryKey="users-list"
+ * Basic data table
+ * ```typescript
+ * import { DataTable } from '@databricks/app-kit-ui';
+ *
+ * function UsersList() {
+ *   return (
+ *     <DataTable
+ *       queryKey="users_list"
  *  parameters={{ status: "active" }}
  *  filterColumn="email"
  *  filterPlaceholder="Filter by email..."

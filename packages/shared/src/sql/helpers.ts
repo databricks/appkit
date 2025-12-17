@@ -9,7 +9,30 @@ import type {
 } from "./types";
 
 /**
- * SQL helper namespace
+ * SQL type helpers for type-safe query parameters.
+ *
+ * These helpers ensure correct type handling when passing parameters to SQL queries.
+ * Each helper creates a type marker that the query executor uses to properly format
+ * the parameter for Databricks SQL Warehouse.
+ *
+ * @example
+ * Using SQL helpers with query parameters
+ * ```typescript
+ * import { sql } from '@databricks/app-kit';
+ *
+ * const params = {
+ *   startDate: sql.date('2024-01-01'),
+ *   userId: sql.number(123),
+ *   isActive: sql.boolean(true),
+ *   createdAt: sql.timestamp(new Date())
+ * };
+ *
+ * // Use in query execution
+ * fetch('/query/user_stats', {
+ *   method: 'POST',
+ *   body: JSON.stringify({ parameters: params })
+ * });
+ * ```
  */
 export const sql = {
   /**

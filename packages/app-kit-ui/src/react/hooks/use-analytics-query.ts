@@ -18,12 +18,54 @@ function getDevMode() {
 }
 
 /**
- * Subscribe to an analytics query over SSE and returns its latest result
- * Integration hook between client and analytics plugin
- * @param queryKey - Analytics query identifier
- * @param parameters - Query parameters (type-safe based on QueryRegistry)
- * @param options - Analytics query settings
- * @returns - Query result state
+ * React hook for executing analytics queries with real-time updates via Server-Sent Events.
+ *
+ * Provides automatic query execution, loading states, error handling, and HMR support
+ * in development. The hook manages the SSE connection lifecycle and cleans up on unmount.
+ *
+ * @param queryKey - Query identifier matching a .sql file in your queries directory
+ * @param parameters - Type-safe query parameters (inferred from QueryRegistry if available)
+ * @param options - Query execution options
+ * @param options.autoStart - Whether to start query execution automatically (default: true)
+ * @param options.format - Optional result format transformation
+ * @param options.maxParametersSize - Maximum payload size in bytes (default: 100KB)
+ * @returns Query state object with data, loading, and error properties
+ *
+ * @example
+ * Basic query execution
+ * ```typescript
+ * import { useAnalyticsQuery } from '@databricks/app-kit-ui';
+ *
+ * function UserStats() {
+ *   const { data, loading, error } = useAnalyticsQuery('user_stats', {
+ *     userId: 123
+ *   });
+ *
+ *   if (loading) return <div>Loading...</div>;
+ *   if (error) return <div>Error: {error}</div>;
+ *   return <div>User: {data?.name}</div>;
+ * }
+ * ```
+ *
+ * @example
+ * Manual query execution
+ * ```typescript
+ * import { useAnalyticsQuery } from '@databricks/app-kit-ui';
+ *
+ * function DataExplorer() {
+ *   const { data, loading, error, start } = useAnalyticsQuery(
+ *     'complex_query',
+ *     { filters: {...} },
+ *     { autoStart: false }
+ *   );
+ *
+ *   return (
+ *     <button onClick={start} disabled={loading}>
+ *       Run Query
+ *     </button>
+ *   );
+ * }
+ * ```
  */
 export function useAnalyticsQuery<T = unknown, K extends QueryKey = QueryKey>(
   queryKey: K,

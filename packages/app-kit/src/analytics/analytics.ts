@@ -17,6 +17,34 @@ import type {
   IAnalyticsQueryRequest,
 } from "./types";
 
+/**
+ * Analytics plugin for executing SQL queries against Databricks SQL Warehouse.
+ *
+ * Provides HTTP endpoints for query execution:
+ * - POST /query/:query_key - Execute query as service user
+ * - POST /users/me/query/:query_key - Execute query as authenticated user
+ *
+ * Features:
+ * - Automatic query caching with configurable TTL
+ * - Parameter substitution in SQL queries
+ * - Streaming results via Server-Sent Events
+ * - Telemetry and observability
+ *
+ * @example
+ * Query file: config/queries/user_stats.sql
+ * ```sql
+ * SELECT * FROM users WHERE user_id = :user_id
+ * ```
+ *
+ * Client usage:
+ * ```typescript
+ * const response = await fetch('/query/user_stats', {
+ *   method: 'POST',
+ *   headers: { 'Content-Type': 'application/json' },
+ *   body: JSON.stringify({ parameters: { user_id: 123 } })
+ * });
+ * ```
+ */
 export class AnalyticsPlugin extends Plugin {
   name = "analytics";
   envVars = [];
@@ -165,6 +193,51 @@ export class AnalyticsPlugin extends Plugin {
   }
 }
 
+/**
+ * Creates an analytics plugin instance for SQL query execution.
+ *
+ * The analytics plugin provides:
+ * - SQL query execution against Databricks SQL Warehouse
+ * - Automatic caching of query results
+ * - Type-safe query parameters
+ * - User-scoped and service-scoped query endpoints
+ * - Streaming query results via Server-Sent Events
+ *
+ * Queries are loaded from `.sql` files in your query directory and can be
+ * executed via HTTP endpoints with parameter substitution.
+ *
+ * @param config - Analytics configuration options
+ * @param config.timeout - Query execution timeout in milliseconds
+ * @param config.telemetry - Telemetry configuration for observability
+ * @returns Plugin definition for use with createApp
+ *
+ * @example
+ * Basic analytics setup
+ * ```typescript
+ * import { createApp, server, analytics } from '@databricks/app-kit';
+ *
+ * const app = await createApp({
+ *   plugins: [
+ *     server(),
+ *     analytics({})
+ *   ]
+ * });
+ * ```
+ *
+ * @example
+ * Analytics with custom timeout
+ * ```typescript
+ * import { createApp, analytics } from '@databricks/app-kit';
+ *
+ * const app = await createApp({
+ *   plugins: [
+ *     analytics({
+ *       timeout: 60000 // 60 seconds
+ *     })
+ *   ]
+ * });
+ * ```
+ */
 export const analytics = toPlugin<
   typeof AnalyticsPlugin,
   IAnalyticsConfig,

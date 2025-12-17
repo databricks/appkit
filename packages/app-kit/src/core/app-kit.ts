@@ -121,6 +121,49 @@ export class AppKit<TPlugins extends InputPluginMap> {
   }
 }
 
+/**
+ * Creates and initializes an App Kit application with plugins.
+ *
+ * This is the main entry point for App Kit. It initializes telemetry, cache,
+ * and all provided plugins in the correct lifecycle order (core → normal → deferred).
+ *
+ * @param config - Application configuration
+ * @param config.plugins - Array of plugin definitions created with plugin factories
+ * @param config.telemetry - Optional telemetry configuration for observability
+ * @param config.cache - Optional cache configuration (defaults to Lakebase with in-memory fallback)
+ * @returns Promise resolving to initialized plugin map with type-safe plugin access
+ *
+ * @example
+ * Basic application with server and analytics
+ * ```typescript
+ * import { createApp, server, analytics } from '@databricks/app-kit';
+ *
+ * const app = await createApp({
+ *   plugins: [
+ *     server({ port: 8000 }),
+ *     analytics({})
+ *   ]
+ * });
+ * ```
+ *
+ * @example
+ * Application with custom telemetry and cache configuration
+ * ```typescript
+ * import { createApp, server } from '@databricks/app-kit';
+ *
+ * const app = await createApp({
+ *   plugins: [server()],
+ *   telemetry: {
+ *     serviceName: 'my-app',
+ *     enabled: true
+ *   },
+ *   cache: {
+ *     enabled: true,
+ *     ttl: 3600
+ *   }
+ * });
+ * ```
+ */
 export async function createApp<
   T extends PluginData<PluginConstructor, unknown, string>[],
 >(

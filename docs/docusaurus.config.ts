@@ -42,6 +42,19 @@ const config: Config = {
               label: `Unreleased 🚧`,
             },
           },
+          async sidebarItemsGenerator({
+            defaultSidebarItemsGenerator,
+            ...args
+          }) {
+            const sidebarItems = await defaultSidebarItemsGenerator(args);
+            // exclude API reference - this category is handled manually in sidebars.ts
+            return sidebarItems.filter(
+              (item) =>
+                item.type !== "category" ||
+                item.link?.type !== "doc" ||
+                item.link.id !== "api/index",
+            );
+          },
         },
         theme: {
           customCss: "./src/css/custom.css",
@@ -50,10 +63,57 @@ const config: Config = {
     ],
   ],
 
-  plugins: [require.resolve("docusaurus-lunr-search")],
+  plugins: [
+    require.resolve("docusaurus-lunr-search"),
+    [
+      "docusaurus-plugin-typedoc",
+      {
+        id: "app-kit",
+        entryPoints: ["../packages/app-kit/src/index.ts"],
+        tsconfig: "../packages/app-kit/tsconfig.json",
+        out: "docs/api/app-kit",
+        gitRevision: "main",
+        useCodeBlocks: true,
+        excludeExternals: true,
+        excludePrivate: true,
+        excludeProtected: false,
+        excludeInternal: true,
+        indexFormat: "table",
+        readme: "none",
+        parametersFormat: "table",
+        sidebar: {
+          autoConfiguration: true,
+          pretty: true,
+          typescript: true,
+        },
+      },
+    ],
+    [
+      "docusaurus-plugin-typedoc",
+      {
+        id: "app-kit-ui",
+        entryPoints: ["../packages/app-kit-ui/src/react/index.ts"],
+        tsconfig: "../packages/app-kit-ui/tsconfig.json",
+        out: "docs/api/app-kit-ui",
+        gitRevision: "main",
+        useCodeBlocks: true,
+        excludeExternals: true,
+        excludePrivate: true,
+        excludeProtected: false,
+        excludeInternal: true,
+        indexFormat: "table",
+        readme: "none",
+        parametersFormat: "table",
+        sidebar: {
+          autoConfiguration: true,
+          pretty: true,
+          typescript: true,
+        },
+      },
+    ],
+  ],
 
   themeConfig: {
-    image: "img/docusaurus-social-card.jpg", // TODO:
     colorMode: {
       respectPrefersColorScheme: true,
     },
@@ -70,10 +130,11 @@ const config: Config = {
           position: "left",
           label: "Getting started",
         },
-        {
-          type: "docsVersionDropdown",
-          position: "right",
-        },
+        // TODO: Uncomment once we have a first 0.1 release
+        // {
+        //   type: "docsVersionDropdown",
+        //   position: "right",
+        // },
         {
           href: "https://github.com/databricks/app-kit",
           label: "GitHub",
@@ -89,7 +150,7 @@ const config: Config = {
           items: [
             {
               label: "Getting started",
-              to: "/docs/getting-started",
+              to: "/docs/",
             },
           ],
         },

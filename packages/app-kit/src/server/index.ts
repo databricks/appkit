@@ -16,18 +16,45 @@ import { ViteDevServer } from "./vite-dev-server";
 dotenv.config({ path: path.resolve(process.cwd(), "./.env") });
 
 /**
- * Server plugin for the App Kit.
+ * Server plugin for serving HTTP endpoints and static files.
  *
- * This plugin is responsible for starting the server and serving the static files.
- * It also handles the remote tunneling for development purposes.
+ * Provides:
+ * - Express server with automatic startup
+ * - Vite dev server integration for development
+ * - Static file serving for production builds
+ * - Remote tunnel support for Databricks Apps
+ * - Route injection from other plugins
+ *
+ * The server runs in deferred phase to ensure all other plugins are initialized first.
  *
  * @example
- * ```ts
- * createApp({
- *   plugins: [server(), telemetryExamples(), analytics({})],
+ * Basic server with default configuration
+ * ```typescript
+ * import { createApp, server } from '@databricks/app-kit';
+ *
+ * const app = await createApp({
+ *   plugins: [server()]
  * });
+ * // Server starts automatically on port 8000
  * ```
  *
+ * @example
+ * Custom server configuration
+ * ```typescript
+ * import { createApp, server } from '@databricks/app-kit';
+ *
+ * const app = await createApp({
+ *   plugins: [
+ *     server({
+ *       port: 3000,
+ *       host: 'localhost',
+ *       autoStart: true,
+ *       clientDir: './client',
+ *       distDir: './dist'
+ *     })
+ *   ]
+ * });
+ * ```
  */
 export class ServerPlugin extends Plugin {
   public static DEFAULT_CONFIG = {
@@ -311,6 +338,29 @@ export class ServerPlugin extends Plugin {
 
 const EXCLUDED_PLUGINS = [ServerPlugin.name];
 
+/**
+ * Creates a server plugin instance.
+ *
+ * Factory function for the ServerPlugin. Use this to add HTTP server capabilities
+ * to your App Kit application.
+ *
+ * @param config - Server configuration options
+ * @param config.port - Port number (default: 8000 or DATABRICKS_APP_PORT env var)
+ * @param config.host - Host address (default: 0.0.0.0 or FLASK_RUN_HOST env var)
+ * @param config.autoStart - Whether to start server automatically (default: true)
+ * @param config.clientDir - Directory containing client source code
+ * @param config.distDir - Directory containing production build
+ * @returns Plugin definition for use with createApp
+ *
+ * @example
+ * ```typescript
+ * import { createApp, server } from '@databricks/app-kit';
+ *
+ * const app = await createApp({
+ *   plugins: [server({ port: 3000 })]
+ * });
+ * ```
+ */
 export const server = toPlugin<typeof ServerPlugin, ServerConfig, "server">(
   ServerPlugin,
   "server",

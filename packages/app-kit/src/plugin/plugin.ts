@@ -29,6 +29,45 @@ import type {
   ExecutionInterceptor,
 } from "./interceptors/types";
 
+/**
+ * Base class for all App Kit plugins.
+ *
+ * Plugins are the building blocks of App Kit applications. They provide functionality
+ * like serving HTTP endpoints, executing SQL queries, or custom business logic.
+ *
+ * Plugins have access to:
+ * - Cache manager for data caching
+ * - Telemetry for observability
+ * - Stream manager for SSE responses
+ * - App manager for query access
+ *
+ * @example
+ * Creating a custom plugin
+ * ```typescript
+ * import { Plugin, toPlugin } from '@databricks/app-kit';
+ *
+ * class MyPlugin extends Plugin {
+ *   name = 'my-plugin';
+ *   envVars = ['MY_API_KEY'];
+ *
+ *   async setup() {
+ *     console.log('Plugin initialized');
+ *   }
+ *
+ *   injectRoutes(router) {
+ *     this.route(router, {
+ *       method: 'get',
+ *       path: '/hello',
+ *       handler: async (req, res) => {
+ *         res.json({ message: 'Hello from my plugin!' });
+ *       }
+ *     });
+ *   }
+ * }
+ *
+ * export const myPlugin = toPlugin(MyPlugin, 'my-plugin');
+ * ```
+ */
 export abstract class Plugin<
   TConfig extends BasePluginConfig = BasePluginConfig,
 > implements BasePlugin
@@ -58,14 +97,50 @@ export abstract class Plugin<
     this.isReady = true;
   }
 
+  /**
+   * Validates required environment variables for the plugin.
+   * Called automatically during plugin initialization.
+   */
   validateEnv() {
     validateEnv(this.envVars);
   }
 
+  /**
+   * Inject HTTP routes for the plugin.
+   * Override this method to add custom routes to the Express router.
+   *
+   * @param router - Express router instance
+   *
+   * @example
+   * ```typescript
+   * injectRoutes(router) {
+   *   this.route(router, {
+   *     method: 'get',
+   *     path: '/status',
+   *     handler: async (req, res) => {
+   *       res.json({ status: 'ok' });
+   *     }
+   *   });
+   * }
+   * ```
+   */
   injectRoutes(_: express.Router) {
     return;
   }
 
+  /**
+   * Plugin setup lifecycle hook.
+   * Override this method to perform async initialization (e.g., database connections).
+   * Called after all plugins are instantiated but before the server starts.
+   *
+   * @example
+   * ```typescript
+   * async setup() {
+   *   await this.initializeDatabase();
+   *   console.log('Plugin ready');
+   * }
+   * ```
+   */
   async setup() {}
 
   abortActiveOperations(): void {

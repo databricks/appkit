@@ -12,20 +12,55 @@ import { detectFields, formatXAxisTick, generateChartConfig } from "../utils";
 import type { BarChartProps } from "./types";
 
 /**
- * Production-ready bar chart with automatic data fetching and state management
- * @param props - Props for the BarChart component
- * @returns - The rendered chart component with error boundary
+ * Bar chart component with automatic query execution and data visualization.
+ *
+ * Integrates with the analytics plugin to fetch and display data as a bar chart.
+ * Supports automatic field detection, custom transformations, loading states,
+ * and error handling out of the box.
+ *
+ * @param props - Bar chart configuration
+ * @param props.queryKey - Analytics query identifier
+ * @param props.parameters - Query parameters
+ * @param props.transformer - Optional data transformation function
+ * @param props.chartConfig - Custom chart configuration (colors, labels)
+ * @param props.orientation - Chart orientation: 'vertical' or 'horizontal' (default: vertical)
+ * @param props.height - Chart height (default: '300px')
+ * @param props.children - Optional custom Bar components for full control
+ * @returns Rendered bar chart with loading and error states
+ *
  * @example
- * // Simple usage
- * <BarChart queryKey="top_contributors" parameters={{ limit: 10 }} />
+ * Basic bar chart
+ * ```typescript
+ * import { BarChart } from '@databricks/app-kit-ui';
+ *
+ * function TopContributors() {
+ *   return (
+ *     <BarChart
+ *       queryKey="top_contributors"
+ *       parameters={{ limit: 10 }}
+ *     />
+ *   );
+ * }
+ * ```
+ *
  * @example
- * // With data transformation
- * <BarChart queryKey="top_contributors" parameters={{ limit: 10 }} transformer={(data) => data.map((d) => ({ name: d.name, value: d.value }))} />
- * @example
- * // With full control mode
- * <BarChart queryKey="top_contributors" parameters={{ limit: 10 }}>
- *  <Bar dataKey="value" fill="red" />
- * </BarChart>
+ * Horizontal bar chart with custom styling
+ * ```typescript
+ * import { BarChart } from '@databricks/app-kit-ui';
+ *
+ * function SalesChart() {
+ *   return (
+ *     <BarChart
+ *       queryKey="sales_by_region"
+ *       orientation="horizontal"
+ *       height="400px"
+ *       chartConfig={{
+ *         sales: { label: 'Sales', color: '#8884d8' }
+ *       }}
+ *     />
+ *   );
+ * }
+ * ```
  */
 export function BarChart(props: BarChartProps) {
   const {
