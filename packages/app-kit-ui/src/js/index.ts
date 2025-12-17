@@ -1,5 +1,6 @@
 export {
   isSQLTypeMarker,
+  type PathParams,
   type SQLBinaryMarker,
   type SQLBooleanMarker,
   type SQLDateMarker,
@@ -11,4 +12,5 @@ export {
 } from "shared";
 export * from "./arrow";
 export * from "./constants";
+export * from "./endpoints";
 export * from "./sse";

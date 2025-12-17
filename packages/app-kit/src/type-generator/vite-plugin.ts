@@ -1,35 +1,51 @@
-import { execSync } from "node:child_process";
 import path from "node:path";
 import type { Plugin } from "vite";
+import { generateFromEntryPoint } from "./index";
 
 /**
  * Options for the AppKit types plugin.
  */
 interface AppKitTypesPluginOptions {
-  /* Path to the output d.ts file (relative to client folder). */
+  /** Path to the output d.ts file (relative to client folder). */
   outFile?: string;
   /** Folders to watch for changes. */
   watchFolders?: string[];
+  /**
+   * Server URL to fetch plugin endpoints from.
+   * Used to generate typed API client.
+   * @default "http://localhost:8000" in development
+   */
+  serverUrl?: string;
 }
 
+const DEFAULT_SERVER_URL = "http://localhost:8000";
+
 /**
- * Vite plugin to generate types for AppKit queries.
- * Calls `npx appkit-generate-types` under the hood.
+ * Vite plugin to generate types for AppKit queries and plugin endpoints.
+ *
+ * Features:
+ * - Generates QueryRegistry types from SQL files
+ * - Generates AppKitPlugins types from server plugin endpoints
+ * - Watches for SQL file changes and regenerates
+ * - In dev mode, fetches plugin schema after server starts
+ *
  * @param options - Options to override default values.
  * @returns Vite plugin to generate types for AppKit queries.
  */
 export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
   let root: string;
-  let appRoot: string;
   let outFile: string;
   let watchFolders: string[];
+  let serverUrl: string;
 
-  function generate() {
+  async function generate() {
     try {
-      const args = [appRoot, outFile].join(" ");
-      execSync(`npx appkit-generate-types ${args}`, {
-        cwd: appRoot,
-        stdio: "inherit",
+      await generateFromEntryPoint({
+        outFile,
+        queryFolder: watchFolders[0],
+        warehouseId: process.env.DATABRICKS_WAREHOUSE_ID || "",
+        serverUrl,
+        noCache: false,
       });
     } catch (error) {
       // throw in production to fail the build
@@ -42,16 +58,21 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
 
   return {
     name: "appkit-types",
+
     configResolved(config) {
       root = config.root;
-      appRoot = path.resolve(root, "..");
 
       outFile = path.resolve(root, options?.outFile ?? "src/appKitTypes.d.ts");
+      serverUrl =
+        options?.serverUrl ||
+        process.env.APPKIT_SERVER_URL ||
+        DEFAULT_SERVER_URL;
 
       watchFolders = (options?.watchFolders ?? ["../config/queries"]).map(
         (folder) => path.resolve(root, folder),
       );
     },
+
     buildStart() {
       generate();
     },
@@ -67,6 +88,10 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         if (isWatchedFile && changedFile.endsWith(".sql")) {
           generate();
         }
+      });
+
+      server.watcher.on("ready", async () => {
+        generate();
       });
     },
   };
