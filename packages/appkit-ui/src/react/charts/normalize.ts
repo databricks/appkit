@@ -316,7 +316,7 @@ export interface NormalizedHeatmapData extends NormalizedChartDataBase {
 
 /**
  * Normalizes data specifically for heatmap charts.
- * Expects data in format: { xKey: string, yAxisKey: string, valueKey: number }
+ * Expects data in format: `{ xKey: string, yAxisKey: string, valueKey: number }`
  *
  * @param data - Raw data (Arrow Table or JSON array)
  * @param xKey - Field key for X-axis (columns)
