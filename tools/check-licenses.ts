@@ -13,6 +13,7 @@ const allowedLicenses = new Set([
   "0BSD",
   "(Public Domain OR MIT)",
   "(MIT OR CC0-1.0)",
+  "(BSD-3-Clause OR GPL-2.0)", // in case of such dual licensing, we use BSD-3-Clause
   "MPL-2.0",
 ]);
 
