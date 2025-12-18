@@ -2,55 +2,71 @@ import type { ReactNode } from "react";
 import clsx from "clsx";
 import Heading from "@theme/Heading";
 import styles from "./styles.module.css";
+import LayersIcon from "./icons/layers.svg";
+import CodeIcon from "./icons/code.svg";
+import SparklesIcon from "./icons/sparkles.svg";
+import PuzzleIcon from "./icons/puzzle.svg";
 
 type FeatureItem = {
   title: string;
-  Svg: React.ComponentType<React.ComponentProps<"svg">>;
+  Icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
   description: ReactNode;
 };
 
 const FeatureList: FeatureItem[] = [
   {
-    title: "Easy to Use",
-    Svg: require("@site/static/img/undraw_docusaurus_mountain.svg").default,
+    title: "Full-Stack SDK",
+    Icon: LayersIcon,
     description: (
       <>
-        Docusaurus was designed from the ground up to be easily installed and
-        used to get your website up and running quickly.
+        Backend with Express, Vite, and plugins. Frontend with React hooks,
+        charts, and UI components. Everything you need out-of-the-box.
       </>
     ),
   },
   {
-    title: "Focus on What Matters",
-    Svg: require("@site/static/img/undraw_docusaurus_tree.svg").default,
+    title: "Extensible Plugins",
+    Icon: PuzzleIcon,
     description: (
       <>
-        Docusaurus lets you focus on your docs, and we&apos;ll do the chores. Go
-        ahead and move your docs into the <code>docs</code> directory.
+        Plugin system with lifecycle phases, built-in plugins for common tasks,
+        and full support for custom plugins. Extend at any level.
       </>
     ),
   },
   {
-    title: "Powered by React",
-    Svg: require("@site/static/img/undraw_docusaurus_react.svg").default,
+    title: "Type-Safe SQL Queries",
+    Icon: CodeIcon,
     description: (
       <>
-        Extend or customize your website layout by reusing React. Docusaurus can
-        be extended while reusing the same header and footer.
+        Write Databricks SQL queries and get TypeScript types automatically.
+        Full parameter type safety across your entire stack.
+      </>
+    ),
+  },
+  {
+    title: "Built for Humans & AI",
+    Icon: SparklesIcon,
+    description: (
+      <>
+        Designed for both developers and AI agents. Every API is discoverable,
+        self-documenting, and inferable by humans and LLMs alike.
       </>
     ),
   },
 ];
 
-function Feature({ title, Svg, description }: FeatureItem) {
+function Feature({ title, Icon, description }: FeatureItem) {
   return (
-    <div className={clsx("col col--4")}>
-      <div className="text--center">
-        <Svg className={styles.featureSvg} role="img" />
-      </div>
-      <div className="text--center padding-horiz--md">
-        <Heading as="h3">{title}</Heading>
-        <p>{description}</p>
+    <div className={clsx("col col--6")}>
+      <div className={styles.featureCard}>
+        <div className={styles.featureIcon}>
+          <Icon />
+        </div>
+        <Heading as="h3" className={styles.featureTitle}>
+          {title}
+        </Heading>
+        <p className={styles.featureDescription}>{description}</p>
       </div>
     </div>
   );
@@ -60,7 +76,7 @@ export default function HomepageFeatures(): ReactNode {
   return (
     <section className={styles.features}>
       <div className="container">
-        <div className="row">
+        <div className={clsx("row", styles.featuresContainer)}>
           {FeatureList.map((props) => (
             <Feature key={props.title} {...props} />
           ))}
