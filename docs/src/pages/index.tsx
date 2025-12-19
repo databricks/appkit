@@ -9,20 +9,18 @@ import Heading from "@theme/Heading";
 import styles from "./index.module.css";
 
 function HomepageHeader() {
-  const { siteConfig } = useDocusaurusContext();
   return (
     <header className={clsx("hero hero--primary", styles.heroBanner)}>
       <div className="container">
         <Heading as="h1" className="hero__title">
-          {siteConfig.title}
+          Build Databricks Apps faster
         </Heading>
-        <p className="hero__subtitle">{siteConfig.tagline}</p>
+        <p className="hero__subtitle">
+          Node.js + React SDK for Databricks Apps. Built for humans and AI.
+        </p>
         <div className={styles.buttons}>
-          <Link
-            className="button button--secondary button--lg"
-            to="/docs/intro"
-          >
-            Docusaurus Tutorial - 5min ⏱️
+          <Link className="button button--secondary button--lg" to="/docs/">
+            Get Started
           </Link>
         </div>
       </div>
@@ -34,8 +32,8 @@ export default function Home(): ReactNode {
   const { siteConfig } = useDocusaurusContext();
   return (
     <Layout
-      title={`Hello from ${siteConfig.title}`}
-      description="Description will go into a meta tag in <head />"
+      title={`${siteConfig.title} - Build Databricks Apps faster`}
+      description="Node.js + React SDK for Databricks Apps. Built for humans and AI."
     >
       <HomepageHeader />
       <main>

@@ -5,8 +5,8 @@ import type * as Preset from "@docusaurus/preset-classic";
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
 const config: Config = {
-  title: "My Site",
-  tagline: "Dinosaurs are cool",
+  title: "AppKit",
+  tagline: "Node.js + React SDK for Databricks Apps. Built for humans and AI.",
   favicon: "img/favicon.ico",
 
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
@@ -14,16 +14,11 @@ const config: Config = {
     v4: true, // Improve compatibility with the upcoming Docusaurus v4
   },
 
-  // Set the production url of your site here
-  url: "https://your-docusaurus-site.example.com",
-  // Set the /<baseUrl>/ pathname under which your site is served
-  // For GitHub pages deployment, it is often '/<projectName>/'
-  baseUrl: "/",
+  url: "https://databricks.github.io",
+  baseUrl: "/appkit/",
 
-  // GitHub pages deployment config.
-  // If you aren't using GitHub pages, you don't need these.
-  organizationName: "facebook", // Usually your GitHub org/user name.
-  projectName: "docusaurus", // Usually your repo name.
+  organizationName: "databricks",
+  projectName: "appkit",
 
   onBrokenLinks: "throw",
 
@@ -41,25 +36,25 @@ const config: Config = {
       {
         docs: {
           sidebarPath: "./sidebars.ts",
-          // Please change this to your repo.
-          // Remove this to remove the "edit this page" links.
-          editUrl:
-            "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/",
-        },
-        blog: {
-          showReadingTime: true,
-          feedOptions: {
-            type: ["rss", "atom"],
-            xslt: true,
+          editUrl: "https://github.com/databricks/appkit/edit/main/docs/",
+          versions: {
+            current: {
+              label: `Unreleased 🚧`,
+            },
           },
-          // Please change this to your repo.
-          // Remove this to remove the "edit this page" links.
-          editUrl:
-            "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/",
-          // Useful options to enforce blogging best practices
-          onInlineTags: "warn",
-          onInlineAuthors: "warn",
-          onUntruncatedBlogPosts: "warn",
+          async sidebarItemsGenerator({
+            defaultSidebarItemsGenerator,
+            ...args
+          }) {
+            const sidebarItems = await defaultSidebarItemsGenerator(args);
+            // exclude API reference - this category is handled manually in sidebars.ts
+            return sidebarItems.filter(
+              (item) =>
+                item.type !== "category" ||
+                item.link?.type !== "doc" ||
+                item.link.id !== "api/index",
+            );
+          },
         },
         theme: {
           customCss: "./src/css/custom.css",
@@ -68,28 +63,44 @@ const config: Config = {
     ],
   ],
 
+  plugins: [require.resolve("docusaurus-lunr-search")],
+
   themeConfig: {
-    // Replace with your project's social card
-    image: "img/docusaurus-social-card.jpg",
     colorMode: {
       respectPrefersColorScheme: true,
     },
+    metadata: [
+      {
+        name: "keywords",
+        content:
+          "Databricks Apps, Node.js, React.js, SDK, TypeScript, SQL, Databricks, AI, full-stack, development",
+      },
+    ],
     navbar: {
-      title: "My Site",
+      title: "AppKit",
       logo: {
-        alt: "My Site Logo",
-        src: "img/logo.svg",
+        alt: "AppKit",
+        src: "img/logo.png",
       },
       items: [
         {
           type: "docSidebar",
-          sidebarId: "tutorialSidebar",
+          sidebarId: "docsSidebar",
           position: "left",
-          label: "Tutorial",
+          label: "Documentation",
         },
-        { to: "/blog", label: "Blog", position: "left" },
         {
-          href: "https://github.com/facebook/docusaurus",
+          to: "/contributing",
+          position: "left",
+          label: "Contributing",
+        },
+        // TODO: Uncomment once we have a first 0.1 release
+        // {
+        //   type: "docsVersionDropdown",
+        //   position: "right",
+        // },
+        {
+          href: "https://github.com/databricks/appkit",
           label: "GitHub",
           position: "right",
         },
@@ -102,8 +113,8 @@ const config: Config = {
           title: "Docs",
           items: [
             {
-              label: "Tutorial",
-              to: "/docs/intro",
+              label: "Getting started",
+              to: "/docs/",
             },
           ],
         },
@@ -111,16 +122,12 @@ const config: Config = {
           title: "Community",
           items: [
             {
-              label: "Stack Overflow",
-              href: "https://stackoverflow.com/questions/tagged/docusaurus",
+              label: "Contributing",
+              to: "/contributing",
             },
             {
-              label: "Discord",
-              href: "https://discordapp.com/invite/docusaurus",
-            },
-            {
-              label: "X",
-              href: "https://x.com/docusaurus",
+              label: "GitHub",
+              href: "https://github.com/databricks/appkit",
             },
           ],
         },
@@ -128,21 +135,21 @@ const config: Config = {
           title: "More",
           items: [
             {
-              label: "Blog",
-              to: "/blog",
+              label: "Databricks Apps docs",
+              href: "https://docs.databricks.com/aws/en/dev-tools/databricks-apps/",
             },
             {
-              label: "GitHub",
-              href: "https://github.com/facebook/docusaurus",
+              label: "Databricks CLI",
+              href: "https://github.com/databricks/cli",
             },
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} My Project, Inc. Built with Docusaurus.`,
+      copyright: `Copyright © ${new Date().getFullYear()} Databricks, Inc.`,
     },
     prism: {
-      theme: prismThemes.github,
-      darkTheme: prismThemes.dracula,
+      theme: prismThemes.vsLight,
+      darkTheme: prismThemes.vsDark,
     },
   } satisfies Preset.ThemeConfig,
 };
