@@ -68,10 +68,10 @@ const config: Config = {
     [
       "docusaurus-plugin-typedoc",
       {
-        id: "app-kit",
-        entryPoints: ["../packages/app-kit/src/index.ts"],
-        tsconfig: "../packages/app-kit/tsconfig.json",
-        out: "docs/api/app-kit",
+        id: "appkit",
+        entryPoints: ["../packages/appkit/src/index.ts"],
+        tsconfig: "../packages/appkit/tsconfig.json",
+        out: "docs/api/appkit",
         gitRevision: "main",
         useCodeBlocks: true,
         excludeExternals: true,
@@ -91,10 +91,10 @@ const config: Config = {
     [
       "docusaurus-plugin-typedoc",
       {
-        id: "app-kit-ui",
-        entryPoints: ["../packages/app-kit-ui/src/react/index.ts"],
-        tsconfig: "../packages/app-kit-ui/tsconfig.json",
-        out: "docs/api/app-kit-ui",
+        id: "appkit-ui",
+        entryPoints: ["../packages/appkit-ui/src/react/index.ts"],
+        tsconfig: "../packages/appkit-ui/tsconfig.json",
+        out: "docs/api/appkit-ui",
         gitRevision: "main",
         useCodeBlocks: true,
         excludeExternals: true,

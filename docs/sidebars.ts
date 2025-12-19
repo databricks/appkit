@@ -1,6 +1,6 @@
 import type { SidebarsConfig } from "@docusaurus/plugin-content-docs";
-import typedocSidebar from "./docs/api/app-kit/typedoc-sidebar";
-import uiTypedocSidebar from "./docs/api/app-kit-ui/typedoc-sidebar";
+import typedocSidebar from "./docs/api/appkit/typedoc-sidebar";
+import uiTypedocSidebar from "./docs/api/appkit-ui/typedoc-sidebar";
 
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
@@ -30,19 +30,19 @@ const sidebars: SidebarsConfig = {
       items: [
         {
           type: "category",
-          label: "@databricks/app-kit",
+          label: "@databricks/appkit",
           link: {
             type: "doc",
-            id: "api/app-kit/index",
+            id: "api/appkit/index",
           },
           items: typedocSidebar.items,
         },
         {
           type: "category",
-          label: "@databricks/app-kit-ui",
+          label: "@databricks/appkit-ui",
           link: {
             type: "doc",
-            id: "api/app-kit-ui/index",
+            id: "api/appkit-ui/index",
           },
           items: uiTypedocSidebar.items,
         },
