@@ -5,7 +5,7 @@ import type * as Preset from "@docusaurus/preset-classic";
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
 const config: Config = {
-  title: "App Kit",
+  title: "AppKit",
   tagline: "Node.js + React SDK for Databricks Apps. Built for humans and AI.",
   favicon: "img/favicon.ico",
 
@@ -15,10 +15,10 @@ const config: Config = {
   },
 
   url: "https://databricks.github.io",
-  baseUrl: "/app-kit/",
+  baseUrl: "/appkit/",
 
   organizationName: "databricks",
-  projectName: "app-kit",
+  projectName: "appkit",
 
   onBrokenLinks: "throw",
 
@@ -36,7 +36,7 @@ const config: Config = {
       {
         docs: {
           sidebarPath: "./sidebars.ts",
-          editUrl: "https://github.com/databricks/app-kit/edit/main/docs/",
+          editUrl: "https://github.com/databricks/appkit/edit/main/docs/",
           versions: {
             current: {
               label: `Unreleased 🚧`,
@@ -77,9 +77,9 @@ const config: Config = {
       },
     ],
     navbar: {
-      title: "App Kit",
+      title: "AppKit",
       logo: {
-        alt: "App Kit",
+        alt: "AppKit",
         src: "img/logo.png",
       },
       items: [
@@ -100,7 +100,7 @@ const config: Config = {
         //   position: "right",
         // },
         {
-          href: "https://github.com/databricks/app-kit",
+          href: "https://github.com/databricks/appkit",
           label: "GitHub",
           position: "right",
         },
@@ -127,7 +127,7 @@ const config: Config = {
             },
             {
               label: "GitHub",
-              href: "https://github.com/databricks/app-kit",
+              href: "https://github.com/databricks/appkit",
             },
           ],
         },
