@@ -3,7 +3,7 @@ import { defineConfig } from "tsdown";
 export default defineConfig([
   {
     publint: true,
-    name: "@databricks/app-kit",
+    name: "@databricks/appkit",
     entry: "src/index.ts",
     outDir: "dist",
     hash: false,

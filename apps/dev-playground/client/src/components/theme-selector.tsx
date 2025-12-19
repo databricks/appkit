@@ -5,12 +5,12 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@databricks/app-kit-ui/react";
-import { Button } from "@databricks/app-kit-ui/react";
+} from "@databricks/appkit-ui/react";
+import { Button } from "@databricks/appkit-ui/react";
 
 type Theme = "light" | "dark" | "system";
 
-const THEME_STORAGE_KEY = "app-kit-playground-theme";
+const THEME_STORAGE_KEY = "appkit-playground-theme";
 
 function getSystemTheme(): "light" | "dark" {
   if (typeof window === "undefined") return "light";

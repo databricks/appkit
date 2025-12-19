@@ -14,7 +14,7 @@
       "!**/*.d.ts",
       "!**/build",
       "!**/coverage",
-      "!packages/app-kit-ui/src/react/ui",
+      "!packages/appkit-ui/src/react/ui",
       "!**/routeTree.gen.ts",
       "!docs/.docusaurus"
     ]

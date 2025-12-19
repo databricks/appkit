@@ -4,7 +4,7 @@ import {
   CardHeader,
   CardTitle,
   Skeleton,
-} from "@databricks/app-kit-ui/react";
+} from "@databricks/appkit-ui/react";
 import type { Aggregation, DashboardFilters } from "@/lib/types";
 
 interface SummaryCardsProps {

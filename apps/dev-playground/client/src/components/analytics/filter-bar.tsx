@@ -7,7 +7,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@databricks/app-kit-ui/react";
+} from "@databricks/appkit-ui/react";
 
 interface FilterBarProps {
   filters: DashboardFilters;

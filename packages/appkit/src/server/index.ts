@@ -16,7 +16,7 @@ import { ViteDevServer } from "./vite-dev-server";
 dotenv.config({ path: path.resolve(process.cwd(), "./.env") });
 
 /**
- * Server plugin for the App Kit.
+ * Server plugin for the AppKit.
  *
  * This plugin is responsible for starting the server and serving the static files.
  * It also handles the remote tunneling for development purposes.

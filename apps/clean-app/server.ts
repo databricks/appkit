@@ -1,4 +1,4 @@
-import { createApp, server } from "@databricks/app-kit";
+import { createApp, server } from "@databricks/appkit";
 
 createApp({
   plugins: [server()],

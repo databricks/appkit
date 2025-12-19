@@ -1,4 +1,4 @@
-import { Card } from "@databricks/app-kit-ui/react";
+import { Card } from "@databricks/appkit-ui/react";
 
 export function TestPlan() {
   return (

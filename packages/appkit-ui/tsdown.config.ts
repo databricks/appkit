@@ -3,7 +3,7 @@ import { defineConfig } from "tsdown";
 export default defineConfig([
   {
     publint: true,
-    name: "@databricks/app-kit-ui",
+    name: "@databricks/appkit-ui",
     entry: ["src/js/index.ts", "src/react/index.ts"],
     outDir: "dist",
     platform: "browser",

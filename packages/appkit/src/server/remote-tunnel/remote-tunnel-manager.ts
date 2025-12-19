@@ -24,7 +24,7 @@ interface DevFileReader {
 }
 
 /**
- * Remote tunnel manager for the App Kit.
+ * Remote tunnel manager for the AppKit.
  *
  * This class is responsible for managing the remote tunnels for the development server.
  * It also handles the asset fetching and the HMR for the development server.

@@ -2,7 +2,7 @@ import type express from "express";
 import { type PluginEndpoints, getConfigScript } from "./utils";
 
 /**
- * Base server for the App Kit.
+ * Base server for the AppKit.
  *
  * Abstract base class that provides common functionality for serving
  * frontend applications. Subclasses implement specific serving strategies

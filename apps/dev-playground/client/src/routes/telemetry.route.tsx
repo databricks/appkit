@@ -1,5 +1,5 @@
 import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
-import { Button, Card } from "@databricks/app-kit-ui/react";
+import { Button, Card } from "@databricks/appkit-ui/react";
 import { useState } from "react";
 import { Activity, Loader2 } from "lucide-react";
 

@@ -22,7 +22,7 @@ jobs:
     name: Detect Changes
     outputs:
       docs: ${{ steps.filter.outputs.docs }}
-      app-kit: ${{ steps.filter.outputs.app-kit }}
+      appkit: ${{ steps.filter.outputs.appkit }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -31,7 +31,7 @@ jobs:
           filters: |
             docs:
               - 'docs/**'
-            app-kit:
+            appkit:
               - '!docs/**'
 
   lint_and_typecheck:
@@ -61,7 +61,7 @@ jobs:
   test:
     name: Unit Tests
     needs: detect-changes
-    if: needs.detect-changes.outputs.app-kit == 'true'
+    if: needs.detect-changes.outputs.appkit == 'true'
     runs-on:
       group: databricks-protected-runner-group
       labels: linux-ubuntu-latest

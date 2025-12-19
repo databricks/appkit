@@ -6,7 +6,7 @@ import {
   useLocation,
 } from "@tanstack/react-router";
 import { ErrorComponent } from "@/components/error-component";
-import { Button, TooltipProvider } from "@databricks/app-kit-ui/react";
+import { Button, TooltipProvider } from "@databricks/appkit-ui/react";
 import { ThemeSelector } from "@/components/theme-selector";
 
 export const Route = createRootRoute({
@@ -28,7 +28,7 @@ function RootComponent() {
                 className="no-underline text-inherit hover:opacity-80 transition-opacity"
               >
                 <h4 className="text-xl font-semibold tracking-tight text-foreground">
-                  App Kit Playground
+                  AppKit Playground
                 </h4>
               </Link>
               <div className="flex items-center gap-3">

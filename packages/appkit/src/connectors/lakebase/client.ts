@@ -283,7 +283,7 @@ export class LakebaseConnector {
       return serviceDatabricksClient;
     } catch (_error) {
       throw new Error(
-        "Databricks workspace client not available. Either pass it in config or use within App Kit request context.",
+        "Databricks workspace client not available. Either pass it in config or use within AppKit request context.",
       );
     }
   }

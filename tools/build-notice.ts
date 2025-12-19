@@ -17,8 +17,8 @@ type PackageJson = {
 
 // Packages whose direct dependencies we want to include in NOTICE.md
 const PUBLISHED_PACKAGES = [
-  "packages/app-kit",
-  "packages/app-kit-ui",
+  "packages/appkit",
+  "packages/appkit-ui",
   "packages/shared",
 ];
 

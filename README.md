@@ -1,4 +1,4 @@
-# App Kit
+# AppKit
 
 > [!WARNING]
 > ## ⚠️ PREVIEW - NOT FOR PRODUCTION USE
@@ -17,7 +17,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and contribution gu
 
 ## Documentation
 
-The `docs/` directory contains the App Kit documentation site, built with Docusaurus.
+The `docs/` directory contains the AppKit documentation site, built with Docusaurus.
 
 **Working with docs:**
 

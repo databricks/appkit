@@ -1,5 +1,5 @@
 {
-  "name": "app-kit",
+  "name": "appkit",
   "version": "1.0.0",
   "main": "build/index.js",
   "scripts": {
@@ -21,7 +21,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@databricks/app-kit": "workspace:*",
+    "@databricks/appkit": "workspace:*",
     "zod": "^4.1.13"
   },
   "devDependencies": {

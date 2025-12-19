@@ -8,7 +8,7 @@ import type { PluginEndpoints } from "./utils";
 import { appKitTypesPlugin } from "../type-generator/vite-plugin";
 
 /**
- * Vite dev server for the App Kit.
+ * Vite dev server for the AppKit.
  *
  * This class is responsible for serving the Vite dev server for the development server.
  * It also handles the index.html file for the development server.

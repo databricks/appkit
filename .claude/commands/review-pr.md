@@ -9,7 +9,7 @@ Please review **all changes in the current branch** (compared to $ARGUMENTS or m
 
 ## Context
 
-This is the **Databricks AppKit** (@databricks/app-kit) - a modular TypeScript SDK for building Databricks apps with workflows and plugins.
+This is the **Databricks AppKit** (@databricks/appkit) - a modular TypeScript SDK for building Databricks apps with workflows and plugins.
 
 ## SDK Core Principles
 

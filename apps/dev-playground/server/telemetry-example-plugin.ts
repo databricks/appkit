@@ -12,7 +12,7 @@ import {
   type Counter,
   type Histogram,
   SeverityNumber,
-} from "@databricks/app-kit";
+} from "@databricks/appkit";
 import type { Request, Response, Router } from "express";
 
 class TelemetryExamples extends Plugin {

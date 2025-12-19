@@ -1,4 +1,4 @@
-import { sql } from "@databricks/app-kit-ui/js";
+import { sql } from "@databricks/appkit-ui/js";
 import {
   useAnalyticsQuery,
   Button,
@@ -8,7 +8,7 @@ import {
   CardHeader,
   CardTitle,
   Input,
-} from "@databricks/app-kit-ui/react";
+} from "@databricks/appkit-ui/react";
 import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { codeToHtml } from "shiki";
@@ -288,7 +288,7 @@ function SqlHelpersRoute() {
             title="String"
             description="For text values. Accepts string, number, or boolean."
             type="STRING"
-            code={`import { sql } from "@databricks/app-kit-ui/js";
+            code={`import { sql } from "@databricks/appkit-ui/js";
 
 const params = {
   name: sql.string("${stringValue}")
@@ -308,7 +308,7 @@ const params = {
             title="Number"
             description="For numeric values. Accepts number or numeric string."
             type="NUMERIC"
-            code={`import { sql } from "@databricks/app-kit-ui/js";
+            code={`import { sql } from "@databricks/appkit-ui/js";
 
 const params = {
   count: sql.number(${numberValue})
@@ -329,7 +329,7 @@ const params = {
             title="Boolean"
             description="For true/false values. Accepts boolean, string, or number (0/1)."
             type="BOOLEAN"
-            code={`import { sql } from "@databricks/app-kit-ui/js";
+            code={`import { sql } from "@databricks/appkit-ui/js";
 
 const params = {
   isActive: sql.boolean(${booleanValue})
@@ -359,7 +359,7 @@ const params = {
             title="Date"
             description="For date values. Accepts Date object or YYYY-MM-DD string."
             type="DATE"
-            code={`import { sql } from "@databricks/app-kit-ui/js";
+            code={`import { sql } from "@databricks/appkit-ui/js";
 
 const params = {
   startDate: sql.date("${dateValue}")
@@ -384,7 +384,7 @@ const params2 = {
             title="Timestamp"
             description="For datetime values. Accepts Date, ISO string, or Unix timestamp."
             type="TIMESTAMP"
-            code={`import { sql } from "@databricks/app-kit-ui/js";
+            code={`import { sql } from "@databricks/appkit-ui/js";
 
 const params = {
   createdAt: sql.timestamp("${timestampValue}Z")
@@ -416,7 +416,7 @@ const params3 = {
             title="Binary"
             description="For binary data. Converts to hex-encoded STRING. Use UNHEX(:param) in SQL."
             type="STRING (hex)"
-            code={`import { sql } from "@databricks/app-kit-ui/js";
+            code={`import { sql } from "@databricks/appkit-ui/js";
 
 // From Uint8Array:
 const bytes = new Uint8Array([${Array.from(binaryBytes)

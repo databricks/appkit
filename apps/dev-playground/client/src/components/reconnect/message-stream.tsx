@@ -1,4 +1,4 @@
-import { Badge, Card } from "@databricks/app-kit-ui/react";
+import { Badge, Card } from "@databricks/appkit-ui/react";
 
 interface Message {
   count: number;

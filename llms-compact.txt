@@ -1,4 +1,4 @@
-# llms-compact.txt — Quick AI reference for @databricks/app-kit
+# llms-compact.txt — Quick AI reference for @databricks/appkit
 
 Project: Databricks AppKit
 Version: 1.0.0
