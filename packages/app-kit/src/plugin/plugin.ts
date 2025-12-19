@@ -3,6 +3,7 @@ import type {
   BasePlugin,
   BasePluginConfig,
   IAppResponse,
+  PluginEndpointMap,
   PluginExecuteConfig,
   PluginExecutionSettings,
   PluginPhase,
@@ -44,6 +45,9 @@ export abstract class Plugin<
   /** If the plugin requires the Databricks client to be set in the request context */
   requiresDatabricksClient = false;
 
+  /** Registered endpoints for this plugin */
+  private registeredEndpoints: PluginEndpointMap = {};
+
   static phase: PluginPhase = "normal";
   name: string;
 
@@ -67,6 +71,10 @@ export abstract class Plugin<
   }
 
   async setup() {}
+
+  getEndpoints(): PluginEndpointMap {
+    return this.registeredEndpoints;
+  }
 
   abortActiveOperations(): void {
     this.streamManager.abortAll();
@@ -154,13 +162,19 @@ export abstract class Plugin<
     }
   }
 
-  // TResponse is used for type generation
+  protected registerEndpoint(name: string, path: string): void {
+    this.registeredEndpoints[name] = path;
+  }
+
   protected route<_TResponse>(
     router: express.Router,
     config: RouteConfig,
   ): void {
-    const { method, path, handler } = config;
+    const { name, method, path, handler } = config;
+
     router[method](path, handler);
+
+    this.registerEndpoint(name, `/api/${this.name}${path}`);
   }
 
   // build execution options by merging defaults, plugin config, and user overrides

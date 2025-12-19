@@ -10,6 +10,8 @@ export interface BasePlugin {
   setup(): Promise<void>;
 
   injectRoutes(router: express.Router): void;
+
+  getEndpoints(): PluginEndpointMap;
 }
 
 export interface BasePluginConfig {
@@ -96,10 +98,18 @@ export type IAppRequest = express.Request;
 export type HttpMethod = "get" | "post" | "put" | "delete" | "patch" | "head";
 
 export type RouteConfig = {
+  /** Unique name for this endpoint (used for frontend access) */
+  name: string;
   method: HttpMethod;
   path: string;
   handler: (req: IAppRequest, res: IAppResponse) => Promise<void>;
 };
+
+/** Map of endpoint names to their full paths for a plugin */
+export type PluginEndpointMap = Record<string, string>;
+
+/** Map of plugin names to their endpoint maps */
+export type PluginEndpoints = Record<string, PluginEndpointMap>;
 
 export interface QuerySchemas {
   [key: string]: unknown;

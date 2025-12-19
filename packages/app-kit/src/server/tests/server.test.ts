@@ -269,6 +269,7 @@ describe("ServerPlugin", () => {
           name: "needs-client",
           requiresDatabricksClient: true,
           injectRoutes,
+          getEndpoints: vi.fn().mockReturnValue({}),
         },
       };
 

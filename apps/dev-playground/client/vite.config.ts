@@ -1,5 +1,4 @@
 import path from "node:path";
-import { appKitTypesPlugin } from "@databricks/app-kit";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
@@ -8,7 +7,6 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [
     react(),
-    appKitTypesPlugin(),
     tanstackRouter({
       target: "react",
       autoCodeSplitting: process.env.NODE_ENV !== "development",
