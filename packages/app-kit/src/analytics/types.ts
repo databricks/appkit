@@ -4,8 +4,10 @@ export interface IAnalyticsConfig extends BasePluginConfig {
   timeout?: number;
 }
 
+export type AnalyticsFormat = "JSON" | "ARROW";
 export interface IAnalyticsQueryRequest {
   parameters?: Record<string, any>;
+  format?: AnalyticsFormat;
 }
 
 export interface AnalyticsQueryResponse {

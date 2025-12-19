@@ -9,4 +9,6 @@ export {
   type SQLTypeMarker,
   sql,
 } from "shared";
+export * from "./arrow";
+export * from "./constants";
 export * from "./sse";

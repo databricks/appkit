@@ -55,6 +55,25 @@ function IndexRoute() {
           <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
             <div className="flex flex-col h-full">
               <h3 className="text-2xl font-semibold text-foreground mb-3">
+                Arrow Analytics Dashboard
+              </h3>
+              <p className="text-muted-foreground mb-6 flex-grow">
+                Explore real-time analytics with query execution, data
+                visualization, and interactive components using Apache Arrow
+                streaming.
+              </p>
+              <Button
+                onClick={() => navigate({ to: "/arrow-analytics" })}
+                className="w-full"
+              >
+                Explore real-time analytics
+              </Button>
+            </div>
+          </Card>
+
+          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
+            <div className="flex flex-col h-full">
+              <h3 className="text-2xl font-semibold text-foreground mb-3">
                 Stream Reconnection
               </h3>
               <p className="text-muted-foreground mb-6 flex-grow">

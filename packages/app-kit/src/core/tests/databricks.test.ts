@@ -53,6 +53,10 @@ class CoreTestPlugin implements BasePlugin {
   asUser() {
     return this;
   }
+
+  getEndpoints() {
+    return {};
+  }
 }
 
 class NormalTestPlugin implements BasePlugin {
@@ -79,6 +83,10 @@ class NormalTestPlugin implements BasePlugin {
 
   asUser() {
     return this;
+  }
+
+  getEndpoints() {
+    return {};
   }
 }
 
@@ -109,6 +117,10 @@ class DeferredTestPlugin implements BasePlugin {
   asUser(): any {
     return this;
   }
+
+  getEndpoints() {
+    return {};
+  }
 }
 
 class SlowSetupPlugin implements BasePlugin {
@@ -133,6 +145,10 @@ class SlowSetupPlugin implements BasePlugin {
   asUser(): any {
     return this;
   }
+
+  getEndpoints() {
+    return {};
+  }
 }
 
 class FailingPlugin implements BasePlugin {
@@ -151,6 +167,10 @@ class FailingPlugin implements BasePlugin {
 
   asUser(): any {
     return this;
+  }
+
+  getEndpoints() {
+    return {};
   }
 }
 

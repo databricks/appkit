@@ -3,6 +3,7 @@ import {
   type sql,
   type WorkspaceClient,
 } from "@databricks/sdk-experimental";
+import { ArrowStreamProcessor } from "../../stream/arrow-stream-processor";
 import type { TelemetryOptions } from "shared";
 import type { TelemetryProvider } from "../../telemetry";
 import {
@@ -25,6 +26,8 @@ export class SQLWarehouseConnector {
 
   private config: SQLWarehouseConfig;
 
+  // Lazy-initialized: only created when Arrow format is used
+  private _arrowProcessor: ArrowStreamProcessor | null = null;
   // telemetry
   private readonly telemetry: TelemetryProvider;
   private readonly telemetryMetrics: {
@@ -51,6 +54,22 @@ export class SQLWarehouseConnector {
           unit: "ms",
         }),
     };
+  }
+
+  /**
+   * Lazily initializes and returns the ArrowStreamProcessor.
+   * Only created on first Arrow format query to avoid unnecessary allocation.
+   */
+  private get arrowProcessor(): ArrowStreamProcessor {
+    if (!this._arrowProcessor) {
+      this._arrowProcessor = new ArrowStreamProcessor({
+        timeout: this.config.timeout || executeStatementDefaults.timeout,
+        maxConcurrentDownloads:
+          ArrowStreamProcessor.DEFAULT_MAX_CONCURRENT_DOWNLOADS,
+        retries: ArrowStreamProcessor.DEFAULT_RETRIES,
+      });
+    }
+    return this._arrowProcessor;
   }
 
   async executeStatement(
@@ -128,7 +147,10 @@ export class SQLWarehouseConnector {
             "db.status": status?.state,
           });
 
-          let result: sql.StatementResponse;
+          let result:
+            | sql.StatementResponse
+            | { result: { statement_id: string; status: sql.StatementStatus } };
+
           switch (status?.state) {
             case "RUNNING":
             case "PENDING":
@@ -282,7 +304,9 @@ export class SQLWarehouseConnector {
                 return this._transformDataArray(response);
               case "FAILED":
                 throw new Error(
-                  `Statement failed: ${status.error?.message || "Unknown error"}`,
+                  `Statement failed: ${
+                    status.error?.message || "Unknown error"
+                  }`,
                 );
               case "CANCELED":
                 throw new Error("Statement was canceled");
@@ -314,6 +338,10 @@ export class SQLWarehouseConnector {
   }
 
   private _transformDataArray(response: sql.StatementResponse) {
+    if (response.manifest?.format === "ARROW_STREAM") {
+      return this.updateWithArrowStatus(response);
+    }
+
     if (!response.result?.data_array || !response.manifest?.schema?.columns) {
       return response;
     }
@@ -355,6 +383,89 @@ export class SQLWarehouseConnector {
         data: transformedData,
       },
     };
+  }
+
+  private updateWithArrowStatus(response: sql.StatementResponse): {
+    result: { statement_id: string; status: sql.StatementStatus };
+  } {
+    return {
+      result: {
+        statement_id: response.statement_id as string,
+        status: {
+          state: response.status?.state,
+          error: response.status?.error,
+        } as sql.StatementStatus,
+      },
+    };
+  }
+
+  async getArrowData(
+    workspaceClient: WorkspaceClient,
+    jobId: string,
+    signal?: AbortSignal,
+  ): Promise<ReturnType<typeof this.arrowProcessor.processChunks>> {
+    const startTime = Date.now();
+
+    return this.telemetry.startActiveSpan(
+      "arrow.getData",
+      {
+        kind: SpanKind.CLIENT,
+        attributes: {
+          "db.system": "databricks",
+          "arrow.job_id": jobId,
+        },
+      },
+      async (span: Span) => {
+        try {
+          const response =
+            await workspaceClient.statementExecution.getStatement(
+              { statement_id: jobId },
+              this._createContext(signal),
+            );
+
+          const chunks = response.result?.external_links;
+          const schema = response.manifest?.schema;
+
+          if (!chunks || !schema) {
+            throw new Error("No chunks or schema found in response");
+          }
+
+          span.setAttribute("arrow.chunk_count", chunks.length);
+
+          const result = await this.arrowProcessor.processChunks(
+            chunks,
+            schema,
+            signal,
+          );
+
+          span.setAttribute("arrow.data_size_bytes", result.data.length);
+          span.setStatus({ code: SpanStatusCode.OK });
+
+          const duration = Date.now() - startTime;
+          this.telemetryMetrics.queryDuration.record(duration, {
+            operation: "arrow.getData",
+            status: "success",
+          });
+
+          return result;
+        } catch (error) {
+          span.setStatus({
+            code: SpanStatusCode.ERROR,
+            message: error instanceof Error ? error.message : "Unknown error",
+          });
+          span.recordException(error as Error);
+
+          const duration = Date.now() - startTime;
+          this.telemetryMetrics.queryDuration.record(duration, {
+            operation: "arrow.getData",
+            status: "error",
+          });
+
+          console.error(`Failed Arrow job: ${jobId}`, error);
+          throw error;
+        }
+      },
+    );
   }
 
   // create context for cancellation token

@@ -6,7 +6,11 @@ import { fileURLToPath } from "node:url";
 import type express from "express";
 import type { TunnelConnection } from "shared";
 import { WebSocketServer } from "ws";
-import { generateTunnelIdFromEmail, getQueries, parseCookies } from "../utils";
+import {
+  generateTunnelIdFromEmail,
+  getConfigScript,
+  parseCookies,
+} from "../utils";
 import { REMOTE_TUNNEL_ASSET_PREFIXES } from "./gate";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -162,16 +166,8 @@ export class RemoteTunnelManager {
       });
 
       const indexPath = path.join(__dirname, "index.html");
-      const configObject = this._configInjection();
-      const configScript = `
-        <script>
-          window.__CONFIG__ = ${JSON.stringify(configObject)};
-        </script>
-      `;
-
       let html = fs.readFileSync(indexPath, "utf-8");
-
-      html = html.replace("<body>", `<body>${configScript}`);
+      html = html.replace("<body>", `<body>${getConfigScript()}`);
 
       res.send(html);
     };
@@ -249,17 +245,6 @@ export class RemoteTunnelManager {
 
     const html = this.loadHtmlTemplate("wait.html", { tunnelId });
     return res.status(200).send(html);
-  }
-
-  private _configInjection() {
-    const configFolder = path.join(process.cwd(), "config");
-
-    const configObject = {
-      appName: process.env.DATABRICKS_APP_NAME || "",
-      queries: getQueries(configFolder),
-    };
-
-    return configObject;
   }
 
   setupWebSocket() {

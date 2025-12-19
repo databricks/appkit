@@ -11,27 +11,31 @@ concurrency:
 permissions:
   id-token: write
   contents: read
+  pull-requests: read
 
 jobs:
-  setup:
+  detect-changes:
     runs-on:
       group: databricks-protected-runner-group
       labels: linux-ubuntu-latest
 
-    name: Setup
+    name: Detect Changes
+    outputs:
+      docs: ${{ steps.filter.outputs.docs }}
+      app-kit: ${{ steps.filter.outputs.app-kit }}
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
         with:
-          node-version: 20
-          cache: 'pnpm'
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          filters: |
+            docs:
+              - 'docs/**'
+            app-kit:
+              - '!docs/**'
 
   lint_and_typecheck:
     name: Lint & Type Check
-    needs: setup
     runs-on:
       group: databricks-protected-runner-group
       labels: linux-ubuntu-latest
@@ -56,7 +60,8 @@ jobs:
 
   test:
     name: Unit Tests
-    needs: setup
+    needs: detect-changes
+    if: needs.detect-changes.outputs.app-kit == 'true'
     runs-on:
       group: databricks-protected-runner-group
       labels: linux-ubuntu-latest
@@ -72,4 +77,24 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Run Tests
         run: pnpm test
+
+  docs-build:
+    name: Docs Build
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docs == 'true'
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build Docs
+        run: pnpm run docs:build
 

@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import express from "express";
-import { getQueries } from "./utils";
+import type express from "express";
+import expressStatic from "express";
+import { BaseServer } from "./base-server";
+import type { PluginEndpoints } from "./utils";
 
 /**
  * Static server for the App Kit.
@@ -11,23 +13,26 @@ import { getQueries } from "./utils";
  *
  * @example
  * ```ts
- * const staticServer = new StaticServer(app, staticPath);
+ * const staticServer = new StaticServer(app, staticPath, endpoints);
  * staticServer.setup();
  * ```
  */
-export class StaticServer {
-  private app: express.Application;
+export class StaticServer extends BaseServer {
   private staticPath: string;
 
-  constructor(app: express.Application, staticPath: string) {
-    this.app = app;
+  constructor(
+    app: express.Application,
+    staticPath: string,
+    endpoints: PluginEndpoints = {},
+  ) {
+    super(app, endpoints);
     this.staticPath = staticPath;
   }
 
   /** Setup the static server. */
   setup() {
     this.app.use(
-      express.static(this.staticPath, {
+      expressStatic.static(this.staticPath, {
         index: false,
       }),
     );
@@ -50,21 +55,7 @@ export class StaticServer {
     }
 
     let html = fs.readFileSync(indexPath, "utf-8");
-    const config = this.getRuntimeConfig();
-    const configScript = `
-        <script>
-            window.__CONFIG__ = ${JSON.stringify(config)};
-        </script>
-    `;
-    html = html.replace("<body>", `<body>${configScript}`);
+    html = html.replace("<body>", `<body>${this.getConfigScript()}`);
     res.send(html);
-  }
-
-  private getRuntimeConfig() {
-    const configFolder = path.join(process.cwd(), "config");
-    return {
-      appName: process.env.DATABRICKS_APP_NAME || "",
-      queries: getQueries(configFolder),
-    };
   }
 }

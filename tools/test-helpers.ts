@@ -200,17 +200,32 @@ export async function runWithRequestContext<T>(
     ...context,
   };
 
-  // Use vi.spyOn to mock getRequestContext
+  // Use vi.spyOn to mock getRequestContext and getWorkspaceClient
   const utilsModule = await import(
     "../packages/app-kit/src/utils/databricks-client-middleware"
   );
-  const spy = vi
+
+  const contextSpy = vi
     .spyOn(utilsModule, "getRequestContext")
     .mockReturnValue(defaultContext);
+
+  // Also mock getWorkspaceClient to return the appropriate client based on asUser
+  const workspaceClientSpy = vi
+    .spyOn(utilsModule, "getWorkspaceClient")
+    .mockImplementation((asUser: boolean) => {
+      if (asUser) {
+        if (!defaultContext.userDatabricksClient) {
+          throw new Error("User token passthrough is not enabled");
+        }
+        return defaultContext.userDatabricksClient;
+      }
+      return defaultContext.serviceDatabricksClient;
+    });
 
   try {
     return await fn();
   } finally {
-    spy.mockRestore();
+    contextSpy.mockRestore();
+    workspaceClientSpy.mockRestore();
   }
 }

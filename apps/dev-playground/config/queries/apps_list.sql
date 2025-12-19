@@ -40,5 +40,5 @@ FROM app_spend a
 JOIN app_primary_creator apc ON a.app_name = apc.app_name
 GROUP BY a.app_name, apc.primary_creator
 ORDER BY totalSpend DESC
-LIMIT 1000
+LIMIT 10
 

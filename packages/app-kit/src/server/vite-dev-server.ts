@@ -3,6 +3,9 @@ import path from "node:path";
 import type express from "express";
 import type { ViteDevServer as ViteDevServerType } from "vite";
 import { mergeConfigDedup } from "@/utils";
+import { BaseServer } from "./base-server";
+import type { PluginEndpoints } from "./utils";
+import { appKitTypesPlugin } from "../type-generator/vite-plugin";
 
 /**
  * Vite dev server for the App Kit.
@@ -12,16 +15,15 @@ import { mergeConfigDedup } from "@/utils";
  *
  * @example
  * ```ts
- * const viteDevServer = new ViteDevServer(app);
+ * const viteDevServer = new ViteDevServer(app, endpoints);
  * await viteDevServer.setup();
  * ```
  */
-export class ViteDevServer {
-  private app: express.Application;
+export class ViteDevServer extends BaseServer {
   private vite: ViteDevServerType | null;
 
-  constructor(app: express.Application) {
-    this.app = app;
+  constructor(app: express.Application, endpoints: PluginEndpoints = {}) {
+    super(app, endpoints);
     this.vite = null;
   }
 
@@ -62,8 +64,8 @@ export class ViteDevServer {
           ignored: ["**/node_modules/**", "!**/node_modules/@databricks/**"],
         },
       },
-      plugins: [react.default()],
-      appType: "spa",
+      plugins: [react.default(), appKitTypesPlugin()],
+      appType: "custom",
     };
 
     const mergedConfigs = mergeConfigDedup(userConfig, coreConfig, mergeConfig);
@@ -84,6 +86,7 @@ export class ViteDevServer {
       try {
         const indexPath = path.resolve(clientRoot, "index.html");
         let html = fs.readFileSync(indexPath, "utf-8");
+        html = html.replace("<body>", `<body>${this.getConfigScript()}`);
         html = await vite.transformIndexHtml(req.originalUrl, html);
         res.status(200).set({ "Content-Type": "text/html" }).end(html);
       } catch (e) {

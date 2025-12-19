@@ -86,3 +86,35 @@ export function getQueries(configFolder: string) {
       .map((f) => [path.basename(f, ".sql"), path.basename(f, ".sql")]),
   );
 }
+
+import type { PluginEndpoints } from "shared";
+
+export type { PluginEndpoints };
+
+export interface RuntimeConfig {
+  appName: string;
+  queries: Record<string, string>;
+  endpoints: PluginEndpoints;
+}
+
+export function getRuntimeConfig(
+  endpoints: PluginEndpoints = {},
+): RuntimeConfig {
+  const configFolder = path.join(process.cwd(), "config");
+
+  return {
+    appName: process.env.DATABRICKS_APP_NAME || "",
+    queries: getQueries(configFolder),
+    endpoints,
+  };
+}
+
+export function getConfigScript(endpoints: PluginEndpoints = {}): string {
+  const config = getRuntimeConfig(endpoints);
+
+  return `
+    <script>
+      window.__CONFIG__ = ${JSON.stringify(config)};
+    </script>
+  `;
+}

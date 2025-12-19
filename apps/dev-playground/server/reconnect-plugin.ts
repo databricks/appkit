@@ -19,6 +19,7 @@ export class ReconnectPlugin extends Plugin {
 
   injectRoutes(router: IAppRouter): void {
     this.route<ReconnectResponse>(router, {
+      name: "reconnect",
       method: "get",
       path: "/",
       handler: async (_req, res) => {
@@ -27,6 +28,7 @@ export class ReconnectPlugin extends Plugin {
     });
 
     this.route<ReconnectStreamResponse>(router, {
+      name: "stream",
       method: "get",
       path: "/stream",
       handler: async (req, res) => {

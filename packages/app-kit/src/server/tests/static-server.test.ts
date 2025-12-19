@@ -22,14 +22,19 @@ vi.mock("express", () => ({
   },
 }));
 
-// Mock getQueries
+// Mock getQueries and getConfigScript
 vi.mock("../utils", () => ({
   getQueries: vi.fn().mockReturnValue({ query1: "SELECT 1" }),
+  getConfigScript: vi.fn().mockReturnValue(`
+    <script>
+      window.__CONFIG__ = {"appName":"my-test-app","queries":{"query1":"query1"},"endpoints":{}};
+    </script>
+  `),
 }));
 
 import fs from "node:fs";
 import express from "express";
-import { getQueries } from "../utils";
+import { getConfigScript } from "../utils";
 import { StaticServer } from "../static-server";
 
 describe("StaticServer", () => {
@@ -174,7 +179,7 @@ describe("StaticServer", () => {
       const handler = mockApp.get.mock.calls[0][1];
       handler({ path: "/" }, mockRes, mockNext);
 
-      expect(getQueries).toHaveBeenCalled();
+      expect(getConfigScript).toHaveBeenCalled();
       const sentHtml = mockRes.send.mock.calls[0][0];
       expect(sentHtml).toContain("query1");
     });

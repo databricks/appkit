@@ -13,7 +13,7 @@ export interface ConnectSSEOptions<Payload = unknown> {
   /** Optional request payload for POST */
   payload?: Payload | string;
   /** Called for each SSE message. */
-  onMessage: (message: SSEMessage) => void;
+  onMessage: (message: SSEMessage) => Promise<void>;
   /** Abort signal to stop streaming and retries. */
   signal?: AbortSignal;
   /** Last event id used to resume the stream. */

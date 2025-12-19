@@ -8,7 +8,7 @@ import type {
 import { SQLWarehouseConnector } from "../connectors";
 import { Plugin, toPlugin } from "../plugin";
 import type { Request, Response } from "../utils";
-import { getRequestContext } from "../utils";
+import { getRequestContext, getWorkspaceClient } from "../utils";
 import { queryDefaults } from "./defaults";
 import { QueryProcessor } from "./query";
 import type {
@@ -41,7 +41,26 @@ export class AnalyticsPlugin extends Plugin {
   }
 
   injectRoutes(router: IAppRouter) {
+    this.route(router, {
+      name: "arrow",
+      method: "get",
+      path: "/arrow-result/:jobId",
+      handler: async (req: Request, res: Response) => {
+        await this._handleArrowRoute(req, res);
+      },
+    });
+
+    this.route(router, {
+      name: "arrowAsUser",
+      method: "get",
+      path: "/users/me/arrow-result/:jobId",
+      handler: async (req: Request, res: Response) => {
+        await this._handleArrowRoute(req, res, { asUser: true });
+      },
+    });
+
     this.route<AnalyticsQueryResponse>(router, {
+      name: "queryAsUser",
       method: "post",
       path: "/users/me/query/:query_key",
       handler: async (req: Request, res: Response) => {
@@ -50,6 +69,7 @@ export class AnalyticsPlugin extends Plugin {
     });
 
     this.route<AnalyticsQueryResponse>(router, {
+      name: "query",
       method: "post",
       path: "/query/:query_key",
       handler: async (req: Request, res: Response) => {
@@ -58,13 +78,59 @@ export class AnalyticsPlugin extends Plugin {
     });
   }
 
+  private async _handleArrowRoute(
+    req: Request,
+    res: Response,
+    { asUser = false }: { asUser?: boolean } = {},
+  ): Promise<void> {
+    try {
+      const { jobId } = req.params;
+
+      const workspaceClient = getWorkspaceClient(asUser);
+
+      console.log(
+        `Processing Arrow job request: ${jobId} for plugin: ${this.name}`,
+      );
+
+      const result = await this.getArrowData(workspaceClient, jobId);
+
+      res.setHeader("Content-Type", "application/octet-stream");
+      res.setHeader("Content-Length", result.data.length.toString());
+      res.setHeader("Cache-Control", "public, max-age=3600");
+
+      console.log(
+        `Sending Arrow buffer: ${result.data.length} bytes for job ${jobId}`,
+      );
+      res.send(Buffer.from(result.data));
+    } catch (error) {
+      console.error(`Arrow job error for ${this.name}:`, error);
+      res.status(404).json({
+        error: error instanceof Error ? error.message : "Arrow job not found",
+        plugin: this.name,
+      });
+    }
+  }
+
   private async _handleQueryRoute(
     req: Request,
     res: Response,
     { asUser = false }: { asUser?: boolean } = {},
   ): Promise<void> {
     const { query_key } = req.params;
-    const { parameters } = req.body as IAnalyticsQueryRequest;
+    const { parameters, format = "JSON" } = req.body as IAnalyticsQueryRequest;
+    const queryParameters =
+      format === "ARROW"
+        ? {
+            formatParameters: {
+              disposition: "EXTERNAL_LINKS",
+              format: "ARROW_STREAM",
+            },
+            type: "arrow",
+          }
+        : {
+            type: "result",
+          };
+
     const requestContext = getRequestContext();
     const userKey = asUser
       ? requestContext.userId
@@ -96,6 +162,7 @@ export class AnalyticsPlugin extends Plugin {
           "analytics:query",
           query_key,
           JSON.stringify(parameters),
+          JSON.stringify(format),
           hashedQuery,
           userKey,
         ],
@@ -114,11 +181,17 @@ export class AnalyticsPlugin extends Plugin {
           parameters,
         );
 
-        const result = await this.query(query, processedParams, signal, {
-          asUser,
-        });
+        const result = await this.query(
+          query,
+          processedParams,
+          queryParameters.formatParameters,
+          signal,
+          {
+            asUser,
+          },
+        );
 
-        return { type: "result", ...result };
+        return { type: queryParameters.type, ...result };
       },
       streamExecutionSettings,
       userKey,
@@ -128,24 +201,15 @@ export class AnalyticsPlugin extends Plugin {
   async query(
     query: string,
     parameters?: Record<string, SQLTypeMarker | null | undefined>,
+    formatParameters?: Record<string, any>,
     signal?: AbortSignal,
     { asUser = false }: { asUser?: boolean } = {},
   ): Promise<any> {
     const requestContext = getRequestContext();
+    const workspaceClient = getWorkspaceClient(asUser);
+
     const { statement, parameters: sqlParameters } =
       this.queryProcessor.convertToSQLParameters(query, parameters);
-
-    let workspaceClient: WorkspaceClient;
-    if (asUser) {
-      if (!requestContext.userDatabricksClient) {
-        throw new Error(
-          `User token passthrough feature is not enabled for workspace ${requestContext.workspaceId}.`,
-        );
-      }
-      workspaceClient = requestContext.userDatabricksClient;
-    } else {
-      workspaceClient = requestContext.serviceDatabricksClient;
-    }
 
     const response = await this.SQLClient.executeStatement(
       workspaceClient,
@@ -153,11 +217,22 @@ export class AnalyticsPlugin extends Plugin {
         statement,
         warehouse_id: await requestContext.warehouseId,
         parameters: sqlParameters,
+        ...formatParameters,
       },
       signal,
     );
 
     return response.result;
+  }
+
+  // If we need arrow stream in more plugins we can define this as a base method in the core plugin class
+  // and have a generic endpoint for each plugin that consumes this arrow data.
+  protected async getArrowData(
+    workspaceClient: WorkspaceClient,
+    jobId: string,
+    signal?: AbortSignal,
+  ): Promise<ReturnType<typeof this.SQLClient.getArrowData>> {
+    return await this.SQLClient.getArrowData(workspaceClient, jobId, signal);
   }
 
   async shutdown(): Promise<void> {

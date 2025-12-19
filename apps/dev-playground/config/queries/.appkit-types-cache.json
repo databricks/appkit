@@ -1,8 +1,12 @@
 {
   "version": "1",
   "queries": {
+    "app_activity_heatmap": {
+      "hash": "744281be86b14c2b14ed76b94060e4af",
+      "type": "{\n    name: \"app_activity_heatmap\";\n    parameters: {\n      /** DATE - use sql.date() */\n      startDate: SQLDateMarker;\n      /** DATE - use sql.date() */\n      endDate: SQLDateMarker;\n    };\n    result: Array<{\n      /** @sqlType STRING */\n      app_name: string;\n      /** @sqlType STRING */\n      day_of_week: string;\n      /** @sqlType DECIMAL(35,2) */\n      spend: number;\n    }>;\n  }"
+    },
     "apps_list": {
-      "hash": "e2c65853cf4b332d638bdd30a3aefb69",
+      "hash": "4b7393b43f8e7beaa52174ed4d918c04",
       "type": "{\n    name: \"apps_list\";\n    parameters: Record<string, never>;\n    result: Array<{\n      /** @sqlType STRING */\n      id: string;\n      /** @sqlType STRING */\n      name: string;\n      /** @sqlType STRING */\n      creator: string;\n      /** @sqlType STRING */\n      tags: string;\n      /** @sqlType DECIMAL(38,6) */\n      totalSpend: number;\n      /** @sqlType DATE */\n      createdAt: string;\n    }>;\n  }"
     },
     "cost_recommendations": {
