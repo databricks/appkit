@@ -1,9 +1,10 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
-import type {
-  IAppRouter,
-  PluginExecuteConfig,
-  SQLTypeMarker,
-  StreamExecutionSettings,
+import {
+  analyticsRoutes,
+  type IAppRouter,
+  type PluginExecuteConfig,
+  type SQLTypeMarker,
+  type StreamExecutionSettings,
 } from "shared";
 import { SQLWarehouseConnector } from "../connectors";
 import { Plugin, toPlugin } from "../plugin";
@@ -62,7 +63,7 @@ export class AnalyticsPlugin extends Plugin {
     this.route<AnalyticsQueryResponse>(router, {
       name: "queryAsUser",
       method: "post",
-      path: "/users/me/query/:query_key",
+      path: analyticsRoutes.queryAsUser,
       handler: async (req: Request, res: Response) => {
         await this._handleQueryRoute(req, res, { asUser: true });
       },
@@ -71,7 +72,7 @@ export class AnalyticsPlugin extends Plugin {
     this.route<AnalyticsQueryResponse>(router, {
       name: "query",
       method: "post",
-      path: "/query/:query_key",
+      path: analyticsRoutes.query,
       handler: async (req: Request, res: Response) => {
         await this._handleQueryRoute(req, res, { asUser: false });
       },

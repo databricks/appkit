@@ -1,4 +1,4 @@
-import { ArrowClient, connectSSE } from "@/js";
+import { analyticsApi, ArrowClient, connectSSE } from "@/js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AnalyticsFormat,
@@ -10,16 +10,10 @@ import type {
 } from "./types";
 import { useQueryHMR } from "./use-query-hmr";
 
-function getDevMode() {
+function getDevModeParams(): Record<string, string> {
   const url = new URL(window.location.href);
-  const searchParams = url.searchParams;
-  const dev = searchParams.get("dev");
-
-  return dev ? `?dev=${dev}` : "";
-}
-
-function getArrowStreamUrl(id: string) {
-  return `/api/analytics/arrow-result/${id}`;
+  const dev = url.searchParams.get("dev");
+  return dev ? { dev } : {};
 }
 
 /**
@@ -107,10 +101,10 @@ export function useAnalyticsQuery<
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
-    const devMode = getDevMode();
+    const url = analyticsApi.query({ query_key: queryKey }, getDevModeParams());
 
     connectSSE({
-      url: `/api/analytics/query/${encodeURIComponent(queryKey)}${devMode}`,
+      url,
       payload: payload,
       signal: abortController.signal,
       onMessage: async (message) => {
@@ -128,7 +122,9 @@ export function useAnalyticsQuery<
           if (parsed.type === "arrow") {
             try {
               const arrowData = await ArrowClient.fetchArrow(
-                getArrowStreamUrl(parsed.statement_id),
+                analyticsApi.arrowResult({
+                  jobId: parsed.statement_id,
+                }),
               );
               const table = await ArrowClient.processArrowBuffer(arrowData);
               setLoading(false);

@@ -44,6 +44,7 @@ export class ServerPlugin extends Plugin {
   private remoteTunnelController?: RemoteTunnelController;
   protected declare config: ServerConfig;
   private serverExtensions: ((app: express.Application) => void)[] = [];
+  private pluginEndpoints: PluginEndpoints = {};
   static phase: PluginPhase = "deferred";
 
   constructor(config: ServerConfig) {
@@ -176,6 +177,15 @@ export class ServerPlugin extends Plugin {
       res.status(200).json({ status: "ok" });
     });
     this.registerEndpoint("health", "/health");
+
+    // Schema endpoint for type generation
+    // TODO: This should only be on development mode
+    this.serverApplication.get("/__schema__", (_, res) => {
+      console.log(`[AppKit] Serving schema:`, this.pluginEndpoints);
+      res.json({
+        endpoints: this.pluginEndpoints,
+      });
+    });
 
     for (const plugin of Object.values(this.config.plugins)) {
       if (EXCLUDED_PLUGINS.includes(plugin.name)) continue;
