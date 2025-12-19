@@ -4,11 +4,11 @@ sidebar_position: 1
 
 # Getting Started
 
-App Kit is a TypeScript SDK for building production-ready Databricks applications with a plugin-based architecture. It provides opinionated defaults, built-in observability, and seamless integration with Databricks services.
+AppKit is a TypeScript SDK for building production-ready Databricks applications with a plugin-based architecture. It provides opinionated defaults, built-in observability, and seamless integration with Databricks services.
 
 ## Introduction
 
-App Kit simplifies building data applications on Databricks by providing:
+AppKit simplifies building data applications on Databricks by providing:
 
 - **Plugin Architecture**: Modular design with built-in server and analytics plugins
 - **Type Safety**: End-to-end TypeScript with automatic query type generation
@@ -37,7 +37,7 @@ corepack enable pnpm
 ### Install Packages
 
 ```bash
-pnpm add @databricks/app-kit @databricks/app-kit-ui
+pnpm add @databricks/appkit @databricks/appkit-ui
 ```
 
 For React applications, also install peer dependencies:
@@ -52,7 +52,7 @@ Create a minimal server application:
 
 ```typescript
 // server.ts
-import { createApp, server } from "@databricks/app-kit";
+import { createApp, server } from "@databricks/appkit";
 
 createApp({
   plugins: [server()],
@@ -73,7 +73,7 @@ Add SQL query capabilities:
 
 ```typescript
 // server.ts
-import { createApp, server, analytics } from "@databricks/app-kit";
+import { createApp, server, analytics } from "@databricks/appkit";
 
 createApp({
   plugins: [
@@ -94,7 +94,7 @@ Query from your frontend using the React hook:
 
 ```typescript
 // App.tsx
-import { useAnalyticsQuery } from "@databricks/app-kit-ui/react";
+import { useAnalyticsQuery } from "@databricks/appkit-ui/react";
 
 function UsersList() {
   const { data, loading, error } = useAnalyticsQuery({
@@ -117,7 +117,7 @@ function UsersList() {
 
 ## Next Steps
 
-- **[Core Concepts](./core-concepts/principles)**: Learn about App Kit's design principles and architecture
+- **[Core Concepts](./core-concepts/principles)**: Learn about AppKit's design principles and architecture
 - **[Development](./development)**: Set up your development environment with hot reload and type generation
 - **[Deployment](./deployment)**: Deploy your application to Databricks
-- **[API Reference](./api/app-kit/)**: Explore the complete API documentation
+- **[API Reference](./api/appkit/)**: Explore the complete API documentation

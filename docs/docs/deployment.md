@@ -4,7 +4,7 @@ sidebar_position: 4
 
 # Deployment
 
-Deploy your App Kit application to Databricks to run in production with access to workspace resources, Unity Catalog, and SQL Warehouses.
+Deploy your AppKit application to Databricks to run in production with access to workspace resources, Unity Catalog, and SQL Warehouses.
 
 ## Prerequisites
 
@@ -84,7 +84,7 @@ env:
 
 ### Environment Variables
 
-Common environment variables for App Kit applications:
+Common environment variables for AppKit applications:
 
 | Variable | Description | Required |
 |----------|-------------|----------|
@@ -341,7 +341,7 @@ Configure telemetry in your application:
 
 ```typescript
 // server.ts
-import { createApp, server, analytics } from "@databricks/app-kit";
+import { createApp, server, analytics } from "@databricks/appkit";
 
 await createApp({
   plugins: [server(), analytics()],
@@ -460,10 +460,10 @@ Common causes:
 
 - **CLI Help:** `databricks apps deploy --help`
 - **Databricks Documentation:** [https://docs.databricks.com/dev-tools/cli/](https://docs.databricks.com/dev-tools/cli/)
-- **App Kit Issues:** [GitHub Issues](https://github.com/databricks/app-kit/issues)
+- **AppKit Issues:** [GitHub Issues](https://github.com/databricks/appkit/issues)
 
 ## Next Steps
 
 - **[Development](./development)**: Set up remote tunneling for debugging deployed apps
-- **[Architecture](./core-concepts/architecture)**: Understand how App Kit works in production
+- **[Architecture](./core-concepts/architecture)**: Understand how AppKit works in production
 - **[Monitoring](./core-concepts/architecture#observability)**: Learn about built-in telemetry and observability

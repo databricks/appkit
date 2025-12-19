@@ -1,6 +1,6 @@
 # Architecture
 
-App Kit is built on a layered, plugin-based architecture that provides modularity, extensibility, and production-ready capabilities out of the box.
+AppKit is built on a layered, plugin-based architecture that provides modularity, extensibility, and production-ready capabilities out of the box.
 
 ## Overview
 
@@ -13,7 +13,7 @@ graph TB
         Hooks[useAnalyticsQuery]
     end
     
-    subgraph appkit [App Kit Core]
+    subgraph appkit [AppKit Core]
         Core[AppKit Core]
         PluginRegistry[Plugin Registry]
         Lifecycle[Lifecycle Manager]
@@ -256,7 +256,7 @@ sequenceDiagram
 Core SDK package providing the plugin architecture and built-in plugins.
 
 **Key Exports:**
-- `createApp`: Initialize App Kit with plugins
+- `createApp`: Initialize AppKit with plugins
 - `server`: Server plugin factory
 - `analytics`: Analytics plugin factory
 - `Plugin`: Base class for custom plugins
@@ -276,7 +276,7 @@ React components and hooks for building UIs.
 
 ## Extension Points
 
-App Kit provides multiple ways to extend functionality:
+AppKit provides multiple ways to extend functionality:
 
 1. **Custom Plugins**: Extend `Plugin` class for new capabilities
 2. **Route Injection**: Add custom routes via `injectRoutes()`

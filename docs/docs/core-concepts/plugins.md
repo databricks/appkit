@@ -1,10 +1,10 @@
 # Plugins
 
-Plugins are the building blocks of App Kit applications. They extend functionality while maintaining clean separation of concerns and providing access to shared services.
+Plugins are the building blocks of AppKit applications. They extend functionality while maintaining clean separation of concerns and providing access to shared services.
 
 ## What are Plugins?
 
-Plugins are modular extensions that add capabilities to your App Kit application. Each plugin:
+Plugins are modular extensions that add capabilities to your AppKit application. Each plugin:
 
 - Extends the base `Plugin` class
 - Has access to shared services (cache, telemetry, streaming)
@@ -155,7 +155,7 @@ function UsersList() {
 
 ### Configuration
 
-Plugins are configured when creating the App Kit instance:
+Plugins are configured when creating the AppKit instance:
 
 ```typescript
 import { createApp, server, analytics } from "@databricks/app-kit";

@@ -4,7 +4,7 @@ sidebar_position: 3
 
 # Development
 
-App Kit provides multiple development workflows to suit different needs: local development with hot reload, AI-assisted development with MCP, and remote tunneling to deployed backends.
+AppKit provides multiple development workflows to suit different needs: local development with hot reload, AI-assisted development with MCP, and remote tunneling to deployed backends.
 
 ## Prerequisites
 
@@ -124,7 +124,7 @@ Enable automatic type generation for type-safe queries.
 // vite.config.ts
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { appKitTypesPlugin } from "@databricks/app-kit";
+import { appKitTypesPlugin } from "@databricks/appkit";
 
 export default defineConfig({
   plugins: [
@@ -143,7 +143,7 @@ The plugin generates type definitions that augment the `QueryRegistry`:
 
 ```typescript
 // src/appKitTypes.d.ts (auto-generated)
-declare module "@databricks/app-kit-ui/react" {
+declare module "@databricks/appkit-ui/react" {
   interface QueryRegistry {
     users: {
       name: "users";
@@ -162,7 +162,7 @@ declare module "@databricks/app-kit-ui/react" {
 **Type-Safe Usage:**
 
 ```typescript
-import { useAnalyticsQuery } from "@databricks/app-kit-ui/react";
+import { useAnalyticsQuery } from "@databricks/appkit-ui/react";
 
 function UsersList() {
   // Fully typed based on QueryRegistry
@@ -206,7 +206,7 @@ NODE_ENV=development
 
 ## AI-Assisted Development
 
-App Kit integrates with AI coding assistants through the Model Context Protocol (MCP).
+AppKit integrates with AI coding assistants through the Model Context Protocol (MCP).
 
 ### Installing MCP Server
 
