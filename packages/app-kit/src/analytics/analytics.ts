@@ -42,6 +42,7 @@ export class AnalyticsPlugin extends Plugin {
 
   injectRoutes(router: IAppRouter) {
     this.route(router, {
+      name: "arrow",
       method: "get",
       path: "/arrow-result/:jobId",
       handler: async (req: Request, res: Response) => {
@@ -50,6 +51,7 @@ export class AnalyticsPlugin extends Plugin {
     });
 
     this.route(router, {
+      name: "arrowAsUser",
       method: "get",
       path: "/users/me/arrow-result/:jobId",
       handler: async (req: Request, res: Response) => {
@@ -58,6 +60,7 @@ export class AnalyticsPlugin extends Plugin {
     });
 
     this.route<AnalyticsQueryResponse>(router, {
+      name: "queryAsUser",
       method: "post",
       path: "/users/me/query/:query_key",
       handler: async (req: Request, res: Response) => {
@@ -66,6 +69,7 @@ export class AnalyticsPlugin extends Plugin {
     });
 
     this.route<AnalyticsQueryResponse>(router, {
+      name: "query",
       method: "post",
       path: "/query/:query_key",
       handler: async (req: Request, res: Response) => {

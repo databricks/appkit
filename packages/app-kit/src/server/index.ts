@@ -10,7 +10,7 @@ import { databricksClientMiddleware } from "../utils";
 import { RemoteTunnelController } from "./remote-tunnel/remote-tunnel-controller";
 import { StaticServer } from "./static-server";
 import type { ServerConfig } from "./types";
-import { getRoutes } from "./utils";
+import { type PluginEndpoints, getRoutes } from "./utils";
 import { ViteDevServer } from "./vite-dev-server";
 
 dotenv.config({ path: path.resolve(process.cwd(), "./.env") });
@@ -88,7 +88,7 @@ export class ServerPlugin extends Plugin {
   async start(): Promise<express.Application> {
     this.serverApplication.use(express.json());
 
-    await this.extendRoutes();
+    const endpoints = await this.extendRoutes();
 
     for (const extension of this.serverExtensions) {
       extension(this.serverApplication);
@@ -100,7 +100,7 @@ export class ServerPlugin extends Plugin {
     );
     this.serverApplication.use(this.remoteTunnelController.middleware);
 
-    await this.setupFrontend();
+    await this.setupFrontend(endpoints);
 
     const server = this.serverApplication.listen(
       this.config.port ?? ServerPlugin.DEFAULT_CONFIG.port,
@@ -165,13 +165,17 @@ export class ServerPlugin extends Plugin {
    * Setup the routes with the plugins.
    *
    * This method goes through all the plugins and injects the routes into the server application.
+   * Returns a map of plugin names to their registered named endpoints.
    */
-  private async extendRoutes() {
-    if (!this.config.plugins) return;
+  private async extendRoutes(): Promise<PluginEndpoints> {
+    const endpoints: PluginEndpoints = {};
+
+    if (!this.config.plugins) return endpoints;
 
     this.serverApplication.get("/health", (_, res) => {
       res.status(200).json({ status: "ok" });
     });
+    this.registerEndpoint("health", "/health");
 
     for (const plugin of Object.values(this.config.plugins)) {
       if (EXCLUDED_PLUGINS.includes(plugin.name)) continue;
@@ -185,9 +189,15 @@ export class ServerPlugin extends Plugin {
 
         plugin.injectRoutes(router);
 
-        this.serverApplication.use(`/api/${plugin.name}`, router);
+        const basePath = `/api/${plugin.name}`;
+        this.serverApplication.use(basePath, router);
+
+        // Collect named endpoints from the plugin
+        endpoints[plugin.name] = plugin.getEndpoints();
       }
     }
+
+    return endpoints;
   }
 
   /**
@@ -196,7 +206,7 @@ export class ServerPlugin extends Plugin {
    * - Dev mode (no staticPath): Vite for HMR
    * - Production (no staticPath): Static files auto-detected
    */
-  private async setupFrontend() {
+  private async setupFrontend(endpoints: PluginEndpoints) {
     const isDev = process.env.NODE_ENV === "development";
     const hasExplicitStaticPath = this.config.staticPath !== undefined;
 
@@ -205,6 +215,7 @@ export class ServerPlugin extends Plugin {
       const staticServer = new StaticServer(
         this.serverApplication,
         this.config.staticPath as string,
+        endpoints,
       );
       staticServer.setup();
       return;
@@ -212,7 +223,7 @@ export class ServerPlugin extends Plugin {
 
     // auto-detection based on environment
     if (isDev) {
-      this.viteDevServer = new ViteDevServer(this.serverApplication);
+      this.viteDevServer = new ViteDevServer(this.serverApplication, endpoints);
       await this.viteDevServer.setup();
       return;
     }
@@ -220,7 +231,12 @@ export class ServerPlugin extends Plugin {
     // auto-detection based on static path
     const staticPath = ServerPlugin.findStaticPath();
     if (staticPath) {
-      const staticServer = new StaticServer(this.serverApplication, staticPath);
+      const staticServer = new StaticServer(
+        this.serverApplication,
+        staticPath,
+        endpoints,
+      );
+
       staticServer.setup();
     }
   }
@@ -259,7 +275,9 @@ export class ServerPlugin extends Plugin {
       console.log("Remote tunnel: disabled (controller not initialized)");
     } else {
       console.log(
-        `Remote tunnel: ${remoteServerController.isAllowedByEnv() ? "allowed" : "blocked"}; ${remoteServerController.isActive() ? "active" : "inactive"}`,
+        `Remote tunnel: ${
+          remoteServerController.isAllowedByEnv() ? "allowed" : "blocked"
+        }; ${remoteServerController.isActive() ? "active" : "inactive"}`,
       );
     }
   }
