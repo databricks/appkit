@@ -14,8 +14,8 @@ Databricks AppKit is a modular TypeScript SDK for building Databricks applicatio
 
 ```
 /packages/
-  /app-kit/          - Core SDK with plugin architecture
-  /app-kit-ui/       - React components and JS utilities
+  /appkit/          - Core SDK with plugin architecture
+  /appkit-ui/       - React components and JS utilities
   /shared/           - Shared TypeScript types across packages
 
 /apps/
@@ -70,8 +70,8 @@ pnpm test:watch       # Run tests in watch mode
 ```
 
 **Test Projects:**
-- `app-kit-ui`: Uses jsdom environment (for React components)
-- `app-kit`: Uses node environment (for Node.js SDK)
+- `appkit-ui`: Uses jsdom environment (for React components)
+- `appkit`: Uses node environment (for Node.js SDK)
 
 ### Code Quality
 ```bash
@@ -113,7 +113,7 @@ AppKit uses a **phase-based plugin architecture** with three initialization phas
 
 **Creating a Plugin:**
 ```typescript
-import { Plugin, toPlugin } from '@databricks/app-kit';
+import { Plugin, toPlugin } from '@databricks/appkit';
 
 class MyPlugin extends Plugin {
   name: string = "my-plugin";
@@ -257,7 +257,7 @@ Biome is used instead of ESLint/Prettier for faster performance:
 pnpm add -Dw <package>
 
 # Package-specific dependencies
-pnpm --filter=@databricks/app-kit add <package>
+pnpm --filter=@databricks/appkit add <package>
 
 # App dependencies
 pnpm --filter=sdk-playground add <package>
@@ -273,7 +273,7 @@ Packages should:
 
 ### Type Generation
 
-`packages/app-kit/src/utils/type-generator.ts` creates plugin registry types at build time. This enables:
+`packages/appkit/src/utils/type-generator.ts` creates plugin registry types at build time. This enables:
 ```typescript
 const AppKit = await createApp({ plugins: [...] });
 AppKit.myPlugin.method();  // Typed based on registered plugins
@@ -291,7 +291,7 @@ The reference app demonstrates AppKit usage:
 **Frontend (`apps/dev-playground/client/`):**
 - Vite + React 19 + TypeScript
 - TanStack Router for file-based routing (routes in `src/routes/`)
-- Components from `@databricks/app-kit-ui`
+- Components from `@databricks/appkit-ui`
 - Route files: `src/routes/<page-name>.route.tsx`
 - Root layout: `src/routes/__root.tsx`
 

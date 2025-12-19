@@ -3,7 +3,7 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@databricks/app-kit-ui/react";
+} from "@databricks/appkit-ui/react";
 
 export function PageHeader() {
   return (

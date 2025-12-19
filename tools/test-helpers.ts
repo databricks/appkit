@@ -2,8 +2,8 @@ import type { IAppRouter } from "shared";
 import type {
   InstrumentConfig,
   ITelemetry,
-} from "../packages/app-kit/src/telemetry/types";
-import type { RequestContext } from "../packages/app-kit/src/utils/databricks-client-middleware";
+} from "../packages/appkit/src/telemetry/types";
+import type { RequestContext } from "../packages/appkit/src/utils/databricks-client-middleware";
 import { vi } from "vitest";
 import type { SpanOptions, Span } from "@opentelemetry/api";
 
@@ -202,7 +202,7 @@ export async function runWithRequestContext<T>(
 
   // Use vi.spyOn to mock getRequestContext and getWorkspaceClient
   const utilsModule = await import(
-    "../packages/app-kit/src/utils/databricks-client-middleware"
+    "../packages/appkit/src/utils/databricks-client-middleware"
   );
 
   const contextSpy = vi

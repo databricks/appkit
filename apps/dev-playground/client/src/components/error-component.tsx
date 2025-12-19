@@ -5,7 +5,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@databricks/app-kit-ui/react";
+} from "@databricks/appkit-ui/react";
 
 export function ErrorComponent({ error }: { error: ErrorComponentProps }) {
   return (

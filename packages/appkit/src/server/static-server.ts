@@ -6,7 +6,7 @@ import { BaseServer } from "./base-server";
 import type { PluginEndpoints } from "./utils";
 
 /**
- * Static server for the App Kit.
+ * Static server for the AppKit.
  *
  * Serves pre-built static files in production mode. Handles SPA routing
  * by serving index.html for non-API routes and injects runtime configuration.

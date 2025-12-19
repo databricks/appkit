@@ -1,7 +1,7 @@
 import type { BasePlugin } from "shared";
 import { setupDatabricksEnv } from "@tools/test-helpers";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { createApp, AppKit } from "../app-kit";
+import { createApp, AppKit } from "../appkit";
 
 // Mock environment validation
 vi.mock("../utils", () => ({

@@ -1,4 +1,4 @@
-# llms.txt — Guidance for AI systems using the Databricks AppKit (@databricks/app-kit)
+# llms.txt — Guidance for AI systems using the Databricks AppKit (@databricks/appkit)
 
 Project: Databricks AppKit
 Author: Databricks
@@ -27,7 +27,7 @@ Server and plugins already initialized, no custom endpoints.
 Example:
 
 ```ts
-import { createApp, server, analytics } from "@databricks/app-kit";
+import { createApp, server, analytics } from "@databricks/appkit";
 
 await createApp({
   plugins: [
@@ -44,7 +44,7 @@ await createApp({
 Example:
 
 ```ts
-import { createApp, server, analytics } from "@databricks/app-kit";
+import { createApp, server, analytics } from "@databricks/appkit";
 
 const AppKit = await createApp({
   plugins: [
@@ -90,7 +90,7 @@ Databricks AppKit Might not cover all the cases needed, so for those cases a plu
 Here is an example:
 
 ```ts
-import { Plugin, toPlugin } from '@databricks/app-kit';
+import { Plugin, toPlugin } from '@databricks/appkit';
 
 class OpenWeatherPlugin extends Plugin {
   name: string = "open-weather";
@@ -149,7 +149,7 @@ export const openWeather = toPlugin<typeof OpenWeatherPlugin, OpenWeatherConfig,
 Then it would be used as the rest of the plugins
 
 ```ts
-import { createApp, server, analytics } from "@databricks/app-kit";
+import { createApp, server, analytics } from "@databricks/appkit";
 import { openWeather } from './open-weather';
 
 const AppKit = await createApp({

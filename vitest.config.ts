@@ -23,20 +23,20 @@ export default defineConfig({
         plugins: [react()],
         resolve: {
           alias: {
-            "@": path.resolve(__dirname, "./packages/app-kit-ui/src"),
+            "@": path.resolve(__dirname, "./packages/appkit-ui/src"),
           },
         },
         test: {
-          name: "app-kit-ui",
-          root: "./packages/app-kit-ui",
+          name: "appkit-ui",
+          root: "./packages/appkit-ui",
           environment: "jsdom",
         },
       },
       {
         plugins: [tsconfigPaths()],
         test: {
-          name: "app-kit",
-          root: "./packages/app-kit",
+          name: "appkit",
+          root: "./packages/appkit",
           environment: "node",
         },
       },

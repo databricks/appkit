@@ -8,7 +8,7 @@ Please review the **staged changes** (git diff --cached) in this repository agai
 
 ## Context
 
-This is the **Databricks Apps Kit** (@databricks/app-kit) - a modular TypeScript SDK for building Databricks apps with workflows and plugins.
+This is the **Databricks Apps Kit** (@databricks/appkit) - a modular TypeScript SDK for building Databricks apps with workflows and plugins.
 
 ## SDK Core Principles
 

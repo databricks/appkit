@@ -1,5 +1,5 @@
-import { sql } from "@databricks/app-kit-ui/js";
-import { BarChart } from "@databricks/app-kit-ui/react";
+import { sql } from "@databricks/appkit-ui/js";
+import { BarChart } from "@databricks/appkit-ui/react";
 import {
   Card,
   CardContent,
@@ -10,7 +10,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@databricks/app-kit-ui/react";
+} from "@databricks/appkit-ui/react";
 
 interface UsageTrendsChartProps {
   groupBy: "default" | "app" | "user";

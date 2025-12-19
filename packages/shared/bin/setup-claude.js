@@ -3,7 +3,7 @@
 /**
  * CLI tool to setup CLAUDE.md for Databricks AppKit packages.
  *
- * This bin is included in both @databricks/app-kit and @databricks/app-kit-ui
+ * This bin is included in both @databricks/appkit and @databricks/appkit-ui
  * so it's available regardless of which package the user installs.
  *
  * Usage:
@@ -15,9 +15,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 const PACKAGES = [
-  { name: "@databricks/app-kit", description: "Backend SDK" },
+  { name: "@databricks/appkit", description: "Backend SDK" },
   {
-    name: "@databricks/app-kit-ui",
+    name: "@databricks/appkit-ui",
     description: "UI Integration, Charts, Tables, SSE, and more.",
   },
 ];
@@ -133,7 +133,7 @@ Examples:
   const installed = findInstalledPackages();
 
   if (installed.length === 0) {
-    console.log("No @databricks/app-kit packages found in node_modules.");
+    console.log("No @databricks/appkit packages found in node_modules.");
     console.log("\nMake sure you've installed at least one of:");
     PACKAGES.forEach((pkg) => {
       console.log(`  - ${pkg.name}`);

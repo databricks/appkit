@@ -13,8 +13,8 @@
     "skipLibCheck": true,
     "lib": ["ES2021"],
     "paths": {
-      "@databricks/app-kit": ["packages/app-kit/*"],
-      "@databricks/app-kit-ui": ["packages/app-kit-ui/*"],
+      "@databricks/appkit": ["packages/appkit/*"],
+      "@databricks/appkit-ui": ["packages/appkit-ui/*"],
       "shared": ["packages/shared/src"],
       "@tools/*": ["tools/*"]
     }

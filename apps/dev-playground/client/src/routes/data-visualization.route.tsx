@@ -1,5 +1,5 @@
 import { Header } from "@/components/layout/header";
-import { sql } from "@databricks/app-kit-ui/js";
+import { sql } from "@databricks/appkit-ui/js";
 import {
   AreaChart,
   BarChart,
@@ -13,7 +13,7 @@ import {
   LineChart,
   PieChart,
   RadarChart,
-} from "@databricks/app-kit-ui/react";
+} from "@databricks/appkit-ui/react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { codeToHtml } from "shiki";
@@ -78,7 +78,7 @@ function DataVisualizationRoute() {
       <div className="max-w-[1200px] mx-auto px-6 py-12">
         <Header
           title="Data Visualization"
-          description="Explore powerful and customizable chart components from the App Kit."
+          description="Explore powerful and customizable chart components from the AppKit."
           tooltip="Showcase of BarChart, AreaChart, LineChart, PieChart, and RadarChart components"
         />
 

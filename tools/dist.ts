@@ -12,7 +12,7 @@ delete pkg.dependencies.shared;
 pkg.exports = pkg.publishConfig.exports;
 delete pkg.publishConfig.exports;
 
-const isAppKitPackage = pkg.name?.startsWith("@databricks/app-kit");
+const isAppKitPackage = pkg.name?.startsWith("@databricks/appkit");
 const sharedBin = path.join(
   __dirname,
   "../packages/shared/bin/setup-claude.js",
@@ -22,7 +22,7 @@ const sharedPostinstall = path.join(
   "../packages/shared/scripts/postinstall.js",
 );
 
-// Add appkit-setup bin and postinstall for @databricks/app-kit* packages
+// Add appkit-setup bin and postinstall for @databricks/appkit* packages
 if (isAppKitPackage) {
   if (fs.existsSync(sharedBin)) {
     pkg.bin = pkg.bin || {};

@@ -12,7 +12,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@databricks/app-kit-ui/react";
+} from "@databricks/appkit-ui/react";
 import {
   type ColumnDef,
   type ColumnFiltersState,

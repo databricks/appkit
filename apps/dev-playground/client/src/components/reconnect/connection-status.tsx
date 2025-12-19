@@ -5,7 +5,7 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@databricks/app-kit-ui/react";
+} from "@databricks/appkit-ui/react";
 import { InfoIcon } from "lucide-react";
 import { Timeline } from "./timeline";
 import { getStatusBadgeStyle } from "./utils";

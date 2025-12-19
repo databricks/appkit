@@ -1,4 +1,4 @@
-import { Plugin, toPlugin } from "@databricks/app-kit";
+import { Plugin, toPlugin } from "@databricks/appkit";
 import type { IAppRouter, StreamExecutionSettings } from "shared";
 
 interface ReconnectResponse {

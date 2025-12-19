@@ -71,9 +71,9 @@ importers:
 
   apps/clean-app:
     dependencies:
-      '@databricks/app-kit':
+      '@databricks/appkit':
         specifier: workspace:*
-        version: link:../../packages/app-kit
+        version: link:../../packages/appkit
       react:
         specifier: ^19.2.0
         version: 19.2.0
@@ -120,9 +120,9 @@ importers:
 
   apps/dev-playground:
     dependencies:
-      '@databricks/app-kit':
+      '@databricks/appkit':
         specifier: workspace:*
-        version: link:../../packages/app-kit
+        version: link:../../packages/appkit
       zod:
         specifier: ^4.1.13
         version: 4.1.13
@@ -186,7 +186,7 @@ importers:
         specifier: ~5.6.2
         version: 5.6.3
 
-  packages/app-kit:
+  packages/appkit:
     dependencies:
       '@databricks/sdk-experimental':
         specifier: ^0.15.0
@@ -268,7 +268,7 @@ importers:
         specifier: ^5.1.1
         version: 5.1.1(rolldown-vite@7.1.14(@types/node@24.10.1)(esbuild@0.25.10)(jiti@2.6.1)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))
 
-  packages/app-kit-ui:
+  packages/appkit-ui:
     dependencies:
       '@hookform/resolvers':
         specifier: ^5.2.2

@@ -19,29 +19,29 @@ const TMP_FOLDER = path.join(process.cwd(), "deployable");
 
 const appKitPackageJson = JSON.parse(
   fs.readFileSync(
-    path.join(process.cwd(), "packages", "app-kit", "package.json"),
+    path.join(process.cwd(), "packages", "appkit", "package.json"),
     "utf-8",
   ),
 );
 const appKitUiPackageJson = JSON.parse(
   fs.readFileSync(
-    path.join(process.cwd(), "packages", "app-kit-ui", "package.json"),
+    path.join(process.cwd(), "packages", "appkit-ui", "package.json"),
     "utf-8",
   ),
 );
 const appKitTarball = path.join(
   process.cwd(),
   "packages",
-  "app-kit",
+  "appkit",
   "tmp",
-  `databricks-app-kit-${appKitPackageJson.version}.tgz`,
+  `databricks-appkit-${appKitPackageJson.version}.tgz`,
 );
 const appKitUiTarball = path.join(
   process.cwd(),
   "packages",
-  "app-kit-ui",
+  "appkit-ui",
   "tmp",
-  `databricks-app-kit-ui-${appKitUiPackageJson.version}.tgz`,
+  `databricks-appkit-ui-${appKitUiPackageJson.version}.tgz`,
 );
 
 async function deployPlayground() {
@@ -88,12 +88,12 @@ async function deployPlayground() {
 
   playgroundPackageJson.dependencies = {
     ...playgroundPackageJson.dependencies,
-    "@databricks/app-kit": `file:./databricks-app-kit-${appKitPackageJson.version}.tgz`,
+    "@databricks/appkit": `file:./databricks-appkit-${appKitPackageJson.version}.tgz`,
   };
 
   clientPackageJson.dependencies = {
     ...clientPackageJson.dependencies,
-    "@databricks/app-kit-ui": `file:./databricks-app-kit-ui-${appKitUiPackageJson.version}.tgz`,
+    "@databricks/appkit-ui": `file:./databricks-appkit-ui-${appKitUiPackageJson.version}.tgz`,
   };
 
   fs.writeFileSync(
@@ -106,17 +106,14 @@ async function deployPlayground() {
   );
   fs.copyFileSync(
     appKitTarball,
-    path.join(
-      TMP_FOLDER,
-      `databricks-app-kit-${appKitPackageJson.version}.tgz`,
-    ),
+    path.join(TMP_FOLDER, `databricks-appkit-${appKitPackageJson.version}.tgz`),
   );
   fs.copyFileSync(
     appKitUiTarball,
     path.join(
       TMP_FOLDER,
       "client",
-      `databricks-app-kit-ui-${appKitUiPackageJson.version}.tgz`,
+      `databricks-appkit-ui-${appKitUiPackageJson.version}.tgz`,
     ),
   );
 

@@ -1,5 +1,5 @@
 import { AnalyticsHeader } from "@/components/analytics";
-import { sql } from "@databricks/app-kit-ui/js";
+import { sql } from "@databricks/appkit-ui/js";
 import {
   AreaChart,
   BarChart,
@@ -12,7 +12,7 @@ import {
   HeatmapChart,
   LineChart,
   PieChart,
-} from "@databricks/app-kit-ui/react";
+} from "@databricks/appkit-ui/react";
 import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/arrow-analytics")({
