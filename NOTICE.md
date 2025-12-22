@@ -49,11 +49,13 @@ This Software contains code from the following open source projects:
 | [@radix-ui/react-tooltip](https://www.npmjs.com/package/@radix-ui/react-tooltip) | 1.2.8 | MIT | https://radix-ui.com/primitives |
 | [@tanstack/react-table](https://www.npmjs.com/package/@tanstack/react-table) | 8.21.3 | MIT | https://tanstack.com/table |
 | [@tanstack/react-virtual](https://www.npmjs.com/package/@tanstack/react-virtual) | 3.13.12 | MIT | https://tanstack.com/virtual |
+| [apache-arrow](https://www.npmjs.com/package/apache-arrow) | 21.1.0 | Apache-2.0 | https://arrow.apache.org/js/ |
 | [class-variance-authority](https://www.npmjs.com/package/class-variance-authority) | 0.7.1 | Apache-2.0 | https://github.com/joe-bell/cva#readme |
 | [clsx](https://www.npmjs.com/package/clsx) | 2.1.1 | MIT | https://github.com/lukeed/clsx#readme |
 | [cmdk](https://www.npmjs.com/package/cmdk) | 1.1.1 | MIT | https://github.com/pacocoursey/cmdk#readme |
 | [date-fns](https://www.npmjs.com/package/date-fns) | 4.1.0 | MIT | https://github.com/date-fns/date-fns#readme |
 | [dotenv](https://www.npmjs.com/package/dotenv) | 16.6.1 | BSD-2-Clause | https://github.com/motdotla/dotenv#readme |
+| [echarts-for-react](https://www.npmjs.com/package/echarts-for-react) | 3.0.5 | MIT | https://github.com/hustcc/echarts-for-react |
 | [embla-carousel-react](https://www.npmjs.com/package/embla-carousel-react) | 8.6.0 | MIT | https://www.embla-carousel.com |
 | [express](https://www.npmjs.com/package/express) | 4.22.0 | MIT | http://expressjs.com/ |
 | [fast-glob](https://www.npmjs.com/package/fast-glob) | 3.3.3 | MIT | https://github.com/mrmlnc/fast-glob#readme |
@@ -67,7 +69,7 @@ This Software contains code from the following open source projects:
 | [sonner](https://www.npmjs.com/package/sonner) | 2.0.7 | MIT | https://sonner.emilkowal.ski/ |
 | [tailwind-merge](https://www.npmjs.com/package/tailwind-merge) | 3.4.0 | MIT | https://github.com/dcastil/tailwind-merge |
 | [vaul](https://www.npmjs.com/package/vaul) | 1.1.2 | MIT | https://vaul.emilkowal.ski/ |
-| [ws](https://www.npmjs.com/package/ws) | 8.18.3 | MIT | https://github.com/websockets/ws |
+| [ws](https://www.npmjs.com/package/ws) | 7.5.10, 8.18.3 | MIT | https://github.com/websockets/ws |
 | [zod](https://www.npmjs.com/package/zod) | 4.1.13 | MIT | https://zod.dev |
 | [zod-to-ts](https://www.npmjs.com/package/zod-to-ts) | 2.0.0 | MIT | https://github.com/sachinraja/zod-to-ts#readme |
 
