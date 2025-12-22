@@ -2,12 +2,18 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
   workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Dry run (no actual release)"
+        required: false
+        type: boolean
+        default: false
 
 jobs:
-  publish:
+  release:
     runs-on:
       group: databricks-protected-runner-group
       labels: linux-ubuntu-latest
@@ -19,29 +25,48 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           registry-url: "https://registry.npmjs.org"
           cache: "pnpm"
+
       - name: Update npm
         run: npm install -g npm@latest
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build package
-        run: pnpm run pack:sdk
+      - name: Determine release mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" == "push" ]; then
+            echo "dry_run=false" >> $GITHUB_OUTPUT
+          else
+            echo "dry_run=${{ inputs.dry-run }}" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            *.tgz
-          draft: false
-          prerelease: false
-
-      - name: Release to NPM
-        run: pnpm run release
+      - name: Release
+        run: |
+          if [ "${{ steps.mode.outputs.dry_run }}" == "true" ]; then
+            pnpm release:dry
+          else
+            pnpm release:ci
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

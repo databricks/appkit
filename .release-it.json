@@ -1,0 +1,51 @@
+{
+  "$schema": "https://unpkg.com/release-it@19/schema/release-it.json",
+  "git": {
+    "commitMessage": "chore: release v${version}",
+    "tagName": "v${version}",
+    "tagAnnotation": "Release v${version}",
+    "requireBranch": "main",
+    "requireCleanWorkingDir": true,
+    "push": true,
+    "pushArgs": ["--follow-tags"]
+  },
+  "github": {
+    "release": true,
+    "releaseName": "v${version}",
+    "autoGenerate": false,
+    "draft": false,
+    "preRelease": false,
+    "tokenRef": "GITHUB_TOKEN"
+  },
+  "npm": false,
+  "hooks": {
+    "after:bump": "tsx tools/sync-versions.ts ${version}",
+    "before:release": "pnpm build && pnpm --filter=@databricks/appkit dist && pnpm --filter=@databricks/appkit-ui dist",
+    "after:release": "npm publish packages/appkit/tmp --access public --provenance && npm publish packages/appkit-ui/tmp --access public --provenance"
+  },
+  "plugins": {
+    "@release-it/conventional-changelog": {
+      "preset": {
+        "name": "conventionalcommits",
+        "types": [
+          { "type": "feat", "section": "Features" },
+          { "type": "fix", "section": "Bug Fixes" },
+          { "type": "perf", "section": "Performance Improvements" },
+          { "type": "refactor", "section": "Code Refactoring" },
+          { "type": "docs", "section": "Documentation" },
+          { "type": "test", "section": "Tests" },
+          { "type": "build", "section": "Build System" },
+          { "type": "ci", "section": "Continuous Integration" },
+          { "type": "chore", "section": "Chores", "hidden": true }
+        ]
+      },
+      "writerOpts": {
+        "groupBy": "scope",
+        "commitGroupsSort": ["appkit", "appkit-ui"],
+        "commitsSort": ["type", "subject"]
+      },
+      "infile": "CHANGELOG.md",
+      "header": "# Changelog\n\nAll notable changes to this project will be documented in this file."
+    }
+  }
+}

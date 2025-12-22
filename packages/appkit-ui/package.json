@@ -31,12 +31,11 @@
   "scripts": {
     "build:package": "tsdown --config tsdown.config.ts",
     "build:watch": "tsdown --config tsdown.config.ts --watch",
-    "dist": "tsx ../../tools/dist.ts && npm pack ./tmp --pack-destination ./tmp",
-    "release:dry": "pnpm dist && pnpm publish ./tmp --access public --dry-run --no-git-checks",
-    "release": "pnpm dist && pnpm publish ./tmp --access public --no-git-checks",
-    "typecheck": "tsc --noEmit",
+    "clean:full": "rm -rf dist node_modules tmp",
     "clean": "rm -rf dist tmp",
-    "clean:full": "rm -rf dist node_modules tmp"
+    "dist": "tsx ../../tools/dist.ts",
+    "tarball": "tsx ../../tools/dist.ts && npm pack ./tmp --pack-destination ./tmp",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
