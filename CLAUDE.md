@@ -101,6 +101,62 @@ pnpm clean            # Remove build artifacts
 pnpm clean:full       # Remove build artifacts + node_modules
 ```
 
+### Releasing
+
+This project uses [release-it](https://github.com/release-it/release-it) with [conventional-changelog](https://www.conventionalcommits.org/) for automated releases. Both packages (`appkit` and `appkit-ui`) are always released together with the same version.
+
+#### GitHub Actions (Recommended)
+
+Releases are automated via GitHub Actions and trigger in two ways:
+
+**Automatic (on merge to main):**
+- When PRs are merged to `main`, the workflow automatically runs
+- Analyzes commits since last release using conventional commits
+- If there are `feat:` or `fix:` commits, both packages are released together
+- If no releasable commits, the release is skipped
+
+**Manual (workflow_dispatch):**
+1. Go to **Actions → Release → Run workflow**
+2. Optionally enable "Dry run" to preview without publishing
+3. Click "Run workflow"
+
+**Permissions (already configured, no secrets needed):**
+- `contents: write` - to push commits and tags
+- `id-token: write` - for npm OIDC/provenance publishing
+
+Both `GITHUB_TOKEN` and npm OIDC are provided automatically by GitHub Actions.
+
+The workflow automatically:
+- Builds all packages
+- Bumps version based on conventional commits
+- Updates `CHANGELOG.md`
+- Creates git tag and GitHub release
+- Publishes to npm
+
+#### Local Release (Alternative)
+
+**Prerequisites:**
+- Be on `main` branch with a clean working directory
+- Set `GITHUB_TOKEN` environment variable
+- Be logged in to npm (`npm login`)
+
+```bash
+# Dry run (preview what will happen without making changes)
+pnpm release:dry
+
+# Interactive release (prompts for version bump)
+pnpm release
+
+# CI release (non-interactive, for automation)
+pnpm release:ci
+```
+
+#### Version Bumps (Conventional Commits)
+
+- `feat:` → Minor version bump (0.1.0 → 0.2.0)
+- `fix:` → Patch version bump (0.1.0 → 0.1.1)
+- `feat!:` or `BREAKING CHANGE:` → Major version bump (0.1.0 → 1.0.0)
+
 ## Architecture Overview
 
 ### Plugin System
