@@ -19,7 +19,7 @@
   },
   "npm": false,
   "hooks": {
-    "after:bump": "tsx tools/sync-versions.ts ${version}",
+    "after:bump": "tsx tools/sync-versions.ts ${version} && pnpm build:notice && git add NOTICE.md",
     "before:release": "pnpm build && pnpm --filter=@databricks/appkit dist && pnpm --filter=@databricks/appkit-ui dist",
     "after:release": "npm publish packages/appkit/tmp --access public --provenance && npm publish packages/appkit-ui/tmp --access public --provenance"
   },
@@ -27,17 +27,7 @@
     "@release-it/conventional-changelog": {
       "preset": {
         "name": "conventionalcommits",
-        "types": [
-          { "type": "feat", "section": "Features" },
-          { "type": "fix", "section": "Bug Fixes" },
-          { "type": "perf", "section": "Performance Improvements" },
-          { "type": "refactor", "section": "Code Refactoring" },
-          { "type": "docs", "section": "Documentation" },
-          { "type": "test", "section": "Tests" },
-          { "type": "build", "section": "Build System" },
-          { "type": "ci", "section": "Continuous Integration" },
-          { "type": "chore", "section": "Chores", "hidden": true }
-        ]
+        "bumpStrict": true
       },
       "writerOpts": {
         "groupBy": "scope",
