@@ -5,6 +5,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "packageManager": "pnpm@10.21.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/databricks/appkit.git"
+  },
   "files": [
     "dist",
     "bin",
