@@ -1,193 +1,1004 @@
-# llms.txt — Guidance for AI systems using the Databricks AppKit (@databricks/appkit)
-
+# llms.txt — LLM Guide for Building Great Databricks Apps with AppKit
 Project: Databricks AppKit
-Author: Databricks
-Version: 1.0.0
 
-# =====================
-# General Description
-# =====================
-AppKit is a modular TypeScript SDK for building apps with workflows and plugins.
-It provides a single entrypoint (createApp) where you configure and register plugins.
-Each plugin is then available under AppKit[pluginName].
+This document is written *for LLMs* generating code in a brand-new project folder that installs AppKit from npm. It is intentionally prescriptive.
 
-Main concepts:
-- createApp(config): initializes the SDK with plugins
-- Plugins: extend AppKit with functionality (server, analytics, ai, etc.)
-- AppKit[pluginName]: exposes plugin API after initialization
-- New plugins can be created by extending the Plugin class.
+## High-level mission
 
-# =====================
-# Primary Usage Pattern
-# =====================
-Always use async/await.
-Always initialize AppKit before using plugins.
-Server and plugins already initialized, no custom endpoints.
+Build **full-stack TypeScript apps** on Databricks using:
 
-Example:
+- **Backend**: `@databricks/appkit`
+- **Frontend**: `@databricks/appkit-ui`
+- **Analytics**: SQL files in `config/queries/*.sql` executed via the AppKit analytics plugin
+
+This file is designed to work even when you *do not* have access to the AppKit source repo. Prefer only public package APIs and portable project structures.
+
+## Hard rules (LLM guardrails)
+
+- **Do not invent APIs**. If unsure, stick to the patterns shown in this file and only documented exports from `@databricks/appkit` and `@databricks/appkit-ui`.
+- **`createApp()` is async**. Prefer **top-level `await createApp(...)`**. If you can’t, use `void createApp(...)` and do not ignore promise rejection.
+- **Always memoize query parameters** passed to `useAnalyticsQuery` / charts to avoid refetch loops.
+- **Always handle loading/error/empty states** in UI (use `Skeleton`, error text, empty state).
+- **Always use `sql.*` helpers** for query parameters (do not pass raw strings/numbers unless the query expects none).
+- **Never construct SQL strings dynamically**. Use parameterized queries with `:paramName`.
+- **Never use `require()`**. Use ESM `import/export`.
+
+## Canonical project layout
+
+Recommended structure:
+
+```
+my-app/
+├── server.ts                 # backend entry point (or server/index.ts for complex apps)
+├── index.html                # Vite entry point
+├── vite.config.ts            # Vite config
+├── src/
+│   ├── main.tsx              # React entry point
+│   └── App.tsx               # Root component
+├── config/
+│   └── queries/
+│       └── my_query.sql      # SQL queries (optional, if using analytics)
+├── app.yaml                  # Databricks Apps config (warehouse binding)
+├── package.json
+└── tsconfig.json
+```
+
+Alternative structure for larger apps:
+
+```
+my-app/
+├── server/
+│   └── index.ts              # backend entry point
+├── client/
+│   ├── index.html
+│   ├── vite.config.ts
+│   └── src/
+│       ├── main.tsx
+│       └── App.tsx
+├── config/
+│   └── queries/
+│       └── my_query.sql
+├── app.yaml
+├── package.json
+└── tsconfig.json
+```
+
+## Project scaffolding (start here)
+
+### `package.json`
+
+```json
+{
+  "name": "my-app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "NODE_ENV=development tsx watch server.ts",
+    "build": "vite build",
+    "start": "NODE_ENV=production tsx server.ts"
+  },
+  "dependencies": {
+    "@databricks/appkit": "^0.0.2",
+    "@databricks/appkit-ui": "^0.0.2",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "~5.6.0",
+    "vite": "^6.0.0"
+  }
+}
+```
+
+### `index.html`
+
+```html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My App</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+```
+
+### `src/main.tsx`
+
+```tsx
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App";
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);
+```
+
+### `src/App.tsx` (minimal)
+
+```tsx
+export default function App() {
+  return (
+    <div className="p-8">
+      <h1 className="text-2xl font-bold">My App</h1>
+    </div>
+  );
+}
+```
+
+### `vite.config.ts`
 
 ```ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+});
+```
+
+### `tsconfig.json`
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true
+  },
+  "include": ["src", "server.ts"]
+}
+```
+
+### `server.ts`
+
+```ts
+import { createApp, server } from "@databricks/appkit";
+
+await createApp({
+  plugins: [server()],
+});
+```
+
+### Running the app
+
+```bash
+# Install dependencies
+npm install
+
+# Development (starts backend + Vite dev server)
+npm run dev
+
+# Production build
+npm run build
+npm start
+```
+
+## Integrating into an existing app
+
+If you already have a React/Vite app and want to add AppKit:
+
+### 1. Install dependencies
+
+```bash
+npm install @databricks/appkit @databricks/appkit-ui
+npm install -D tsx
+```
+
+### 2. Create `server.ts` (new file)
+
+```ts
+import { createApp, server } from "@databricks/appkit";
+
+await createApp({
+  plugins: [server()],
+});
+```
+
+### 3. Update `package.json` scripts
+
+```json
+{
+  "scripts": {
+    "dev": "NODE_ENV=development tsx watch server.ts",
+    "build": "vite build",
+    "start": "NODE_ENV=production tsx server.ts"
+  }
+}
+```
+
+### 4. That's it
+
+- Your existing `vite.config.ts` stays the same
+- Your existing `src/` folder stays the same
+- AppKit's server plugin will automatically serve your Vite app in dev mode and the `dist/` folder in production
+
+### Adding analytics to an existing app
+
+```ts
+// server.ts
 import { createApp, server, analytics } from "@databricks/appkit";
 
 await createApp({
+  plugins: [server(), analytics({})],
+});
+```
+
+Then create `config/queries/` and add your `.sql` files.
+
+## Environment variables
+
+### Required for Databricks Apps deployment
+
+These are typically **provided by Databricks Apps runtime** (exact set can vary by platform/version):
+
+| Variable | Description |
+|----------|-------------|
+| `DATABRICKS_HOST` | Workspace URL (e.g. `https://xxx.cloud.databricks.com`) |
+| `DATABRICKS_APP_PORT` | Port to bind (default: `8000`) |
+| `DATABRICKS_APP_NAME` | App name in Databricks |
+
+### Required for SQL queries (analytics plugin)
+
+| Variable | Description | How to set |
+|----------|-------------|------------|
+| `DATABRICKS_WAREHOUSE_ID` | SQL warehouse ID | In `app.yaml`: `valueFrom: sql-warehouse` |
+
+### Optional
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DATABRICKS_WORKSPACE_ID` | Workspace ID | Auto-fetched from API |
+| `NODE_ENV` | `"development"` or `"production"` | — |
+| `FLASK_RUN_HOST` | Host to bind | `0.0.0.0` |
+
+### Local development
+
+For local development, you need to authenticate with Databricks. Options:
+
+**Option 1: Databricks CLI profile (recommended)**
+
+```bash
+# Configure once
+databricks configure --profile my-profile
+
+# Then run with profile
+DATABRICKS_CONFIG_PROFILE=my-profile npm run dev
+# If your Databricks SDK expects a different variable name, try:
+# DATABRICKS_PROFILE=my-profile npm run dev
+```
+
+**Option 2: Environment variables**
+
+```bash
+export DATABRICKS_HOST="https://xxx.cloud.databricks.com"
+export DATABRICKS_TOKEN="dapi..."
+export DATABRICKS_WAREHOUSE_ID="abc123..."
+npm run dev
+```
+
+**Option 3: `.env` file (auto-loaded by AppKit)**
+
+```bash
+# .env (add to .gitignore!)
+DATABRICKS_HOST=https://xxx.cloud.databricks.com
+DATABRICKS_TOKEN=dapi...
+DATABRICKS_WAREHOUSE_ID=abc123...
+```
+
+### Telemetry (optional)
+
+| Variable | Description |
+|----------|-------------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OpenTelemetry collector endpoint |
+| `OTEL_SERVICE_NAME` | Service name for traces |
+
+## Backend: `@databricks/appkit`
+
+### Minimal server (golden template)
+
+The smallest valid AppKit server:
+
+```ts
+// server.ts (or server/index.ts)
+import { createApp, server } from "@databricks/appkit";
+
+await createApp({
+  plugins: [server()],
+});
+```
+
+### Server plugin (`server()`)
+
+What it does:
+
+- Starts an Express server (default `host=0.0.0.0`, `port=8000`)
+- Mounts plugin routes under `/api/<pluginName>/...`
+- Adds `/health` (returns `{ status: "ok" }`)
+- Serves frontend:
+  - **Development** (`NODE_ENV=development`): runs a Vite dev server in middleware mode
+  - **Production**: auto-detects static frontend directory (checks `dist`, `client/dist`, `build`, `public`, `out`)
+
+Config (real options):
+
+```ts
+import { createApp, server } from "@databricks/appkit";
+
+await createApp({
   plugins: [
-    server({ port: 8000 }),
-    analytics(),
+    server({
+      port: 8000,          // default: Number(process.env.DATABRICKS_APP_PORT) || 8000
+      host: "0.0.0.0",     // default: process.env.FLASK_RUN_HOST || "0.0.0.0"
+      autoStart: true,     // default: true
+      staticPath: "dist",  // optional: force a specific static directory
+    }),
   ],
 });
 ```
 
-# ==============================================
-# Basic Usage Pattern starting the server
-# ==============================================
-
-Example:
+Manual server start (when you need to `.extend()` Express):
 
 ```ts
-import { createApp, server, analytics } from "@databricks/appkit";
+import { createApp, server } from "@databricks/appkit";
 
-const AppKit = await createApp({
-  plugins: [
-    server({ port: 8000, autoStart: false }),
-    analytics(),
-  ],
+const appkit = await createApp({
+  plugins: [server({ autoStart: false })],
 });
 
-const app = await AppKit.server.start();
-app.get("/ping", (req, res) => res.send("pong"));
+appkit.server.extend((app) => {
+  app.get("/custom", (_req, res) => res.json({ ok: true }));
+});
+
+await appkit.server.start();
 ```
 
-# =====================
-# Plugin APIs
-# =====================
+### Analytics plugin (`analytics()`)
 
-Each plugin exposes a set of endpoints by default.
-
-## Server Plugin
-- AppKit.server.start(): Promise<Express.Application>
-- Purpose: Start an Express server with configured port, only use if { autoStart: false } is provided in the config of the server plugin
-- Usage: Add routes via the returned app
-- Config - When setting the plugin, the following options can be provided:
-  server({
-    port?: number;
-    staticPath?: string; // This provides the path where the frontend assets are.
-    autoStart?: boolean;
-  })
-
-## Analytics Plugin
-- AppKit.analytics.query.executeQuery({ query, parameters }: { query: string; parameters?: Record<string, any> }, options?: ExecuteOptions): Promise<ExecuteStatementOutput>;
-- Purpose: Provide SQL by key interface.
-- Usage: Only for structured query + insert examples. SQL never goes into the call to the function. Any SQL that needs to be written,
-  will be written into config/queries/<query_key>.sql. All queries should be parameterized (use placeholders).
-- Default endpoints:
-  - POST /api/analytics/:query_key -> `query_key` will be the key to the file that contains the query. Expects a body with the shape { parameters?: Record<string, any>; }. parameters will be bound into the query.
-
-# =====================
-# Custom Plugins
-# =====================
-
-Databricks AppKit Might not cover all the cases needed, so for those cases a plugin can be created.
-Here is an example:
+Add SQL query execution backed by Databricks SQL Warehouses.
 
 ```ts
-import { Plugin, toPlugin } from '@databricks/appkit';
+import { analytics, createApp, server } from "@databricks/appkit";
 
-class OpenWeatherPlugin extends Plugin {
-  name: string = "open-weather";
-  private apiKey: string;
-  private url: string;
+await createApp({
+  plugins: [server(), analytics({})],
+});
+```
 
-  constructor(config: any, auth: IAuthManager, telemetry: ITelemetryManager) {
-    super(config, auth, telemetry);
+Where queries live:
 
-    this.apiKey = process.env.OPEN_WEATHER_API_KEY!;
-    this.url = process.env.OPEN_WEATHER_URL || "https://api.openweathermap.org/data/3.0/onecall";
+- Put `.sql` files in `config/queries/`.
+- Query key is the filename without `.sql` (e.g. `spend_summary.sql` → `"spend_summary"`).
 
-    // ...
-  }
+SQL parameters:
 
-  async getWeather(lat: number, lon: number): Promise<any | null> {
-    const url = `${this.url}?lat=${lat}&lon=${lon}&appid=${this.apiKey}`;
+- Use `:paramName` placeholders.
+- Optionally annotate parameter types using SQL comments:
 
-    try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        console.error("Error fetching weather data:", response.statusText);
-        return null;
-      }
+```sql
+-- @param startDate DATE
+-- @param endDate DATE
+-- @param limit NUMERIC
+SELECT ...
+WHERE usage_date BETWEEN :startDate AND :endDate
+LIMIT :limit
+```
 
-      const data = await response.json();
-      return data;
-    } catch (error) {
-      console.error("Fetch error:", error);
-      return null;
-    }
-  }
+Supported `-- @param` types (case-insensitive):
 
-  /**
-   * Optionally the plugin can inject its own routes to the router
-   */
+- `STRING`, `NUMERIC`, `BOOLEAN`, `DATE`, `TIMESTAMP`, `BINARY`
+
+Server-injected params (important):
+
+- `:workspaceId` is **injected by the server** and **must not** be annotated.
+- Example:
+
+```sql
+WHERE workspace_id = :workspaceId
+```
+
+HTTP endpoints exposed (mounted under `/api/analytics`):
+
+- `POST /api/analytics/query/:query_key`
+- `POST /api/analytics/users/me/query/:query_key`
+- `GET /api/analytics/arrow-result/:jobId`
+- `GET /api/analytics/users/me/arrow-result/:jobId`
+
+Formats:
+
+- `format: "JSON"` (default) returns JSON rows
+- `format: "ARROW"` returns an Arrow “external links” payload over SSE, then the client fetches binary Arrow from `/api/analytics/arrow-result/:jobId`
+
+### Request context (`getRequestContext()`)
+
+If a plugin sets `requiresDatabricksClient = true`, AppKit adds middleware that provides request context.
+
+Headers used:
+
+- `x-forwarded-user`: required in production; identifies the user
+- `x-forwarded-access-token`: optional; enables **user token passthrough** if `DATABRICKS_HOST` is set
+
+Context fields (real behavior):
+
+- `userId`: derived from `x-forwarded-user` (in development it falls back to `serviceUserId`)
+- `serviceUserId`: service principal/user ID
+- `warehouseId`: `Promise<string>` (from `DATABRICKS_WAREHOUSE_ID`, or auto-selected in development)
+- `workspaceId`: `Promise<string>` (from `DATABRICKS_WORKSPACE_ID` or fetched)
+- `userDatabricksClient`: present only when passthrough is available (or in dev it equals service client)
+- `serviceDatabricksClient`: always present
+
+### Custom plugins (backend)
+
+If you need custom API routes or background logic, implement an AppKit plugin.
+
+```ts
+import { Plugin, toPlugin } from "@databricks/appkit";
+import type express from "express";
+
+class MyPlugin extends Plugin {
+  name = "my-plugin";
+  envVars = [];                 // list required env vars here
+  requiresDatabricksClient = false; // set true if you need getRequestContext()
+
   injectRoutes(router: express.Router) {
-    /**
-     * Each route is scoped to the plugin name. So in this case the route will be end up being
-     * /api/open-weather/weather
-     * 
-     * and an example request would be:
-     * GET /api/open-weather/weather?lat=40.7128&lon=-74.0060
-     */
-    router.get("/weather", async (req: any, res: any) => {
-      const { lat, lon } = req.query;
-      const data = await this.getWeather(lat, lon);
-      res.send(data);
+    this.route(router, {
+      name: "hello",
+      method: "get",
+      path: "/hello",
+      handler: async (_req, res) => {
+        res.json({ ok: true });
+      },
     });
   }
 }
 
-export const openWeather = toPlugin<typeof OpenWeatherPlugin, OpenWeatherConfig, "openWeather">(OpenWeatherPlugin, "openWeather");
+export const myPlugin = toPlugin<typeof MyPlugin, Record<string, never>, "my-plugin">(
+  MyPlugin,
+  "my-plugin",
+);
 ```
 
-Then it would be used as the rest of the plugins
+### Caching (global + plugin-level)
+
+Global:
 
 ```ts
-import { createApp, server, analytics } from "@databricks/appkit";
-import { openWeather } from './open-weather';
-
-const AppKit = await createApp({
-  plugins: [
-    server({ port: 8000 }),
-    analytics(),
-    openWeather(),
-  ],
-});
-
-const app = await AppKit.server.start();
-/**
- * A route could also be added here
- */
-app.get("/api/open-weather/weather", async (req, res) => {
-  const data = await AppKit.openWeather.getWeather(40.7128, -74.0060);
-  res.send(data);
+await createApp({
+  plugins: [server(), analytics({})],
+  cache: {
+    enabled: true,
+    ttl: 3600,              // seconds
+    strictPersistence: false,
+  },
 });
 ```
 
+- Storage auto-selects **Lakebase persistent cache when healthy**, otherwise falls back to in-memory.
 
-# =====================
-# Style Guidelines for AI
-# =====================
-- Always prefer async/await (never .then chaining in examples).
-- Always show explicit plugin config (no hidden defaults).
-- Use ESModules (import/export), not require().
-- Use TypeScript typings in advanced examples if helpful.
+Plugin-level:
 
-# =====================
-# Anti-Patterns (avoid in examples)
-# =====================
-- ❌ Do not access AppKit internals (only use AppKit[pluginName]).
-- ❌ Do not assume SQL queries hit a real DB (they return demo data unless configured).
-- ❌ Do not show usage without createApp first.
+```ts
+// inside a Plugin subclass:
+const value = await this.cache.getOrExecute(
+  ["my-plugin", "data", userId],
+  async () => expensiveWork(),
+  userKey,
+  { ttl: 300 },
+);
+```
 
-# =====================
-# Attribution
-# =====================
-If AI-generated code uses this SDK, attribute:
-"Powered by Databricks AppKit (https://github.com/...)".
+## Frontend: `@databricks/appkit-ui`
+
+### Imports
+
+- React-facing APIs: `@databricks/appkit-ui/react`
+- Non-React utilities (sql markers, arrow, SSE): `@databricks/appkit-ui/js`
+
+```tsx
+import { useAnalyticsQuery, Card, Skeleton } from "@databricks/appkit-ui/react";
+import { sql } from "@databricks/appkit-ui/js";
+```
+
+### `useAnalyticsQuery(queryKey, parameters, options?)`
+
+Facts:
+
+- Uses **SSE** under the hood (not `fetch()` polling).
+- By default it hits `POST /api/analytics/query/:queryKey`.
+- Returns `{ data, loading, error }` where `data` is `null` until loaded.
+- `format` is `"JSON"` or `"ARROW"` (uppercase).
+
+Recommended usage pattern (memoized params + explicit states):
+
+```tsx
+import { useMemo } from "react";
+import { useAnalyticsQuery, Skeleton } from "@databricks/appkit-ui/react";
+import { sql } from "@databricks/appkit-ui/js";
+
+export function Users() {
+  const params = useMemo(
+    () => ({
+      status: sql.string("active"),
+      limit: sql.number(50),
+    }),
+    [],
+  );
+
+  const { data, loading, error } = useAnalyticsQuery("users_list", params);
+
+  if (loading) return <Skeleton className="h-24 w-full" />;
+  if (error) return <div className="text-destructive">Error: {error}</div>;
+  if (!data || data.length === 0) return <div>No results</div>;
+
+  return <pre>{JSON.stringify(data[0], null, 2)}</pre>;
+}
+```
+
+Options:
+
+- `format?: "JSON" | "ARROW"` (default `"JSON"`)
+- `autoStart?: boolean` (default `true`)
+- `maxParametersSize?: number` (default `100 * 1024` bytes)
+
+### `useChartData({ queryKey, parameters, format, transformer })`
+
+- `format` here is **lowercase**: `"json" | "arrow" | "auto"` (default `"auto"`)
+- Auto-selection heuristics:
+  - If `parameters._preferArrow === true` → Arrow
+  - If `parameters._preferJson === true` → JSON
+  - If `parameters.limit` is a number > 500 → Arrow
+  - If `parameters.startDate` and `parameters.endDate` exist → Arrow
+
+### Charts (unified query/data API)
+
+All charts support:
+
+- **Query mode**: `queryKey` + `parameters`
+- **Data mode**: `data` (inline JSON, no server)
+
+Available chart components:
+
+- `BarChart`, `LineChart`, `AreaChart`, `PieChart`, `DonutChart`, `HeatmapChart`, `ScatterChart`, `RadarChart`
+
+Query mode (recommended for Databricks-backed analytics):
+
+```tsx
+import { LineChart } from "@databricks/appkit-ui/react";
+import { sql } from "@databricks/appkit-ui/js";
+import { useMemo } from "react";
+
+export function SpendChart() {
+  const params = useMemo(
+    () => ({
+      startDate: sql.date("2024-01-01"),
+      endDate: sql.date("2024-12-31"),
+      aggregationLevel: sql.string("day"),
+    }),
+    [],
+  );
+
+  return (
+    <LineChart
+      queryKey="spend_data"
+      parameters={params}
+      format="auto"      // "auto" | "json" | "arrow"
+      xKey="period"
+      yKey="cost_usd"
+      smooth
+      showSymbol={false}
+    />
+  );
+}
+```
+
+### SQL helpers (`sql.*`)
+
+Use these to build typed parameters (they return marker objects: `{ __sql_type, value }`):
+
+- `sql.string(value)` → STRING (accepts string|number|boolean)
+- `sql.number(value)` → NUMERIC (accepts number|string)
+- `sql.boolean(value)` → BOOLEAN (accepts boolean|string("true"/"false")|number(1/0))
+- `sql.date(value)` → DATE (accepts Date or `"YYYY-MM-DD"`)
+- `sql.timestamp(value)` → TIMESTAMP (accepts Date, ISO string, or unix time)
+
+Binary parameters (important):
+
+- Databricks SQL Warehouse doesn't support `BINARY` as a parameter type.
+- `sql.binary(value)` returns a **STRING marker containing hex**, so use `UNHEX(:param)` in SQL.
+- `sql.binary` accepts `Uint8Array`, `ArrayBuffer`, or a hex string.
+
+### `connectSSE` (custom SSE connections)
+
+For custom streaming endpoints (not analytics), use the `connectSSE` utility:
+
+```tsx
+import { connectSSE } from "@databricks/appkit-ui/js";
+import { useEffect, useState } from "react";
+
+function useCustomStream(endpoint: string) {
+  const [messages, setMessages] = useState<string[]>([]);
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    connectSSE({
+      url: endpoint,
+      payload: { key: "value" },  // optional: makes it a POST
+      onMessage: async ({ data }) => {
+        setConnected(true);
+        setMessages((prev) => [...prev, data]);
+      },
+      onError: (error) => {
+        console.error("SSE error:", error);
+        setConnected(false);
+      },
+      signal: controller.signal,
+      maxRetries: 3,          // default: 3
+      retryDelay: 2000,       // default: 2000ms (exponential backoff)
+      timeout: 300000,        // default: 5 minutes
+      maxBufferSize: 1048576, // default: 1MB
+    });
+
+    return () => controller.abort();
+  }, [endpoint]);
+
+  return { messages, connected };
+}
+```
+
+Options:
+
+- `url`: SSE endpoint URL (required)
+- `payload`: Optional request body (if provided, uses POST; otherwise GET)
+- `onMessage({ id, data })`: Called for each SSE message
+- `onError(error)`: Called on connection errors
+- `signal`: AbortSignal to cancel the connection
+- `lastEventId`: Resume from a specific event ID
+- `maxRetries`: Max retry attempts (default: 3)
+- `retryDelay`: Base delay between retries in ms (default: 2000)
+- `timeout`: Connection timeout in ms (default: 300000)
+- `maxBufferSize`: Max buffer size in bytes (default: 1MB)
+
+### `ArrowClient` (advanced Arrow processing)
+
+For low-level Arrow data handling:
+
+```tsx
+import { ArrowClient } from "@databricks/appkit-ui/js";
+
+// Process Arrow buffer
+const table = await ArrowClient.processArrowBuffer(buffer);
+
+// Fetch and process Arrow data in one call
+const table = await ArrowClient.fetchAndProcessArrow(url, headers);
+
+// Extract fields from table
+const fields = ArrowClient.extractArrowFields(table);
+// → [{ name: "date", type: ... }, { name: "value", type: ... }]
+
+// Extract columns as arrays
+const columns = ArrowClient.extractArrowColumns(table);
+// → { date: [...], value: [...] }
+
+// Extract chart data
+const { xData, yDataMap } = ArrowClient.extractChartData(table, "date", ["value", "count"]);
+// → { xData: [...], yDataMap: { value: [...], count: [...] } }
+
+// Auto-detect chart fields from Arrow table
+const detected = ArrowClient.detectFieldsFromArrow(table);
+// → { xField: "date", yFields: ["value"], chartType: "timeseries" }
+```
+
+### DataTable
+
+`DataTable` is a production-ready table integrated with `useAnalyticsQuery`.
+
+Key behaviors:
+
+- `parameters` is required (use `{}` if none)
+- Supports opinionated mode (auto columns) and full-control mode (`children(table)`)
+
+```tsx
+import { DataTable } from "@databricks/appkit-ui/react";
+
+export function UsersTable() {
+  return (
+    <DataTable
+      queryKey="users_list"
+      parameters={{}}
+      filterColumn="email"
+      filterPlaceholder="Filter by email..."
+      pageSize={25}
+      pageSizeOptions={[10, 25, 50, 100]}
+    />
+  );
+}
+```
+
+### UI components (primitives)
+
+AppKit-UI ships shadcn-style primitives. Import from `@databricks/appkit-ui/react`.
+
+Note: Exact exports can vary by AppKit-UI version. Prefer using IDE auto-import/autocomplete to confirm what your installed version exports.
+
+**Available components:**
+
+`Accordion`, `Alert`, `AlertDialog`, `AspectRatio`, `Avatar`, `Badge`, `Breadcrumb`, `Button`, `ButtonGroup`, `Calendar`, `Card`, `CardHeader`, `CardTitle`, `CardDescription`, `CardContent`, `CardFooter`, `Carousel`, `Checkbox`, `Collapsible`, `Command`, `ContextMenu`, `Dialog`, `DialogTrigger`, `DialogContent`, `DialogHeader`, `DialogTitle`, `DialogDescription`, `DialogFooter`, `Drawer`, `DropdownMenu`, `Empty`, `Field`, `Form`, `HoverCard`, `Input`, `InputGroup`, `InputOtp`, `Item`, `Kbd`, `Label`, `Menubar`, `NavigationMenu`, `Pagination`, `Popover`, `Progress`, `RadioGroup`, `Resizable`, `ScrollArea`, `Select`, `SelectTrigger`, `SelectValue`, `SelectContent`, `SelectItem`, `Separator`, `Sheet`, `Sidebar`, `Skeleton`, `Slider`, `Sonner`, `Spinner`, `Switch`, `Table`, `Tabs`, `TabsList`, `TabsTrigger`, `TabsContent`, `Textarea`, `Toggle`, `ToggleGroup`, `Tooltip`, `TooltipTrigger`, `TooltipContent`, `TooltipProvider`
+
+### Card pattern
+
+```tsx
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+  CardFooter,
+} from "@databricks/appkit-ui/react";
+
+function MetricCard({ title, value, description }: Props) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardDescription>{description}</CardDescription>
+        <CardTitle className="text-3xl">{value}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {/* Optional content */}
+      </CardContent>
+      <CardFooter>
+        {/* Optional footer */}
+      </CardFooter>
+    </Card>
+  );
+}
+```
+
+### Select pattern
+
+```tsx
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@databricks/appkit-ui/react";
+
+function DateRangeSelect({ value, onChange }: Props) {
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger className="w-40">
+        <SelectValue placeholder="Select range" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="7d">Last 7 days</SelectItem>
+        <SelectItem value="30d">Last 30 days</SelectItem>
+        <SelectItem value="90d">Last 90 days</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
+```
+
+### Tabs pattern
+
+```tsx
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@databricks/appkit-ui/react";
+
+function Dashboard() {
+  return (
+    <Tabs defaultValue="overview">
+      <TabsList>
+        <TabsTrigger value="overview">Overview</TabsTrigger>
+        <TabsTrigger value="analytics">Analytics</TabsTrigger>
+      </TabsList>
+      <TabsContent value="overview">
+        <p>Overview content</p>
+      </TabsContent>
+      <TabsContent value="analytics">
+        <p>Analytics content</p>
+      </TabsContent>
+    </Tabs>
+  );
+}
+```
+
+### Dialog pattern
+
+```tsx
+import {
+  Dialog,
+  DialogTrigger,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  Button,
+} from "@databricks/appkit-ui/react";
+
+function ConfirmDialog() {
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive">Delete</Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Confirm deletion</DialogTitle>
+          <DialogDescription>
+            This action cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline">Cancel</Button>
+          <Button variant="destructive">Delete</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+```
+
+### TooltipProvider requirement
+
+If using tooltips anywhere in your app, wrap your root component with `TooltipProvider`:
+
+```tsx
+import { TooltipProvider } from "@databricks/appkit-ui/react";
+
+function App() {
+  return (
+    <TooltipProvider>
+      {/* Your app content */}
+    </TooltipProvider>
+  );
+}
+```
+
+### Button variants
+
+```tsx
+import { Button } from "@databricks/appkit-ui/react";
+
+<Button variant="default">Primary</Button>
+<Button variant="secondary">Secondary</Button>
+<Button variant="outline">Outline</Button>
+<Button variant="ghost">Ghost</Button>
+<Button variant="destructive">Destructive</Button>
+<Button variant="link">Link</Button>
+```
+
+### Loading skeleton pattern
+
+```tsx
+import { Card, CardHeader, Skeleton } from "@databricks/appkit-ui/react";
+
+function LoadingCard() {
+    return (
+    <Card>
+            <CardHeader>
+        <Skeleton className="h-4 w-24 mb-2" />
+        <Skeleton className="h-8 w-20 mb-2" />
+        <Skeleton className="h-4 w-28" />
+            </CardHeader>
+          </Card>
+  );
+}
+```
+
+## Type generation (QueryRegistry + IntelliSense)
+
+Goal: generate `client/src/appKitTypes.d.ts` so query keys, params, and result rows are type-safe.
+
+### Vite plugin: `appKitTypesPlugin`
+
+Correct option names:
+
+- `outFile?: string` (default `src/appKitTypes.d.ts`)
+- `watchFolders?: string[]` (default `["../config/queries"]`)
+
+```ts
+// client/vite.config.ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { appKitTypesPlugin } from "@databricks/appkit";
+
+export default defineConfig({
+  plugins: [
+    react(),
+    appKitTypesPlugin({
+      outFile: "src/appKitTypes.d.ts",
+      watchFolders: ["../config/queries"],
+    }),
+  ],
+});
+```
+
+Important nuance:
+
+- When the frontend is served through AppKit in dev mode, AppKit’s dev server already includes `appKitTypesPlugin()` internally.
+- You still want it in your client build pipeline if you run `vite build` separately.
+
+### CLI: `appkit-generate-types`
+
+```bash
+# Requires DATABRICKS_WAREHOUSE_ID (or pass as 3rd arg)
+npx appkit-generate-types [rootDir] [outFile] [warehouseId]
+
+# Example:
+npx appkit-generate-types . client/src/appKitTypes.d.ts
+
+# Force regeneration (skip cache):
+npx appkit-generate-types --no-cache
+```
+
+## Databricks Apps config: `app.yaml`
+
+Bind a SQL warehouse for Apps runtime:
+
+```yaml
+env:
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: sql-warehouse
+```
+
+Full example with command:
+
+```yaml
+command:
+  - node
+  - build/index.mjs
+env:
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: sql-warehouse
+```
+
+## LLM checklist (before you "finalize" code)
+
+- **Project setup**
+  - `package.json` has `"type": "module"`
+  - `tsx` is in devDependencies for dev server
+  - `dev` script uses `NODE_ENV=development tsx watch server.ts`
+  - `index.html` exists with `<div id="root"></div>` and script pointing to `src/main.tsx`
+
+- **Backend**
+  - `await createApp({ plugins: [...] })` is used (or `void createApp` with intent)
+  - `server()` is included (always)
+  - If using SQL: `analytics({})` included + `config/queries/*.sql` present
+  - Queries use `:param` placeholders, and params are passed from UI using `sql.*`
+  - If query needs workspace scoping: uses `:workspaceId`
+
+- **Frontend**
+  - `useMemo` wraps parameters objects
+  - Loading/error/empty states are explicit
+  - Charts use `format="auto"` unless you have a reason to force `"json"`/`"arrow"`
+  - If using tooltips: root is wrapped with `<TooltipProvider>`
+
+- **Never**
+  - Don't build SQL strings manually
+  - Don't pass untyped raw params for annotated queries
+  - Don't ignore `createApp()`'s promise
+  - Don't invent UI components not listed in this file
+
