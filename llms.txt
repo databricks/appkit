@@ -23,6 +23,15 @@ This file is designed to work even when you *do not* have access to the AppKit s
 - **Never construct SQL strings dynamically**. Use parameterized queries with `:paramName`.
 - **Never use `require()`**. Use ESM `import/export`.
 
+## TypeScript import rules (when using `verbatimModuleSyntax`)
+
+If your `tsconfig.json` uses `"verbatimModuleSyntax": true`, **always use `import type` for type-only imports** (otherwise builds can fail in strict setups):
+
+```ts
+import type { ReactNode } from "react";
+import { useMemo } from "react";
+```
+
 ## Canonical project layout
 
 Recommended structure (client/server split):
@@ -554,6 +563,16 @@ Facts:
 - Returns `{ data, loading, error }` where `data` is `null` until loaded.
 - `format` is `"JSON"` or `"ARROW"` (uppercase).
 
+When to use it:
+
+- Use `useAnalyticsQuery` **only** when you need a custom UI (cards/KPIs/forms/conditional rendering).
+- If you just need a standard chart or table, prefer the built-in components (`BarChart`, `LineChart`, `DataTable`, etc.) so you don’t re-implement loading/error/empty states.
+
+Limitations (common LLM pitfall):
+
+- There is **no `enabled` option**. Use conditional rendering to mount/unmount the component.
+- There is **no `refetch()`**. Change `parameters` (memoized) or re-mount to re-run the query.
+
 Recommended usage pattern (memoized params + explicit states):
 
 ```tsx
@@ -606,6 +625,17 @@ Available chart components:
 
 - `BarChart`, `LineChart`, `AreaChart`, `PieChart`, `DonutChart`, `HeatmapChart`, `ScatterChart`, `RadarChart`
 
+Avoid double-fetching:
+
+```tsx
+// ❌ Wrong: fetches the same query twice
+// const { data } = useAnalyticsQuery("spend_data", params);
+// return <LineChart queryKey="spend_data" parameters={params} />;
+
+// ✅ Correct: let the chart fetch
+return <LineChart queryKey="spend_data" parameters={params} />;
+```
+
 Query mode (recommended for Databricks-backed analytics):
 
 ```tsx
@@ -652,6 +682,16 @@ Binary parameters (important):
 - Databricks SQL Warehouse doesn't support `BINARY` as a parameter type.
 - `sql.binary(value)` returns a **STRING marker containing hex**, so use `UNHEX(:param)` in SQL.
 - `sql.binary` accepts `Uint8Array`, `ArrayBuffer`, or a hex string.
+
+### SQL result types (important)
+
+Databricks SQL JSON results can return some numeric-like fields (especially `DECIMAL`) as strings. If a field behaves like a string at runtime, convert explicitly:
+
+```ts
+const value = Number(row.amount);
+```
+
+If you need more reliable numeric fidelity for large datasets, prefer `format: "ARROW"` and process Arrow on the client.
 
 ### `connectSSE` (custom SSE connections)
 
@@ -767,6 +807,10 @@ export function UsersTable() {
 AppKit-UI ships shadcn-style primitives. Import from `@databricks/appkit-ui/react`.
 
 Note: Exact exports can vary by AppKit-UI version. Prefer using IDE auto-import/autocomplete to confirm what your installed version exports.
+
+Radix constraint (common bug):
+
+- `SelectItem` cannot have `value=""`. Use a sentinel value like `"all"` or `"none"`.
 
 **Available components:**
 

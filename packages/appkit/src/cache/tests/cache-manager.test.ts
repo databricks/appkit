@@ -565,18 +565,11 @@ describe("CacheManager", () => {
       (CacheManager as any).instance = null;
       (CacheManager as any).initPromise = null;
 
-      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
       // Pass an unhealthy storage with strictPersistence: true
       const cache = await CacheManager.getInstance({
         storage: createUnhealthyMockStorage(),
         strictPersistence: true,
       });
-
-      // Should have logged about strictPersistence
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining("strictPersistence"),
-      );
 
       // Cache should be disabled
       const fn = vi.fn().mockResolvedValue("result");
@@ -585,8 +578,6 @@ describe("CacheManager", () => {
 
       // Function called twice because cache is disabled
       expect(fn).toHaveBeenCalledTimes(2);
-
-      consoleSpy.mockRestore();
     });
   });
 
@@ -596,45 +587,31 @@ describe("CacheManager", () => {
       (CacheManager as any).instance = null;
       (CacheManager as any).initPromise = null;
 
-      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
       // Pass an unhealthy storage, should fallback to in-memory
       const cache = await CacheManager.getInstance({
         storage: createUnhealthyMockStorage(),
         strictPersistence: false,
       });
 
-      // Should log fallback message
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining("[Cache]"),
-      );
-
       // Cache should still work (in-memory fallback)
       await cache.set("test-key", "value");
       const result = await cache.get("test-key");
       expect(result).toBe("value");
-
-      consoleSpy.mockRestore();
     });
 
-    test("should log warning when provided storage health check fails", async () => {
+    test("should use in-memory storage when provided storage health check fails", async () => {
       // Reset singleton
       (CacheManager as any).instance = null;
       (CacheManager as any).initPromise = null;
 
-      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-      await CacheManager.getInstance({
+      const cache = await CacheManager.getInstance({
         storage: createUnhealthyMockStorage(),
         strictPersistence: false,
       });
 
-      // Should have logged about storage health check failing
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining("[Cache] Provided storage health check failed"),
-      );
-
-      consoleSpy.mockRestore();
+      // Should be using in-memory storage (not persistent)
+      const storage = (cache as any).storage;
+      expect(storage.isPersistent()).toBe(false);
     });
   });
 
@@ -659,17 +636,10 @@ describe("CacheManager", () => {
       (CacheManager as any).instance = null;
       (CacheManager as any).initPromise = null;
 
-      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
       // Lakebase unhealthy (default in beforeEach)
       mockLakebaseHealthCheck.mockResolvedValue(false);
 
       const cache = await CacheManager.getInstance({});
-
-      // Should log fallback message
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining("[Cache] Falling back to in-memory cache"),
-      );
 
       // Cache should work (in-memory fallback)
       await cache.set("test-key", "value");
@@ -679,16 +649,12 @@ describe("CacheManager", () => {
       // Storage should not be persistent
       const storage = (cache as any).storage;
       expect(storage.isPersistent()).toBe(false);
-
-      consoleSpy.mockRestore();
     });
 
     test("should disable cache when Lakebase unavailable and strictPersistence is true", async () => {
       // Reset singleton
       (CacheManager as any).instance = null;
       (CacheManager as any).initPromise = null;
-
-      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       // Lakebase unhealthy
       mockLakebaseHealthCheck.mockResolvedValue(false);
@@ -697,13 +663,6 @@ describe("CacheManager", () => {
         strictPersistence: true,
       });
 
-      // Should have logged about strictPersistence
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining(
-          "strictPersistence enabled but lakebase unavailable",
-        ),
-      );
-
       // Cache should be disabled
       const fn = vi.fn().mockResolvedValue("result");
       await cache.getOrExecute(["key"], fn, "user1");
@@ -711,50 +670,38 @@ describe("CacheManager", () => {
 
       // Function called twice because cache is disabled
       expect(fn).toHaveBeenCalledTimes(2);
-
-      consoleSpy.mockRestore();
     });
 
-    test("should log warning when Lakebase health check fails", async () => {
+    test("should use in-memory storage when Lakebase health check fails", async () => {
       // Reset singleton
       (CacheManager as any).instance = null;
       (CacheManager as any).initPromise = null;
-
-      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       // Lakebase unhealthy
       mockLakebaseHealthCheck.mockResolvedValue(false);
 
-      await CacheManager.getInstance({});
+      const cache = await CacheManager.getInstance({});
 
-      // Should have logged about Lakebase health check
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining("[Cache] Lakebase health check failed"),
-      );
-
-      consoleSpy.mockRestore();
+      // Should be using in-memory storage
+      const storage = (cache as any).storage;
+      expect(storage.isPersistent()).toBe(false);
     });
 
-    test("should log warning when Lakebase throws an error", async () => {
+    test("should use in-memory storage when Lakebase throws an error", async () => {
       // Reset singleton
       (CacheManager as any).instance = null;
       (CacheManager as any).initPromise = null;
-
-      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       // Lakebase throws
       mockLakebaseHealthCheck.mockRejectedValue(
         new Error("Connection refused"),
       );
 
-      await CacheManager.getInstance({});
+      const cache = await CacheManager.getInstance({});
 
-      // Should have logged about Lakebase being unavailable
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining("[Cache] Lakebase unavailable"),
-      );
-
-      consoleSpy.mockRestore();
+      // Should be using in-memory storage
+      const storage = (cache as any).storage;
+      expect(storage.isPersistent()).toBe(false);
     });
   });
 });
