@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.1](https://github.com/databricks/appkit/compare/v0.1.0...v0.1.1) (2025-12-23)
+
+* one-time publish workflow ([#36](https://github.com/databricks/appkit/issues/36)) ([428053b](https://github.com/databricks/appkit/commit/428053b5b122a5e54626196d1f4d8b3de17c9370))
+
 ## [0.1.0](https://github.com/databricks/appkit/compare/v0.0.2...v0.1.0) (2025-12-23)
 
 * automatic release ([#31](https://github.com/databricks/appkit/issues/31)) ([7867d54](https://github.com/databricks/appkit/commit/7867d547d63417e389fed5b6c2928cf63c027a7a))
