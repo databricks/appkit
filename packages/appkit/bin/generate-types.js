@@ -1,7 +1,7 @@
-#!/usr/bin/env tsx
+#!/usr/bin/env node
 import path from "node:path";
 
-import { generateFromEntryPoint } from "../src/type-generator";
+import { generateFromEntryPoint } from "../dist/type-generator/index.js";
 
 // Parse arguments
 const args = process.argv.slice(2);
