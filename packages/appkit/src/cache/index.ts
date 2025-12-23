@@ -128,12 +128,7 @@ export class CacheManager {
         return new CacheManager(config.storage, config);
       }
 
-      console.warn("[Cache] Provided storage health check failed");
-
       if (config.strictPersistence) {
-        console.warn(
-          "[Cache] strictPersistence enabled but provided storage unhealthy. Cache disabled.",
-        );
         const disabledConfig = { ...config, enabled: false };
         return new CacheManager(
           new InMemoryStorage(disabledConfig),
@@ -141,7 +136,6 @@ export class CacheManager {
         );
       }
 
-      console.warn("[Cache] Falling back to in-memory cache.");
       return new CacheManager(new InMemoryStorage(config), config);
     }
 
@@ -156,20 +150,11 @@ export class CacheManager {
         await persistentStorage.initialize();
         return new CacheManager(persistentStorage, config);
       }
-
-      console.warn(
-        "[Cache] Lakebase health check failed, default storage unhealthy",
-      );
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      console.warn(`[Cache] Lakebase unavailable: ${errorMessage}`);
+    } catch {
+      // lakebase unavailable, continue with in-memory storage
     }
 
     if (config.strictPersistence) {
-      console.warn(
-        "[Cache] strictPersistence enabled but lakebase unavailable. Cache disabled.",
-      );
       const disabledConfig = { ...config, enabled: false };
       return new CacheManager(
         new InMemoryStorage(disabledConfig),
@@ -177,7 +162,6 @@ export class CacheManager {
       );
     }
 
-    console.warn("[Cache] Falling back to in-memory cache.");
     return new CacheManager(new InMemoryStorage(config), config);
   }
 

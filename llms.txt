@@ -25,30 +25,13 @@ This file is designed to work even when you *do not* have access to the AppKit s
 
 ## Canonical project layout
 
-Recommended structure:
-
-```
-my-app/
-├── server.ts                 # backend entry point (or server/index.ts for complex apps)
-├── index.html                # Vite entry point
-├── vite.config.ts            # Vite config
-├── src/
-│   ├── main.tsx              # React entry point
-│   └── App.tsx               # Root component
-├── config/
-│   └── queries/
-│       └── my_query.sql      # SQL queries (optional, if using analytics)
-├── app.yaml                  # Databricks Apps config (warehouse binding)
-├── package.json
-└── tsconfig.json
-```
-
-Alternative structure for larger apps:
+Recommended structure (client/server split):
 
 ```
 my-app/
 ├── server/
-│   └── index.ts              # backend entry point
+│   ├── index.ts              # backend entry point (AppKit)
+│   └── .env                  # optional local dev env vars (do not commit)
 ├── client/
 │   ├── index.html
 │   ├── vite.config.ts
@@ -63,6 +46,12 @@ my-app/
 └── tsconfig.json
 ```
 
+Why this layout:
+
+- The AppKit `server()` plugin automatically serves:
+  - **Dev**: Vite dev server (HMR) from `client/`
+  - **Prod**: static files from `client/dist` (built by Vite)
+
 ## Project scaffolding (start here)
 
 ### `package.json`
@@ -74,28 +63,54 @@ my-app/
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "NODE_ENV=development tsx watch server.ts",
-    "build": "vite build",
-    "start": "NODE_ENV=production tsx server.ts"
+    "dev": "NODE_ENV=development tsx watch server/index.ts",
+    "build": "npm run build:server && npm run build:client",
+    "build:server": "tsdown --out-dir build server/index.ts",
+    "build:client": "cd client && npm run build",
+    "start": "node build/index.mjs"
   },
   "dependencies": {
-    "@databricks/appkit": "^0.0.2",
+    "@databricks/appkit": "^0.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsdown": "^0.15.7",
+    "tsx": "^4.19.0",
+    "typescript": "~5.6.0"
+  }
+}
+```
+
+### `client/package.json`
+
+```json
+{
+  "name": "client",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
     "@databricks/appkit-ui": "^0.0.2",
     "react": "^18.0.0",
-    "react-dom": "^18.0.0"
+    "react-dom": "^18.0.0",
+    "recharts": "^3.0.0"
   },
   "devDependencies": {
     "@types/react": "^18.0.0",
     "@types/react-dom": "^18.0.0",
     "@vitejs/plugin-react": "^5.0.0",
-    "tsx": "^4.19.0",
     "typescript": "~5.6.0",
     "vite": "^6.0.0"
   }
 }
 ```
 
-### `index.html`
+### `client/index.html`
 
 ```html
 <!doctype html>
@@ -112,7 +127,7 @@ my-app/
 </html>
 ```
 
-### `src/main.tsx`
+### `client/src/main.tsx`
 
 ```tsx
 import { StrictMode } from "react";
@@ -126,7 +141,7 @@ createRoot(document.getElementById("root")!).render(
 );
 ```
 
-### `src/App.tsx` (minimal)
+### `client/src/App.tsx` (minimal)
 
 ```tsx
 export default function App() {
@@ -138,7 +153,7 @@ export default function App() {
 }
 ```
 
-### `vite.config.ts`
+### `client/vite.config.ts`
 
 ```ts
 import { defineConfig } from "vite";
@@ -165,11 +180,11 @@ export default defineConfig({
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src", "server.ts"]
+  "include": ["server", "client/src"]
 }
 ```
 
-### `server.ts`
+### `server/index.ts`
 
 ```ts
 import { createApp, server } from "@databricks/appkit";
@@ -184,6 +199,7 @@ await createApp({
 ```bash
 # Install dependencies
 npm install
+cd client && npm install && cd ..
 
 # Development (starts backend + Vite dev server)
 npm run dev
@@ -200,11 +216,22 @@ If you already have a React/Vite app and want to add AppKit:
 ### 1. Install dependencies
 
 ```bash
-npm install @databricks/appkit @databricks/appkit-ui
-npm install -D tsx
+npm install @databricks/appkit
+npm install -D tsx tsdown
+
+# If you don't already have a client/ folder, create one and move your Vite app into it:
+# - move index.html -> client/index.html
+# - move vite.config.ts -> client/vite.config.ts
+# - move src/ -> client/src/
+#
+# Then install client deps:
+cd client
+npm install @databricks/appkit-ui react react-dom recharts
+npm install -D vite @vitejs/plugin-react typescript
+cd ..
 ```
 
-### 2. Create `server.ts` (new file)
+### 2. Create `server/index.ts` (new file)
 
 ```ts
 import { createApp, server } from "@databricks/appkit";
@@ -219,23 +246,24 @@ await createApp({
 ```json
 {
   "scripts": {
-    "dev": "NODE_ENV=development tsx watch server.ts",
-    "build": "vite build",
-    "start": "NODE_ENV=production tsx server.ts"
+    "dev": "NODE_ENV=development tsx watch server/index.ts",
+    "build": "npm run build:server && npm run build:client",
+    "build:server": "tsdown --out-dir build server/index.ts",
+    "build:client": "cd client && npm run build",
+    "start": "node build/index.mjs"
   }
 }
 ```
 
 ### 4. That's it
 
-- Your existing `vite.config.ts` stays the same
-- Your existing `src/` folder stays the same
-- AppKit's server plugin will automatically serve your Vite app in dev mode and the `dist/` folder in production
+- AppKit's server plugin will automatically serve your Vite app in dev mode and `client/dist` in production.
+- If your Vite app must stay at the repo root (no `client/` folder), AppKit can still work, but the recommended layout is `client/` + `server/`.
 
 ### Adding analytics to an existing app
 
 ```ts
-// server.ts
+// server/index.ts
 import { createApp, server, analytics } from "@databricks/appkit";
 
 await createApp({
@@ -319,7 +347,7 @@ DATABRICKS_WAREHOUSE_ID=abc123...
 The smallest valid AppKit server:
 
 ```ts
-// server.ts (or server/index.ts)
+// server/index.ts
 import { createApp, server } from "@databricks/appkit";
 
 await createApp({
@@ -980,8 +1008,9 @@ env:
 - **Project setup**
   - `package.json` has `"type": "module"`
   - `tsx` is in devDependencies for dev server
-  - `dev` script uses `NODE_ENV=development tsx watch server.ts`
-  - `index.html` exists with `<div id="root"></div>` and script pointing to `src/main.tsx`
+  - `dev` script uses `NODE_ENV=development tsx watch server/index.ts`
+  - `client/index.html` exists with `<div id="root"></div>` and script pointing to `client/src/main.tsx`
+  - `client/package.json` exists and includes `@databricks/appkit-ui`
 
 - **Backend**
   - `await createApp({ plugins: [...] })` is used (or `void createApp` with intent)
