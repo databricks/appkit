@@ -38,6 +38,10 @@ fs.writeFileSync("tmp/package.json", JSON.stringify(pkg, null, 2));
 
 fs.cpSync("dist", "tmp/dist", { recursive: true });
 
+if (fs.existsSync("bin")) {
+  fs.cpSync("bin", "tmp/bin", { recursive: true });
+}
+
 // Copy bin and scripts from shared package
 if (isAppKitPackage) {
   if (fs.existsSync(sharedBin)) {

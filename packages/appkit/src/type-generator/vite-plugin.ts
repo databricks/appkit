@@ -1,6 +1,6 @@
-import { execSync } from "node:child_process";
 import path from "node:path";
 import type { Plugin } from "vite";
+import { generateFromEntryPoint } from "./index";
 
 /**
  * Options for the AppKit types plugin.
@@ -14,22 +14,31 @@ interface AppKitTypesPluginOptions {
 
 /**
  * Vite plugin to generate types for AppKit queries.
- * Calls `npx appkit-generate-types` under the hood.
+ * Calls generateFromEntryPoint under the hood.
  * @param options - Options to override default values.
  * @returns Vite plugin to generate types for AppKit queries.
  */
 export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
   let root: string;
-  let appRoot: string;
   let outFile: string;
   let watchFolders: string[];
 
-  function generate() {
+  async function generate() {
     try {
-      const args = [appRoot, outFile].join(" ");
-      execSync(`npx appkit-generate-types ${args}`, {
-        cwd: appRoot,
-        stdio: "inherit",
+      const warehouseId = process.env.DATABRICKS_WAREHOUSE_ID || "";
+
+      if (!warehouseId) {
+        console.warn(
+          "[AppKit] Warehouse ID not found. Skipping type generation.",
+        );
+        return;
+      }
+
+      await generateFromEntryPoint({
+        outFile,
+        queryFolder: watchFolders[0],
+        warehouseId,
+        noCache: false,
       });
     } catch (error) {
       // throw in production to fail the build
@@ -42,16 +51,15 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
 
   return {
     name: "appkit-types",
+
     configResolved(config) {
       root = config.root;
-      appRoot = path.resolve(root, "..");
-
       outFile = path.resolve(root, options?.outFile ?? "src/appKitTypes.d.ts");
-
       watchFolders = (options?.watchFolders ?? ["../config/queries"]).map(
         (folder) => path.resolve(root, folder),
       );
     },
+
     buildStart() {
       generate();
     },

@@ -27,7 +27,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "appkit-generate-types": "./bin/generate-types.ts"
+    "appkit-generate-types": "./bin/generate-types.js"
   },
   "scripts": {
     "build:package": "tsdown --config tsdown.config.ts",
