@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { Plugin } from "vite";
+import fs from "node:fs";
 import { generateFromEntryPoint } from "./index";
 
 /**
@@ -52,12 +53,29 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
   return {
     name: "appkit-types",
 
+    apply() {
+      const warehouseId = process.env.DATABRICKS_WAREHOUSE_ID || "";
+
+      if (!warehouseId) {
+        console.warn(
+          "[AppKit] Warehouse ID not found. Skipping type generation.",
+        );
+        return false;
+      }
+
+      if (!fs.existsSync(path.join(process.cwd(), "config", "queries"))) {
+        return false;
+      }
+
+      return true;
+    },
+
     configResolved(config) {
       root = config.root;
       outFile = path.resolve(root, options?.outFile ?? "src/appKitTypes.d.ts");
-      watchFolders = (options?.watchFolders ?? ["../config/queries"]).map(
-        (folder) => path.resolve(root, folder),
-      );
+      watchFolders = options?.watchFolders ?? [
+        path.join(process.cwd(), "config", "queries"),
+      ];
     },
 
     buildStart() {
