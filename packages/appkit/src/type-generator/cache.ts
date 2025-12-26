@@ -24,6 +24,12 @@ interface Cache {
 
 export const CACHE_VERSION = "1";
 const CACHE_FILE = ".appkit-types-cache.json";
+const CACHE_DIR = path.join(
+  process.cwd(),
+  "node_modules",
+  ".databricks",
+  "appkit",
+);
 
 /**
  * Hash the SQL query
@@ -38,12 +44,15 @@ export function hashSQL(sql: string): string {
 /**
  * Load the cache from the file system
  * If the cache is not found, run the query explain
- * @param cacheDir - the directory to load the cache from
  * @returns - the cache
  */
-export function loadCache(cacheDir: string): Cache {
-  const cachePath = path.join(cacheDir, CACHE_FILE);
+export function loadCache(): Cache {
+  const cachePath = path.join(CACHE_DIR, CACHE_FILE);
   try {
+    if (!fs.existsSync(CACHE_DIR)) {
+      fs.mkdirSync(CACHE_DIR, { recursive: true });
+    }
+
     if (fs.existsSync(cachePath)) {
       const cache = JSON.parse(fs.readFileSync(cachePath, "utf8")) as Cache;
       if (cache.version === CACHE_VERSION) {
@@ -59,10 +68,9 @@ export function loadCache(cacheDir: string): Cache {
 /**
  * Save the cache to the file system
  * The cache is saved as a JSON file, it is used to avoid running the query explain multiple times
- * @param cacheDir - the directory to save the cache to
  * @param cache - cache object to save
  */
-export function saveCache(cacheDir: string, cache: Cache): void {
-  const cachePath = path.join(cacheDir, CACHE_FILE);
+export function saveCache(cache: Cache): void {
+  const cachePath = path.join(CACHE_DIR, CACHE_FILE);
   fs.writeFileSync(cachePath, JSON.stringify(cache, null, 2), "utf8");
 }

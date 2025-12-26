@@ -124,9 +124,7 @@ export async function generateQueriesFromDescribe(
   console.log(`  Found ${queryFiles.length} SQL queries\n`);
 
   // load cache
-  const cache = noCache
-    ? { version: CACHE_VERSION, queries: {} }
-    : loadCache(queryFolder);
+  const cache = noCache ? { version: CACHE_VERSION, queries: {} } : loadCache();
 
   const client = new WorkspaceClient({});
   const querySchemas: QuerySchema[] = [];
@@ -191,7 +189,7 @@ export async function generateQueriesFromDescribe(
   }
 
   // save cache
-  saveCache(queryFolder, cache);
+  saveCache(cache);
 
   // log warning if there are failed queries
   if (failedQueries.length > 0) {

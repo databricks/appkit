@@ -9,6 +9,3 @@ coverage
 *.tsbuildinfo
 
 .turbo
-
-# AppKit type generation cache
-.appkit-types-cache.json
