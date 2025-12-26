@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.4](https://github.com/databricks/appkit/compare/v0.1.3...v0.1.4) (2025-12-26)
+
+### appkit
+
+* **appkit:** update llms.txt file ([#38](https://github.com/databricks/appkit/issues/38)) ([1548028](https://github.com/databricks/appkit/commit/1548028261722d9e3d0e867959367865ea840d85))
+
 ## [0.1.3](https://github.com/databricks/appkit/compare/v0.1.2...v0.1.3) (2025-12-26)
 
 ### appkit
