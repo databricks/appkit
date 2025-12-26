@@ -54,15 +54,15 @@ if (isAppKitPackage) {
   }
 }
 
-if (fs.existsSync("CLAUDE.md")) {
-  fs.copyFileSync("CLAUDE.md", "tmp/CLAUDE.md");
-}
-
 if (fs.existsSync("llms.txt")) {
   fs.copyFileSync("llms.txt", "tmp/llms.txt");
 } else {
   fs.copyFileSync(path.join(__dirname, "../llms.txt"), "tmp/llms.txt");
 }
+
+// Copy llms.txt as CLAUDE.md and AGENTS.md (npm pack doesn't support symlinks)
+fs.copyFileSync("tmp/llms.txt", "tmp/CLAUDE.md");
+fs.copyFileSync("tmp/llms.txt", "tmp/AGENTS.md");
 
 fs.copyFileSync(path.join(__dirname, "../README.md"), "tmp/README.md");
 fs.copyFileSync(path.join(__dirname, "../LICENSE"), "tmp/LICENSE");
