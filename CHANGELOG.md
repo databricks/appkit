@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.3](https://github.com/databricks/appkit/compare/v0.1.2...v0.1.3) (2025-12-26)
+
+### appkit
+
+* **appkit:** query cache generation ([#37](https://github.com/databricks/appkit/issues/37)) ([db5e266](https://github.com/databricks/appkit/commit/db5e26608a1751e795e2edb5f1c401040db089e7))
+
 ## [0.1.2](https://github.com/databricks/appkit/compare/v0.1.1...v0.1.2) (2025-12-23)
 
 ### appkit
