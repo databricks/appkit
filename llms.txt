@@ -75,46 +75,24 @@ Why this layout:
     "dev": "NODE_ENV=development tsx watch server/index.ts",
     "build": "npm run build:server && npm run build:client",
     "build:server": "tsdown --out-dir build server/index.ts",
-    "build:client": "cd client && npm run build",
+    "build:client": "tsc -b && vite build --config client/vite.config.ts",
     "start": "node build/index.mjs"
   },
   "dependencies": {
-    "@databricks/appkit": "^0.0.2"
+    "@databricks/appkit": "^0.1.2"
+    "@databricks/appkit-ui": "^0.1.2",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.1.1",
     "tsdown": "^0.15.7",
     "tsx": "^4.19.0",
-    "typescript": "~5.6.0"
-  }
-}
-```
-
-### `client/package.json`
-
-```json
-{
-  "name": "client",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "@databricks/appkit-ui": "^0.0.2",
-    "react": "^18.0.0",
-    "react-dom": "^18.0.0",
-    "recharts": "^3.0.0"
-  },
-  "devDependencies": {
-    "@types/react": "^18.0.0",
-    "@types/react-dom": "^18.0.0",
-    "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.6.0",
-    "vite": "^6.0.0"
+    "vite": "^7.2.4"
   }
 }
 ```
@@ -208,7 +186,6 @@ await createApp({
 ```bash
 # Install dependencies
 npm install
-cd client && npm install && cd ..
 
 # Development (starts backend + Vite dev server)
 npm run dev
@@ -225,19 +202,14 @@ If you already have a React/Vite app and want to add AppKit:
 ### 1. Install dependencies
 
 ```bash
-npm install @databricks/appkit
-npm install -D tsx tsdown
+npm install @databricks/appkit @databricks/appkit-ui react react-dom
+npm install -D tsx tsdown vite @vitejs/plugin-react typescript
 
 # If you don't already have a client/ folder, create one and move your Vite app into it:
 # - move index.html -> client/index.html
 # - move vite.config.ts -> client/vite.config.ts
 # - move src/ -> client/src/
 #
-# Then install client deps:
-cd client
-npm install @databricks/appkit-ui react react-dom recharts
-npm install -D vite @vitejs/plugin-react typescript
-cd ..
 ```
 
 ### 2. Create `server/index.ts` (new file)
@@ -258,7 +230,7 @@ await createApp({
     "dev": "NODE_ENV=development tsx watch server/index.ts",
     "build": "npm run build:server && npm run build:client",
     "build:server": "tsdown --out-dir build server/index.ts",
-    "build:client": "cd client && npm run build",
+    "build:client": "tsc -b && vite build --config client/vite.config.ts",
     "start": "node build/index.mjs"
   }
 }
@@ -276,7 +248,7 @@ await createApp({
 import { createApp, server, analytics } from "@databricks/appkit";
 
 await createApp({
-  plugins: [server(), analytics({})],
+  plugins: [server(), analytics()],
 });
 ```
 
@@ -312,13 +284,17 @@ These are typically **provided by Databricks Apps runtime** (exact set can vary 
 
 For local development, you need to authenticate with Databricks. Options:
 
-**Option 1: Databricks CLI profile (recommended)**
+**Option 1: Databricks CLI Auth (recommended)**
 
 ```bash
 # Configure once
-databricks configure --profile my-profile
+databricks auth login --host [host] --profile [profile-name]
 
-# Then run with profile
+# If you used `DEFAULT` as the profile name then you can just run
+
+`npm run dev`
+
+# To run with a specific profile
 DATABRICKS_CONFIG_PROFILE=my-profile npm run dev
 # If your Databricks SDK expects a different variable name, try:
 # DATABRICKS_PROFILE=my-profile npm run dev
@@ -462,7 +438,7 @@ HTTP endpoints exposed (mounted under `/api/analytics`):
 Formats:
 
 - `format: "JSON"` (default) returns JSON rows
-- `format: "ARROW"` returns an Arrow “external links” payload over SSE, then the client fetches binary Arrow from `/api/analytics/arrow-result/:jobId`
+- `format: "ARROW"` returns an Arrow “statement_id” payload over SSE, then the client fetches binary Arrow from `/api/analytics/arrow-result/:jobId`
 
 ### Request context (`getRequestContext()`)
 
@@ -980,6 +956,108 @@ function LoadingCard() {
 }
 ```
 
+## Stylesheet
+
+In the main css file import the following
+
+```css
+@import "@databricks/appkit-ui/styles.css";
+```
+
+That will provide a default theme for the app using css variables.
+
+### Customizing theme (light/dark mode)
+
+- Full list of variables to customize the theme.
+
+```css
+@import "@databricks/appkit-ui/styles.css";
+
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.141 0.005 285.823);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.141 0.005 285.823);
+  --primary: oklch(0.21 0.006 285.885);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.967 0.001 286.375);
+  --secondary-foreground: oklch(0.21 0.006 285.885);
+  --muted: oklch(0.967 0.001 286.375);
+  --muted-foreground: oklch(0.552 0.016 285.938);
+  --accent: oklch(0.967 0.001 286.375);
+  --accent-foreground: oklch(0.21 0.006 285.885);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --success: oklch(0.603 0.135 166.892);
+  --success-foreground: oklch(1 0 0);
+  --warning: oklch(0.795 0.157 78.748);
+  --warning-foreground: oklch(0.199 0.027 238.732);
+  --border: oklch(0.92 0.004 286.32);
+  --input: oklch(0.92 0.004 286.32);
+  --ring: oklch(0.705 0.015 286.067);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.141 0.005 285.823);
+  --sidebar-primary: oklch(0.21 0.006 285.885);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.967 0.001 286.375);
+  --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
+  --sidebar-border: oklch(0.92 0.004 286.32);
+  --sidebar-ring: oklch(0.705 0.015 286.067);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: oklch(0.141 0.005 285.823);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.21 0.006 285.885);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.21 0.006 285.885);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.92 0.004 286.32);
+    --primary-foreground: oklch(0.21 0.006 285.885);
+    --secondary: oklch(0.274 0.006 286.033);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.274 0.006 286.033);
+    --muted-foreground: oklch(0.705 0.015 286.067);
+    --accent: oklch(0.274 0.006 286.033);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --destructive-foreground: oklch(0.985 0 0);
+    --success: oklch(0.67 0.12 167);
+    --success-foreground: oklch(1 0 0);
+    --warning: oklch(0.83 0.165 85);
+    --warning-foreground: oklch(0.199 0.027 238.732);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.552 0.016 285.938);
+    --chart-1: oklch(0.488 0.243 264.376);
+    --chart-2: oklch(0.696 0.17 162.48);
+    --chart-3: oklch(0.769 0.188 70.08);
+    --chart-4: oklch(0.627 0.265 303.9);
+    --chart-5: oklch(0.645 0.246 16.439);
+    --sidebar: oklch(0.21 0.006 285.885);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.488 0.243 264.376);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.274 0.006 286.033);
+    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.552 0.016 285.938);
+  }
+}
+
+```
+
+- If any variable is changed, it must be changed for both light and dark mode.
+
 ## Type generation (QueryRegistry + IntelliSense)
 
 Goal: generate `client/src/appKitTypes.d.ts` so query keys, params, and result rows are type-safe.
@@ -1054,7 +1132,6 @@ env:
   - `tsx` is in devDependencies for dev server
   - `dev` script uses `NODE_ENV=development tsx watch server/index.ts`
   - `client/index.html` exists with `<div id="root"></div>` and script pointing to `client/src/main.tsx`
-  - `client/package.json` exists and includes `@databricks/appkit-ui`
 
 - **Backend**
   - `await createApp({ plugins: [...] })` is used (or `void createApp` with intent)

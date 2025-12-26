@@ -33,7 +33,7 @@ function findInstalledPackages() {
   const installed = [];
 
   for (const pkg of PACKAGES) {
-    const claudePath = path.join(cwd, "node_modules", pkg.name, "CLAUDE.md");
+    const claudePath = path.join(cwd, "node_modules", pkg.name, "package.json");
     if (fs.existsSync(claudePath)) {
       installed.push(pkg);
     }
