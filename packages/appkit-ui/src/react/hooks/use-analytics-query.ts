@@ -59,6 +59,12 @@ export function useAnalyticsQuery<
   const format = options?.format ?? "JSON";
   const maxParametersSize = options?.maxParametersSize ?? 100 * 1024;
   const autoStart = options?.autoStart ?? true;
+  const asUser = options?.asUser ?? false;
+
+  const devMode = getDevMode();
+  const urlSuffix = asUser
+    ? `/api/analytics/users/me/query/${encodeURIComponent(queryKey)}${devMode}`
+    : `/api/analytics/query/${encodeURIComponent(queryKey)}${devMode}`;
 
   type ResultType = InferResultByFormat<T, K, F>;
   const [data, setData] = useState<ResultType | null>(null);
@@ -107,10 +113,8 @@ export function useAnalyticsQuery<
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
-    const devMode = getDevMode();
-
     connectSSE({
-      url: `/api/analytics/query/${encodeURIComponent(queryKey)}${devMode}`,
+      url: urlSuffix,
       payload: payload,
       signal: abortController.signal,
       onMessage: async (message) => {
@@ -187,7 +191,7 @@ export function useAnalyticsQuery<
         setError(userMessage);
       },
     });
-  }, [queryKey, payload]);
+  }, [queryKey, payload, urlSuffix]);
 
   useEffect(() => {
     if (autoStart) {

@@ -2,13 +2,13 @@ import type { TelemetryConfig } from "shared";
 import { SpanStatusCode, type Span } from "@opentelemetry/api";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { TelemetryInterceptor } from "../../plugin/interceptors/telemetry";
-import type { ExecutionContext } from "../../plugin/interceptors/types";
+import type { InterceptorContext } from "../../plugin/interceptors/types";
 import type { ITelemetry } from "../types";
 
 describe("TelemetryInterceptor", () => {
   let mockTelemetry: ITelemetry;
   let mockSpan: Span;
-  let context: ExecutionContext;
+  let context: InterceptorContext;
 
   beforeEach(() => {
     mockSpan = {

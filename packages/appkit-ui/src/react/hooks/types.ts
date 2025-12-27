@@ -41,6 +41,9 @@ export interface UseAnalyticsQueryOptions<F extends AnalyticsFormat = "JSON"> {
 
   /** Whether to automatically start the query when the hook is mounted. Default is true. */
   autoStart?: boolean;
+
+  /** Whether to execute the query as a user. Default is false. */
+  asUser?: boolean;
 }
 
 /** Result state returned by useAnalyticsQuery */

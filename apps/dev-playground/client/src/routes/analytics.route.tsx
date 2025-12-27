@@ -69,7 +69,7 @@ function AnalyticsRoute() {
     data: untaggedAppsData,
     loading: untaggedAppsLoading,
     error: untaggedAppsError,
-  } = useAnalyticsQuery("untagged_apps", untaggedAppsParams);
+  } = useAnalyticsQuery("untagged_apps", untaggedAppsParams, { asUser: true });
 
   const metrics = useMemo(() => {
     if (!summaryDataRaw || summaryDataRaw.length === 0) {

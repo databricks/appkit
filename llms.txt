@@ -440,23 +440,49 @@ Formats:
 - `format: "JSON"` (default) returns JSON rows
 - `format: "ARROW"` returns an Arrow “statement_id” payload over SSE, then the client fetches binary Arrow from `/api/analytics/arrow-result/:jobId`
 
-### Request context (`getRequestContext()`)
+### Execution context and `asUser(req)`
 
-If a plugin sets `requiresDatabricksClient = true`, AppKit adds middleware that provides request context.
+AppKit manages Databricks authentication via two contexts:
 
-Headers used:
+- **ServiceContext** (singleton): Initialized at app startup with service principal credentials
+- **ExecutionContext**: Determined at runtime - either service principal or user context
+
+**Headers used for user context:**
 
 - `x-forwarded-user`: required in production; identifies the user
-- `x-forwarded-access-token`: optional; enables **user token passthrough** if `DATABRICKS_HOST` is set
+- `x-forwarded-access-token`: required for user token passthrough
 
-Context fields (real behavior):
+**Using `asUser(req)` for user-scoped operations:**
 
-- `userId`: derived from `x-forwarded-user` (in development it falls back to `serviceUserId`)
-- `serviceUserId`: service principal/user ID
-- `warehouseId`: `Promise<string>` (from `DATABRICKS_WAREHOUSE_ID`, or auto-selected in development)
-- `workspaceId`: `Promise<string>` (from `DATABRICKS_WORKSPACE_ID` or fetched)
-- `userDatabricksClient`: present only when passthrough is available (or in dev it equals service client)
-- `serviceDatabricksClient`: always present
+The `asUser(req)` pattern allows plugins to execute operations using the requesting user's credentials:
+
+```ts
+// In a custom plugin route handler
+router.post("/users/me/data", async (req, res) => {
+  // Execute as the user (uses their Databricks permissions)
+  const result = await this.asUser(req).query("SELECT ...");
+  res.json(result);
+});
+
+// Service principal execution (default)
+router.post("/system/data", async (req, res) => {
+  const result = await this.query("SELECT ...");
+  res.json(result);
+});
+```
+
+**Context helper functions (exported from `@databricks/appkit`):**
+
+- `getExecutionContext()`: Returns current context (user or service)
+- `getCurrentUserId()`: Returns user ID in user context, service user ID otherwise
+- `getWorkspaceClient()`: Returns the appropriate WorkspaceClient for current context
+- `getWarehouseId()`: `Promise<string>` (from `DATABRICKS_WAREHOUSE_ID` or auto-selected in dev)
+- `getWorkspaceId()`: `Promise<string>` (from `DATABRICKS_WORKSPACE_ID` or fetched)
+- `isInUserContext()`: Returns `true` if currently executing in user context
+
+**Development mode behavior:**
+
+In local development (`NODE_ENV=development`), if `asUser(req)` is called without a user token, it logs a warning and falls back to the service principal.
 
 ### Custom plugins (backend)
 
@@ -469,7 +495,6 @@ import type express from "express";
 class MyPlugin extends Plugin {
   name = "my-plugin";
   envVars = [];                 // list required env vars here
-  requiresDatabricksClient = false; // set true if you need getRequestContext()
 
   injectRoutes(router: express.Router) {
     this.route(router, {

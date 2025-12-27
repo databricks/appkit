@@ -8,12 +8,13 @@ import type {
   PluginExecuteConfig,
   IAppResponse,
 } from "shared";
-import { createMockTelemetry } from "@tools/test-helpers";
+import { createMockTelemetry, mockServiceContext } from "@tools/test-helpers";
 import { validateEnv } from "../../utils";
 import type express from "express";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import type { ExecutionContext } from "../interceptors/types";
+import type { InterceptorContext } from "../interceptors/types";
 import { Plugin } from "../plugin";
+import { ServiceContext } from "../../context/service-context";
 
 // Mock all dependencies
 vi.mock("../../app");
@@ -127,9 +128,13 @@ describe("Plugin", () => {
   let mockApp: AppManager;
   let mockStreamManager: StreamManager;
   let config: BasePluginConfig;
+  let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.useFakeTimers();
+
+    ServiceContext.reset();
+    serviceContextMock = await mockServiceContext();
 
     mockTelemetry = createMockTelemetry();
 
@@ -170,6 +175,7 @@ describe("Plugin", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+    serviceContextMock?.restore();
   });
 
   describe("constructor", () => {
@@ -499,7 +505,7 @@ describe("Plugin", () => {
     test("should execute function directly when no interceptors", async () => {
       const plugin = new TestPlugin(config);
       const mockFn = vi.fn().mockResolvedValue("direct-result");
-      const context: ExecutionContext = {
+      const context: InterceptorContext = {
         metadata: new Map(),
         userKey: "test",
       };
@@ -514,7 +520,7 @@ describe("Plugin", () => {
     test("should chain interceptors correctly", async () => {
       const plugin = new TestPlugin(config);
       const mockFn = vi.fn().mockResolvedValue("chained-result");
-      const context: ExecutionContext = {
+      const context: InterceptorContext = {
         metadata: new Map(),
         userKey: "test",
       };
@@ -541,9 +547,8 @@ describe("Plugin", () => {
     test("should pass context to interceptors", async () => {
       const plugin = new TestPlugin(config);
       const mockFn = vi.fn().mockResolvedValue("context-result");
-      const context: ExecutionContext = {
+      const context: InterceptorContext = {
         metadata: new Map(),
-        asUser: true,
         signal: new AbortController().signal,
         userKey: "test",
       };
@@ -568,22 +573,6 @@ describe("Plugin", () => {
   describe("static properties", () => {
     test("should have default phase of 'normal'", () => {
       expect(Plugin.phase).toBe("normal");
-    });
-  });
-
-  describe("requiresDatabricksClient", () => {
-    test("should default to false", () => {
-      const plugin = new TestPlugin(config);
-      expect(plugin.requiresDatabricksClient).toBe(false);
-    });
-
-    test("should allow plugins to override to true", () => {
-      class PluginWithDatabricksClient extends TestPlugin {
-        requiresDatabricksClient = true;
-      }
-
-      const plugin = new PluginWithDatabricksClient(config);
-      expect(plugin.requiresDatabricksClient).toBe(true);
     });
   });
 

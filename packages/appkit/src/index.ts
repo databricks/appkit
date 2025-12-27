@@ -11,6 +11,19 @@ export {
 } from "shared";
 export { analytics } from "./analytics";
 export { CacheManager } from "./cache";
+export {
+  ServiceContext,
+  getExecutionContext,
+  getCurrentUserId,
+  getWorkspaceClient,
+  getWarehouseId,
+  getWorkspaceId,
+  isInUserContext,
+  isUserContext,
+  type ExecutionContext,
+  type ServiceContextState,
+  type UserContext,
+} from "./context";
 export { createApp } from "./core";
 export { Plugin, toPlugin } from "./plugin";
 export { server } from "./server";
@@ -24,4 +37,3 @@ export {
   TelemetryConfig,
 } from "./telemetry";
 export { appKitTypesPlugin } from "./type-generator/vite-plugin";
-export { getRequestContext, RequestContext } from "./utils";

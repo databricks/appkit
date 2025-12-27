@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { TimeoutInterceptor } from "../interceptors/timeout";
-import type { ExecutionContext } from "../interceptors/types";
+import type { InterceptorContext } from "../interceptors/types";
 
 describe("TimeoutInterceptor", () => {
-  let context: ExecutionContext;
+  let context: InterceptorContext;
 
   beforeEach(() => {
     context = {
@@ -61,7 +61,7 @@ describe("TimeoutInterceptor", () => {
 
   test("should combine user signal with timeout signal", async () => {
     const userController = new AbortController();
-    const contextWithSignal: ExecutionContext = {
+    const contextWithSignal: InterceptorContext = {
       metadata: new Map(),
       signal: userController.signal,
       userKey: "test",
@@ -82,7 +82,7 @@ describe("TimeoutInterceptor", () => {
 
   test("should combine signals when user signal exists", async () => {
     const userController = new AbortController();
-    const contextWithSignal: ExecutionContext = {
+    const contextWithSignal: InterceptorContext = {
       metadata: new Map(),
       signal: userController.signal,
       userKey: "test",
@@ -105,7 +105,7 @@ describe("TimeoutInterceptor", () => {
     const userController = new AbortController();
     userController.abort(new Error("Already aborted"));
 
-    const contextWithSignal: ExecutionContext = {
+    const contextWithSignal: InterceptorContext = {
       metadata: new Map(),
       signal: userController.signal,
       userKey: "test",
