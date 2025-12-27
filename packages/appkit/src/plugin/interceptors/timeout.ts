@@ -1,4 +1,4 @@
-import type { ExecutionContext, ExecutionInterceptor } from "./types";
+import type { InterceptorContext, ExecutionInterceptor } from "./types";
 
 // interceptor to handle timeout logic
 export class TimeoutInterceptor implements ExecutionInterceptor {
@@ -6,7 +6,7 @@ export class TimeoutInterceptor implements ExecutionInterceptor {
 
   async intercept<T>(
     fn: () => Promise<T>,
-    context: ExecutionContext,
+    context: InterceptorContext,
   ): Promise<T> {
     // create timeout signal
     const timeoutController = new AbortController();

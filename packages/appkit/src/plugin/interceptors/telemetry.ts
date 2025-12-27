@@ -1,7 +1,7 @@
 import type { ITelemetry, Span } from "../../telemetry";
 import { SpanStatusCode } from "../../telemetry";
 import type { TelemetryConfig } from "shared";
-import type { ExecutionContext, ExecutionInterceptor } from "./types";
+import type { InterceptorContext, ExecutionInterceptor } from "./types";
 
 /**
  * Interceptor to automatically instrument plugin executions with telemetry spans.
@@ -15,7 +15,7 @@ export class TelemetryInterceptor implements ExecutionInterceptor {
 
   async intercept<T>(
     fn: () => Promise<T>,
-    _context: ExecutionContext,
+    _context: InterceptorContext,
   ): Promise<T> {
     const spanName = this.config?.spanName || "plugin.execute";
     return this.telemetry.startActiveSpan(
