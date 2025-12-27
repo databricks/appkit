@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { sql } from "@databricks/sdk-experimental";
 import { isSQLTypeMarker, type SQLTypeMarker, sql as sqlHelpers } from "shared";
-import { getRequestContext } from "../utils";
+import { getWorkspaceId } from "../context";
 
 type SQLParameterValue = SQLTypeMarker | null | undefined;
 
@@ -18,8 +18,7 @@ export class QueryProcessor {
 
     // auto-inject workspaceId if needed and not provided
     if (queryParams.has("workspaceId") && !processed.workspaceId) {
-      const requestContext = getRequestContext();
-      const workspaceId = await requestContext.workspaceId;
+      const workspaceId = await getWorkspaceId();
       if (workspaceId) {
         processed.workspaceId = sqlHelpers.string(workspaceId);
       }

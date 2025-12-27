@@ -5,6 +5,7 @@ import {
 } from "@tanstack/react-router";
 import { Button, Card } from "@databricks/appkit-ui/react";
 import { ThemeSelector } from "@/components/theme-selector";
+import { useEffect } from "react";
 
 export const Route = createFileRoute("/")({
   component: IndexRoute,
@@ -15,6 +16,22 @@ export const Route = createFileRoute("/")({
 
 function IndexRoute() {
   const navigate = useNavigate();
+
+  useEffect(() => {
+    fetch("/sp")
+      .then((res) => res.json())
+      .then((data) => {
+        console.log(data);
+      });
+  }, []);
+
+  // useEffect(() => {
+  //   fetch("/obo")
+  //     .then((res) => res.json())
+  //     .then((data) => {
+  //       console.log(data);
+  //     });
+  // }, []);
 
   return (
     <div className="min-h-screen bg-background">

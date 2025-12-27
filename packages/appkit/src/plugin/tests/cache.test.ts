@@ -1,7 +1,7 @@
 import type { CacheConfig } from "shared";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { CacheInterceptor } from "../interceptors/cache";
-import type { ExecutionContext } from "../interceptors/types";
+import type { InterceptorContext } from "../interceptors/types";
 
 vi.mock("../../telemetry", () => ({
   TelemetryManager: {
@@ -78,7 +78,7 @@ class MockCacheManager {
 
 describe("CacheInterceptor", () => {
   let cacheManager: MockCacheManager;
-  let context: ExecutionContext;
+  let context: InterceptorContext;
 
   beforeEach(() => {
     cacheManager = new MockCacheManager();
@@ -180,7 +180,7 @@ describe("CacheInterceptor", () => {
       enabled: true,
       cacheKey: ["query", "sales"],
     };
-    const contextWithToken: ExecutionContext = {
+    const contextWithToken: InterceptorContext = {
       metadata: new Map(),
       userKey: "user1",
     };
@@ -213,7 +213,7 @@ describe("CacheInterceptor", () => {
     );
 
     // Service account context
-    const context1: ExecutionContext = {
+    const context1: InterceptorContext = {
       metadata: new Map(),
       userKey: "service",
     };
@@ -221,7 +221,7 @@ describe("CacheInterceptor", () => {
     await interceptor.intercept(fn1, context1);
 
     // User context
-    const context2: ExecutionContext = {
+    const context2: InterceptorContext = {
       metadata: new Map(),
       userKey: "user1",
     };

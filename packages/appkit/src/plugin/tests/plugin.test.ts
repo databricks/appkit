@@ -12,7 +12,7 @@ import { createMockTelemetry } from "@tools/test-helpers";
 import { validateEnv } from "../../utils";
 import type express from "express";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import type { ExecutionContext } from "../interceptors/types";
+import type { InterceptorContext } from "../interceptors/types";
 import { Plugin } from "../plugin";
 
 // Mock all dependencies
@@ -499,7 +499,7 @@ describe("Plugin", () => {
     test("should execute function directly when no interceptors", async () => {
       const plugin = new TestPlugin(config);
       const mockFn = vi.fn().mockResolvedValue("direct-result");
-      const context: ExecutionContext = {
+      const context: InterceptorContext = {
         metadata: new Map(),
         userKey: "test",
       };
@@ -514,7 +514,7 @@ describe("Plugin", () => {
     test("should chain interceptors correctly", async () => {
       const plugin = new TestPlugin(config);
       const mockFn = vi.fn().mockResolvedValue("chained-result");
-      const context: ExecutionContext = {
+      const context: InterceptorContext = {
         metadata: new Map(),
         userKey: "test",
       };
@@ -541,9 +541,8 @@ describe("Plugin", () => {
     test("should pass context to interceptors", async () => {
       const plugin = new TestPlugin(config);
       const mockFn = vi.fn().mockResolvedValue("context-result");
-      const context: ExecutionContext = {
+      const context: InterceptorContext = {
         metadata: new Map(),
-        asUser: true,
         signal: new AbortController().signal,
         userKey: "test",
       };

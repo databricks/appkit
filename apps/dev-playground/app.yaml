@@ -1,3 +1,8 @@
 env:
   - name: DATABRICKS_WAREHOUSE_ID
     valueFrom: sql-warehouse
+
+permissions:
+  user_authorization:
+    scopes:
+      - sql

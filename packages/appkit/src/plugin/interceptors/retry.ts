@@ -1,5 +1,5 @@
 import type { RetryConfig } from "shared";
-import type { ExecutionContext, ExecutionInterceptor } from "./types";
+import type { InterceptorContext, ExecutionInterceptor } from "./types";
 
 // interceptor to handle retry logic
 export class RetryInterceptor implements ExecutionInterceptor {
@@ -15,7 +15,7 @@ export class RetryInterceptor implements ExecutionInterceptor {
 
   async intercept<T>(
     fn: () => Promise<T>,
-    context: ExecutionContext,
+    context: InterceptorContext,
   ): Promise<T> {
     let lastError: Error | unknown;
 
