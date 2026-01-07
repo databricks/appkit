@@ -81,6 +81,7 @@ const config: Config = {
         indexFormat: "table",
         readme: "none",
         parametersFormat: "table",
+        categorizeByGroup: true,
         sidebar: {
           autoConfiguration: true,
           pretty: true,

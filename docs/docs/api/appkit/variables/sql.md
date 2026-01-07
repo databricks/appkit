@@ -4,7 +4,7 @@
 const sql: object;
 ```
 
-Defined in: [shared/src/sql/helpers.ts:14](https://github.com/databricks/appkit/blob/main/packages/shared/src/sql/helpers.ts#L14)
+Defined in: [shared/src/sql/helpers.ts:15](https://github.com/databricks/appkit/blob/main/packages/shared/src/sql/helpers.ts#L15)
 
 SQL helper namespace
 

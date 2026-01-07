@@ -7,11 +7,6 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
-          id: "api/appkit/classes/CacheManager",
-          label: "CacheManager"
-        },
-        {
-          type: "doc",
           id: "api/appkit/classes/Plugin",
           label: "Plugin"
         }
@@ -56,27 +51,6 @@ const typedocSidebar: SidebarsConfig = {
     },
     {
       type: "category",
-      label: "Variables",
-      items: [
-        {
-          type: "doc",
-          id: "api/appkit/variables/analytics",
-          label: "analytics"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/variables/server",
-          label: "server"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/variables/sql",
-          label: "sql"
-        }
-      ]
-    },
-    {
-      type: "category",
       label: "Functions",
       items: [
         {
@@ -103,6 +77,17 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/functions/toPlugin",
           label: "toPlugin"
+        }
+      ]
+    },
+    {
+      type: "category",
+      label: "Helpers",
+      items: [
+        {
+          type: "doc",
+          id: "api/appkit/variables/sql",
+          label: "sql"
         }
       ]
     }
