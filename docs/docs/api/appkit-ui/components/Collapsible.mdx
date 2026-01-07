@@ -1,0 +1,79 @@
+---
+title: Collapsible
+---
+
+# Collapsible
+
+## Collapsible
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/collapsible.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/collapsible.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `defaultOpen` | `boolean` |  | - | - |
+| `open` | `boolean` |  | - | - |
+| `disabled` | `boolean` |  | - | - |
+| `onOpenChange` | `((open: boolean) => void)` |  | - | - |
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { Collapsible } from '@databricks/appkit-ui';
+
+<Collapsible /* props */ />
+```
+
+
+## CollapsibleContent
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/collapsible.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/collapsible.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `forceMount` | `true` |  | - | Used to force mounting when more control is needed. Useful when controlling animation with React animation libraries. |
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { CollapsibleContent } from '@databricks/appkit-ui';
+
+<CollapsibleContent /* props */ />
+```
+
+
+## CollapsibleTrigger
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/collapsible.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/collapsible.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { CollapsibleTrigger } from '@databricks/appkit-ui';
+
+<CollapsibleTrigger /* props */ />
+```
+

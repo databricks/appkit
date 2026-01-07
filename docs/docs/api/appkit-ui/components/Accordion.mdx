@@ -1,0 +1,108 @@
+---
+title: Accordion
+---
+
+# Accordion
+
+## Accordion
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/accordion.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/accordion.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `type` | `enum` | ✓ | - | - |
+| `value` | `string \| string[]` |  | - | The controlled stateful value of the accordion item whose content is expanded. The controlled stateful value of the accordion items whose contents are expanded. |
+| `defaultValue` | `string \| string[]` |  | - | The value of the item whose content is expanded when the accordion is initially rendered. Use `defaultValue` if you do not need to control the state of an accordion. The value of the items whose contents are expanded when the accordion is initially rendered. Use `defaultValue` if you do not need to control the state of an accordion. |
+| `onValueChange` | `((value: string) => void) \| ((value: string[]) => void)` |  | - | The callback that fires when the state of the accordion changes. |
+| `collapsible` | `boolean` |  | `false` | Whether an accordion item can be collapsed after it has been opened. |
+| `disabled` | `boolean` |  | - | Whether or not an accordion is disabled from user interaction. @defaultValue false |
+| `orientation` | `enum` |  | `vertical` | The layout in which the Accordion operates. |
+| `dir` | `enum` |  | - | The language read direction. |
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { Accordion } from '@databricks/appkit-ui';
+
+<Accordion /* props */ />
+```
+
+
+## AccordionContent
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/accordion.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/accordion.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+| `forceMount` | `true` |  | - | Used to force mounting when more control is needed. Useful when controlling animation with React animation libraries. |
+
+
+
+### Usage
+
+```tsx
+import { AccordionContent } from '@databricks/appkit-ui';
+
+<AccordionContent /* props */ />
+```
+
+
+## AccordionItem
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/accordion.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/accordion.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `disabled` | `boolean` |  | - | Whether or not an accordion is disabled from user interaction. @defaultValue false |
+| `value` | `string \| string[]` |  | - | The controlled stateful value of the accordion item whose content is expanded. The controlled stateful value of the accordion items whose contents are expanded. |
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { AccordionItem } from '@databricks/appkit-ui';
+
+<AccordionItem /* props */ />
+```
+
+
+## AccordionTrigger
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/accordion.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/accordion.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { AccordionTrigger } from '@databricks/appkit-ui';
+
+<AccordionTrigger /* props */ />
+```
+

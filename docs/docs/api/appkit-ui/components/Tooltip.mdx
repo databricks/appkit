@@ -1,0 +1,118 @@
+---
+title: Tooltip
+---
+
+# Tooltip
+
+## Tooltip
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/tooltip.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/tooltip.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `open` | `boolean` |  | - | - |
+| `defaultOpen` | `boolean` |  | - | - |
+| `onOpenChange` | `((open: boolean) => void)` |  | - | - |
+| `delayDuration` | `number` |  | - | The duration from when the pointer enters the trigger until the tooltip gets opened. This will override the prop with the same name passed to Provider. @defaultValue 700 |
+| `disableHoverableContent` | `boolean` |  | - | When `true`, trying to hover the content will result in the tooltip closing as the pointer leaves the trigger. @defaultValue false |
+
+
+
+### Usage
+
+```tsx
+import { Tooltip } from '@databricks/appkit-ui';
+
+<Tooltip /* props */ />
+```
+
+
+## TooltipContent
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/tooltip.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/tooltip.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `forceMount` | `true` |  | - | Used to force mounting when more control is needed. Useful when controlling animation with React animation libraries. |
+| `aria-label` | `string` |  | - | A more descriptive label for accessibility purpose |
+| `onEscapeKeyDown` | `((event: KeyboardEvent) => void)` |  | - | Event handler called when the escape key is down. Can be prevented. |
+| `onPointerDownOutside` | `((event: PointerDownOutsideEvent) => void)` |  | - | Event handler called when the a `pointerdown` event happens outside of the `Tooltip`. Can be prevented. |
+| `asChild` | `boolean` |  | - | - |
+| `align` | `enum` |  | - | - |
+| `side` | `enum` |  | - | - |
+| `sideOffset` | `number` |  | - | - |
+| `alignOffset` | `number` |  | - | - |
+| `arrowPadding` | `number` |  | - | - |
+| `avoidCollisions` | `boolean` |  | - | - |
+| `collisionBoundary` | `Boundary \| Boundary[]` |  | - | - |
+| `collisionPadding` | `number \| Partial<Record<"left" \| "right" \| "top" \| "bottom", number>>` |  | - | - |
+| `sticky` | `enum` |  | - | - |
+| `hideWhenDetached` | `boolean` |  | - | - |
+| `updatePositionStrategy` | `enum` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { TooltipContent } from '@databricks/appkit-ui';
+
+<TooltipContent /* props */ />
+```
+
+
+## TooltipProvider
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/tooltip.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/tooltip.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `delayDuration` | `number` |  | - | The duration from when the pointer enters the trigger until the tooltip gets opened. This will override the prop with the same name passed to Provider. @defaultValue 700 |
+| `skipDelayDuration` | `number` |  | - | How much time a user has to enter another trigger without incurring a delay again. @defaultValue 300 |
+| `disableHoverableContent` | `boolean` |  | - | When `true`, trying to hover the content will result in the tooltip closing as the pointer leaves the trigger. @defaultValue false |
+
+
+
+### Usage
+
+```tsx
+import { TooltipProvider } from '@databricks/appkit-ui';
+
+<TooltipProvider /* props */ />
+```
+
+
+## TooltipTrigger
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/tooltip.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/tooltip.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { TooltipTrigger } from '@databricks/appkit-ui';
+
+<TooltipTrigger /* props */ />
+```
+

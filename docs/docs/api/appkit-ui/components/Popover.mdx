@@ -1,0 +1,119 @@
+---
+title: Popover
+---
+
+# Popover
+
+## Popover
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/popover.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/popover.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `open` | `boolean` |  | - | - |
+| `defaultOpen` | `boolean` |  | - | - |
+| `onOpenChange` | `((open: boolean) => void)` |  | - | - |
+| `modal` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { Popover } from '@databricks/appkit-ui';
+
+<Popover /* props */ />
+```
+
+
+## PopoverAnchor
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/popover.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/popover.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+| `virtualRef` | `RefObject<Measurable>` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { PopoverAnchor } from '@databricks/appkit-ui';
+
+<PopoverAnchor /* props */ />
+```
+
+
+## PopoverContent
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/popover.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/popover.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `forceMount` | `true` |  | - | Used to force mounting when more control is needed. Useful when controlling animation with React animation libraries. |
+| `asChild` | `boolean` |  | - | - |
+| `onEscapeKeyDown` | `((event: KeyboardEvent) => void)` |  | - | Event handler called when the escape key is down. Can be prevented. |
+| `onPointerDownOutside` | `((event: PointerDownOutsideEvent) => void)` |  | - | Event handler called when the a `pointerdown` event happens outside of the `DismissableLayer`. Can be prevented. |
+| `onFocusOutside` | `((event: FocusOutsideEvent) => void)` |  | - | Event handler called when the focus moves outside of the `DismissableLayer`. Can be prevented. |
+| `onInteractOutside` | `((event: FocusOutsideEvent \| PointerDownOutsideEvent) => void)` |  | - | Event handler called when an interaction happens outside the `DismissableLayer`. Specifically, when a `pointerdown` event happens outside or focus moves outside of it. Can be prevented. |
+| `onOpenAutoFocus` | `((event: Event) => void)` |  | - | Event handler called when auto-focusing on open. Can be prevented. |
+| `onCloseAutoFocus` | `((event: Event) => void)` |  | - | Event handler called when auto-focusing on close. Can be prevented. |
+| `align` | `enum` |  | - | - |
+| `side` | `enum` |  | - | - |
+| `sideOffset` | `number` |  | - | - |
+| `alignOffset` | `number` |  | - | - |
+| `arrowPadding` | `number` |  | - | - |
+| `avoidCollisions` | `boolean` |  | - | - |
+| `collisionBoundary` | `Boundary \| Boundary[]` |  | - | - |
+| `collisionPadding` | `number \| Partial<Record<"left" \| "right" \| "top" \| "bottom", number>>` |  | - | - |
+| `sticky` | `enum` |  | - | - |
+| `hideWhenDetached` | `boolean` |  | - | - |
+| `updatePositionStrategy` | `enum` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { PopoverContent } from '@databricks/appkit-ui';
+
+<PopoverContent /* props */ />
+```
+
+
+## PopoverTrigger
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/popover.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/popover.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { PopoverTrigger } from '@databricks/appkit-ui';
+
+<PopoverTrigger /* props */ />
+```
+
