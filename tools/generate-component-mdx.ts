@@ -118,6 +118,30 @@ ${propsSection}
 ${usageSection}`;
 }
 
+interface ExampleInfo {
+  name: string;
+}
+
+function buildExampleInfo(component: ComponentDoc): ExampleInfo | undefined {
+  const filePath = component.filePath;
+  if (!filePath) {
+    return undefined;
+  }
+  const baseName = path.basename(filePath, path.extname(filePath));
+  const examplePath = path.join(
+    repoRoot,
+    "packages/appkit-ui/src/react/ui",
+    `${baseName}.example.tsx`,
+  );
+  if (!fs.existsSync(examplePath)) {
+    return undefined;
+  }
+
+  return {
+    name: baseName,
+  };
+}
+
 function generateSingleComponentPage(component: ComponentDoc): string {
   return `---
 title: ${component.displayName}
@@ -132,6 +156,7 @@ ${buildComponentDetails(component)}
 function generateGroupedComponentPage(
   groupName: string,
   components: ComponentDoc[],
+  example?: ExampleInfo,
 ): string {
   const sections = components
     .map((component) => {
@@ -144,13 +169,28 @@ ${buildComponentDetails(component, {
     })
     .join("\n\n");
 
+  const exampleImports = example
+    ? `import { DocExample } from "@site/src/components/DocExample";
+
+`
+    : "";
+
+  const exampleSection = example
+    ? `
+## Example
+
+<DocExample name="${example.name}" />
+
+`
+    : "";
+
   return `---
 title: ${groupName}
 ---
 
-# ${groupName}
+${exampleImports}# ${groupName}
 
-${sections}
+${exampleSection}${sections}
 `;
 }
 
@@ -251,11 +291,14 @@ function main() {
     const sortedMembers = [...components].sort((a, b) =>
       a.displayName!.localeCompare(b.displayName!),
     );
+    const exampleInfo = sortedMembers[0]
+      ? buildExampleInfo(sortedMembers[0])
+      : undefined;
     const outputPath = path.join(outputDir, `${outputName}.mdx`);
     try {
       fs.writeFileSync(
         outputPath,
-        generateGroupedComponentPage(pageName, sortedMembers),
+        generateGroupedComponentPage(pageName, sortedMembers, exampleInfo),
         "utf8",
       );
       outputPageNames.push(outputName);

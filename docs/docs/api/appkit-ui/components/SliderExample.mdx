@@ -1,0 +1,42 @@
+---
+title: SliderExample
+---
+
+# SliderExample
+
+## slider
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/slider.example.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/slider.example.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `name` | `string` |  | - | - |
+| `disabled` | `boolean` |  | - | - |
+| `orientation` | `enum` |  | - | - |
+| `dir` | `enum` |  | - | - |
+| `min` | `number` |  | - | - |
+| `max` | `number` |  | - | - |
+| `step` | `number` |  | - | - |
+| `minStepsBetweenThumbs` | `number` |  | - | - |
+| `value` | `number[]` |  | - | - |
+| `defaultValue` | `number[]` |  | - | - |
+| `onValueChange` | `((value: number[]) => void)` |  | - | - |
+| `onValueCommit` | `((value: number[]) => void)` |  | - | - |
+| `inverted` | `boolean` |  | - | - |
+| `form` | `string` |  | - | - |
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { slider } from '@databricks/appkit-ui';
+
+<slider /* props */ />
+```
+
