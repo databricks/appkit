@@ -6,7 +6,7 @@ Defined in: [appkit/src/plugin/plugin.ts:33](https://github.com/databricks/appki
 
 | Type Parameter | Default type |
 | ------ | ------ |
-| `TConfig` *extends* [`BasePluginConfig`](../interfaces/BasePluginConfig.md) | [`BasePluginConfig`](../interfaces/BasePluginConfig.md) |
+| `TConfig` *extends* `BasePluginConfig` | `BasePluginConfig` |
 
 ## Implements
 
@@ -34,82 +34,6 @@ Defined in: [appkit/src/plugin/plugin.ts:54](https://github.com/databricks/appki
 
 ## Properties
 
-### app
-
-```ts
-protected app: AppManager;
-```
-
-Defined in: [appkit/src/plugin/plugin.ts:39](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L39)
-
-***
-
-### cache
-
-```ts
-protected cache: CacheManager;
-```
-
-Defined in: [appkit/src/plugin/plugin.ts:38](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L38)
-
-***
-
-### config
-
-```ts
-protected config: TConfig;
-```
-
-Defined in: [appkit/src/plugin/plugin.ts:54](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L54)
-
-***
-
-### devFileReader
-
-```ts
-protected devFileReader: DevFileReader;
-```
-
-Defined in: [appkit/src/plugin/plugin.ts:40](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L40)
-
-***
-
-### envVars
-
-```ts
-abstract protected envVars: string[];
-```
-
-Defined in: [appkit/src/plugin/plugin.ts:43](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L43)
-
-***
-
-### isReady
-
-```ts
-protected isReady: boolean = false;
-```
-
-Defined in: [appkit/src/plugin/plugin.ts:37](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L37)
-
-***
-
-### name
-
-```ts
-name: string;
-```
-
-Defined in: [appkit/src/plugin/plugin.ts:52](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L52)
-
-#### Implementation of
-
-```ts
-BasePlugin.name
-```
-
-***
-
 ### requiresDatabricksClient
 
 ```ts
@@ -119,36 +43,6 @@ requiresDatabricksClient: boolean = false;
 Defined in: [appkit/src/plugin/plugin.ts:46](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L46)
 
 If the plugin requires the Databricks client to be set in the request context
-
-***
-
-### streamManager
-
-```ts
-protected streamManager: StreamManager;
-```
-
-Defined in: [appkit/src/plugin/plugin.ts:41](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L41)
-
-***
-
-### telemetry
-
-```ts
-protected telemetry: ITelemetry;
-```
-
-Defined in: [appkit/src/plugin/plugin.ts:42](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L42)
-
-***
-
-### phase
-
-```ts
-static phase: PluginPhase = "normal";
-```
-
-Defined in: [appkit/src/plugin/plugin.ts:51](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L51)
 
 ## Methods
 
@@ -227,7 +121,7 @@ Defined in: [appkit/src/plugin/plugin.ts:84](https://github.com/databricks/appki
 | ------ | ------ |
 | `res` | `IAppResponse` |
 | `fn` | `StreamExecuteHandler`\<`T`\> |
-| `options` | [`StreamExecutionSettings`](../interfaces/StreamExecutionSettings.md) |
+| `options` | `StreamExecutionSettings` |
 | `userKey` | `string` |
 
 #### Returns

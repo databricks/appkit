@@ -37,15 +37,6 @@ const sidebars: SidebarsConfig = {
           },
           items: typedocSidebar.items,
         },
-        {
-          type: "category",
-          label: "@databricks/appkit-ui",
-          link: {
-            type: "doc",
-            id: "api/appkit-ui/index",
-          },
-          items: uiTypedocSidebar.items,
-        },
       ],
     },
   ],

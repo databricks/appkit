@@ -22,4 +22,4 @@ export {
   SpanStatusCode,
 } from "./telemetry";
 export { appKitTypesPlugin } from "./type-generator/vite-plugin";
-export { getRequestContext } from "./utils";
+export { getRequestContext, RequestContext } from "./utils";

@@ -10,15 +10,12 @@
 
 | Interface | Description |
 | ------ | ------ |
-| [BasePluginConfig](interfaces/BasePluginConfig.md) | - |
 | [ITelemetry](interfaces/ITelemetry.md) | Plugin-facing interface for OpenTelemetry instrumentation. Provides a thin abstraction over OpenTelemetry APIs for plugins. |
-| [StreamExecutionSettings](interfaces/StreamExecutionSettings.md) | - |
 
 ## Type Aliases
 
 | Type Alias | Description |
 | ------ | ------ |
-| [IAppRouter](type-aliases/IAppRouter.md) | - |
 | [SQLTypeMarker](type-aliases/SQLTypeMarker.md) | Object that identifies a typed SQL parameter. Created using sql.date(), sql.string(), sql.number(), sql.boolean(), sql.timestamp(), sql.binary(), or sql.interval(). |
 
 ## Functions

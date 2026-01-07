@@ -18,18 +18,8 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
-          id: "api/appkit/interfaces/BasePluginConfig",
-          label: "BasePluginConfig"
-        },
-        {
-          type: "doc",
           id: "api/appkit/interfaces/ITelemetry",
           label: "ITelemetry"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/interfaces/StreamExecutionSettings",
-          label: "StreamExecutionSettings"
         }
       ]
     },
@@ -37,11 +27,6 @@ const typedocSidebar: SidebarsConfig = {
       type: "category",
       label: "Type Aliases",
       items: [
-        {
-          type: "doc",
-          id: "api/appkit/type-aliases/IAppRouter",
-          label: "IAppRouter"
-        },
         {
           type: "doc",
           id: "api/appkit/type-aliases/SQLTypeMarker",
