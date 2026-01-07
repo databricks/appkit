@@ -20,6 +20,13 @@
   --hero-text-color: #ffffff;
   --hero-gradient-dark: #0b2026;
   --hero-gradient-accent: #ff3621;
+
+  --api-kind-class-color: #3178c6;
+  --api-kind-interface-color: #8b5cf6;
+  --api-kind-typealias-color: #ec4899;
+  --api-kind-function-color: #10b981;
+  --api-kind-variable-color: #f59e0b;
+  --api-kind-enum-color: #6366f1;
 }
 
 [data-theme="light"] {
@@ -47,4 +54,68 @@
   .landing-button-vertical {
     display: block;
   }
+}
+
+.api-kind-class .menu__link::before,
+.api-kind-interface .menu__link::before,
+.api-kind-typealias .menu__link::before,
+.api-kind-function .menu__link::before,
+.api-kind-variable .menu__link::before,
+.api-kind-enum .menu__link::before,
+.api-kind-other .menu__link::before {
+  display: inline-block;
+  width: 1.5em;
+  margin-right: 0.5em;
+  font-size: 0.75em;
+  font-weight: 600;
+  border: 1.5px solid;
+  border-radius: 3px;
+  font-family: var(--ifm-font-family-monospace);
+  line-height: 1;
+  text-align: center;
+  vertical-align: middle;
+  padding: 0.2em;
+  box-sizing: border-box;
+}
+
+.api-kind-class .menu__link::before {
+  content: "C";
+  border-color: var(--api-kind-class-color);
+  color: var(--api-kind-class-color);
+}
+
+.api-kind-interface .menu__link::before {
+  border-color: var(--api-kind-interface-color);
+  color: var(--api-kind-interface-color);
+  content: "I";
+}
+
+.api-kind-typealias .menu__link::before {
+  border-color: var(--api-kind-typealias-color);
+  color: var(--api-kind-typealias-color);
+  content: "T";
+}
+
+.api-kind-function .menu__link::before {
+  border-color: var(--api-kind-function-color);
+  color: var(--api-kind-function-color);
+  content: "F";
+}
+
+.api-kind-variable .menu__link::before {
+  border-color: var(--api-kind-variable-color);
+  color: var(--api-kind-variable-color);
+  content: "V";
+}
+
+.api-kind-enum .menu__link::before {
+  border-color: var(--api-kind-enum-color);
+  color: var(--api-kind-enum-color);
+  content: "E";
+}
+
+.api-kind-other .menu__link::before {
+  border-color: var(--ifm-color-content);
+  color: var(--ifm-color-content);
+  content: "O";
 }

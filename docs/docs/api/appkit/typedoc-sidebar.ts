@@ -7,7 +7,7 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
-          id: "api/appkit/classes/Plugin",
+          id: "api/appkit/Class.Plugin",
           label: "Plugin"
         }
       ]
@@ -18,8 +18,28 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
-          id: "api/appkit/interfaces/ITelemetry",
+          id: "api/appkit/Interface.BasePluginConfig",
+          label: "BasePluginConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.CacheConfig",
+          label: "CacheConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ITelemetry",
           label: "ITelemetry"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.StreamExecutionSettings",
+          label: "StreamExecutionSettings"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.TelemetryConfig",
+          label: "TelemetryConfig"
         }
       ]
     },
@@ -29,8 +49,29 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
-          id: "api/appkit/type-aliases/SQLTypeMarker",
+          id: "api/appkit/TypeAlias.IAppRouter",
+          label: "IAppRouter"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.RequestContext",
+          label: "RequestContext"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.SQLTypeMarker",
           label: "SQLTypeMarker"
+        }
+      ]
+    },
+    {
+      type: "category",
+      label: "Variables",
+      items: [
+        {
+          type: "doc",
+          id: "api/appkit/Variable.sql",
+          label: "sql"
         }
       ]
     },
@@ -40,39 +81,23 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
-          id: "api/appkit/functions/appKitTypesPlugin",
+          id: "api/appkit/Function.appKitTypesPlugin",
           label: "appKitTypesPlugin"
         },
         {
           type: "doc",
-          id: "api/appkit/functions/createApp",
+          id: "api/appkit/Function.createApp",
           label: "createApp"
         },
         {
           type: "doc",
-          id: "api/appkit/functions/getRequestContext",
+          id: "api/appkit/Function.getRequestContext",
           label: "getRequestContext"
         },
         {
           type: "doc",
-          id: "api/appkit/functions/isSQLTypeMarker",
+          id: "api/appkit/Function.isSQLTypeMarker",
           label: "isSQLTypeMarker"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/functions/toPlugin",
-          label: "toPlugin"
-        }
-      ]
-    },
-    {
-      type: "category",
-      label: "Helpers",
-      items: [
-        {
-          type: "doc",
-          id: "api/appkit/variables/sql",
-          label: "sql"
         }
       ]
     }

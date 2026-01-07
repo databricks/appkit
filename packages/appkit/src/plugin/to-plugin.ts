@@ -1,5 +1,8 @@
 import type { PluginData, ToPlugin } from "shared";
 
+/**
+ * @internal
+ */
 export function toPlugin<T, U, N extends string>(
   plugin: T,
   name: N,

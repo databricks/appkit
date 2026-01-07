@@ -1,10 +1,17 @@
 # Variable: sql
 
 ```ts
-const sql: object;
+const sql: {
+  binary: SQLBinaryMarker;
+  boolean: SQLBooleanMarker;
+  date: SQLDateMarker;
+  number: SQLNumberMarker;
+  string: SQLStringMarker;
+  timestamp: SQLTimestampMarker;
+};
 ```
 
-Defined in: [shared/src/sql/helpers.ts:15](https://github.com/databricks/appkit/blob/main/packages/shared/src/sql/helpers.ts#L15)
+Defined in: [shared/src/sql/helpers.ts:14](https://github.com/databricks/appkit/blob/main/packages/shared/src/sql/helpers.ts#L14)
 
 SQL helper namespace
 
@@ -13,7 +20,7 @@ SQL helper namespace
 ### binary()
 
 ```ts
-binary(value): SQLBinaryMarker;
+binary(value: string | Uint8Array | ArrayBuffer): SQLBinaryMarker;
 ```
 
 Creates a BINARY parameter as hex-encoded STRING
@@ -51,7 +58,7 @@ const params = { data: sql.binary("537061726B") };
 ### boolean()
 
 ```ts
-boolean(value): SQLBooleanMarker;
+boolean(value: string | number | boolean): SQLBooleanMarker;
 ```
 
 Create a BOOLEAN type parameter
@@ -99,7 +106,7 @@ params = { isActive: "false" }
 ### date()
 
 ```ts
-date(value): SQLDateMarker;
+date(value: string | Date): SQLDateMarker;
 ```
 
 Creates a DATE type parameter
@@ -132,7 +139,7 @@ params = { startDate: "2024-01-01" }
 ### number()
 
 ```ts
-number(value): SQLNumberMarker;
+number(value: string | number): SQLNumberMarker;
 ```
 
 Creates a NUMERIC type parameter
@@ -165,7 +172,7 @@ params = { userId: "123" }
 ### string()
 
 ```ts
-string(value): SQLStringMarker;
+string(value: string | number | boolean): SQLStringMarker;
 ```
 
 Creates a STRING type parameter
@@ -203,7 +210,7 @@ params = { name: "true" }
 ### timestamp()
 
 ```ts
-timestamp(value): SQLTimestampMarker;
+timestamp(value: string | number | Date): SQLTimestampMarker;
 ```
 
 Creates a TIMESTAMP type parameter

@@ -1,10 +1,10 @@
 # Function: isSQLTypeMarker()
 
 ```ts
-function isSQLTypeMarker(value): value is SQLTypeMarker;
+function isSQLTypeMarker(value: any): value is SQLTypeMarker;
 ```
 
-Defined in: [shared/src/sql/helpers.ts:345](https://github.com/databricks/appkit/blob/main/packages/shared/src/sql/helpers.ts#L345)
+Defined in: [shared/src/sql/helpers.ts:344](https://github.com/databricks/appkit/blob/main/packages/shared/src/sql/helpers.ts#L344)
 
 Type guard to check if a value is a SQL type marker
 

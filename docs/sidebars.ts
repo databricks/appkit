@@ -1,6 +1,5 @@
 import type { SidebarsConfig } from "@docusaurus/plugin-content-docs";
 import typedocSidebar from "./docs/api/appkit/typedoc-sidebar";
-import uiTypedocSidebar from "./docs/api/appkit-ui/typedoc-sidebar";
 
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
@@ -14,6 +13,44 @@ import uiTypedocSidebar from "./docs/api/appkit-ui/typedoc-sidebar";
 
  Create as many sidebars as you want.
  */
+
+const SUPPORTED_KINDS = new Set([
+  "class",
+  "interface",
+  "typealias",
+  "function",
+  "variable",
+  "enum",
+]);
+
+function flattenSidebarWithKind(sidebarConfig: any): any[] {
+  const flatItems: any[] = [];
+  const items = Array.isArray(sidebarConfig)
+    ? sidebarConfig
+    : sidebarConfig.items || [];
+
+  for (const item of items) {
+    if (item.type === "category" && item.items) {
+      // Extract items from categories
+      for (const subItem of item.items) {
+        // Extract kind from the id (e.g., "Function." from "api/appkit/Function.name")
+        // To get "function", "class", "interface", etc.
+        const idParts = subItem.id.split("/").pop() || "";
+        const rawKind = idParts.split(".")[0].toLowerCase();
+        const kind = SUPPORTED_KINDS.has(rawKind) ? rawKind : "other";
+
+        flatItems.push({
+          ...subItem,
+          className: `api-kind-${kind}`,
+        });
+      }
+    } else {
+      flatItems.push(item);
+    }
+  }
+
+  return flatItems;
+}
 const sidebars: SidebarsConfig = {
   docsSidebar: [
     {
@@ -35,7 +72,7 @@ const sidebars: SidebarsConfig = {
             type: "doc",
             id: "api/appkit/index",
           },
-          items: typedocSidebar.items,
+          items: flattenSidebarWithKind(typedocSidebar),
         },
       ],
     },

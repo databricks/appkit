@@ -10,7 +10,7 @@ Provides a thin abstraction over OpenTelemetry APIs for plugins.
 ### emit()
 
 ```ts
-emit(logRecord): void;
+emit(logRecord: LogRecord): void;
 ```
 
 Defined in: [appkit/src/telemetry/types.ts:57](https://github.com/databricks/appkit/blob/main/packages/appkit/src/telemetry/types.ts#L57)
@@ -33,7 +33,7 @@ Respects the logs enabled/disabled config.
 ### getLogger()
 
 ```ts
-getLogger(options?): Logger;
+getLogger(options?: InstrumentConfig): Logger;
 ```
 
 Defined in: [appkit/src/telemetry/types.ts:50](https://github.com/databricks/appkit/blob/main/packages/appkit/src/telemetry/types.ts#L50)
@@ -55,7 +55,7 @@ Gets a logger for emitting log records.
 ### getMeter()
 
 ```ts
-getMeter(options?): Meter;
+getMeter(options?: InstrumentConfig): Meter;
 ```
 
 Defined in: [appkit/src/telemetry/types.ts:44](https://github.com/databricks/appkit/blob/main/packages/appkit/src/telemetry/types.ts#L44)
@@ -77,7 +77,7 @@ Gets a meter for recording metrics.
 ### getTracer()
 
 ```ts
-getTracer(options?): Tracer;
+getTracer(options?: InstrumentConfig): Tracer;
 ```
 
 Defined in: [appkit/src/telemetry/types.ts:38](https://github.com/databricks/appkit/blob/main/packages/appkit/src/telemetry/types.ts#L38)
@@ -99,7 +99,7 @@ Gets a tracer for creating spans.
 ### registerInstrumentations()
 
 ```ts
-registerInstrumentations(instrumentations): void;
+registerInstrumentations(instrumentations: Instrumentation<InstrumentationConfig>[]): void;
 ```
 
 Defined in: [appkit/src/telemetry/types.ts:81](https://github.com/databricks/appkit/blob/main/packages/appkit/src/telemetry/types.ts#L81)
@@ -123,10 +123,10 @@ Can be called at any time, but recommended to call in plugin constructor.
 
 ```ts
 startActiveSpan<T>(
-   name, 
-   options, 
-   fn, 
-tracerOptions?): Promise<T>;
+   name: string, 
+   options: SpanOptions, 
+   fn: (span: Span) => Promise<T>, 
+tracerOptions?: InstrumentConfig): Promise<T>;
 ```
 
 Defined in: [appkit/src/telemetry/types.ts:69](https://github.com/databricks/appkit/blob/main/packages/appkit/src/telemetry/types.ts#L69)
@@ -147,7 +147,7 @@ When traces are disabled, executes the callback with a no-op span.
 | ------ | ------ | ------ |
 | `name` | `string` | The name of the span |
 | `options` | `SpanOptions` | Span options including attributes, kind, etc. |
-| `fn` | (`span`) => `Promise`\<`T`\> | Callback function to execute within the span context |
+| `fn` | (`span`: `Span`) => `Promise`\<`T`\> | Callback function to execute within the span context |
 | `tracerOptions?` | `InstrumentConfig` | Optional tracer configuration (custom name, prefix inclusion) |
 
 #### Returns

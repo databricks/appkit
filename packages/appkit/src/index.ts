@@ -1,5 +1,6 @@
 export type {
   BasePluginConfig,
+  CacheConfig,
   IAppRouter,
   SQLTypeMarker,
   StreamExecutionSettings,
@@ -20,6 +21,7 @@ export {
   SeverityNumber,
   type Span,
   SpanStatusCode,
+  TelemetryConfig,
 } from "./telemetry";
 export { appKitTypesPlugin } from "./type-generator/vite-plugin";
 export { getRequestContext, RequestContext } from "./utils";

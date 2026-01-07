@@ -1,7 +1,7 @@
 # Function: appKitTypesPlugin()
 
 ```ts
-function appKitTypesPlugin(options?): Plugin$1;
+function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin$1;
 ```
 
 Defined in: [appkit/src/type-generator/vite-plugin.ts:22](https://github.com/databricks/appkit/blob/main/packages/appkit/src/type-generator/vite-plugin.ts#L22)

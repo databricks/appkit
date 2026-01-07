@@ -82,8 +82,10 @@ const config: Config = {
         readme: "none",
         parametersFormat: "table",
         categorizeByGroup: true,
-        excludeNotDocumented: true,
-        excludeNotDocumentedKinds: ["Property", "Interface", "TypeAlias"],
+        excludeNotDocumented: false,
+        flattenOutputFiles: true,
+        expandObjects: true,
+        expandParameters: true,
         sidebar: {
           autoConfiguration: true,
           pretty: true,
