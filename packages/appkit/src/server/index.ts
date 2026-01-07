@@ -329,9 +329,6 @@ export class ServerPlugin extends Plugin {
 
 const EXCLUDED_PLUGINS = [ServerPlugin.name];
 
-/**
- * @internal
- */
 export const server = toPlugin<typeof ServerPlugin, ServerConfig, "server">(
   ServerPlugin,
   "server",

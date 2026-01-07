@@ -15,7 +15,6 @@ import { InMemoryStorage, PersistentStorage } from "./storage";
  * The cache is automatically initialized by AppKit. Use `getInstanceSync()` to access
  * the singleton instance after initialization.
  *
- * @internal
  * @example
  * ```typescript
  * const cache = CacheManager.getInstanceSync();

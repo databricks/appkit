@@ -63,56 +63,7 @@ const config: Config = {
     ],
   ],
 
-  plugins: [
-    require.resolve("docusaurus-lunr-search"),
-    [
-      "docusaurus-plugin-typedoc",
-      {
-        id: "appkit",
-        entryPoints: ["../packages/appkit/src/index.ts"],
-        tsconfig: "../packages/appkit/tsconfig.json",
-        out: "docs/api/appkit",
-        gitRevision: "main",
-        useCodeBlocks: true,
-        excludeExternals: true,
-        excludePrivate: true,
-        excludeProtected: false,
-        excludeInternal: true,
-        indexFormat: "table",
-        readme: "none",
-        parametersFormat: "table",
-        categorizeByGroup: true,
-        sidebar: {
-          autoConfiguration: true,
-          pretty: true,
-          typescript: true,
-        },
-      },
-    ],
-    [
-      "docusaurus-plugin-typedoc",
-      {
-        id: "appkit-ui",
-        entryPoints: ["../packages/appkit-ui/src/react/index.ts"],
-        tsconfig: "../packages/appkit-ui/tsconfig.json",
-        out: "docs/api/appkit-ui",
-        gitRevision: "main",
-        useCodeBlocks: true,
-        excludeExternals: true,
-        excludePrivate: true,
-        excludeProtected: false,
-        excludeInternal: true,
-        indexFormat: "table",
-        readme: "none",
-        parametersFormat: "table",
-        sidebar: {
-          autoConfiguration: true,
-          pretty: true,
-          typescript: true,
-        },
-      },
-    ],
-  ],
+  plugins: [require.resolve("docusaurus-lunr-search")],
 
   themeConfig: {
     colorMode: {
@@ -164,10 +115,6 @@ const config: Config = {
             {
               label: "Getting started",
               to: "/docs/",
-            },
-            {
-              label: "API Reference",
-              to: "/docs/api/",
             },
           ],
         },
