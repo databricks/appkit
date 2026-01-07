@@ -14,14 +14,14 @@ export { CacheManager } from "./cache";
 export { createApp } from "./core";
 export { Plugin, toPlugin } from "./plugin";
 export { server } from "./server";
-export type { ITelemetry } from "./telemetry";
+export type { ITelemetry, TelemetryConfig } from "./telemetry";
 export {
   type Counter,
   type Histogram,
   SeverityNumber,
   type Span,
   SpanStatusCode,
-  TelemetryConfig,
 } from "./telemetry";
 export { appKitTypesPlugin } from "./type-generator/vite-plugin";
-export { getRequestContext, RequestContext } from "./utils";
+export { getRequestContext } from "./utils";
+export type { RequestContext } from "./utils";
