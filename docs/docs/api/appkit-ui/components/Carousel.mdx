@@ -1,0 +1,123 @@
+---
+title: Carousel
+---
+
+# Carousel
+
+## Carousel
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/carousel.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/carousel.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `opts` | `Partial<OptionsType>` |  | - | - |
+| `plugins` | `CreatePluginType<LoosePluginType, {}>[]` |  | - | - |
+| `orientation` | `enum` |  | `horizontal` | - |
+| `setApi` | `((api: EmblaCarouselType) => void)` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { Carousel } from '@databricks/appkit-ui';
+
+<Carousel /* props */ />
+```
+
+
+## CarouselContent
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/carousel.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/carousel.tsx)
+
+
+### Props
+
+This component extends standard HTML element attributes.
+
+
+
+### Usage
+
+```tsx
+import { CarouselContent } from '@databricks/appkit-ui';
+
+<CarouselContent /* props */ />
+```
+
+
+## CarouselItem
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/carousel.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/carousel.tsx)
+
+
+### Props
+
+This component extends standard HTML element attributes.
+
+
+
+### Usage
+
+```tsx
+import { CarouselItem } from '@databricks/appkit-ui';
+
+<CarouselItem /* props */ />
+```
+
+
+## CarouselNext
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/carousel.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/carousel.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `variant` | `"link" \| "default" \| "destructive" \| "secondary" \| "outline" \| "ghost" \| null` |  | `outline` | - |
+| `size` | `"default" \| "sm" \| "lg" \| "icon" \| "icon-sm" \| "icon-lg" \| null` |  | `icon` | - |
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { CarouselNext } from '@databricks/appkit-ui';
+
+<CarouselNext /* props */ />
+```
+
+
+## CarouselPrevious
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/carousel.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/carousel.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `variant` | `"link" \| "default" \| "destructive" \| "secondary" \| "outline" \| "ghost" \| null` |  | `outline` | - |
+| `size` | `"default" \| "sm" \| "lg" \| "icon" \| "icon-sm" \| "icon-lg" \| null` |  | `icon` | - |
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { CarouselPrevious } from '@databricks/appkit-ui';
+
+<CarouselPrevious /* props */ />
+```
+

@@ -1,0 +1,76 @@
+---
+title: ButtonGroup
+---
+
+# ButtonGroup
+
+## ButtonGroup
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/button-group.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/button-group.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `orientation` | `"horizontal" \| "vertical" \| null` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ButtonGroup } from '@databricks/appkit-ui';
+
+<ButtonGroup /* props */ />
+```
+
+
+## ButtonGroupSeparator
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/button-group.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/button-group.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `orientation` | `enum` |  | `vertical` | Either `vertical` or `horizontal`. Defaults to `horizontal`. |
+| `decorative` | `boolean` |  | - | Whether or not the component is purely decorative. When true, accessibility-related attributes are updated so that that the rendered element is removed from the accessibility tree. |
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ButtonGroupSeparator } from '@databricks/appkit-ui';
+
+<ButtonGroupSeparator /* props */ />
+```
+
+
+## ButtonGroupText
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/button-group.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/button-group.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | `false` | - |
+
+
+
+### Usage
+
+```tsx
+import { ButtonGroupText } from '@databricks/appkit-ui';
+
+<ButtonGroupText /* props */ />
+```
+

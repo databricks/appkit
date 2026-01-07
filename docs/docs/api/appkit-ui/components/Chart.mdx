@@ -1,0 +1,165 @@
+---
+title: Chart
+---
+
+# Chart
+
+## ChartContainer
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/chart.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/chart.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `config` | `ChartConfig` | ✓ | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ChartContainer } from '@databricks/appkit-ui';
+
+<ChartContainer /* props */ />
+```
+
+
+## ChartLegendContent
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/chart.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/chart.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `verticalAlign` | `enum` |  | - | - |
+| `payload` | `any[]` |  | `[] as any[]` | - |
+| `hideIcon` | `boolean` |  | `false` | - |
+| `nameKey` | `string` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ChartLegendContent } from '@databricks/appkit-ui';
+
+<ChartLegendContent /* props */ />
+```
+
+
+## ChartStyle
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/chart.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/chart.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `id` | `string` | ✓ | - | - |
+| `config` | `ChartConfig` | ✓ | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ChartStyle } from '@databricks/appkit-ui';
+
+<ChartStyle /* props */ />
+```
+
+
+## ChartTooltipContent
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/chart.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/chart.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `active` | `boolean` |  | - | - |
+| `payload` | `any[]` |  | - | - |
+| `label` | `string` |  | `"" as string` | - |
+| `labelFormatter` | `((value: any, payload: any[]) => ReactNode)` |  | - | - |
+| `formatter` | `((value: any, name: any, item: any, index: number, payload: any) => ReactNode)` |  | - | - |
+| `hideLabel` | `boolean` |  | `false` | - |
+| `hideIndicator` | `boolean` |  | `false` | - |
+| `indicator` | `enum` |  | `dot` | - |
+| `labelClassName` | `string` |  | - | - |
+| `nameKey` | `string` |  | - | - |
+| `labelKey` | `string` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ChartTooltipContent } from '@databricks/appkit-ui';
+
+<ChartTooltipContent /* props */ />
+```
+
+
+## Tooltip
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/chart.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/chart.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `separator` | `string` |  | - | - |
+| `wrapperClassName` | `string` |  | - | - |
+| `labelClassName` | `string` |  | - | - |
+| `formatter` | `Formatter<TValue, TName>` |  | - | - |
+| `contentStyle` | `CSSProperties` |  | - | - |
+| `itemStyle` | `CSSProperties` |  | - | - |
+| `labelStyle` | `CSSProperties` |  | - | - |
+| `labelFormatter` | `((label: any, payload: Payload<TValue, TName>[]) => ReactNode)` |  | - | - |
+| `label` | `any` |  | - | - |
+| `payload` | `Payload<TValue, TName>[]` |  | - | - |
+| `itemSorter` | `((item: Payload<TValue, TName>) => string \| number)` |  | - | - |
+| `accessibilityLayer` | `boolean` |  | - | - |
+| `active` | `boolean` |  | - | If true, then Tooltip is always displayed, once an activeIndex is set by mouse over, or programmatically. If false, then Tooltip is never displayed. If active is undefined, Recharts will control when the Tooltip displays. This includes mouse and keyboard controls. |
+| `includeHidden` | `boolean` |  | - | If true, then Tooltip will information about hidden series (defaults to false). Interacting with the hide property of Area, Bar, Line, Scatter. |
+| `allowEscapeViewBox` | `AllowInDimension` |  | - | - |
+| `animationDuration` | `number` |  | - | - |
+| `animationEasing` | `enum` |  | - | - |
+| `content` | `ContentType<TValue, TName>` |  | - | - |
+| `coordinate` | `Partial<Coordinate>` |  | - | - |
+| `cursor` | `boolean \| ReactElement<unknown, string \| JSXElementConstructor<any>> \| SVGProps<SVGElement>` |  | - | - |
+| `filterNull` | `boolean` |  | - | - |
+| `defaultIndex` | `number` |  | - | - |
+| `isAnimationActive` | `boolean` |  | - | - |
+| `offset` | `number` |  | - | - |
+| `payloadUniqBy` | `UniqueOption<Payload<TValue, TName>>` |  | - | - |
+| `position` | `Partial<Coordinate>` |  | - | - |
+| `reverseDirection` | `AllowInDimension` |  | - | - |
+| `shared` | `boolean` |  | - | - |
+| `trigger` | `enum` |  | - | - |
+| `useTranslate3d` | `boolean` |  | - | - |
+| `viewBox` | `CartesianViewBox` |  | - | - |
+| `wrapperStyle` | `CSSProperties` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { Tooltip } from '@databricks/appkit-ui';
+
+<Tooltip /* props */ />
+```
+
