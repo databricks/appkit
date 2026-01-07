@@ -240,6 +240,9 @@ export class AnalyticsPlugin extends Plugin {
   }
 }
 
+/**
+ * @internal
+ */
 export const analytics = toPlugin<
   typeof AnalyticsPlugin,
   IAnalyticsConfig,

@@ -10,6 +10,7 @@ import type {
 
 /**
  * SQL helper namespace
+ * @group Helpers
  */
 export const sql = {
   /**
