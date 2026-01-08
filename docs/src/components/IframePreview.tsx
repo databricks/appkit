@@ -10,8 +10,6 @@ interface IframePreviewProps {
 export function IframePreview({ children }: IframePreviewProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [iframeBody, setIframeBody] = useState<HTMLElement | null>(null);
-  const [iframeHeight, setIframeHeight] = useState<number>(200);
-  const [stylesLoaded, setStylesLoaded] = useState(false);
   const stylesHref = useBaseUrl("/appkit-ui/styles.css");
 
   // Initialize iframe document
@@ -34,17 +32,20 @@ export function IframePreview({ children }: IframePreviewProps) {
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <link rel="stylesheet" href="${stylesHref}">
           <style>
-            body {
+            html, body {
               margin: 0;
+              padding: 0;
+              height: 100%;
+              overflow: auto;
+            }
+            body {
               padding: 16px;
-              overflow: hidden;
-              min-height: 100vh;
             }
             #preview-root {
               display: flex;
               align-items: center;
               justify-content: center;
-              min-height: 100px;
+              min-height: 200px;
             }
           </style>
         </head>
@@ -60,7 +61,6 @@ export function IframePreview({ children }: IframePreviewProps) {
     if (link) {
       link.addEventListener("load", () => {
         console.log("[IframePreview] Stylesheet loaded");
-        setStylesLoaded(true);
         const root = iframeDoc.getElementById("preview-root");
         setIframeBody(root);
       });
@@ -106,70 +106,20 @@ export function IframePreview({ children }: IframePreviewProps) {
     return () => observer.disconnect();
   }, [iframeBody]);
 
-  // Auto-resize iframe based on content
-  useEffect(() => {
-    if (!iframeBody) return;
-
-    const iframe = iframeRef.current;
-    if (!iframe?.contentWindow) return;
-
-    console.log("[IframePreview] Setting up ResizeObserver");
-
-    const updateHeight = () => {
-      const doc = iframe.contentDocument;
-      if (!doc) return;
-
-      // Get full scroll height including portals
-      const height = Math.max(
-        doc.body.scrollHeight,
-        doc.documentElement.scrollHeight,
-        doc.body.offsetHeight,
-        doc.documentElement.offsetHeight
-      );
-
-      // Add padding buffer to prevent scrollbars
-      const newHeight = height + 32;
-      if (Math.abs(newHeight - iframeHeight) > 5) {
-        // Only update if change is significant
-        setIframeHeight(newHeight);
-        console.log("[IframePreview] Height updated:", newHeight);
-      }
-    };
-
-    const resizeObserver = new ResizeObserver(() => {
-      updateHeight();
-    });
-
-    // Observe the preview root
-    resizeObserver.observe(iframeBody);
-
-    // Also observe document.body for portal content
-    if (iframe.contentDocument?.body) {
-      resizeObserver.observe(iframe.contentDocument.body);
-    }
-
-    // Initial height calculation
-    updateHeight();
-
-    // Also listen to window resize in iframe
-    const handleResize = () => updateHeight();
-    iframe.contentWindow.addEventListener("resize", handleResize);
-
-    return () => {
-      resizeObserver.disconnect();
-      iframe.contentWindow?.removeEventListener("resize", handleResize);
-    };
-  }, [iframeBody, iframeHeight]);
+  // No auto-resize needed - iframe has fixed height with internal scrolling
 
   return (
     <iframe
       ref={iframeRef}
       style={{
         width: "100%",
-        height: `${iframeHeight}px`,
+        height: "400px",
+        minHeight: "200px",
+        maxHeight: "600px",
         border: "none",
         display: "block",
         backgroundColor: "transparent",
+        borderRadius: "8px",
       }}
       title="Component Preview"
     >
