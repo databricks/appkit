@@ -121,6 +121,9 @@ export class AppKit<TPlugins extends InputPluginMap> {
   }
 }
 
+/**
+ * Bootstraps AppKit with the provided configuration.
+ */
 export async function createApp<
   T extends PluginData<PluginConstructor, unknown, string>[],
 >(

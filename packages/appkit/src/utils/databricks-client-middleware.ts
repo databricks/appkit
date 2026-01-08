@@ -93,6 +93,10 @@ export async function databricksClientMiddleware(): Promise<express.RequestHandl
   };
 }
 
+/**
+ * Retrieve the request-scoped context populated by `databricksClientMiddleware`.
+ * Throws when invoked outside of a request lifecycle.
+ */
 export function getRequestContext(): RequestContext {
   const store = asyncLocalStorage.getStore();
   if (!store) {
