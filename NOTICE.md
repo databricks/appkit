@@ -49,6 +49,7 @@ This Software contains code from the following open source projects:
 | [@radix-ui/react-tooltip](https://www.npmjs.com/package/@radix-ui/react-tooltip) | 1.2.8 | MIT | https://radix-ui.com/primitives |
 | [@tanstack/react-table](https://www.npmjs.com/package/@tanstack/react-table) | 8.21.3 | MIT | https://tanstack.com/table |
 | [@tanstack/react-virtual](https://www.npmjs.com/package/@tanstack/react-virtual) | 3.13.12 | MIT | https://tanstack.com/virtual |
+| [@types/semver](https://www.npmjs.com/package/@types/semver) | 7.7.1 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/semver |
 | [apache-arrow](https://www.npmjs.com/package/apache-arrow) | 21.1.0 | Apache-2.0 | https://arrow.apache.org/js/ |
 | [class-variance-authority](https://www.npmjs.com/package/class-variance-authority) | 0.7.1 | Apache-2.0 | https://github.com/joe-bell/cva#readme |
 | [clsx](https://www.npmjs.com/package/clsx) | 2.1.1 | MIT | https://github.com/lukeed/clsx#readme |
@@ -66,6 +67,7 @@ This Software contains code from the following open source projects:
 | [react-day-picker](https://www.npmjs.com/package/react-day-picker) | 9.12.0 | MIT | https://daypicker.dev |
 | [react-hook-form](https://www.npmjs.com/package/react-hook-form) | 7.68.0 | MIT | https://react-hook-form.com |
 | [react-resizable-panels](https://www.npmjs.com/package/react-resizable-panels) | 3.0.6 | MIT | https://github.com/bvaughn/react-resizable-panels#readme |
+| [semver](https://www.npmjs.com/package/semver) | 6.3.1, 7.7.3 | ISC | https://github.com/npm/node-semver#readme |
 | [sonner](https://www.npmjs.com/package/sonner) | 2.0.7 | MIT | https://sonner.emilkowal.ski/ |
 | [tailwind-merge](https://www.npmjs.com/package/tailwind-merge) | 3.4.0 | MIT | https://github.com/dcastil/tailwind-merge |
 | [vaul](https://www.npmjs.com/package/vaul) | 1.1.2 | MIT | https://vaul.emilkowal.ski/ |
