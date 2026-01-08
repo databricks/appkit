@@ -1,6 +1,7 @@
 // Types from shared
 export type {
   BasePluginConfig,
+  CacheConfig,
   IAppRouter,
   StreamExecutionSettings,
 } from "shared";
@@ -19,9 +20,11 @@ export { CacheManager } from "./cache";
 export {
   SeverityNumber,
   SpanStatusCode,
+  type TelemetryConfig,
   type Counter,
   type Histogram,
   type Span,
+  type ITelemetry,
 } from "./telemetry";
 
 // Vite plugin

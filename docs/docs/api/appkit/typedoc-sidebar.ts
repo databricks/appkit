@@ -23,8 +23,23 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.CacheConfig",
+          label: "CacheConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ITelemetry",
+          label: "ITelemetry"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.StreamExecutionSettings",
           label: "StreamExecutionSettings"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.TelemetryConfig",
+          label: "TelemetryConfig"
         }
       ]
     },

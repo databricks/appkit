@@ -11,7 +11,10 @@
 | Interface | Description |
 | ------ | ------ |
 | [BasePluginConfig](Interface.BasePluginConfig.md) | - |
+| [CacheConfig](Interface.CacheConfig.md) | Configuration for caching |
+| [ITelemetry](Interface.ITelemetry.md) | Plugin-facing interface for OpenTelemetry instrumentation. Provides a thin abstraction over OpenTelemetry APIs for plugins. |
 | [StreamExecutionSettings](Interface.StreamExecutionSettings.md) | - |
+| [TelemetryConfig](Interface.TelemetryConfig.md) | - |
 
 ## Type Aliases
 
