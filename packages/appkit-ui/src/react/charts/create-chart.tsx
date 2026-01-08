@@ -27,6 +27,7 @@ export function createChart<TProps extends UnifiedChartProps>(
       parameters,
       format,
       transformer,
+      asUser,
       // Data props
       data,
       // Common props
@@ -41,6 +42,7 @@ export function createChart<TProps extends UnifiedChartProps>(
       parameters?: Record<string, unknown>;
       format?: string;
       transformer?: unknown;
+      asUser?: boolean;
       data?: unknown;
       height?: number;
       className?: string;
@@ -56,6 +58,7 @@ export function createChart<TProps extends UnifiedChartProps>(
             parameters,
             format,
             transformer,
+            asUser,
             height,
             className,
             ariaLabel,

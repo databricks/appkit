@@ -8,6 +8,7 @@ import type {
   PluginMap,
 } from "shared";
 import { CacheManager } from "../cache";
+import { ServiceContext } from "../context";
 import type { TelemetryConfig } from "../telemetry";
 import { TelemetryManager } from "../telemetry";
 
@@ -91,8 +92,13 @@ export class AppKit<TPlugins extends InputPluginMap> {
       cache?: CacheConfig;
     } = {},
   ): Promise<PluginMap<T>> {
+    // Initialize core services
     TelemetryManager.initialize(config?.telemetry);
     await CacheManager.getInstance(config?.cache);
+
+    // Initialize ServiceContext for Databricks client management
+    // This provides the service principal client and shared resources
+    await ServiceContext.initialize();
 
     const rawPlugins = config.plugins as T;
     const preparedPlugins = AppKit.preparePlugins(rawPlugins);

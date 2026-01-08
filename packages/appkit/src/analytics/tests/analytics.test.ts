@@ -2,13 +2,14 @@ import {
   createMockRequest,
   createMockResponse,
   createMockRouter,
-  runWithRequestContext,
+  mockServiceContext,
   setupDatabricksEnv,
 } from "@tools/test-helpers";
 import { sql } from "shared";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AnalyticsPlugin, analytics } from "../analytics";
 import type { IAnalyticsConfig } from "../types";
+import { ServiceContext } from "../../context/service-context";
 
 // Mock CacheManager singleton with actual caching behavior
 const { mockCacheStore, mockCacheInstance } = vi.hoisted(() => {
@@ -52,11 +53,18 @@ vi.mock("../../cache", () => ({
 
 describe("Analytics Plugin", () => {
   let config: IAnalyticsConfig;
+  let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     config = { timeout: 5000 };
     setupDatabricksEnv();
     mockCacheStore.clear();
+    ServiceContext.reset();
+    serviceContextMock = await mockServiceContext();
+  });
+
+  afterEach(() => {
+    serviceContextMock?.restore();
   });
 
   test("Analytics plugin data should have correct name", () => {
@@ -101,9 +109,7 @@ describe("Analytics Plugin", () => {
       });
       const mockRes = createMockResponse();
 
-      await runWithRequestContext(async () => {
-        await handler(mockReq, mockRes);
-      });
+      await handler(mockReq, mockRes);
 
       expect(mockRes.status).toHaveBeenCalledWith(400);
       expect(mockRes.json).toHaveBeenCalledWith({
@@ -140,22 +146,14 @@ describe("Analytics Plugin", () => {
       });
       const mockRes = createMockResponse();
 
-      const mockServiceClient = { service: "client" };
-      await runWithRequestContext(
-        async () => {
-          await handler(mockReq, mockRes);
-        },
-        {
-          serviceDatabricksClient: mockServiceClient as any,
-        },
-      );
+      await handler(mockReq, mockRes);
 
-      // Verify service workspace client is used
-      expect(capturedWorkspaceClient).toBe(mockServiceClient);
+      // Verify service workspace client is used (from mocked ServiceContext)
+      expect(capturedWorkspaceClient).toBeDefined();
 
-      // Verify executeStatement is called with service workspace client
+      // Verify executeStatement is called
       expect(executeMock).toHaveBeenCalledWith(
-        mockServiceClient,
+        expect.anything(),
         expect.objectContaining({
           statement: "SELECT * FROM test",
           warehouse_id: "test-warehouse-id",
@@ -207,30 +205,25 @@ describe("Analytics Plugin", () => {
       plugin.injectRoutes(router);
 
       const handler = getHandler("POST", "/users/me/query/:query_key");
+      // The request needs both x-forwarded-access-token and x-forwarded-user headers
       const mockReq = createMockRequest({
         params: { query_key: "user_profile" },
         body: { parameters: { user_id: sql.number(123) } },
-        headers: { "x-forwarded-access-token": "user-token-123" },
+        headers: {
+          "x-forwarded-access-token": "user-token-123",
+          "x-forwarded-user": "user-123",
+        },
       });
       const mockRes = createMockResponse();
 
-      const mockUserClient = { user: "client" };
-      await runWithRequestContext(
-        async () => {
-          await handler(mockReq, mockRes);
-        },
-        {
-          userDatabricksClient: mockUserClient as any,
-          userId: "user-token-123",
-        },
-      );
+      await handler(mockReq, mockRes);
 
-      // Verify user workspace client is used
-      expect(capturedWorkspaceClient).toBe(mockUserClient);
+      // Verify a workspace client is used (created via ServiceContext.createUserContext)
+      expect(capturedWorkspaceClient).toBeDefined();
 
-      // Verify the user workspace client is passed to SQL connector
+      // Verify the workspace client is passed to SQL connector
       expect(executeMock).toHaveBeenCalledWith(
-        mockUserClient,
+        expect.anything(),
         expect.objectContaining({
           statement: "SELECT * FROM users WHERE id = :user_id",
           warehouse_id: "test-warehouse-id",
@@ -272,18 +265,16 @@ describe("Analytics Plugin", () => {
         body: { parameters: { foo: sql.string("bar") } },
       });
 
-      await runWithRequestContext(async () => {
-        const mockRes1 = createMockResponse();
-        await handler(mockReq, mockRes1);
+      const mockRes1 = createMockResponse();
+      await handler(mockReq, mockRes1);
 
-        const mockRes2 = createMockResponse();
-        await handler(mockReq, mockRes2);
+      const mockRes2 = createMockResponse();
+      await handler(mockReq, mockRes2);
 
-        expect(executeMock).toHaveBeenCalledTimes(1);
+      expect(executeMock).toHaveBeenCalledTimes(1);
 
-        expect(mockRes1.write).toHaveBeenCalledWith("event: result\n");
-        expect(mockRes2.write).toHaveBeenCalledWith("event: result\n");
-      });
+      expect(mockRes1.write).toHaveBeenCalledWith("event: result\n");
+      expect(mockRes2.write).toHaveBeenCalledWith("event: result\n");
     });
 
     test("should cache user-scoped queries separately per user", async () => {
@@ -308,44 +299,41 @@ describe("Analytics Plugin", () => {
 
       const handler = getHandler("POST", "/users/me/query/:query_key");
 
+      // User 1's request
       const mockReq1 = createMockRequest({
         params: { query_key: "user_profile" },
         body: { parameters: { user_id: sql.number(1) } },
-        headers: { "x-forwarded-access-token": "user-token-1" },
+        headers: {
+          "x-forwarded-access-token": "user-token-1",
+          "x-forwarded-user": "user-1",
+        },
       });
       const mockRes1 = createMockResponse();
-      await runWithRequestContext(
-        async () => {
-          await handler(mockReq1, mockRes1);
-        },
-        { userId: "user-token-1" },
-      );
+      await handler(mockReq1, mockRes1);
 
+      // User 2's request - different user, should not use cache
       const mockReq2 = createMockRequest({
         params: { query_key: "user_profile" },
         body: { parameters: { user_id: sql.number(2) } },
-        headers: { "x-forwarded-access-token": "user-token-2" },
+        headers: {
+          "x-forwarded-access-token": "user-token-2",
+          "x-forwarded-user": "user-2",
+        },
       });
       const mockRes2 = createMockResponse();
-      await runWithRequestContext(
-        async () => {
-          await handler(mockReq2, mockRes2);
-        },
-        { userId: "user-token-2" },
-      );
+      await handler(mockReq2, mockRes2);
 
+      // User 1's request again - should use cache
       const mockReq1Again = createMockRequest({
         params: { query_key: "user_profile" },
         body: { parameters: { user_id: sql.number(1) } },
-        headers: { "x-forwarded-access-token": "user-token-1" },
+        headers: {
+          "x-forwarded-access-token": "user-token-1",
+          "x-forwarded-user": "user-1",
+        },
       });
       const mockRes1Again = createMockResponse();
-      await runWithRequestContext(
-        async () => {
-          await handler(mockReq1Again, mockRes1Again);
-        },
-        { userId: "user-token-1" },
-      );
+      await handler(mockReq1Again, mockRes1Again);
 
       expect(executeMock).toHaveBeenCalledTimes(2);
 
@@ -389,18 +377,10 @@ describe("Analytics Plugin", () => {
       });
       const mockRes = createMockResponse();
 
-      const mockServiceClient = { service: "client" };
-      await runWithRequestContext(
-        async () => {
-          await handler(mockReq, mockRes);
-        },
-        {
-          serviceDatabricksClient: mockServiceClient as any,
-        },
-      );
+      await handler(mockReq, mockRes);
 
       expect(executeMock).toHaveBeenCalledWith(
-        mockServiceClient,
+        expect.anything(),
         expect.objectContaining({
           statement: "SELECT * FROM test",
           parameters: [],

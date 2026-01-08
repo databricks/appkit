@@ -6,9 +6,13 @@ import type {
   StreamExecutionSettings,
 } from "shared";
 import { SQLWarehouseConnector } from "../connectors";
+import {
+  getCurrentUserId,
+  getWarehouseId,
+  getWorkspaceClient,
+} from "../context";
+import type express from "express";
 import { Plugin, toPlugin } from "../plugin";
-import type { Request, Response } from "../utils";
-import { getRequestContext, getWorkspaceClient } from "../utils";
 import { queryDefaults } from "./defaults";
 import { QueryProcessor } from "./query";
 import type {
@@ -20,7 +24,6 @@ import type {
 export class AnalyticsPlugin extends Plugin {
   name = "analytics";
   envVars = [];
-  requiresDatabricksClient = true;
 
   protected static description = "Analytics plugin for data analysis";
   protected declare config: IAnalyticsConfig;
@@ -41,30 +44,13 @@ export class AnalyticsPlugin extends Plugin {
   }
 
   injectRoutes(router: IAppRouter) {
+    // Service principal endpoints
     this.route(router, {
       name: "arrow",
       method: "get",
       path: "/arrow-result/:jobId",
-      handler: async (req: Request, res: Response) => {
+      handler: async (req: express.Request, res: express.Response) => {
         await this._handleArrowRoute(req, res);
-      },
-    });
-
-    this.route(router, {
-      name: "arrowAsUser",
-      method: "get",
-      path: "/users/me/arrow-result/:jobId",
-      handler: async (req: Request, res: Response) => {
-        await this._handleArrowRoute(req, res, { asUser: true });
-      },
-    });
-
-    this.route<AnalyticsQueryResponse>(router, {
-      name: "queryAsUser",
-      method: "post",
-      path: "/users/me/query/:query_key",
-      handler: async (req: Request, res: Response) => {
-        await this._handleQueryRoute(req, res, { asUser: true });
       },
     });
 
@@ -72,21 +58,42 @@ export class AnalyticsPlugin extends Plugin {
       name: "query",
       method: "post",
       path: "/query/:query_key",
-      handler: async (req: Request, res: Response) => {
-        await this._handleQueryRoute(req, res, { asUser: false });
+      handler: async (req: express.Request, res: express.Response) => {
+        await this._handleQueryRoute(req, res);
+      },
+    });
+
+    // User context endpoints - use asUser(req) to execute with user's identity
+    this.route(router, {
+      name: "arrowAsUser",
+      method: "get",
+      path: "/users/me/arrow-result/:jobId",
+      handler: async (req: express.Request, res: express.Response) => {
+        await this.asUser(req)._handleArrowRoute(req, res);
+      },
+    });
+
+    this.route<AnalyticsQueryResponse>(router, {
+      name: "queryAsUser",
+      method: "post",
+      path: "/users/me/query/:query_key",
+      handler: async (req: express.Request, res: express.Response) => {
+        await this.asUser(req)._handleQueryRoute(req, res);
       },
     });
   }
 
-  private async _handleArrowRoute(
-    req: Request,
-    res: Response,
-    { asUser = false }: { asUser?: boolean } = {},
+  /**
+   * Handle Arrow data download requests.
+   * When called via asUser(req), uses the user's Databricks credentials.
+   */
+  async _handleArrowRoute(
+    req: express.Request,
+    res: express.Response,
   ): Promise<void> {
     try {
       const { jobId } = req.params;
-
-      const workspaceClient = getWorkspaceClient(asUser);
+      const workspaceClient = getWorkspaceClient();
 
       console.log(
         `Processing Arrow job request: ${jobId} for plugin: ${this.name}`,
@@ -111,10 +118,13 @@ export class AnalyticsPlugin extends Plugin {
     }
   }
 
-  private async _handleQueryRoute(
-    req: Request,
-    res: Response,
-    { asUser = false }: { asUser?: boolean } = {},
+  /**
+   * Handle SQL query execution requests.
+   * When called via asUser(req), uses the user's Databricks credentials.
+   */
+  async _handleQueryRoute(
+    req: express.Request,
+    res: express.Response,
   ): Promise<void> {
     const { query_key } = req.params;
     const { parameters, format = "JSON" } = req.body as IAnalyticsQueryRequest;
@@ -131,10 +141,8 @@ export class AnalyticsPlugin extends Plugin {
             type: "result",
           };
 
-    const requestContext = getRequestContext();
-    const userKey = asUser
-      ? requestContext.userId
-      : requestContext.serviceUserId;
+    // Get user key from current context (automatically includes user ID when in user context)
+    const userKey = getCurrentUserId();
 
     if (!query_key) {
       res.status(400).json({ error: "query_key is required" });
@@ -186,9 +194,6 @@ export class AnalyticsPlugin extends Plugin {
           processedParams,
           queryParameters.formatParameters,
           signal,
-          {
-            asUser,
-          },
         );
 
         return { type: queryParameters.type, ...result };
@@ -198,15 +203,29 @@ export class AnalyticsPlugin extends Plugin {
     );
   }
 
+  /**
+   * Execute a SQL query using the current execution context.
+   *
+   * When called directly: uses service principal credentials.
+   * When called via asUser(req).query(...): uses user's credentials.
+   *
+   * @example
+   * ```typescript
+   * // Service principal execution
+   * const result = await analytics.query("SELECT * FROM table")
+   *
+   * // User context execution (in route handler)
+   * const result = await this.asUser(req).query("SELECT * FROM table")
+   * ```
+   */
   async query(
     query: string,
     parameters?: Record<string, SQLTypeMarker | null | undefined>,
     formatParameters?: Record<string, any>,
     signal?: AbortSignal,
-    { asUser = false }: { asUser?: boolean } = {},
   ): Promise<any> {
-    const requestContext = getRequestContext();
-    const workspaceClient = getWorkspaceClient(asUser);
+    const workspaceClient = getWorkspaceClient();
+    const warehouseId = await getWarehouseId();
 
     const { statement, parameters: sqlParameters } =
       this.queryProcessor.convertToSQLParameters(query, parameters);
@@ -215,7 +234,7 @@ export class AnalyticsPlugin extends Plugin {
       workspaceClient,
       {
         statement,
-        warehouse_id: await requestContext.warehouseId,
+        warehouse_id: warehouseId,
         parameters: sqlParameters,
         ...formatParameters,
       },
@@ -225,8 +244,9 @@ export class AnalyticsPlugin extends Plugin {
     return response.result;
   }
 
-  // If we need arrow stream in more plugins we can define this as a base method in the core plugin class
-  // and have a generic endpoint for each plugin that consumes this arrow data.
+  /**
+   * Get Arrow-formatted data for a completed query job.
+   */
   protected async getArrowData(
     workspaceClient: WorkspaceClient,
     jobId: string,

@@ -1,10 +1,23 @@
-import { runWithRequestContext } from "@tools/test-helpers";
+import { mockServiceContext } from "@tools/test-helpers";
 import { sql } from "shared";
-import { describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { QueryProcessor } from "../query";
+import { ServiceContext } from "../../context/service-context";
 
 describe("QueryProcessor", () => {
   const processor = new QueryProcessor();
+  let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
+
+  beforeEach(async () => {
+    ServiceContext.reset();
+    serviceContextMock = await mockServiceContext({
+      workspaceId: "1234567890",
+    });
+  });
+
+  afterEach(() => {
+    serviceContextMock?.restore();
+  });
 
   describe("convertToSQLParameters - Parameter Injection Protection", () => {
     test("should accept valid parameters that exist in query", () => {
@@ -143,14 +156,8 @@ describe("QueryProcessor", () => {
       const query = "SELECT * FROM data WHERE workspace_id = :workspaceId";
       const parameters = {};
 
-      const result = await runWithRequestContext(
-        async () => {
-          return await processor.processQueryParams(query, parameters);
-        },
-        {
-          workspaceId: Promise.resolve("1234567890"),
-        },
-      );
+      // ServiceContext is already mocked with workspaceId: "1234567890" in beforeEach
+      const result = await processor.processQueryParams(query, parameters);
 
       expect(result.workspaceId).toEqual({
         __sql_type: "STRING",
@@ -162,14 +169,7 @@ describe("QueryProcessor", () => {
       const query = "SELECT * FROM data WHERE workspace_id = :workspaceId";
       const parameters = { workspaceId: sql.number("9876543210") };
 
-      const result = await runWithRequestContext(
-        async () => {
-          return await processor.processQueryParams(query, parameters);
-        },
-        {
-          workspaceId: Promise.resolve("1234567890"),
-        },
-      );
+      const result = await processor.processQueryParams(query, parameters);
 
       expect(result.workspaceId).toEqual({
         __sql_type: "NUMERIC",

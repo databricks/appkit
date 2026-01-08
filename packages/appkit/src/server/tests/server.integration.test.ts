@@ -1,32 +1,28 @@
-import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import type { Server } from "node:http";
+import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 
 // Set required env vars BEFORE imports that use them
 process.env.DATABRICKS_APP_PORT = "8000";
 process.env.FLASK_RUN_HOST = "0.0.0.0";
 
-// Mock databricks middleware to avoid auth requirements
-vi.mock("../../utils", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../../utils")>();
-  return {
-    ...original,
-    databricksClientMiddleware: vi
-      .fn()
-      .mockResolvedValue((_req: any, _res: any, next: any) => next()),
-  };
-});
-
 import { createApp } from "../../core";
 import { server as serverPlugin } from "../index";
 import { Plugin, toPlugin } from "../../plugin";
+import { ServiceContext } from "../../context/service-context";
 
 // Integration tests - actually start server and make HTTP requests
 describe("ServerPlugin Integration", () => {
   let server: Server;
   let baseUrl: string;
+  let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
   const TEST_PORT = 9876; // Use non-standard port to avoid conflicts
 
   beforeAll(async () => {
+    setupDatabricksEnv();
+    ServiceContext.reset();
+    serviceContextMock = await mockServiceContext();
+
     const app = await createApp({
       plugins: [
         serverPlugin({
@@ -47,6 +43,7 @@ describe("ServerPlugin Integration", () => {
   });
 
   afterAll(async () => {
+    serviceContextMock?.restore();
     if (server) {
       await new Promise<void>((resolve, reject) => {
         server.close((err) => {
@@ -91,9 +88,14 @@ describe("ServerPlugin Integration", () => {
 describe("ServerPlugin with custom plugin", () => {
   let server: Server;
   let baseUrl: string;
+  let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
   const TEST_PORT = 9877;
 
   beforeAll(async () => {
+    setupDatabricksEnv();
+    ServiceContext.reset();
+    serviceContextMock = await mockServiceContext();
+
     // Create a simple test plugin
     class TestPlugin extends Plugin {
       name = "test-plugin" as const;
@@ -134,6 +136,7 @@ describe("ServerPlugin with custom plugin", () => {
   });
 
   afterAll(async () => {
+    serviceContextMock?.restore();
     if (server) {
       await new Promise<void>((resolve, reject) => {
         server.close((err) => {
@@ -170,9 +173,14 @@ describe("ServerPlugin with custom plugin", () => {
 describe("ServerPlugin with extend()", () => {
   let server: Server;
   let baseUrl: string;
+  let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
   const TEST_PORT = 9878;
 
   beforeAll(async () => {
+    setupDatabricksEnv();
+    ServiceContext.reset();
+    serviceContextMock = await mockServiceContext();
+
     const app = await createApp({
       plugins: [
         serverPlugin({
@@ -198,6 +206,7 @@ describe("ServerPlugin with extend()", () => {
   });
 
   afterAll(async () => {
+    serviceContextMock?.restore();
     if (server) {
       await new Promise<void>((resolve, reject) => {
         server.close((err) => {

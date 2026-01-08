@@ -51,16 +51,6 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.IAppRouter",
           label: "IAppRouter"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/TypeAlias.RequestContext",
-          label: "RequestContext"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/TypeAlias.SQLTypeMarker",
-          label: "SQLTypeMarker"
         }
       ]
     },
@@ -88,11 +78,6 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.createApp",
           label: "createApp"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Function.getRequestContext",
-          label: "getRequestContext"
         },
         {
           type: "doc",

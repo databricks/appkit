@@ -54,9 +54,6 @@ function ArrowAnalyticsRoute() {
 
       <main className="max-w-7xl mx-auto px-6 py-12">
         <div className="flex flex-col gap-6">
-          {/* ============================================================ */}
-          {/* UNIFIED CHARTS - FORMAT COMPARISON */}
-          {/* ============================================================ */}
           <div>
             <h2 className="text-2xl font-bold mb-4">Unified Charts API</h2>
             <p className="text-muted-foreground mb-6">

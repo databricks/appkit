@@ -1,27 +1,31 @@
+// Types from shared
 export type {
   BasePluginConfig,
   CacheConfig,
   IAppRouter,
-  SQLTypeMarker,
   StreamExecutionSettings,
 } from "shared";
-export {
-  isSQLTypeMarker,
-  sql,
-} from "shared";
-export { analytics } from "./analytics";
-export { CacheManager } from "./cache";
+export { isSQLTypeMarker, sql } from "shared";
+
+// Core
 export { createApp } from "./core";
-export { Plugin, toPlugin } from "./plugin";
+export { analytics } from "./analytics";
 export { server } from "./server";
-export type { ITelemetry } from "./telemetry";
+
+// Plugin authoring
+export { Plugin, toPlugin } from "./plugin";
+export { CacheManager } from "./cache";
+
+// Telemetry (for advanced custom telemetry)
 export {
+  SeverityNumber,
+  SpanStatusCode,
+  type TelemetryConfig,
   type Counter,
   type Histogram,
-  SeverityNumber,
   type Span,
-  SpanStatusCode,
-  TelemetryConfig,
+  type ITelemetry,
 } from "./telemetry";
+
+// Vite plugin
 export { appKitTypesPlugin } from "./type-generator/vite-plugin";
-export { getRequestContext, RequestContext } from "./utils";
