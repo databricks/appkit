@@ -119,3 +119,29 @@
   color: var(--ifm-color-content);
   content: "O";
 }
+
+.doc-example {
+  border: 1px solid var(--ifm-color-border, #dfe3e8);
+  border-radius: var(--ifm-border-radius);
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+  background: var(--ifm-card-background);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.doc-example-preview {
+  border: 1px solid var(--ifm-color-border, #dfe3e8);
+  border-radius: var(--ifm-border-radius);
+  padding: 1rem;
+  background: var(--ifm-background-color);
+}
+
+.doc-example-source pre {
+  margin: 0;
+  padding: 1rem;
+  border-radius: var(--ifm-border-radius);
+  background: var(--ifm-code-background);
+  overflow-x: auto;
+}

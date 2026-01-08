@@ -15,7 +15,7 @@ function Checkbox({
       data-slot="checkbox"
       className={cn(
         // Fixed size and square shape - IMPORTANT: overrides global CSS
-        "h-4 w-4 p-0 m-0 shrink-0 flex-shrink-0",
+        "h-4 w-4 p-0 shrink-0 flex-shrink-0",
         // Base appearance
         "peer border-input dark:bg-input/30 rounded-[4px] border shadow-xs",
         // Checked states
