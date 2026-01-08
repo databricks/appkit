@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "build-appkit-ui-styles": "tsx scripts/build-appkit-ui-styles.ts",
     "docusaurus": "docusaurus",
     "dev": "pnpm run generate-component-docs && docusaurus start --no-open",
-    "build": "pnpm run generate-component-docs && docusaurus build",
+    "build": "pnpm run build-appkit-ui-styles && pnpm run generate-component-docs && docusaurus build",
     "generate-component-docs": "tsx ../tools/generate-component-mdx.ts",
     "swizzle": "docusaurus swizzle",
     "deploy": "docusaurus deploy",
@@ -17,11 +18,14 @@
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@databricks/appkit-ui": "workspace:*",
     "@docusaurus/core": "3.9.2",
     "@docusaurus/preset-classic": "3.9.2",
     "@mdx-js/react": "^3.0.0",
+    "@tailwindcss/postcss": "^4.1.18",
     "clsx": "^2.0.0",
     "docusaurus-lunr-search": "^3.6.0",
+    "postcss": "^8.5.6",
     "prism-react-renderer": "^2.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
@@ -32,6 +36,8 @@
     "@docusaurus/types": "3.9.2",
     "docusaurus-plugin-typedoc": "^1.4.2",
     "react-docgen-typescript": "^2.4.0",
+    "tailwindcss": "^4.0.14",
+    "tailwindcss-animate": "^1.0.7",
     "typedoc": "^0.28.15",
     "typedoc-plugin-markdown": "^4.9.0",
     "typescript": "~5.6.2"
