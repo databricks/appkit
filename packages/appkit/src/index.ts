@@ -5,10 +5,7 @@ export type {
   SQLTypeMarker,
   StreamExecutionSettings,
 } from "shared";
-export {
-  isSQLTypeMarker,
-  sql,
-} from "shared";
+export { isSQLTypeMarker, sql } from "shared";
 export { analytics } from "./analytics";
 export { CacheManager } from "./cache";
 export {
@@ -34,6 +31,6 @@ export {
   SeverityNumber,
   type Span,
   SpanStatusCode,
-  TelemetryConfig,
+  type TelemetryConfig,
 } from "./telemetry";
 export { appKitTypesPlugin } from "./type-generator/vite-plugin";
