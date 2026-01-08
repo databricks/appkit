@@ -1,6 +1,28 @@
 import { themes as prismThemes } from "prism-react-renderer";
+import path from "node:path";
 import type { Config } from "@docusaurus/types";
 import type * as Preset from "@docusaurus/preset-classic";
+
+function appKitAliasPlugin() {
+  return {
+    name: "appkit-aliases",
+    configureWebpack() {
+      return {
+        resolve: {
+          alias: {
+            "@": path.resolve(__dirname, "../packages/appkit-ui/src"),
+            shared: path.resolve(__dirname, "../shared/src"),
+            "@/lib/utils": path.resolve(
+              __dirname,
+              "../packages/appkit-ui/src/lib/utils",
+            ),
+            "@/js": path.resolve(__dirname, "../packages/appkit-ui/src/js"),
+          },
+        },
+      };
+    },
+  };
+}
 
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
@@ -93,6 +115,7 @@ const config: Config = {
         },
       },
     ],
+    appKitAliasPlugin,
   ],
 
   themeConfig: {
