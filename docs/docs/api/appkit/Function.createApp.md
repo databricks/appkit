@@ -22,10 +22,10 @@ Bootstraps AppKit with the provided configuration.
 
 | Parameter | Type |
 | ------ | ------ |
-| `config` | \{ `cache?`: [`CacheConfig`](Interface.CacheConfig.md); `plugins?`: `T`; `telemetry?`: [`TelemetryConfig`](Interface.TelemetryConfig.md); \} |
-| `config.cache?` | [`CacheConfig`](Interface.CacheConfig.md) |
+| `config` | \{ `cache?`: `CacheConfig`; `plugins?`: `T`; `telemetry?`: `TelemetryConfig`; \} |
+| `config.cache?` | `CacheConfig` |
 | `config.plugins?` | `T` |
-| `config.telemetry?` | [`TelemetryConfig`](Interface.TelemetryConfig.md) |
+| `config.telemetry?` | `TelemetryConfig` |
 
 ## Returns
 
