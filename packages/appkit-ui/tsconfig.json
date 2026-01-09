@@ -7,6 +7,7 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
+      "@databricks/appkit-ui/*": ["./src/*"],
       "shared": ["../shared/src"]
     }
   },
