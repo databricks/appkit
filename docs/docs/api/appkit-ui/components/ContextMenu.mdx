@@ -1,0 +1,404 @@
+---
+title: ContextMenu
+---
+
+# ContextMenu
+
+## ContextMenu
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/context-menu.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/context-menu.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `onOpenChange` | `((open: boolean) => void)` |  | - | - |
+| `dir` | `enum` |  | - | - |
+| `modal` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ContextMenu } from '@databricks/appkit-ui';
+
+<ContextMenu /* props */ />
+```
+
+
+## ContextMenuCheckboxItem
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/context-menu.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/context-menu.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `onSelect` | `((event: Event) => void)` |  | - | - |
+| `asChild` | `boolean` |  | - | - |
+| `disabled` | `boolean` |  | - | - |
+| `checked` | `CheckedState` |  | - | - |
+| `onCheckedChange` | `((checked: boolean) => void)` |  | - | - |
+| `textValue` | `string` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ContextMenuCheckboxItem } from '@databricks/appkit-ui';
+
+<ContextMenuCheckboxItem /* props */ />
+```
+
+
+## ContextMenuContent
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/context-menu.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/context-menu.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+| `forceMount` | `true` |  | - | Used to force mounting when more control is needed. Useful when controlling animation with React animation libraries. |
+| `onEscapeKeyDown` | `((event: KeyboardEvent) => void)` |  | - | - |
+| `onPointerDownOutside` | `((event: PointerDownOutsideEvent) => void)` |  | - | - |
+| `onFocusOutside` | `((event: FocusOutsideEvent) => void)` |  | - | - |
+| `onInteractOutside` | `((event: FocusOutsideEvent \| PointerDownOutsideEvent) => void)` |  | - | - |
+| `onCloseAutoFocus` | `((event: Event) => void)` |  | - | Event handler called when auto-focusing on close. Can be prevented. |
+| `loop` | `boolean` |  | - | Whether keyboard navigation should loop around @defaultValue false |
+| `alignOffset` | `number` |  | - | - |
+| `arrowPadding` | `number` |  | - | - |
+| `avoidCollisions` | `boolean` |  | - | - |
+| `collisionBoundary` | `Boundary \| Boundary[]` |  | - | - |
+| `collisionPadding` | `number \| Partial<Record<"left" \| "right" \| "top" \| "bottom", number>>` |  | - | - |
+| `sticky` | `enum` |  | - | - |
+| `hideWhenDetached` | `boolean` |  | - | - |
+| `updatePositionStrategy` | `enum` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ContextMenuContent } from '@databricks/appkit-ui';
+
+<ContextMenuContent /* props */ />
+```
+
+
+## ContextMenuGroup
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/context-menu.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/context-menu.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ContextMenuGroup } from '@databricks/appkit-ui';
+
+<ContextMenuGroup /* props */ />
+```
+
+
+## ContextMenuItem
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/context-menu.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/context-menu.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `onSelect` | `((event: Event) => void)` |  | - | - |
+| `asChild` | `boolean` |  | - | - |
+| `disabled` | `boolean` |  | - | - |
+| `textValue` | `string` |  | - | - |
+| `inset` | `boolean` |  | - | - |
+| `variant` | `enum` |  | `default` | - |
+
+
+
+### Usage
+
+```tsx
+import { ContextMenuItem } from '@databricks/appkit-ui';
+
+<ContextMenuItem /* props */ />
+```
+
+
+## ContextMenuLabel
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/context-menu.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/context-menu.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+| `inset` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ContextMenuLabel } from '@databricks/appkit-ui';
+
+<ContextMenuLabel /* props */ />
+```
+
+
+## ContextMenuPortal
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/context-menu.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/context-menu.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `container` | `Element \| DocumentFragment \| null` |  | - | Specify a container element to portal the content into. |
+| `forceMount` | `true` |  | - | Used to force mounting when more control is needed. Useful when controlling animation with React animation libraries. |
+
+
+
+### Usage
+
+```tsx
+import { ContextMenuPortal } from '@databricks/appkit-ui';
+
+<ContextMenuPortal /* props */ />
+```
+
+
+## ContextMenuRadioGroup
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/context-menu.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/context-menu.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+| `value` | `string` | ✓ | - | - |
+| `onValueChange` | `((value: string) => void)` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ContextMenuRadioGroup } from '@databricks/appkit-ui';
+
+<ContextMenuRadioGroup /* props */ />
+```
+
+
+## ContextMenuRadioItem
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/context-menu.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/context-menu.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `onSelect` | `((event: Event) => void)` |  | - | - |
+| `asChild` | `boolean` |  | - | - |
+| `disabled` | `boolean` |  | - | - |
+| `value` | `string` | ✓ | - | - |
+| `textValue` | `string` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ContextMenuRadioItem } from '@databricks/appkit-ui';
+
+<ContextMenuRadioItem /* props */ />
+```
+
+
+## ContextMenuSeparator
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/context-menu.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/context-menu.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ContextMenuSeparator } from '@databricks/appkit-ui';
+
+<ContextMenuSeparator /* props */ />
+```
+
+
+## ContextMenuShortcut
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/context-menu.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/context-menu.tsx)
+
+
+### Props
+
+This component extends standard HTML element attributes.
+
+
+
+### Usage
+
+```tsx
+import { ContextMenuShortcut } from '@databricks/appkit-ui';
+
+<ContextMenuShortcut /* props */ />
+```
+
+
+## ContextMenuSub
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/context-menu.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/context-menu.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `open` | `boolean` |  | - | - |
+| `defaultOpen` | `boolean` |  | - | - |
+| `onOpenChange` | `((open: boolean) => void)` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ContextMenuSub } from '@databricks/appkit-ui';
+
+<ContextMenuSub /* props */ />
+```
+
+
+## ContextMenuSubContent
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/context-menu.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/context-menu.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+| `forceMount` | `true` |  | - | Used to force mounting when more control is needed. Useful when controlling animation with React animation libraries. |
+| `onEscapeKeyDown` | `((event: KeyboardEvent) => void)` |  | - | - |
+| `onPointerDownOutside` | `((event: PointerDownOutsideEvent) => void)` |  | - | - |
+| `onFocusOutside` | `((event: FocusOutsideEvent) => void)` |  | - | - |
+| `onInteractOutside` | `((event: FocusOutsideEvent \| PointerDownOutsideEvent) => void)` |  | - | - |
+| `loop` | `boolean` |  | - | Whether keyboard navigation should loop around @defaultValue false |
+| `sideOffset` | `number` |  | - | - |
+| `alignOffset` | `number` |  | - | - |
+| `arrowPadding` | `number` |  | - | - |
+| `avoidCollisions` | `boolean` |  | - | - |
+| `collisionBoundary` | `Boundary \| Boundary[]` |  | - | - |
+| `collisionPadding` | `number \| Partial<Record<"left" \| "right" \| "top" \| "bottom", number>>` |  | - | - |
+| `sticky` | `enum` |  | - | - |
+| `hideWhenDetached` | `boolean` |  | - | - |
+| `updatePositionStrategy` | `enum` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ContextMenuSubContent } from '@databricks/appkit-ui';
+
+<ContextMenuSubContent /* props */ />
+```
+
+
+## ContextMenuSubTrigger
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/context-menu.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/context-menu.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+| `disabled` | `boolean` |  | - | - |
+| `textValue` | `string` |  | - | - |
+| `inset` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ContextMenuSubTrigger } from '@databricks/appkit-ui';
+
+<ContextMenuSubTrigger /* props */ />
+```
+
+
+## ContextMenuTrigger
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/context-menu.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/context-menu.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `disabled` | `boolean` |  | - | - |
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ContextMenuTrigger } from '@databricks/appkit-ui';
+
+<ContextMenuTrigger /* props */ />
+```
+

@@ -1,0 +1,266 @@
+---
+title: Select
+---
+
+# Select
+
+## Select
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/select.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/select.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `open` | `boolean` |  | - | - |
+| `defaultOpen` | `boolean` |  | - | - |
+| `onOpenChange` | `((open: boolean) => void)` |  | - | - |
+| `dir` | `enum` |  | - | - |
+| `name` | `string` |  | - | - |
+| `autoComplete` | `string` |  | - | - |
+| `disabled` | `boolean` |  | - | - |
+| `required` | `boolean` |  | - | - |
+| `form` | `string` |  | - | - |
+| `value` | `string` |  | - | - |
+| `defaultValue` | `string` |  | - | - |
+| `onValueChange` | `((value: string) => void)` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { Select } from '@databricks/appkit-ui';
+
+<Select /* props */ />
+```
+
+
+## SelectContent
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/select.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/select.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `onCloseAutoFocus` | `((event: Event) => void)` |  | - | Event handler called when auto-focusing on close. Can be prevented. |
+| `onEscapeKeyDown` | `((event: KeyboardEvent) => void)` |  | - | Event handler called when the escape key is down. Can be prevented. |
+| `onPointerDownOutside` | `((event: PointerDownOutsideEvent) => void)` |  | - | Event handler called when the a `pointerdown` event happens outside of the `DismissableLayer`. Can be prevented. |
+| `position` | `enum` |  | `popper` | - |
+| `asChild` | `boolean` |  | - | - |
+| `align` | `enum` |  | - | - |
+| `side` | `enum` |  | - | - |
+| `sideOffset` | `number` |  | - | - |
+| `alignOffset` | `number` |  | - | - |
+| `arrowPadding` | `number` |  | - | - |
+| `avoidCollisions` | `boolean` |  | - | - |
+| `collisionBoundary` | `Boundary \| Boundary[]` |  | - | - |
+| `collisionPadding` | `number \| Partial<Record<"left" \| "right" \| "top" \| "bottom", number>>` |  | - | - |
+| `sticky` | `enum` |  | - | - |
+| `hideWhenDetached` | `boolean` |  | - | - |
+| `updatePositionStrategy` | `enum` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { SelectContent } from '@databricks/appkit-ui';
+
+<SelectContent /* props */ />
+```
+
+
+## SelectGroup
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/select.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/select.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { SelectGroup } from '@databricks/appkit-ui';
+
+<SelectGroup /* props */ />
+```
+
+
+## SelectItem
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/select.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/select.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `value` | `string` | ✓ | - | - |
+| `disabled` | `boolean` |  | - | - |
+| `textValue` | `string` |  | - | - |
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { SelectItem } from '@databricks/appkit-ui';
+
+<SelectItem /* props */ />
+```
+
+
+## SelectLabel
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/select.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/select.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { SelectLabel } from '@databricks/appkit-ui';
+
+<SelectLabel /* props */ />
+```
+
+
+## SelectScrollDownButton
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/select.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/select.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { SelectScrollDownButton } from '@databricks/appkit-ui';
+
+<SelectScrollDownButton /* props */ />
+```
+
+
+## SelectScrollUpButton
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/select.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/select.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { SelectScrollUpButton } from '@databricks/appkit-ui';
+
+<SelectScrollUpButton /* props */ />
+```
+
+
+## SelectSeparator
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/select.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/select.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { SelectSeparator } from '@databricks/appkit-ui';
+
+<SelectSeparator /* props */ />
+```
+
+
+## SelectTrigger
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/select.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/select.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+| `size` | `enum` |  | `default` | - |
+
+
+
+### Usage
+
+```tsx
+import { SelectTrigger } from '@databricks/appkit-ui';
+
+<SelectTrigger /* props */ />
+```
+
+
+## SelectValue
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/select.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/select.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `placeholder` | `ReactNode` |  | - | - |
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { SelectValue } from '@databricks/appkit-ui';
+
+<SelectValue /* props */ />
+```
+

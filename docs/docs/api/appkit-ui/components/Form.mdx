@@ -1,0 +1,142 @@
+---
+title: Form
+---
+
+# Form
+
+## FormControl
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/form.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/form.tsx)
+
+
+### Props
+
+This component extends standard HTML element attributes.
+
+
+
+### Usage
+
+```tsx
+import { FormControl } from '@databricks/appkit-ui';
+
+<FormControl /* props */ />
+```
+
+
+## FormDescription
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/form.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/form.tsx)
+
+
+### Props
+
+This component extends standard HTML element attributes.
+
+
+
+### Usage
+
+```tsx
+import { FormDescription } from '@databricks/appkit-ui';
+
+<FormDescription /* props */ />
+```
+
+
+## FormField
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/form.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/form.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `render` | `({ field, fieldState, formState, }: { field: ControllerRenderProps<TFieldValues, TName>; fieldState: ControllerFieldState; formState: UseFormStateReturn<TFieldValues>; }) => ReactElement<...>` | ✓ | - | - |
+| `name` | `string` | ✓ | - | - |
+| `rules` | `Omit<RegisterOptions<TFieldValues, TName>, "disabled" \| "valueAsNumber" \| "valueAsDate" \| "setValueAs">` |  | - | - |
+| `shouldUnregister` | `boolean` |  | - | - |
+| `defaultValue` | `any` |  | - | - |
+| `control` | `Control<TFieldValues, any, TFieldValues>` |  | - | - |
+| `disabled` | `boolean` |  | - | - |
+| `exact` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { FormField } from '@databricks/appkit-ui';
+
+<FormField /* props */ />
+```
+
+
+## FormItem
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/form.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/form.tsx)
+
+
+### Props
+
+This component extends standard HTML element attributes.
+
+
+
+### Usage
+
+```tsx
+import { FormItem } from '@databricks/appkit-ui';
+
+<FormItem /* props */ />
+```
+
+
+## FormLabel
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/form.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/form.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { FormLabel } from '@databricks/appkit-ui';
+
+<FormLabel /* props */ />
+```
+
+
+## FormMessage
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/form.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/form.tsx)
+
+
+### Props
+
+This component extends standard HTML element attributes.
+
+
+
+### Usage
+
+```tsx
+import { FormMessage } from '@databricks/appkit-ui';
+
+<FormMessage /* props */ />
+```
+
