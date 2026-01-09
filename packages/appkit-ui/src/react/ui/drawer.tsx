@@ -4,6 +4,7 @@ import type * as React from "react";
 import { Drawer as DrawerPrimitive } from "vaul";
 
 import { cn } from "../lib/utils";
+import { useResolvedPortalContainer } from "../portal-container-context";
 
 function Drawer({
   ...props
@@ -18,9 +19,16 @@ function DrawerTrigger({
 }
 
 function DrawerPortal({
+  container,
   ...props
 }: React.ComponentProps<typeof DrawerPrimitive.Portal>) {
-  return <DrawerPrimitive.Portal data-slot="drawer-portal" {...props} />;
+  return (
+    <DrawerPrimitive.Portal
+      data-slot="drawer-portal"
+      container={useResolvedPortalContainer(container)}
+      {...props}
+    />
+  );
 }
 
 function DrawerClose({
