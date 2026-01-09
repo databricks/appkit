@@ -668,6 +668,56 @@ export function SpendChart() {
 }
 ```
 
+**Chart props reference (important):**
+
+Charts are **self-contained ECharts components**. Configure via props, NOT children:
+
+```tsx
+// ✅ Correct: use props for customization
+<BarChart
+  queryKey="sales_by_region"
+  parameters={{}}
+  xKey="region"                    // X-axis field
+  yKey={["revenue", "expenses"]}   // Y-axis field(s) - string or string[]
+  colors={['#40d1f5', '#4462c9']}  // Custom colors
+  stacked                          // Stack bars (BarChart, AreaChart)
+  orientation="horizontal"         // "vertical" (default) | "horizontal"
+  showLegend                       // Show legend
+  height={400}                     // Height in pixels (default: 300)
+/>
+
+<LineChart
+  queryKey="trend_data"
+  parameters={{}}
+  xKey="date"
+  yKey="value"
+  smooth                           // Smooth curves (default: true)
+  showSymbol={false}               // Hide data point markers
+/>
+```
+
+**❌ CRITICAL: Charts do NOT accept Recharts children**
+
+```tsx
+// ❌ WRONG - AppKit charts are NOT Recharts wrappers
+import { BarChart } from "@databricks/appkit-ui/react";
+import { Bar, XAxis, YAxis, CartesianGrid } from "recharts";
+
+<BarChart queryKey="data" parameters={{}}>
+  <CartesianGrid />  // ❌ This will cause TypeScript errors
+  <XAxis dataKey="x" />  // ❌ Not supported
+  <Bar dataKey="y" />  // ❌ Not supported
+</BarChart>
+
+// ✅ CORRECT - use props instead
+<BarChart
+  queryKey="data"
+  parameters={{}}
+  xKey="x"
+  yKey="y"
+/>
+```
+
 ### SQL helpers (`sql.*`)
 
 Use these to build typed parameters (they return marker objects: `{ __sql_type, value }`):
@@ -1169,6 +1219,7 @@ env:
   - `useMemo` wraps parameters objects
   - Loading/error/empty states are explicit
   - Charts use `format="auto"` unless you have a reason to force `"json"`/`"arrow"`
+  - Charts use props (`xKey`, `yKey`, `colors`) NOT children (they're ECharts-based, not Recharts)
   - If using tooltips: root is wrapped with `<TooltipProvider>`
 
 - **Never**
@@ -1176,4 +1227,5 @@ env:
   - Don't pass untyped raw params for annotated queries
   - Don't ignore `createApp()`'s promise
   - Don't invent UI components not listed in this file
+  - Don't pass Recharts children (`<Bar>`, `<XAxis>`, etc.) to AppKit chart components
 
