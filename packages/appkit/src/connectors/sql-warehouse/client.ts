@@ -204,7 +204,6 @@ export class SQLWarehouseConnector {
         success = true;
         span.setStatus({ code: SpanStatusCode.OK });
 
-        // Context flows automatically to: Terminal + WideEvent.context + Span events
         this.logger.info("Query completed", {
           statement_id: response.statement_id,
           rows_returned: rowCount,

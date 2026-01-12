@@ -94,7 +94,6 @@ export class LakebaseConnector {
   ): Promise<pg.QueryResult<T>> {
     const startTime = Date.now();
 
-    // Context flows automatically to: Terminal + WideEvent.context + Span events
     this.logger.info("Executing query", {
       statement: sql.substring(0, 500),
       has_params: !!params,
@@ -102,7 +101,6 @@ export class LakebaseConnector {
     });
 
     return this.logger.span("query", async (span) => {
-      // OTEL semantic conventions for database spans
       span.setAttribute("db.system", "lakebase");
       span.setAttribute("db.statement", sql.substring(0, 500));
       span.setAttribute("db.retry_count", retryCount);
@@ -195,13 +193,11 @@ export class LakebaseConnector {
     retryCount: number = 0,
   ): Promise<T> {
     const startTime = Date.now();
-    // Context flows automatically to: Terminal + WideEvent.context + Span events
     this.logger.info("Executing transaction", {
       retry_count: retryCount,
     });
 
     return this.logger.span("transaction", async (span) => {
-      // OTEL semantic conventions for database spans
       span.setAttribute("db.system", "lakebase");
       span.setAttribute("db.retry_count", retryCount);
 

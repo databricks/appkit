@@ -6,27 +6,22 @@ export type {
   StreamExecutionSettings,
 } from "shared";
 export { isSQLTypeMarker, sql } from "shared";
-
+export { analytics } from "./analytics";
+export { CacheManager } from "./cache";
 // Core
 export { createApp } from "./core";
-export { analytics } from "./analytics";
-export { server } from "./server";
-
-// Plugin authoring
-export { Plugin, toPlugin } from "./plugin";
-export { CacheManager } from "./cache";
-
 // Observability
 export {
-  SeverityNumber,
-  SpanStatusCode,
-  otel,
-  type Span,
   type Counter,
   type Histogram,
   type ObservabilityConfig,
-  type TelemetryConfig,
+  otel,
+  type Span,
+  SpanStatusCode,
 } from "./observability";
+// Plugin authoring
+export { Plugin, toPlugin } from "./plugin";
+export { server } from "./server";
 
 // Vite plugin
 export { appKitTypesPlugin } from "./type-generator/vite-plugin";
