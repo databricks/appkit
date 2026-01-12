@@ -1,25 +1,32 @@
+// Types from shared
 export type {
   BasePluginConfig,
+  CacheConfig,
   IAppRouter,
-  SQLTypeMarker,
   StreamExecutionSettings,
 } from "shared";
-export {
-  isSQLTypeMarker,
-  sql,
-} from "shared";
-export { analytics } from "./analytics";
-export { CacheManager } from "./cache";
+export { isSQLTypeMarker, sql } from "shared";
+
+// Core
 export { createApp } from "./core";
-export type { ObservabilityConfig } from "./observability";
+export { analytics } from "./analytics";
+export { server } from "./server";
+
+// Plugin authoring
+export { Plugin, toPlugin } from "./plugin";
+export { CacheManager } from "./cache";
+
+// Observability
 export {
-  type Counter,
-  type Histogram,
+  SeverityNumber,
+  SpanStatusCode,
   otel,
   type Span,
-  SpanStatusCode,
+  type Counter,
+  type Histogram,
+  type ObservabilityConfig,
+  type TelemetryConfig,
 } from "./observability";
-export { Plugin, toPlugin } from "./plugin";
-export { server } from "./server";
+
+// Vite plugin
 export { appKitTypesPlugin } from "./type-generator/vite-plugin";
-export { getRequestContext } from "./utils";

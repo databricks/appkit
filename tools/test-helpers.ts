@@ -1,7 +1,8 @@
 import type { Span } from "@opentelemetry/api";
 import type { IAppRouter } from "shared";
+import type { ServiceContextState } from "../packages/appkit/src/context/service-context";
+import type { UserContext } from "../packages/appkit/src/context/user-context";
 import { vi } from "vitest";
-import type { RequestContext } from "../packages/appkit/src/utils/databricks-client-middleware";
 
 /**
  * Creates a mock telemetry provider for testing
@@ -140,13 +141,28 @@ export function setupDatabricksEnv(overrides: Record<string, string> = {}) {
 }
 
 /**
- * Runs a test function within a request context
+ * Context options for running tests with mocked service/user context
  */
-export async function runWithRequestContext<T>(
-  fn: () => T | Promise<T>,
-  context?: Partial<RequestContext>,
-): Promise<T> {
-  const mockWorkspaceClient = {
+export interface TestContextOptions {
+  /** Mock WorkspaceClient for service principal operations */
+  serviceDatabricksClient?: any;
+  /** Mock WorkspaceClient for user operations */
+  userDatabricksClient?: any;
+  /** User ID for user context */
+  userId?: string;
+  /** Service user ID */
+  serviceUserId?: string;
+  /** Warehouse ID */
+  warehouseId?: string;
+  /** Workspace ID */
+  workspaceId?: string;
+}
+
+/**
+ * Creates a default mock WorkspaceClient for testing
+ */
+export function createMockWorkspaceClient() {
+  return {
     statementExecution: {
       executeStatement: vi.fn().mockResolvedValue({
         status: { state: "SUCCEEDED" },
@@ -154,43 +170,110 @@ export async function runWithRequestContext<T>(
       }),
     },
   };
+}
 
-  const defaultContext: RequestContext = {
-    userDatabricksClient: mockWorkspaceClient as any,
-    serviceDatabricksClient: mockWorkspaceClient as any,
-    userId: "test-user",
-    serviceUserId: "test-service-user",
-    warehouseId: Promise.resolve("test-warehouse-id"),
-    workspaceId: Promise.resolve("test-workspace-id"),
-    ...context,
+/**
+ * Creates a mock ServiceContext for testing.
+ * Call this in beforeEach to set up the ServiceContext mock.
+ */
+export function createMockServiceContext(options: TestContextOptions = {}) {
+  const mockWorkspaceClient = createMockWorkspaceClient();
+
+  const serviceContext: ServiceContextState = {
+    client: (options.serviceDatabricksClient || mockWorkspaceClient) as any,
+    serviceUserId: options.serviceUserId || "test-service-user",
+    warehouseId: Promise.resolve(options.warehouseId || "test-warehouse-id"),
+    workspaceId: Promise.resolve(options.workspaceId || "test-workspace-id"),
   };
 
-  // Use vi.spyOn to mock getRequestContext and getWorkspaceClient
-  const utilsModule = await import(
-    "../packages/appkit/src/utils/databricks-client-middleware"
+  return serviceContext;
+}
+
+/**
+ * Creates a mock UserContext for testing.
+ */
+export function createMockUserContext(
+  options: TestContextOptions = {},
+): UserContext {
+  const mockWorkspaceClient = createMockWorkspaceClient();
+
+  return {
+    client: (options.userDatabricksClient || mockWorkspaceClient) as any,
+    userId: options.userId || "test-user",
+    warehouseId: Promise.resolve(options.warehouseId || "test-warehouse-id"),
+    workspaceId: Promise.resolve(options.workspaceId || "test-workspace-id"),
+    isUserContext: true,
+  };
+}
+
+/**
+ * Mocks the ServiceContext singleton for testing.
+ * Should be called in beforeEach.
+ *
+ * @returns Object with spies that can be used to restore the mocks
+ */
+export async function mockServiceContext(options: TestContextOptions = {}) {
+  const serviceContext = createMockServiceContext(options);
+
+  const contextModule = await import(
+    "../packages/appkit/src/context/service-context"
   );
 
-  const contextSpy = vi
-    .spyOn(utilsModule, "getRequestContext")
-    .mockReturnValue(defaultContext);
+  const getSpy = vi
+    .spyOn(contextModule.ServiceContext, "get")
+    .mockReturnValue(serviceContext);
 
-  // Also mock getWorkspaceClient to return the appropriate client based on asUser
-  const workspaceClientSpy = vi
-    .spyOn(utilsModule, "getWorkspaceClient")
-    .mockImplementation((asUser: boolean) => {
-      if (asUser) {
-        if (!defaultContext.userDatabricksClient) {
-          throw new Error("User token passthrough is not enabled");
-        }
-        return defaultContext.userDatabricksClient;
-      }
-      return defaultContext.serviceDatabricksClient;
+  const initSpy = vi
+    .spyOn(contextModule.ServiceContext, "initialize")
+    .mockResolvedValue(serviceContext);
+
+  const isInitializedSpy = vi
+    .spyOn(contextModule.ServiceContext, "isInitialized")
+    .mockReturnValue(true);
+
+  // Mock createUserContext to return a test user context
+  const createUserContextSpy = vi
+    .spyOn(contextModule.ServiceContext, "createUserContext")
+    .mockImplementation((_token: string, userId: string, userName?: string) => {
+      const mockWorkspaceClient = createMockWorkspaceClient();
+      return {
+        client: (options.userDatabricksClient || mockWorkspaceClient) as any,
+        userId,
+        userName,
+        warehouseId: serviceContext.warehouseId,
+        workspaceId: serviceContext.workspaceId,
+        isUserContext: true,
+      };
     });
+
+  return {
+    serviceContext,
+    getSpy,
+    initSpy,
+    isInitializedSpy,
+    createUserContextSpy,
+    restore: () => {
+      getSpy.mockRestore();
+      initSpy.mockRestore();
+      isInitializedSpy.mockRestore();
+      createUserContextSpy.mockRestore();
+    },
+  };
+}
+
+/**
+ * Runs a test function within a mocked service context.
+ * This sets up the ServiceContext mock, runs the function, and restores the mock.
+ */
+export async function runWithRequestContext<T>(
+  fn: () => T | Promise<T>,
+  context?: TestContextOptions,
+): Promise<T> {
+  const mocks = await mockServiceContext(context);
 
   try {
     return await fn();
   } finally {
-    contextSpy.mockRestore();
-    workspaceClientSpy.mockRestore();
+    mocks.restore();
   }
 }

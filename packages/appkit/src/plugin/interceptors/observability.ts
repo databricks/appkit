@@ -1,6 +1,6 @@
 import type { ILogger } from "../../observability";
 import { createDebug } from "../../observability/debug";
-import type { ExecutionContext, ExecutionInterceptor } from "./types";
+import type { ExecutionInterceptor, InterceptorContext } from "./types";
 
 const debug = createDebug("observability-interceptor");
 
@@ -13,7 +13,7 @@ export class ObservabilityInterceptor implements ExecutionInterceptor {
 
   async intercept<T>(
     fn: () => Promise<T>,
-    context: ExecutionContext,
+    context: InterceptorContext,
   ): Promise<T> {
     /**
      * Important: `Plugin` already constructs `this.logger` with scope = plugin name.

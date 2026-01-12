@@ -96,7 +96,7 @@ describe("Logger", () => {
 
   describe("span()", () => {
     test("should create span with scoped name", async () => {
-      await logger.span("operation", async (span) => {
+      await logger.span("operation", async (_span) => {
         return "result";
       });
 
@@ -108,7 +108,7 @@ describe("Logger", () => {
     });
 
     test("should auto-set span status to OK on success", async () => {
-      await logger.span("operation", async (span) => {
+      await logger.span("operation", async (_span) => {
         return "success";
       });
 
@@ -121,7 +121,7 @@ describe("Logger", () => {
       const error = new Error("Test error");
 
       await expect(
-        logger.span("operation", async (span) => {
+        logger.span("operation", async (_span) => {
           throw error;
         }),
       ).rejects.toThrow("Test error");
@@ -136,7 +136,7 @@ describe("Logger", () => {
     test("should pass span attributes", async () => {
       await logger.span(
         "operation",
-        async (span) => {
+        async (_span) => {
           return "result";
         },
         { attributes: { key: "value", count: 42 } },
@@ -152,7 +152,7 @@ describe("Logger", () => {
 
   describe("counter()", () => {
     test("should create counter with scoped name", () => {
-      const counter = logger.counter("requests", {
+      const _counter = logger.counter("requests", {
         description: "Total requests",
       });
 
@@ -165,7 +165,7 @@ describe("Logger", () => {
 
   describe("histogram()", () => {
     test("should create histogram with scoped name", () => {
-      const histogram = logger.histogram("duration", { unit: "ms" });
+      const _histogram = logger.histogram("duration", { unit: "ms" });
 
       expect(mockOtelBridge.createHistogram).toHaveBeenCalledWith(
         "test-scope.duration",
@@ -188,7 +188,7 @@ describe("Logger", () => {
 
   describe("child()", () => {
     test("should create child logger with nested scope", () => {
-      const childLogger = logger.child("subsystem");
+      const _childLogger = logger.child("subsystem");
 
       expect(mockOtelBridge.createScoped).toHaveBeenCalledWith(
         "test-scope:subsystem",

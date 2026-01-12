@@ -1,6 +1,6 @@
 import type { RetryConfig } from "shared";
 import { type ILogger, LoggerManager } from "@/observability";
-import type { ExecutionContext, ExecutionInterceptor } from "./types";
+import type { ExecutionInterceptor, InterceptorContext } from "./types";
 
 // interceptor to handle retry logic
 export class RetryInterceptor implements ExecutionInterceptor {
@@ -18,7 +18,7 @@ export class RetryInterceptor implements ExecutionInterceptor {
 
   async intercept<T>(
     fn: () => Promise<T>,
-    context: ExecutionContext,
+    context: InterceptorContext,
   ): Promise<T> {
     const event = this.logger.getEvent();
 

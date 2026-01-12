@@ -4,8 +4,9 @@
   "private": true,
   "scripts": {
     "docusaurus": "docusaurus",
-    "dev": "docusaurus start --no-open",
-    "build": "docusaurus build",
+    "dev": "pnpm run generate-component-docs && docusaurus start --no-open",
+    "build": "pnpm run generate-component-docs && docusaurus build",
+    "generate-component-docs": "tsx ../tools/generate-component-mdx.ts",
     "swizzle": "docusaurus swizzle",
     "deploy": "docusaurus deploy",
     "clean": "docusaurus clear",
@@ -29,6 +30,10 @@
     "@docusaurus/module-type-aliases": "3.9.2",
     "@docusaurus/tsconfig": "3.9.2",
     "@docusaurus/types": "3.9.2",
+    "docusaurus-plugin-typedoc": "^1.4.2",
+    "react-docgen-typescript": "^2.4.0",
+    "typedoc": "^0.28.15",
+    "typedoc-plugin-markdown": "^4.9.0",
     "typescript": "~5.6.2"
   },
   "browserslist": {

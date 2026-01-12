@@ -328,22 +328,22 @@ export class LakebaseConnector {
     this.close();
   }
 
-  /** Get Databricks workspace client - from config or request context */
+  /** Get Databricks workspace client - from config or execution context */
   private getWorkspaceClient(): WorkspaceClient {
     if (this.config.workspaceClient) {
       return this.config.workspaceClient;
     }
 
     try {
-      const { getRequestContext } = require("../../utils");
-      const { serviceDatabricksClient } = getRequestContext();
+      const { getWorkspaceClient: getClient } = require("../../context");
+      const client = getClient();
 
       // cache it for subsequent calls
-      this.config.workspaceClient = serviceDatabricksClient;
-      return serviceDatabricksClient;
+      this.config.workspaceClient = client;
+      return client;
     } catch (_error) {
       throw new Error(
-        "Databricks workspace client not available. Either pass it in config or use within AppKit request context.",
+        "Databricks workspace client not available. Either pass it in config or ensure ServiceContext is initialized.",
       );
     }
   }

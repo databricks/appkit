@@ -7,7 +7,6 @@ import type { PluginPhase } from "shared";
 import { LoggerManager } from "@/observability";
 import { createDebug } from "@/observability/debug";
 import { Plugin, toPlugin } from "../plugin";
-import { databricksClientMiddleware } from "../utils";
 import { RemoteTunnelController } from "./remote-tunnel/remote-tunnel-controller";
 import { StaticServer } from "./static-server";
 import type { ServerConfig } from "./types";
@@ -182,10 +181,6 @@ export class ServerPlugin extends Plugin {
       if (plugin?.injectRoutes && typeof plugin.injectRoutes === "function") {
         const router = express.Router();
 
-        // add databricks client middleware to the router if the plugin needs the request context
-        if (plugin.requiresDatabricksClient)
-          router.use(await databricksClientMiddleware());
-
         plugin.injectRoutes(router);
 
         const basePath = `/api/${plugin.name}`;
@@ -336,6 +331,9 @@ export class ServerPlugin extends Plugin {
 
 const EXCLUDED_PLUGINS = [ServerPlugin.name];
 
+/**
+ * @internal
+ */
 export const server = toPlugin<typeof ServerPlugin, ServerConfig, "server">(
   ServerPlugin,
   "server",

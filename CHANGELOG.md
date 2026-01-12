@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.5](https://github.com/databricks/appkit/compare/v0.1.4...v0.1.5) (2026-01-08)
+
+### appkit
+
+* **appkit:** obo logic and api usage ([#39](https://github.com/databricks/appkit/issues/39)) ([4976b1a](https://github.com/databricks/appkit/commit/4976b1a7160749b55723894bc1d49e8ea8614598))
+
 ## [0.1.4](https://github.com/databricks/appkit/compare/v0.1.3...v0.1.4) (2025-12-26)
 
 ### appkit

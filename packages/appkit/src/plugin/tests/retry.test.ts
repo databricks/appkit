@@ -1,10 +1,10 @@
 import type { RetryConfig } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { RetryInterceptor } from "../interceptors/retry";
-import type { ExecutionContext } from "../interceptors/types";
+import type { InterceptorContext } from "../interceptors/types";
 
 describe("RetryInterceptor", () => {
-  let context: ExecutionContext;
+  let context: InterceptorContext;
 
   beforeEach(() => {
     context = {
@@ -138,11 +138,11 @@ describe("RetryInterceptor", () => {
     const interceptor = new RetryInterceptor(config);
 
     const abortController = new AbortController();
-    const contextWithSignal: ExecutionContext = {
-      pluginName: "test",
+    const contextWithSignal: InterceptorContext = {
       metadata: new Map(),
       signal: abortController.signal,
       userKey: "test",
+      pluginName: "test",
     };
 
     const fn = vi.fn().mockImplementation(() => {

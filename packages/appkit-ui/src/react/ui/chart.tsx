@@ -102,7 +102,17 @@ ${colorConfig
   );
 };
 
-const ChartTooltip = RechartsPrimitive.Tooltip;
+/**
+ * A wrapper component for Recharts Tooltip with proper typing and documentation support.
+ * It is needed to ensure the correct name is displayed in the docs.
+ * @see https://recharts.org/en-US/api/Tooltip
+ */
+const ChartTooltip = React.forwardRef<HTMLDivElement, RechartsPrimitive.TooltipProps<any, any>>(
+  (props, ref) => {
+    return <RechartsPrimitive.Tooltip {...props} />;
+  }
+);
+ChartTooltip.displayName = "ChartTooltip";
 
 function ChartTooltipContent({
   active,
@@ -262,7 +272,17 @@ function ChartTooltipContent({
   );
 }
 
-const ChartLegend = RechartsPrimitive.Legend;
+/**
+ * A wrapper component for Recharts Legend with proper typing and documentation support.
+ * It is needed to ensure the correct name is displayed in the docs.
+ * @see https://recharts.org/en-US/api/Legend
+ */
+const ChartLegend = React.forwardRef<HTMLDivElement, RechartsPrimitive.LegendProps>(
+  (props, ref) => {
+    return <RechartsPrimitive.Legend {...props} />;
+  }
+);
+ChartLegend.displayName = "ChartLegend";
 
 function ChartLegendContent({
   className,

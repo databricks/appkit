@@ -1,7 +1,8 @@
 import type { BasePlugin } from "shared";
-import { setupDatabricksEnv } from "@tools/test-helpers";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { setupDatabricksEnv, mockServiceContext } from "@tools/test-helpers";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createApp, AppKit } from "../appkit";
+import { ServiceContext } from "../../context/service-context";
 
 // Mock environment validation
 vi.mock("../utils", () => ({
@@ -175,11 +176,21 @@ class FailingPlugin implements BasePlugin {
 }
 
 describe("AppKit", () => {
-  beforeEach(() => {
+  let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
+
+  beforeEach(async () => {
     setupDatabricksEnv();
     vi.clearAllMocks();
     // Reset singleton instance
     (AppKit as any)._instance = null;
+    // Reset ServiceContext singleton
+    ServiceContext.reset();
+    // Mock ServiceContext for tests
+    serviceContextMock = await mockServiceContext();
+  });
+
+  afterEach(() => {
+    serviceContextMock?.restore();
   });
 
   describe("createApp", () => {

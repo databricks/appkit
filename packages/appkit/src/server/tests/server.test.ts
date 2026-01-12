@@ -91,9 +91,6 @@ vi.mock("../../cache", () => ({
 }));
 
 vi.mock("../../utils", () => ({
-  databricksClientMiddleware: vi
-    .fn()
-    .mockResolvedValue((_req: any, _res: any, next: any) => next()),
   validateEnv: vi.fn(),
   deepMerge: vi.fn((a, b) => ({ ...a, ...b })),
 }));
@@ -260,14 +257,13 @@ describe("ServerPlugin", () => {
       );
     });
 
-    test("extendRoutes registers databricksClientMiddleware when plugin.requiresDatabricksClient=true", async () => {
+    test("extendRoutes registers plugin routes correctly", async () => {
       process.env.NODE_ENV = "production";
 
       const injectRoutes = vi.fn();
       const plugins: any = {
-        "needs-client": {
-          name: "needs-client",
-          requiresDatabricksClient: true,
+        "test-plugin": {
+          name: "test-plugin",
           injectRoutes,
           getEndpoints: vi.fn().mockReturnValue({}),
         },
@@ -280,10 +276,9 @@ describe("ServerPlugin", () => {
       expect(routerFn).toHaveBeenCalledTimes(1);
       const routerInstance = routerFn.mock.results[0].value;
 
-      expect(routerInstance.use).toHaveBeenCalledWith(expect.any(Function));
       expect(injectRoutes).toHaveBeenCalledWith(routerInstance);
       expect(mockExpressApp.use).toHaveBeenCalledWith(
-        "/api/needs-client",
+        "/api/test-plugin",
         routerInstance,
       );
     });

@@ -124,8 +124,8 @@ describe("ScopedOTELBridge", () => {
     test("should respect boolean config", () => {
       const scoped = new ScopedOTELBridge("test", mockBridge, false);
 
-      const counter = scoped.createCounter("test");
-      const histogram = scoped.createHistogram("test");
+      const _counter = scoped.createCounter("test");
+      const _histogram = scoped.createHistogram("test");
 
       // Should return noop instances
       expect(mockMeter.createCounter).not.toHaveBeenCalled();
@@ -148,16 +148,18 @@ describe("ScopedOTELBridge", () => {
     test("should create span when traces enabled", async () => {
       const scoped = new ScopedOTELBridge("test", mockBridge, { traces: true });
 
-      mockTracer.startActiveSpan.mockImplementation((name, opts, fn) => {
-        const mockSpan = {
-          end: vi.fn(),
-          setAttribute: vi.fn(),
-          setStatus: vi.fn(),
-        };
-        return fn(mockSpan);
-      });
+      mockTracer.startActiveSpan.mockImplementation(
+        (_name: string, _opts: any, fn: any) => {
+          const mockSpan = {
+            end: vi.fn(),
+            setAttribute: vi.fn(),
+            setStatus: vi.fn(),
+          };
+          return fn(mockSpan);
+        },
+      );
 
-      await scoped.startActiveSpan("test-span", {}, async (span) => {
+      await scoped.startActiveSpan("test-span", {}, async (_span) => {
         return "result";
       });
 

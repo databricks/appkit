@@ -1,3 +1,4 @@
+import { mockServiceContext } from "@tools/test-helpers";
 import type express from "express";
 import type {
   BasePluginConfig,
@@ -7,9 +8,10 @@ import type {
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AppManager } from "../../app";
 import { CacheManager } from "../../cache";
+import { ServiceContext } from "../../context/service-context";
 import { StreamManager } from "../../stream";
 import { validateEnv } from "../../utils";
-import type { ExecutionContext } from "../interceptors/types";
+import type { InterceptorContext } from "../interceptors/types";
 import { Plugin } from "../plugin";
 
 // Mock all dependencies
@@ -129,9 +131,13 @@ describe("Plugin", () => {
   let mockApp: AppManager;
   let mockStreamManager: StreamManager;
   let config: BasePluginConfig;
+  let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.useFakeTimers();
+
+    ServiceContext.reset();
+    serviceContextMock = await mockServiceContext();
 
     mockCache = {
       get: vi.fn(),
@@ -167,6 +173,7 @@ describe("Plugin", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+    serviceContextMock?.restore();
   });
 
   describe("constructor", () => {
@@ -274,7 +281,12 @@ describe("Plugin", () => {
         stream: {},
       };
 
-      await (plugin as any).executeStream(mockResponse, mockFn, options, false);
+      await (plugin as any).executeStream(
+        mockResponse,
+        mockFn,
+        options,
+        "user-key",
+      );
 
       expect(mockStreamManager.stream).toHaveBeenCalledTimes(1);
       expect(mockStreamManager.stream).toHaveBeenCalledWith(
@@ -319,7 +331,7 @@ describe("Plugin", () => {
         user: { timeout: 2000 },
       };
 
-      const result = await (plugin as any).execute(mockFn, options, false);
+      const result = await (plugin as any).execute(mockFn, options, "user-key");
 
       expect(result).toBe("result");
       expect(mockFn).toHaveBeenCalledTimes(1);
@@ -333,7 +345,7 @@ describe("Plugin", () => {
         default: {},
       };
 
-      const result = await (plugin as any).execute(mockFn, options, false);
+      const result = await (plugin as any).execute(mockFn, options, "user-key");
 
       expect(result).toBeUndefined();
     });
@@ -492,7 +504,7 @@ describe("Plugin", () => {
     test("should execute function directly when no interceptors", async () => {
       const plugin = new TestPlugin(config);
       const mockFn = vi.fn().mockResolvedValue("direct-result");
-      const context: ExecutionContext = {
+      const context: InterceptorContext = {
         metadata: new Map(),
         userKey: "test",
         pluginName: plugin.name,
@@ -508,10 +520,10 @@ describe("Plugin", () => {
     test("should chain interceptors correctly", async () => {
       const plugin = new TestPlugin(config);
       const mockFn = vi.fn().mockResolvedValue("chained-result");
-      const context: ExecutionContext = {
-        pluginName: plugin.name,
+      const context: InterceptorContext = {
         metadata: new Map(),
         userKey: "test",
+        pluginName: plugin.name,
       };
 
       const mockInterceptor1 = {
@@ -536,12 +548,11 @@ describe("Plugin", () => {
     test("should pass context to interceptors", async () => {
       const plugin = new TestPlugin(config);
       const mockFn = vi.fn().mockResolvedValue("context-result");
-      const context: ExecutionContext = {
-        pluginName: plugin.name,
+      const context: InterceptorContext = {
         metadata: new Map(),
-        asUser: true,
         signal: new AbortController().signal,
         userKey: "test",
+        pluginName: plugin.name,
       };
 
       const mockInterceptor = {
@@ -564,22 +575,6 @@ describe("Plugin", () => {
   describe("static properties", () => {
     test("should have default phase of 'normal'", () => {
       expect(Plugin.phase).toBe("normal");
-    });
-  });
-
-  describe("requiresDatabricksClient", () => {
-    test("should default to false", () => {
-      const plugin = new TestPlugin(config);
-      expect(plugin.requiresDatabricksClient).toBe(false);
-    });
-
-    test("should allow plugins to override to true", () => {
-      class PluginWithDatabricksClient extends TestPlugin {
-        requiresDatabricksClient = true;
-      }
-
-      const plugin = new PluginWithDatabricksClient(config);
-      expect(plugin.requiresDatabricksClient).toBe(true);
     });
   });
 

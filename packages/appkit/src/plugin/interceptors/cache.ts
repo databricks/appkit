@@ -1,6 +1,6 @@
 import type { CacheConfig } from "shared";
 import type { CacheManager } from "../../cache";
-import type { ExecutionContext, ExecutionInterceptor } from "./types";
+import type { ExecutionInterceptor, InterceptorContext } from "./types";
 
 // interceptor to handle caching logic
 export class CacheInterceptor implements ExecutionInterceptor {
@@ -11,7 +11,7 @@ export class CacheInterceptor implements ExecutionInterceptor {
 
   async intercept<T>(
     fn: () => Promise<T>,
-    context: ExecutionContext,
+    context: InterceptorContext,
   ): Promise<T> {
     // if cache disabled, ignore
     if (!this.config.enabled || !this.config.cacheKey?.length) {

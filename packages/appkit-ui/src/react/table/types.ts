@@ -12,6 +12,8 @@ export interface TableWrapperProps<TRaw = any, TProcessed = any> {
   parameters: Record<string, any>;
   /** Optional function to transform raw data before creating table */
   transformer?: (data: TRaw[]) => TProcessed[];
+  /** Whether to execute the query as a user. Default is false. */
+  asUser?: boolean;
   /** Render function that receives the TanStack Table instance */
   children: (data: Table<TProcessed>) => React.ReactNode;
   /** Optional CSS class name for the wrapper */

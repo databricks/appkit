@@ -28,6 +28,7 @@ function normalizeObservabilityOptions(
     logs: options.logs,
   };
 }
+import { ServiceContext } from "../context";
 
 export class AppKit<TPlugins extends InputPluginMap> {
   private static _instance: AppKit<InputPluginMap> | null = null;
@@ -114,6 +115,10 @@ export class AppKit<TPlugins extends InputPluginMap> {
     );
     await CacheManager.getInstance(config?.cache);
 
+    // Initialize ServiceContext for Databricks client management
+    // This provides the service principal client and shared resources
+    await ServiceContext.initialize();
+
     const rawPlugins = config.plugins as T;
     const preparedPlugins = AppKit.preparePlugins(rawPlugins);
     const mergedConfig = {
@@ -141,6 +146,9 @@ export class AppKit<TPlugins extends InputPluginMap> {
   }
 }
 
+/**
+ * Bootstraps AppKit with the provided configuration.
+ */
 export async function createApp<
   T extends PluginData<PluginConstructor, unknown, string>[],
 >(

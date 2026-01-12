@@ -1,7 +1,7 @@
 import type { CacheConfig } from "shared";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { CacheInterceptor } from "../interceptors/cache";
-import type { ExecutionContext } from "../interceptors/types";
+import type { InterceptorContext } from "../interceptors/types";
 
 vi.mock("../../telemetry", () => ({
   TelemetryManager: {
@@ -78,7 +78,7 @@ class MockCacheManager {
 
 describe("CacheInterceptor", () => {
   let cacheManager: MockCacheManager;
-  let context: ExecutionContext;
+  let context: InterceptorContext;
 
   beforeEach(() => {
     cacheManager = new MockCacheManager();
@@ -181,10 +181,10 @@ describe("CacheInterceptor", () => {
       enabled: true,
       cacheKey: ["query", "sales"],
     };
-    const contextWithToken: ExecutionContext = {
-      pluginName: "test",
+    const contextWithToken: InterceptorContext = {
       metadata: new Map(),
       userKey: "user1",
+      pluginName: "test",
     };
     const interceptor = new CacheInterceptor(
       cacheManager as unknown as ConstructorParameters<
@@ -215,19 +215,19 @@ describe("CacheInterceptor", () => {
     );
 
     // Service account context
-    const context1: ExecutionContext = {
-      pluginName: "test",
+    const context1: InterceptorContext = {
       metadata: new Map(),
       userKey: "service",
+      pluginName: "test",
     };
     const fn1 = vi.fn().mockResolvedValue("service-account-data");
     await interceptor.intercept(fn1, context1);
 
     // User context
-    const context2: ExecutionContext = {
-      pluginName: "test",
+    const context2: InterceptorContext = {
       metadata: new Map(),
       userKey: "user1",
+      pluginName: "test",
     };
     const fn2 = vi.fn().mockResolvedValue("user-data");
     await interceptor.intercept(fn2, context2);
