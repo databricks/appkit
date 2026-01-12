@@ -42,7 +42,7 @@ export function shouldSample(data: WideEventData): boolean {
 
     // skip by extension
     if (
-      /\.(js|css|json|svg|png|jpg|jpeg|gif|ico|webp|woff|woff2|ttf|eot|otf)$/.test(
+      /\.(js|css|json|map|svg|png|jpg|jpeg|gif|ico|webp|woff|woff2|ttf|eot|otf)$/.test(
         data.path,
       )
     ) {
@@ -73,10 +73,10 @@ export function formatAndEmitWideEvent(
   event: WideEvent,
   statusCode: number,
 ): WideEventData | null {
-  // Finalize FIRST to set status_code and duration_ms
+  // finalize first to set status_code and duration_ms
   const data = event.finalize(statusCode);
 
-  // THEN check sampling (now has access to status_code, duration_ms)
+  // check if the event should be sampled
   if (!shouldSample(data)) return null;
 
   // Format and output to terminal

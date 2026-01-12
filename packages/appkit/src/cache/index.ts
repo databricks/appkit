@@ -304,9 +304,13 @@ export class CacheManager {
     this.lastCleanupAttempt = now;
 
     this.cleanupInProgress = true;
-    (this.storage as PersistentStorage).cleanupExpired().finally(() => {
-      this.cleanupInProgress = false;
-    });
+    void (this.storage as PersistentStorage)
+      .cleanupExpired()
+      // fire-and-forget: ensure no unhandled rejection escapes
+      .catch(() => {})
+      .finally(() => {
+        this.cleanupInProgress = false;
+      });
   }
 
   /**

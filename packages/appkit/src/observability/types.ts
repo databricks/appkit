@@ -39,7 +39,7 @@ export interface ErrorLogOptions {
  *
  * THREE LAYERS OF CONTROL:
  *
- * LAYER 1: Magic (99% of cases) - Automatic observability
+ * LAYER 1: Opinionated (99% of cases) - Automatic observability
  * - logger.debug()  - Terminal only (requires DEBUG=appkit:*)
  * - logger.trace()  - Terminal + WideEvent + individual OTEL log records
  * - logger.info()   - Terminal + WideEvent + Span events
@@ -48,7 +48,7 @@ export interface ErrorLogOptions {
  *
  * Note: WideEvent is sent to OTEL Logs as ONE aggregated record at request end
  *
- * LAYER 2: Opinionated API (when you need control)
+ * LAYER 2: Custom API (when you need control)
  * - logger.span()          - Create traced span (auto-managed)
  * - logger.counter()       - Create counter metric
  * - logger.histogram()     - Create histogram metric
@@ -56,7 +56,7 @@ export interface ErrorLogOptions {
  * - logger.child()         - Create child logger with nested scope
  * - logger.getEvent()      - Access WideEvent for advanced use
  *
- * LAYER 3: Escape Hatch (full OTEL power)
+ * LAYER 3: Raw (full OTEL power)
  * - otel.getTracer()  - Raw OTEL tracer (custom span names, full control)
  * - otel.getMeter()   - Raw OTEL meter (gauges, observable instruments)
  * - otel.getLogger()  - Raw OTEL logger (rarely needed)
@@ -71,14 +71,14 @@ export interface ErrorLogOptions {
  * - In Tempo traces: You see individual log events attached to spans
  * - In Terminal: You see individual debug output (requires DEBUG=appkit:*)
  *
- * @example Magic layer - automatic observability
+ * @example Opinionated layer - automatic observability
  * ```typescript
  * logger.info("Processing request", { userId: "123" });
  * // ✅ Goes to: Terminal + WideEvent.logs[] + Current Span Events
  * // At request end: WideEvent → OTEL Logs (aggregated)
  * ```
  *
- * @example Opinionated layer - custom spans
+ * @example Custom layer - custom spans
  * ```typescript
  * await logger.span("fetch-data", async (span) => {
  *   span.setAttribute("db.system", "databricks");
@@ -86,7 +86,7 @@ export interface ErrorLogOptions {
  * }); // ✅ Span auto-ended, status auto-set
  * ```
  *
- * @example Escape hatch - full control
+ * @example Raw layer - full control
  * ```typescript
  * const tracer = otel.getTracer("custom-name");
  * await tracer.startActiveSpan("operation", async (span) => {

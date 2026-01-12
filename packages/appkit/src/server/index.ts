@@ -46,7 +46,7 @@ export class ServerPlugin extends Plugin {
   protected declare config: ServerConfig;
   private serverExtensions: ((app: express.Application) => void)[] = [];
   static phase: PluginPhase = "deferred";
-  private debug = createDebug("server");
+  static debug = createDebug("server");
 
   constructor(config: ServerConfig) {
     super(config);
@@ -117,7 +117,7 @@ export class ServerPlugin extends Plugin {
 
     if (process.env.NODE_ENV === "development") {
       const allRoutes = getRoutes(this.serverApplication._router.stack);
-      this.debug("Registered routes", { routes: allRoutes });
+      ServerPlugin.debug("Registered routes", { routes: allRoutes });
     }
     return this.serverApplication;
   }
@@ -246,6 +246,8 @@ export class ServerPlugin extends Plugin {
     for (const p of staticPaths) {
       const fullPath = path.resolve(cwd, p);
       if (fs.existsSync(path.resolve(fullPath, "index.html"))) {
+        const msg = `Static files: serving from ${fullPath}`;
+        ServerPlugin.debug(msg);
         return fullPath;
       }
     }
@@ -258,7 +260,7 @@ export class ServerPlugin extends Plugin {
     const port = this.config.port ?? ServerPlugin.DEFAULT_CONFIG.port;
     const host = this.config.host ?? ServerPlugin.DEFAULT_CONFIG.host;
 
-    this.debug("Server started", {
+    ServerPlugin.debug("Server started", {
       url: `http://${host}:${port}`,
       mode: hasExplicitStaticPath
         ? "static"
@@ -271,10 +273,24 @@ export class ServerPlugin extends Plugin {
         active: this.remoteTunnelController?.isActive(),
       },
     });
+
+    if (!this.remoteTunnelController) {
+      ServerPlugin.debug(
+        "Remote tunnel: disabled (controller not initialized)",
+      );
+    } else {
+      const allowed = !!this.remoteTunnelController.isAllowedByEnv();
+      const active = !!this.remoteTunnelController.isActive();
+      ServerPlugin.debug(
+        `Remote tunnel: ${allowed ? "allowed" : "disallowed"}; ${
+          active ? "active" : "inactive"
+        }`,
+      );
+    }
   }
 
   private async _gracefulShutdown() {
-    this.debug("Starting graceful shutdown");
+    ServerPlugin.debug("Starting graceful shutdown");
 
     if (this.viteDevServer) {
       await this.viteDevServer.close();
@@ -303,13 +319,13 @@ export class ServerPlugin extends Plugin {
     // 2. close the server
     if (this.server) {
       this.server.close(() => {
-        this.debug("Server closed gracefully");
+        ServerPlugin.debug("Server closed gracefully");
         process.exit(0);
       });
 
       // 3. timeout to force shutdown after 15 seconds
       setTimeout(() => {
-        this.debug("Force shutdown after timeout");
+        ServerPlugin.debug("Force shutdown after timeout");
         process.exit(1);
       }, 15000);
     } else {

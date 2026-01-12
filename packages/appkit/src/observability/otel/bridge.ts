@@ -64,7 +64,12 @@ export class OTELBridge {
    * Initialize the OpenTelemetry SDK
    */
   private initializeSdk(): void {
-    const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT!;
+    const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+    if (!endpoint) {
+      this.enabled = false;
+      debug("OTEL disabled (no OTEL_EXPORTER_OTLP_ENDPOINT)");
+      return;
+    }
     const serviceName =
       this.config.serviceName ||
       process.env.OTEL_SERVICE_NAME ||
@@ -111,13 +116,25 @@ export class OTELBridge {
     }
 
     if (metricsEnabled) {
-      sdkConfig.metricReader = new PeriodicExportingMetricReader({
-        exporter: new OTLPMetricExporter({
-          url: `${endpoint}/v1/metrics`,
-          headers: this.config.headers,
-        }),
+      const metricExporter: any = new OTLPMetricExporter({
+        url: `${endpoint}/v1/metrics`,
+        headers: this.config.headers,
+      });
+
+      // provide a safe default to avoid runtime errors
+      if (typeof metricExporter.forceFlush !== "function") {
+        metricExporter.forceFlush = async () => {};
+      }
+
+      const metricReader = new PeriodicExportingMetricReader({
+        exporter: metricExporter,
         exportIntervalMillis: this.config.exportIntervalMs || 10000,
       });
+
+      sdkConfig.metricReaders = [
+        ...(sdkConfig.metricReaders ?? []),
+        metricReader,
+      ];
     }
 
     if (logsEnabled) {

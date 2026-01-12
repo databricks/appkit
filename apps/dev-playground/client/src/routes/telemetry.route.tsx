@@ -1,4 +1,3 @@
-import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
 import {
   Badge,
   Button,
@@ -12,8 +11,9 @@ import {
   TabsList,
   TabsTrigger,
 } from "@databricks/appkit-ui/react";
-import { useEffect, useState } from "react";
+import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
 import { Activity, ArrowRight, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { codeToHtml } from "shiki";
 import { Header } from "@/components/layout/header";
 
@@ -47,8 +47,8 @@ type ExampleResult = {
 
 const LAYER_CONFIGS = [
   {
-    id: "magic",
-    name: "Magic API",
+    id: "opinionated",
+    name: "Opinionated API",
     badge: "Recommended",
     description: "Automatic observability with standard logger methods",
     useCases: [
@@ -99,8 +99,8 @@ const LAYER_CONFIGS = [
     ],
   },
   {
-    id: "opinionated",
-    name: "Opinionated API",
+    id: "custom",
+    name: "Custom API",
     badge: "Advanced",
     description: "Custom spans, metrics, and scoping",
     useCases: [
@@ -281,15 +281,15 @@ function TelemetryRoute() {
       <div className="max-w-6xl mx-auto px-6 py-12">
         <Header
           title="Observability Layers"
-          description="Three layers of observability APIs: Magic (automatic), Opinionated (custom), and Escape Hatch (direct OTEL)"
+          description="Three layers of observability APIs: Opinionated (automatic), Custom (custom), and Raw (direct OTEL)"
           tooltip="Demonstrates the layered observability approach with OpenTelemetry integration"
         />
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="grid w-full grid-cols-4 mb-8">
             <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="magic">Magic API</TabsTrigger>
-            <TabsTrigger value="opinionated">Opinionated</TabsTrigger>
+            <TabsTrigger value="opinionated">Opinionated API</TabsTrigger>
+            <TabsTrigger value="custom">Custom</TabsTrigger>
             <TabsTrigger value="escape">Escape Hatch</TabsTrigger>
           </TabsList>
 
@@ -519,8 +519,8 @@ function TelemetryRoute() {
             </Card>
           </TabsContent>
 
-          {/* Magic API Tab */}
-          <TabsContent value="magic" className="space-y-6">
+          {/* Opinionated API Tab */}
+          <TabsContent value="opinionated" className="space-y-6">
             {(() => {
               const layer = LAYER_CONFIGS[0];
               return (
@@ -823,8 +823,8 @@ logger.recordContext({
             })()}
           </TabsContent>
 
-          {/* Opinionated API Tab */}
-          <TabsContent value="opinionated" className="space-y-6">
+          {/* Custom API Tab */}
+          <TabsContent value="custom" className="space-y-6">
             {(() => {
               const layer = LAYER_CONFIGS[1];
               return (
@@ -998,7 +998,7 @@ if (event) {
                     <CardContent>
                       <p className="text-sm text-muted-foreground mb-3">
                         Use the escape hatch when you need OTEL features not
-                        available in Magic or Opinionated APIs:
+                        available in Opinionated or Custom APIs:
                       </p>
                       <ul className="space-y-2 text-sm text-foreground">
                         {layer.useCases.map((useCase) => (
@@ -1006,7 +1006,7 @@ if (event) {
                         ))}
                       </ul>
                       <p className="text-sm text-muted-foreground mt-3">
-                        Note: The Magic API is sufficient for most use cases.
+                        Note: The Custom API is sufficient for most use cases.
                       </p>
                     </CardContent>
                   </Card>
@@ -1131,7 +1131,7 @@ await tracer.startActiveSpan(
                       <div>
                         <h4 className="font-semibold mb-2">Combining Layers</h4>
                         <p className="text-sm text-gray-600 mb-3">
-                          You can use escape hatch alongside Magic API:
+                          You can use escape hatch alongside Opinionated API:
                         </p>
                         <CodeSnippet
                           code={`import { otel } from "@databricks/appkit";
@@ -1142,7 +1142,7 @@ await tracer.startActiveSpan("custom-span", async (span) => {
   // Use escape hatch for span control
   span.setAttribute("custom.id", "123");
 
-  // Still use Magic API inside!
+  // Still use Opinionated API inside!
   this.logger.info("Processing inside custom span", {
     spanId: span.spanContext().spanId
   });
@@ -1214,7 +1214,7 @@ await tracer.startActiveSpan("custom-span", async (span) => {
               <div className="flex items-start gap-3 p-3 bg-muted rounded-lg">
                 <div>
                   <div className="font-semibold text-foreground">
-                    Start with Magic API
+                    Start with Opinionated API
                   </div>
                   <div className="text-sm text-muted-foreground">
                     Use logger.info(), logger.warn(), logger.error() for most
@@ -1226,7 +1226,7 @@ await tracer.startActiveSpan("custom-span", async (span) => {
               <div className="flex items-start gap-3 p-3 bg-muted rounded-lg">
                 <div>
                   <div className="font-semibold text-foreground">
-                    Use Opinionated API when you need:
+                    Use Custom API when you need:
                   </div>
                   <div className="text-sm text-muted-foreground">
                     Custom spans (logger.span), business metrics

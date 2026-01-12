@@ -387,20 +387,25 @@ describe("ServerPlugin", () => {
 
   describe("logStartupInfo", () => {
     test("logs remote tunnel controller disabled when missing", () => {
-      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const originalDebug = (ServerPlugin as any).debug;
+      const debugSpy = vi.fn();
+      (ServerPlugin as any).debug = debugSpy;
       const plugin = new ServerPlugin({ autoStart: false });
       (plugin as any).remoteTunnelController = undefined;
 
       (plugin as any).logStartupInfo();
 
-      expect(logSpy).toHaveBeenCalledWith(
+      expect(debugSpy).toHaveBeenCalledWith(
         "Remote tunnel: disabled (controller not initialized)",
       );
-      logSpy.mockRestore();
+
+      (ServerPlugin as any).debug = originalDebug;
     });
 
     test("logs remote tunnel allowed/active when controller present", () => {
-      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const originalDebug = (ServerPlugin as any).debug;
+      const debugSpy = vi.fn();
+      (ServerPlugin as any).debug = debugSpy;
       const plugin = new ServerPlugin({ autoStart: false });
       (plugin as any).remoteTunnelController = {
         isAllowedByEnv: () => true,
@@ -410,17 +415,20 @@ describe("ServerPlugin", () => {
       (plugin as any).logStartupInfo();
 
       expect(
-        logSpy.mock.calls.some((c) =>
+        debugSpy.mock.calls.some((c) =>
           String(c[0]).includes("Remote tunnel: allowed; active"),
         ),
       ).toBe(true);
-      logSpy.mockRestore();
+
+      (ServerPlugin as any).debug = originalDebug;
     });
   });
 
   describe("findStaticPath", () => {
     test("returns first matching static path and logs it", () => {
-      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const originalDebug = (ServerPlugin as any).debug;
+      const debugSpy = vi.fn();
+      (ServerPlugin as any).debug = debugSpy;
       vi.mocked(fs.existsSync).mockImplementation((p: any) => {
         return String(p).endsWith("dist/index.html");
       });
@@ -428,11 +436,12 @@ describe("ServerPlugin", () => {
       const p = (ServerPlugin as any).findStaticPath();
       expect(String(p)).toContain("dist");
       expect(
-        logSpy.mock.calls.some((c) =>
+        debugSpy.mock.calls.some((c) =>
           String(c[0]).includes("Static files: serving from"),
         ),
       ).toBe(true);
-      logSpy.mockRestore();
+
+      (ServerPlugin as any).debug = originalDebug;
     });
   });
 

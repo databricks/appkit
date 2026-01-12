@@ -1,5 +1,5 @@
-import { createDebug } from "../../observability/debug";
 import type { ILogger } from "../../observability";
+import { createDebug } from "../../observability/debug";
 import type { ExecutionContext, ExecutionInterceptor } from "./types";
 
 const debug = createDebug("observability-interceptor");
@@ -15,14 +15,21 @@ export class ObservabilityInterceptor implements ExecutionInterceptor {
     fn: () => Promise<T>,
     context: ExecutionContext,
   ): Promise<T> {
-    // Derive span name from context
-    const spanName = context.operation
-      ? `${context.pluginName}.${context.operation}`
-      : `${context.pluginName}.execute`;
+    /**
+     * Important: `Plugin` already constructs `this.logger` with scope = plugin name.
+     * `Logger.span(name)` prefixes with `${scope}.${name}`.
+     *
+     * So we should pass only the *operation* here (e.g. "query"), not
+     * `${pluginName}.${operation}`, otherwise we end up with "analytics.analytics.query".
+     */
+    const rawOperation = context.operation ?? "execute";
+    const operation = rawOperation.startsWith(`${context.pluginName}.`)
+      ? rawOperation.slice(context.pluginName.length + 1)
+      : rawOperation;
 
-    debug("Creating span: %s", spanName);
+    debug("Creating span: %s.%s", context.pluginName, operation);
 
-    return this.logger.span(spanName, async () => {
+    return this.logger.span(operation, async () => {
       return await fn();
     });
   }

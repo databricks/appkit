@@ -79,6 +79,12 @@ vi.mock("../interceptors/telemetry", () => ({
   })),
 }));
 
+vi.mock("../interceptors/observability", () => ({
+  ObservabilityInterceptor: vi.fn().mockImplementation((_logger) => ({
+    intercept: vi.fn().mockImplementation((fn, _context) => fn()),
+  })),
+}));
+
 // Test plugin implementations
 class TestPlugin extends Plugin<BasePluginConfig> {
   envVars = ["TEST_ENV_VAR"];
@@ -406,11 +412,11 @@ describe("Plugin", () => {
     });
 
     test("should skip disabled interceptors", () => {
-      const configWithoutTelemetry = {
+      const configWithoutObservability = {
         ...config,
-        telemetry: { metrics: false, traces: false, logs: false },
+        observability: { metrics: false, traces: false, logs: false },
       };
-      const plugin = new TestPlugin(configWithoutTelemetry);
+      const plugin = new TestPlugin(configWithoutObservability);
 
       const options: PluginExecuteConfig = {
         timeout: 0, // disabled
@@ -427,7 +433,7 @@ describe("Plugin", () => {
     test("should skip timeout interceptor when timeout is 0 or negative", () => {
       const configWithoutTelemetry = {
         ...config,
-        telemetry: { metrics: false, traces: false, logs: false },
+        observability: { metrics: false, traces: false, logs: false },
       };
       const plugin = new TestPlugin(configWithoutTelemetry);
 
@@ -446,7 +452,7 @@ describe("Plugin", () => {
     test("should skip retry interceptor when attempts <= 1", () => {
       const configWithoutTelemetry = {
         ...config,
-        telemetry: { metrics: false, traces: false, logs: false },
+        observability: { metrics: false, traces: false, logs: false },
       };
       const plugin = new TestPlugin(configWithoutTelemetry);
 
@@ -463,7 +469,7 @@ describe("Plugin", () => {
     test("should skip cache interceptor when cacheKey is empty", () => {
       const configWithoutTelemetry = {
         ...config,
-        telemetry: {
+        observability: {
           metrics: false,
           traces: false,
           logs: false,
