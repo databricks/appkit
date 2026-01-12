@@ -3,7 +3,7 @@
  *
  * Demonstrates the THREE LAYERS of observability in AppKit:
  *
- * LAYER 1: Magic API (99% of cases) - Automatic observability
+ * LAYER 1: Opinionated API (99% of cases) - Automatic observability
  * - logger.debug()          - Terminal only (DEBUG=appkit:*)
  * - logger.trace()          - Terminal + OTEL + WideEvent (NEW!)
  * - logger.info()           - Terminal + WideEvent + Span + OTEL
@@ -11,21 +11,21 @@
  * - logger.error()          - Terminal + WideEvent + Span + OTEL + Exception
  * - logger.recordContext()  - WideEvent + Span attributes only (NEW!)
  *
- * LAYER 2: Opinionated API (when you need control)
+ * LAYER 2: Custom API (when you need control)
  * - logger.span()      - Create auto-managed traced spans
  * - logger.counter()   - Create scoped counter metrics
  * - logger.histogram() - Create scoped histogram metrics
  * - logger.child()     - Create child logger with nested scope
  * - logger.getEvent()  - Access WideEvent for advanced use
  *
- * LAYER 3: Escape Hatch (full OTEL power)
+ * LAYER 3: Raw (full OTEL power)
  * - otel.getTracer()   - Raw OTEL tracer (see registerAdvancedOtelRoutes)
  * - otel.getMeter()    - Raw OTEL meter (gauges, observables)
  * - otel.getLogger()   - Raw OTEL logger (rarely needed)
  *
  * Routes:
  * - POST /api/telemetry-examples/combined - Shows all three layers
- * - POST /api/telemetry-examples/advanced-otel - Shows escape hatch usage
+ * - POST /api/telemetry-examples/advanced-otel - Shows raw OTEL usage
  */
 
 import {
@@ -51,7 +51,7 @@ class TelemetryExamples extends Plugin {
     super(config);
     this.cache = CacheManager.getInstanceSync();
 
-    // Use the opinionated logger API for metrics
+    // Use the custom logger API for metrics
     this.requestCounter = this.logger.counter("requests.total", {
       description: "Total number of requests",
     });
@@ -384,7 +384,7 @@ class TelemetryExamples extends Plugin {
    * - Raw OTEL Meter for gauges, observable instruments
    * - Direct access to OTEL APIs for special use cases
    *
-   * For most use cases, prefer the opinionated logger API:
+   * For most use cases, prefer the custom logger API:
    * - this.logger.span() instead of otel.getTracer()
    * - this.logger.counter() instead of otel.getMeter().createCounter()
    */
@@ -437,7 +437,7 @@ class TelemetryExamples extends Plugin {
           success: true,
           message: "Advanced OTEL example completed",
           layers: {
-            "LAYER 1: Magic API (99% of use cases)": {
+            "LAYER 1: Opinionated API (99% of use cases)": {
               description:
                 "Automatic observability - just log and it flows everywhere",
               methods: [
@@ -449,7 +449,7 @@ class TelemetryExamples extends Plugin {
                 "logger.recordContext() - WideEvent + Span attributes only [NEW!]",
               ],
             },
-            "LAYER 2: Opinionated API (when you need control)": {
+            "LAYER 2: Custom API (when you need control)": {
               description: "Custom spans, metrics, and scoping",
               methods: [
                 "logger.span() - Auto-managed traced spans",
@@ -459,7 +459,7 @@ class TelemetryExamples extends Plugin {
                 "logger.getEvent() - Access WideEvent for advanced use",
               ],
             },
-            "LAYER 3: Escape Hatch (full OTEL power)": {
+            "LAYER 3: Raw (full OTEL power)": {
               description: "Use when you need features not in Layer 1 or 2",
               methods: [
                 "otel.getTracer() - Custom tracer names, full span control",
@@ -475,8 +475,8 @@ class TelemetryExamples extends Plugin {
             },
           },
           recommendation:
-            "Start with LAYER 1 (Magic API). Use LAYER 2 for custom spans. " +
-            "Only use LAYER 3 (Escape Hatch) when you need features not available in layers 1-2.",
+            "Start with LAYER 1 (Opinionated API). Use LAYER 2 for custom spans. " +
+            "Only use LAYER 3 (Raw) when you need features not available in layers 1-2.",
           newFeatures: {
             "logger.trace()": {
               description:
