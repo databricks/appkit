@@ -62,7 +62,7 @@ This Software contains code from the following open source projects:
 | [express](https://www.npmjs.com/package/express) | 4.22.0 | MIT | http://expressjs.com/ |
 | [fast-glob](https://www.npmjs.com/package/fast-glob) | 3.3.3 | MIT | https://github.com/mrmlnc/fast-glob#readme |
 | [input-otp](https://www.npmjs.com/package/input-otp) | 1.4.2 | MIT | https://input-otp.rodz.dev/ |
-| [lucide-react](https://www.npmjs.com/package/lucide-react) | 0.546.0, 0.554.0 | ISC | https://lucide.dev |
+| [lucide-react](https://www.npmjs.com/package/lucide-react) | 0.554.0 | ISC | https://lucide.dev |
 | [next-themes](https://www.npmjs.com/package/next-themes) | 0.4.6 | MIT | https://github.com/pacocoursey/next-themes#readme |
 | [pg](https://www.npmjs.com/package/pg) | 8.16.3 | MIT | https://github.com/brianc/node-postgres |
 | [react-day-picker](https://www.npmjs.com/package/react-day-picker) | 9.12.0 | MIT | https://daypicker.dev |
