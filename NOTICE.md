@@ -6,6 +6,7 @@ This Software contains code from the following open source projects:
 
 | Name             | Installed version | License | Code                                                 |
 | :--------------- | :---------------- | :----------- | :--------------------------------------------------- |
+| [@ast-grep/napi](https://www.npmjs.com/package/@ast-grep/napi) | 0.37.0 | MIT | https://ast-grep.github.io |
 | [@hookform/resolvers](https://www.npmjs.com/package/@hookform/resolvers) | 5.2.2 | MIT | https://react-hook-form.com |
 | [@opentelemetry/api](https://www.npmjs.com/package/@opentelemetry/api) | 1.9.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/api |
 | [@opentelemetry/api-logs](https://www.npmjs.com/package/@opentelemetry/api-logs) | 0.208.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/api-logs |

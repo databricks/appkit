@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execSync } from "node:child_process";
+import { type Package, getDirectDependencyLicenses } from "./license-utils";
 
 const allowedLicenses = new Set([
   "MIT",
@@ -27,28 +27,18 @@ const disallowedPatterns = [
   /SEE LICEN[CS]E/i,
 ];
 
-type Package = {
-  name: string;
-  versions: string[];
-  paths: string[];
-  license: string;
-};
-
 try {
-  const output = execSync("pnpm licenses list --json", { encoding: "utf8" });
-  const licenses: Record<string, Package[]> = JSON.parse(output);
+  const packages = getDirectDependencyLicenses();
 
-  const violations = [];
+  const violations: Package[] = [];
 
-  for (const [licenseName, packages] of Object.entries(licenses)) {
-    if (allowedLicenses.has(licenseName)) continue;
+  for (const pkg of packages) {
+    if (allowedLicenses.has(pkg.license)) continue;
 
-    const isDisallowed = disallowedPatterns.some((rx) => rx.test(licenseName));
+    const isDisallowed = disallowedPatterns.some((rx) => rx.test(pkg.license));
     if (!isDisallowed) continue;
 
-    for (const pkg of packages) {
-      violations.push({ ...pkg, license: licenseName });
-    }
+    violations.push(pkg);
   }
 
   if (violations.length > 0) {

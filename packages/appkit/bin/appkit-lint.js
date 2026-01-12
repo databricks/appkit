@@ -88,7 +88,7 @@ function lintFile(filePath, rules) {
         column: range.start.column + 1,
         rule: rule.id,
         message: rule.message,
-        code: code.length > 80 ? code.slice(0, 77) + "..." : code,
+        code: code.length > 80 ? `${code.slice(0, 77)}...` : code,
       });
     }
   }
