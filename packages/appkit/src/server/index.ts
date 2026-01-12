@@ -4,6 +4,7 @@ import path from "node:path";
 import dotenv from "dotenv";
 import express from "express";
 import type { PluginPhase } from "shared";
+import { ServerError } from "../observability/errors";
 import { Plugin, toPlugin } from "../plugin";
 import { instrumentations } from "../telemetry";
 import { RemoteTunnelController } from "./remote-tunnel/remote-tunnel-controller";
@@ -132,13 +133,11 @@ export class ServerPlugin extends Plugin {
    */
   getServer(): HTTPServer {
     if (this.shouldAutoStart()) {
-      throw new Error("Cannot get server when autoStart is true.");
+      throw ServerError.autoStartConflict("get server");
     }
 
     if (!this.server) {
-      throw new Error(
-        "Server not started. Please start the server first by calling the start() method.",
-      );
+      throw ServerError.notStarted();
     }
 
     return this.server;
@@ -153,7 +152,7 @@ export class ServerPlugin extends Plugin {
    */
   extend(fn: (app: express.Application) => void) {
     if (this.shouldAutoStart()) {
-      throw new Error("Cannot extend server when autoStart is true.");
+      throw ServerError.autoStartConflict("extend server");
     }
 
     this.serverExtensions.push(fn);

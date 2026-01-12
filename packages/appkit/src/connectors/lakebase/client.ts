@@ -9,6 +9,12 @@ import {
   TelemetryManager,
   type TelemetryProvider,
 } from "@/telemetry";
+import {
+  AuthenticationError,
+  ConfigurationError,
+  ConnectionError,
+  ValidationError,
+} from "../../observability/errors";
 import { deepMerge } from "../../utils";
 import { lakebaseDefaults } from "./defaults";
 import type {
@@ -72,7 +78,11 @@ export class LakebaseConnector {
 
     // validate configuration
     if (this.config.maxPoolSize < 1) {
-      throw new Error("maxPoolSize must be at least 1");
+      throw ValidationError.invalidValue(
+        "maxPoolSize",
+        this.config.maxPoolSize,
+        "at least 1",
+      );
     }
   }
 
@@ -282,8 +292,9 @@ export class LakebaseConnector {
       this.config.workspaceClient = client;
       return client;
     } catch (_error) {
-      throw new Error(
-        "Databricks workspace client not available. Either pass it in config or ensure ServiceContext is initialized.",
+      throw ConnectionError.clientUnavailable(
+        "Databricks workspace client",
+        "Either pass it in config or ensure ServiceContext is initialized",
       );
     }
   }
@@ -291,9 +302,9 @@ export class LakebaseConnector {
   /** Get or create connection pool */
   private async getPool(): Promise<pg.Pool> {
     if (!this.connectionConfig) {
-      throw new Error(
-        "Lakebase connection not configured. " +
-          "Set PGHOST, PGDATABASE, PGAPPNAME env vars, provide a connectionString, or pass explicit config.",
+      throw ConfigurationError.invalidConnection(
+        "Lakebase",
+        "Set PGHOST, PGDATABASE, PGAPPNAME env vars, provide a connectionString, or pass explicit config",
       );
     }
 
@@ -382,7 +393,7 @@ export class LakebaseConnector {
     const workspaceClient = this.getWorkspaceClient();
     const user = await workspaceClient.currentUser.me();
     if (!user.userName) {
-      throw new Error("Failed to get current user from Databricks workspace");
+      throw AuthenticationError.userLookupFailed();
     }
     return user.userName;
   }
@@ -394,7 +405,7 @@ export class LakebaseConnector {
     const apiClient = new ApiClient(config);
 
     if (!this.connectionConfig.appName) {
-      throw new Error(`Database app name not found in connection config`);
+      throw ConfigurationError.resourceNotFound("Database app name");
     }
 
     const credentials = await apiClient.request({
@@ -409,8 +420,8 @@ export class LakebaseConnector {
     });
 
     if (!this.validateCredentials(credentials)) {
-      throw new Error(
-        `Failed to generate credentials for instance: ${this.connectionConfig.appName}`,
+      throw AuthenticationError.credentialsFailed(
+        this.connectionConfig.appName,
       );
     }
 
@@ -488,16 +499,16 @@ export class LakebaseConnector {
     const pgDatabase = process.env.PGDATABASE;
     const pgAppName = process.env.PGAPPNAME;
     if (!pgHost || !pgDatabase || !pgAppName) {
-      throw new Error(
-        "Lakebase connection not configured. Required env vars: PGHOST, PGDATABASE, PGAPPNAME. " +
-          "Optional: PGPORT (default: 5432), PGSSLMODE (default: require).",
+      throw ConfigurationError.invalidConnection(
+        "Lakebase",
+        "Required env vars: PGHOST, PGDATABASE, PGAPPNAME. Optional: PGPORT (default: 5432), PGSSLMODE (default: require)",
       );
     }
     const pgPort = process.env.PGPORT;
     const port = pgPort ? parseInt(pgPort, 10) : 5432;
 
     if (Number.isNaN(port)) {
-      throw new Error(`Invalid port: ${pgPort}. Must be a number.`);
+      throw ValidationError.invalidValue("port", pgPort, "a number");
     }
 
     const pgSSLMode = process.env.PGSSLMODE;
@@ -519,7 +530,7 @@ export class LakebaseConnector {
     const url = new URL(connectionString);
     const appName = url.searchParams.get("appName");
     if (!appName) {
-      throw new Error("Connection string must include appName parameter");
+      throw ConfigurationError.missingConnectionParam("appName");
     }
 
     return {

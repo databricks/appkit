@@ -72,7 +72,7 @@ describe("LakebaseConnector", () => {
             maxPoolSize: 0,
             workspaceClient: {} as any,
           }),
-      ).toThrow("maxPoolSize must be at least 1");
+      ).toThrow("Invalid value for maxPoolSize");
     });
 
     test("should create connector with valid config", () => {
@@ -96,7 +96,7 @@ describe("LakebaseConnector", () => {
     test("should throw when PGPORT is invalid", () => {
       process.env.PGPORT = "invalid";
 
-      expect(() => new LakebaseConnector()).toThrow("Invalid port");
+      expect(() => new LakebaseConnector()).toThrow("Invalid value for port");
     });
 
     test("should parse env vars correctly", () => {

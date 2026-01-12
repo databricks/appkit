@@ -14,6 +14,11 @@ import {
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
+import {
+  ConnectionError,
+  ExecutionError,
+  ValidationError,
+} from "../../observability/errors";
 import { executeStatementDefaults } from "./defaults";
 
 export interface SQLWarehouseConfig {
@@ -97,15 +102,11 @@ export class SQLWarehouseConnector {
         try {
           // validate required fields
           if (!input.statement) {
-            throw new Error(
-              "Statement is required: Please provide a SQL statement to execute",
-            );
+            throw ValidationError.missingField("statement");
           }
 
           if (!input.warehouse_id) {
-            throw new Error(
-              "Warehouse ID is required: Please provide a warehouse_id to execute the statement",
-            );
+            throw ValidationError.missingField("warehouse_id");
           }
 
           const body: sql.ExecuteStatementRequest = {
@@ -136,7 +137,7 @@ export class SQLWarehouseConnector {
             );
 
           if (!response) {
-            throw new Error("No response received from SQL Warehouse API");
+            throw ConnectionError.apiFailure("SQL Warehouse");
           }
           const status = response.status;
           const statementId = response.statement_id as string;
@@ -168,17 +169,13 @@ export class SQLWarehouseConnector {
               result = this._transformDataArray(response);
               break;
             case "FAILED":
-              throw new Error(
-                `Statement failed: ${status.error?.message || "Unknown error"}`,
-              );
+              throw ExecutionError.statementFailed(status.error?.message);
             case "CANCELED":
-              throw new Error("Statement was canceled");
+              throw ExecutionError.canceled();
             case "CLOSED":
-              throw new Error(
-                "Statement execution completed but results are no longer available (CLOSED state)",
-              );
+              throw ExecutionError.resultsClosed();
             default:
-              throw new Error(`Unknown statement state: ${status?.state}`);
+              throw ExecutionError.unknownState(status?.state as string);
           }
 
           const resultData = result.result as any;
@@ -278,7 +275,7 @@ export class SQLWarehouseConnector {
                 this._createContext(signal),
               );
             if (!response) {
-              throw new Error("No response received from SQL Warehouse API");
+              throw ConnectionError.apiFailure("SQL Warehouse");
             }
 
             const status = response.status;
@@ -303,19 +300,13 @@ export class SQLWarehouseConnector {
                 span.setStatus({ code: SpanStatusCode.OK });
                 return this._transformDataArray(response);
               case "FAILED":
-                throw new Error(
-                  `Statement failed: ${
-                    status.error?.message || "Unknown error"
-                  }`,
-                );
+                throw ExecutionError.statementFailed(status.error?.message);
               case "CANCELED":
-                throw new Error("Statement was canceled");
+                throw ExecutionError.canceled();
               case "CLOSED":
-                throw new Error(
-                  "Statement execution completed but results are no longer available (CLOSED state)",
-                );
+                throw ExecutionError.resultsClosed();
               default:
-                throw new Error(`Unknown statement state: ${status?.state}`);
+                throw ExecutionError.unknownState(status?.state as string);
             }
 
             // continue polling after delay
@@ -427,7 +418,7 @@ export class SQLWarehouseConnector {
           const schema = response.manifest?.schema;
 
           if (!chunks || !schema) {
-            throw new Error("No chunks or schema found in response");
+            throw ExecutionError.missingData("chunks or schema");
           }
 
           span.setAttribute("arrow.chunk_count", chunks.length);

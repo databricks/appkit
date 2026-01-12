@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { CacheConfig, CacheEntry, CacheStorage } from "shared";
 import type { LakebaseConnector } from "../../connectors";
+import { ValidationError } from "../../observability/errors";
 import { lakebaseStorageDefaults } from "./defaults";
 
 /**
@@ -104,8 +105,10 @@ export class PersistentStorage implements CacheStorage {
     const byteSize = keyBytes.length + valueBytes.length;
 
     if (byteSize > this.maxEntryBytes) {
-      throw new Error(
-        `Cache entry too large: ${byteSize} bytes exceeds maximum of ${this.maxEntryBytes} bytes`,
+      throw ValidationError.invalidValue(
+        "cache entry size",
+        byteSize,
+        `maximum ${this.maxEntryBytes} bytes`,
       );
     }
 
@@ -251,7 +254,7 @@ export class PersistentStorage implements CacheStorage {
 
   /** Generate a 64-bit hash for the cache key using SHA256 */
   private hashKey(key: string): bigint {
-    if (!key) throw new Error("Cache key cannot be empty");
+    if (!key) throw ValidationError.missingField("key");
     const hash = createHash("sha256").update(key).digest();
     return hash.readBigInt64BE(0);
   }

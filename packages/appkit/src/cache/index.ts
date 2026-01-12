@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { CacheConfig, CacheStorage } from "shared";
 import { LakebaseConnector } from "@/connectors";
+import { InitializationError } from "../observability/errors";
 import type { Counter, TelemetryProvider } from "../telemetry";
 import { SpanStatusCode, TelemetryManager } from "../telemetry";
 import { deepMerge } from "../utils";
@@ -72,8 +73,9 @@ export class CacheManager {
    */
   static getInstanceSync(): CacheManager {
     if (!CacheManager.instance) {
-      throw new Error(
-        "CacheManager not initialized. Ensure AppKit.create() has completed before accessing the cache.",
+      throw InitializationError.notInitialized(
+        "CacheManager",
+        "Ensure AppKit.create() has completed before accessing the cache",
       );
     }
 

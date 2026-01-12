@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { TunnelConnection } from "shared";
 import { isRemoteTunnelAllowedByEnv } from "@/server/remote-tunnel/gate";
+import { TunnelError } from "../observability/errors";
 
 type TunnelConnectionGetter = (
   req: import("express").Request,
@@ -56,14 +57,12 @@ export class DevFileReader {
     req: import("express").Request,
   ): Promise<string> {
     if (!this.getTunnelForRequest) {
-      throw new Error(
-        "Tunnel getter not registered for DevFileReader singleton",
-      );
+      throw TunnelError.getterNotRegistered();
     }
     const tunnel = this.getTunnelForRequest(req);
 
     if (!tunnel) {
-      throw new Error("No tunnel connection available for file read");
+      throw TunnelError.noConnection();
     }
 
     const { ws, pendingFileReads } = tunnel;

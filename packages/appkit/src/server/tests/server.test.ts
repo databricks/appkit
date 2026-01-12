@@ -323,7 +323,7 @@ describe("ServerPlugin", () => {
       const extensionFn = vi.fn();
 
       expect(() => plugin.extend(extensionFn)).toThrow(
-        "Cannot extend server when autoStart is true.",
+        "Cannot extend server when autoStart is true",
       );
     });
 
@@ -343,7 +343,7 @@ describe("ServerPlugin", () => {
       const plugin = new ServerPlugin({ autoStart: true });
 
       expect(() => plugin.getServer()).toThrow(
-        "Cannot get server when autoStart is true.",
+        "Cannot get server when autoStart is true",
       );
     });
 
@@ -351,7 +351,7 @@ describe("ServerPlugin", () => {
       const plugin = new ServerPlugin({ autoStart: false });
 
       expect(() => plugin.getServer()).toThrow(
-        "Server not started. Please start the server first by calling the start() method.",
+        "Server not started. Please start the server first by calling the start() method",
       );
     });
 

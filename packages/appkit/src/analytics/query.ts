@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { sql } from "@databricks/sdk-experimental";
 import { isSQLTypeMarker, type SQLTypeMarker, sql as sqlHelpers } from "shared";
 import { getWorkspaceId } from "../context";
+import { ValidationError } from "../observability/errors";
 
 type SQLParameterValue = SQLTypeMarker | null | undefined;
 
@@ -45,10 +46,11 @@ export class QueryProcessor {
       // only allow parameters that exist in the query
       for (const key of Object.keys(parameters)) {
         if (!queryParams.has(key)) {
-          throw new Error(
-            `Parameter "${key}" not found in query. Valid parameters: ${
-              Array.from(queryParams).join(", ") || "none"
-            }`,
+          const validParams = Array.from(queryParams).join(", ") || "none";
+          throw ValidationError.invalidValue(
+            key,
+            parameters[key],
+            `a parameter defined in the query (valid: ${validParams})`,
           );
         }
       }
@@ -74,8 +76,10 @@ export class QueryProcessor {
     }
 
     if (!isSQLTypeMarker(value)) {
-      throw new Error(
-        `Parameter "${key}" must be a SQL type. Use sql.string(), sql.number(), sql.date(), sql.timestamp(), or sql.boolean().`,
+      throw ValidationError.invalidValue(
+        key,
+        value,
+        "SQL type (use sql.string(), sql.number(), sql.date(), sql.timestamp(), or sql.boolean())",
       );
     }
 

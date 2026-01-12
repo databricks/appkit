@@ -19,6 +19,7 @@ import {
   runInUserContext,
   type UserContext,
 } from "../context";
+import { AuthenticationError } from "../observability/errors";
 import { StreamManager } from "../stream";
 import {
   type ITelemetry,
@@ -148,17 +149,11 @@ export abstract class Plugin<
     }
 
     if (!token) {
-      throw new Error(
-        "User token not available in request headers. " +
-          "Ensure the request has the x-forwarded-access-token header.",
-      );
+      throw AuthenticationError.missingToken("user token");
     }
 
     if (!userId && !isDev) {
-      throw new Error(
-        "User ID not available in request headers. " +
-          "Ensure the request has the x-forwarded-user header.",
-      );
+      throw AuthenticationError.missingUserId();
     }
 
     const effectiveUserId = userId || "dev-user";
