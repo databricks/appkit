@@ -5,6 +5,7 @@ import {
   WorkspaceClient,
 } from "@databricks/sdk-experimental";
 import type express from "express";
+import { getWideEvent } from "@/observability/context";
 import {
   name as productName,
   version as productVersion,
@@ -71,6 +72,7 @@ export async function databricksClientMiddleware(): Promise<express.RequestHandl
 
     let userName = req.headers["x-forwarded-user"] as string;
     if (!userName && process.env.NODE_ENV !== "development") {
+      getWideEvent()?.setError(new Error("Missing x-forwarded-user header"));
       res.status(401).json({ error: "Unauthorized" });
       return;
     } else {
@@ -98,6 +100,12 @@ export function getRequestContext(): RequestContext {
   if (!store) {
     throw new Error("Request context not found");
   }
+
+  const event = getWideEvent();
+  event?.setUser({
+    id: store.userId,
+  });
+
   return store;
 }
 

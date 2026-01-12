@@ -20,14 +20,14 @@ export interface BasePluginConfig {
 
   [key: string]: unknown;
 
-  /*
-   * Telemetry configuration
-   * @default true for all telemetry types
+  /**
+   * Observability configuration (replaces telemetry)
+   * @default true for all observability types
    */
-  telemetry?: TelemetryOptions;
+  observability?: ObservabilityOptions;
 }
 
-export type TelemetryOptions =
+export type ObservabilityOptions =
   | boolean
   | {
       traces?: boolean;

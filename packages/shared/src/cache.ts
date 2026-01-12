@@ -1,4 +1,4 @@
-import type { TelemetryOptions } from "./plugin";
+import type { ObservabilityOptions } from "./plugin";
 
 /** Cache entry interface */
 export interface CacheEntry<T = any> {
@@ -48,8 +48,8 @@ export interface CacheConfig {
   storage?: CacheStorage;
   /** Whether to enforce strict persistence */
   strictPersistence?: boolean;
-  /** Telemetry configuration */
-  telemetry?: TelemetryOptions;
+  /** Observability configuration */
+  observability?: ObservabilityOptions;
 
   /** Probability (0-1) of triggering cleanup on each get operation */
   cleanupProbability?: number;

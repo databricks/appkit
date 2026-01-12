@@ -5,10 +5,10 @@ import pg from "pg";
 import {
   type Counter,
   type Histogram,
+  type ILogger,
+  LoggerManager,
   SpanStatusCode,
-  TelemetryManager,
-  type TelemetryProvider,
-} from "@/telemetry";
+} from "@/observability";
 import { deepMerge } from "../../utils";
 import { lakebaseDefaults } from "./defaults";
 import type {
@@ -41,8 +41,8 @@ export class LakebaseConnector {
   private credentials: LakebaseCredentials | null = null;
 
   // telemetry
-  private readonly telemetry: TelemetryProvider;
-  private readonly telemetryMetrics: {
+  private readonly logger: ILogger;
+  private readonly metrics: {
     queryCount: Counter;
     queryDuration: Histogram;
   };
@@ -51,29 +51,31 @@ export class LakebaseConnector {
     this.config = deepMerge(lakebaseDefaults, userConfig);
     this.connectionConfig = this.parseConnectionConfig();
 
-    this.telemetry = TelemetryManager.getProvider(
+    this.logger = LoggerManager.getLogger(
       this.name,
-      this.config.telemetry,
+      this.config?.observability,
     );
-    this.telemetryMetrics = {
-      queryCount: this.telemetry
-        .getMeter()
-        .createCounter("lakebase.query.count", {
-          description: "Total number of queries executed",
-          unit: "1",
-        }),
-      queryDuration: this.telemetry
-        .getMeter()
-        .createHistogram("lakebase.query.duration", {
-          description: "Duration of queries executed",
-          unit: "ms",
-        }),
+    this.metrics = {
+      queryCount: this.logger.counter("query.count", {
+        description: "Total number of queries executed",
+        unit: "1",
+      }),
+      queryDuration: this.logger.histogram("query.duration", {
+        description: "Duration of queries executed",
+        unit: "ms",
+      }),
     };
 
     // validate configuration
     if (this.config.maxPoolSize < 1) {
       throw new Error("maxPoolSize must be at least 1");
     }
+
+    this.logger.debug("Lakebase connector initialized", {
+      config: this.config,
+      database: this.connectionConfig.database,
+      maxPoolSize: this.config.maxPoolSize,
+    });
   }
 
   /**
@@ -92,53 +94,86 @@ export class LakebaseConnector {
   ): Promise<pg.QueryResult<T>> {
     const startTime = Date.now();
 
-    return this.telemetry.startActiveSpan(
-      "lakebase.query",
-      {
-        attributes: {
-          "db.system": "lakebase",
-          "db.statement": sql.substring(0, 500),
-          "db.retry_count": retryCount,
-        },
-      },
-      async (span) => {
-        try {
-          const pool = await this.getPool();
-          const result = await pool.query<T>(sql, params);
-          span.setAttribute("db.rows_affected", result.rowCount ?? 0);
-          span.setStatus({ code: SpanStatusCode.OK });
-          return result;
-        } catch (error) {
-          // retry on auth failure
-          if (this.isAuthError(error)) {
-            span.addEvent("auth_error_retry");
-            await this.rotateCredentials();
-            const newPool = await this.getPool();
-            const result = await newPool.query<T>(sql, params);
-            span.setAttribute("db.rows_affected", result.rowCount ?? 0);
-            span.setStatus({ code: SpanStatusCode.OK });
-            return result;
-          }
+    // Context flows automatically to: Terminal + WideEvent.context + Span events
+    this.logger.info("Executing query", {
+      statement: sql.substring(0, 500),
+      has_params: !!params,
+      retry_count: retryCount,
+    });
 
-          // retry on transient errors, but only once
-          if (this.isTransientError(error) && retryCount < 1) {
-            span.addEvent("transient_error_retry");
-            await new Promise((resolve) => setTimeout(resolve, 100));
-            return await this.query<T>(sql, params, retryCount + 1);
-          }
+    return this.logger.span("query", async (span) => {
+      // OTEL semantic conventions for database spans
+      span.setAttribute("db.system", "lakebase");
+      span.setAttribute("db.statement", sql.substring(0, 500));
+      span.setAttribute("db.retry_count", retryCount);
 
-          span.recordException(error as Error);
-          span.setStatus({ code: SpanStatusCode.ERROR });
+      try {
+        const pool = await this.getPool();
+        const result = await pool.query<T>(sql, params);
+        const rowAffected = result.rowCount ?? 0;
+        const duration = Date.now() - startTime;
 
-          throw error;
-        } finally {
+        span.setAttribute("db.rows_affected", rowAffected);
+        span.setStatus({ code: SpanStatusCode.OK });
+
+        this.logger.info("Query completed", {
+          rows_affected: rowAffected,
+          query_duration_ms: duration,
+        });
+
+        return result;
+      } catch (error) {
+        // retry on auth failure
+        if (this.isAuthError(error)) {
+          this.logger.warn("Authentication error, retrying");
+          span.addEvent("auth_error_retry");
+
+          await this.rotateCredentials();
+
+          const newPool = await this.getPool();
+          const result = await newPool.query<T>(sql, params);
+          const rowsAffected = result.rowCount ?? 0;
+
           const duration = Date.now() - startTime;
-          this.telemetryMetrics.queryCount.add(1);
-          this.telemetryMetrics.queryDuration.record(duration);
-          span.end();
+
+          span.setAttribute("db.rows_affected", rowsAffected);
+          span.setStatus({ code: SpanStatusCode.OK });
+
+          this.logger.info(
+            "Query executed successfully after authentication error",
+            {
+              rows_affected: rowsAffected,
+              query_duration_ms: duration,
+            },
+          );
+
+          return result;
         }
-      },
-    );
+
+        // retry on transient errors, but only once
+        if (this.isTransientError(error) && retryCount < 1) {
+          this.logger.warn("Transient error, retrying", {
+            error_code: (error as any).code,
+          });
+          span.addEvent("transient_error_retry");
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          return await this.query<T>(sql, params, retryCount + 1);
+        }
+
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+
+        this.logger.error("Query failed", error as Error);
+
+        throw error;
+      } finally {
+        const duration = Date.now() - startTime;
+        this.metrics.queryCount.add(1);
+        this.metrics.queryDuration.record(duration);
+
+        span.end();
+      }
+    });
   }
 
   /**
@@ -160,105 +195,130 @@ export class LakebaseConnector {
     retryCount: number = 0,
   ): Promise<T> {
     const startTime = Date.now();
-    return this.telemetry.startActiveSpan(
-      "lakebase.transaction",
-      {
-        attributes: {
-          "db.system": "lakebase",
-          "db.retry_count": retryCount,
-        },
-      },
-      async (span) => {
-        const pool = await this.getPool();
-        const client = await pool.connect();
-        try {
-          await client.query("BEGIN");
-          const result = await callback(client);
-          await client.query("COMMIT");
-          span.setStatus({ code: SpanStatusCode.OK });
-          return result;
-        } catch (error) {
-          try {
-            await client.query("ROLLBACK");
-          } catch {}
-          // retry on auth failure
-          if (this.isAuthError(error)) {
-            span.addEvent("auth_error_retry");
-            client.release();
-            await this.rotateCredentials();
-            const newPool = await this.getPool();
-            const retryClient = await newPool.connect();
-            try {
-              await client.query("BEGIN");
-              const result = await callback(retryClient);
-              await client.query("COMMIT");
-              span.setStatus({ code: SpanStatusCode.OK });
-              return result;
-            } catch (retryError) {
-              try {
-                await retryClient.query("ROLLBACK");
-              } catch {}
-              throw retryError;
-            } finally {
-              retryClient.release();
-            }
-          }
+    // Context flows automatically to: Terminal + WideEvent.context + Span events
+    this.logger.info("Executing transaction", {
+      retry_count: retryCount,
+    });
 
-          // retry on transient errors, but only once
-          if (this.isTransientError(error) && retryCount < 1) {
-            span.addEvent("transaction_error_retry");
-            client.release();
-            await new Promise((resolve) => setTimeout(resolve, 100));
-            return await this.transaction<T>(callback, retryCount + 1);
-          }
-          span.recordException(error as Error);
-          span.setStatus({ code: SpanStatusCode.ERROR });
-          throw error;
-        } finally {
+    return this.logger.span("transaction", async (span) => {
+      // OTEL semantic conventions for database spans
+      span.setAttribute("db.system", "lakebase");
+      span.setAttribute("db.retry_count", retryCount);
+
+      const pool = await this.getPool();
+      const client = await pool.connect();
+
+      try {
+        await client.query("BEGIN");
+        this.logger.debug("Transaction began");
+        const result = await callback(client);
+        await client.query("COMMIT");
+        span.setStatus({ code: SpanStatusCode.OK });
+
+        const duration = Date.now() - startTime;
+
+        this.logger.info("Transaction committed", {
+          transaction_duration_ms: duration,
+          transaction_status: "committed",
+        });
+
+        return result;
+      } catch (error) {
+        try {
+          await client.query("ROLLBACK");
+          this.logger.debug("Transaction ROLLBACK");
+        } catch {}
+        // retry on auth failure
+        if (this.isAuthError(error)) {
+          this.logger.warn("Authentication error in transaction, retrying");
+          span.addEvent("auth_error_retry");
           client.release();
-          const duration = Date.now() - startTime;
-          this.telemetryMetrics.queryCount.add(1);
-          this.telemetryMetrics.queryDuration.record(duration);
-          span.end();
+          await this.rotateCredentials();
+          const newPool = await this.getPool();
+          const retryClient = await newPool.connect();
+          try {
+            await client.query("BEGIN");
+            const result = await callback(retryClient);
+            await client.query("COMMIT");
+            span.setStatus({ code: SpanStatusCode.OK });
+
+            const duration = Date.now() - startTime;
+
+            this.logger.info(
+              "Transaction committed after authentication error",
+              {
+                duration_ms: duration,
+              },
+            );
+
+            return result;
+          } catch (retryError) {
+            try {
+              await retryClient.query("ROLLBACK");
+            } catch {}
+            throw retryError;
+          } finally {
+            retryClient.release();
+          }
         }
-      },
-    );
+
+        // retry on transient errors, but only once
+        if (this.isTransientError(error) && retryCount < 1) {
+          this.logger.warn("Transient error in transaction, retrying");
+          span.addEvent("transaction_error_retry");
+          client.release();
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          return await this.transaction<T>(callback, retryCount + 1);
+        }
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+
+        this.logger.error("Transaction failed", error as Error);
+
+        throw error;
+      } finally {
+        client.release();
+        const duration = Date.now() - startTime;
+        this.metrics.queryCount.add(1);
+        this.metrics.queryDuration.record(duration);
+        span.end();
+      }
+    });
   }
 
   /** Check if database connection is healthy */
   async healthCheck(): Promise<boolean> {
-    return this.telemetry.startActiveSpan(
-      "lakebase.healthCheck",
-      {},
-      async (span) => {
-        try {
-          const result = await this.query<{ result: number }>(
-            "SELECT 1 as result",
-          );
-          const healthy = result.rows[0]?.result === 1;
-          span.setAttribute("db.healthy", healthy);
-          span.setStatus({ code: SpanStatusCode.OK });
-          return healthy;
-        } catch {
-          span.setAttribute("db.healthy", false);
-          span.setStatus({ code: SpanStatusCode.ERROR });
-          return false;
-        } finally {
-          span.end();
-        }
-      },
-    );
+    return this.logger.span("healthCheck", async (span) => {
+      try {
+        const result = await this.query<{ result: number }>(
+          "SELECT 1 as result",
+        );
+        const healthy = result.rows[0]?.result === 1;
+        span.setAttribute("db.healthy", healthy);
+        span.setStatus({ code: SpanStatusCode.OK });
+        return healthy;
+      } catch {
+        span.setAttribute("db.healthy", false);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        return false;
+      } finally {
+        span.end();
+      }
+    });
   }
 
   /** Close connection pool (call on shutdown) */
   async close(): Promise<void> {
     if (this.pool) {
+      this.logger.debug("Closing connection pool");
       await this.pool.end().catch((error: unknown) => {
-        console.error("Error closing connection pool:", error);
+        this.logger.error("Error closing connection pool:", error as Error);
       });
       this.pool = null;
     }
     this.credentials = null;
+
+    this.logger.debug("Connection pool closed");
   }
 
   /** Setup graceful shutdown to close connection pools */
@@ -298,6 +358,7 @@ export class LakebaseConnector {
     }
 
     if (!this.pool) {
+      this.logger.debug("Creating new connection pool");
       const creds = await this.getCredentials();
       this.pool = this.createPool(creds);
     }
@@ -324,10 +385,9 @@ export class LakebaseConnector {
     });
 
     pool.on("error", (error: Error & { code?: string }) => {
-      console.error("Connection pool error:", error.message, {
-        code: error.code,
-      });
+      this.logger.error("Connection pool error:", error as Error);
     });
+    this.logger.debug("Connection pool created");
 
     return pool;
   }
@@ -344,8 +404,11 @@ export class LakebaseConnector {
       this.credentials &&
       now < this.credentials.expiresAt - this.CACHE_BUFFER_MS
     ) {
+      this.logger.debug("Using cached credentials");
       return this.credentials;
     }
+
+    this.logger.debug("Fetching new credentials");
 
     // fetch new credentials
     const username = await this.fetchUsername();
@@ -357,11 +420,14 @@ export class LakebaseConnector {
       expiresAt,
     };
 
+    this.logger.debug("New credentials fetched");
+
     return { username, password: token };
   }
 
   /** Rotate credentials and recreate pool */
   private async rotateCredentials(): Promise<void> {
+    this.logger.debug("Rotating credentials");
     // clear cached credentials
     this.credentials = null;
 
@@ -369,9 +435,9 @@ export class LakebaseConnector {
       const oldPool = this.pool;
       this.pool = null;
       oldPool.end().catch((error: unknown) => {
-        console.error(
+        this.logger.error(
           "Error closing old connection pool during rotation:",
-          error,
+          error as Error,
         );
       });
     }

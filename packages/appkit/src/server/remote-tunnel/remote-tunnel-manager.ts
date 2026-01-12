@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import type express from "express";
 import type { TunnelConnection } from "shared";
 import { WebSocketServer } from "ws";
+import { type ILogger, LoggerManager } from "@/observability";
 import {
   generateTunnelIdFromEmail,
   getConfigScript,
@@ -41,6 +42,7 @@ export class RemoteTunnelManager {
   private hmrWss: WebSocketServer;
   private server?: HTTPServer;
   private devFileReader: DevFileReader;
+  private logger: ILogger = LoggerManager.getLogger("remote-tunnel");
 
   constructor(devFileReader: DevFileReader) {
     this.devFileReader = devFileReader;
@@ -102,7 +104,7 @@ export class RemoteTunnelManager {
 
         ws.send(JSON.stringify(request));
       }).catch((err) => {
-        console.error(`Failed to fetch ${path}:`, err.message);
+        this.logger.error("Failed to fetch asset", err as Error, { path });
         return { status: 504, body: Buffer.from(""), headers: {} };
       });
 
@@ -271,7 +273,7 @@ export class RemoteTunnelManager {
 
         if (isBinary) {
           if (!tunnel.waitingForBinaryBody) {
-            console.warn(
+            this.logger.debug(
               "Received binary message but no requestId is waiting for body",
             );
             return;
@@ -281,7 +283,9 @@ export class RemoteTunnelManager {
           const pending = tunnel.pendingFetches.get(requestId);
 
           if (!pending || !pending.metadata) {
-            console.warn("Received binary message but pending fetch not found");
+            this.logger.debug(
+              "Received binary message but pending fetch not found",
+            );
             tunnel.waitingForBinaryBody = null;
             return;
           }
@@ -307,12 +311,16 @@ export class RemoteTunnelManager {
 
               if (data.approved) {
                 tunnel.approvedViewers.add(data.viewer);
-                console.log(
-                  `✅ Approved ${data.viewer} for tunnel ${tunnelId}`,
-                );
+                this.logger.debug("Viewer approved", {
+                  viewer: data.viewer,
+                  tunnelId,
+                });
               } else {
                 tunnel.rejectedViewers.add(data.viewer);
-                console.log(`❌ Denied ${data.viewer} for tunnel ${tunnelId}`);
+                this.logger.debug("Viewer denied", {
+                  viewer: data.viewer,
+                  tunnelId,
+                });
               }
             }
           } else if (data.type === "fetch:response:meta") {
@@ -352,7 +360,9 @@ export class RemoteTunnelManager {
             }
           }
         } catch (e) {
-          console.error("Failed to parse WebSocket message:", e);
+          this.logger.error("Failed to parse WebSocket message", e as Error, {
+            error: e instanceof Error ? e.message : String(e),
+          });
         }
       });
 
@@ -362,7 +372,7 @@ export class RemoteTunnelManager {
         const tunnel = this.tunnels.get(tunnelId);
 
         if (tunnel) {
-          for (const [_, pending] of tunnel.pendingFetches) {
+          for (const [, pending] of Array.from(tunnel.pendingFetches)) {
             clearTimeout(pending.timeout);
             pending.reject(new Error("Tunnel closed"));
           }
@@ -393,7 +403,9 @@ export class RemoteTunnelManager {
       // Browser → CLI
       browserWs.on("message", (msg) => {
         const hmrStart = Date.now();
-        console.log("browser -> cli browserWS message", msg.toString());
+        this.logger.debug("Browser to CLI message", {
+          size: (msg as Buffer).length,
+        });
         cliWs.send(
           JSON.stringify({
             type: "hmr:message",
@@ -415,10 +427,9 @@ export class RemoteTunnelManager {
             browserWs.send(data.body);
           }
         } catch {
-          console.error(
-            "Failed to parse CLI message for HMR:",
-            msg.toString().substring(0, 100),
-          );
+          this.logger.error("Failed to parse CLI message for HMR", undefined, {
+            message: msg.toString().substring(0, 100),
+          });
         }
       };
       cliWs.on("message", cliHandler);
@@ -471,8 +482,8 @@ export class RemoteTunnelManager {
   }
 
   cleanup() {
-    for (const [, tunnel] of this.tunnels) {
-      for (const [_, pending] of tunnel.pendingFetches) {
+    for (const [, tunnel] of Array.from(this.tunnels)) {
+      for (const [, pending] of Array.from(tunnel.pendingFetches)) {
         clearTimeout(pending.timeout);
         pending.reject(new Error("Server shutting down"));
       }

@@ -1,5 +1,5 @@
-import type { CacheManager } from "../../cache";
 import type { CacheConfig } from "shared";
+import type { CacheManager } from "../../cache";
 import type { ExecutionContext, ExecutionInterceptor } from "./types";
 
 // interceptor to handle caching logic

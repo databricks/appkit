@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
+import { type ILogger, LoggerManager } from "@/observability";
 import { CACHE_VERSION, hashSQL, loadCache, saveCache } from "./cache";
 import { Spinner } from "./spinner";
 import {
@@ -18,7 +19,7 @@ import {
 export function extractParameters(sql: string): string[] {
   const matches = sql.matchAll(/:([a-zA-Z_]\w*)/g);
   const params = new Set<string>();
-  for (const match of matches) {
+  for (const match of Array.from(matches)) {
     params.add(match[1]);
   }
   return Array.from(params);
@@ -92,7 +93,7 @@ export function extractParameterTypes(sql: string): Record<string, string> {
   const regex =
     /--\s*@param\s+(\w+)\s+(STRING|NUMERIC|BOOLEAN|DATE|TIMESTAMP|BINARY)/gi;
   const matches = sql.matchAll(regex);
-  for (const match of matches) {
+  for (const match of Array.from(matches)) {
     const [, paramName, paramType] = match;
     paramTypes[paramName] = paramType.toUpperCase();
   }
@@ -116,12 +117,14 @@ export async function generateQueriesFromDescribe(
 ): Promise<QuerySchema[]> {
   const { noCache = false } = options;
 
+  const logger: ILogger = LoggerManager.getLogger("query-registry");
+
   // read all query files in the folder
   const queryFiles = fs
     .readdirSync(queryFolder)
     .filter((file) => file.endsWith(".sql"));
 
-  console.log(`  Found ${queryFiles.length} SQL queries\n`);
+  logger.debug("Found SQL queries", { count: queryFiles.length });
 
   // load cache
   const cache = noCache ? { version: CACHE_VERSION, queries: {} } : loadCache();
@@ -193,7 +196,10 @@ export async function generateQueriesFromDescribe(
 
   // log warning if there are failed queries
   if (failedQueries.length > 0) {
-    console.warn(`  Warning: ${failedQueries.length} queries failed\n`);
+    logger.warn("Query validation warnings", {
+      failed: failedQueries.length,
+      queries: failedQueries,
+    });
   }
 
   return querySchemas;

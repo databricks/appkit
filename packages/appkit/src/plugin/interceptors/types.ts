@@ -3,6 +3,8 @@ export interface ExecutionContext {
   metadata?: Map<string, any>;
   userKey: string;
   asUser?: boolean;
+  pluginName: string;
+  operation?: string;
 }
 
 export interface ExecutionInterceptor {

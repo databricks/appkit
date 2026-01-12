@@ -11,19 +11,15 @@ import type {
   StreamExecuteHandler,
   StreamExecutionSettings,
 } from "shared";
+import { type ILogger, LoggerManager } from "@/observability";
 import { AppManager } from "../app";
 import { CacheManager } from "../cache";
 import { StreamManager } from "../stream";
-import {
-  type ITelemetry,
-  normalizeTelemetryOptions,
-  TelemetryManager,
-} from "../telemetry";
 import { deepMerge, validateEnv } from "../utils";
 import { DevFileReader } from "./dev-reader";
 import { CacheInterceptor } from "./interceptors/cache";
+import { ObservabilityInterceptor } from "./interceptors/observability";
 import { RetryInterceptor } from "./interceptors/retry";
-import { TelemetryInterceptor } from "./interceptors/telemetry";
 import { TimeoutInterceptor } from "./interceptors/timeout";
 import type {
   ExecutionContext,
@@ -39,7 +35,7 @@ export abstract class Plugin<
   protected app: AppManager;
   protected devFileReader: DevFileReader;
   protected streamManager: StreamManager;
-  protected telemetry: ITelemetry;
+  protected logger: ILogger;
   protected abstract envVars: string[];
 
   /** If the plugin requires the Databricks client to be set in the request context */
@@ -53,7 +49,7 @@ export abstract class Plugin<
 
   constructor(protected config: TConfig) {
     this.name = config.name ?? "plugin";
-    this.telemetry = TelemetryManager.getProvider(this.name, config.telemetry);
+    this.logger = LoggerManager.getLogger(this.name, config?.observability);
     this.streamManager = new StreamManager();
     this.cache = CacheManager.getInstanceSync();
     this.app = new AppManager();
@@ -100,6 +96,8 @@ export abstract class Plugin<
       user: userConfig,
     });
 
+    const interceptors = this._buildInterceptors(executeConfig);
+
     const self = this;
 
     // wrapper function to ensure it returns a generator
@@ -109,10 +107,8 @@ export abstract class Plugin<
         signal: streamSignal,
         metadata: new Map(),
         userKey: userKey,
+        pluginName: self.name,
       };
-
-      // build interceptors
-      const interceptors = self._buildInterceptors(executeConfig);
 
       // wrap the function to ensure it returns a promise
       const wrappedFn = async () => {
@@ -152,6 +148,7 @@ export abstract class Plugin<
     const context: ExecutionContext = {
       metadata: new Map(),
       userKey: userKey,
+      pluginName: this.name,
     };
 
     try {
@@ -183,9 +180,11 @@ export abstract class Plugin<
   ): PluginExecuteConfig {
     const { default: methodDefaults, user: userOverride } = options;
 
-    // Merge: method defaults <- plugin config <- user override (highest priority)
+    const { observability: _, ...pluginConfigWithoutObservability } =
+      this.config;
+
     return deepMerge(
-      deepMerge(methodDefaults, this.config),
+      deepMerge(methodDefaults, pluginConfigWithoutObservability),
       userOverride ?? {},
     ) as PluginExecuteConfig;
   }
@@ -196,17 +195,24 @@ export abstract class Plugin<
   ): ExecutionInterceptor[] {
     const interceptors: ExecutionInterceptor[] = [];
 
-    // order matters: telemetry → timeout → retry → cache (innermost to outermost)
+    // order matters: observability → timeout → retry → cache (innermost to outermost)
 
-    // Only add telemetry interceptor if traces are enabled
-    const telemetryConfig = normalizeTelemetryOptions(this.config.telemetry);
-    if (
-      telemetryConfig.traces &&
-      (options.telemetryInterceptor?.enabled ?? true)
-    ) {
-      interceptors.push(
-        new TelemetryInterceptor(this.telemetry, options.telemetryInterceptor),
-      );
+    // Check if traces are enabled (from plugin config OR execution config)
+    const pluginObservability = this.config?.observability;
+    const executeObservability = options.observability;
+
+    // Merge: execution config overrides plugin config
+    const tracesEnabled =
+      typeof executeObservability === "boolean"
+        ? executeObservability
+        : typeof executeObservability === "object"
+          ? (executeObservability.traces ?? true)
+          : typeof pluginObservability === "boolean"
+            ? pluginObservability
+            : (pluginObservability?.traces ?? true);
+
+    if (tracesEnabled) {
+      interceptors.push(new ObservabilityInterceptor(this.logger));
     }
 
     if (options.timeout && options.timeout > 0) {

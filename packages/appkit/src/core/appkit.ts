@@ -2,14 +2,32 @@ import type {
   BasePlugin,
   CacheConfig,
   InputPluginMap,
+  ObservabilityOptions,
   OptionalConfigPluginDef,
   PluginConstructor,
   PluginData,
   PluginMap,
 } from "shared";
+import { LoggerManager, type ObservabilityConfig } from "@/observability";
 import { CacheManager } from "../cache";
-import type { TelemetryConfig } from "../telemetry";
-import { TelemetryManager } from "../telemetry";
+
+function normalizeObservabilityOptions(
+  options?: ObservabilityOptions,
+): ObservabilityConfig {
+  if (options === undefined) {
+    return {};
+  }
+
+  if (typeof options === "boolean") {
+    return { enabled: options };
+  }
+
+  return {
+    traces: options.traces,
+    metrics: options.metrics,
+    logs: options.logs,
+  };
+}
 
 export class AppKit<TPlugins extends InputPluginMap> {
   private static _instance: AppKit<InputPluginMap> | null = null;
@@ -87,11 +105,13 @@ export class AppKit<TPlugins extends InputPluginMap> {
   >(
     config: {
       plugins?: T;
-      telemetry?: TelemetryConfig;
+      observability?: ObservabilityOptions;
       cache?: CacheConfig;
     } = {},
   ): Promise<PluginMap<T>> {
-    TelemetryManager.initialize(config?.telemetry);
+    LoggerManager.initialize(
+      normalizeObservabilityOptions(config?.observability),
+    );
     await CacheManager.getInstance(config?.cache);
 
     const rawPlugins = config.plugins as T;
@@ -126,7 +146,7 @@ export async function createApp<
 >(
   config: {
     plugins?: T;
-    telemetry?: TelemetryConfig;
+    observability?: ObservabilityOptions;
     cache?: CacheConfig;
   } = {},
 ): Promise<PluginMap<T>> {

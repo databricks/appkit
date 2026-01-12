@@ -1,4 +1,5 @@
 import type { CacheConfig } from "./cache";
+import type { ObservabilityOptions } from "./plugin";
 
 export interface StreamConfig {
   userSignal?: AbortSignal;
@@ -19,17 +20,10 @@ export interface RetryConfig {
   maxDelay?: number;
 }
 
-export interface TelemetryConfig {
-  enabled?: boolean;
-  spanName?: string;
-  attributes?: Record<string, any>;
-}
-
 export interface PluginExecuteConfig {
   cache?: CacheConfig;
   retry?: RetryConfig;
-  // to not mix with the 'telemetry' plugin config property - it is a different thing
-  telemetryInterceptor?: TelemetryConfig;
+  observability?: ObservabilityOptions;
   abort?: AbortSignal;
   timeout?: number;
   [key: string]: unknown;

@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { type ILogger, LoggerManager } from "../observability";
 
 interface RequestLike {
   query?: Record<string, any>;
@@ -11,6 +12,7 @@ interface DevFileReader {
 }
 
 export class AppManager {
+  private logger: ILogger = LoggerManager.getLogger("app-manager");
   /**
    * Retrieves a query file by key from the queries directory
    * In dev mode with a request context, reads from local filesystem via WebSocket
@@ -27,9 +29,11 @@ export class AppManager {
   ): Promise<string | null> {
     // Security: Sanitize query key to prevent path traversal
     if (!queryKey || !/^[a-zA-Z0-9_-]+$/.test(queryKey)) {
-      console.error(
-        `Invalid query key format: "${queryKey}". Only alphanumeric characters, underscores, and hyphens are allowed.`,
-      );
+      this.logger.debug("Invalid query key format", {
+        queryKey,
+        reason:
+          "Only alphanumeric characters, underscores, and hyphens are allowed.",
+      });
       return null;
     }
 
@@ -44,7 +48,9 @@ export class AppManager {
     const queriesDir = path.resolve(process.cwd(), "config/queries");
 
     if (!resolvedPath.startsWith(queriesDir)) {
-      console.error(`Invalid query path: path traversal detected`);
+      this.logger.debug("Invalid query path - traversal detected", {
+        queryKey,
+      });
       return null;
     }
 
@@ -57,9 +63,10 @@ export class AppManager {
         const relativePath = path.relative(process.cwd(), resolvedPath);
         return await devFileReader.readFile(relativePath, req);
       } catch (error) {
-        console.error(
-          `Failed to read query "${queryKey}" from dev tunnel: ${(error as Error).message}`,
-        );
+        this.logger.debug("Failed to read query from dev tunnel", {
+          queryKey,
+          error: error instanceof Error ? error.message : String(error),
+        });
         return null;
       }
     }
@@ -70,12 +77,14 @@ export class AppManager {
       return query;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        console.error(`Query "${queryKey}" not found at path: ${resolvedPath}`);
+        this.logger.debug("Query not found", { queryKey, path: resolvedPath });
         return null;
       }
-      console.error(
-        `Failed to read query "${queryKey}" from server filesystem: ${(error as Error).message}`,
-      );
+      this.logger.debug("Failed to read query from filesystem", {
+        queryKey,
+        path: resolvedPath,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return null;
     }
   }

@@ -11,15 +11,15 @@ export {
 export { analytics } from "./analytics";
 export { CacheManager } from "./cache";
 export { createApp } from "./core";
-export { Plugin, toPlugin } from "./plugin";
-export { server } from "./server";
-export type { ITelemetry } from "./telemetry";
+export type { ObservabilityConfig } from "./observability";
 export {
   type Counter,
   type Histogram,
-  SeverityNumber,
+  otel,
   type Span,
   SpanStatusCode,
-} from "./telemetry";
+} from "./observability";
+export { Plugin, toPlugin } from "./plugin";
+export { server } from "./server";
 export { appKitTypesPlugin } from "./type-generator/vite-plugin";
 export { getRequestContext } from "./utils";

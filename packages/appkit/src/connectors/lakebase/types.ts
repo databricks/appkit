@@ -1,5 +1,5 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
-import type { TelemetryOptions } from "shared";
+import type { ObservabilityOptions } from "@/observability";
 
 /** Configuration for LakebaseConnector */
 export interface LakebaseConfig {
@@ -33,8 +33,8 @@ export interface LakebaseConfig {
   /** Connection timeout (milliseconds) */
   connectionTimeoutMs: number;
 
-  /** Telemetry configuration */
-  telemetry?: TelemetryOptions;
+  /** Observability configuration */
+  observability?: ObservabilityOptions;
 
   /** Additional configuration options */
   [key: string]: unknown;

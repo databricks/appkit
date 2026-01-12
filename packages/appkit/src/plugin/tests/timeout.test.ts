@@ -7,6 +7,7 @@ describe("TimeoutInterceptor", () => {
 
   beforeEach(() => {
     context = {
+      pluginName: "test",
       metadata: new Map(),
       userKey: "test",
     };
@@ -62,6 +63,7 @@ describe("TimeoutInterceptor", () => {
   test("should combine user signal with timeout signal", async () => {
     const userController = new AbortController();
     const contextWithSignal: ExecutionContext = {
+      pluginName: "test",
       metadata: new Map(),
       signal: userController.signal,
       userKey: "test",
@@ -83,6 +85,7 @@ describe("TimeoutInterceptor", () => {
   test("should combine signals when user signal exists", async () => {
     const userController = new AbortController();
     const contextWithSignal: ExecutionContext = {
+      pluginName: "test",
       metadata: new Map(),
       signal: userController.signal,
       userKey: "test",
@@ -106,6 +109,7 @@ describe("TimeoutInterceptor", () => {
     userController.abort(new Error("Already aborted"));
 
     const contextWithSignal: ExecutionContext = {
+      pluginName: "test",
       metadata: new Map(),
       signal: userController.signal,
       userKey: "test",

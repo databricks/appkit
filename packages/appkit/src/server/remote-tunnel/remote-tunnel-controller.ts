@@ -1,5 +1,6 @@
 import type { Server as HTTPServer } from "node:http";
 import type express from "express";
+import { type ILogger, LoggerManager } from "@/observability";
 import type { DevFileReader } from "../../plugin/dev-reader";
 import {
   hasDevQuery,
@@ -23,6 +24,7 @@ export class RemoteTunnelController {
   private manager: RemoteTunnelManager | null;
   private initPromise: Promise<RemoteTunnelManager | null> | null;
   private wsReady: boolean;
+  private logger: ILogger = LoggerManager.getLogger("remote-tunnel-controller");
 
   constructor(devFileReader: DevFileReader) {
     this.devFileReader = devFileReader;
@@ -124,7 +126,7 @@ export class RemoteTunnelController {
       // attach server + ws setup
       this.maybeSetupWebSocket();
 
-      console.log("RemoteTunnel: initialized (on-demand)");
+      this.logger.debug("Initialized (on-demand)");
       return remoteTunnelManager;
     })();
 
@@ -147,6 +149,6 @@ export class RemoteTunnelController {
     this.manager.setupWebSocket();
     this.wsReady = true;
 
-    console.log("RemoteTunnel: web socket setup complete");
+    this.logger.debug("WebSocket setup complete");
   }
 }

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { CacheConfig, CacheEntry, CacheStorage } from "shared";
+import { type ILogger, LoggerManager } from "@/observability";
 import type { LakebaseConnector } from "../../connectors";
 import { lakebaseStorageDefaults } from "./defaults";
 
@@ -25,6 +26,8 @@ export class PersistentStorage implements CacheStorage {
   private readonly evictionBatchSize: number;
   private readonly evictionCheckProbability: number;
   private initialized: boolean;
+  private readonly logger: ILogger =
+    LoggerManager.getLogger("persistent-storage");
 
   constructor(config: CacheConfig, connector: LakebaseConnector) {
     this.connector = connector;
@@ -47,7 +50,10 @@ export class PersistentStorage implements CacheStorage {
       await this.runMigrations();
       this.initialized = true;
     } catch (error) {
-      console.error("Error in persistent storage initialization:", error);
+      this.logger.error(
+        "Error in persistent storage initialization",
+        error as Error,
+      );
       throw error;
     }
   }
@@ -80,7 +86,11 @@ export class PersistentStorage implements CacheStorage {
         [keyHash],
       )
       .catch(() => {
-        console.debug("Error updating last_accessed time for key:", key);
+        this.logger.error(
+          "Error updating last_accessed time for key",
+          undefined,
+          { key },
+        );
       });
 
     return {
@@ -302,9 +312,9 @@ export class PersistentStorage implements CacheStorage {
         `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_byte_size ON ${this.tableName} (byte_size); `,
       );
     } catch (error) {
-      console.error(
-        "Error in running migrations for persistent storage:",
-        error,
+      this.logger.error(
+        "Error in running migrations for persistent storage",
+        error as Error,
       );
       throw error;
     }

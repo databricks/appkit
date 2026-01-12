@@ -36,7 +36,7 @@ export class AnalyticsPlugin extends Plugin {
 
     this.SQLClient = new SQLWarehouseConnector({
       timeout: config.timeout,
-      telemetry: config.telemetry,
+      observability: config?.observability,
     });
   }
 
@@ -85,25 +85,30 @@ export class AnalyticsPlugin extends Plugin {
   ): Promise<void> {
     try {
       const { jobId } = req.params;
-
       const workspaceClient = getWorkspaceClient(asUser);
 
-      console.log(
-        `Processing Arrow job request: ${jobId} for plugin: ${this.name}`,
-      );
+      this.logger.info("Fetching arrow data", {
+        operation: "arrow_fetch",
+        job_id: jobId,
+      });
 
       const result = await this.getArrowData(workspaceClient, jobId);
+
+      this.logger.info("Arrow data fetched", {
+        job_id: jobId,
+        bytes_returned: result.data.length,
+      });
 
       res.setHeader("Content-Type", "application/octet-stream");
       res.setHeader("Content-Length", result.data.length.toString());
       res.setHeader("Cache-Control", "public, max-age=3600");
 
-      console.log(
-        `Sending Arrow buffer: ${result.data.length} bytes for job ${jobId}`,
-      );
       res.send(Buffer.from(result.data));
     } catch (error) {
-      console.error(`Arrow job error for ${this.name}:`, error);
+      this.logger.error("Arrow fetch failed", error as Error, {
+        plugin: this.name,
+      });
+
       res.status(404).json({
         error: error instanceof Error ? error.message : "Arrow job not found",
         plugin: this.name,
@@ -118,6 +123,7 @@ export class AnalyticsPlugin extends Plugin {
   ): Promise<void> {
     const { query_key } = req.params;
     const { parameters, format = "JSON" } = req.body as IAnalyticsQueryRequest;
+
     const queryParameters =
       format === "ARROW"
         ? {
@@ -130,6 +136,12 @@ export class AnalyticsPlugin extends Plugin {
         : {
             type: "result",
           };
+
+    this.logger.info("Processing query", {
+      query_key,
+      format,
+      parameter_count: parameters ? Object.keys(parameters).length : 0,
+    });
 
     const requestContext = getRequestContext();
     const userKey = asUser

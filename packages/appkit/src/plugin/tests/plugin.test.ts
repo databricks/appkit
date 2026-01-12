@@ -1,17 +1,14 @@
-import type { ITelemetry, TelemetryProvider } from "../../telemetry";
-import { TelemetryManager } from "../../telemetry";
+import type express from "express";
+import type {
+  BasePluginConfig,
+  IAppResponse,
+  PluginExecuteConfig,
+} from "shared";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AppManager } from "../../app";
 import { CacheManager } from "../../cache";
 import { StreamManager } from "../../stream";
-import type {
-  BasePluginConfig,
-  PluginExecuteConfig,
-  IAppResponse,
-} from "shared";
-import { createMockTelemetry } from "@tools/test-helpers";
 import { validateEnv } from "../../utils";
-import type express from "express";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { ExecutionContext } from "../interceptors/types";
 import { Plugin } from "../plugin";
 
@@ -122,7 +119,6 @@ class PluginWithRoutes extends TestPlugin {
 }
 
 describe("Plugin", () => {
-  let mockTelemetry: ITelemetry;
   let mockCache: CacheManager;
   let mockApp: AppManager;
   let mockStreamManager: StreamManager;
@@ -130,8 +126,6 @@ describe("Plugin", () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-
-    mockTelemetry = createMockTelemetry();
 
     mockCache = {
       get: vi.fn(),
@@ -159,9 +153,6 @@ describe("Plugin", () => {
     vi.mocked(CacheManager.getInstanceSync).mockReturnValue(mockCache);
     vi.mocked(AppManager).mockImplementation(() => mockApp);
     vi.mocked(StreamManager).mockImplementation(() => mockStreamManager);
-    vi.mocked(TelemetryManager.getProvider).mockReturnValue(
-      mockTelemetry as TelemetryProvider,
-    );
     vi.mocked(validateEnv).mockImplementation(() => {});
 
     vi.clearAllMocks();
@@ -395,18 +386,14 @@ describe("Plugin", () => {
 
       expect(interceptors).toHaveLength(4); // telemetry + timeout + retry + cache
 
-      // Import interceptor classes dynamically to avoid module resolution issues
-      const { TelemetryInterceptor } = await import(
-        "../interceptors/telemetry"
+      const { ObservabilityInterceptor } = await import(
+        "../interceptors/observability"
       );
       const { TimeoutInterceptor } = await import("../interceptors/timeout");
       const { RetryInterceptor } = await import("../interceptors/retry");
       const { CacheInterceptor } = await import("../interceptors/cache");
 
-      expect(TelemetryInterceptor).toHaveBeenCalledWith(
-        mockTelemetry,
-        options.telemetryInterceptor,
-      );
+      expect(ObservabilityInterceptor).toHaveBeenCalledWith(expect.any(Object));
       expect(TimeoutInterceptor).toHaveBeenCalledWith(5000);
       expect(RetryInterceptor).toHaveBeenCalledWith({
         enabled: true,
@@ -502,6 +489,7 @@ describe("Plugin", () => {
       const context: ExecutionContext = {
         metadata: new Map(),
         userKey: "test",
+        pluginName: plugin.name,
       };
 
       // @ts-expect-error - _executeWithInterceptors is private
@@ -515,6 +503,7 @@ describe("Plugin", () => {
       const plugin = new TestPlugin(config);
       const mockFn = vi.fn().mockResolvedValue("chained-result");
       const context: ExecutionContext = {
+        pluginName: plugin.name,
         metadata: new Map(),
         userKey: "test",
       };
@@ -542,6 +531,7 @@ describe("Plugin", () => {
       const plugin = new TestPlugin(config);
       const mockFn = vi.fn().mockResolvedValue("context-result");
       const context: ExecutionContext = {
+        pluginName: plugin.name,
         metadata: new Map(),
         asUser: true,
         signal: new AbortController().signal,

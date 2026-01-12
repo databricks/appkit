@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { IAppResponse, StreamConfig } from "shared";
+import { type ILogger, LoggerManager } from "@/observability";
 import { EventRingBuffer } from "./buffers";
 import { streamDefaults } from "./defaults";
 import { SSEWriter } from "./sse-writer";
@@ -14,6 +15,8 @@ export class StreamManager {
   private sseWriter: SSEWriter;
   private maxEventSize: number;
   private bufferTTL: number;
+
+  private logger: ILogger = LoggerManager.getLogger("stream-manager");
 
   constructor(options?: StreamConfig) {
     this.streamRegistry = new StreamRegistry(
@@ -33,6 +36,9 @@ export class StreamManager {
   ): Promise<void> {
     const { streamId } = options || {};
 
+    const event = this.logger.getEvent();
+    event?.setStream({ stream_id: streamId || "new" });
+
     // setup SSE headers
     this.sseWriter.setupHeaders(res);
 
@@ -41,6 +47,7 @@ export class StreamManager {
       const existingStream = this.streamRegistry.get(streamId);
       // if stream exists, attach to it
       if (existingStream) {
+        event?.setStream({ reconnection: true });
         return this._attachToExistingStream(res, existingStream, options);
       }
     }
@@ -190,12 +197,15 @@ export class StreamManager {
   private async _processGeneratorInBackground(
     streamEntry: StreamEntry,
   ): Promise<void> {
+    const event = this.logger.getEvent();
+    let eventCount = 0;
+
     try {
       // retrieve all events from generator
-      for await (const event of streamEntry.generator) {
+      for await (const generatorEvent of streamEntry.generator) {
         if (streamEntry.abortController.signal.aborted) break;
         const eventId = randomUUID();
-        const eventData = JSON.stringify(event);
+        const eventData = JSON.stringify(generatorEvent);
 
         // validate event size
         if (eventData.length > this.maxEventSize) {
@@ -214,17 +224,21 @@ export class StreamManager {
         // buffer event for reconnection
         streamEntry.eventBuffer.add({
           id: eventId,
-          type: event.type,
+          type: generatorEvent.type,
           data: eventData,
           timestamp: Date.now(),
         });
 
+        eventCount++;
+
         // broadcast to all connected clients
-        this._broadcastEventsToClients(streamEntry, eventId, event);
+        this._broadcastEventsToClients(streamEntry, eventId, generatorEvent);
         streamEntry.lastAccess = Date.now();
       }
 
       streamEntry.isCompleted = true;
+
+      event?.setStream({ events_sent: eventCount });
 
       // close all clients
       this._closeAllClients(streamEntry);
@@ -232,6 +246,9 @@ export class StreamManager {
       // cleanup if no clients are connected
       this._cleanupStream(streamEntry);
     } catch (error) {
+      event?.setStream({ events_sent: eventCount });
+      event?.setError(error as Error);
+
       const errorMsg =
         error instanceof Error ? error.message : "Internal server error";
       const errorEventId = randomUUID();
@@ -291,7 +308,7 @@ export class StreamManager {
     eventId: string,
     event: any,
   ): void {
-    for (const client of streamEntry.clients) {
+    for (const client of Array.from(streamEntry.clients)) {
       if (!client.writableEnded) {
         this.sseWriter.writeEvent(client, eventId, event);
       }
@@ -306,7 +323,7 @@ export class StreamManager {
     errorCode: SSEErrorCode,
     closeClients: boolean = false,
   ): void {
-    for (const client of streamEntry.clients) {
+    for (const client of Array.from(streamEntry.clients)) {
       if (!client.writableEnded) {
         this.sseWriter.writeError(client, eventId, errorMessage, errorCode);
         if (closeClients) {
@@ -318,7 +335,7 @@ export class StreamManager {
 
   // close all connected clients
   private _closeAllClients(streamEntry: StreamEntry): void {
-    for (const client of streamEntry.clients) {
+    for (const client of Array.from(streamEntry.clients)) {
       if (!client.writableEnded) {
         client.end();
       }

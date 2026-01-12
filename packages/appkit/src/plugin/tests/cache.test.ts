@@ -83,6 +83,7 @@ describe("CacheInterceptor", () => {
   beforeEach(() => {
     cacheManager = new MockCacheManager();
     context = {
+      pluginName: "test",
       metadata: new Map(),
       userKey: "service",
     };
@@ -181,6 +182,7 @@ describe("CacheInterceptor", () => {
       cacheKey: ["query", "sales"],
     };
     const contextWithToken: ExecutionContext = {
+      pluginName: "test",
       metadata: new Map(),
       userKey: "user1",
     };
@@ -214,6 +216,7 @@ describe("CacheInterceptor", () => {
 
     // Service account context
     const context1: ExecutionContext = {
+      pluginName: "test",
       metadata: new Map(),
       userKey: "service",
     };
@@ -222,6 +225,7 @@ describe("CacheInterceptor", () => {
 
     // User context
     const context2: ExecutionContext = {
+      pluginName: "test",
       metadata: new Map(),
       userKey: "user1",
     };

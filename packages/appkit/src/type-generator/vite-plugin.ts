@@ -1,6 +1,7 @@
+import fs from "node:fs";
 import path from "node:path";
 import type { Plugin } from "vite";
-import fs from "node:fs";
+import { type ILogger, LoggerManager } from "@/observability";
 import { generateFromEntryPoint } from "./index";
 
 /**
@@ -24,14 +25,14 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
   let outFile: string;
   let watchFolders: string[];
 
+  const logger: ILogger = LoggerManager.getLogger("type-generator-plugin");
+
   async function generate() {
     try {
       const warehouseId = process.env.DATABRICKS_WAREHOUSE_ID || "";
 
       if (!warehouseId) {
-        console.warn(
-          "[AppKit] Warehouse ID not found. Skipping type generation.",
-        );
+        logger.warn("Warehouse ID not found. Skipping type generation.");
         return;
       }
 
@@ -46,7 +47,9 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
       if (process.env.NODE_ENV === "production") {
         throw error;
       }
-      console.error("[AppKit] Error generating types:", error);
+      logger.error("Error generating types", error as Error, {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -57,9 +60,7 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
       const warehouseId = process.env.DATABRICKS_WAREHOUSE_ID || "";
 
       if (!warehouseId) {
-        console.warn(
-          "[AppKit] Warehouse ID not found. Skipping type generation.",
-        );
+        logger.warn("Warehouse ID not found. Skipping type generation.");
         return false;
       }
 

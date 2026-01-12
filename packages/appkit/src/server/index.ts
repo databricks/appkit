@@ -4,13 +4,14 @@ import path from "node:path";
 import dotenv from "dotenv";
 import express from "express";
 import type { PluginPhase } from "shared";
+import { LoggerManager } from "@/observability";
+import { createDebug } from "@/observability/debug";
 import { Plugin, toPlugin } from "../plugin";
-import { instrumentations } from "../telemetry";
 import { databricksClientMiddleware } from "../utils";
 import { RemoteTunnelController } from "./remote-tunnel/remote-tunnel-controller";
 import { StaticServer } from "./static-server";
 import type { ServerConfig } from "./types";
-import { type PluginEndpoints, getRoutes } from "./utils";
+import { getRoutes, type PluginEndpoints } from "./utils";
 import { ViteDevServer } from "./vite-dev-server";
 
 dotenv.config({ path: path.resolve(process.cwd(), "./.env") });
@@ -45,6 +46,7 @@ export class ServerPlugin extends Plugin {
   protected declare config: ServerConfig;
   private serverExtensions: ((app: express.Application) => void)[] = [];
   static phase: PluginPhase = "deferred";
+  private debug = createDebug("server");
 
   constructor(config: ServerConfig) {
     super(config);
@@ -52,10 +54,6 @@ export class ServerPlugin extends Plugin {
     this.serverApplication = express();
     this.server = null;
     this.serverExtensions = [];
-    this.telemetry.registerInstrumentations([
-      instrumentations.http,
-      instrumentations.express,
-    ]);
   }
 
   /** Setup the server plugin. */
@@ -86,6 +84,7 @@ export class ServerPlugin extends Plugin {
    * @returns The express application.
    */
   async start(): Promise<express.Application> {
+    this.serverApplication.use(LoggerManager.getMiddleware());
     this.serverApplication.use(express.json());
 
     const endpoints = await this.extendRoutes();
@@ -118,7 +117,7 @@ export class ServerPlugin extends Plugin {
 
     if (process.env.NODE_ENV === "development") {
       const allRoutes = getRoutes(this.serverApplication._router.stack);
-      console.dir(allRoutes, { depth: null });
+      this.debug("Registered routes", { routes: allRoutes });
     }
     return this.serverApplication;
   }
@@ -247,7 +246,6 @@ export class ServerPlugin extends Plugin {
     for (const p of staticPaths) {
       const fullPath = path.resolve(cwd, p);
       if (fs.existsSync(path.resolve(fullPath, "index.html"))) {
-        console.log(`Static files: serving from ${fullPath}`);
         return fullPath;
       }
     }
@@ -260,30 +258,23 @@ export class ServerPlugin extends Plugin {
     const port = this.config.port ?? ServerPlugin.DEFAULT_CONFIG.port;
     const host = this.config.host ?? ServerPlugin.DEFAULT_CONFIG.host;
 
-    console.log(`Server running on http://${host}:${port}`);
-
-    if (hasExplicitStaticPath) {
-      console.log(`Mode: static (${this.config.staticPath})`);
-    } else if (isDev) {
-      console.log("Mode: development (Vite HMR)");
-    } else {
-      console.log("Mode: production (static)");
-    }
-
-    const remoteServerController = this.remoteTunnelController;
-    if (!remoteServerController) {
-      console.log("Remote tunnel: disabled (controller not initialized)");
-    } else {
-      console.log(
-        `Remote tunnel: ${
-          remoteServerController.isAllowedByEnv() ? "allowed" : "blocked"
-        }; ${remoteServerController.isActive() ? "active" : "inactive"}`,
-      );
-    }
+    this.debug("Server started", {
+      url: `http://${host}:${port}`,
+      mode: hasExplicitStaticPath
+        ? "static"
+        : isDev
+          ? "development"
+          : "production",
+      staticPath: this.config.staticPath,
+      remoteTunnel: {
+        allowed: this.remoteTunnelController?.isAllowedByEnv(),
+        active: this.remoteTunnelController?.isActive(),
+      },
+    });
   }
 
   private async _gracefulShutdown() {
-    console.log("Starting graceful shutdown...");
+    this.debug("Starting graceful shutdown");
 
     if (this.viteDevServer) {
       await this.viteDevServer.close();
@@ -312,13 +303,13 @@ export class ServerPlugin extends Plugin {
     // 2. close the server
     if (this.server) {
       this.server.close(() => {
-        console.log("Server closed gracefully");
+        this.debug("Server closed gracefully");
         process.exit(0);
       });
 
       // 3. timeout to force shutdown after 15 seconds
       setTimeout(() => {
-        console.log("Force shutdown after timeout");
+        this.debug("Force shutdown after timeout");
         process.exit(1);
       }, 15000);
     } else {

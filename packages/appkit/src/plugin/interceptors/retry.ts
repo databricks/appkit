@@ -1,13 +1,16 @@
 import type { RetryConfig } from "shared";
+import { type ILogger, LoggerManager } from "@/observability";
 import type { ExecutionContext, ExecutionInterceptor } from "./types";
 
 // interceptor to handle retry logic
 export class RetryInterceptor implements ExecutionInterceptor {
+  private logger: ILogger;
   private attempts: number;
   private initialDelay: number;
   private maxDelay: number;
 
   constructor(config: RetryConfig) {
+    this.logger = LoggerManager.getLogger("retry-interceptor");
     this.attempts = config.attempts ?? 3;
     this.initialDelay = config.initialDelay ?? 1000;
     this.maxDelay = config.maxDelay ?? 30000;
@@ -17,6 +20,8 @@ export class RetryInterceptor implements ExecutionInterceptor {
     fn: () => Promise<T>,
     context: ExecutionContext,
   ): Promise<T> {
+    const event = this.logger.getEvent();
+
     let lastError: Error | unknown;
 
     for (let attempt = 1; attempt <= this.attempts; attempt++) {
@@ -24,6 +29,8 @@ export class RetryInterceptor implements ExecutionInterceptor {
         return await fn();
       } catch (error) {
         lastError = error;
+
+        event?.setExecution({ retry_attempts: attempt });
 
         // last attempt, rethrow the error
         if (attempt === this.attempts) {

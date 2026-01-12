@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { TunnelConnection } from "shared";
+import { type ILogger, LoggerManager } from "@/observability";
 import { isRemoteTunnelAllowedByEnv } from "@/server/remote-tunnel/gate";
 
 type TunnelConnectionGetter = (
@@ -13,6 +14,7 @@ type TunnelConnectionGetter = (
 export class DevFileReader {
   private static instance: DevFileReader | null = null;
   private getTunnelForRequest: TunnelConnectionGetter | null = null;
+  private logger: ILogger = LoggerManager.getLogger("dev-reader");
 
   private constructor() {}
 
@@ -31,7 +33,10 @@ export class DevFileReader {
 
           if (typeof value === "function") {
             return function noop() {
-              console.info(`Noop: ${String(prop)} (remote server disabled)`);
+              DevFileReader.getInstance().logger.debug("Noop", {
+                prop: String(prop),
+                reason: "remote server disabled",
+              });
               return Promise.resolve("");
             };
           }

@@ -2,8 +2,12 @@ import { createHash } from "node:crypto";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { CacheConfig, CacheStorage } from "shared";
 import { LakebaseConnector } from "@/connectors";
-import type { Counter, TelemetryProvider } from "../telemetry";
-import { SpanStatusCode, TelemetryManager } from "../telemetry";
+import {
+  type Counter,
+  type ILogger,
+  LoggerManager,
+  SpanStatusCode,
+} from "@/observability";
 import { deepMerge } from "../utils";
 import { cacheDefaults } from "./defaults";
 import { InMemoryStorage, PersistentStorage } from "./storage";
@@ -33,9 +37,8 @@ export class CacheManager {
   private cleanupInProgress: boolean;
   private lastCleanupAttempt: number;
 
-  // Telemetry
-  private telemetry: TelemetryProvider;
-  private telemetryMetrics: {
+  private logger: ILogger;
+  private metrics: {
     cacheHitCount: Counter;
     cacheMissCount: Counter;
   };
@@ -47,16 +50,14 @@ export class CacheManager {
     this.cleanupInProgress = false;
     this.lastCleanupAttempt = 0;
 
-    this.telemetry = TelemetryManager.getProvider(
-      this.name,
-      this.config.telemetry,
-    );
-    this.telemetryMetrics = {
-      cacheHitCount: this.telemetry.getMeter().createCounter("cache.hit", {
+    this.logger = LoggerManager.getLogger(this.name, config?.observability);
+
+    this.metrics = {
+      cacheHitCount: this.logger.counter("cache.hit", {
         description: "Total number of cache hits",
         unit: "1",
       }),
-      cacheMissCount: this.telemetry.getMeter().createCounter("cache.miss", {
+      cacheMissCount: this.logger.counter("cache.miss", {
         description: "Total number of cache misses",
         unit: "1",
       }),
@@ -181,87 +182,90 @@ export class CacheManager {
   ): Promise<T> {
     if (!this.config.enabled) return fn();
 
+    const event = this.logger.getEvent();
     const cacheKey = this.generateKey(key, userKey);
 
-    return this.telemetry.startActiveSpan(
-      "cache.getOrExecute",
-      {
-        attributes: {
-          "cache.key": cacheKey,
-          "cache.enabled": this.config.enabled,
-          "cache.persistent": this.storage.isPersistent(),
-        },
-      },
-      async (span) => {
-        try {
-          // check if the value is in the cache
-          const cached = await this.storage.get<T>(cacheKey);
-          if (cached !== null) {
-            span.setAttribute("cache.hit", true);
-            span.setStatus({ code: SpanStatusCode.OK });
-            this.telemetryMetrics.cacheHitCount.add(1, {
-              "cache.key": cacheKey,
-            });
-            return cached.value as T;
-          }
+    return this.logger.span("getOrExecute", async (span) => {
+      span.setAttribute("cache.key", cacheKey);
+      span.setAttribute("cache.enabled", this.config.enabled ?? false);
+      span.setAttribute(
+        "cache.persistent",
+        this.storage.isPersistent() ?? false,
+      );
 
-          // check if the value is being processed by another request
-          const inFlight = this.inFlightRequests.get(cacheKey);
-          if (inFlight) {
-            span.setAttribute("cache.hit", true);
-            span.setAttribute("cache.deduplication", true);
-            span.addEvent("cache.deduplication_used", {
-              "cache.key": cacheKey,
-            });
-            span.setStatus({ code: SpanStatusCode.OK });
-            this.telemetryMetrics.cacheHitCount.add(1, {
-              "cache.key": cacheKey,
-              "cache.deduplication": "true",
-            });
-            span.end();
-            return inFlight as Promise<T>;
-          }
-
-          // cache miss - execute function
-          span.setAttribute("cache.hit", false);
-          span.addEvent("cache.miss", { "cache.key": cacheKey });
-          this.telemetryMetrics.cacheMissCount.add(1, {
-            "cache.key": cacheKey,
+      try {
+        // check if the value is in the cache
+        const cached = await this.storage.get<T>(cacheKey);
+        if (cached !== null) {
+          event?.setExecution({
+            cache_hit: true,
+            cache_key: cacheKey,
           });
 
-          const promise = fn()
-            .then(async (result) => {
-              await this.set(cacheKey, result, options);
-              span.addEvent("cache.value_stored", {
-                "cache.key": cacheKey,
-                "cache.ttl": options?.ttl ?? this.config.ttl ?? 3600,
-              });
-              return result;
-            })
-            .catch((error) => {
-              span.recordException(error);
-              span.setStatus({ code: SpanStatusCode.ERROR });
-              throw error;
-            })
-            .finally(() => {
-              this.inFlightRequests.delete(cacheKey);
-            });
-
-          this.inFlightRequests.set(cacheKey, promise);
-
-          const result = await promise;
+          span.setAttribute("cache.hit", true);
           span.setStatus({ code: SpanStatusCode.OK });
-          return result;
-        } catch (error) {
-          span.recordException(error as Error);
-          span.setStatus({ code: SpanStatusCode.ERROR });
-          throw error;
-        } finally {
-          span.end();
+          this.metrics.cacheHitCount.add(1, { "cache.key": cacheKey });
+          return cached.value as T;
         }
-      },
-      { name: this.name, includePrefix: true },
-    );
+
+        // check if the value is being processed by another request
+        const inFlight = this.inFlightRequests.get(cacheKey);
+        if (inFlight) {
+          event?.setExecution({
+            cache_hit: true,
+            cache_key: cacheKey,
+          });
+
+          span.setAttribute("cache.hit", true);
+          span.setAttribute("cache.deduplication", true);
+          span.addEvent("cache.deduplication_used", {
+            "cache.key": cacheKey,
+          });
+          span.setStatus({ code: SpanStatusCode.OK });
+
+          this.metrics.cacheHitCount.add(1, { "cache.key": cacheKey });
+          return inFlight as Promise<T>;
+        }
+
+        // cache miss - execute function
+        event?.setExecution({
+          cache_hit: false,
+          cache_key: cacheKey,
+        });
+
+        span.setAttribute("cache.hit", false);
+        span.addEvent("cache.miss", { "cache.key": cacheKey });
+        this.metrics.cacheMissCount.add(1, { "cache.key": cacheKey });
+
+        const promise = fn()
+          .then(async (result) => {
+            await this.set(cacheKey, result, options);
+            span.addEvent("cache.value_stored", {
+              "cache.key": cacheKey,
+              "cache.ttl": options?.ttl ?? this.config.ttl ?? 3600,
+            });
+            return result;
+          })
+          .catch((error) => {
+            span.recordException(error);
+            span.setStatus({ code: SpanStatusCode.ERROR });
+            throw error;
+          })
+          .finally(() => {
+            this.inFlightRequests.delete(cacheKey);
+          });
+
+        this.inFlightRequests.set(cacheKey, promise);
+
+        const result = await promise;
+        span.setStatus({ code: SpanStatusCode.OK });
+        return result;
+      } catch (error) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      }
+    });
   }
 
   /**
@@ -300,14 +304,9 @@ export class CacheManager {
     this.lastCleanupAttempt = now;
 
     this.cleanupInProgress = true;
-    (this.storage as PersistentStorage)
-      .cleanupExpired()
-      .catch((error) => {
-        console.debug("Error cleaning up expired entries:", error);
-      })
-      .finally(() => {
-        this.cleanupInProgress = false;
-      });
+    (this.storage as PersistentStorage).cleanupExpired().finally(() => {
+      this.cleanupInProgress = false;
+    });
   }
 
   /**

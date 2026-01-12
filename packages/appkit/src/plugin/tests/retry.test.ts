@@ -8,6 +8,7 @@ describe("RetryInterceptor", () => {
 
   beforeEach(() => {
     context = {
+      pluginName: "test",
       metadata: new Map(),
       userKey: "test",
     };
@@ -138,6 +139,7 @@ describe("RetryInterceptor", () => {
 
     const abortController = new AbortController();
     const contextWithSignal: ExecutionContext = {
+      pluginName: "test",
       metadata: new Map(),
       signal: abortController.signal,
       userKey: "test",

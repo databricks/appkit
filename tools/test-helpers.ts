@@ -1,16 +1,12 @@
+import type { Span } from "@opentelemetry/api";
 import type { IAppRouter } from "shared";
-import type {
-  InstrumentConfig,
-  ITelemetry,
-} from "../packages/appkit/src/telemetry/types";
-import type { RequestContext } from "../packages/appkit/src/utils/databricks-client-middleware";
 import { vi } from "vitest";
-import type { SpanOptions, Span } from "@opentelemetry/api";
+import type { RequestContext } from "../packages/appkit/src/utils/databricks-client-middleware";
 
 /**
  * Creates a mock telemetry provider for testing
  */
-export function createMockTelemetry(): ITelemetry {
+export function createMockTelemetry(): Span {
   const mockSpan: Span = {
     addLink: vi.fn(),
     addLinks: vi.fn(),
@@ -25,38 +21,7 @@ export function createMockTelemetry(): ITelemetry {
     spanContext: vi.fn(),
   };
 
-  return {
-    getTracer: vi.fn().mockReturnValue({
-      startActiveSpan: vi.fn().mockImplementation((...args: any[]) => {
-        const fn = args[args.length - 1];
-        if (typeof fn === "function") {
-          return fn(mockSpan);
-        }
-        return undefined;
-      }),
-    }),
-    getMeter: vi.fn().mockReturnValue({
-      createCounter: vi.fn().mockReturnValue({ add: vi.fn() }),
-      createHistogram: vi.fn().mockReturnValue({ record: vi.fn() }),
-    }),
-    getLogger: vi.fn().mockReturnValue({
-      emit: vi.fn(),
-    }),
-    emit: vi.fn(),
-    startActiveSpan: vi
-      .fn()
-      .mockImplementation(
-        async (
-          _name: string,
-          _options: SpanOptions,
-          fn: (span: Span) => Promise<any>,
-          _tracerOptions?: InstrumentConfig,
-        ) => {
-          return await fn(mockSpan);
-        },
-      ),
-    registerInstrumentations: vi.fn(),
-  };
+  return mockSpan;
 }
 
 /**

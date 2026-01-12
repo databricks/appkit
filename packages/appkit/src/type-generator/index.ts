@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import dotenv from "dotenv";
+import { type ILogger, LoggerManager } from "@/observability";
 import { generateQueriesFromDescribe } from "./query-registry";
 import type { QuerySchema } from "./types";
 
@@ -48,9 +49,11 @@ export async function generateFromEntryPoint(options: {
   warehouseId: string;
   noCache?: boolean;
 }) {
+  const logger: ILogger = LoggerManager.getLogger("type-generator");
+
   const { outFile, queryFolder, warehouseId, noCache } = options;
 
-  console.log("\n[AppKit] Starting type generation...\n");
+  logger.debug("Starting type generation");
 
   let queryRegistry: QuerySchema[] = [];
   if (queryFolder)
@@ -66,5 +69,5 @@ export async function generateFromEntryPoint(options: {
 
   fs.writeFileSync(outFile, typeDeclarations, "utf-8");
 
-  console.log("\n[AppKit] Type generation complete!\n");
+  logger.debug("Type generation complete");
 }
