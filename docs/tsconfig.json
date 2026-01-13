@@ -4,8 +4,13 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@site/*": ["./*"]
+      "@site/*": ["./*"],
+      "@databricks/appkit-ui/react": ["../packages/appkit-ui/src/react"],
+      "@databricks/appkit-ui/js": ["../packages/appkit-ui/src/js"],
+      "@/*": ["../packages/appkit-ui/src/*"],
+      "shared": ["../packages/shared/src"]
     }
   },
+  "include": ["../packages/appkit-ui/src/react/vite-env.d.ts"],
   "exclude": [".docusaurus", "build"]
 }
