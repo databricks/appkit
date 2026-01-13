@@ -4,6 +4,8 @@ sidebar_position: 1
 
 # Getting Started
 
+import Prerequisites from './_prerequisites.mdx';
+
 ## Introduction
 
 AppKit is a TypeScript SDK for building production-ready Databricks applications with a plugin-based architecture. It provides opinionated defaults, built-in observability, and seamless integration with Databricks services.
@@ -16,10 +18,7 @@ AppKit simplifies building data applications on Databricks by providing:
 - **Developer experience**: Remote hot reload, file-based queries, optimized for AI-assisted development
 - **Databricks native**: Seamless integration with SQL Warehouses, Unity Catalog, and other workspace resources
 
-## Prerequisites
-
-- [Node.js](https://nodejs.org)
-- Databricks CLI: install and configure it according to the [official tutorial](https://docs.databricks.com/aws/en/dev-tools/cli/tutorial).
+<Prerequisites />
 
 ## Quick start options
 
@@ -40,50 +39,51 @@ Install the Databricks MCP server and configure it for use with your preferred A
 databricks experimental apps-mcp install
 ```
 
-Once configured for your development environment, you can use your AI assistant to create and deploy new Databricks applications, as well as to iteratively evolve your app’s codebase.
+Once configured for your development environment, you can use your AI assistant to create and deploy new Databricks applications, as well as to iteratively evolve your app's codebase.
 
-The MCP server exposes the following capabilities:
+Just prompt your AI assistant to create a new Databricks app, such as:
 
-- **Data exploration**: Query catalogs, schemas, tables, and execute SQL
-- **CLI command execution**: Run bundle, apps, and workspace operations
-- **Workspace resource discovery**: Inspect and navigate workspace resources
+```
+Create a new Databricks app that displays a dashboard of the nyc taxi trips dataset.
+```
+
+To learn more about the MCP server, see the [AI-assisted development](./development/ai-assisted-development.mdx) documentation.
 
 ## Manual quick start
 
 Learn how to create and deploy a sample Databricks application that uses AppKit with the Databricks CLI.
 
-### Create a new Databricks app
+### Bootstrap a new Databricks app
 
-Run the following command to create a new Databricks application:
-
-```sh
-databricks apps create {application-name}
-```
-
-This creates a new Databricks application named `{application-name}` in the current workspace.
-
-### Bootstrap the app codebase with AppKit
-
-Run the following command to bootstrap the app codebase:
+Run the following command to bootstrap the new Databricks app with AppKit:
 
 ```sh
-databricks experimental appkit init
+databricks experimental dev app init
 ```
 
 Follow the prompts to bootstrap the app codebase in the current working directory.  
-This creates a complete TypeScript project with Tailwind CSS, React, and AppKit installed out of the box.
+
+The command will guide you through the process of:
+- creating a new Databricks app
+- scaffolding the app codebase with selected features
+- installing dependencies
+- (optionally) deploying the app to Databricks
+- (optionally) running the app in development mode
+
+Learn more about the various [development flows](./development/) available with AppKit.
 
 ### Deploy the app to Databricks
 
 Run the following command to deploy the app to Databricks:
 
 ```sh
-databricks experimental appkit deploy .
+databricks experimental dev app deploy .
 ```
 
 This deploys the sample app to Databricks.
 
 ## Next steps
 
-- **[Core Concepts](./core-concepts/principles)**: Learn about AppKit's design principles and architecture
+- **[App Management](./app-management.mdx)**: Manage your AppKit application throughout its lifecycle using the Databricks CLI
 - **[API Reference](./api/appkit/)**: Explore the complete API documentation
+- **[Core Concepts](./core-principles)**: Learn about AppKit's design principles and architecture

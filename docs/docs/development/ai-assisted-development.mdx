@@ -1,0 +1,56 @@
+---
+sidebar_position: 2
+---
+
+import Prerequisites from './_prerequisites_app.mdx';
+
+# AI-Assisted Development
+
+<Prerequisites />
+
+AppKit integrates with AI coding assistants through the Model Context Protocol (MCP).
+
+## Installing MCP Server
+
+To install the Databricks MCP server for your preferred AI assistant, run:
+
+```bash
+databricks experimental apps-mcp install
+```
+
+## MCP Capabilities
+
+The MCP server exposes the following capabilities for AI assistants:
+
+- **Data exploration**: Query catalogs, schemas, tables, and execute SQL
+- **CLI command execution**: Deploy and manage apps, and run other workspace operations
+- **Workspace resource discovery**: Inspect and navigate workspace resources
+
+## Example prompts
+
+Here are some basic examples you can use to explore your app and workspace:
+
+1. Creating a new basic app
+  ```
+  Create a new Databricks app that displays a dashboard of the users table in main.default.
+  ```
+1. Introspecting a table schema
+  ```
+  Show me the schema of the users table in main.default.
+  ```
+1. Creating a new query
+  ```
+  Create a new query to find users created in the last 7 days.
+  ```
+1. Deploying an app
+  ```
+  Deploy the app to Databricks with the name "my-app".
+  ```
+
+Possibilities are virtually endless. Ask your AI assistant to help you with your app and workspace.
+
+## LLM Resources
+
+AppKit provides specialized guidance files to help AI coding assistants work more effectively with the projects.
+
+If you're building applications using AppKit packages, reference the **[llms.txt](https://github.com/databricks/appkit/blob/main/llms.txt)** file.
