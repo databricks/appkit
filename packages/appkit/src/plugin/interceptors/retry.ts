@@ -26,9 +26,8 @@ export class RetryInterceptor implements ExecutionInterceptor {
       try {
         const result = await fn();
 
-        if (attempt > 1 && context.request) {
-          const event = logger.event(context.request);
-          event.setExecution({
+        if (attempt > 1) {
+          logger.event()?.setExecution({
             retry_attempts: attempt - 1,
           });
         }
@@ -39,12 +38,9 @@ export class RetryInterceptor implements ExecutionInterceptor {
 
         // last attempt, rethrow the error
         if (attempt === this.attempts) {
-          if (context.request) {
-            const event = logger.event(context.request);
-            event.setExecution({
-              retry_attempts: attempt - 1,
-            });
-          }
+          logger.event()?.setExecution({
+            retry_attempts: attempt - 1,
+          });
           throw error;
         }
 

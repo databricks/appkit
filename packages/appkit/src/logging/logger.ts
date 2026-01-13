@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { format } from "node:util";
 import { trace } from "@opentelemetry/api";
 import type { Request, Response } from "express";
@@ -26,11 +27,14 @@ export interface Logger {
   error(message: string, ...args: unknown[]): void;
   error(req: Request, message: string, ...args: unknown[]): void;
 
-  /** Get or create request-scoped WideEvent */
-  event(req: Request): WideEvent;
+  /** Get request-scoped WideEvent (from AsyncLocalStorage or explicit req) */
+  event(req?: Request): WideEvent | undefined;
 }
 
-// WeakMap to store WideEvent per request
+// AsyncLocalStorage for WideEvent context propagation
+const eventStorage = new AsyncLocalStorage<WideEvent>();
+
+// WeakMap to store WideEvent per request (for explicit req usage)
 const eventsByRequest = new WeakMap<Request, WideEvent>();
 
 // Global emitter instance
@@ -42,9 +46,7 @@ const MAX_REQUEST_ID_LENGTH = 128;
  * Sanitize a request ID from user headers
  */
 function sanitizeRequestId(id: string): string {
-  // Remove any characters that aren't alphanumeric, dash, underscore, or dot
   const sanitized = id.replace(/[^a-zA-Z0-9_.-]/g, "");
-  // Limit length
   return sanitized.slice(0, MAX_REQUEST_ID_LENGTH);
 }
 
@@ -52,7 +54,6 @@ function sanitizeRequestId(id: string): string {
  * Generate a request ID from the request
  */
 function generateRequestId(req: Request): string {
-  // Use existing request ID if available
   const existingId =
     req.headers["x-request-id"] ||
     req.headers["x-correlation-id"] ||
@@ -65,104 +66,115 @@ function generateRequestId(req: Request): string {
     }
   }
 
-  // Generate a simple ID based on timestamp and random
   return `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 }
 
 /**
- * Get or create a WideEvent for the given request
+ * Create a WideEvent for a request
+ */
+function createEventForRequest(req: Request): WideEvent {
+  const requestId = generateRequestId(req);
+  const wideEvent = new WideEvent(requestId);
+
+  // extract path from request (strip query string)
+  const rawPath = req.path || req.url || req.originalUrl;
+  const path = rawPath?.split("?")[0];
+  wideEvent.set("method", req.method).set("path", path);
+
+  // extract user id from request headers (sanitized)
+  const rawUserId = req.headers["x-forwarded-user"];
+  if (rawUserId && typeof rawUserId === "string" && rawUserId.length > 0) {
+    const userId = rawUserId.replace(/[^a-zA-Z0-9_@.-]/g, "").slice(0, 128);
+    if (userId.length > 0) {
+      wideEvent.setUser({ id: userId });
+    }
+  }
+
+  // extract trace id from active span for distributed tracing
+  const currentSpan = trace.getActiveSpan();
+  const spanContext = currentSpan?.spanContext();
+  if (spanContext?.traceId) {
+    wideEvent.set("trace_id", spanContext.traceId);
+
+    const debugLogger = createObug("appkit:logger:event", { useColors: true });
+    debugLogger(
+      "WideEvent created: %s %s (reqId: %s, traceId: %s)",
+      req.method,
+      path,
+      requestId.substring(0, 8),
+      spanContext.traceId.substring(0, 8),
+    );
+  }
+
+  // Update service scope
+  if (wideEvent.data.service) {
+    wideEvent.data.service = {
+      ...wideEvent.data.service,
+      name: "appkit",
+    };
+  }
+
+  return wideEvent;
+}
+
+/**
+ * Setup response lifecycle handlers for WideEvent finalization
+ */
+function setupResponseHandlers(req: Request, wideEvent: WideEvent): void {
+  const res = req.res as Response | undefined;
+  if (!res) return;
+
+  res.once("finish", () => {
+    // Finalize the event with status code
+    const finalizedData = wideEvent.finalize(res.statusCode || 200);
+
+    // Emit to OpenTelemetry if sampled
+    if (shouldSample(finalizedData, DEFAULT_SAMPLING_CONFIG)) {
+      emitter.emit(finalizedData);
+    }
+
+    // Clean up WeakMap
+    eventsByRequest.delete(req);
+  });
+
+  res.once("close", () => {
+    if (!res.writableFinished) {
+      // Request was aborted - just cleanup
+      eventsByRequest.delete(req);
+    }
+  });
+}
+
+/**
+ * Get or create a WideEvent for the given request.
+ * Also sets the event in AsyncLocalStorage so downstream code can access it via logger.event()
  */
 function getOrCreateEvent(req: Request): WideEvent {
   let wideEvent = eventsByRequest.get(req);
 
   if (!wideEvent) {
-    const requestId = generateRequestId(req);
-    wideEvent = new WideEvent(requestId);
-
-    // Set initial request metadata
-    const path = req.path || req.url || req.originalUrl;
-    wideEvent.set("method", req.method).set("path", path);
-
-    // Extract user ID from request headers
-    const userId = req.headers["x-forwarded-user"] as string | undefined;
-    if (userId) {
-      wideEvent.setUser({ id: userId });
-    }
-
-    // Extract trace ID from active span for distributed tracing
-    const currentSpan = trace.getActiveSpan();
-    const spanContext = currentSpan?.spanContext();
-    if (spanContext?.traceId) {
-      wideEvent.set("trace_id", spanContext.traceId);
-
-      const debugLogger = createObug("appkit:logger:event", {
-        useColors: true,
-      });
-      debugLogger(
-        "WideEvent created: %s %s (reqId: %s, traceId: %s)",
-        req.method,
-        path,
-        requestId.substring(0, 8),
-        spanContext.traceId.substring(0, 8),
-      );
-    }
-
-    // Update service scope
-    if (wideEvent.data.service) {
-      wideEvent.data.service = {
-        ...wideEvent.data.service,
-        name: "appkit",
-      };
-    }
-
+    wideEvent = createEventForRequest(req);
     eventsByRequest.set(req, wideEvent);
-
-    // Auto-finalize on response finish
-    const res = req.res as Response | undefined;
-    if (res) {
-      res.once("finish", () => {
-        const event = eventsByRequest.get(req);
-        if (event) {
-          // Finalize the event with status code
-          const finalizedData = event.finalize(res.statusCode || 200);
-
-          // Emit to OpenTelemetry if sampled
-          const sampled = shouldSample(finalizedData, DEFAULT_SAMPLING_CONFIG);
-
-          if (sampled) {
-            emitter.emit(finalizedData);
-          }
-
-          // Clean up to prevent memory leaks
-          eventsByRequest.delete(req);
-        }
-      });
-
-      // Also handle aborted requests
-      res.once("close", () => {
-        if (!res.writableFinished) {
-          // Request was aborted/cancelled
-          const event = eventsByRequest.get(req);
-
-          if (event) {
-            // Try to end the active span with error status
-            const currentSpan = trace.getActiveSpan();
-            if (currentSpan) {
-              currentSpan.setStatus({
-                code: 1, // ERROR
-                message: "Request aborted by client",
-              });
-              currentSpan.end();
-            }
-          }
-
-          eventsByRequest.delete(req);
-        }
-      });
-    }
+    setupResponseHandlers(req, wideEvent);
   }
 
+  // set in AsyncLocalStorage so downstream code can access via logger.event()
+  eventStorage.enterWith(wideEvent);
+
   return wideEvent;
+}
+
+/**
+ * Get current WideEvent from AsyncLocalStorage or request
+ */
+function getCurrentEvent(req?: Request): WideEvent | undefined {
+  // If req provided, use it (explicit usage in route handlers)
+  if (req) {
+    return getOrCreateEvent(req);
+  }
+
+  // Otherwise, get from AsyncLocalStorage (interceptors, etc.)
+  return eventStorage.getStore();
 }
 
 /**
@@ -195,9 +207,10 @@ function isRequest(arg: unknown): arg is Request {
  * logger.debug(req, "Processing query: %s", queryId);
  * logger.error(req, "Query failed: %O", error);
  *
- * // Get WideEvent for manual updates
- * const event = logger.event(req);
- * event.setComponent("analytics", "executeQuery");
+ * // Get WideEvent - works in route handlers (with req) or interceptors (from context)
+ * const event = logger.event(req);  // In route handler
+ * const event = logger.event();     // In interceptor (gets from AsyncLocalStorage)
+ * event?.setComponent("analytics", "executeQuery");
  * ```
  */
 export function createLogger(scope: string): Logger {
@@ -260,8 +273,8 @@ export function createLogger(scope: string): Logger {
     }
   }
 
-  function event(req: Request): WideEvent {
-    return getOrCreateEvent(req);
+  function event(req?: Request): WideEvent | undefined {
+    return getCurrentEvent(req);
   }
 
   return {

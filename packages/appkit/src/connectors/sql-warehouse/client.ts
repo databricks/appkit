@@ -208,14 +208,19 @@ export class SQLWarehouseConnector {
           }
 
           const resultData = result.result as any;
-          if (resultData?.data) {
-            span.setAttribute("db.result.row_count", resultData.data.length);
-          } else if (resultData?.data_array) {
-            span.setAttribute(
-              "db.result.row_count",
-              resultData.data_array.length,
-            );
+          const rowCount =
+            resultData?.data?.length ?? resultData?.data_array?.length ?? 0;
+
+          if (rowCount > 0) {
+            span.setAttribute("db.result.row_count", rowCount);
           }
+
+          const duration = Date.now() - startTime;
+          logger.event()?.setContext("sql-warehouse", {
+            warehouse_id: input.warehouse_id,
+            rows_returned: rowCount,
+            query_duration_ms: duration,
+          });
 
           success = true;
           // only set success status if not aborted
@@ -494,6 +499,11 @@ export class SQLWarehouseConnector {
           this.telemetryMetrics.queryDuration.record(duration, {
             operation: "arrow.getData",
             status: "success",
+          });
+
+          logger.event()?.setContext("sql-warehouse", {
+            arrow_data_size_bytes: result.data.length,
+            arrow_job_id: jobId,
           });
 
           return result;

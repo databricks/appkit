@@ -78,9 +78,9 @@ describe("Logger with WideEvent Integration", () => {
       const event = logger.event(mockReq as Request);
 
       expect(event).toBeInstanceOf(WideEvent);
-      expect(event.data.request_id).toBeDefined();
-      expect(event.data.method).toBe("POST");
-      expect(event.data.path).toBe("/api/query");
+      expect(event!.data.request_id).toBeDefined();
+      expect(event!.data.method).toBe("POST");
+      expect(event!.data.path).toBe("/api/query");
     });
 
     test("should reuse same WideEvent for same request", () => {
@@ -99,9 +99,10 @@ describe("Logger with WideEvent Integration", () => {
       logger.info(mockReq as Request, "Processing query: %s", "SELECT *");
 
       const event = logger.event(mockReq as Request);
-      expect(event.data.logs).toHaveLength(1);
-      expect(event.data.logs![0].level).toBe("info");
-      expect(event.data.logs![0].message).toBe("Processing query: SELECT *");
+      expect(event).toBeDefined();
+      expect(event!.data.logs).toHaveLength(1);
+      expect(event!.data.logs![0].level).toBe("info");
+      expect(event!.data.logs![0].message).toBe("Processing query: SELECT *");
 
       infoSpy.mockRestore();
     });
@@ -116,10 +117,11 @@ describe("Logger with WideEvent Integration", () => {
       logger.error(mockReq as Request, "Warning: slow query");
 
       const event = logger.event(mockReq as Request);
-      expect(event.data.logs).toHaveLength(3);
-      expect(event.data.logs![0].message).toBe("Starting query");
-      expect(event.data.logs![1].message).toBe("Query completed: 100 rows");
-      expect(event.data.logs![2].message).toBe("Warning: slow query");
+      expect(event).toBeDefined();
+      expect(event!.data.logs).toHaveLength(3);
+      expect(event!.data.logs![0].message).toBe("Starting query");
+      expect(event!.data.logs![1].message).toBe("Query completed: 100 rows");
+      expect(event!.data.logs![2].message).toBe("Warning: slow query");
 
       infoSpy.mockRestore();
       errorSpy.mockRestore();
@@ -129,8 +131,9 @@ describe("Logger with WideEvent Integration", () => {
       const logger = createLogger("connectors:lakebase");
 
       const event = logger.event(mockReq as Request);
+      expect(event).toBeDefined();
 
-      expect(event.data.service?.name).toBe("appkit");
+      expect(event!.data.service?.name).toBe("appkit");
       // Note: scope is not currently stored in WideEventData
       // It's used for logger context but not part of the event structure
     });
@@ -138,32 +141,34 @@ describe("Logger with WideEvent Integration", () => {
     test("should finalize WideEvent on response finish", () => {
       const logger = createLogger("analytics");
       const event = logger.event(mockReq as Request);
+      expect(event).toBeDefined();
 
-      expect(event.data.duration_ms).toBeUndefined();
-      expect(event.data.status_code).toBeUndefined();
+      expect(event!.data.duration_ms).toBeUndefined();
+      expect(event!.data.status_code).toBeUndefined();
 
       // Trigger finish event
       finishCallback?.();
 
-      expect(event.data.duration_ms).toBeDefined();
-      expect(event.data.status_code).toBe(200);
+      expect(event!.data.duration_ms).toBeDefined();
+      expect(event!.data.status_code).toBe(200);
     });
 
     test("should allow manual updates to WideEvent", () => {
       const logger = createLogger("analytics");
       const event = logger.event(mockReq as Request);
+      expect(event).toBeDefined();
 
-      event.setComponent("analytics", "executeQuery");
-      event.setExecution({
+      event!.setComponent("analytics", "executeQuery");
+      event!.setExecution({
         statement: "SELECT * FROM users",
         duration: 125,
         rowCount: 100,
       });
 
-      expect(event.data.component?.name).toBe("analytics");
-      expect(event.data.component?.operation).toBe("executeQuery");
-      expect(event.data.execution?.statement).toBe("SELECT * FROM users");
-      expect(event.data.execution?.duration).toBe(125);
+      expect(event!.data.component?.name).toBe("analytics");
+      expect(event!.data.component?.operation).toBe("executeQuery");
+      expect(event!.data.execution?.statement).toBe("SELECT * FROM users");
+      expect(event!.data.execution?.duration).toBe(125);
     });
 
     test("should track errors in WideEvent", () => {
@@ -174,8 +179,9 @@ describe("Logger with WideEvent Integration", () => {
       logger.error(mockReq as Request, "Query failed: %O", error);
 
       const event = logger.event(mockReq as Request);
-      expect(event.data.logs).toHaveLength(1);
-      expect(event.data.logs![0].level).toBe("error");
+      expect(event).toBeDefined();
+      expect(event!.data.logs).toHaveLength(1);
+      expect(event!.data.logs![0].level).toBe("error");
 
       errorSpy.mockRestore();
     });
@@ -196,8 +202,9 @@ describe("Logger with WideEvent Integration", () => {
       logger.info("Request count: %d", 1);
 
       const event = logger.event(mockReq as Request);
-      expect(event.data.logs).toHaveLength(1); // Only request log
-      expect(event.data.logs![0].message).toBe("Processing request");
+      expect(event).toBeDefined();
+      expect(event!.data.logs).toHaveLength(1); // Only request log
+      expect(event!.data.logs![0].message).toBe("Processing request");
 
       infoSpy.mockRestore();
     });

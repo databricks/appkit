@@ -11,12 +11,9 @@ export class TimeoutInterceptor implements ExecutionInterceptor {
     fn: () => Promise<T>,
     context: InterceptorContext,
   ): Promise<T> {
-    if (context.request) {
-      const event = logger.event(context.request);
-      event.setExecution({
-        timeout_ms: this.timeoutMs,
-      });
-    }
+    logger.event()?.setExecution({
+      timeout_ms: this.timeoutMs,
+    });
 
     // create timeout signal
     const timeoutController = new AbortController();

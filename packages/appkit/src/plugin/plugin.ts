@@ -200,7 +200,6 @@ export abstract class Plugin<
     fn: StreamExecuteHandler<T>,
     options: StreamExecutionSettings,
     userKey?: string,
-    req?: express.Request,
   ) {
     // destructure options
     const {
@@ -227,7 +226,6 @@ export abstract class Plugin<
         signal: streamSignal,
         metadata: new Map(),
         userKey: effectiveUserKey,
-        request: req,
       };
 
       // build interceptors
@@ -263,7 +261,6 @@ export abstract class Plugin<
     fn: (signal?: AbortSignal) => Promise<T>,
     options: PluginExecutionSettings,
     userKey?: string,
-    req?: express.Request,
   ): Promise<T | undefined> {
     const executeConfig = this._buildExecutionConfig(options);
 
@@ -275,7 +272,6 @@ export abstract class Plugin<
     const context: InterceptorContext = {
       metadata: new Map(),
       userKey: effectiveUserKey,
-      request: req,
     };
 
     try {
