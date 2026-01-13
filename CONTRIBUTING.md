@@ -84,3 +84,18 @@ export DATABRICKS_PROFILE=your-profile # Databricks profile name. Used as a Data
 export DATABRICKS_APP_NAME=your-app-name # The name of the app to deploy. If not provided, it will be prefixed with the username.
 export DATABRICKS_WORKSPACE_DIR=your-workspace-dir # The source workspace directory to deploy the app from. It will be used to construct the absolute path: /Workspace/Users/{your-username}/{workspace-dir}
 ```
+
+## Contributing to AppKit documentation
+
+The `docs/` directory contains the AppKit documentation site, built with Docusaurus.
+
+**Working with docs:**
+
+```bash
+# From root
+pnpm docs:dev    # Start dev server
+pnpm docs:build  # Build docs
+pnpm docs:serve  # Serve built docs
+```
+
+See [docs/README.md](./docs/README.md) for more details.
