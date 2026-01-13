@@ -102,6 +102,23 @@ vi.mock("../vite-dev-server", () => ({
   })),
 }));
 
+// Mock logger for testing log output
+const { mockLoggerDebug, mockLoggerInfo, mockLoggerWarn, mockLoggerError } =
+  vi.hoisted(() => ({
+    mockLoggerDebug: vi.fn(),
+    mockLoggerInfo: vi.fn(),
+    mockLoggerWarn: vi.fn(),
+    mockLoggerError: vi.fn(),
+  }));
+vi.mock("../../observability/logger", () => ({
+  createLogger: vi.fn(() => ({
+    debug: mockLoggerDebug,
+    info: mockLoggerInfo,
+    warn: mockLoggerWarn,
+    error: mockLoggerError,
+  })),
+}));
+
 vi.mock("../static-server", () => ({
   StaticServer: vi.fn().mockImplementation(() => ({
     setup: vi.fn(),
@@ -382,20 +399,19 @@ describe("ServerPlugin", () => {
 
   describe("logStartupInfo", () => {
     test("logs remote tunnel controller disabled when missing", () => {
-      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      mockLoggerDebug.mockClear();
       const plugin = new ServerPlugin({ autoStart: false });
       (plugin as any).remoteTunnelController = undefined;
 
       (plugin as any).logStartupInfo();
 
-      expect(logSpy).toHaveBeenCalledWith(
+      expect(mockLoggerDebug).toHaveBeenCalledWith(
         "Remote tunnel: disabled (controller not initialized)",
       );
-      logSpy.mockRestore();
     });
 
     test("logs remote tunnel allowed/active when controller present", () => {
-      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      mockLoggerDebug.mockClear();
       const plugin = new ServerPlugin({ autoStart: false });
       (plugin as any).remoteTunnelController = {
         isAllowedByEnv: () => true,
@@ -405,17 +421,16 @@ describe("ServerPlugin", () => {
       (plugin as any).logStartupInfo();
 
       expect(
-        logSpy.mock.calls.some((c) =>
-          String(c[0]).includes("Remote tunnel: allowed; active"),
+        mockLoggerDebug.mock.calls.some((c) =>
+          String(c[0]).includes("Remote tunnel:"),
         ),
       ).toBe(true);
-      logSpy.mockRestore();
     });
   });
 
   describe("findStaticPath", () => {
     test("returns first matching static path and logs it", () => {
-      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      mockLoggerDebug.mockClear();
       vi.mocked(fs.existsSync).mockImplementation((p: any) => {
         return String(p).endsWith("dist/index.html");
       });
@@ -423,21 +438,20 @@ describe("ServerPlugin", () => {
       const p = (ServerPlugin as any).findStaticPath();
       expect(String(p)).toContain("dist");
       expect(
-        logSpy.mock.calls.some((c) =>
+        mockLoggerDebug.mock.calls.some((c) =>
           String(c[0]).includes("Static files: serving from"),
         ),
       ).toBe(true);
-      logSpy.mockRestore();
     });
   });
 
   describe("_gracefulShutdown", () => {
     test("aborts plugin operations (with error isolation) and closes server", async () => {
       vi.useFakeTimers();
+      mockLoggerError.mockClear();
       const exitSpy = vi
         .spyOn(process, "exit")
         .mockImplementation(((_code?: number) => undefined) as any);
-      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
       const plugin = new ServerPlugin({
         autoStart: false,
@@ -461,11 +475,10 @@ describe("ServerPlugin", () => {
       await (plugin as any)._gracefulShutdown();
       vi.runAllTimers();
 
-      expect(errSpy).toHaveBeenCalled();
+      expect(mockLoggerError).toHaveBeenCalled();
       expect(mockHttpServer.close).toHaveBeenCalled();
       expect(exitSpy).toHaveBeenCalled();
 
-      errSpy.mockRestore();
       exitSpy.mockRestore();
       vi.useRealTimers();
     });

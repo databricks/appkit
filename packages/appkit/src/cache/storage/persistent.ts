@@ -1,8 +1,14 @@
 import { createHash } from "node:crypto";
 import type { CacheConfig, CacheEntry, CacheStorage } from "shared";
 import type { LakebaseConnector } from "../../connectors";
-import { ValidationError } from "../../observability/errors";
+import {
+  InitializationError,
+  ValidationError,
+} from "../../observability/errors";
+import { createLogger } from "../../observability/logger";
 import { lakebaseStorageDefaults } from "./defaults";
+
+const logger = createLogger("cache:persistent");
 
 /**
  * Persistent cache storage implementation. Uses a least recently used (LRU) eviction policy
@@ -48,7 +54,7 @@ export class PersistentStorage implements CacheStorage {
       await this.runMigrations();
       this.initialized = true;
     } catch (error) {
-      console.error("Error in persistent storage initialization:", error);
+      logger.error("Error in persistent storage initialization: %O", error);
       throw error;
     }
   }
@@ -81,7 +87,7 @@ export class PersistentStorage implements CacheStorage {
         [keyHash],
       )
       .catch(() => {
-        console.debug("Error updating last_accessed time for key:", key);
+        logger.debug("Error updating last_accessed time for key: %s", key);
       });
 
     return {
@@ -305,11 +311,11 @@ export class PersistentStorage implements CacheStorage {
         `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_byte_size ON ${this.tableName} (byte_size); `,
       );
     } catch (error) {
-      console.error(
-        "Error in running migrations for persistent storage:",
+      logger.error(
+        "Error in running migrations for persistent storage: %O",
         error,
       );
-      throw error;
+      throw InitializationError.migrationFailed(error as Error);
     }
   }
 }

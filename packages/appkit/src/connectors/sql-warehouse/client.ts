@@ -3,8 +3,15 @@ import {
   type sql,
   type WorkspaceClient,
 } from "@databricks/sdk-experimental";
-import { ArrowStreamProcessor } from "../../stream/arrow-stream-processor";
 import type { TelemetryOptions } from "shared";
+import {
+  AppKitError,
+  ConnectionError,
+  ExecutionError,
+  ValidationError,
+} from "../../observability/errors";
+import { createLogger } from "../../observability/logger";
+import { ArrowStreamProcessor } from "../../stream/arrow-stream-processor";
 import type { TelemetryProvider } from "../../telemetry";
 import {
   type Counter,
@@ -14,12 +21,9 @@ import {
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
-import {
-  ConnectionError,
-  ExecutionError,
-  ValidationError,
-} from "../../observability/errors";
 import { executeStatementDefaults } from "./defaults";
+
+const logger = createLogger("connectors:sql-warehouse");
 
 export interface SQLWarehouseConfig {
   timeout?: number;
@@ -197,7 +201,13 @@ export class SQLWarehouseConnector {
             code: SpanStatusCode.ERROR,
             message: error instanceof Error ? error.message : String(error),
           });
-          throw error;
+
+          if (error instanceof AppKitError) {
+            throw error;
+          }
+          throw ExecutionError.statementFailed(
+            error instanceof Error ? error.message : String(error),
+          );
         } finally {
           const duration = Date.now() - startTime;
           span.end();
@@ -246,8 +256,8 @@ export class SQLWarehouseConnector {
             // check if timeout exceeded
             const elapsedTime = Date.now() - startTime;
             if (elapsedTime > timeout) {
-              const error = new Error(
-                `Statement polling timeout exceeded after ${timeout}ms (elapsed: ${elapsedTime}ms)`,
+              const error = ExecutionError.statementFailed(
+                `Polling timeout exceeded after ${timeout}ms (elapsed: ${elapsedTime}ms)`,
               );
               span.recordException(error);
               span.setStatus({ code: SpanStatusCode.ERROR });
@@ -255,7 +265,7 @@ export class SQLWarehouseConnector {
             }
 
             if (signal?.aborted) {
-              const error = new Error("Request aborted");
+              const error = ExecutionError.canceled();
               span.recordException(error);
               span.setStatus({ code: SpanStatusCode.ERROR });
               throw error;
@@ -319,7 +329,13 @@ export class SQLWarehouseConnector {
             code: SpanStatusCode.ERROR,
             message: error instanceof Error ? error.message : String(error),
           });
-          throw error;
+
+          if (error instanceof AppKitError) {
+            throw error;
+          }
+          throw ExecutionError.statementFailed(
+            error instanceof Error ? error.message : String(error),
+          );
         } finally {
           span.end();
         }
@@ -452,8 +468,14 @@ export class SQLWarehouseConnector {
             status: "error",
           });
 
-          console.error(`Failed Arrow job: ${jobId}`, error);
-          throw error;
+          logger.error("Failed Arrow job: %s %O", jobId, error);
+
+          if (error instanceof AppKitError) {
+            throw error;
+          }
+          throw ExecutionError.statementFailed(
+            error instanceof Error ? error.message : String(error),
+          );
         }
       },
     );

@@ -14,12 +14,13 @@ import type {
 import { AppManager } from "../app";
 import { CacheManager } from "../cache";
 import {
-  ServiceContext,
   getCurrentUserId,
   runInUserContext,
+  ServiceContext,
   type UserContext,
 } from "../context";
 import { AuthenticationError } from "../observability/errors";
+import { createLogger } from "../observability/logger";
 import { StreamManager } from "../stream";
 import {
   type ITelemetry,
@@ -33,9 +34,11 @@ import { RetryInterceptor } from "./interceptors/retry";
 import { TelemetryInterceptor } from "./interceptors/telemetry";
 import { TimeoutInterceptor } from "./interceptors/timeout";
 import type {
-  InterceptorContext,
   ExecutionInterceptor,
+  InterceptorContext,
 } from "./interceptors/types";
+
+const logger = createLogger("plugin");
 
 /**
  * Methods that should not be proxied by asUser().
@@ -140,9 +143,8 @@ export abstract class Plugin<
     // In local development, fall back to service principal
     // since there's no user token available
     if (!token && isDev) {
-      console.warn(
-        "[AppKit] asUser() called without user token in development mode. " +
-          "Using service principal.",
+      logger.warn(
+        "asUser() called without user token in development mode. Using service principal.",
       );
 
       return this;

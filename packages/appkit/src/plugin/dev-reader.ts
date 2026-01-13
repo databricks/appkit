@@ -2,6 +2,9 @@ import { randomUUID } from "node:crypto";
 import type { TunnelConnection } from "shared";
 import { isRemoteTunnelAllowedByEnv } from "@/server/remote-tunnel/gate";
 import { TunnelError } from "../observability/errors";
+import { createLogger } from "../observability/logger";
+
+const logger = createLogger("plugin:dev-reader");
 
 type TunnelConnectionGetter = (
   req: import("express").Request,
@@ -32,7 +35,7 @@ export class DevFileReader {
 
           if (typeof value === "function") {
             return function noop() {
-              console.info(`Noop: ${String(prop)} (remote server disabled)`);
+              logger.debug("Noop: %s (remote server disabled)", String(prop));
               return Promise.resolve("");
             };
           }

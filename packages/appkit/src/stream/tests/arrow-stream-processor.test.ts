@@ -452,9 +452,10 @@ describe("ArrowStreamProcessor", () => {
         processor.processChunks(chunks, createMockSchema()),
       ).rejects.toThrow();
 
+      // Logger uses util.format, so the message is pre-formatted
       expect(consoleSpy).toHaveBeenCalledWith(
-        "External link is required",
-        expect.objectContaining({ chunk_index: 0 }),
+        "[appkit:stream:arrow]",
+        expect.stringContaining("External link is required for chunk:"),
       );
 
       consoleSpy.mockRestore();

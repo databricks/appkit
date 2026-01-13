@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
+import { createLogger } from "../observability/logger";
 import { CACHE_VERSION, hashSQL, loadCache, saveCache } from "./cache";
 import { Spinner } from "./spinner";
 import {
@@ -9,6 +10,8 @@ import {
   sqlTypeToHelper,
   sqlTypeToMarker,
 } from "./types";
+
+const logger = createLogger("type-generator:query-registry");
 
 /**
  * Extract parameters from a SQL query
@@ -121,7 +124,7 @@ export async function generateQueriesFromDescribe(
     .readdirSync(queryFolder)
     .filter((file) => file.endsWith(".sql"));
 
-  console.log(`  Found ${queryFiles.length} SQL queries\n`);
+  logger.debug("Found %d SQL queries", queryFiles.length);
 
   // load cache
   const cache = noCache ? { version: CACHE_VERSION, queries: {} } : loadCache();
@@ -193,7 +196,7 @@ export async function generateQueriesFromDescribe(
 
   // log warning if there are failed queries
   if (failedQueries.length > 0) {
-    console.warn(`  Warning: ${failedQueries.length} queries failed\n`);
+    logger.debug("Warning: %d queries failed", failedQueries.length);
   }
 
   return querySchemas;

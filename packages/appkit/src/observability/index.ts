@@ -11,6 +11,6 @@ export {
   TunnelError,
   ValidationError,
 } from "./errors";
-export { createDebug } from "./debug";
-export { WideEvent, type WideEventData } from "./wide-event";
+export { createLogger, type Logger } from "./logger";
 export type { LogLevel } from "./types";
+export { WideEvent, type WideEventData } from "./wide-event";

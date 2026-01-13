@@ -269,6 +269,9 @@ importers:
       express:
         specifier: ^4.22.0
         version: 4.22.0
+      obug:
+        specifier: ^2.1.1
+        version: 2.1.1
       pg:
         specifier: ^8.16.3
         version: 8.16.3
@@ -8008,6 +8011,9 @@ packages:
 
   obuf@1.1.2:
     resolution: {integrity: sha512-PX1wu0AmAdPqOL1mWhqmlOd8kOIZQwGZw6rh7uby9fTc5lhaOWFLX3I6R1hrF9k3zUY40e6igsLGkDXK92LJNg==}
+
+  obug@2.1.1:
+    resolution: {integrity: sha512-uTqF9MuPraAQ+IsnPf366RG4cP9RtUi7MLO1N3KEc+wb0a6yKpeL0lmk2IB1jY5KHPAlTc6T/JRdC/YqxHNwkQ==}
 
   ohash@2.0.11:
     resolution: {integrity: sha512-RdR9FQrFwNBNXAr4GixM8YaRZRJ5PUWbKYbE5eOsrwAjJW0q2REGcf79oYPsLyskQCZG1PLN+S/K1V00joZAoQ==}
@@ -19726,6 +19732,8 @@ snapshots:
       isobject: 3.0.1
 
   obuf@1.1.2: {}
+
+  obug@2.1.1: {}
 
   ohash@2.0.11: {}
 

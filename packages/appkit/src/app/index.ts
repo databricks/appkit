@@ -1,5 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { createLogger } from "../observability/logger";
+
+const logger = createLogger("app");
 
 interface RequestLike {
   query?: Record<string, any>;
@@ -27,8 +30,9 @@ export class AppManager {
   ): Promise<string | null> {
     // Security: Sanitize query key to prevent path traversal
     if (!queryKey || !/^[a-zA-Z0-9_-]+$/.test(queryKey)) {
-      console.error(
-        `Invalid query key format: "${queryKey}". Only alphanumeric characters, underscores, and hyphens are allowed.`,
+      logger.error(
+        "Invalid query key format: %s. Only alphanumeric characters, underscores, and hyphens are allowed.",
+        queryKey,
       );
       return null;
     }
@@ -44,7 +48,7 @@ export class AppManager {
     const queriesDir = path.resolve(process.cwd(), "config/queries");
 
     if (!resolvedPath.startsWith(queriesDir)) {
-      console.error(`Invalid query path: path traversal detected`);
+      logger.error("Invalid query path: path traversal detected");
       return null;
     }
 
@@ -57,8 +61,10 @@ export class AppManager {
         const relativePath = path.relative(process.cwd(), resolvedPath);
         return await devFileReader.readFile(relativePath, req);
       } catch (error) {
-        console.error(
-          `Failed to read query "${queryKey}" from dev tunnel: ${(error as Error).message}`,
+        logger.error(
+          "Failed to read query %s from dev tunnel: %s",
+          queryKey,
+          (error as Error).message,
         );
         return null;
       }
@@ -70,11 +76,13 @@ export class AppManager {
       return query;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        console.error(`Query "${queryKey}" not found at path: ${resolvedPath}`);
+        logger.debug("Query %s not found at path: %s", queryKey, resolvedPath);
         return null;
       }
-      console.error(
-        `Failed to read query "${queryKey}" from server filesystem: ${(error as Error).message}`,
+      logger.error(
+        "Failed to read query %s from server filesystem: %s",
+        queryKey,
+        (error as Error).message,
       );
       return null;
     }

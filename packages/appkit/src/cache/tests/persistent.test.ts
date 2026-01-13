@@ -57,7 +57,9 @@ describe("PersistentStorage", () => {
 
       mockConnector.query.mockRejectedValue(new Error("migration failed"));
 
-      await expect(storage.initialize()).rejects.toThrow("migration failed");
+      await expect(storage.initialize()).rejects.toThrow(
+        "Error in running migrations for persistent storage",
+      );
 
       consoleErrorSpy.mockRestore();
     });

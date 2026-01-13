@@ -1,5 +1,8 @@
 import type { sql } from "@databricks/sdk-experimental";
 import { ExecutionError, ValidationError } from "../observability/errors";
+import { createLogger } from "../observability/logger";
+
+const logger = createLogger("stream:arrow");
 
 type ResultManifest = sql.ResultManifest;
 type ExternalLink = sql.ExternalLink;
@@ -118,7 +121,7 @@ export class ArrowStreamProcessor {
       try {
         const externalLink = chunk.external_link;
         if (!externalLink) {
-          console.error("External link is required", chunk);
+          logger.error("External link is required for chunk: %O", chunk);
           continue;
         }
 

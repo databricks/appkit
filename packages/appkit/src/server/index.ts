@@ -5,15 +5,18 @@ import dotenv from "dotenv";
 import express from "express";
 import type { PluginPhase } from "shared";
 import { ServerError } from "../observability/errors";
+import { createLogger } from "../observability/logger";
 import { Plugin, toPlugin } from "../plugin";
 import { instrumentations } from "../telemetry";
 import { RemoteTunnelController } from "./remote-tunnel/remote-tunnel-controller";
 import { StaticServer } from "./static-server";
 import type { ServerConfig } from "./types";
-import { type PluginEndpoints, getRoutes } from "./utils";
+import { getRoutes, type PluginEndpoints } from "./utils";
 import { ViteDevServer } from "./vite-dev-server";
 
 dotenv.config({ path: path.resolve(process.cwd(), "./.env") });
+
+const logger = createLogger("server");
 
 /**
  * Server plugin for the AppKit.
@@ -241,7 +244,7 @@ export class ServerPlugin extends Plugin {
     for (const p of staticPaths) {
       const fullPath = path.resolve(cwd, p);
       if (fs.existsSync(path.resolve(fullPath, "index.html"))) {
-        console.log(`Static files: serving from ${fullPath}`);
+        logger.debug("Static files: serving from %s", fullPath);
         return fullPath;
       }
     }
@@ -254,30 +257,30 @@ export class ServerPlugin extends Plugin {
     const port = this.config.port ?? ServerPlugin.DEFAULT_CONFIG.port;
     const host = this.config.host ?? ServerPlugin.DEFAULT_CONFIG.host;
 
-    console.log(`Server running on http://${host}:${port}`);
+    logger.info("Server running on http://%s:%d", host, port);
 
     if (hasExplicitStaticPath) {
-      console.log(`Mode: static (${this.config.staticPath})`);
+      logger.info("Mode: static (%s)", this.config.staticPath);
     } else if (isDev) {
-      console.log("Mode: development (Vite HMR)");
+      logger.info("Mode: development (Vite HMR)");
     } else {
-      console.log("Mode: production (static)");
+      logger.info("Mode: production (static)");
     }
 
     const remoteServerController = this.remoteTunnelController;
     if (!remoteServerController) {
-      console.log("Remote tunnel: disabled (controller not initialized)");
+      logger.debug("Remote tunnel: disabled (controller not initialized)");
     } else {
-      console.log(
-        `Remote tunnel: ${
-          remoteServerController.isAllowedByEnv() ? "allowed" : "blocked"
-        }; ${remoteServerController.isActive() ? "active" : "inactive"}`,
+      logger.debug(
+        "Remote tunnel: %s; %s",
+        remoteServerController.isAllowedByEnv() ? "allowed" : "blocked",
+        remoteServerController.isActive() ? "active" : "inactive",
       );
     }
   }
 
   private async _gracefulShutdown() {
-    console.log("Starting graceful shutdown...");
+    logger.info("Starting graceful shutdown...");
 
     if (this.viteDevServer) {
       await this.viteDevServer.close();
@@ -294,8 +297,9 @@ export class ServerPlugin extends Plugin {
           try {
             plugin.abortActiveOperations();
           } catch (err) {
-            console.error(
-              `Error aborting operations for plugin ${plugin.name}:`,
+            logger.error(
+              "Error aborting operations for plugin %s: %O",
+              plugin.name,
               err,
             );
           }
@@ -306,13 +310,13 @@ export class ServerPlugin extends Plugin {
     // 2. close the server
     if (this.server) {
       this.server.close(() => {
-        console.log("Server closed gracefully");
+        logger.debug("Server closed gracefully");
         process.exit(0);
       });
 
       // 3. timeout to force shutdown after 15 seconds
       setTimeout(() => {
-        console.log("Force shutdown after timeout");
+        logger.debug("Force shutdown after timeout");
         process.exit(1);
       }, 15000);
     } else {

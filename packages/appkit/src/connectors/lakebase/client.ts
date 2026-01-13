@@ -10,11 +10,13 @@ import {
   type TelemetryProvider,
 } from "@/telemetry";
 import {
+  AppKitError,
   AuthenticationError,
   ConfigurationError,
   ConnectionError,
   ValidationError,
 } from "../../observability/errors";
+import { createLogger } from "../../observability/logger";
 import { deepMerge } from "../../utils";
 import { lakebaseDefaults } from "./defaults";
 import type {
@@ -22,6 +24,8 @@ import type {
   LakebaseConnectionConfig,
   LakebaseCredentials,
 } from "./types";
+
+const logger = createLogger("connectors:lakebase");
 
 /**
  * Enterprise-grade connector for Databricks Lakebase
@@ -140,7 +144,10 @@ export class LakebaseConnector {
           span.recordException(error as Error);
           span.setStatus({ code: SpanStatusCode.ERROR });
 
-          throw error;
+          if (error instanceof AppKitError) {
+            throw error;
+          }
+          throw ConnectionError.queryFailed(error as Error);
         } finally {
           const duration = Date.now() - startTime;
           this.telemetryMetrics.queryCount.add(1);
@@ -223,7 +230,11 @@ export class LakebaseConnector {
           }
           span.recordException(error as Error);
           span.setStatus({ code: SpanStatusCode.ERROR });
-          throw error;
+
+          if (error instanceof AppKitError) {
+            throw error;
+          }
+          throw ConnectionError.transactionFailed(error as Error);
         } finally {
           client.release();
           const duration = Date.now() - startTime;
@@ -264,7 +275,7 @@ export class LakebaseConnector {
   async close(): Promise<void> {
     if (this.pool) {
       await this.pool.end().catch((error: unknown) => {
-        console.error("Error closing connection pool:", error);
+        logger.error("Error closing connection pool: %O", error);
       });
       this.pool = null;
     }
@@ -335,9 +346,11 @@ export class LakebaseConnector {
     });
 
     pool.on("error", (error: Error & { code?: string }) => {
-      console.error("Connection pool error:", error.message, {
-        code: error.code,
-      });
+      logger.error(
+        "Connection pool error: %s (code: %s)",
+        error.message,
+        error.code,
+      );
     });
 
     return pool;
@@ -380,8 +393,8 @@ export class LakebaseConnector {
       const oldPool = this.pool;
       this.pool = null;
       oldPool.end().catch((error: unknown) => {
-        console.error(
-          "Error closing old connection pool during rotation:",
+        logger.error(
+          "Error closing old connection pool during rotation: %O",
           error,
         );
       });

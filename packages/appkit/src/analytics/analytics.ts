@@ -1,4 +1,5 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
+import type express from "express";
 import type {
   IAppRouter,
   PluginExecuteConfig,
@@ -11,7 +12,7 @@ import {
   getWarehouseId,
   getWorkspaceClient,
 } from "../context";
-import type express from "express";
+import { createLogger } from "../observability/logger";
 import { Plugin, toPlugin } from "../plugin";
 import { queryDefaults } from "./defaults";
 import { QueryProcessor } from "./query";
@@ -20,6 +21,8 @@ import type {
   IAnalyticsConfig,
   IAnalyticsQueryRequest,
 } from "./types";
+
+const logger = createLogger("analytics");
 
 export class AnalyticsPlugin extends Plugin {
   name = "analytics";
@@ -95,8 +98,10 @@ export class AnalyticsPlugin extends Plugin {
       const { jobId } = req.params;
       const workspaceClient = getWorkspaceClient();
 
-      console.log(
-        `Processing Arrow job request: ${jobId} for plugin: ${this.name}`,
+      logger.debug(
+        "Processing Arrow job request: %s for plugin: %s",
+        jobId,
+        this.name,
       );
 
       const result = await this.getArrowData(workspaceClient, jobId);
@@ -105,12 +110,14 @@ export class AnalyticsPlugin extends Plugin {
       res.setHeader("Content-Length", result.data.length.toString());
       res.setHeader("Cache-Control", "public, max-age=3600");
 
-      console.log(
-        `Sending Arrow buffer: ${result.data.length} bytes for job ${jobId}`,
+      logger.debug(
+        "Sending Arrow buffer: %d bytes for job %s",
+        result.data.length,
+        jobId,
       );
       res.send(Buffer.from(result.data));
     } catch (error) {
-      console.error(`Arrow job error for ${this.name}:`, error);
+      logger.error("Arrow job error for %s: %O", this.name, error);
       res.status(404).json({
         error: error instanceof Error ? error.message : "Arrow job not found",
         plugin: this.name,

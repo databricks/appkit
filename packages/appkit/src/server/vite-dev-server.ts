@@ -4,9 +4,12 @@ import type express from "express";
 import type { ViteDevServer as ViteDevServerType } from "vite";
 import { mergeConfigDedup } from "@/utils";
 import { ServerError } from "../observability/errors";
+import { createLogger } from "../observability/logger";
+import { appKitTypesPlugin } from "../type-generator/vite-plugin";
 import { BaseServer } from "./base-server";
 import type { PluginEndpoints } from "./utils";
-import { appKitTypesPlugin } from "../type-generator/vite-plugin";
+
+const logger = createLogger("server:vite");
 
 /**
  * Vite dev server for the AppKit.
@@ -115,7 +118,7 @@ export class ViteDevServer extends BaseServer {
       const hasIndexHtml = fs.existsSync(path.join(fullPath, "index.html"));
 
       if (hasViteConfig && hasIndexHtml) {
-        console.log(`Vite dev server: using client root ${fullPath}`);
+        logger.debug("Vite dev server: using client root %s", fullPath);
         return fullPath;
       }
     }

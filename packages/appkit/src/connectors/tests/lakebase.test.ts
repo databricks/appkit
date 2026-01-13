@@ -208,9 +208,7 @@ describe("LakebaseConnector", () => {
 
       mockQuery.mockRejectedValue(transientError);
 
-      await expect(connector.query("SELECT 1")).rejects.toThrow(
-        "connection reset",
-      );
+      await expect(connector.query("SELECT 1")).rejects.toThrow("Query failed");
       expect(mockQuery).toHaveBeenCalledTimes(2);
     });
 
@@ -220,7 +218,7 @@ describe("LakebaseConnector", () => {
 
       mockQuery.mockRejectedValue(syntaxError);
 
-      await expect(connector.query("SELEC 1")).rejects.toThrow("syntax error");
+      await expect(connector.query("SELEC 1")).rejects.toThrow("Query failed");
       expect(mockQuery).toHaveBeenCalledTimes(1);
     });
   });
