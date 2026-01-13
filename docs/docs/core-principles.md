@@ -1,4 +1,4 @@
-# Principles
+# Core Principles
 
 Learn about the fundamental concepts and principles behind AppKit.
 
