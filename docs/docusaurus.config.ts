@@ -1,6 +1,43 @@
 import { themes as prismThemes } from "prism-react-renderer";
+import path from "node:path";
 import type { Config } from "@docusaurus/types";
 import type * as Preset from "@docusaurus/preset-classic";
+import webpack from "webpack";
+
+function appKitAliasPlugin() {
+  return {
+    name: "appkit-aliases",
+    configureWebpack() {
+      return {
+        resolve: {
+          alias: {
+            "@": path.resolve(__dirname, "../packages/appkit-ui/src"),
+            shared: path.resolve(__dirname, "../packages/shared/src"),
+            "@/lib/utils": path.resolve(
+              __dirname,
+              "../packages/appkit-ui/src/lib/utils",
+            ),
+            "@/js": path.resolve(__dirname, "../packages/appkit-ui/src/js"),
+            "@databricks/appkit-ui/react": path.resolve(
+              __dirname,
+              "../packages/appkit-ui/src/react",
+            ),
+          },
+        },
+        // Replace import.meta references at build time to prevent SSR errors.
+        // The appkit-ui source code uses import.meta for Vite HMR, which causes
+        // "Cannot use 'import.meta' outside a module" errors when Docusaurus
+        // evaluates the server bundle in Node.js CommonJS context during SSG.
+        plugins: [
+          new webpack.DefinePlugin({
+            "import.meta.env.DEV": JSON.stringify(false),
+            "import.meta.hot": JSON.stringify(undefined),
+          }),
+        ],
+      };
+    },
+  };
+}
 
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
@@ -93,6 +130,7 @@ const config: Config = {
         },
       },
     ],
+    appKitAliasPlugin,
   ],
 
   themeConfig: {

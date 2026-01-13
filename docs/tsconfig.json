@@ -2,7 +2,15 @@
   // This file is not used in compilation. It is here just for a nice editor experience.
   "extends": "@docusaurus/tsconfig",
   "compilerOptions": {
-    "baseUrl": "."
+    "baseUrl": ".",
+    "paths": {
+      "@site/*": ["./*"],
+      "@databricks/appkit-ui/react": ["../packages/appkit-ui/src/react"],
+      "@databricks/appkit-ui/js": ["../packages/appkit-ui/src/js"],
+      "@/*": ["../packages/appkit-ui/src/*"],
+      "shared": ["../packages/shared/src"]
+    }
   },
+  "include": ["../packages/appkit-ui/src/react/vite-env.d.ts"],
   "exclude": [".docusaurus", "build"]
 }
