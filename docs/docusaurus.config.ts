@@ -134,6 +134,14 @@ const config: Config = {
   ],
 
   themeConfig: {
+    announcementBar: {
+      id: "preview-not-for-production",
+      content:
+        "⚠️ AppKit is in an early development phase and is subject to change without notice. <strong>DO NOT</strong> use in production environments.",
+      backgroundColor: "#f0f0f0",
+      textColor: "#000000",
+      isCloseable: true,
+    },
     colorMode: {
       respectPrefersColorScheme: true,
     },
