@@ -15,8 +15,8 @@ import {
   ConfigurationError,
   ConnectionError,
   ValidationError,
-} from "../../observability/errors";
-import { createLogger } from "../../observability/logger";
+} from "../../errors";
+import { createLogger } from "../../logging/logger";
 import { deepMerge } from "../../utils";
 import { lakebaseDefaults } from "./defaults";
 import type {

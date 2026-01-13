@@ -10,7 +10,13 @@ export {
   ServerError,
   TunnelError,
   ValidationError,
-} from "./errors";
+} from "../errors";
 export { createLogger, type Logger } from "./logger";
+export {
+  DEFAULT_SAMPLING_CONFIG,
+  type SamplingConfig,
+  shouldSample,
+} from "./sampling";
 export type { LogLevel } from "./types";
 export { WideEvent, type WideEventData } from "./wide-event";
+export { WideEventEmitter } from "./wide-event-emitter";

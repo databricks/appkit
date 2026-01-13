@@ -1,4 +1,4 @@
-import { ValidationError } from "../observability/errors";
+import { ValidationError } from "../errors";
 
 export function validateEnv(envVars: string[]) {
   const missingVars = [];

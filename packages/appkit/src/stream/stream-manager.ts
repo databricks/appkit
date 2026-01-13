@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { context } from "@opentelemetry/api";
 import type { IAppResponse, StreamConfig } from "shared";
 import { EventRingBuffer } from "./buffers";
 import { streamDefaults } from "./defaults";
@@ -26,12 +27,17 @@ export class StreamManager {
   }
 
   // main streaming method - handles new connection and reconnection
-  stream(
+  async stream(
     res: IAppResponse,
     handler: (signal: AbortSignal) => AsyncGenerator<any, void, unknown>,
     options?: StreamConfig,
   ): Promise<void> {
     const { streamId } = options || {};
+
+    // check if response is already closed
+    if (res.writableEnded || res.destroyed) {
+      return;
+    }
 
     // setup SSE headers
     this.sseWriter.setupHeaders(res);
@@ -139,6 +145,12 @@ export class StreamManager {
     options?: StreamConfig,
   ): Promise<void> {
     const streamId = options?.streamId ?? randomUUID();
+
+    // abort stream if response is closed
+    if (res.writableEnded || res.destroyed) {
+      return;
+    }
+
     const abortController = new AbortController();
 
     // create event buffer
@@ -153,6 +165,15 @@ export class StreamManager {
     );
     const heartbeat = this.sseWriter.startHeartbeat(res, combinedSignal);
 
+    // capture the current trace context at stream creation time
+    const traceContext = context.active();
+
+    // abort stream if response is closed
+    if (res.writableEnded || res.destroyed) {
+      clearInterval(heartbeat);
+      return;
+    }
+
     // create stream entry
     const streamEntry: StreamEntry = {
       streamId,
@@ -162,6 +183,7 @@ export class StreamManager {
       isCompleted: false,
       lastAccess: Date.now(),
       abortController,
+      traceContext,
     };
     this.streamRegistry.add(streamEntry);
 
@@ -173,7 +195,6 @@ export class StreamManager {
     };
     this.activeOperations.add(streamOperation);
 
-    // handle client disconnect
     res.on("close", () => {
       clearInterval(heartbeat);
       this.activeOperations.delete(streamOperation);
@@ -190,71 +211,74 @@ export class StreamManager {
   private async _processGeneratorInBackground(
     streamEntry: StreamEntry,
   ): Promise<void> {
-    try {
-      // retrieve all events from generator
-      for await (const event of streamEntry.generator) {
-        if (streamEntry.abortController.signal.aborted) break;
-        const eventId = randomUUID();
-        const eventData = JSON.stringify(event);
+    // run the entire generator processing within the captured trace context
+    return context.with(streamEntry.traceContext, async () => {
+      try {
+        // retrieve all events from generator
+        for await (const event of streamEntry.generator) {
+          if (streamEntry.abortController.signal.aborted) break;
+          const eventId = randomUUID();
+          const eventData = JSON.stringify(event);
 
-        // validate event size
-        if (eventData.length > this.maxEventSize) {
-          const errorMsg = `Event exceeds max size of ${this.maxEventSize} bytes`;
-          const errorCode = SSEErrorCode.INVALID_REQUEST;
-          // broadcast error to all connected clients
-          this._broadcastErrorToClients(
-            streamEntry,
-            eventId,
-            errorMsg,
-            errorCode,
-          );
-          continue;
+          // validate event size
+          if (eventData.length > this.maxEventSize) {
+            const errorMsg = `Event exceeds max size of ${this.maxEventSize} bytes`;
+            const errorCode = SSEErrorCode.INVALID_REQUEST;
+            // broadcast error to all connected clients
+            this._broadcastErrorToClients(
+              streamEntry,
+              eventId,
+              errorMsg,
+              errorCode,
+            );
+            continue;
+          }
+
+          // buffer event for reconnection
+          streamEntry.eventBuffer.add({
+            id: eventId,
+            type: event.type,
+            data: eventData,
+            timestamp: Date.now(),
+          });
+
+          // broadcast to all connected clients
+          this._broadcastEventsToClients(streamEntry, eventId, event);
+          streamEntry.lastAccess = Date.now();
         }
 
-        // buffer event for reconnection
+        streamEntry.isCompleted = true;
+
+        // close all clients
+        this._closeAllClients(streamEntry);
+
+        // cleanup if no clients are connected
+        this._cleanupStream(streamEntry);
+      } catch (error) {
+        const errorMsg =
+          error instanceof Error ? error.message : "Internal server error";
+        const errorEventId = randomUUID();
+        const errorCode = this._categorizeError(error);
+
+        // buffer error event
         streamEntry.eventBuffer.add({
-          id: eventId,
-          type: event.type,
-          data: eventData,
+          id: errorEventId,
+          type: "error",
+          data: JSON.stringify({ error: errorMsg, code: errorCode }),
           timestamp: Date.now(),
         });
 
-        // broadcast to all connected clients
-        this._broadcastEventsToClients(streamEntry, eventId, event);
-        streamEntry.lastAccess = Date.now();
+        // send error event to all connected clients
+        this._broadcastErrorToClients(
+          streamEntry,
+          errorEventId,
+          errorMsg,
+          errorCode,
+          true,
+        );
+        streamEntry.isCompleted = true;
       }
-
-      streamEntry.isCompleted = true;
-
-      // close all clients
-      this._closeAllClients(streamEntry);
-
-      // cleanup if no clients are connected
-      this._cleanupStream(streamEntry);
-    } catch (error) {
-      const errorMsg =
-        error instanceof Error ? error.message : "Internal server error";
-      const errorEventId = randomUUID();
-      const errorCode = this._categorizeError(error);
-
-      // buffer error event
-      streamEntry.eventBuffer.add({
-        id: errorEventId,
-        type: "error",
-        data: JSON.stringify({ error: errorMsg, code: errorCode }),
-        timestamp: Date.now(),
-      });
-
-      // send error event to all connected clients
-      this._broadcastErrorToClients(
-        streamEntry,
-        errorEventId,
-        errorMsg,
-        errorCode,
-        true,
-      );
-      streamEntry.isCompleted = true;
-    }
+    });
   }
 
   private _combineSignals(

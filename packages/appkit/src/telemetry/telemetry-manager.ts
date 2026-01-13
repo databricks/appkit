@@ -17,14 +17,14 @@ import {
 import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
 import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 import { NodeSDK } from "@opentelemetry/sdk-node";
-import { AlwaysOnSampler } from "@opentelemetry/sdk-trace-base";
 import {
   ATTR_SERVICE_NAME,
   ATTR_SERVICE_VERSION,
 } from "@opentelemetry/semantic-conventions";
 import type { TelemetryOptions } from "shared";
-import { createLogger } from "../observability/logger";
+import { createLogger } from "../logging/logger";
 import { TelemetryProvider } from "./telemetry-provider";
+import { AppKitSampler } from "./trace-sampler";
 import type { TelemetryConfig } from "./types";
 
 const logger = createLogger("telemetry");
@@ -76,7 +76,7 @@ export class TelemetryManager {
       this.sdk = new NodeSDK({
         resource: this.createResource(config),
         autoDetectResources: false,
-        sampler: new AlwaysOnSampler(),
+        sampler: new AppKitSampler(),
         traceExporter: new OTLPTraceExporter({ headers: config.headers }),
         metricReaders: [
           new PeriodicExportingMetricReader({

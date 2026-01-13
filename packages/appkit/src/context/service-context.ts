@@ -12,7 +12,7 @@ import {
   AuthenticationError,
   ConfigurationError,
   InitializationError,
-} from "../observability/errors";
+} from "../errors";
 import type { UserContext } from "./user-context";
 
 /**

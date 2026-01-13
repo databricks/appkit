@@ -1,5 +1,6 @@
 {
   "$schema": "https://turborepo.com/schema.json",
+  "globalPassThroughEnv": ["DEBUG"],
   "ui": "tui",
   "tasks": {
     "build:watch": {

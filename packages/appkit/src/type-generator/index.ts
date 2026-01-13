@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import dotenv from "dotenv";
-import { createLogger } from "../observability/logger";
+import { createLogger } from "../logging/logger";
 import { generateQueriesFromDescribe } from "./query-registry";
 import type { QuerySchema } from "./types";
 

@@ -1,11 +1,8 @@
 import { createHash } from "node:crypto";
 import type { CacheConfig, CacheEntry, CacheStorage } from "shared";
 import type { LakebaseConnector } from "../../connectors";
-import {
-  InitializationError,
-  ValidationError,
-} from "../../observability/errors";
-import { createLogger } from "../../observability/logger";
+import { InitializationError, ValidationError } from "../../errors";
+import { createLogger } from "../../logging/logger";
 import { lakebaseStorageDefaults } from "./defaults";
 
 const logger = createLogger("cache:persistent");

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import type express from "express";
 import type { TunnelConnection } from "shared";
 import { WebSocketServer } from "ws";
-import { createLogger } from "../../observability/logger";
+import { createLogger } from "../../logging/logger";
 import {
   generateTunnelIdFromEmail,
   getConfigScript,

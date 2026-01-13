@@ -1,7 +1,4 @@
-import { createLogger } from "./logger";
 import type { LogLevel } from "./types";
-
-const logger = createLogger("wide-event");
 
 export interface QueryData {
   key?: string;
@@ -21,6 +18,7 @@ export interface WideEventData {
   // request metadata
   timestamp: string;
   request_id: string;
+  trace_id?: string;
   method?: string;
   path?: string;
   status_code?: number;
@@ -51,6 +49,7 @@ export interface WideEventData {
   execution?: {
     cache_hit?: boolean;
     cache_key?: string;
+    cache_deduplication?: boolean;
     retry_attempts?: number;
     timeout_ms?: number;
     [key: string]: unknown;
@@ -98,7 +97,7 @@ export interface WideEventData {
  * - Fields are camelCase to match OpenTelemetry
  */
 export class WideEvent {
-  private data: WideEventData;
+  public data: WideEventData;
   private startTime: number;
 
   constructor(requestId: string) {
@@ -245,12 +244,7 @@ export class WideEvent {
 
     // Keep only last 50 logs to prevent unbounded growth
     if (this.data.logs.length > 50) {
-      const originalLength = this.data.logs.length;
       this.data.logs = this.data.logs.slice(-50);
-      logger.debug(
-        "Log limit exceeded, truncated from %d to 50 logs",
-        originalLength,
-      );
     }
 
     return this;

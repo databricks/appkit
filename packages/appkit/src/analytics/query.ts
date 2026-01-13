@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { sql } from "@databricks/sdk-experimental";
 import { isSQLTypeMarker, type SQLTypeMarker, sql as sqlHelpers } from "shared";
 import { getWorkspaceId } from "../context";
-import { ValidationError } from "../observability/errors";
+import { ValidationError } from "../errors";
 
 type SQLParameterValue = SQLTypeMarker | null | undefined;
 

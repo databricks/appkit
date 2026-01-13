@@ -1,7 +1,4 @@
-import {
-  ConfigurationError,
-  ValidationError,
-} from "../../observability/errors";
+import { ConfigurationError, ValidationError } from "../../errors";
 import type { LakebaseConnectionConfig } from "./types";
 
 export interface ParsedConnectionString {

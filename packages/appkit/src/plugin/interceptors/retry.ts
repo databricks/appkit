@@ -1,5 +1,8 @@
 import type { RetryConfig } from "shared";
-import type { InterceptorContext, ExecutionInterceptor } from "./types";
+import { createLogger } from "../../logging/logger";
+import type { ExecutionInterceptor, InterceptorContext } from "./types";
+
+const logger = createLogger("interceptors:retry");
 
 // interceptor to handle retry logic
 export class RetryInterceptor implements ExecutionInterceptor {
@@ -21,12 +24,27 @@ export class RetryInterceptor implements ExecutionInterceptor {
 
     for (let attempt = 1; attempt <= this.attempts; attempt++) {
       try {
-        return await fn();
+        const result = await fn();
+
+        if (attempt > 1 && context.request) {
+          const event = logger.event(context.request);
+          event.setExecution({
+            retry_attempts: attempt - 1,
+          });
+        }
+
+        return result;
       } catch (error) {
         lastError = error;
 
         // last attempt, rethrow the error
         if (attempt === this.attempts) {
+          if (context.request) {
+            const event = logger.event(context.request);
+            event.setExecution({
+              retry_attempts: attempt - 1,
+            });
+          }
           throw error;
         }
 

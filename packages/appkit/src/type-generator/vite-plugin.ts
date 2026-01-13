@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Plugin } from "vite";
-import { createLogger } from "../observability/logger";
+import { createLogger } from "../logging/logger";
 import { generateFromEntryPoint } from "./index";
 
 const logger = createLogger("type-generator:vite-plugin");

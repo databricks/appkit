@@ -9,8 +9,8 @@ import {
   ConnectionError,
   ExecutionError,
   ValidationError,
-} from "../../observability/errors";
-import { createLogger } from "../../observability/logger";
+} from "../../errors";
+import { createLogger } from "../../logging/logger";
 import { ArrowStreamProcessor } from "../../stream/arrow-stream-processor";
 import type { TelemetryProvider } from "../../telemetry";
 import {
@@ -89,6 +89,11 @@ export class SQLWarehouseConnector {
     const startTime = Date.now();
     let success = false;
 
+    // if signal is aborted, throw an error
+    if (signal?.aborted) {
+      throw ExecutionError.canceled();
+    }
+
     return this.telemetry.startActiveSpan(
       "sql.query",
       {
@@ -103,6 +108,24 @@ export class SQLWarehouseConnector {
         },
       },
       async (span: Span) => {
+        let abortHandler: (() => void) | undefined;
+        let isAborted = false;
+
+        if (signal) {
+          abortHandler = () => {
+            // abort span if not recording
+            if (!span.isRecording()) return;
+            isAborted = true;
+            span.setAttribute("cancelled", true);
+            span.setStatus({
+              code: SpanStatusCode.ERROR,
+              message: "Query cancelled by client",
+            });
+            span.end();
+          };
+          signal.addEventListener("abort", abortHandler, { once: true });
+        }
+
         try {
           // validate required fields
           if (!input.statement) {
@@ -179,7 +202,9 @@ export class SQLWarehouseConnector {
             case "CLOSED":
               throw ExecutionError.resultsClosed();
             default:
-              throw ExecutionError.unknownState(status?.state as string);
+              throw ExecutionError.unknownState(
+                String(status?.state ?? "unknown"),
+              );
           }
 
           const resultData = result.result as any;
@@ -193,14 +218,20 @@ export class SQLWarehouseConnector {
           }
 
           success = true;
-          span.setStatus({ code: SpanStatusCode.OK });
+          // only set success status if not aborted
+          if (!isAborted) {
+            span.setStatus({ code: SpanStatusCode.OK });
+          }
           return result;
         } catch (error) {
-          span.recordException(error as Error);
-          span.setStatus({
-            code: SpanStatusCode.ERROR,
-            message: error instanceof Error ? error.message : String(error),
-          });
+          // only record error if not already handled by abort
+          if (!isAborted) {
+            span.recordException(error as Error);
+            span.setStatus({
+              code: SpanStatusCode.ERROR,
+              message: error instanceof Error ? error.message : String(error),
+            });
+          }
 
           if (error instanceof AppKitError) {
             throw error;
@@ -209,8 +240,17 @@ export class SQLWarehouseConnector {
             error instanceof Error ? error.message : String(error),
           );
         } finally {
+          // remove abort handler
+          if (abortHandler && signal) {
+            signal.removeEventListener("abort", abortHandler);
+          }
+
           const duration = Date.now() - startTime;
-          span.end();
+
+          // end span if not already ended by abort handler
+          if (!isAborted) {
+            span.end();
+          }
 
           const attributes = {
             "db.warehouse_id": input.warehouse_id,
@@ -316,7 +356,9 @@ export class SQLWarehouseConnector {
               case "CLOSED":
                 throw ExecutionError.resultsClosed();
               default:
-                throw ExecutionError.unknownState(status?.state as string);
+                throw ExecutionError.unknownState(
+                  String(status?.state ?? "unknown"),
+                );
             }
 
             // continue polling after delay

@@ -12,7 +12,7 @@ import {
   getWarehouseId,
   getWorkspaceClient,
 } from "../context";
-import { createLogger } from "../observability/logger";
+import { createLogger } from "../logging/logger";
 import { Plugin, toPlugin } from "../plugin";
 import { queryDefaults } from "./defaults";
 import { QueryProcessor } from "./query";
@@ -98,26 +98,33 @@ export class AnalyticsPlugin extends Plugin {
       const { jobId } = req.params;
       const workspaceClient = getWorkspaceClient();
 
-      logger.debug(
-        "Processing Arrow job request: %s for plugin: %s",
-        jobId,
-        this.name,
-      );
+      logger.debug(req, "Processing Arrow job request for jobId=%s", jobId);
+
+      const event = logger.event(req);
+      event.setComponent("analytics", "getArrowData").setContext("analytics", {
+        job_id: jobId,
+        plugin: this.name,
+      });
 
       const result = await this.getArrowData(workspaceClient, jobId);
+
+      event.setContext("sql-warehouse", {
+        arrow_data_size_bytes: result.data.length,
+      });
 
       res.setHeader("Content-Type", "application/octet-stream");
       res.setHeader("Content-Length", result.data.length.toString());
       res.setHeader("Cache-Control", "public, max-age=3600");
 
       logger.debug(
+        req,
         "Sending Arrow buffer: %d bytes for job %s",
         result.data.length,
         jobId,
       );
       res.send(Buffer.from(result.data));
     } catch (error) {
-      logger.error("Arrow job error for %s: %O", this.name, error);
+      logger.error(req, "Arrow job error: %O", error);
       res.status(404).json({
         error: error instanceof Error ? error.message : "Arrow job not found",
         plugin: this.name,
@@ -135,6 +142,18 @@ export class AnalyticsPlugin extends Plugin {
   ): Promise<void> {
     const { query_key } = req.params;
     const { parameters, format = "JSON" } = req.body as IAnalyticsQueryRequest;
+
+    // Request-scoped logging with WideEvent tracking
+    logger.debug(req, "Executing query: %s (format=%s)", query_key, format);
+
+    const event = logger.event(req);
+    event.setComponent("analytics", "executeQuery").setContext("analytics", {
+      query_key,
+      format,
+      parameter_count: parameters ? Object.keys(parameters).length : 0,
+      plugin: this.name,
+    });
+
     const queryParameters =
       format === "ARROW"
         ? {
@@ -201,12 +220,14 @@ export class AnalyticsPlugin extends Plugin {
           processedParams,
           queryParameters.formatParameters,
           signal,
+          req,
         );
 
         return { type: queryParameters.type, ...result };
       },
       streamExecutionSettings,
       userKey,
+      req,
     );
   }
 
@@ -230,6 +251,7 @@ export class AnalyticsPlugin extends Plugin {
     parameters?: Record<string, SQLTypeMarker | null | undefined>,
     formatParameters?: Record<string, any>,
     signal?: AbortSignal,
+    req?: express.Request,
   ): Promise<any> {
     const workspaceClient = getWorkspaceClient();
     const warehouseId = await getWarehouseId();
@@ -237,6 +259,7 @@ export class AnalyticsPlugin extends Plugin {
     const { statement, parameters: sqlParameters } =
       this.queryProcessor.convertToSQLParameters(query, parameters);
 
+    const queryStartTime = Date.now();
     const response = await this.SQLClient.executeStatement(
       workspaceClient,
       {
@@ -247,6 +270,20 @@ export class AnalyticsPlugin extends Plugin {
       },
       signal,
     );
+    const queryDurationMs = Date.now() - queryStartTime;
+
+    // Set warehouse execution data on WideEvent
+    if (req) {
+      const event = logger.event(req);
+      const result = response.result as any;
+      const rowCount = result?.data?.length ?? result?.data_array?.length ?? 0;
+
+      event.setContext("sql-warehouse", {
+        warehouse_id: warehouseId,
+        rows_returned: rowCount,
+        query_duration_ms: queryDurationMs,
+      });
+    }
 
     return response.result;
   }

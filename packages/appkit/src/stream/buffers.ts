@@ -1,4 +1,4 @@
-import { ValidationError } from "../observability/errors";
+import { ValidationError } from "../errors";
 import type { BufferedEvent } from "./types";
 
 // generic ring buffer implementation

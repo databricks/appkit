@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
-import { createLogger } from "../observability/logger";
+import { createLogger } from "../logging/logger";
 import { CACHE_VERSION, hashSQL, loadCache, saveCache } from "./cache";
 import { Spinner } from "./spinner";
 import {

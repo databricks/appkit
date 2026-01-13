@@ -19,8 +19,8 @@ import {
   ServiceContext,
   type UserContext,
 } from "../context";
-import { AuthenticationError } from "../observability/errors";
-import { createLogger } from "../observability/logger";
+import { AuthenticationError } from "../errors";
+import { createLogger } from "../logging/logger";
 import { StreamManager } from "../stream";
 import {
   type ITelemetry,
@@ -200,6 +200,7 @@ export abstract class Plugin<
     fn: StreamExecuteHandler<T>,
     options: StreamExecutionSettings,
     userKey?: string,
+    req?: express.Request,
   ) {
     // destructure options
     const {
@@ -214,7 +215,7 @@ export abstract class Plugin<
       user: userConfig,
     });
 
-    // Get user key from context if not provided
+    // get user key from context if not provided
     const effectiveUserKey = userKey ?? getCurrentUserId();
 
     const self = this;
@@ -226,6 +227,7 @@ export abstract class Plugin<
         signal: streamSignal,
         metadata: new Map(),
         userKey: effectiveUserKey,
+        request: req,
       };
 
       // build interceptors
@@ -261,17 +263,19 @@ export abstract class Plugin<
     fn: (signal?: AbortSignal) => Promise<T>,
     options: PluginExecutionSettings,
     userKey?: string,
+    req?: express.Request,
   ): Promise<T | undefined> {
     const executeConfig = this._buildExecutionConfig(options);
 
     const interceptors = this._buildInterceptors(executeConfig);
 
-    // Get user key from context if not provided
+    // get user key from context if not provided
     const effectiveUserKey = userKey ?? getCurrentUserId();
 
     const context: InterceptorContext = {
       metadata: new Map(),
       userKey: effectiveUserKey,
+      request: req,
     };
 
     try {
@@ -318,7 +322,6 @@ export abstract class Plugin<
 
     // order matters: telemetry → timeout → retry → cache (innermost to outermost)
 
-    // Only add telemetry interceptor if traces are enabled
     const telemetryConfig = normalizeTelemetryOptions(this.config.telemetry);
     if (
       telemetryConfig.traces &&

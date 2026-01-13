@@ -64,11 +64,11 @@ describe("WideEvent", () => {
     test("merges object values", () => {
       const event = new WideEvent("req-123");
 
-      event.set("service", { region: "us-west-2" });
+      // Use setContext for partial updates since service requires name and version
+      event.setContext("test", { region: "us-west-2" });
 
       const data = event.toJSON();
-      expect(data.service?.name).toBe("appkit");
-      expect(data.service?.region).toBe("us-west-2");
+      expect(data.context?.test?.region).toBe("us-west-2");
     });
 
     test("returns this for chaining", () => {
@@ -210,7 +210,8 @@ describe("WideEvent", () => {
     test("extracts error cause", () => {
       const event = new WideEvent("req-123");
       const cause = new Error("Original error");
-      const error = new Error("Wrapped error", { cause });
+      const error = new Error("Wrapped error");
+      (error as any).cause = cause;
 
       event.setError(error);
 

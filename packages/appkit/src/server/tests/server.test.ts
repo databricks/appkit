@@ -110,12 +110,20 @@ const { mockLoggerDebug, mockLoggerInfo, mockLoggerWarn, mockLoggerError } =
     mockLoggerWarn: vi.fn(),
     mockLoggerError: vi.fn(),
   }));
-vi.mock("../../observability/logger", () => ({
+vi.mock("../../logging/logger", () => ({
   createLogger: vi.fn(() => ({
     debug: mockLoggerDebug,
     info: mockLoggerInfo,
     warn: mockLoggerWarn,
     error: mockLoggerError,
+    event: vi.fn(() => ({
+      set: vi.fn().mockReturnThis(),
+      setComponent: vi.fn().mockReturnThis(),
+      setContext: vi.fn().mockReturnThis(),
+      setUser: vi.fn().mockReturnThis(),
+      setExecution: vi.fn().mockReturnThis(),
+      setError: vi.fn().mockReturnThis(),
+    })),
   })),
 }));
 

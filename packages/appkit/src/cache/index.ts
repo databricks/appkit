@@ -2,12 +2,9 @@ import { createHash } from "node:crypto";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { CacheConfig, CacheStorage } from "shared";
 import { LakebaseConnector } from "@/connectors";
-import {
-  AppKitError,
-  ExecutionError,
-  InitializationError,
-} from "../observability/errors";
-import { createLogger } from "../observability/logger";
+import { AppKitError, ExecutionError, InitializationError } from "../errors";
+import { createLogger } from "../logging/logger";
+import type { WideEvent } from "../logging/wide-event";
 import type { Counter, TelemetryProvider } from "../telemetry";
 import { SpanStatusCode, TelemetryManager } from "../telemetry";
 import { deepMerge } from "../utils";
@@ -180,6 +177,7 @@ export class CacheManager {
    * @param fn - Function to execute
    * @param userKey - User key
    * @param options - Options for the cache
+   * @param wideEvent - Optional WideEvent to track cache execution data
    * @returns Promise of the result
    */
   async getOrExecute<T>(
@@ -187,6 +185,7 @@ export class CacheManager {
     fn: () => Promise<T>,
     userKey: string,
     options?: { ttl?: number },
+    wideEvent?: WideEvent | null,
   ): Promise<T> {
     if (!this.config.enabled) return fn();
 
@@ -211,6 +210,12 @@ export class CacheManager {
             this.telemetryMetrics.cacheHitCount.add(1, {
               "cache.key": cacheKey,
             });
+
+            wideEvent?.setExecution({
+              cache_hit: true,
+              cache_key: cacheKey,
+            });
+
             return cached.value as T;
           }
 
@@ -227,6 +232,13 @@ export class CacheManager {
               "cache.key": cacheKey,
               "cache.deduplication": "true",
             });
+
+            wideEvent?.setExecution({
+              cache_hit: true,
+              cache_key: cacheKey,
+              cache_deduplication: true,
+            });
+
             span.end();
             return inFlight as Promise<T>;
           }
@@ -236,6 +248,11 @@ export class CacheManager {
           span.addEvent("cache.miss", { "cache.key": cacheKey });
           this.telemetryMetrics.cacheMissCount.add(1, {
             "cache.key": cacheKey,
+          });
+
+          wideEvent?.setExecution({
+            cache_hit: false,
+            cache_key: cacheKey,
           });
 
           const promise = fn()

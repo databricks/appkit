@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { TunnelConnection } from "shared";
 import { isRemoteTunnelAllowedByEnv } from "@/server/remote-tunnel/gate";
-import { TunnelError } from "../observability/errors";
-import { createLogger } from "../observability/logger";
+import { TunnelError } from "../errors";
+import { createLogger } from "../logging/logger";
 
 const logger = createLogger("plugin:dev-reader");
 

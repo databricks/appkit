@@ -1,6 +1,6 @@
 import type { Server as HTTPServer } from "node:http";
 import type express from "express";
-import { createLogger } from "../../observability/logger";
+import { createLogger } from "../../logging/logger";
 import type { DevFileReader } from "../../plugin/dev-reader";
 import {
   hasDevQuery,
