@@ -7,6 +7,8 @@ This section contains the API reference for the AppKit packages.
 - [`appkit`](appkit/index.md) - Core library. Provides the core functionality for building Databricks applications.
 - [`appkit-ui`](appkit-ui/index.md) - UI components library. Provides a set of UI primitives for building Databricks apps in [React](https://react.dev/).
 
+Learn more about the architecture of AppKit in the [architecture](../architecture.md) document.
+
 ## Getting started
 
 To learn how to get started with AppKit, see the [getting started guide](../index.md) for AI-assisted and manual quick start options.
@@ -19,4 +21,3 @@ To install the AppKit packages into your existing JavaScript/TypeScript project,
 npm install @databricks/appkit
 npm install @databricks/appkit-ui
 ```
-
