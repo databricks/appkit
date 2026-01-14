@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import useBaseUrl from "@docusaurus/useBaseUrl";
 import { Toaster } from "sonner";
 import { PortalContainerProvider } from "../../../../packages/appkit-ui/src/react/portal-container-context";
+import styleVersion from "../../../static/appkit-ui/styles.version.json";
 
 // Timing constants for delays and retries
 const TIMING = {
@@ -195,7 +196,9 @@ export function IframePreview({
 }: IframePreviewProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [iframeBody, setIframeBody] = useState<HTMLElement | null>(null);
-  const stylesHref = useBaseUrl("/appkit-ui/styles.gen.css");
+  const stylesHref = useBaseUrl(
+    `/appkit-ui/styles.gen.css?v=${styleVersion.version}`,
+  );
 
   const iframeHeight = useIframeAutoHeight(iframeRef, customHeight);
   useDarkModeSync(iframeRef);

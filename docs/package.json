@@ -5,8 +5,9 @@
   "scripts": {
     "build-appkit-ui-styles": "tsx scripts/build-appkit-ui-styles.ts",
     "docusaurus": "docusaurus",
-    "dev": "pnpm run generate-component-docs && docusaurus start --no-open",
-    "build": "pnpm run build-appkit-ui-styles && pnpm run generate-component-docs && docusaurus build",
+    "dev": "pnpm run gen && docusaurus start --no-open",
+    "build": "pnpm run gen && docusaurus build",
+    "gen": "pnpm run build-appkit-ui-styles && pnpm run generate-component-docs",
     "generate-component-docs": "tsx ../tools/generate-component-mdx.ts",
     "swizzle": "docusaurus swizzle",
     "deploy": "docusaurus deploy",

@@ -54,6 +54,75 @@
     --default-mono-font-family: var(--font-mono);
     --radius: var(--radius);
     --color-border: var(--border);
+  
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --color-card: var(--card);
+    --color-card-foreground: var(--card-foreground);
+    --color-popover: var(--popover);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-destructive: var(--destructive);
+    --color-destructive-foreground: var(--destructive-foreground);
+    --color-success: var(--success);
+    --color-success-foreground: var(--success-foreground);
+    --color-warning: var(--warning);
+    --color-warning-foreground: var(--warning-foreground);
+    --color-border: var(--border);
+    --color-input: var(--input);
+    --color-ring: var(--ring);
+    /* Legacy chart colors (aliased to categorical) */
+    --color-chart-1: var(--chart-1);
+    --color-chart-2: var(--chart-2);
+    --color-chart-3: var(--chart-3);
+    --color-chart-4: var(--chart-4);
+    --color-chart-5: var(--chart-5);
+    --color-chart-6: var(--chart-6);
+    --color-chart-7: var(--chart-7);
+    --color-chart-8: var(--chart-8);
+    /* Categorical colors */
+    --color-chart-cat-1: var(--chart-cat-1);
+    --color-chart-cat-2: var(--chart-cat-2);
+    --color-chart-cat-3: var(--chart-cat-3);
+    --color-chart-cat-4: var(--chart-cat-4);
+    --color-chart-cat-5: var(--chart-cat-5);
+    --color-chart-cat-6: var(--chart-cat-6);
+    --color-chart-cat-7: var(--chart-cat-7);
+    --color-chart-cat-8: var(--chart-cat-8);
+    /* Sequential colors */
+    --color-chart-seq-1: var(--chart-seq-1);
+    --color-chart-seq-2: var(--chart-seq-2);
+    --color-chart-seq-3: var(--chart-seq-3);
+    --color-chart-seq-4: var(--chart-seq-4);
+    --color-chart-seq-5: var(--chart-seq-5);
+    --color-chart-seq-6: var(--chart-seq-6);
+    --color-chart-seq-7: var(--chart-seq-7);
+    --color-chart-seq-8: var(--chart-seq-8);
+    /* Diverging colors */
+    --color-chart-div-1: var(--chart-div-1);
+    --color-chart-div-2: var(--chart-div-2);
+    --color-chart-div-3: var(--chart-div-3);
+    --color-chart-div-4: var(--chart-div-4);
+    --color-chart-div-5: var(--chart-div-5);
+    --color-chart-div-6: var(--chart-div-6);
+    --color-chart-div-7: var(--chart-div-7);
+    --color-chart-div-8: var(--chart-div-8);
+    --color-sidebar: var(--sidebar);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-ring: var(--sidebar-ring);
+    --radius: var(--radius);
   }
 }
 @layer base {
@@ -5041,8 +5110,8 @@
   --card-foreground: oklch(0.141 0.005 285.823);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.141 0.005 285.823);
-  --primary: oklch(0.21 0.006 285.885);
-  --primary-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.55 0.22 29);
+  --primary-foreground: oklch(0.55 0.22 29);
   --secondary: oklch(0.967 0.001 286.375);
   --secondary-foreground: oklch(0.21 0.006 285.885);
   --muted: oklch(0.967 0.001 286.375);
