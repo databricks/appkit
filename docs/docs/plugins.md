@@ -8,9 +8,9 @@ Plugins are modular extensions that add capabilities to your AppKit application.
 
 For complete API documentation, see the [`Plugin`](api/appkit/Class.Plugin.md) class reference.
 
-## Built-in Plugins
+## Built-in plugins
 
-### Server Plugin
+### Server plugin
 
 Provides HTTP server capabilities with development and production modes.
 
@@ -20,9 +20,9 @@ Provides HTTP server capabilities with development and production modes.
 - Static file serving for production
 - Remote tunneling to deployed backends
 
-The Server Plugin uses the deferred initialization phase to access routes from other plugins.
+The Server plugin uses the deferred initialization phase to access routes from other plugins.
 
-### Analytics Plugin
+### Analytics plugin
 
 Enables SQL query execution against Databricks SQL Warehouses.
 
@@ -35,7 +35,7 @@ Enables SQL query execution against Databricks SQL Warehouses.
 
 Store SQL queries in `config/queries/` directory and use parameterized queries with the [`sql`](api/appkit/Variable.sql.md) helper for type safety.
 
-## Using Plugins
+## Using plugins
 
 Configure plugins when creating your AppKit instance:
 
@@ -52,7 +52,7 @@ const AppKit = await createApp({
 
 For complete configuration options, see [`createApp`](api/appkit/Function.createApp.md).
 
-## Creating Custom Plugins
+## Creating custom plugins
 
 Extend the [`Plugin`](api/appkit/Class.Plugin.md) class and export with `toPlugin()`:
 
@@ -92,7 +92,7 @@ export const myPlugin = toPlugin<typeof MyPlugin, MyPluginConfig, "myPlugin">(
 
 See the [`Plugin`](api/appkit/Class.Plugin.md) API reference for complete documentation.
 
-## Plugin Phases
+## Plugin phases
 
 Plugins initialize in three phases:
 

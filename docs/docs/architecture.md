@@ -47,7 +47,7 @@ The backend SDK that provides the plugin architecture and core functionality. It
 - Cache management and streaming capabilities
 - Type generation for SQL queries
 
-See the [Plugins](./plugins.md) and [API Reference](./api/appkit/) documentation for detailed information.
+See the [Plugins](./plugins.md) and [API reference](./api/appkit/) documentation for detailed information.
 
 ### @databricks/appkit-ui
 
@@ -58,7 +58,7 @@ A React UI library with pre-built components optimized for data applications:
 - Data visualization components
 - Type-safe integration with backend queries
 
-See the [API Reference](./api/appkit-ui/) for component documentation.
+See the [API reference](./api/appkit-ui/) for component documentation.
 
 ## Application layers
 
@@ -88,6 +88,6 @@ Integration with Databricks services:
 ## See also
 
 - [Plugins](./plugins.md): Deep dive into the plugin system
-- [API Reference](./api/): Complete API documentation
+- [API reference](./api/): Complete API documentation
 - [Development](./development/): Explore development workflows
 - [Core Principles](./core-principles.md): Learn about AppKit's design philosophy

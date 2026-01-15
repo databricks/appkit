@@ -1,4 +1,4 @@
-# API Reference
+# API reference
 
 This section contains the API reference for the AppKit packages.
 

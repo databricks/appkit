@@ -185,7 +185,7 @@ const config: Config = {
               to: "/docs/",
             },
             {
-              label: "API Reference",
+              label: "API reference",
               to: "/docs/api/",
             },
           ],
