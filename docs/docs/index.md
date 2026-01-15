@@ -84,6 +84,6 @@ This deploys the sample app to Databricks.
 
 ## Next steps
 
-- **[App Management](./app-management.mdx)**: Manage your AppKit application throughout its lifecycle using the Databricks CLI
-- **[API Reference](./api/appkit/)**: Explore the complete API documentation
-- **[Core Concepts](./core-principles)**: Learn about AppKit's design principles and architecture
+- **[App management](./app-management.mdx)**: Manage your AppKit application throughout its lifecycle using the Databricks CLI
+- **[API reference](./api/appkit/)**: Explore the complete API documentation
+- **[Core concepts](./core-principles)**: Learn about AppKit's design principles and architecture
