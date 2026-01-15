@@ -223,7 +223,25 @@ const config: Config = {
       theme: prismThemes.vsLight,
       darkTheme: prismThemes.vsDark,
     },
+    mermaid: {
+      theme: { light: "base", dark: "base" },
+      options: {
+        themeVariables: {
+          // Light mode colors (bluish) - matches Docusaurus theme
+          primaryColor: "#e3f2fd", // Light blue background
+          primaryTextColor: "#1b3139", // Dark text from custom.css
+          primaryBorderColor: "#2272b4", // Primary blue border
+          lineColor: "#2272b4", // Connection lines
+          secondaryColor: "#bbdefb", // Secondary elements
+          tertiaryColor: "#f5f5f5", // Tertiary elements
+        },
+      },
+    },
   } satisfies Preset.ThemeConfig,
+  markdown: {
+    mermaid: true,
+  },
+  themes: ["@docusaurus/theme-mermaid"],
 };
 
 export default config;
