@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import type { CacheConfig, CacheEntry, CacheStorage } from "shared";
 import type { LakebaseConnector } from "../../connectors";
+import { InitializationError, ValidationError } from "../../errors";
+import { createLogger } from "../../logging/logger";
 import { lakebaseStorageDefaults } from "./defaults";
+
+const logger = createLogger("cache:persistent");
 
 /**
  * Persistent cache storage implementation. Uses a least recently used (LRU) eviction policy
@@ -47,7 +51,7 @@ export class PersistentStorage implements CacheStorage {
       await this.runMigrations();
       this.initialized = true;
     } catch (error) {
-      console.error("Error in persistent storage initialization:", error);
+      logger.error("Error in persistent storage initialization: %O", error);
       throw error;
     }
   }
@@ -80,7 +84,7 @@ export class PersistentStorage implements CacheStorage {
         [keyHash],
       )
       .catch(() => {
-        console.debug("Error updating last_accessed time for key:", key);
+        logger.debug("Error updating last_accessed time for key: %s", key);
       });
 
     return {
@@ -104,8 +108,10 @@ export class PersistentStorage implements CacheStorage {
     const byteSize = keyBytes.length + valueBytes.length;
 
     if (byteSize > this.maxEntryBytes) {
-      throw new Error(
-        `Cache entry too large: ${byteSize} bytes exceeds maximum of ${this.maxEntryBytes} bytes`,
+      throw ValidationError.invalidValue(
+        "cache entry size",
+        byteSize,
+        `maximum ${this.maxEntryBytes} bytes`,
       );
     }
 
@@ -251,7 +257,7 @@ export class PersistentStorage implements CacheStorage {
 
   /** Generate a 64-bit hash for the cache key using SHA256 */
   private hashKey(key: string): bigint {
-    if (!key) throw new Error("Cache key cannot be empty");
+    if (!key) throw ValidationError.missingField("key");
     const hash = createHash("sha256").update(key).digest();
     return hash.readBigInt64BE(0);
   }
@@ -302,11 +308,11 @@ export class PersistentStorage implements CacheStorage {
         `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_byte_size ON ${this.tableName} (byte_size); `,
       );
     } catch (error) {
-      console.error(
-        "Error in running migrations for persistent storage:",
+      logger.error(
+        "Error in running migrations for persistent storage: %O",
         error,
       );
-      throw error;
+      throw InitializationError.migrationFailed(error as Error);
     }
   }
 }

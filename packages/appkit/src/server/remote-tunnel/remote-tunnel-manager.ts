@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import type express from "express";
 import type { TunnelConnection } from "shared";
 import { WebSocketServer } from "ws";
+import { createLogger } from "../../logging/logger";
 import {
   generateTunnelIdFromEmail,
   getConfigScript,
@@ -16,6 +17,8 @@ import { REMOTE_TUNNEL_ASSET_PREFIXES } from "./gate";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const MAX_ASSET_FETCH_TIMEOUT = 60_000;
+
+const logger = createLogger("server:remote-tunnel");
 
 interface DevFileReader {
   registerTunnelGetter(
@@ -102,7 +105,7 @@ export class RemoteTunnelManager {
 
         ws.send(JSON.stringify(request));
       }).catch((err) => {
-        console.error(`Failed to fetch ${path}:`, err.message);
+        logger.error("Failed to fetch %s: %s", path, err.message);
         return { status: 504, body: Buffer.from(""), headers: {} };
       });
 
@@ -271,7 +274,7 @@ export class RemoteTunnelManager {
 
         if (isBinary) {
           if (!tunnel.waitingForBinaryBody) {
-            console.warn(
+            logger.debug(
               "Received binary message but no requestId is waiting for body",
             );
             return;
@@ -281,7 +284,7 @@ export class RemoteTunnelManager {
           const pending = tunnel.pendingFetches.get(requestId);
 
           if (!pending || !pending.metadata) {
-            console.warn("Received binary message but pending fetch not found");
+            logger.debug("Received binary message but pending fetch not found");
             tunnel.waitingForBinaryBody = null;
             return;
           }
@@ -307,12 +310,18 @@ export class RemoteTunnelManager {
 
               if (data.approved) {
                 tunnel.approvedViewers.add(data.viewer);
-                console.log(
-                  `✅ Approved ${data.viewer} for tunnel ${tunnelId}`,
+                logger.debug(
+                  "✅ Approved %s for tunnel %s",
+                  data.viewer,
+                  tunnelId,
                 );
               } else {
                 tunnel.rejectedViewers.add(data.viewer);
-                console.log(`❌ Denied ${data.viewer} for tunnel ${tunnelId}`);
+                logger.debug(
+                  "❌ Denied %s for tunnel %s",
+                  data.viewer,
+                  tunnelId,
+                );
               }
             }
           } else if (data.type === "fetch:response:meta") {
@@ -352,7 +361,7 @@ export class RemoteTunnelManager {
             }
           }
         } catch (e) {
-          console.error("Failed to parse WebSocket message:", e);
+          logger.error("Failed to parse WebSocket message: %O", e);
         }
       });
 
@@ -393,7 +402,7 @@ export class RemoteTunnelManager {
       // Browser → CLI
       browserWs.on("message", (msg) => {
         const hmrStart = Date.now();
-        console.log("browser -> cli browserWS message", msg.toString());
+        logger.debug("browser -> cli browserWS message: %s", msg.toString());
         cliWs.send(
           JSON.stringify({
             type: "hmr:message",
@@ -415,8 +424,8 @@ export class RemoteTunnelManager {
             browserWs.send(data.body);
           }
         } catch {
-          console.error(
-            "Failed to parse CLI message for HMR:",
+          logger.error(
+            "Failed to parse CLI message for HMR: %s",
             msg.toString().substring(0, 100),
           );
         }

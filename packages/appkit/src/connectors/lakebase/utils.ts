@@ -1,3 +1,4 @@
+import { ConfigurationError, ValidationError } from "../../errors";
 import type { LakebaseConnectionConfig } from "./types";
 
 export interface ParsedConnectionString {
@@ -23,13 +24,15 @@ export function parseConnectionString(
     const url = new URL(cleanedString);
 
     if (url.protocol !== "postgresql:" && url.protocol !== "postgres:") {
-      throw new Error(
-        `Invalid connection string protocol: ${url.protocol}. Expected postgresql: or postgres:`,
+      throw ValidationError.invalidValue(
+        "protocol",
+        url.protocol,
+        "postgresql: or postgres:",
       );
     }
 
     if (!url.hostname) {
-      throw new Error("Connection string must include a hostname");
+      throw ValidationError.missingField("hostname");
     }
 
     const dbName = url.pathname.slice(1) || "databricks_postgres";
@@ -51,9 +54,7 @@ export function parseConnectionString(
   }
 
   if (!database) {
-    throw new Error(
-      "Database name is required when using hostname directly (PGHOST format)",
-    );
+    throw ValidationError.missingField("database");
   }
 
   const connectionParams: LakebaseConnectionConfig = {
@@ -76,11 +77,11 @@ export function parseFromEnv(): LakebaseConnectionConfig {
   const port = process.env.PGPORT ? parseInt(process.env.PGPORT, 10) : 5432;
 
   if (!host) {
-    throw new Error("PGHOST environment variable is required");
+    throw ConfigurationError.missingEnvVar("PGHOST");
   }
 
   if (!database) {
-    throw new Error("PGDATABASE environment variable is required");
+    throw ConfigurationError.missingEnvVar("PGDATABASE");
   }
 
   return {

@@ -14,11 +14,13 @@ import type {
 import { AppManager } from "../app";
 import { CacheManager } from "../cache";
 import {
-  ServiceContext,
   getCurrentUserId,
   runInUserContext,
+  ServiceContext,
   type UserContext,
 } from "../context";
+import { AuthenticationError } from "../errors";
+import { createLogger } from "../logging/logger";
 import { StreamManager } from "../stream";
 import {
   type ITelemetry,
@@ -32,9 +34,11 @@ import { RetryInterceptor } from "./interceptors/retry";
 import { TelemetryInterceptor } from "./interceptors/telemetry";
 import { TimeoutInterceptor } from "./interceptors/timeout";
 import type {
-  InterceptorContext,
   ExecutionInterceptor,
+  InterceptorContext,
 } from "./interceptors/types";
+
+const logger = createLogger("plugin");
 
 /**
  * Methods that should not be proxied by asUser().
@@ -139,26 +143,19 @@ export abstract class Plugin<
     // In local development, fall back to service principal
     // since there's no user token available
     if (!token && isDev) {
-      console.warn(
-        "[AppKit] asUser() called without user token in development mode. " +
-          "Using service principal.",
+      logger.warn(
+        "asUser() called without user token in development mode. Using service principal.",
       );
 
       return this;
     }
 
     if (!token) {
-      throw new Error(
-        "User token not available in request headers. " +
-          "Ensure the request has the x-forwarded-access-token header.",
-      );
+      throw AuthenticationError.missingToken("user token");
     }
 
     if (!userId && !isDev) {
-      throw new Error(
-        "User ID not available in request headers. " +
-          "Ensure the request has the x-forwarded-user header.",
-      );
+      throw AuthenticationError.missingUserId();
     }
 
     const effectiveUserId = userId || "dev-user";
@@ -217,7 +214,7 @@ export abstract class Plugin<
       user: userConfig,
     });
 
-    // Get user key from context if not provided
+    // get user key from context if not provided
     const effectiveUserKey = userKey ?? getCurrentUserId();
 
     const self = this;
@@ -269,7 +266,7 @@ export abstract class Plugin<
 
     const interceptors = this._buildInterceptors(executeConfig);
 
-    // Get user key from context if not provided
+    // get user key from context if not provided
     const effectiveUserKey = userKey ?? getCurrentUserId();
 
     const context: InterceptorContext = {
@@ -321,7 +318,6 @@ export abstract class Plugin<
 
     // order matters: telemetry → timeout → retry → cache (innermost to outermost)
 
-    // Only add telemetry interceptor if traces are enabled
     const telemetryConfig = normalizeTelemetryOptions(this.config.telemetry);
     if (
       telemetryConfig.traces &&

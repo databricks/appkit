@@ -1,4 +1,5 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
+import type express from "express";
 import type {
   IAppRouter,
   PluginExecuteConfig,
@@ -11,7 +12,7 @@ import {
   getWarehouseId,
   getWorkspaceClient,
 } from "../context";
-import type express from "express";
+import { createLogger } from "../logging/logger";
 import { Plugin, toPlugin } from "../plugin";
 import { queryDefaults } from "./defaults";
 import { QueryProcessor } from "./query";
@@ -20,6 +21,8 @@ import type {
   IAnalyticsConfig,
   IAnalyticsQueryRequest,
 } from "./types";
+
+const logger = createLogger("analytics");
 
 export class AnalyticsPlugin extends Plugin {
   name = "analytics";
@@ -95,9 +98,13 @@ export class AnalyticsPlugin extends Plugin {
       const { jobId } = req.params;
       const workspaceClient = getWorkspaceClient();
 
-      console.log(
-        `Processing Arrow job request: ${jobId} for plugin: ${this.name}`,
-      );
+      logger.debug("Processing Arrow job request for jobId=%s", jobId);
+
+      const event = logger.event(req);
+      event?.setComponent("analytics", "getArrowData").setContext("analytics", {
+        job_id: jobId,
+        plugin: this.name,
+      });
 
       const result = await this.getArrowData(workspaceClient, jobId);
 
@@ -105,12 +112,14 @@ export class AnalyticsPlugin extends Plugin {
       res.setHeader("Content-Length", result.data.length.toString());
       res.setHeader("Cache-Control", "public, max-age=3600");
 
-      console.log(
-        `Sending Arrow buffer: ${result.data.length} bytes for job ${jobId}`,
+      logger.debug(
+        "Sending Arrow buffer: %d bytes for job %s",
+        result.data.length,
+        jobId,
       );
       res.send(Buffer.from(result.data));
     } catch (error) {
-      console.error(`Arrow job error for ${this.name}:`, error);
+      logger.error("Arrow job error: %O", error);
       res.status(404).json({
         error: error instanceof Error ? error.message : "Arrow job not found",
         plugin: this.name,
@@ -128,6 +137,18 @@ export class AnalyticsPlugin extends Plugin {
   ): Promise<void> {
     const { query_key } = req.params;
     const { parameters, format = "JSON" } = req.body as IAnalyticsQueryRequest;
+
+    // Request-scoped logging with WideEvent tracking
+    logger.debug(req, "Executing query: %s (format=%s)", query_key, format);
+
+    const event = logger.event(req);
+    event?.setComponent("analytics", "executeQuery").setContext("analytics", {
+      query_key,
+      format,
+      parameter_count: parameters ? Object.keys(parameters).length : 0,
+      plugin: this.name,
+    });
+
     const queryParameters =
       format === "ARROW"
         ? {

@@ -1,4 +1,8 @@
 import type { sql } from "@databricks/sdk-experimental";
+import { ExecutionError, ValidationError } from "../errors";
+import { createLogger } from "../logging/logger";
+
+const logger = createLogger("stream:arrow");
 
 type ResultManifest = sql.ResultManifest;
 type ExternalLink = sql.ExternalLink;
@@ -65,7 +69,7 @@ export class ArrowStreamProcessor {
     signal?: AbortSignal,
   ): Promise<ArrowRawResult> {
     if (chunks.length === 0) {
-      throw new Error("No Arrow chunks provided");
+      throw ValidationError.missingField("chunks");
     }
 
     const buffers = await this.downloadChunksRaw(chunks, signal);
@@ -117,7 +121,7 @@ export class ArrowStreamProcessor {
       try {
         const externalLink = chunk.external_link;
         if (!externalLink) {
-          console.error("External link is required", chunk);
+          logger.error("External link is required for chunk: %O", chunk);
           continue;
         }
 
@@ -126,7 +130,7 @@ export class ArrowStreamProcessor {
         });
 
         if (!response.ok) {
-          throw new Error(
+          throw ExecutionError.statementFailed(
             `Failed to download chunk ${chunk.chunk_index}: ${response.status} ${response.statusText}`,
           );
         }
@@ -143,7 +147,7 @@ export class ArrowStreamProcessor {
         }
 
         if (signal?.aborted) {
-          throw new Error("Arrow stream processing was aborted");
+          throw ExecutionError.canceled();
         }
 
         if (attempt < this.options.retries - 1) {
@@ -154,7 +158,7 @@ export class ArrowStreamProcessor {
       }
     }
 
-    throw new Error(
+    throw ExecutionError.statementFailed(
       `Failed to download chunk ${chunk.chunk_index} after ${this.options.retries} attempts: ${lastError?.message}`,
     );
   }
@@ -165,7 +169,7 @@ export class ArrowStreamProcessor {
    */
   private concatenateBuffers(buffers: Uint8Array[]): Uint8Array {
     if (buffers.length === 0) {
-      throw new Error("No buffers to concatenate");
+      throw ValidationError.missingField("buffers");
     }
 
     if (buffers.length === 1) {

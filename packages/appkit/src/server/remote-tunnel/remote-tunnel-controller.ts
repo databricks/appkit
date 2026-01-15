@@ -1,5 +1,6 @@
 import type { Server as HTTPServer } from "node:http";
 import type express from "express";
+import { createLogger } from "../../logging/logger";
 import type { DevFileReader } from "../../plugin/dev-reader";
 import {
   hasDevQuery,
@@ -8,6 +9,8 @@ import {
   isRemoteTunnelAssetRequest,
 } from "./gate";
 import type { RemoteTunnelManager } from "./remote-tunnel-manager";
+
+const logger = createLogger("server:remote-tunnel:controller");
 
 /**
  * Controller for the remote tunnel
@@ -124,7 +127,7 @@ export class RemoteTunnelController {
       // attach server + ws setup
       this.maybeSetupWebSocket();
 
-      console.log("RemoteTunnel: initialized (on-demand)");
+      logger.debug("RemoteTunnel: initialized (on-demand)");
       return remoteTunnelManager;
     })();
 
@@ -147,6 +150,6 @@ export class RemoteTunnelController {
     this.manager.setupWebSocket();
     this.wsReady = true;
 
-    console.log("RemoteTunnel: web socket setup complete");
+    logger.debug("RemoteTunnel: web socket setup complete");
   }
 }

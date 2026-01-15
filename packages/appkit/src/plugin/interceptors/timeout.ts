@@ -1,4 +1,7 @@
-import type { InterceptorContext, ExecutionInterceptor } from "./types";
+import { createLogger } from "../../logging/logger";
+import type { ExecutionInterceptor, InterceptorContext } from "./types";
+
+const logger = createLogger("interceptors:timeout");
 
 // interceptor to handle timeout logic
 export class TimeoutInterceptor implements ExecutionInterceptor {
@@ -8,6 +11,10 @@ export class TimeoutInterceptor implements ExecutionInterceptor {
     fn: () => Promise<T>,
     context: InterceptorContext,
   ): Promise<T> {
+    logger.event()?.setExecution({
+      timeout_ms: this.timeoutMs,
+    });
+
     // create timeout signal
     const timeoutController = new AbortController();
     const timeoutId = setTimeout(() => {

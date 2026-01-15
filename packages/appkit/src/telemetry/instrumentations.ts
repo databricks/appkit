@@ -1,6 +1,7 @@
+import type { Instrumentation } from "@opentelemetry/instrumentation";
 import { ExpressInstrumentation } from "@opentelemetry/instrumentation-express";
 import { HttpInstrumentation } from "@opentelemetry/instrumentation-http";
-import type { Instrumentation } from "@opentelemetry/instrumentation";
+import { shouldIgnoreRequest } from "../utils/path-exclusions";
 
 /**
  * Registry of pre-configured instrumentations for common use cases.
@@ -11,6 +12,9 @@ import type { Instrumentation } from "@opentelemetry/instrumentation";
  */
 export const instrumentations: Record<string, Instrumentation> = {
   http: new HttpInstrumentation({
+    // Filter out requests before creating spans - this is the most efficient approach
+    ignoreIncomingRequestHook: shouldIgnoreRequest,
+
     applyCustomAttributesOnSpan(span: any, request: any) {
       let spanName: string | null = null;
 

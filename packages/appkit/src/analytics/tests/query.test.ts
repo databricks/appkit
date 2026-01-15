@@ -47,7 +47,7 @@ describe("QueryProcessor", () => {
       expect(() => {
         processor.convertToSQLParameters(query, parameters);
       }).toThrow(
-        'Parameter "malicious_param" not found in query. Valid parameters: user_id',
+        "Invalid value for malicious_param: expected a parameter defined in the query (valid: user_id)",
       );
     });
 
@@ -61,7 +61,7 @@ describe("QueryProcessor", () => {
 
       expect(() => {
         processor.convertToSQLParameters(query, parameters);
-      }).toThrow('Parameter "admin_flag" not found in query');
+      }).toThrow("Invalid value for admin_flag");
     });
 
     test("should allow parameters with underscores and mixed case", () => {
@@ -86,7 +86,7 @@ describe("QueryProcessor", () => {
       expect(() => {
         processor.convertToSQLParameters(query, parameters);
       }).toThrow(
-        'Parameter "user_id" not found in query. Valid parameters: none',
+        "Invalid value for user_id: expected a parameter defined in the query (valid: none)",
       );
     });
 
@@ -135,7 +135,7 @@ describe("QueryProcessor", () => {
 
       expect(() => {
         processor.convertToSQLParameters(query, attackParameters);
-      }).toThrow('Parameter "admin_override" not found in query');
+      }).toThrow("Invalid value for admin_override");
     });
 
     test("should handle duplicate parameter names in query correctly", () => {
@@ -252,9 +252,7 @@ describe("QueryProcessor", () => {
 
       expect(() => {
         processor.convertToSQLParameters(query, parameters);
-      }).toThrow(
-        'Parameter "userId" must be a SQL type. Use sql.string(), sql.number(), sql.date(), sql.timestamp(), or sql.boolean().',
-      );
+      }).toThrow("Invalid value for userId");
     });
   });
 });
