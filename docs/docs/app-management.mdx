@@ -4,13 +4,13 @@ sidebar_position: 3
 
 import Prerequisites from './_prerequisites.mdx';
 
-# App Management
+# App management
 
 Manage your AppKit application throughout its lifecycle using the Databricks CLI. This guide covers deploying, starting, stopping, monitoring, and deleting apps.
 
 <Prerequisites />
 
-## Create App
+## Create app
 
 See the [Quick start](./index.md#quick-start-options) section to create a new Databricks app with AppKit installed.
 
@@ -23,12 +23,12 @@ Before deploying your app, configure it according to your needs. See the [Databr
 - Authorization and permissions
 - Networking configuration
 
-## Deploy App
+## Deploy app
 
 Deploy your AppKit application using the automated deployment pipeline:
 
 ```bash
-databricks experimental dev app deploy
+databricks apps deploy
 ```
 
 This command runs a complete deployment pipeline:
@@ -40,43 +40,37 @@ This command runs a complete deployment pipeline:
 
 For all available options, run:
 ```bash
-databricks experimental dev app deploy --help
+databricks apps deploy --help
 ```
 :::
 
 ### Examples
 
-Deploy to the default target:
+- Deploy to a specific target:
 
-```bash
-databricks experimental dev app deploy
-```
+    ```bash
+    databricks apps deploy --target prod
+    ```
 
-Deploy to a specific target:
+- Deploy with custom variables:
 
-```bash
-databricks experimental dev app deploy --target prod
-```
+    ```bash
+    databricks apps deploy --var="warehouse_id=abc123"
+    ```
 
-Deploy with custom variables:
+- Skip the build step for faster iteration:
 
-```bash
-databricks experimental dev app deploy --var="warehouse_id=abc123"
-```
+    ```bash
+    databricks apps deploy --skip-build
+    ```
 
-Skip the build step for faster iteration:
+- Force deploy (override Git branch validation):
 
-```bash
-databricks experimental dev app deploy --skip-build
-```
+    ```bash
+    databricks apps deploy --force
+    ```
 
-Force deploy (override Git branch validation):
-
-```bash
-databricks experimental dev app deploy --force
-```
-
-## Start App
+## Start app
 
 To start a stopped app, run:
 
@@ -84,7 +78,7 @@ To start a stopped app, run:
 databricks apps start {name}
 ```
 
-## Stop App
+## Stop app
 
 Stop a running app without deleting it:
 
@@ -104,7 +98,7 @@ databricks apps list
 databricks apps get {name}
 ```
 
-## Stream App Logs
+## Stream app Logs
 
 Stream application logs in real-time:
 
@@ -118,37 +112,37 @@ By default, this shows the most recent 200 log lines and exits.
 
 ### Examples
 
-Show the last 50 log lines:
+- Show the last 50 log lines:
 
-```bash
-databricks apps logs my-app --tail-lines 50
-```
+    ```bash
+    databricks apps logs my-app --tail-lines 50
+    ```
 
-Follow logs with a search filter:
+- Follow logs with a search filter:
 
-```bash
-databricks apps logs my-app --follow --search ERROR
-```
+    ```bash
+    databricks apps logs my-app --follow --search ERROR
+    ```
 
-Filter logs by source:
+- Filter logs by source:
 
-```bash
-databricks apps logs my-app --follow --source APP
-```
+    ```bash
+    databricks apps logs my-app --follow --source APP
+    ```
 
-Save logs to a file:
+- Save logs to a file:
 
-```bash
-databricks apps logs my-app --follow --output-file app.log
-```
+    ```bash
+    databricks apps logs my-app --follow --output-file app.log
+    ```
 
-Stream logs for 5 minutes:
+- Stream logs for 5 minutes:
 
-```bash
-databricks apps logs my-app --follow --timeout 5m
-```
+    ```bash
+    databricks apps logs my-app --follow --timeout 5m
+    ```
 
-## Delete App
+## Delete app
 
 Permanently delete an app:
 

@@ -2,7 +2,7 @@
 sidebar_position: 1
 ---
 
-# Getting Started
+# Getting started
 
 import Prerequisites from './_prerequisites.mdx';
 
@@ -58,7 +58,7 @@ Learn how to create and deploy a sample Databricks application that uses AppKit 
 Run the following command to bootstrap the new Databricks app with AppKit:
 
 ```sh
-databricks experimental dev app init
+databricks apps init
 ```
 
 Follow the prompts to bootstrap the app codebase in the current working directory.  
@@ -77,7 +77,7 @@ Learn more about the various [development flows](./development/) available with 
 Run the following command to deploy the app to Databricks:
 
 ```sh
-databricks experimental dev app deploy .
+databricks apps deploy
 ```
 
 This deploys the sample app to Databricks.
