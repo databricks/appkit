@@ -19,7 +19,8 @@
       "!docs/.docusaurus",
       "!**/*.gen.css",
       "!**/*.gen.ts",
-      "!**/typedoc-sidebar.ts"
+      "!**/typedoc-sidebar.ts",
+      "!**/template"
     ]
   },
   "formatter": {
