@@ -8,7 +8,7 @@
 
 
 
-## Researc
+## Research
 
 - @signalwire/docusaurus-plugin-llms-txt - https://github.com/signalwire/docusaurus-plugins
    + supports mdx -> we can render our example codeblock and shared prerequisites
@@ -18,35 +18,52 @@
   Limitations:
    - no way to configure output directory; I would like to run 2 plugins for appkit and appkit-ui
 
-  Questions:
-    - should we host MD files for the llms.txt file or embed into the package?
 
 
+
+
+
+
+
+# Suggested approach
+
+Use @signalwire/docusaurus-plugin-llms-txt for both appkit and appkit-ui to generate llms.txt and llms-full.txt files.
+
+Options:
+1. Host llms.txt and MD files on our website (versioned docs)
+2. Embed llms.txt and MD files into the packages
+   1. Embed llms.txt and MD files into the packages - all docs files
+   2. Split generation for appkit and appkit-ui
+      1. Limitations: we'd need to contribute to the plugin to add support for:
+         - output dir
+         - running the plugin twice to generate separate files for appkit and appkit-ui
+
+In theory, the llms.txt spec is about hosting MD files on website. Also, it will require a manual maintenance to split generation for appkit and appkit-ui (to avoid bundling unnecessary/not relevant files into the llms.txt file).
+
+
+## Rejected alternatives
+
+### Other Docusaurus plugins
 
 - https://github.com/osodevops/docusaurus-llm-docs
-   - too fresh and just github actions option
-
+   - too early version, and just GitHub Actions option.
 - https://github.com/din0s/docusaurus-plugin-llms-txt
-
-
-
-
+  - Doesn't render or partially render imported React components
 - https://github.com/rachfop/docusaurus-plugin-llms
-  - Powerful config
+  - Powerful configuration
   - Doesn't render or partially render imported React components
 
+### Arbitrary tools that generate llms.txt from MD/MDX files
+
+**Example:** https://github.com/romankurnovskii/get-llms-txt
+
+We use MDX for UI component examples and shared content (e.g. prerequisites).
+Even if `mdx` is supported, it means they skip React components and just use Markdown which isn't ideal.
 
 
-Alternative, arbitrary tools:
-    Even if mdx is supported, it means they skip React components and just use markdown, e.g. here: https://github.com/romankurnovskii/get-llms-txt
-     - we'd like to keep examples
+### HTML to llms.txt / MD tools
 
+**Example:** Mdream Crawl - https://github.com/harlan-zw/mdream?tab=readme-ov-file#mdream-usage
 
+The tools I found crawl live websites which is more time consuming and less reliable.
 
-# Options
-1. Docusaurus plugin
-1. Arbitrary MD/MDX tool 
-    Even if mdx is supported, it means they skip React components and just use markdown, e.g. here: https://github.com/romankurnovskii/get-llms-txt
-    and we would like to keep examples and shared prerequisites etc.
-2. HTML -> MD - Mdream Crawl
-    https://github.com/harlan-zw/mdream?tab=readme-ov-file#mdream-usage
