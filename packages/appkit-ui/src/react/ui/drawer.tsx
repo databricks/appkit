@@ -6,18 +6,21 @@ import { Drawer as DrawerPrimitive } from "vaul";
 import { cn } from "../lib/utils";
 import { useResolvedPortalContainer } from "../portal-container-context";
 
+/** Draggable panel that slides in from screen edges */
 function Drawer({
   ...props
 }: React.ComponentProps<typeof DrawerPrimitive.Root>) {
   return <DrawerPrimitive.Root data-slot="drawer" {...props} />;
 }
 
+/** Button that opens the drawer */
 function DrawerTrigger({
   ...props
 }: React.ComponentProps<typeof DrawerPrimitive.Trigger>) {
   return <DrawerPrimitive.Trigger data-slot="drawer-trigger" {...props} />;
 }
 
+/** Portal container for drawer content */
 function DrawerPortal({
   container,
   ...props
@@ -31,12 +34,14 @@ function DrawerPortal({
   );
 }
 
+/** Button that closes the drawer */
 function DrawerClose({
   ...props
 }: React.ComponentProps<typeof DrawerPrimitive.Close>) {
   return <DrawerPrimitive.Close data-slot="drawer-close" {...props} />;
 }
 
+/** Dimmed overlay behind the drawer */
 function DrawerOverlay({
   className,
   ...props
@@ -53,6 +58,7 @@ function DrawerOverlay({
   );
 }
 
+/** Main content area of the drawer */
 function DrawerContent({
   className,
   children,
@@ -80,6 +86,7 @@ function DrawerContent({
   );
 }
 
+/** Header section of the drawer */
 function DrawerHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -93,6 +100,7 @@ function DrawerHeader({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/** Footer section of the drawer */
 function DrawerFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -103,6 +111,7 @@ function DrawerFooter({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/** Title text for the drawer */
 function DrawerTitle({
   className,
   ...props
@@ -116,6 +125,7 @@ function DrawerTitle({
   );
 }
 
+/** Description text for the drawer */
 function DrawerDescription({
   className,
   ...props

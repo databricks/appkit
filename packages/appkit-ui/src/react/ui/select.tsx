@@ -5,6 +5,7 @@ import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useResolvedPortalContainer } from "../portal-container-context";
 
+/** Dropdown control for selecting a value from a list */
 function Select({
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Root>) {

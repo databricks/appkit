@@ -15,6 +15,7 @@ const ToggleGroupContext = React.createContext<
   spacing: 0,
 });
 
+/** Group of toggle buttons for selecting one or more options */
 function ToggleGroup({
   className,
   variant,

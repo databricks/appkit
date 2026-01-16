@@ -2,6 +2,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "../lib/utils";
 
+/** Empty state component for displaying no-data scenarios */
 function Empty({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div

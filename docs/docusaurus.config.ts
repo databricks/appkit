@@ -145,7 +145,7 @@ const config: Config = {
           includeBlog: false,
           includePages: false,
           includeGeneratedIndex: true,
-          excludeRoutes: ["/api/appkit-ui/**"],
+          // excludeRoutes: ["/api/appkit-ui/**"],
         },
         llmsTxt: {
           siteTitle: "AppKit",

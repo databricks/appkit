@@ -5,6 +5,7 @@ import * as ScrollAreaPrimitive from "@radix-ui/react-scroll-area";
 
 import { cn } from "../lib/utils";
 
+/** Container with custom scrollbars for overflow content */
 function ScrollArea({
   className,
   children,
@@ -28,6 +29,7 @@ function ScrollArea({
   );
 }
 
+/** Scrollbar component for the scroll area */
 function ScrollBar({
   className,
   orientation = "vertical",

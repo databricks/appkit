@@ -7,6 +7,7 @@ import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useResolvedPortalContainer } from "../portal-container-context";
 
+/** Menu triggered by right-clicking an element */
 function ContextMenu({
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.Root>) {

@@ -34,6 +34,7 @@ function useChart() {
   return context;
 }
 
+/** Container for rendering data visualizations using Recharts */
 function ChartContainer({
   id,
   className,

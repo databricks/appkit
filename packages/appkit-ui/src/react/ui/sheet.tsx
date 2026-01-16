@@ -5,22 +5,26 @@ import { XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useResolvedPortalContainer } from "../portal-container-context";
 
+/** Sliding panel that overlays content from screen edges */
 function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
   return <SheetPrimitive.Root data-slot="sheet" {...props} />;
 }
 
+/** Button that opens the sheet */
 function SheetTrigger({
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Trigger>) {
   return <SheetPrimitive.Trigger data-slot="sheet-trigger" {...props} />;
 }
 
+/** Button that closes the sheet */
 function SheetClose({
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Close>) {
   return <SheetPrimitive.Close data-slot="sheet-close" {...props} />;
 }
 
+/** Portal container for sheet content */
 function SheetPortal({
   container,
   ...props
@@ -34,6 +38,7 @@ function SheetPortal({
   );
 }
 
+/** Dimmed overlay behind the sheet */
 function SheetOverlay({
   className,
   ...props
@@ -50,6 +55,7 @@ function SheetOverlay({
   );
 }
 
+/** Main content area of the sheet */
 function SheetContent({
   className,
   children,
@@ -87,6 +93,7 @@ function SheetContent({
   );
 }
 
+/** Header section of the sheet */
 function SheetHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -97,6 +104,7 @@ function SheetHeader({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/** Footer section of the sheet */
 function SheetFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -107,6 +115,7 @@ function SheetFooter({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/** Title text for the sheet */
 function SheetTitle({
   className,
   ...props
@@ -120,6 +129,7 @@ function SheetTitle({
   );
 }
 
+/** Description text for the sheet */
 function SheetDescription({
   className,
   ...props

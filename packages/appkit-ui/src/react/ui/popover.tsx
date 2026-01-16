@@ -6,6 +6,7 @@ import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { cn } from "../lib/utils";
 import { useResolvedPortalContainer } from "../portal-container-context";
 
+/** Floating content panel anchored to a trigger element */
 function Popover({
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Root>) {

@@ -5,18 +5,21 @@ import { XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useResolvedPortalContainer } from "../portal-container-context";
 
+/** Modal dialog that overlays the page content */
 function Dialog({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Root>) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />;
 }
 
+/** Button that opens the dialog */
 function DialogTrigger({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Trigger>) {
   return <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} />;
 }
 
+/** Portal container for dialog content */
 function DialogPortal({
   container,
   ...props
@@ -30,12 +33,14 @@ function DialogPortal({
   );
 }
 
+/** Button that closes the dialog */
 function DialogClose({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Close>) {
   return <DialogPrimitive.Close data-slot="dialog-close" {...props} />;
 }
 
+/** Dimmed overlay behind the dialog */
 function DialogOverlay({
   className,
   ...props
@@ -52,6 +57,7 @@ function DialogOverlay({
   );
 }
 
+/** Main content area of the dialog */
 function DialogContent({
   className,
   children,
@@ -86,6 +92,7 @@ function DialogContent({
   );
 }
 
+/** Header section of the dialog */
 function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -96,6 +103,7 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/** Footer section of the dialog */
 function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -109,6 +117,7 @@ function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/** Title text for the dialog */
 function DialogTitle({
   className,
   ...props
@@ -122,6 +131,7 @@ function DialogTitle({
   );
 }
 
+/** Description text for the dialog */
 function DialogDescription({
   className,
   ...props

@@ -176,11 +176,7 @@ import { DocExample } from "@site/src/components/DocExample";
     ? `${sanitizeDescriptionText(components[0].description)}\n\n`
     : "";
 
-  return `---
-title: ${groupName}
----
-
-# ${groupName}
+  return `# ${groupName}
 
 ${pageDescription}${exampleSection}
 ${sections}

@@ -6,6 +6,7 @@ import * as HoverCardPrimitive from "@radix-ui/react-hover-card";
 import { cn } from "../lib/utils";
 import { useResolvedPortalContainer } from "../portal-container-context";
 
+/** Content card that appears when hovering over an element */
 function HoverCard({
   ...props
 }: React.ComponentProps<typeof HoverCardPrimitive.Root>) {
