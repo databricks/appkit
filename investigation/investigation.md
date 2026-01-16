@@ -17,13 +17,6 @@
    - no way to configure output directory; we cannot configure 2 plugins for appkit and appkit-ui
    - While you can generate Markdown files for versioned docs, llms.txt points only to the latest version.
 
-
-
-
-
-
-
-
 ## Suggested approach
 
 Use the `@signalwire/docusaurus-plugin-llms-txt` Docusaurus plugin to generate llms.txt and llms-full.txt files.
@@ -35,7 +28,7 @@ Use the `@signalwire/docusaurus-plugin-llms-txt` Docusaurus plugin to generate l
    2. Split generation for appkit and appkit-ui
       1. Limitations: we'd need to contribute to the plugin to add support for:
          - output dir
-         - running the plugin twice to generate separate files for appkit and appkit-ui
+         - running the plugin twice to generate separate files for appkit and appkit-ui - current hacky way to do it is to run the docs build twice with different plugin config
 
 In theory, the llms.txt spec is about hosting MD files on website. Also, it will require a manual maintenance to split generation for appkit and appkit-ui (to avoid bundling unnecessary/not relevant files into the llms.txt file).
 

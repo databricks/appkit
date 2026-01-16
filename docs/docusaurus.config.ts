@@ -135,6 +135,7 @@ const config: Config = {
     appKitAliasPlugin,
     [
       "@signalwire/docusaurus-plugin-llms-txt",
+      // docs: https://github.com/signalwire/docusaurus-plugins/blob/main/packages/docusaurus-plugin-llms-txt/README.md
       {
         id: "appkit",
         markdown: {
@@ -145,13 +146,14 @@ const config: Config = {
           includeBlog: false,
           includePages: false,
           includeGeneratedIndex: true,
-          // excludeRoutes: ["/api/appkit-ui/**"],
+          // excludeRoutes: ["/appkit/docs/api/appkit-ui/**"],
         },
         llmsTxt: {
           siteTitle: "AppKit",
           siteDescription:
             "Node.js + React SDK for Databricks Apps. Built for humans and AI.",
           enableLlmsFullTxt: true,
+          // excludeRoutes: ["/appkit/docs/api/appkit-ui/**"],
         },
         ui: {
           copyPageContent: {
