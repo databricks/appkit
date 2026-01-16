@@ -16,12 +16,55 @@ See the [Quick start](./index.md#quick-start-options) section to create a new Da
 
 ## Configuration
 
-Before deploying your app, configure it according to your needs. See the [Databricks Apps Configuration](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/configuration) documentation for details on:
+Before deploying your app, configure it according to your needs.
 
-- App configuration file (`app.yaml`)
-- Environment variables
+### `app.yaml` Configuration
+
+The `app.yaml` file configures your app's runtime environment. Here's a basic example:
+
+```yaml
+command:
+  - node
+  - build/index.mjs
+env:
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: sql-warehouse
+```
+
+#### Binding a SQL Warehouse
+
+To use the analytics plugin, bind a SQL warehouse:
+
+```yaml
+env:
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: sql-warehouse
+```
+
+This makes the warehouse ID available to your app at runtime. The `valueFrom: sql-warehouse` directive tells Databricks Apps to inject the configured warehouse ID.
+
+#### Command Specification
+
+Specify how to start your app:
+
+```yaml
+command:
+  - node
+  - build/index.mjs
+```
+
+This runs the production build of your AppKit server (created by `npm run build`).
+
+### Additional Configuration
+
+For more advanced configuration options, see the [Databricks Apps Configuration](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/configuration) documentation for details on:
+
 - Authorization and permissions
 - Networking configuration
+- Resource limits
+- Custom environment variables
+
+See also: [Configuration guide](./configuration.mdx) for environment variable reference.
 
 ## Deploy app
 

@@ -1,0 +1,11 @@
+{
+  "label": "Development",
+  "position": 7,
+  "collapsible": true,
+  "collapsed": false,
+  "link": {
+    "type": "generated-index",
+    "title": "Development",
+    "description": "Guides for developing AppKit applications"
+  }
+}

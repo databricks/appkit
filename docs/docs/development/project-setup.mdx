@@ -1,0 +1,236 @@
+---
+sidebar_position: 4
+---
+
+# Project Setup
+
+This guide covers the recommended project structure and scaffolding for AppKit applications.
+
+## Canonical Project Layout
+
+Recommended structure (client/server split):
+
+```
+my-app/
+├── server/
+│   ├── index.ts              # backend entry point (AppKit)
+│   └── .env                  # optional local dev env vars (do not commit)
+├── client/
+│   ├── index.html
+│   ├── vite.config.ts
+│   └── src/
+│       ├── main.tsx
+│       └── App.tsx
+├── config/
+│   └── queries/
+│       └── my_query.sql
+├── app.yaml
+├── package.json
+└── tsconfig.json
+```
+
+### Why This Layout?
+
+The AppKit `server()` plugin automatically serves:
+- **Dev**: Vite dev server (HMR) from `client/`
+- **Prod**: static files from `client/dist` (built by Vite)
+
+## Project Scaffolding
+
+### `package.json`
+
+```json
+{
+  "name": "my-app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "NODE_ENV=development tsx watch server/index.ts",
+    "build": "npm run build:server && npm run build:client",
+    "build:server": "tsdown --out-dir build server/index.ts",
+    "build:client": "tsc -b && vite build --config client/vite.config.ts",
+    "start": "node build/index.mjs"
+  },
+  "dependencies": {
+    "@databricks/appkit": "^0.1.2",
+    "@databricks/appkit-ui": "^0.1.2",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.1.1",
+    "tsdown": "^0.15.7",
+    "tsx": "^4.19.0",
+    "typescript": "~5.6.0",
+    "vite": "^7.2.4"
+  }
+}
+```
+
+### `client/index.html`
+
+```html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My App</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+```
+
+### `client/src/main.tsx`
+
+```tsx
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App";
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);
+```
+
+### `client/src/App.tsx` (Minimal)
+
+```tsx
+export default function App() {
+  return (
+    <div className="p-8">
+      <h1 className="text-2xl font-bold">My App</h1>
+    </div>
+  );
+}
+```
+
+### `client/vite.config.ts`
+
+```ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+});
+```
+
+### `tsconfig.json`
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true
+  },
+  "include": ["server", "client/src"]
+}
+```
+
+### `server/index.ts`
+
+```ts
+import { createApp, server } from "@databricks/appkit";
+
+await createApp({
+  plugins: [server()],
+});
+```
+
+## Running the App
+
+```bash
+# Install dependencies
+npm install
+
+# Development (starts backend + Vite dev server)
+npm run dev
+
+# Production build
+npm run build
+npm start
+```
+
+## Integrating into an Existing App
+
+If you already have a React/Vite app and want to add AppKit:
+
+### 1. Install Dependencies
+
+```bash
+npm install @databricks/appkit @databricks/appkit-ui react react-dom
+npm install -D tsx tsdown vite @vitejs/plugin-react typescript
+```
+
+If you don't already have a `client/` folder, create one and move your Vite app into it:
+- Move `index.html` → `client/index.html`
+- Move `vite.config.ts` → `client/vite.config.ts`
+- Move `src/` → `client/src/`
+
+### 2. Create `server/index.ts` (New File)
+
+```ts
+import { createApp, server } from "@databricks/appkit";
+
+await createApp({
+  plugins: [server()],
+});
+```
+
+### 3. Update `package.json` Scripts
+
+```json
+{
+  "scripts": {
+    "dev": "NODE_ENV=development tsx watch server/index.ts",
+    "build": "npm run build:server && npm run build:client",
+    "build:server": "tsdown --out-dir build server/index.ts",
+    "build:client": "tsc -b && vite build --config client/vite.config.ts",
+    "start": "node build/index.mjs"
+  }
+}
+```
+
+### 4. That's It!
+
+- AppKit's server plugin will automatically serve your Vite app in dev mode and `client/dist` in production.
+- If your Vite app must stay at the repo root (no `client/` folder), AppKit can still work, but the recommended layout is `client/` + `server/`.
+
+## Adding Analytics to an Existing App
+
+To add SQL query execution capabilities:
+
+```ts
+// server/index.ts
+import { createApp, server, analytics } from "@databricks/appkit";
+
+await createApp({
+  plugins: [server(), analytics()],
+});
+```
+
+Then create `config/queries/` and add your `.sql` files.
+
+## See Also
+
+- [Local development](./local-development.mdx) - Running the dev server
+- [Configuration](../configuration.mdx) - Environment variables
+- [Plugins](../plugins.md) - Plugin configuration
