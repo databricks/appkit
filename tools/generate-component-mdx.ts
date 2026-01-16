@@ -172,12 +172,17 @@ import { DocExample } from "@site/src/components/DocExample";
 `
     : "";
 
+  const pageDescription = components[0]?.description
+    ? `${sanitizeDescriptionText(components[0].description)}\n\n`
+    : "";
+
   return `---
 title: ${groupName}
 ---
 
 # ${groupName}
-${exampleSection}
+
+${pageDescription}${exampleSection}
 ${sections}
 `;
 }

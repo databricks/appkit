@@ -16,6 +16,7 @@ import {
 import { cn } from "../lib/utils";
 import { Label } from "./label";
 
+/** Form context provider using react-hook-form */
 const Form = FormProvider;
 
 type FormFieldContextValue<
@@ -29,6 +30,7 @@ const FormFieldContext = React.createContext<FormFieldContextValue>(
   {} as FormFieldContextValue,
 );
 
+/** Controlled field component for react-hook-form integration */
 const FormField = <
   TFieldValues extends FieldValues = FieldValues,
   TName extends FieldPath<TFieldValues> = FieldPath<TFieldValues>,
@@ -73,6 +75,7 @@ const FormItemContext = React.createContext<FormItemContextValue>(
   {} as FormItemContextValue,
 );
 
+/** Container for a single form field with label and messages */
 function FormItem({ className, ...props }: React.ComponentProps<"div">) {
   const id = React.useId();
 
@@ -87,6 +90,7 @@ function FormItem({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/** Label for a form field with error state styling */
 function FormLabel({
   className,
   ...props
@@ -104,6 +108,7 @@ function FormLabel({
   );
 }
 
+/** Wrapper for form control elements with accessibility attributes */
 function FormControl({ ...props }: React.ComponentProps<typeof Slot>) {
   const { error, formItemId, formDescriptionId, formMessageId } =
     useFormField();
@@ -123,6 +128,7 @@ function FormControl({ ...props }: React.ComponentProps<typeof Slot>) {
   );
 }
 
+/** Helper text providing guidance for a form field */
 function FormDescription({ className, ...props }: React.ComponentProps<"p">) {
   const { formDescriptionId } = useFormField();
 
@@ -136,6 +142,7 @@ function FormDescription({ className, ...props }: React.ComponentProps<"p">) {
   );
 }
 
+/** Validation error message for a form field */
 function FormMessage({ className, ...props }: React.ComponentProps<"p">) {
   const { error, formMessageId } = useFormField();
   const body = error ? String(error?.message ?? "") : props.children;

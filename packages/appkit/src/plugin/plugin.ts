@@ -55,6 +55,7 @@ const EXCLUDED_FROM_PROXY = new Set([
   "constructor",
 ]);
 
+/** Base abstract class for creating AppKit plugins */
 export abstract class Plugin<
   TConfig extends BasePluginConfig = BasePluginConfig,
 > implements BasePlugin

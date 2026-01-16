@@ -5,12 +5,14 @@ import { cn } from "../lib/utils";
 import { useResolvedPortalContainer } from "../portal-container-context";
 import { buttonVariants } from "./button";
 
+/** Modal dialog that interrupts the user with critical information requiring immediate action */
 function AlertDialog({
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Root>) {
   return <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />;
 }
 
+/** Button that triggers the alert dialog to open */
 function AlertDialogTrigger({
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Trigger>) {
@@ -19,6 +21,7 @@ function AlertDialogTrigger({
   );
 }
 
+/** Portal container for rendering alert dialog content outside the DOM hierarchy */
 function AlertDialogPortal({
   container,
   ...props
@@ -32,6 +35,7 @@ function AlertDialogPortal({
   );
 }
 
+/** Background overlay that dims content behind the alert dialog */
 function AlertDialogOverlay({
   className,
   ...props
@@ -48,6 +52,7 @@ function AlertDialogOverlay({
   );
 }
 
+/** Main content container for the alert dialog */
 function AlertDialogContent({
   className,
   ...props
@@ -67,6 +72,7 @@ function AlertDialogContent({
   );
 }
 
+/** Header section containing title and description */
 function AlertDialogHeader({
   className,
   ...props
@@ -80,6 +86,7 @@ function AlertDialogHeader({
   );
 }
 
+/** Footer section containing action buttons */
 function AlertDialogFooter({
   className,
   ...props
@@ -96,6 +103,7 @@ function AlertDialogFooter({
   );
 }
 
+/** Title heading for the alert dialog */
 function AlertDialogTitle({
   className,
   ...props
@@ -109,6 +117,7 @@ function AlertDialogTitle({
   );
 }
 
+/** Descriptive text explaining the alert */
 function AlertDialogDescription({
   className,
   ...props
@@ -122,6 +131,7 @@ function AlertDialogDescription({
   );
 }
 
+/** Primary action button that confirms the alert */
 function AlertDialogAction({
   className,
   ...props
@@ -134,6 +144,7 @@ function AlertDialogAction({
   );
 }
 
+/** Cancel button that dismisses the alert dialog */
 function AlertDialogCancel({
   className,
   ...props

@@ -1,26 +1,29 @@
 # @databricks/appkit
 
+Core library for building Databricks applications with type-safe SQL queries,
+plugin architecture, and React integration.
+
 ## Classes
 
 | Class | Description |
 | ------ | ------ |
-| [Plugin](Class.Plugin.md) | - |
+| [Plugin](Class.Plugin.md) | Base abstract class for creating AppKit plugins |
 
 ## Interfaces
 
 | Interface | Description |
 | ------ | ------ |
-| [BasePluginConfig](Interface.BasePluginConfig.md) | - |
+| [BasePluginConfig](Interface.BasePluginConfig.md) | Base configuration interface for AppKit plugins |
 | [CacheConfig](Interface.CacheConfig.md) | Configuration for caching |
 | [ITelemetry](Interface.ITelemetry.md) | Plugin-facing interface for OpenTelemetry instrumentation. Provides a thin abstraction over OpenTelemetry APIs for plugins. |
-| [StreamExecutionSettings](Interface.StreamExecutionSettings.md) | - |
-| [TelemetryConfig](Interface.TelemetryConfig.md) | - |
+| [StreamExecutionSettings](Interface.StreamExecutionSettings.md) | Configuration for streaming execution with default and user-scoped settings |
+| [TelemetryConfig](Interface.TelemetryConfig.md) | OpenTelemetry configuration for AppKit applications |
 
 ## Type Aliases
 
 | Type Alias | Description |
 | ------ | ------ |
-| [IAppRouter](TypeAlias.IAppRouter.md) | - |
+| [IAppRouter](TypeAlias.IAppRouter.md) | Express router type for plugin route registration |
 
 ## Variables
 

@@ -12,6 +12,7 @@ import { type DayButton, DayPicker, getDefaultClassNames } from "react-day-picke
 import { cn } from "../lib/utils";
 import { Button, buttonVariants } from "./button";
 
+/** Date picker component for selecting single dates or date ranges */
 function Calendar({
   className,
   classNames,
@@ -176,6 +177,7 @@ function Calendar({
   );
 }
 
+/** Individual day button within the calendar grid */
 function CalendarDayButton({
   className,
   day,

@@ -4,6 +4,8 @@ sidebar_position: 1
 
 # Getting started
 
+Learn how to get started with AppKit.
+
 import Prerequisites from './_prerequisites.mdx';
 
 ## Introduction

@@ -40,6 +40,7 @@ function useCarousel() {
   return context;
 }
 
+/** Slideshow component for cycling through content with navigation controls */
 function Carousel({
   orientation = "horizontal",
   opts,
@@ -130,6 +131,7 @@ function Carousel({
   );
 }
 
+/** Container for carousel slides with horizontal or vertical scrolling */
 function CarouselContent({ className, ...props }: React.ComponentProps<"div">) {
   const { carouselRef, orientation } = useCarousel();
 
@@ -151,6 +153,7 @@ function CarouselContent({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/** Individual slide within the carousel */
 function CarouselItem({ className, ...props }: React.ComponentProps<"div">) {
   const { orientation } = useCarousel();
 
@@ -169,6 +172,7 @@ function CarouselItem({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/** Button to navigate to the previous carousel slide */
 function CarouselPrevious({
   className,
   variant = "outline",
@@ -199,6 +203,7 @@ function CarouselPrevious({
   );
 }
 
+/** Button to navigate to the next carousel slide */
 function CarouselNext({
   className,
   variant = "outline",

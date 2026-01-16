@@ -2,6 +2,7 @@ import type { Meter, Span, SpanOptions, Tracer } from "@opentelemetry/api";
 import type { Logger, LogRecord } from "@opentelemetry/api-logs";
 import type { Instrumentation } from "@opentelemetry/instrumentation";
 
+/** OpenTelemetry configuration for AppKit applications */
 export interface TelemetryConfig {
   serviceName?: string;
   serviceVersion?: string;

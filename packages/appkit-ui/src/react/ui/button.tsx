@@ -36,6 +36,7 @@ const buttonVariants = cva(
   },
 );
 
+/** Clickable button with multiple variants and sizes */
 function Button({
   className,
   variant,
