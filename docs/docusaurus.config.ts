@@ -16,12 +16,12 @@ function appKitAliasPlugin() {
             shared: path.resolve(__dirname, "../packages/shared/src"),
             "@/lib/utils": path.resolve(
               __dirname,
-              "../packages/appkit-ui/src/lib/utils"
+              "../packages/appkit-ui/src/lib/utils",
             ),
             "@/js": path.resolve(__dirname, "../packages/appkit-ui/src/js"),
             "@databricks/appkit-ui/react": path.resolve(
               __dirname,
-              "../packages/appkit-ui/src/react"
+              "../packages/appkit-ui/src/react",
             ),
           },
         },
@@ -90,7 +90,7 @@ const config: Config = {
               (item) =>
                 item.type !== "category" ||
                 item.link?.type !== "doc" ||
-                item.link.id !== "api/index"
+                item.link.id !== "api/index",
             );
           },
         },
@@ -135,7 +135,7 @@ const config: Config = {
     [
       "@signalwire/docusaurus-plugin-llms-txt",
       {
-        id: 'appkit',
+        id: "appkit",
         markdown: {
           enableFiles: true,
           relativePaths: true,
@@ -144,11 +144,12 @@ const config: Config = {
           includeBlog: false,
           includePages: false,
           includeGeneratedIndex: true,
-          excludeRoutes: ['/api/appkit-ui/**'],
+          excludeRoutes: ["/api/appkit-ui/**"],
         },
         llmsTxt: {
           siteTitle: "AppKit",
-          siteDescription: "Node.js + React SDK for Databricks Apps. Built for humans and AI.",
+          siteDescription:
+            "Node.js + React SDK for Databricks Apps. Built for humans and AI.",
           enableLlmsFullTxt: true,
         },
         ui: {
@@ -156,38 +157,11 @@ const config: Config = {
             display: {
               docs: true,
             },
-          }
-        }
+          },
+        },
       } satisfies PluginOptions,
     ],
-    [
-      "@signalwire/docusaurus-plugin-llms-txt",
-      {
-        id: 'appkit-ui',
-        markdown: {
-          enableFiles: true,
-          relativePaths: true,
-          includeDocs: true,
-          includeVersionedDocs: false,
-          includeBlog: false,
-          includePages: false,
-          includeGeneratedIndex: true,
-          excludeRoutes: ['/api/appkit/**'],
-        },
-        llmsTxt: {
-          siteTitle: "AppKit",
-          siteDescription: "Node.js + React SDK for Databricks Apps. Built for humans and AI.",
-          enableLlmsFullTxt: true,
-        },
-        ui: {
-          copyPageContent: {
-            display: {
-              docs: true,
-            },
-          }
-        }
-      } satisfies PluginOptions,
-    ],
+
     // [ 'docusaurus-plugin-llms',
     //   {
     //     // Options here

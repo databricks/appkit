@@ -1,12 +1,10 @@
 # Generating llms.txt from documentation
 
-## Assumption
+## Assumptions
 - We use our documentation files as the source of truth.
 
 ## Goal
-- Ideally: embedded llms.txt files in appkit + appkit-ui packages
-
-
+- Ideally: embedded llms.txt files in `appkit` + `appkit-ui` packages
 
 ## Research
 
@@ -16,7 +14,8 @@
    - doesn't enable output directory configuration
 
   Limitations:
-   - no way to configure output directory; I would like to run 2 plugins for appkit and appkit-ui
+   - no way to configure output directory; we cannot configure 2 plugins for appkit and appkit-ui
+   - While you can generate Markdown files for versioned docs, llms.txt points only to the latest version.
 
 
 
@@ -25,11 +24,11 @@
 
 
 
-# Suggested approach
+## Suggested approach
 
-Use @signalwire/docusaurus-plugin-llms-txt for both appkit and appkit-ui to generate llms.txt and llms-full.txt files.
+Use the `@signalwire/docusaurus-plugin-llms-txt` Docusaurus plugin to generate llms.txt and llms-full.txt files.
 
-Options:
+## Options:
 1. Host llms.txt and MD files on our website (versioned docs)
 2. Embed llms.txt and MD files into the packages
    1. Embed llms.txt and MD files into the packages - all docs files
@@ -59,7 +58,6 @@ In theory, the llms.txt spec is about hosting MD files on website. Also, it will
 
 We use MDX for UI component examples and shared content (e.g. prerequisites).
 Even if `mdx` is supported, it means they skip React components and just use Markdown which isn't ideal.
-
 
 ### HTML to llms.txt / MD tools
 
