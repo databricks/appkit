@@ -48,7 +48,7 @@ All those limitations can be resolved by contributions to the plugin, post-proce
 1. Host `llms.txt` and MD files on our website (versioned docs)
    - Advantage: We can update the AI docs without releasing new versions of the packages
    - Downside: Agent needs to fetch the documentation from the website which are not as reliable as the local files
-2. Embed llms.txt and MD files into the packages
+2. Embed `llms.txt` and MD files into the packages
    1. Embed llms.txt and MD files into the packages - all docs files
    2. Split generation for appkit and appkit-ui
       1. Limitations: we'd need to contribute to the plugin to add support for:

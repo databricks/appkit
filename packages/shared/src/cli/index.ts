@@ -4,6 +4,7 @@ import { Command } from "commander";
 import { setupCommand } from "./commands/setup.js";
 import { generateTypesCommand } from "./commands/generate-types.js";
 import { lintCommand } from "./commands/lint.js";
+import { docsCommand } from "./commands/docs.js";
 
 const program = new Command();
 
@@ -16,5 +17,6 @@ program
 program.addCommand(setupCommand);
 program.addCommand(generateTypesCommand);
 program.addCommand(lintCommand);
+program.addCommand(docsCommand);
 
 program.parse();

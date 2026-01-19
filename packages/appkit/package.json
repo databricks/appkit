@@ -13,6 +13,7 @@
     "dist",
     "bin",
     "scripts",
+    "docs",
     "CLAUDE.md",
     "llms.txt",
     "AGENTS.md",

@@ -21,7 +21,12 @@ function findInstalledPackages() {
   const installed = [];
 
   for (const pkg of PACKAGES) {
-    const packagePath = path.join(cwd, "node_modules", pkg.name, "package.json");
+    const packagePath = path.join(
+      cwd,
+      "node_modules",
+      pkg.name,
+      "package.json",
+    );
     if (fs.existsSync(packagePath)) {
       installed.push(pkg);
     }
