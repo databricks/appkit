@@ -71,7 +71,7 @@ export function shouldExcludePath(path: string | undefined): boolean {
 
   // Check path prefixes
   for (const prefix of EXCLUDED_PATH_PREFIXES) {
-    if (cleanPath.startsWith(prefix) || cleanPath.includes(prefix)) {
+    if (cleanPath.includes(prefix)) {
       return true;
     }
   }

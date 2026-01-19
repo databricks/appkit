@@ -191,7 +191,7 @@ export class WideEvent {
       type: error.name,
       code: isAppKitError ? (error as any).code : "UNKNOWN_ERROR",
       message: error.message,
-      retriable: isAppKitError ? (error as any).retriable : false,
+      retriable: isAppKitError ? (error as any).isRetryable : false,
       cause: errorCause ? String(errorCause) : undefined,
     };
 

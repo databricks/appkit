@@ -11,7 +11,7 @@ export {
   TunnelError,
   ValidationError,
 } from "../errors";
-export { createLogger, type Logger } from "./logger";
+export { createLogger, type Logger, wideEventMiddleware } from "./logger";
 export {
   DEFAULT_SAMPLING_CONFIG,
   type SamplingConfig,

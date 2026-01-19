@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { format } from "node:util";
 import { trace } from "@opentelemetry/api";
-import type { Request, Response } from "express";
+import type { NextFunction, Request, Response } from "express";
 import { createDebug as createObug } from "obug";
 import { DEFAULT_SAMPLING_CONFIG, shouldSample } from "./sampling";
 import { WideEvent } from "./wide-event";
@@ -125,41 +125,73 @@ function setupResponseHandlers(req: Request, wideEvent: WideEvent): void {
   if (!res) return;
 
   res.once("finish", () => {
-    // Finalize the event with status code
+    // finalize the event with status code
     const finalizedData = wideEvent.finalize(res.statusCode || 200);
 
-    // Emit to OpenTelemetry if sampled
+    // emit to OpenTelemetry if sampled
     if (shouldSample(finalizedData, DEFAULT_SAMPLING_CONFIG)) {
       emitter.emit(finalizedData);
     }
 
-    // Clean up WeakMap
+    // clean up the WeakMap
     eventsByRequest.delete(req);
   });
 
   res.once("close", () => {
     if (!res.writableFinished) {
-      // Request was aborted - just cleanup
+      // request was aborted - just cleanup
       eventsByRequest.delete(req);
     }
   });
 }
 
 /**
+ * Express middleware that establishes AsyncLocalStorage context for WideEvent.
+ * This properly scopes the context to the entire request lifecycle using run().
+ *
+ * @example
+ * ```typescript
+ * import { wideEventMiddleware } from "@databricks/appkit";
+ *
+ * app.use(wideEventMiddleware);
+ * ```
+ */
+export function wideEventMiddleware(
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+): void {
+  const wideEvent = createEventForRequest(req);
+  eventsByRequest.set(req, wideEvent);
+  setupResponseHandlers(req, wideEvent);
+
+  // run() scopes the context to this request's entire async chain
+  eventStorage.run(wideEvent, next);
+}
+
+/**
  * Get or create a WideEvent for the given request.
- * Also sets the event in AsyncLocalStorage so downstream code can access it via logger.event()
+ * If called within wideEventMiddleware context, returns the event from AsyncLocalStorage.
+ * Otherwise creates a new event for the request.
  */
 function getOrCreateEvent(req: Request): WideEvent {
+  // first check if we already have an event
   let wideEvent = eventsByRequest.get(req);
 
   if (!wideEvent) {
+    // check if we are in a middleware context
+    const alsEvent = eventStorage.getStore();
+    if (alsEvent) {
+      // store the event in the WeakMap
+      eventsByRequest.set(req, alsEvent);
+      return alsEvent;
+    }
+
+    // no middleware context - create event directly
     wideEvent = createEventForRequest(req);
     eventsByRequest.set(req, wideEvent);
     setupResponseHandlers(req, wideEvent);
   }
-
-  // set in AsyncLocalStorage so downstream code can access via logger.event()
-  eventStorage.enterWith(wideEvent);
 
   return wideEvent;
 }
@@ -168,12 +200,12 @@ function getOrCreateEvent(req: Request): WideEvent {
  * Get current WideEvent from AsyncLocalStorage or request
  */
 function getCurrentEvent(req?: Request): WideEvent | undefined {
-  // If req provided, use it (explicit usage in route handlers)
+  // if req provided, use it
   if (req) {
     return getOrCreateEvent(req);
   }
 
-  // Otherwise, get from AsyncLocalStorage (interceptors, etc.)
+  // otherwise, get from AsyncLocalStorage
   return eventStorage.getStore();
 }
 

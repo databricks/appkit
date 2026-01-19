@@ -124,7 +124,7 @@ describe("WideEventEmitter", () => {
     emitter.emit(event);
 
     const logRecord = mockLogger.emit.mock.calls[0][0];
-    expect(logRecord.attributes["trace_id"]).toBe("abc123def456");
+    expect(logRecord.attributes.trace_id).toBe("abc123def456");
   });
 
   test("should include component information", () => {
@@ -217,7 +217,7 @@ describe("WideEventEmitter", () => {
     emitter.emit(event);
 
     const logRecord = mockLogger.emit.mock.calls[0][0];
-    expect(logRecord.attributes["log_count"]).toBe(2);
+    expect(logRecord.attributes.log_count).toBe(2);
   });
 
   test("should not include undefined attributes", () => {
