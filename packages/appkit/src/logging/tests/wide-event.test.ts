@@ -197,7 +197,7 @@ describe("WideEvent", () => {
       error.name = "ValidationError";
       error.code = "INVALID_INPUT";
       error.statusCode = 400;
-      error.retriable = false;
+      error.isRetryable = false;
 
       event.setError(error);
 
