@@ -1,6 +1,6 @@
 # Abstract Class: Plugin\<TConfig\>
 
-Defined in: [appkit/src/plugin/plugin.ts:58](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L58)
+Base abstract class for creating AppKit plugins
 
 ## Type Parameters
 
@@ -20,8 +20,6 @@ Defined in: [appkit/src/plugin/plugin.ts:58](https://github.com/databricks/appki
 new Plugin<TConfig>(config: TConfig): Plugin<TConfig>;
 ```
 
-Defined in: [appkit/src/plugin/plugin.ts:76](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L76)
-
 #### Parameters
 
 | Parameter | Type |
@@ -40,8 +38,6 @@ Defined in: [appkit/src/plugin/plugin.ts:76](https://github.com/databricks/appki
 protected app: AppManager;
 ```
 
-Defined in: [appkit/src/plugin/plugin.ts:64](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L64)
-
 ***
 
 ### cache
@@ -49,8 +45,6 @@ Defined in: [appkit/src/plugin/plugin.ts:64](https://github.com/databricks/appki
 ```ts
 protected cache: CacheManager;
 ```
-
-Defined in: [appkit/src/plugin/plugin.ts:63](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L63)
 
 ***
 
@@ -60,8 +54,6 @@ Defined in: [appkit/src/plugin/plugin.ts:63](https://github.com/databricks/appki
 protected config: TConfig;
 ```
 
-Defined in: [appkit/src/plugin/plugin.ts:76](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L76)
-
 ***
 
 ### devFileReader
@@ -69,8 +61,6 @@ Defined in: [appkit/src/plugin/plugin.ts:76](https://github.com/databricks/appki
 ```ts
 protected devFileReader: DevFileReader;
 ```
-
-Defined in: [appkit/src/plugin/plugin.ts:65](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L65)
 
 ***
 
@@ -80,8 +70,6 @@ Defined in: [appkit/src/plugin/plugin.ts:65](https://github.com/databricks/appki
 abstract protected envVars: string[];
 ```
 
-Defined in: [appkit/src/plugin/plugin.ts:68](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L68)
-
 ***
 
 ### isReady
@@ -90,8 +78,6 @@ Defined in: [appkit/src/plugin/plugin.ts:68](https://github.com/databricks/appki
 protected isReady: boolean = false;
 ```
 
-Defined in: [appkit/src/plugin/plugin.ts:62](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L62)
-
 ***
 
 ### name
@@ -99,8 +85,6 @@ Defined in: [appkit/src/plugin/plugin.ts:62](https://github.com/databricks/appki
 ```ts
 name: string;
 ```
-
-Defined in: [appkit/src/plugin/plugin.ts:74](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L74)
 
 #### Implementation of
 
@@ -116,8 +100,6 @@ BasePlugin.name
 protected streamManager: StreamManager;
 ```
 
-Defined in: [appkit/src/plugin/plugin.ts:66](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L66)
-
 ***
 
 ### telemetry
@@ -125,8 +107,6 @@ Defined in: [appkit/src/plugin/plugin.ts:66](https://github.com/databricks/appki
 ```ts
 protected telemetry: ITelemetry;
 ```
-
-Defined in: [appkit/src/plugin/plugin.ts:67](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L67)
 
 ***
 
@@ -136,8 +116,6 @@ Defined in: [appkit/src/plugin/plugin.ts:67](https://github.com/databricks/appki
 static phase: PluginPhase = "normal";
 ```
 
-Defined in: [appkit/src/plugin/plugin.ts:73](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L73)
-
 ## Methods
 
 ### abortActiveOperations()
@@ -145,8 +123,6 @@ Defined in: [appkit/src/plugin/plugin.ts:73](https://github.com/databricks/appki
 ```ts
 abortActiveOperations(): void;
 ```
-
-Defined in: [appkit/src/plugin/plugin.ts:101](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L101)
 
 #### Returns
 
@@ -165,8 +141,6 @@ BasePlugin.abortActiveOperations
 ```ts
 asUser(req: Request): this;
 ```
-
-Defined in: [appkit/src/plugin/plugin.ts:134](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L134)
 
 Execute operations using the user's identity from the request.
 
@@ -220,8 +194,6 @@ protected execute<T>(
 userKey?: string): Promise<T | undefined>;
 ```
 
-Defined in: [appkit/src/plugin/plugin.ts:263](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L263)
-
 #### Type Parameters
 
 | Type Parameter |
@@ -252,8 +224,6 @@ protected executeStream<T>(
 userKey?: string): Promise<void>;
 ```
 
-Defined in: [appkit/src/plugin/plugin.ts:201](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L201)
-
 #### Type Parameters
 
 | Type Parameter |
@@ -281,8 +251,6 @@ Defined in: [appkit/src/plugin/plugin.ts:201](https://github.com/databricks/appk
 getEndpoints(): PluginEndpointMap;
 ```
 
-Defined in: [appkit/src/plugin/plugin.ts:97](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L97)
-
 #### Returns
 
 `PluginEndpointMap`
@@ -300,8 +268,6 @@ BasePlugin.getEndpoints
 ```ts
 injectRoutes(_: Router): void;
 ```
-
-Defined in: [appkit/src/plugin/plugin.ts:91](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L91)
 
 #### Parameters
 
@@ -327,8 +293,6 @@ BasePlugin.injectRoutes
 protected registerEndpoint(name: string, path: string): void;
 ```
 
-Defined in: [appkit/src/plugin/plugin.ts:288](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L288)
-
 #### Parameters
 
 | Parameter | Type |
@@ -347,8 +311,6 @@ Defined in: [appkit/src/plugin/plugin.ts:288](https://github.com/databricks/appk
 ```ts
 protected route<_TResponse>(router: Router, config: RouteConfig): void;
 ```
-
-Defined in: [appkit/src/plugin/plugin.ts:292](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L292)
 
 #### Type Parameters
 
@@ -375,8 +337,6 @@ Defined in: [appkit/src/plugin/plugin.ts:292](https://github.com/databricks/appk
 setup(): Promise<void>;
 ```
 
-Defined in: [appkit/src/plugin/plugin.ts:95](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L95)
-
 #### Returns
 
 `Promise`\<`void`\>
@@ -394,8 +354,6 @@ BasePlugin.setup
 ```ts
 validateEnv(): void;
 ```
-
-Defined in: [appkit/src/plugin/plugin.ts:87](https://github.com/databricks/appkit/blob/main/packages/appkit/src/plugin/plugin.ts#L87)
 
 #### Returns
 

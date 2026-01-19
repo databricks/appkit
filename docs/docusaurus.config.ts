@@ -3,6 +3,7 @@ import path from "node:path";
 import type { Config } from "@docusaurus/types";
 import type * as Preset from "@docusaurus/preset-classic";
 import webpack from "webpack";
+import type { PluginOptions } from "@signalwire/docusaurus-plugin-llms-txt/public";
 
 function appKitAliasPlugin() {
   return {
@@ -123,6 +124,7 @@ const config: Config = {
         flattenOutputFiles: true,
         expandObjects: true,
         expandParameters: true,
+        disableSources: true,
         sidebar: {
           autoConfiguration: true,
           pretty: true,
@@ -131,6 +133,86 @@ const config: Config = {
       },
     ],
     appKitAliasPlugin,
+    [
+      "@signalwire/docusaurus-plugin-llms-txt",
+      // docs: https://github.com/signalwire/docusaurus-plugins/blob/main/packages/docusaurus-plugin-llms-txt/README.md
+      {
+        id: "appkit",
+        markdown: {
+          enableFiles: true,
+          relativePaths: true,
+          includeDocs: true,
+          includeVersionedDocs: false,
+          includeBlog: false,
+          includePages: false,
+          includeGeneratedIndex: true,
+          // excludeRoutes: ["/appkit/docs/api/appkit-ui/**"],
+        },
+        llmsTxt: {
+          siteTitle: "AppKit",
+          siteDescription:
+            "Node.js + React SDK for Databricks Apps. Built for humans and AI.",
+          enableLlmsFullTxt: true,
+          // excludeRoutes: ["/appkit/docs/api/appkit-ui/**"],
+        },
+        ui: {
+          copyPageContent: {
+            display: {
+              docs: true,
+            },
+          },
+        },
+      } satisfies PluginOptions,
+    ],
+
+    // [ 'docusaurus-plugin-llms',
+    //   {
+    //     // Options here
+    //     generateLLMsTxt: true,
+    //     generateLLMsFullTxt: true,
+    //     docsDir: './',
+    //     // ignoreFiles: ['advanced/*', 'private/*'],
+    //     // title: 'My Project Documentation',
+    //     // description: 'Complete reference documentation for My Project',
+    //     // includeBlog: true,
+    //     // Content cleaning options
+    //     // excludeImports: true,
+    //     // removeDuplicateHeadings: true,
+    //     // Generate individual markdown files following llmstxt.org specification
+    //     generateMarkdownFiles: true,
+    //     // Control documentation order
+    //     // includeOrder: [
+    //     //   'getting-started/*',
+    //     //   'guides/*',
+    //     //   'api/*',
+    //     // ],
+    //     // includeUnmatchedLast: true,
+    //     // Path transformation options
+    //     // pathTransformation: {
+    //     // Paths to ignore when constructing URLs (will be removed if found)
+    //     //   ignorePaths: ['docs'],
+    //     // Paths to add when constructing URLs (will be prepended if not already present)
+    //     //   addPaths: ['api'],
+    //     // },
+    //     // Custom LLM files for specific documentation sections
+    //     // customLLMFiles: [
+    //     //   {
+    //     //     filename: 'llms-python.txt',
+    //     //     includePatterns: ['api/python/**/*.md', 'guides/python/*.md'],
+    //     //     fullContent: true,
+    //     //     title: 'Python API Documentation',
+    //     //     description: 'Complete reference for Python API'
+    //     //   },
+    //     //   {
+    //     //     filename: 'llms-tutorials.txt',
+    //     //     includePatterns: ['tutorials/**/*.md'],
+    //     //     fullContent: false,
+    //     //     title: 'Tutorial Documentation',
+    //     //     description: 'All tutorials in a single file'
+    //     //   }
+    //     // ],
+    //   },
+    // ]
   ],
 
   themeConfig: {

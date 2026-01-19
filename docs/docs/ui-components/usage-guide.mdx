@@ -1,0 +1,252 @@
+---
+sidebar_position: 1
+---
+
+# Usage Guide
+
+This guide covers the core hooks and utilities for building data-driven UIs with AppKit.
+
+## Imports
+
+AppKit UI provides two entry points:
+
+- **React-facing APIs**: `@databricks/appkit-ui/react`
+- **Non-React utilities** (sql markers, arrow, SSE): `@databricks/appkit-ui/js`
+
+```tsx
+import { useAnalyticsQuery, Card, Skeleton } from "@databricks/appkit-ui/react";
+import { sql } from "@databricks/appkit-ui/js";
+```
+
+## `useAnalyticsQuery` Hook
+
+The `useAnalyticsQuery` hook executes SQL queries and returns results with loading/error states.
+
+### Facts
+
+- Uses **SSE** under the hood (not `fetch()` polling)
+- By default hits `POST /api/analytics/query/:queryKey`
+- Returns `{ data, loading, error }` where `data` is `null` until loaded
+- `format` is `"JSON"` or `"ARROW"` (uppercase)
+
+### When to Use It
+
+- Use `useAnalyticsQuery` **only** when you need a custom UI (cards/KPIs/forms/conditional rendering)
+- If you just need a standard chart or table, prefer the built-in components (`BarChart`, `LineChart`, `DataTable`, etc.) so you don't re-implement loading/error/empty states
+
+### Limitations
+
+- There is **no `enabled` option**. Use conditional rendering to mount/unmount the component.
+- There is **no `refetch()`**. Change `parameters` (memoized) or re-mount to re-run the query.
+
+### Recommended Usage Pattern
+
+Always memoize parameters and handle all states explicitly:
+
+```tsx
+import { useMemo } from "react";
+import { useAnalyticsQuery, Skeleton } from "@databricks/appkit-ui/react";
+import { sql } from "@databricks/appkit-ui/js";
+
+export function Users() {
+  const params = useMemo(
+    () => ({
+      status: sql.string("active"),
+      limit: sql.number(50),
+    }),
+    [],
+  );
+
+  const { data, loading, error } = useAnalyticsQuery("users_list", params);
+
+  if (loading) return <Skeleton className="h-24 w-full" />;
+  if (error) return <div className="text-destructive">Error: {error}</div>;
+  if (!data || data.length === 0) return <div>No results</div>;
+
+  return <pre>{JSON.stringify(data[0], null, 2)}</pre>;
+}
+```
+
+### Options
+
+- `format?: "JSON" | "ARROW"` - Result format (default: `"JSON"`)
+- `autoStart?: boolean` - Start query automatically (default: `true`)
+- `maxParametersSize?: number` - Max parameter payload size (default: `100 * 1024` bytes)
+
+## `useChartData` Hook
+
+The `useChartData` hook is used internally by chart components but can be used directly for custom visualizations.
+
+### Format Options
+
+- `format` here is **lowercase**: `"json" | "arrow" | "auto"` (default: `"auto"`)
+
+### Auto-Selection Heuristics
+
+When `format="auto"`, the hook selects the best format based on:
+- If `parameters._preferArrow === true` → Arrow
+- If `parameters._preferJson === true` → JSON
+- If `parameters.limit` is a number > 500 → Arrow
+- If `parameters.startDate` and `parameters.endDate` exist → Arrow
+
+## SQL Helpers (`sql.*`)
+
+Use these to build typed parameters. They return marker objects: `{ __sql_type, value }`.
+
+### Available Helpers
+
+- `sql.string(value)` → STRING (accepts string|number|boolean)
+- `sql.number(value)` → NUMERIC (accepts number|string)
+- `sql.boolean(value)` → BOOLEAN (accepts boolean|string("true"/"false")|number(1/0))
+- `sql.date(value)` → DATE (accepts Date or `"YYYY-MM-DD"`)
+- `sql.timestamp(value)` → TIMESTAMP (accepts Date, ISO string, or unix time)
+
+### Binary Parameters
+
+Databricks SQL Warehouse doesn't support `BINARY` as a parameter type:
+
+- `sql.binary(value)` returns a **STRING marker containing hex**
+- Use `UNHEX(:param)` in your SQL query
+- Accepts `Uint8Array`, `ArrayBuffer`, or a hex string
+
+```sql
+-- In your SQL file
+SELECT * FROM files WHERE content = UNHEX(:fileContent)
+```
+
+```tsx
+// In your component
+const params = useMemo(
+  () => ({
+    fileContent: sql.binary(new Uint8Array([0x48, 0x65, 0x6c, 0x6c, 0x6f])),
+  }),
+  [],
+);
+```
+
+## SQL Result Types
+
+Databricks SQL JSON results can return some numeric-like fields (especially `DECIMAL`) as strings. If a field behaves like a string at runtime, convert explicitly:
+
+```ts
+const value = Number(row.amount);
+```
+
+If you need more reliable numeric fidelity for large datasets, prefer `format: "ARROW"` and process Arrow on the client.
+
+## `connectSSE` (Custom SSE Connections)
+
+For custom streaming endpoints (not analytics), use the `connectSSE` utility:
+
+```tsx
+import { connectSSE } from "@databricks/appkit-ui/js";
+import { useEffect, useState } from "react";
+
+function useCustomStream(endpoint: string) {
+  const [messages, setMessages] = useState<string[]>([]);
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    connectSSE({
+      url: endpoint,
+      payload: { key: "value" },  // optional: makes it a POST
+      onMessage: async ({ data }) => {
+        setConnected(true);
+        setMessages((prev) => [...prev, data]);
+      },
+      onError: (error) => {
+        console.error("SSE error:", error);
+        setConnected(false);
+      },
+      signal: controller.signal,
+      maxRetries: 3,          // default: 3
+      retryDelay: 2000,       // default: 2000ms (exponential backoff)
+      timeout: 300000,        // default: 5 minutes
+      maxBufferSize: 1048576, // default: 1MB
+    });
+
+    return () => controller.abort();
+  }, [endpoint]);
+
+  return { messages, connected };
+}
+```
+
+### Options
+
+- `url` - SSE endpoint URL (required)
+- `payload` - Optional request body (if provided, uses POST; otherwise GET)
+- `onMessage({ id, data })` - Called for each SSE message
+- `onError(error)` - Called on connection errors
+- `signal` - AbortSignal to cancel the connection
+- `lastEventId` - Resume from a specific event ID
+- `maxRetries` - Max retry attempts (default: 3)
+- `retryDelay` - Base delay between retries in ms (default: 2000)
+- `timeout` - Connection timeout in ms (default: 300000)
+- `maxBufferSize` - Max buffer size in bytes (default: 1MB)
+
+## `ArrowClient` (Advanced Arrow Processing)
+
+For low-level Arrow data handling:
+
+```tsx
+import { ArrowClient } from "@databricks/appkit-ui/js";
+
+// Process Arrow buffer
+const table = await ArrowClient.processArrowBuffer(buffer);
+
+// Fetch and process Arrow data in one call
+const table = await ArrowClient.fetchAndProcessArrow(url, headers);
+
+// Extract fields from table
+const fields = ArrowClient.extractArrowFields(table);
+// → [{ name: "date", type: ... }, { name: "value", type: ... }]
+
+// Extract columns as arrays
+const columns = ArrowClient.extractArrowColumns(table);
+// → { date: [...], value: [...] }
+
+// Extract chart data
+const { xData, yDataMap } = ArrowClient.extractChartData(table, "date", ["value", "count"]);
+// → { xData: [...], yDataMap: { value: [...], count: [...] } }
+
+// Auto-detect chart fields from Arrow table
+const detected = ArrowClient.detectFieldsFromArrow(table);
+// → { xField: "date", yFields: ["value"], chartType: "timeseries" }
+```
+
+## `DataTable` Component
+
+`DataTable` is a production-ready table integrated with `useAnalyticsQuery`.
+
+### Key Behaviors
+
+- `parameters` is required (use `{}` if none)
+- Supports opinionated mode (auto columns) and full-control mode (`children(table)`)
+
+### Example
+
+```tsx
+import { DataTable } from "@databricks/appkit-ui/react";
+
+export function UsersTable() {
+  return (
+    <DataTable
+      queryKey="users_list"
+      parameters={{}}
+      filterColumn="email"
+      filterPlaceholder="Filter by email..."
+      pageSize={25}
+      pageSizeOptions={[10, 25, 50, 100]}
+    />
+  );
+}
+```
+
+## See Also
+
+- [Charts](./charts.mdx) - Chart components and patterns
+- [Component Patterns](./component-patterns.mdx) - UI composition patterns
+- [Styling](./styling.mdx) - Theming and CSS customization

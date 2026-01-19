@@ -1,0 +1,206 @@
+---
+sidebar_position: 3
+---
+
+# Component Patterns
+
+This guide shows common composition patterns for building UIs with AppKit UI components.
+
+## Available Components
+
+AppKit-UI ships shadcn-style primitives. Import from `@databricks/appkit-ui/react`.
+
+:::note
+Exact exports can vary by AppKit-UI version. Prefer using IDE auto-import/autocomplete to confirm what your installed version exports.
+:::
+
+### Component List
+
+`Accordion`, `Alert`, `AlertDialog`, `AspectRatio`, `Avatar`, `Badge`, `Breadcrumb`, `Button`, `ButtonGroup`, `Calendar`, `Card`, `CardHeader`, `CardTitle`, `CardDescription`, `CardContent`, `CardFooter`, `Carousel`, `Checkbox`, `Collapsible`, `Command`, `ContextMenu`, `Dialog`, `DialogTrigger`, `DialogContent`, `DialogHeader`, `DialogTitle`, `DialogDescription`, `DialogFooter`, `Drawer`, `DropdownMenu`, `Empty`, `Field`, `Form`, `HoverCard`, `Input`, `InputGroup`, `InputOtp`, `Item`, `Kbd`, `Label`, `Menubar`, `NavigationMenu`, `Pagination`, `Popover`, `Progress`, `RadioGroup`, `Resizable`, `ScrollArea`, `Select`, `SelectTrigger`, `SelectValue`, `SelectContent`, `SelectItem`, `Separator`, `Sheet`, `Sidebar`, `Skeleton`, `Slider`, `Sonner`, `Spinner`, `Switch`, `Table`, `Tabs`, `TabsList`, `TabsTrigger`, `TabsContent`, `Textarea`, `Toggle`, `ToggleGroup`, `Tooltip`, `TooltipTrigger`, `TooltipContent`, `TooltipProvider`
+
+## Card Pattern
+
+Cards are containers for grouping related content:
+
+```tsx
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+  CardFooter,
+} from "@databricks/appkit-ui/react";
+
+function MetricCard({ title, value, description }: Props) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardDescription>{description}</CardDescription>
+        <CardTitle className="text-3xl">{value}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {/* Optional content */}
+      </CardContent>
+      <CardFooter>
+        {/* Optional footer */}
+      </CardFooter>
+    </Card>
+  );
+}
+```
+
+## Select Pattern
+
+Dropdowns for selecting from a list of options:
+
+```tsx
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@databricks/appkit-ui/react";
+
+function DateRangeSelect({ value, onChange }: Props) {
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger className="w-40">
+        <SelectValue placeholder="Select range" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="7d">Last 7 days</SelectItem>
+        <SelectItem value="30d">Last 30 days</SelectItem>
+        <SelectItem value="90d">Last 90 days</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
+```
+
+:::warning Radix Constraint
+`SelectItem` cannot have `value=""`. Use a sentinel value like `"all"` or `"none"` instead.
+:::
+
+## Tabs Pattern
+
+Organize content into multiple panels:
+
+```tsx
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@databricks/appkit-ui/react";
+
+function Dashboard() {
+  return (
+    <Tabs defaultValue="overview">
+      <TabsList>
+        <TabsTrigger value="overview">Overview</TabsTrigger>
+        <TabsTrigger value="analytics">Analytics</TabsTrigger>
+      </TabsList>
+      <TabsContent value="overview">
+        <p>Overview content</p>
+      </TabsContent>
+      <TabsContent value="analytics">
+        <p>Analytics content</p>
+      </TabsContent>
+    </Tabs>
+  );
+}
+```
+
+## Dialog Pattern
+
+Modal dialogs for user interactions:
+
+```tsx
+import {
+  Dialog,
+  DialogTrigger,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  Button,
+} from "@databricks/appkit-ui/react";
+
+function ConfirmDialog() {
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive">Delete</Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Confirm deletion</DialogTitle>
+          <DialogDescription>
+            This action cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline">Cancel</Button>
+          <Button variant="destructive">Delete</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+```
+
+## Button Variants
+
+Buttons come with multiple style variants:
+
+```tsx
+import { Button } from "@databricks/appkit-ui/react";
+
+<Button variant="default">Primary</Button>
+<Button variant="secondary">Secondary</Button>
+<Button variant="outline">Outline</Button>
+<Button variant="ghost">Ghost</Button>
+<Button variant="destructive">Destructive</Button>
+<Button variant="link">Link</Button>
+```
+
+## Loading Skeleton Pattern
+
+Show loading states with skeleton screens:
+
+```tsx
+import { Card, CardHeader, Skeleton } from "@databricks/appkit-ui/react";
+
+function LoadingCard() {
+  return (
+    <Card>
+      <CardHeader>
+        <Skeleton className="h-4 w-24 mb-2" />
+        <Skeleton className="h-8 w-20 mb-2" />
+        <Skeleton className="h-4 w-28" />
+      </CardHeader>
+    </Card>
+  );
+}
+```
+
+## TooltipProvider Requirement
+
+If using tooltips anywhere in your app, wrap your root component with `TooltipProvider`:
+
+```tsx
+import { TooltipProvider } from "@databricks/appkit-ui/react";
+
+function App() {
+  return (
+    <TooltipProvider>
+      {/* Your app content */}
+    </TooltipProvider>
+  );
+}
+```
+
+## See Also
+
+- [Usage Guide](./usage-guide.mdx) - Hooks and utilities
+- [Charts](./charts.mdx) - Chart components
+- [Styling](./styling.mdx) - Theming and CSS customization
+- [API Reference](/docs/api/appkit-ui) - Complete component API documentation

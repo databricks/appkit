@@ -1,5 +1,6 @@
 import { cn } from "../lib/utils";
 
+/** Loading placeholder with pulsing animation */
 function Skeleton({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
