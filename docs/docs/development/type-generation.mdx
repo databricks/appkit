@@ -42,26 +42,26 @@ export default defineConfig({
 
 When the frontend is served through AppKit in dev mode, AppKit's dev server already includes `appKitTypesPlugin()` internally. You still want it in your client build pipeline if you run `vite build` separately.
 
-## CLI: `appkit-generate-types`
+## CLI: `appkit generate-types`
 
 For manual type generation or CI/CD pipelines, use the CLI command:
 
 ```bash
 # Requires DATABRICKS_WAREHOUSE_ID (or pass as 3rd arg)
-npx appkit-generate-types [rootDir] [outFile] [warehouseId]
+npx appkit generate-types [rootDir] [outFile] [warehouseId]
 ```
 
 ### Examples
 
 ```bash
 # Generate types using warehouse ID from environment
-npx appkit-generate-types . client/src/appKitTypes.d.ts
+npx appkit generate-types . client/src/appKitTypes.d.ts
 
 # Force regeneration (skip cache)
-npx appkit-generate-types --no-cache
+npx appkit generate-types --no-cache
 
 # Specify warehouse ID explicitly
-npx appkit-generate-types . client/src/appKitTypes.d.ts abc123...
+npx appkit generate-types . client/src/appKitTypes.d.ts abc123...
 ```
 
 ## How It Works

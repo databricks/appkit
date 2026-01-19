@@ -38,8 +38,8 @@
     "build:watch": "tsdown --config tsdown.config.ts --watch",
     "clean:full": "rm -rf dist node_modules tmp",
     "clean": "rm -rf dist tmp",
-    "dist": "tsx ../../tools/dist.ts",
-    "tarball": "rm -rf tmp && tsx ../../tools/dist.ts && npm pack ./tmp --pack-destination ./tmp",
+    "dist": "pnpm --filter=docs build && tsx ../../tools/dist.ts",
+    "tarball": "rm -rf tmp && pnpm dist && npm pack ./tmp --pack-destination ./tmp",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

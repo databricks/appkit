@@ -6,7 +6,7 @@ export default defineConfig({
   outDir: "dist",
   minify: false,
   format: "esm",
-  platform: "neutral",
+  platform: "node",
   sourcemap: false,
   unbundle: true,
   dts: true,

@@ -33,6 +33,8 @@
     }
   },
   "dependencies": {
+    "@ast-grep/napi": "^0.37.0",
+    "commander": "^12.1.0",
     "fast-glob": "^3.3.3"
   }
 }
