@@ -23,6 +23,42 @@
       "description": "App Description (Optional)",
       "default": "A Databricks App powered by Databricks AppKit",
       "order": 4
+    },
+    "dotenv": {
+      "type": "string",
+      "description": "Additional .env content",
+      "default": "",
+      "hidden": true
+    },
+    "dotenv_example": {
+      "type": "string",
+      "description": "Additional .env.example content",
+      "default": "",
+      "hidden": true
+    },
+    "app_env": {
+      "type": "string",
+      "description": "App environment variables for app.yaml",
+      "default": "",
+      "hidden": true
+    },
+    "bundle_variables": {
+      "type": "string",
+      "description": "Additional bundle variables",
+      "default": "",
+      "hidden": true
+    },
+    "bundle_resources": {
+      "type": "string",
+      "description": "Additional bundle resources",
+      "default": "",
+      "hidden": true
+    },
+    "target_variables": {
+      "type": "string",
+      "description": "Target-specific variables",
+      "default": "",
+      "hidden": true
     }
   },
   "success_message": "\nYour new project has been created in the '{{.project_name}}' directory!"
