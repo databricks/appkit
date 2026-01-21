@@ -59,6 +59,18 @@
       "description": "Target-specific variables",
       "default": "",
       "hidden": true
+    },
+    "plugin_import": {
+      "type": "string",
+      "description": "Plugin imports for server.ts",
+      "default": "analytics",
+      "hidden": true
+    },
+    "plugin_usage": {
+      "type": "string",
+      "description": "Plugin usage in createApp",
+      "default": "analytics()",
+      "hidden": true
     }
   },
   "success_message": "\nYour new project has been created in the '{{.project_name}}' directory!"
