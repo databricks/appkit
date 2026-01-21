@@ -83,9 +83,8 @@ llmsContent = llmsContent.replace(/\/appkit\//g, "./docs/");
 
 fs.writeFileSync("tmp/llms.txt", llmsContent);
 
-// Copy llms.txt as CLAUDE.md and AGENTS.md (npm pack doesn't support symlinks)
+// Copy llms.txt as CLAUDE.md (npm pack doesn't support symlinks)
 fs.copyFileSync("tmp/llms.txt", "tmp/CLAUDE.md");
-fs.copyFileSync("tmp/llms.txt", "tmp/AGENTS.md");
 
 fs.copyFileSync(path.join(__dirname, "../README.md"), "tmp/README.md");
 fs.copyFileSync(path.join(__dirname, "../LICENSE"), "tmp/LICENSE");
