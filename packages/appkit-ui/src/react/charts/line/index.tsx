@@ -2,24 +2,52 @@ import { createChart } from "../create-chart";
 import type { LineChartProps } from "../types";
 
 /**
- * Line Chart component.
- * Supports both JSON and Arrow data formats with automatic format selection.
+ * Line Chart component for time-series and trend visualization.
+ * Built on Apache ECharts. Configure via props, NOT children.
  *
- * @example Simple usage
+ * ⚠️ CRITICAL: This is NOT a Recharts wrapper. Do not use Recharts components as children.
+ * ⚠️ ANTI-PATTERN: Don't fetch with useAnalyticsQuery then pass to chart - let the chart fetch.
+ *
+ * @example Query mode (recommended for Databricks analytics)
  * ```tsx
- * <LineChart
- *   queryKey="revenue_over_time"
- *   parameters={{ period: "monthly" }}
- * />
+ * import { LineChart } from "@databricks/appkit-ui/react";
+ * import { sql } from "@databricks/appkit-ui/js";
+ * import { useMemo } from "react";
+ *
+ * export function SpendChart() {
+ *   const params = useMemo(
+ *     () => ({
+ *       startDate: sql.date("2024-01-01"),
+ *       endDate: sql.date("2024-12-31"),
+ *       aggregationLevel: sql.string("day"),
+ *     }),
+ *     [],
+ *   );
+ *
+ *   return (
+ *     <LineChart
+ *       queryKey="spend_data"
+ *       parameters={params}
+ *       format="auto"      // "auto" | "json" | "arrow"
+ *       xKey="period"
+ *       yKey="cost_usd"
+ *       smooth
+ *       showSymbol={false}
+ *     />
+ *   );
+ * }
  * ```
  *
- * @example With custom styling
+ * @example Data mode (for static/client-side data)
  * ```tsx
  * <LineChart
- *   queryKey="trends"
- *   parameters={{ metric: "users" }}
- *   smooth={false}
- *   showSymbol={true}
+ *   data={[
+ *     { month: "Jan", sales: 100 },
+ *     { month: "Feb", sales: 150 },
+ *     { month: "Mar", sales: 200 },
+ *   ]}
+ *   xKey="month"
+ *   yKey="sales"
  * />
  * ```
  */

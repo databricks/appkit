@@ -2,10 +2,12 @@ import { createChart } from "../create-chart";
 import type { DonutChartProps, PieChartProps } from "../types";
 
 /**
- * Pie Chart component.
- * Supports both JSON and Arrow data formats with automatic format selection.
+ * Pie Chart component for proportional data visualization.
+ * Built on Apache ECharts. Configure via props, NOT children.
  *
- * @example Simple usage
+ * ⚠️ CRITICAL: This is NOT a Recharts wrapper.
+ *
+ * @example Query mode
  * ```tsx
  * <PieChart
  *   queryKey="market_share"
@@ -17,6 +19,7 @@ import type { DonutChartProps, PieChartProps } from "../types";
  * ```tsx
  * <PieChart
  *   queryKey="distribution"
+ *   parameters={{}}
  *   showLabels={true}
  *   labelPosition="inside"
  * />
@@ -26,9 +29,11 @@ export const PieChart = createChart<PieChartProps>("pie", "PieChart");
 
 /**
  * Donut Chart component (Pie chart with inner radius).
- * Supports both JSON and Arrow data formats with automatic format selection.
+ * Built on Apache ECharts. Configure via props, NOT children.
  *
- * @example Simple usage
+ * ⚠️ CRITICAL: This is NOT a Recharts wrapper.
+ *
+ * @example Query mode
  * ```tsx
  * <DonutChart
  *   queryKey="budget_allocation"
@@ -40,6 +45,7 @@ export const PieChart = createChart<PieChartProps>("pie", "PieChart");
  * ```tsx
  * <DonutChart
  *   queryKey="progress"
+ *   parameters={{}}
  *   innerRadius={60}
  * />
  * ```

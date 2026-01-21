@@ -2,14 +2,18 @@ import { createChart } from "../create-chart";
 import type { ScatterChartProps } from "../types";
 
 /**
- * Scatter Chart component.
- * Supports both JSON and Arrow data formats with automatic format selection.
+ * Scatter Chart component for correlation and distribution visualization.
+ * Built on Apache ECharts. Configure via props, NOT children.
  *
- * @example Simple usage
+ * ⚠️ CRITICAL: This is NOT a Recharts wrapper.
+ *
+ * @example Query mode with parameters
  * ```tsx
  * <ScatterChart
  *   queryKey="correlation_data"
  *   parameters={{ metrics: ["revenue", "growth"] }}
+ *   xKey="revenue"
+ *   yKey="growth"
  * />
  * ```
  *
@@ -17,6 +21,9 @@ import type { ScatterChartProps } from "../types";
  * ```tsx
  * <ScatterChart
  *   queryKey="data_points"
+ *   parameters={{}}
+ *   xKey="x_value"
+ *   yKey="y_value"
  *   symbolSize={12}
  * />
  * ```

@@ -2,23 +2,31 @@ import { createChart } from "../create-chart";
 import type { AreaChartProps } from "../types";
 
 /**
- * Area Chart component.
- * Supports both JSON and Arrow data formats with automatic format selection.
+ * Area Chart component for trend visualization with filled areas.
+ * Built on Apache ECharts. Configure via props, NOT children.
  *
- * @example Simple usage
- * ```tsx
- * <AreaChart
- *   queryKey="traffic_data"
- *   parameters={{ period: "weekly" }}
- * />
- * ```
+ * ⚠️ CRITICAL: This is NOT a Recharts wrapper.
  *
  * @example Stacked area chart
  * ```tsx
  * <AreaChart
  *   queryKey="revenue_breakdown"
- *   parameters={{ groupBy: "product" }}
- *   stacked={true}
+ *   parameters={{}}
+ *   xKey="date"
+ *   yKey={["product_a", "product_b", "product_c"]}
+ *   stacked
+ *   showLegend
+ * />
+ * ```
+ *
+ * @example Query mode with format selection
+ * ```tsx
+ * <AreaChart
+ *   queryKey="traffic_data"
+ *   parameters={{ period: "weekly" }}
+ *   format="arrow"  // Force Arrow for large datasets
+ *   xKey="week"
+ *   yKey="visitors"
  * />
  * ```
  */

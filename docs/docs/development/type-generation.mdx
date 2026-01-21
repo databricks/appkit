@@ -1,0 +1,108 @@
+---
+sidebar_position: 5
+---
+
+# Type generation
+
+AppKit can automatically generate TypeScript types for your SQL queries, providing end-to-end type safety from database to UI.
+
+## Goal
+
+Generate `client/src/appKitTypes.d.ts` so query keys, parameters, and result rows are type-safe.
+
+## Vite plugin: `appKitTypesPlugin`
+
+The recommended approach is to use the Vite plugin, which watches your SQL files and regenerates types automatically during development.
+
+### Configuration
+
+- `outFile?: string` - Output file path (default: `src/appKitTypes.d.ts`)
+- `watchFolders?: string[]` - Folders to watch for SQL files (default: `["../config/queries"]`)
+
+### Example
+
+```ts
+// client/vite.config.ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { appKitTypesPlugin } from "@databricks/appkit";
+
+export default defineConfig({
+  plugins: [
+    react(),
+    appKitTypesPlugin({
+      outFile: "src/appKitTypes.d.ts",
+      watchFolders: ["../config/queries"],
+    }),
+  ],
+});
+```
+
+### Important nuance
+
+When the frontend is served through AppKit in dev mode, AppKit's dev server already includes `appKitTypesPlugin()` internally. You still want it in your client build pipeline if you run `vite build` separately.
+
+## CLI: `appkit generate-types`
+
+For manual type generation or CI/CD pipelines, use the CLI command:
+
+```bash
+# Requires DATABRICKS_WAREHOUSE_ID (or pass as 3rd arg)
+npx appkit generate-types [rootDir] [outFile] [warehouseId]
+```
+
+### Examples
+
+- Generate types using warehouse ID from environment
+
+  ```bash
+  npx appkit generate-types . client/src/appKitTypes.d.ts
+  ```
+
+- Generate types using warehouse ID explicitly
+
+  ```bash
+  npx appkit generate-types . client/src/appKitTypes.d.ts abc123...
+  ```
+
+- Force regeneration (skip cache)
+
+  ```bash
+  npx appkit generate-types --no-cache
+  ```
+
+## How it works
+
+The type generator:
+
+1. Scans your `config/queries/` folder for `.sql` files
+2. Parses SQL parameter annotations (e.g., `-- @param startDate DATE`)
+3. Connects to your Databricks SQL Warehouse to infer result column types
+4. Generates TypeScript interfaces for query parameters and results
+5. Creates a `QueryRegistry` type for type-safe query execution
+
+## Using generated types
+
+Once types are generated, your IDE will provide autocomplete and type checking:
+
+```tsx
+import { useAnalyticsQuery } from "@databricks/appkit-ui/react";
+import { sql } from "@databricks/appkit-ui/js";
+
+// TypeScript knows "users_list" is a valid query key
+// and what parameters it expects
+const { data } = useAnalyticsQuery("users_list", {
+  status: sql.string("active"),
+  limit: sql.number(50),
+});
+
+// TypeScript knows the shape of the result rows
+data?.forEach(row => {
+  console.log(row.email); // ✓ autocomplete works
+});
+```
+
+## See also
+
+- [Plugins](../plugins.md) - Analytics plugin configuration
+- [Charts](../ui-components/charts.mdx) - Using queries with chart components

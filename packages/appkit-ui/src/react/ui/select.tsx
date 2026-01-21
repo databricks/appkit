@@ -100,6 +100,17 @@ function SelectLabel({
   );
 }
 
+/**
+ * Select item component for individual options in a dropdown.
+ * 
+ * @warning SelectItem cannot have value="". Use a sentinel value like "all" or "none" instead due to Radix UI constraint.
+ * 
+ * @example
+ * ```tsx
+ * <SelectItem value="option1">Option 1</SelectItem>
+ * <SelectItem value="all">All Items</SelectItem> // Use "all" instead of ""
+ * ```
+ */
 function SelectItem({
   className,
   children,
