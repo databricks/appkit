@@ -3,6 +3,7 @@ import * as ProgressPrimitive from "@radix-ui/react-progress";
 
 import { cn } from "../lib/utils";
 
+/** Visual indicator showing task completion percentage */
 function Progress({
   className,
   value,

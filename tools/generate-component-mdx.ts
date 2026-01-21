@@ -172,12 +172,13 @@ import { DocExample } from "@site/src/components/DocExample";
 `
     : "";
 
-  return `---
-title: ${groupName}
----
+  const pageDescription = components[0]?.description
+    ? `${sanitizeDescriptionText(components[0].description)}\n\n`
+    : "";
 
-# ${groupName}
-${exampleSection}
+  return `# ${groupName}
+
+${pageDescription}${exampleSection}
 ${sections}
 `;
 }
