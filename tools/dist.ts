@@ -62,9 +62,9 @@ const itemsToCopy = fs.readdirSync(docsBuildPath);
 for (const item of itemsToCopy) {
   const sourcePath = path.join(docsBuildPath, item);
   const stat = fs.statSync(sourcePath);
-  
+
   // Copy .md files and docs directory
-  if (item.endsWith('.md') || item === 'docs') {
+  if (item.endsWith(".md") || item === "docs") {
     const destPath = path.join("tmp/docs", item);
     if (stat.isDirectory()) {
       fs.cpSync(sourcePath, destPath, { recursive: true });

@@ -34,5 +34,6 @@ export {
   type ITelemetry,
 } from "./telemetry";
 
-// Vite plugin
+// Vite plugin and type generation
 export { appKitTypesPlugin } from "./type-generator/vite-plugin";
+export { generateFromEntryPoint } from "./type-generator";

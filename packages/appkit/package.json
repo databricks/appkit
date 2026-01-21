@@ -25,6 +25,11 @@
       "development": "./src/index.ts",
       "default": "./dist/index.js"
     },
+    "./type-generator": {
+      "types": "./dist/type-generator/index.d.ts",
+      "development": "./src/type-generator/index.ts",
+      "default": "./dist/type-generator/index.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -75,6 +80,7 @@
   "publishConfig": {
     "exports": {
       ".": "./dist/index.js",
+      "./type-generator": "./dist/type-generator/index.js",
       "./package.json": "./package.json"
     }
   }

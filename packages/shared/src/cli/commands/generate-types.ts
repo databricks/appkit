@@ -13,7 +13,7 @@ async function runGenerateTypes(
   try {
     // Try to import the type generator from @databricks/appkit
     const { generateFromEntryPoint } = await import(
-      "@databricks/appkit/dist/type-generator/index.js"
+      "@databricks/appkit/type-generator"
     );
 
     const resolvedRootDir = rootDir || process.cwd();
