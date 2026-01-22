@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://databricks.com/schemas/appkit-plugin.json",
+  "title": "AppKit Plugin Manifest",
+  "description": "Defines an AppKit plugin and its requirements",
+  "type": "object",
+  "required": ["id", "name", "description"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Unique plugin identifier (lowercase, underscores allowed)"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable plugin name"
+    },
+    "description": {
+      "type": "string",
+      "description": "Brief description shown during feature selection"
+    },
+    "requires": {
+      "type": "array",
+      "description": "Dependencies the plugin needs from the user",
+      "items": {
+        "$ref": "#/$defs/requirement"
+      }
+    },
+    "env": {
+      "type": "array",
+      "description": "Environment variables to inject (format: NAME=${requirement_id})",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z][A-Z0-9_]*=.+$"
+      }
+    }
+  },
+  "$defs": {
+    "requirement": {
+      "type": "object",
+      "required": ["id", "name", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Unique identifier for this requirement"
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name for prompts"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "warehouse",
+            "secret",
+            "genie-space",
+            "job",
+            "mlflow",
+            "serving-endpoint",
+            "uc-volume",
+            "vector-index",
+            "uc-function",
+            "uc-connection"
+          ],
+          "description": "Type determines the prompt UI"
+        },
+        "required": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this requirement is mandatory"
+        },
+        "default": {
+          "description": "Default value if not provided"
+        },
+        "options": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Options for enum type"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "type": { "const": "enum" } }
+          },
+          "then": {
+            "required": ["options"]
+          }
+        }
+      ]
+    }
+  }
+}

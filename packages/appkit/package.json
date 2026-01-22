@@ -29,7 +29,8 @@
   },
   "bin": {
     "appkit-generate-types": "./bin/generate-types.js",
-    "appkit-lint": "./bin/appkit-lint.js"
+    "appkit-lint": "./bin/appkit-lint.js",
+    "appkit-schema-validate": "./bin/schema-validate.js"
   },
   "scripts": {
     "build:package": "tsdown --config tsdown.config.ts",
@@ -41,6 +42,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "ajv": "^8.17.1",
     "@ast-grep/napi": "^0.37.0",
     "@databricks/sdk-experimental": "^0.15.0",
     "@opentelemetry/api": "^1.9.0",
