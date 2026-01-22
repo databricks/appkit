@@ -164,5 +164,4 @@ Where:
 
 ## See also
 
-- [Charts](./charts.mdx) - Chart components and data display
-- [API Reference](/docs/api/appkit-ui) - Complete component API documentation
+- [API Reference](/docs/api/appkit-ui) - Complete UI components API documentation
