@@ -8,6 +8,11 @@ import {
   name as productName,
   version as productVersion,
 } from "../../package.json";
+import {
+  AuthenticationError,
+  ConfigurationError,
+  InitializationError,
+} from "../errors";
 import type { UserContext } from "./user-context";
 
 /**
@@ -73,8 +78,9 @@ export class ServiceContext {
    */
   static get(): ServiceContextState {
     if (!ServiceContext.instance) {
-      throw new Error(
-        "ServiceContext not initialized. Call ServiceContext.initialize() first.",
+      throw InitializationError.notInitialized(
+        "ServiceContext",
+        "Call ServiceContext.initialize() first",
       );
     }
     return ServiceContext.instance;
@@ -101,14 +107,12 @@ export class ServiceContext {
     userName?: string,
   ): UserContext {
     if (!token) {
-      throw new Error("User token is required to create user context");
+      throw AuthenticationError.missingToken("user token");
     }
 
     const host = process.env.DATABRICKS_HOST;
     if (!host) {
-      throw new Error(
-        "DATABRICKS_HOST environment variable is required for user context",
-      );
+      throw ConfigurationError.missingEnvVar("DATABRICKS_HOST");
     }
 
     const serviceCtx = ServiceContext.get();
@@ -151,7 +155,7 @@ export class ServiceContext {
     const currentUser = await client.currentUser.me();
 
     if (!currentUser.id) {
-      throw new Error("Service user ID not found");
+      throw ConfigurationError.resourceNotFound("Service user ID");
     }
 
     return {
@@ -179,7 +183,7 @@ export class ServiceContext {
     })) as { "x-databricks-org-id": string };
 
     if (!response["x-databricks-org-id"]) {
-      throw new Error("Workspace ID not found");
+      throw ConfigurationError.resourceNotFound("Workspace ID");
     }
 
     return response["x-databricks-org-id"];
@@ -219,8 +223,9 @@ export class ServiceContext {
       });
 
       if (response.warehouses.length === 0) {
-        throw new Error(
-          "Warehouse ID not found. Please configure the DATABRICKS_WAREHOUSE_ID environment variable.",
+        throw ConfigurationError.resourceNotFound(
+          "Warehouse ID",
+          "Please configure the DATABRICKS_WAREHOUSE_ID environment variable",
         );
       }
 
@@ -230,16 +235,18 @@ export class ServiceContext {
         firstWarehouse.state === "DELETING" ||
         !firstWarehouse.id
       ) {
-        throw new Error(
-          "Warehouse ID not found. Please configure the DATABRICKS_WAREHOUSE_ID environment variable.",
+        throw ConfigurationError.resourceNotFound(
+          "Warehouse ID",
+          "Please configure the DATABRICKS_WAREHOUSE_ID environment variable",
         );
       }
 
       return firstWarehouse.id;
     }
 
-    throw new Error(
-      "Warehouse ID not found. Please configure the DATABRICKS_WAREHOUSE_ID environment variable.",
+    throw ConfigurationError.resourceNotFound(
+      "Warehouse ID",
+      "Please configure the DATABRICKS_WAREHOUSE_ID environment variable",
     );
   }
 

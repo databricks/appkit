@@ -3,9 +3,13 @@ import path from "node:path";
 import type express from "express";
 import type { ViteDevServer as ViteDevServerType } from "vite";
 import { mergeConfigDedup } from "@/utils";
+import { ServerError } from "../errors";
+import { createLogger } from "../logging/logger";
+import { appKitTypesPlugin } from "../type-generator/vite-plugin";
 import { BaseServer } from "./base-server";
 import type { PluginEndpoints } from "./utils";
-import { appKitTypesPlugin } from "../type-generator/vite-plugin";
+
+const logger = createLogger("server:vite");
 
 /**
  * Vite dev server for the AppKit.
@@ -114,14 +118,12 @@ export class ViteDevServer extends BaseServer {
       const hasIndexHtml = fs.existsSync(path.join(fullPath, "index.html"));
 
       if (hasViteConfig && hasIndexHtml) {
-        console.log(`Vite dev server: using client root ${fullPath}`);
+        logger.debug("Vite dev server: using client root %s", fullPath);
         return fullPath;
       }
     }
 
-    throw new Error(
-      `Could not find client directory. Searched for vite.config.ts/js + index.html in: ${candidates.join(", ")}`,
-    );
+    throw ServerError.clientDirectoryNotFound(candidates);
   }
 
   // type assertion to ensure vite is not null
@@ -129,7 +131,7 @@ export class ViteDevServer extends BaseServer {
     vite: ViteDevServerType | null,
   ): asserts vite is ViteDevServerType {
     if (!vite) {
-      throw new Error("Vite dev server not initialized");
+      throw ServerError.viteNotInitialized();
     }
   }
 }

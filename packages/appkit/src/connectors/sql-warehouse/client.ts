@@ -3,8 +3,15 @@ import {
   type sql,
   type WorkspaceClient,
 } from "@databricks/sdk-experimental";
-import { ArrowStreamProcessor } from "../../stream/arrow-stream-processor";
 import type { TelemetryOptions } from "shared";
+import {
+  AppKitError,
+  ConnectionError,
+  ExecutionError,
+  ValidationError,
+} from "../../errors";
+import { createLogger } from "../../logging/logger";
+import { ArrowStreamProcessor } from "../../stream/arrow-stream-processor";
 import type { TelemetryProvider } from "../../telemetry";
 import {
   type Counter,
@@ -15,6 +22,8 @@ import {
   TelemetryManager,
 } from "../../telemetry";
 import { executeStatementDefaults } from "./defaults";
+
+const logger = createLogger("connectors:sql-warehouse");
 
 export interface SQLWarehouseConfig {
   timeout?: number;
@@ -80,6 +89,11 @@ export class SQLWarehouseConnector {
     const startTime = Date.now();
     let success = false;
 
+    // if signal is aborted, throw an error
+    if (signal?.aborted) {
+      throw ExecutionError.canceled();
+    }
+
     return this.telemetry.startActiveSpan(
       "sql.query",
       {
@@ -94,18 +108,32 @@ export class SQLWarehouseConnector {
         },
       },
       async (span: Span) => {
+        let abortHandler: (() => void) | undefined;
+        let isAborted = false;
+
+        if (signal) {
+          abortHandler = () => {
+            // abort span if not recording
+            if (!span.isRecording()) return;
+            isAborted = true;
+            span.setAttribute("cancelled", true);
+            span.setStatus({
+              code: SpanStatusCode.ERROR,
+              message: "Query cancelled by client",
+            });
+            span.end();
+          };
+          signal.addEventListener("abort", abortHandler, { once: true });
+        }
+
         try {
           // validate required fields
           if (!input.statement) {
-            throw new Error(
-              "Statement is required: Please provide a SQL statement to execute",
-            );
+            throw ValidationError.missingField("statement");
           }
 
           if (!input.warehouse_id) {
-            throw new Error(
-              "Warehouse ID is required: Please provide a warehouse_id to execute the statement",
-            );
+            throw ValidationError.missingField("warehouse_id");
           }
 
           const body: sql.ExecuteStatementRequest = {
@@ -136,7 +164,7 @@ export class SQLWarehouseConnector {
             );
 
           if (!response) {
-            throw new Error("No response received from SQL Warehouse API");
+            throw ConnectionError.apiFailure("SQL Warehouse");
           }
           const status = response.status;
           const statementId = response.statement_id as string;
@@ -168,42 +196,66 @@ export class SQLWarehouseConnector {
               result = this._transformDataArray(response);
               break;
             case "FAILED":
-              throw new Error(
-                `Statement failed: ${status.error?.message || "Unknown error"}`,
-              );
+              throw ExecutionError.statementFailed(status.error?.message);
             case "CANCELED":
-              throw new Error("Statement was canceled");
+              throw ExecutionError.canceled();
             case "CLOSED":
-              throw new Error(
-                "Statement execution completed but results are no longer available (CLOSED state)",
-              );
+              throw ExecutionError.resultsClosed();
             default:
-              throw new Error(`Unknown statement state: ${status?.state}`);
+              throw ExecutionError.unknownState(
+                String(status?.state ?? "unknown"),
+              );
           }
 
           const resultData = result.result as any;
-          if (resultData?.data) {
-            span.setAttribute("db.result.row_count", resultData.data.length);
-          } else if (resultData?.data_array) {
-            span.setAttribute(
-              "db.result.row_count",
-              resultData.data_array.length,
-            );
+          const rowCount =
+            resultData?.data?.length ?? resultData?.data_array?.length ?? 0;
+
+          if (rowCount > 0) {
+            span.setAttribute("db.result.row_count", rowCount);
           }
 
+          const duration = Date.now() - startTime;
+          logger.event()?.setContext("sql-warehouse", {
+            warehouse_id: input.warehouse_id,
+            rows_returned: rowCount,
+            query_duration_ms: duration,
+          });
+
           success = true;
-          span.setStatus({ code: SpanStatusCode.OK });
+          // only set success status if not aborted
+          if (!isAborted) {
+            span.setStatus({ code: SpanStatusCode.OK });
+          }
           return result;
         } catch (error) {
-          span.recordException(error as Error);
-          span.setStatus({
-            code: SpanStatusCode.ERROR,
-            message: error instanceof Error ? error.message : String(error),
-          });
-          throw error;
+          // only record error if not already handled by abort
+          if (!isAborted) {
+            span.recordException(error as Error);
+            span.setStatus({
+              code: SpanStatusCode.ERROR,
+              message: error instanceof Error ? error.message : String(error),
+            });
+          }
+
+          if (error instanceof AppKitError) {
+            throw error;
+          }
+          throw ExecutionError.statementFailed(
+            error instanceof Error ? error.message : String(error),
+          );
         } finally {
+          // remove abort handler
+          if (abortHandler && signal) {
+            signal.removeEventListener("abort", abortHandler);
+          }
+
           const duration = Date.now() - startTime;
-          span.end();
+
+          // end span if not already ended by abort handler
+          if (!isAborted) {
+            span.end();
+          }
 
           const attributes = {
             "db.warehouse_id": input.warehouse_id,
@@ -249,8 +301,8 @@ export class SQLWarehouseConnector {
             // check if timeout exceeded
             const elapsedTime = Date.now() - startTime;
             if (elapsedTime > timeout) {
-              const error = new Error(
-                `Statement polling timeout exceeded after ${timeout}ms (elapsed: ${elapsedTime}ms)`,
+              const error = ExecutionError.statementFailed(
+                `Polling timeout exceeded after ${timeout}ms (elapsed: ${elapsedTime}ms)`,
               );
               span.recordException(error);
               span.setStatus({ code: SpanStatusCode.ERROR });
@@ -258,7 +310,7 @@ export class SQLWarehouseConnector {
             }
 
             if (signal?.aborted) {
-              const error = new Error("Request aborted");
+              const error = ExecutionError.canceled();
               span.recordException(error);
               span.setStatus({ code: SpanStatusCode.ERROR });
               throw error;
@@ -278,7 +330,7 @@ export class SQLWarehouseConnector {
                 this._createContext(signal),
               );
             if (!response) {
-              throw new Error("No response received from SQL Warehouse API");
+              throw ConnectionError.apiFailure("SQL Warehouse");
             }
 
             const status = response.status;
@@ -303,19 +355,15 @@ export class SQLWarehouseConnector {
                 span.setStatus({ code: SpanStatusCode.OK });
                 return this._transformDataArray(response);
               case "FAILED":
-                throw new Error(
-                  `Statement failed: ${
-                    status.error?.message || "Unknown error"
-                  }`,
-                );
+                throw ExecutionError.statementFailed(status.error?.message);
               case "CANCELED":
-                throw new Error("Statement was canceled");
+                throw ExecutionError.canceled();
               case "CLOSED":
-                throw new Error(
-                  "Statement execution completed but results are no longer available (CLOSED state)",
-                );
+                throw ExecutionError.resultsClosed();
               default:
-                throw new Error(`Unknown statement state: ${status?.state}`);
+                throw ExecutionError.unknownState(
+                  String(status?.state ?? "unknown"),
+                );
             }
 
             // continue polling after delay
@@ -328,7 +376,13 @@ export class SQLWarehouseConnector {
             code: SpanStatusCode.ERROR,
             message: error instanceof Error ? error.message : String(error),
           });
-          throw error;
+
+          if (error instanceof AppKitError) {
+            throw error;
+          }
+          throw ExecutionError.statementFailed(
+            error instanceof Error ? error.message : String(error),
+          );
         } finally {
           span.end();
         }
@@ -427,7 +481,7 @@ export class SQLWarehouseConnector {
           const schema = response.manifest?.schema;
 
           if (!chunks || !schema) {
-            throw new Error("No chunks or schema found in response");
+            throw ExecutionError.missingData("chunks or schema");
           }
 
           span.setAttribute("arrow.chunk_count", chunks.length);
@@ -447,6 +501,11 @@ export class SQLWarehouseConnector {
             status: "success",
           });
 
+          logger.event()?.setContext("sql-warehouse", {
+            arrow_data_size_bytes: result.data.length,
+            arrow_job_id: jobId,
+          });
+
           return result;
         } catch (error) {
           span.setStatus({
@@ -461,8 +520,14 @@ export class SQLWarehouseConnector {
             status: "error",
           });
 
-          console.error(`Failed Arrow job: ${jobId}`, error);
-          throw error;
+          logger.error("Failed Arrow job: %s %O", jobId, error);
+
+          if (error instanceof AppKitError) {
+            throw error;
+          }
+          throw ExecutionError.statementFailed(
+            error instanceof Error ? error.message : String(error),
+          );
         }
       },
     );

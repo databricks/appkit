@@ -1,3 +1,4 @@
+import { ValidationError } from "../errors";
 import type { BufferedEvent } from "./types";
 
 // generic ring buffer implementation
@@ -11,7 +12,11 @@ export class RingBuffer<T> {
 
   constructor(capacity: number, keyExtractor: (item: T) => string) {
     if (capacity <= 0) {
-      throw new Error("Capacity must be greater than 0");
+      throw ValidationError.invalidValue(
+        "capacity",
+        capacity,
+        "greater than 0",
+      );
     }
 
     this.capacity = capacity;

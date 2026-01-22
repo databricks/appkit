@@ -2,11 +2,15 @@ import { createHash } from "node:crypto";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { CacheConfig, CacheStorage } from "shared";
 import { LakebaseConnector } from "@/connectors";
+import { AppKitError, ExecutionError, InitializationError } from "../errors";
+import { createLogger } from "../logging/logger";
 import type { Counter, TelemetryProvider } from "../telemetry";
 import { SpanStatusCode, TelemetryManager } from "../telemetry";
 import { deepMerge } from "../utils";
 import { cacheDefaults } from "./defaults";
 import { InMemoryStorage, PersistentStorage } from "./storage";
+
+const logger = createLogger("cache");
 
 /**
  * Cache manager class to handle cache operations.
@@ -34,7 +38,6 @@ export class CacheManager {
   private cleanupInProgress: boolean;
   private lastCleanupAttempt: number;
 
-  // Telemetry
   private telemetry: TelemetryProvider;
   private telemetryMetrics: {
     cacheHitCount: Counter;
@@ -72,8 +75,9 @@ export class CacheManager {
    */
   static getInstanceSync(): CacheManager {
     if (!CacheManager.instance) {
-      throw new Error(
-        "CacheManager not initialized. Ensure AppKit.create() has completed before accessing the cache.",
+      throw InitializationError.notInitialized(
+        "CacheManager",
+        "Ensure AppKit.create() has completed before accessing the cache",
       );
     }
 
@@ -203,6 +207,12 @@ export class CacheManager {
             this.telemetryMetrics.cacheHitCount.add(1, {
               "cache.key": cacheKey,
             });
+
+            logger.event()?.setExecution({
+              cache_hit: true,
+              cache_key: cacheKey,
+            });
+
             return cached.value as T;
           }
 
@@ -219,6 +229,13 @@ export class CacheManager {
               "cache.key": cacheKey,
               "cache.deduplication": "true",
             });
+
+            logger.event()?.setExecution({
+              cache_hit: true,
+              cache_key: cacheKey,
+              cache_deduplication: true,
+            });
+
             span.end();
             return inFlight as Promise<T>;
           }
@@ -228,6 +245,11 @@ export class CacheManager {
           span.addEvent("cache.miss", { "cache.key": cacheKey });
           this.telemetryMetrics.cacheMissCount.add(1, {
             "cache.key": cacheKey,
+          });
+
+          logger.event()?.setExecution({
+            cache_hit: false,
+            cache_key: cacheKey,
           });
 
           const promise = fn()
@@ -242,7 +264,12 @@ export class CacheManager {
             .catch((error) => {
               span.recordException(error);
               span.setStatus({ code: SpanStatusCode.ERROR });
-              throw error;
+              if (error instanceof AppKitError) {
+                throw error;
+              }
+              throw ExecutionError.statementFailed(
+                error instanceof Error ? error.message : String(error),
+              );
             })
             .finally(() => {
               this.inFlightRequests.delete(cacheKey);
@@ -304,7 +331,7 @@ export class CacheManager {
     (this.storage as PersistentStorage)
       .cleanupExpired()
       .catch((error) => {
-        console.debug("Error cleaning up expired entries:", error);
+        logger.debug("Error cleaning up expired entries: %O", error);
       })
       .finally(() => {
         this.cleanupInProgress = false;

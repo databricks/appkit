@@ -1,4 +1,3 @@
-import type { TelemetryOptions } from "shared";
 import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-proto";
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-proto";
@@ -17,14 +16,18 @@ import {
 } from "@opentelemetry/resources";
 import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
 import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
-import { AlwaysOnSampler } from "@opentelemetry/sdk-trace-base";
+import { NodeSDK } from "@opentelemetry/sdk-node";
 import {
   ATTR_SERVICE_NAME,
   ATTR_SERVICE_VERSION,
 } from "@opentelemetry/semantic-conventions";
+import type { TelemetryOptions } from "shared";
+import { createLogger } from "../logging/logger";
 import { TelemetryProvider } from "./telemetry-provider";
+import { AppKitSampler } from "./trace-sampler";
 import type { TelemetryConfig } from "./types";
-import { NodeSDK } from "@opentelemetry/sdk-node";
+
+const logger = createLogger("telemetry");
 
 export class TelemetryManager {
   private static readonly DEFAULT_EXPORT_INTERVAL_MS = 10000;
@@ -73,7 +76,7 @@ export class TelemetryManager {
       this.sdk = new NodeSDK({
         resource: this.createResource(config),
         autoDetectResources: false,
-        sampler: new AlwaysOnSampler(),
+        sampler: new AppKitSampler(),
         traceExporter: new OTLPTraceExporter({ headers: config.headers }),
         metricReaders: [
           new PeriodicExportingMetricReader({
@@ -93,9 +96,9 @@ export class TelemetryManager {
 
       this.sdk.start();
       this.registerShutdown();
-      console.log("[Telemetry] Initialized successfully");
+      logger.debug("Initialized successfully");
     } catch (error) {
-      console.error("[Telemetry] Failed to initialize:", error);
+      logger.error("Failed to initialize: %O", error);
     }
   }
 
@@ -172,7 +175,7 @@ export class TelemetryManager {
       await this.sdk.shutdown();
       this.sdk = undefined;
     } catch (error) {
-      console.error("[Telemetry] Error shutting down:", error);
+      logger.error("Error shutting down: %O", error);
     }
   }
 }

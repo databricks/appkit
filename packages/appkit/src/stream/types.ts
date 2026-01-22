@@ -1,3 +1,4 @@
+import type { Context } from "@opentelemetry/api";
 import type { IAppResponse } from "shared";
 import type { EventRingBuffer } from "./buffers";
 
@@ -39,6 +40,7 @@ export interface StreamEntry {
   isCompleted: boolean;
   lastAccess: number;
   abortController: AbortController;
+  traceContext: Context;
 }
 
 export interface BufferEntry {

@@ -1,3 +1,5 @@
+import { ValidationError } from "../errors";
+
 export function validateEnv(envVars: string[]) {
   const missingVars = [];
 
@@ -8,8 +10,6 @@ export function validateEnv(envVars: string[]) {
   }
 
   if (missingVars.length > 0) {
-    throw new Error(
-      `Missing required environment variables: ${missingVars.join(", ")}`,
-    );
+    throw ValidationError.missingEnvVars(missingVars);
   }
 }

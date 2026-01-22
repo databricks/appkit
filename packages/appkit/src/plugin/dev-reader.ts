@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { TunnelConnection } from "shared";
 import { isRemoteTunnelAllowedByEnv } from "@/server/remote-tunnel/gate";
+import { TunnelError } from "../errors";
+import { createLogger } from "../logging/logger";
+
+const logger = createLogger("plugin:dev-reader");
 
 type TunnelConnectionGetter = (
   req: import("express").Request,
@@ -31,7 +35,7 @@ export class DevFileReader {
 
           if (typeof value === "function") {
             return function noop() {
-              console.info(`Noop: ${String(prop)} (remote server disabled)`);
+              logger.debug("Noop: %s (remote server disabled)", String(prop));
               return Promise.resolve("");
             };
           }
@@ -56,14 +60,12 @@ export class DevFileReader {
     req: import("express").Request,
   ): Promise<string> {
     if (!this.getTunnelForRequest) {
-      throw new Error(
-        "Tunnel getter not registered for DevFileReader singleton",
-      );
+      throw TunnelError.getterNotRegistered();
     }
     const tunnel = this.getTunnelForRequest(req);
 
     if (!tunnel) {
-      throw new Error("No tunnel connection available for file read");
+      throw TunnelError.noConnection();
     }
 
     const { ws, pendingFileReads } = tunnel;

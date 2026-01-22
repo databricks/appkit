@@ -89,7 +89,7 @@ describe("ArrowStreamProcessor", () => {
     test("should throw error when no chunks provided", async () => {
       await expect(
         processor.processChunks([], createMockSchema()),
-      ).rejects.toThrow("No Arrow chunks provided");
+      ).rejects.toThrow("Missing required field: chunks");
     });
 
     test("should process single chunk successfully", async () => {
@@ -356,7 +356,7 @@ describe("ArrowStreamProcessor", () => {
           createMockSchema(),
           abortController.signal,
         ),
-      ).rejects.toThrow(/abort/i);
+      ).rejects.toThrow("Statement was canceled");
     });
 
     test("should abort in-flight requests when signal fires", async () => {
@@ -397,7 +397,7 @@ describe("ArrowStreamProcessor", () => {
       await vi.waitFor(() => expect(fetchStarted).toBe(true));
       abortController.abort();
 
-      await expect(promise).rejects.toThrow(/abort/i);
+      await expect(promise).rejects.toThrow("Statement was canceled");
     });
   });
 
@@ -452,9 +452,10 @@ describe("ArrowStreamProcessor", () => {
         processor.processChunks(chunks, createMockSchema()),
       ).rejects.toThrow();
 
+      // Logger uses util.format, so the message is pre-formatted
       expect(consoleSpy).toHaveBeenCalledWith(
-        "External link is required",
-        expect.objectContaining({ chunk_index: 0 }),
+        "[appkit:stream:arrow]",
+        expect.stringContaining("External link is required for chunk:"),
       );
 
       consoleSpy.mockRestore();
