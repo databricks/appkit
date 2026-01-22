@@ -20,36 +20,7 @@ AppKit simplifies building data applications on Databricks by providing:
 
 <Prerequisites />
 
-## Quick start options
-
-There are two ways to get started with AppKit:
-
-- **AI-assisted** (recommended): Use an AI coding assistant connected via the Databricks MCP server to explore data, run CLI commands, and scaffold your app interactively.
-- **Manual**: Use the Databricks CLI directly to create, bootstrap, and deploy your app.
-
-Choose the path that best fits your workflow; both approaches produce the same kind of AppKit-based Databricks application.
-
-## AI-first quick start
-
-Databricks AppKit is designed to work with AI coding assistants through the Databricks MCP server.
-
-Install the Databricks MCP server and configure it for use with your preferred AI assistant:
-
-```bash
-databricks experimental apps-mcp install
-```
-
-Once configured for your development environment, you can use your AI assistant to create and deploy new Databricks applications, as well as to iteratively evolve your app's codebase.
-
-Just prompt your AI assistant to create a new Databricks app, such as:
-
-```
-Create a new Databricks app that displays a dashboard of the nyc taxi trips dataset.
-```
-
-To learn more about the MCP server, see the [AI-assisted development](./development/ai-assisted-development.mdx) documentation.
-
-## Manual quick start
+## Quick start
 
 Learn how to create and deploy a sample Databricks application that uses AppKit with the Databricks CLI.
 
