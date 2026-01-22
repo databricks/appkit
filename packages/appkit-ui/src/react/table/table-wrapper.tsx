@@ -45,7 +45,6 @@ const CHECKBOX_COLUMN_WIDTH = 40;
  * @param props.queryKey - The query key to fetch the data
  * @param props.parameters - The parameters to pass to the query
  * @param props.transformer - Optional function to transform raw data before creating table
- * @param props.asUser - Whether to execute the query as a user. Default is false.
  * @param props.children - Render function that receives the TanStack Table instance
  * @param props.className - Optional CSS class name for the wrapper
  * @param props.ariaLabel - Optional accessibility label
@@ -60,7 +59,6 @@ export function TableWrapper<TRaw = any, TProcessed = any>(
     queryKey,
     parameters,
     transformer,
-    asUser = false,
     children,
     className,
     ariaLabel,
@@ -78,7 +76,6 @@ export function TableWrapper<TRaw = any, TProcessed = any>(
   const { data, loading, error } = useAnalyticsQuery<TRaw[]>(
     queryKey,
     parameters,
-    { asUser },
   );
 
   useEffect(() => {

@@ -137,7 +137,8 @@ export async function generateQueriesFromDescribe(
   // process each query file
   for (let i = 0; i < queryFiles.length; i++) {
     const file = queryFiles[i];
-    const queryName = path.basename(file, ".sql");
+    const rawName = path.basename(file, ".sql");
+    const queryName = normalizeQueryName(rawName);
 
     // read query file content
     const sql = fs.readFileSync(path.join(queryFolder, file), "utf8");
@@ -200,6 +201,15 @@ export async function generateQueriesFromDescribe(
   }
 
   return querySchemas;
+}
+
+/**
+ * Normalize query name by removing the .obo extension
+ * @param queryName - the query name to normalize
+ * @returns the normalized query name
+ */
+export function normalizeQueryName(fileName: string): string {
+  return fileName.replace(/\.obo$/, "");
 }
 
 /**

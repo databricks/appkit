@@ -431,9 +431,12 @@ WHERE workspace_id = :workspaceId
 HTTP endpoints exposed (mounted under `/api/analytics`):
 
 - `POST /api/analytics/query/:query_key`
-- `POST /api/analytics/users/me/query/:query_key`
 - `GET /api/analytics/arrow-result/:jobId`
-- `GET /api/analytics/users/me/arrow-result/:jobId`
+
+**Query file naming convention determines execution context:**
+
+- `config/queries/<query_key>.sql` - Executes as service principal (shared cache)
+- `config/queries/<query_key>.obo.sql` - Executes as user (OBO = On-Behalf-Of, per-user cache)
 
 Formats:
 

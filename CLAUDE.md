@@ -254,9 +254,12 @@ The SDK has built-in SSE support with automatic reconnection:
 ### Analytics Query Pattern
 
 The AnalyticsPlugin provides SQL query execution:
-- Queries stored in `config/queries/<query_key>.sql`
+- Queries stored in `config/queries/`
+- Query file naming determines execution context:
+  - `<query_key>.sql` - Executes as service principal (shared cache)
+  - `<query_key>.obo.sql` - Executes as user (OBO = On-Behalf-Of, per-user cache)
 - All queries should be parameterized (use placeholders)
-- POST `/api/analytics/:query_key` - Execute query with parameters
+- POST `/api/analytics/query/:query_key` - Execute query with parameters
 - Built-in caching with configurable TTL
 - Databricks SQL Warehouse connector for execution
 

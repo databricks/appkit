@@ -12,8 +12,6 @@ import { isArrowTable } from "./types";
 // ============================================================================
 
 interface ChartWrapperQueryProps {
-  /** Whether to execute the query as a user. Default is false. */
-  asUser?: boolean;
   /** Analytics query key */
   queryKey: string;
   /** Query parameters */
@@ -61,7 +59,6 @@ function QueryModeContent({
   parameters,
   format,
   transformer,
-  asUser,
   height,
   className,
   ariaLabel,
@@ -73,7 +70,6 @@ function QueryModeContent({
     parameters,
     format,
     transformer,
-    asUser,
   });
 
   if (loading) return <LoadingSkeleton height={height ?? 300} />;
@@ -184,7 +180,6 @@ export function ChartWrapper(props: ChartWrapperProps) {
         parameters={props.parameters}
         format={props.format}
         transformer={props.transformer}
-        asUser={props.asUser}
         height={height}
         className={className}
         ariaLabel={ariaLabel}
