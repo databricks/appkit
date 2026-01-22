@@ -25,8 +25,6 @@ export interface UseChartDataOptions {
   format?: DataFormat;
   /** Transform data after fetching */
   transformer?: <T>(data: T) => T;
-  /** Whether to execute the query as the current user. @default false */
-  asUser?: boolean;
 }
 
 export interface UseChartDataResult {
@@ -104,13 +102,7 @@ function resolveFormat(
  * ```
  */
 export function useChartData(options: UseChartDataOptions): UseChartDataResult {
-  const {
-    queryKey,
-    parameters,
-    format = "auto",
-    transformer,
-    asUser = false,
-  } = options;
+  const { queryKey, parameters, format = "auto", transformer } = options;
 
   // Resolve the format to use
   const resolvedFormat = useMemo(
@@ -128,7 +120,6 @@ export function useChartData(options: UseChartDataOptions): UseChartDataResult {
   } = useAnalyticsQuery(queryKey, parameters, {
     autoStart: true,
     format: resolvedFormat,
-    asUser,
   });
 
   // Process and transform data

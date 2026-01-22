@@ -85,12 +85,6 @@ export interface QueryProps extends ChartBaseProps {
   format?: DataFormat;
   /** Transform raw data before rendering */
   transformer?: <T>(data: T) => T;
-  /**
-   * Whether to execute the query as the current user
-   * @default false
-   */
-  asUser?: boolean;
-
   // Discriminator: cannot use direct data with query
   data?: never;
 }

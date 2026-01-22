@@ -65,25 +65,6 @@ export class AnalyticsPlugin extends Plugin {
         await this._handleQueryRoute(req, res);
       },
     });
-
-    // User context endpoints - use asUser(req) to execute with user's identity
-    this.route(router, {
-      name: "arrowAsUser",
-      method: "get",
-      path: "/users/me/arrow-result/:jobId",
-      handler: async (req: express.Request, res: express.Response) => {
-        await this.asUser(req)._handleArrowRoute(req, res);
-      },
-    });
-
-    this.route<AnalyticsQueryResponse>(router, {
-      name: "queryAsUser",
-      method: "post",
-      path: "/users/me/query/:query_key",
-      handler: async (req: express.Request, res: express.Response) => {
-        await this.asUser(req)._handleQueryRoute(req, res);
-      },
-    });
   }
 
   /**
@@ -149,6 +130,29 @@ export class AnalyticsPlugin extends Plugin {
       plugin: this.name,
     });
 
+    if (!query_key) {
+      res.status(400).json({ error: "query_key is required" });
+      return;
+    }
+
+    const queryResult = await this.app.getAppQuery(
+      query_key,
+      req,
+      this.devFileReader,
+    );
+
+    if (!queryResult) {
+      res.status(404).json({ error: "Query not found" });
+      return;
+    }
+
+    const { query, isAsUser } = queryResult;
+
+    // get execution context - user-scoped if .obo.sql, otherwise service principal
+    const executor = isAsUser ? this.asUser(req) : this;
+    const userKey = getCurrentUserId();
+    const executorKey = isAsUser ? userKey : "global";
+
     const queryParameters =
       format === "ARROW"
         ? {
@@ -162,25 +166,6 @@ export class AnalyticsPlugin extends Plugin {
             type: "result",
           };
 
-    // Get user key from current context (automatically includes user ID when in user context)
-    const userKey = getCurrentUserId();
-
-    if (!query_key) {
-      res.status(400).json({ error: "query_key is required" });
-      return;
-    }
-
-    const query = await this.app.getAppQuery(
-      query_key,
-      req,
-      this.devFileReader,
-    );
-
-    if (!query) {
-      res.status(404).json({ error: "Query not found" });
-      return;
-    }
-
     const hashedQuery = this.queryProcessor.hashQuery(query);
 
     const defaultConfig: PluginExecuteConfig = {
@@ -193,7 +178,7 @@ export class AnalyticsPlugin extends Plugin {
           JSON.stringify(parameters),
           JSON.stringify(format),
           hashedQuery,
-          userKey,
+          executorKey,
         ],
       },
     };
@@ -202,7 +187,7 @@ export class AnalyticsPlugin extends Plugin {
       default: defaultConfig,
     };
 
-    await this.executeStream(
+    await executor.executeStream(
       res,
       async (signal) => {
         const processedParams = await this.queryProcessor.processQueryParams(
@@ -210,7 +195,7 @@ export class AnalyticsPlugin extends Plugin {
           parameters,
         );
 
-        const result = await this.query(
+        const result = await executor.query(
           query,
           processedParams,
           queryParameters.formatParameters,
@@ -220,7 +205,7 @@ export class AnalyticsPlugin extends Plugin {
         return { type: queryParameters.type, ...result };
       },
       streamExecutionSettings,
-      userKey,
+      executorKey,
     );
   }
 

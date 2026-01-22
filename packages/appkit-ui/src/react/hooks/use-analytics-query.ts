@@ -1,5 +1,5 @@
-import { ArrowClient, connectSSE } from "@/js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowClient, connectSSE } from "@/js";
 import type {
   AnalyticsFormat,
   InferParams,
@@ -30,6 +30,10 @@ function getArrowStreamUrl(id: string) {
  * - `format: "JSON"` (default): Returns typed array from QueryRegistry
  * - `format: "ARROW"`: Returns TypedArrowTable with row type preserved
  *
+ * Note: User context execution is determined by query file naming:
+ * - `queryKey.obo.sql`: Executes as user (OBO = on-behalf-of / user delegation)
+ * - `queryKey.sql`: Executes as service principal
+ *
  * @param queryKey - Analytics query identifier
  * @param parameters - Query parameters (type-safe based on QueryRegistry)
  * @param options - Analytics query settings including format
@@ -59,12 +63,9 @@ export function useAnalyticsQuery<
   const format = options?.format ?? "JSON";
   const maxParametersSize = options?.maxParametersSize ?? 100 * 1024;
   const autoStart = options?.autoStart ?? true;
-  const asUser = options?.asUser ?? false;
 
   const devMode = getDevMode();
-  const urlSuffix = asUser
-    ? `/api/analytics/users/me/query/${encodeURIComponent(queryKey)}${devMode}`
-    : `/api/analytics/query/${encodeURIComponent(queryKey)}${devMode}`;
+  const urlSuffix = `/api/analytics/query/${encodeURIComponent(queryKey)}${devMode}`;
 
   type ResultType = InferResultByFormat<T, K, F>;
   const [data, setData] = useState<ResultType | null>(null);
