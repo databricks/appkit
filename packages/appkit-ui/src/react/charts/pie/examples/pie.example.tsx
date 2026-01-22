@@ -1,8 +1,6 @@
-"use client"
+"use client";
 
-import * as React from "react"
-
-import { PieChart } from "@databricks/appkit-ui/react"
+import { PieChart } from "@databricks/appkit-ui/react";
 
 export default function PieChartExample() {
   return (
@@ -15,5 +13,5 @@ export default function PieChartExample() {
       ]}
       height={300}
     />
-  )
+  );
 }

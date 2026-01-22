@@ -1,41 +1,35 @@
-# RadarChart
+# PieChart
 
-Radar Chart component for multi-dimensional data comparison.
+Pie Chart component for proportional data visualization.
 
 
 ## Example
 
 ```tsx
-"use client"
+"use client";
 
-import * as React from "react"
+import { PieChart } from "@databricks/appkit-ui/react";
 
-import { RadarChart } from "@databricks/appkit-ui/react"
-
-export default function RadarChartExample() {
+export default function PieChartExample() {
   return (
-    <RadarChart
+    <PieChart
       data={[
-        { skill: "Communication", score: 85 },
-        { skill: "Problem Solving", score: 90 },
-        { skill: "Teamwork", score: 75 },
-        { skill: "Leadership", score: 80 },
-        { skill: "Technical", score: 95 },
-        { skill: "Creativity", score: 70 },
+        { name: "Product A", value: 400 },
+        { name: "Product B", value: 300 },
+        { name: "Product C", value: 300 },
+        { name: "Product D", value: 200 },
       ]}
-      xKey="skill"
-      yKey="score"
       height={300}
     />
-  )
+  );
 }
 
 ```
 
 
-## RadarChart
+## PieChart
 
-Radar Chart component for multi-dimensional data comparison.
+Pie Chart component for proportional data visualization.
 
 **Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
 
@@ -44,7 +38,7 @@ Radar Chart component for multi-dimensional data comparison.
 Supports both query mode (queryKey + parameters) and data mode (static data).
 
 
-**Source:** [`packages/appkit-ui/src/react/charts/radar/index.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/charts/radar/index.tsx)
+**Source:** [`packages/appkit-ui/src/react/charts/pie/index.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/charts/pie/index.tsx)
 
 
 ### Props
@@ -68,15 +62,17 @@ Supports both query mode (queryKey + parameters) and data mode (static data).
 | `ariaLabel` | `string` |  | - | Accessibility label for screen readers |
 | `testId` | `string` |  | - | Test ID for automated testing |
 | `options` | `Record<string, unknown>` |  | - | Additional ECharts options to merge |
-| `showArea` | `boolean` |  | `true` | Show area fill |
+| `innerRadius` | `number` |  | `0` | Inner radius for donut charts (0-100%) |
+| `showLabels` | `boolean` |  | `true` | Show labels on slices |
+| `labelPosition` | `enum` |  | `"outside"` | Label position |
 
 
 
 ### Usage
 
 ```tsx
-import { RadarChart } from '@databricks/appkit-ui';
+import { PieChart } from '@databricks/appkit-ui';
 
-<RadarChart /* props */ />
+<PieChart /* props */ />
 ```
 

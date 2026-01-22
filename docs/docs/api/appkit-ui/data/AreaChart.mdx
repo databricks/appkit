@@ -1,63 +1,50 @@
-# HeatmapChart
+# AreaChart
 
-Heatmap Chart component for matrix-style data visualization.
+Area Chart component for trend visualization with filled areas.
 
 
 ## Example
 
 ```tsx
-"use client"
+"use client";
 
-import * as React from "react"
+import { AreaChart } from "@databricks/appkit-ui/react";
 
-import { HeatmapChart } from "@databricks/appkit-ui/react"
-
-export default function HeatmapChartExample() {
-  const data = []
-  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-  const hours = ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00"]
-  
-  for (const day of days) {
-    for (const hour of hours) {
-      data.push({
-        day,
-        hour,
-        count: Math.floor(Math.random() * 100),
-      })
-    }
-  }
-
+export default function AreaChartExample() {
   return (
-    <HeatmapChart
-      data={data}
-      xKey="day"
-      yAxisKey="hour"
-      yKey="count"
+    <AreaChart
+      data={[
+        { month: "Jan", visitors: 1000, revenue: 5000 },
+        { month: "Feb", visitors: 1500, revenue: 7000 },
+        { month: "Mar", visitors: 2000, revenue: 9000 },
+        { month: "Apr", visitors: 1800, revenue: 8500 },
+        { month: "May", visitors: 2200, revenue: 10000 },
+        { month: "Jun", visitors: 2500, revenue: 11000 },
+      ]}
+      xKey="month"
+      yKey={["visitors", "revenue"]}
+      stacked
+      showLegend
       height={300}
     />
-  )
+  );
 }
 
 ```
 
 
-## HeatmapChart
+## AreaChart
 
-Heatmap Chart component for matrix-style data visualization.
+Area Chart component for trend visualization with filled areas.
 
 **Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
 
 **Best Practice:** Use the built-in data fetching by passing `queryKey` and `parameters` props instead of pre-fetching data with `useAnalyticsQuery`.
 
-Data should be in "long format" with three fields:
-- xKey: X-axis category (columns)
-- yAxisKey: Y-axis category (rows)
-- yKey: The numeric value for each cell
-
 Supports both query mode (queryKey + parameters) and data mode (static data).
 
 
-**Source:** [`packages/appkit-ui/src/react/charts/heatmap/index.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/charts/heatmap/index.tsx)
+**Source:** [`packages/appkit-ui/src/react/charts/area/index.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/charts/area/index.tsx)
 
 
 ### Props
@@ -81,18 +68,18 @@ Supports both query mode (queryKey + parameters) and data mode (static data).
 | `ariaLabel` | `string` |  | - | Accessibility label for screen readers |
 | `testId` | `string` |  | - | Test ID for automated testing |
 | `options` | `Record<string, unknown>` |  | - | Additional ECharts options to merge |
-| `yAxisKey` | `string` |  | - | Field key for the Y-axis categories. For heatmaps, data should have: xKey (column), yAxisKey (row), and yKey (value). |
-| `min` | `number` |  | - | Min value for color scale (auto-detected if not provided) |
-| `max` | `number` |  | - | Max value for color scale (auto-detected if not provided) |
-| `showLabels` | `boolean` |  | `false` | Show value labels on cells |
+| `orientation` | `enum` |  | `"vertical"` | Chart orientation |
+| `showSymbol` | `boolean` |  | `false` | Show data point symbols |
+| `smooth` | `boolean` |  | `true` | Smooth line curves |
+| `stacked` | `boolean` |  | `false` | Stack areas |
 
 
 
 ### Usage
 
 ```tsx
-import { HeatmapChart } from '@databricks/appkit-ui';
+import { AreaChart } from '@databricks/appkit-ui';
 
-<HeatmapChart /* props */ />
+<AreaChart /* props */ />
 ```
 

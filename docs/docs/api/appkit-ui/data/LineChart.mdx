@@ -1,40 +1,40 @@
-# BarChart
+# LineChart
 
-Bar Chart component for categorical comparisons.
+Line Chart component for time-series and trend visualization.
 
 
 ## Example
 
 ```tsx
-"use client"
+"use client";
 
-import * as React from "react"
+import { LineChart } from "@databricks/appkit-ui/react";
 
-import { BarChart } from "@databricks/appkit-ui/react"
-
-export default function BarChartExample() {
+export default function LineChartExample() {
   return (
-    <BarChart
+    <LineChart
       data={[
-        { category: "Product A", value: 100 },
-        { category: "Product B", value: 200 },
-        { category: "Product C", value: 150 },
-        { category: "Product D", value: 300 },
-        { category: "Product E", value: 250 },
+        { month: "Jan", sales: 100 },
+        { month: "Feb", sales: 150 },
+        { month: "Mar", sales: 200 },
+        { month: "Apr", sales: 180 },
+        { month: "May", sales: 220 },
+        { month: "Jun", sales: 250 },
       ]}
-      xKey="category"
-      yKey="value"
+      xKey="month"
+      yKey="sales"
+      smooth
       height={300}
     />
-  )
+  );
 }
 
 ```
 
 
-## BarChart
+## LineChart
 
-Bar Chart component for categorical comparisons.
+Line Chart component for time-series and trend visualization.
 
 **Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
 
@@ -43,7 +43,7 @@ Bar Chart component for categorical comparisons.
 Supports both query mode (queryKey + parameters) and data mode (static data).
 
 
-**Source:** [`packages/appkit-ui/src/react/charts/bar/index.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/charts/bar/index.tsx)
+**Source:** [`packages/appkit-ui/src/react/charts/line/index.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/charts/line/index.tsx)
 
 
 ### Props
@@ -68,15 +68,16 @@ Supports both query mode (queryKey + parameters) and data mode (static data).
 | `testId` | `string` |  | - | Test ID for automated testing |
 | `options` | `Record<string, unknown>` |  | - | Additional ECharts options to merge |
 | `orientation` | `enum` |  | `"vertical"` | Chart orientation |
-| `stacked` | `boolean` |  | - | Stack bars |
+| `showSymbol` | `boolean` |  | `false` | Show data point symbols |
+| `smooth` | `boolean` |  | `true` | Smooth line curves |
 
 
 
 ### Usage
 
 ```tsx
-import { BarChart } from '@databricks/appkit-ui';
+import { LineChart } from '@databricks/appkit-ui';
 
-<BarChart /* props */ />
+<LineChart /* props */ />
 ```
 

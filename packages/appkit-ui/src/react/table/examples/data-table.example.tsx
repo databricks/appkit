@@ -1,8 +1,6 @@
-"use client"
+"use client";
 
-import * as React from "react"
-
-import { DataTable } from "@databricks/appkit-ui/react"
+import { DataTable } from "@databricks/appkit-ui/react";
 
 export default function DataTableExample() {
   return (
@@ -13,5 +11,5 @@ export default function DataTableExample() {
       filterPlaceholder="Filter by name..."
       pageSize={10}
     />
-  )
+  );
 }

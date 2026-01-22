@@ -1,8 +1,6 @@
-"use client"
+"use client";
 
-import * as React from "react"
-
-import { DonutChart } from "@databricks/appkit-ui/react"
+import { DonutChart } from "@databricks/appkit-ui/react";
 
 export default function DonutChartExample() {
   return (
@@ -15,5 +13,5 @@ export default function DonutChartExample() {
       ]}
       height={300}
     />
-  )
+  );
 }

@@ -1,8 +1,6 @@
-"use client"
+"use client";
 
-import * as React from "react"
-
-import { AreaChart } from "@databricks/appkit-ui/react"
+import { AreaChart } from "@databricks/appkit-ui/react";
 
 export default function AreaChartExample() {
   return (
@@ -21,5 +19,5 @@ export default function AreaChartExample() {
       showLegend
       height={300}
     />
-  )
+  );
 }

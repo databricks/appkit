@@ -2,13 +2,21 @@
 sidebar_position: 2
 ---
 
+import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
+
+export function LlmsTxtLink({ children = '`llms.txt`' }) {
+  const { siteConfig } = useDocusaurusContext();
+  const llmsTxtUrl = `${siteConfig.url}${siteConfig.baseUrl}llms.txt`;
+  return <a href={llmsTxtUrl}>{children}</a>;
+}
+
 # LLM Guide
 
 This document provides prescriptive guidance for AI coding assistants generating code with Databricks AppKit. It is intentionally opinionated to ensure consistent, production-ready code generation.
 
 :::note
 This file contains just a subset of the LLM guidance.
-To get the complete guidance, see the [`llms.txt`](/llms.txt) file for full guidance based on the AppKit documentation.
+To get the complete guidance, see the <LlmsTxtLink /> file for full guidance based on the AppKit documentation.
 :::
 
 ## High-level mission

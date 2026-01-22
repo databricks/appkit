@@ -1,42 +1,39 @@
-# LineChart
+# RadarChart
 
-Line Chart component for time-series and trend visualization.
+Radar Chart component for multi-dimensional data comparison.
 
 
 ## Example
 
 ```tsx
-"use client"
+"use client";
 
-import * as React from "react"
+import { RadarChart } from "@databricks/appkit-ui/react";
 
-import { LineChart } from "@databricks/appkit-ui/react"
-
-export default function LineChartExample() {
+export default function RadarChartExample() {
   return (
-    <LineChart
+    <RadarChart
       data={[
-        { month: "Jan", sales: 100 },
-        { month: "Feb", sales: 150 },
-        { month: "Mar", sales: 200 },
-        { month: "Apr", sales: 180 },
-        { month: "May", sales: 220 },
-        { month: "Jun", sales: 250 },
+        { skill: "Communication", score: 85 },
+        { skill: "Problem Solving", score: 90 },
+        { skill: "Teamwork", score: 75 },
+        { skill: "Leadership", score: 80 },
+        { skill: "Technical", score: 95 },
+        { skill: "Creativity", score: 70 },
       ]}
-      xKey="month"
-      yKey="sales"
-      smooth
+      xKey="skill"
+      yKey="score"
       height={300}
     />
-  )
+  );
 }
 
 ```
 
 
-## LineChart
+## RadarChart
 
-Line Chart component for time-series and trend visualization.
+Radar Chart component for multi-dimensional data comparison.
 
 **Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
 
@@ -45,7 +42,7 @@ Line Chart component for time-series and trend visualization.
 Supports both query mode (queryKey + parameters) and data mode (static data).
 
 
-**Source:** [`packages/appkit-ui/src/react/charts/line/index.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/charts/line/index.tsx)
+**Source:** [`packages/appkit-ui/src/react/charts/radar/index.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/charts/radar/index.tsx)
 
 
 ### Props
@@ -69,17 +66,15 @@ Supports both query mode (queryKey + parameters) and data mode (static data).
 | `ariaLabel` | `string` |  | - | Accessibility label for screen readers |
 | `testId` | `string` |  | - | Test ID for automated testing |
 | `options` | `Record<string, unknown>` |  | - | Additional ECharts options to merge |
-| `orientation` | `enum` |  | `"vertical"` | Chart orientation |
-| `showSymbol` | `boolean` |  | `false` | Show data point symbols |
-| `smooth` | `boolean` |  | `true` | Smooth line curves |
+| `showArea` | `boolean` |  | `true` | Show area fill |
 
 
 
 ### Usage
 
 ```tsx
-import { LineChart } from '@databricks/appkit-ui';
+import { RadarChart } from '@databricks/appkit-ui';
 
-<LineChart /* props */ />
+<RadarChart /* props */ />
 ```
 

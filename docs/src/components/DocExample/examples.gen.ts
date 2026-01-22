@@ -160,11 +160,9 @@ export default function AlertExample() {
   },
   "area": {
     Component: AreaExample,
-    source: `"use client"
+    source: `"use client";
 
-import * as React from "react"
-
-import { AreaChart } from "@databricks/appkit-ui/react"
+import { AreaChart } from "@databricks/appkit-ui/react";
 
 export default function AreaChartExample() {
   return (
@@ -183,7 +181,7 @@ export default function AreaChartExample() {
       showLegend
       height={300}
     />
-  )
+  );
 }
 `,
   },
@@ -233,11 +231,9 @@ export default function BadgeExample() {
   },
   "bar": {
     Component: BarExample,
-    source: `"use client"
+    source: `"use client";
 
-import * as React from "react"
-
-import { BarChart } from "@databricks/appkit-ui/react"
+import { BarChart } from "@databricks/appkit-ui/react";
 
 export default function BarChartExample() {
   return (
@@ -253,7 +249,7 @@ export default function BarChartExample() {
       yKey="value"
       height={300}
     />
-  )
+  );
 }
 `,
   },
@@ -668,11 +664,9 @@ export default function ContextMenuExample() {
   },
   "data-table": {
     Component: DataTableExample,
-    source: `"use client"
+    source: `"use client";
 
-import * as React from "react"
-
-import { DataTable } from "@databricks/appkit-ui/react"
+import { DataTable } from "@databricks/appkit-ui/react";
 
 export default function DataTableExample() {
   return (
@@ -683,7 +677,7 @@ export default function DataTableExample() {
       filterPlaceholder="Filter by name..."
       pageSize={10}
     />
-  )
+  );
 }
 `,
   },
@@ -748,11 +742,9 @@ export default function DialogExample() {
   },
   "donut": {
     Component: DonutExample,
-    source: `"use client"
+    source: `"use client";
 
-import * as React from "react"
-
-import { DonutChart } from "@databricks/appkit-ui/react"
+import { DonutChart } from "@databricks/appkit-ui/react";
 
 export default function DonutChartExample() {
   return (
@@ -765,7 +757,7 @@ export default function DonutChartExample() {
       ]}
       height={300}
     />
-  )
+  );
 }
 `,
   },
@@ -1035,24 +1027,22 @@ export default function DropdownMenuExample() {
   },
   "heatmap": {
     Component: HeatmapExample,
-    source: `"use client"
+    source: `"use client";
 
-import * as React from "react"
-
-import { HeatmapChart } from "@databricks/appkit-ui/react"
+import { HeatmapChart } from "@databricks/appkit-ui/react";
 
 export default function HeatmapChartExample() {
-  const data = []
-  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-  const hours = ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00"]
-  
+  const data = [];
+  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const hours = ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00"];
+
   for (const day of days) {
     for (const hour of hours) {
       data.push({
         day,
         hour,
         count: Math.floor(Math.random() * 100),
-      })
+      });
     }
   }
 
@@ -1064,7 +1054,7 @@ export default function HeatmapChartExample() {
       yKey="count"
       height={300}
     />
-  )
+  );
 }
 `,
   },
@@ -1168,11 +1158,9 @@ export default function LabelExample() {
   },
   "line": {
     Component: LineExample,
-    source: `"use client"
+    source: `"use client";
 
-import * as React from "react"
-
-import { LineChart } from "@databricks/appkit-ui/react"
+import { LineChart } from "@databricks/appkit-ui/react";
 
 export default function LineChartExample() {
   return (
@@ -1190,7 +1178,7 @@ export default function LineChartExample() {
       smooth
       height={300}
     />
-  )
+  );
 }
 `,
   },
@@ -1494,11 +1482,9 @@ export default function PaginationExample() {
   },
   "pie": {
     Component: PieExample,
-    source: `"use client"
+    source: `"use client";
 
-import * as React from "react"
-
-import { PieChart } from "@databricks/appkit-ui/react"
+import { PieChart } from "@databricks/appkit-ui/react";
 
 export default function PieChartExample() {
   return (
@@ -1511,7 +1497,7 @@ export default function PieChartExample() {
       ]}
       height={300}
     />
-  )
+  );
 }
 `,
   },
@@ -1603,11 +1589,9 @@ export default function ProgressExample() {
   },
   "radar": {
     Component: RadarExample,
-    source: `"use client"
+    source: `"use client";
 
-import * as React from "react"
-
-import { RadarChart } from "@databricks/appkit-ui/react"
+import { RadarChart } from "@databricks/appkit-ui/react";
 
 export default function RadarChartExample() {
   return (
@@ -1624,7 +1608,7 @@ export default function RadarChartExample() {
       yKey="score"
       height={300}
     />
-  )
+  );
 }
 `,
   },
@@ -1694,11 +1678,9 @@ export default function ResizableExample() {
   },
   "scatter": {
     Component: ScatterExample,
-    source: `"use client"
+    source: `"use client";
 
-import * as React from "react"
-
-import { ScatterChart } from "@databricks/appkit-ui/react"
+import { ScatterChart } from "@databricks/appkit-ui/react";
 
 export default function ScatterChartExample() {
   return (
@@ -1717,7 +1699,7 @@ export default function ScatterChartExample() {
       yKey="growth"
       height={300}
     />
-  )
+  );
 }
 `,
   },

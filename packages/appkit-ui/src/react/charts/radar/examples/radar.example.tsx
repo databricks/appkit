@@ -1,8 +1,6 @@
-"use client"
+"use client";
 
-import * as React from "react"
-
-import { RadarChart } from "@databricks/appkit-ui/react"
+import { RadarChart } from "@databricks/appkit-ui/react";
 
 export default function RadarChartExample() {
   return (
@@ -19,5 +17,5 @@ export default function RadarChartExample() {
       yKey="score"
       height={300}
     />
-  )
+  );
 }

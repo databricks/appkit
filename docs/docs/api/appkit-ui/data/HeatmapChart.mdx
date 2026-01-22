@@ -1,52 +1,61 @@
-# ScatterChart
+# HeatmapChart
 
-Scatter Chart component for correlation and distribution visualization.
+Heatmap Chart component for matrix-style data visualization.
 
 
 ## Example
 
 ```tsx
-"use client"
+"use client";
 
-import * as React from "react"
+import { HeatmapChart } from "@databricks/appkit-ui/react";
 
-import { ScatterChart } from "@databricks/appkit-ui/react"
+export default function HeatmapChartExample() {
+  const data = [];
+  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const hours = ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00"];
 
-export default function ScatterChartExample() {
+  for (const day of days) {
+    for (const hour of hours) {
+      data.push({
+        day,
+        hour,
+        count: Math.floor(Math.random() * 100),
+      });
+    }
+  }
+
   return (
-    <ScatterChart
-      data={[
-        { revenue: 100, growth: 5 },
-        { revenue: 200, growth: 10 },
-        { revenue: 150, growth: 7 },
-        { revenue: 300, growth: 15 },
-        { revenue: 250, growth: 12 },
-        { revenue: 400, growth: 20 },
-        { revenue: 180, growth: 8 },
-        { revenue: 320, growth: 16 },
-      ]}
-      xKey="revenue"
-      yKey="growth"
+    <HeatmapChart
+      data={data}
+      xKey="day"
+      yAxisKey="hour"
+      yKey="count"
       height={300}
     />
-  )
+  );
 }
 
 ```
 
 
-## ScatterChart
+## HeatmapChart
 
-Scatter Chart component for correlation and distribution visualization.
+Heatmap Chart component for matrix-style data visualization.
 
 **Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
 
 **Best Practice:** Use the built-in data fetching by passing `queryKey` and `parameters` props instead of pre-fetching data with `useAnalyticsQuery`.
 
+Data should be in "long format" with three fields:
+- xKey: X-axis category (columns)
+- yAxisKey: Y-axis category (rows)
+- yKey: The numeric value for each cell
+
 Supports both query mode (queryKey + parameters) and data mode (static data).
 
 
-**Source:** [`packages/appkit-ui/src/react/charts/scatter/index.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/charts/scatter/index.tsx)
+**Source:** [`packages/appkit-ui/src/react/charts/heatmap/index.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/charts/heatmap/index.tsx)
 
 
 ### Props
@@ -70,15 +79,18 @@ Supports both query mode (queryKey + parameters) and data mode (static data).
 | `ariaLabel` | `string` |  | - | Accessibility label for screen readers |
 | `testId` | `string` |  | - | Test ID for automated testing |
 | `options` | `Record<string, unknown>` |  | - | Additional ECharts options to merge |
-| `symbolSize` | `number` |  | `8` | Symbol size |
+| `yAxisKey` | `string` |  | - | Field key for the Y-axis categories. For heatmaps, data should have: xKey (column), yAxisKey (row), and yKey (value). |
+| `min` | `number` |  | - | Min value for color scale (auto-detected if not provided) |
+| `max` | `number` |  | - | Max value for color scale (auto-detected if not provided) |
+| `showLabels` | `boolean` |  | `false` | Show value labels on cells |
 
 
 
 ### Usage
 
 ```tsx
-import { ScatterChart } from '@databricks/appkit-ui';
+import { HeatmapChart } from '@databricks/appkit-ui';
 
-<ScatterChart /* props */ />
+<HeatmapChart /* props */ />
 ```
 

@@ -1,8 +1,6 @@
-"use client"
+"use client";
 
-import * as React from "react"
-
-import { BarChart } from "@databricks/appkit-ui/react"
+import { BarChart } from "@databricks/appkit-ui/react";
 
 export default function BarChartExample() {
   return (
@@ -18,5 +16,5 @@ export default function BarChartExample() {
       yKey="value"
       height={300}
     />
-  )
+  );
 }

@@ -1,43 +1,38 @@
-# AreaChart
+# BarChart
 
-Area Chart component for trend visualization with filled areas.
+Bar Chart component for categorical comparisons.
 
 
 ## Example
 
 ```tsx
-"use client"
+"use client";
 
-import * as React from "react"
+import { BarChart } from "@databricks/appkit-ui/react";
 
-import { AreaChart } from "@databricks/appkit-ui/react"
-
-export default function AreaChartExample() {
+export default function BarChartExample() {
   return (
-    <AreaChart
+    <BarChart
       data={[
-        { month: "Jan", visitors: 1000, revenue: 5000 },
-        { month: "Feb", visitors: 1500, revenue: 7000 },
-        { month: "Mar", visitors: 2000, revenue: 9000 },
-        { month: "Apr", visitors: 1800, revenue: 8500 },
-        { month: "May", visitors: 2200, revenue: 10000 },
-        { month: "Jun", visitors: 2500, revenue: 11000 },
+        { category: "Product A", value: 100 },
+        { category: "Product B", value: 200 },
+        { category: "Product C", value: 150 },
+        { category: "Product D", value: 300 },
+        { category: "Product E", value: 250 },
       ]}
-      xKey="month"
-      yKey={["visitors", "revenue"]}
-      stacked
-      showLegend
+      xKey="category"
+      yKey="value"
       height={300}
     />
-  )
+  );
 }
 
 ```
 
 
-## AreaChart
+## BarChart
 
-Area Chart component for trend visualization with filled areas.
+Bar Chart component for categorical comparisons.
 
 **Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
 
@@ -46,7 +41,7 @@ Area Chart component for trend visualization with filled areas.
 Supports both query mode (queryKey + parameters) and data mode (static data).
 
 
-**Source:** [`packages/appkit-ui/src/react/charts/area/index.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/charts/area/index.tsx)
+**Source:** [`packages/appkit-ui/src/react/charts/bar/index.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/charts/bar/index.tsx)
 
 
 ### Props
@@ -71,17 +66,15 @@ Supports both query mode (queryKey + parameters) and data mode (static data).
 | `testId` | `string` |  | - | Test ID for automated testing |
 | `options` | `Record<string, unknown>` |  | - | Additional ECharts options to merge |
 | `orientation` | `enum` |  | `"vertical"` | Chart orientation |
-| `showSymbol` | `boolean` |  | `false` | Show data point symbols |
-| `smooth` | `boolean` |  | `true` | Smooth line curves |
-| `stacked` | `boolean` |  | `false` | Stack areas |
+| `stacked` | `boolean` |  | - | Stack bars |
 
 
 
 ### Usage
 
 ```tsx
-import { AreaChart } from '@databricks/appkit-ui';
+import { BarChart } from '@databricks/appkit-ui';
 
-<AreaChart /* props */ />
+<BarChart /* props */ />
 ```
 

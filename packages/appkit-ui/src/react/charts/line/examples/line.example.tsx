@@ -1,8 +1,6 @@
-"use client"
+"use client";
 
-import * as React from "react"
-
-import { LineChart } from "@databricks/appkit-ui/react"
+import { LineChart } from "@databricks/appkit-ui/react";
 
 export default function LineChartExample() {
   return (
@@ -20,5 +18,5 @@ export default function LineChartExample() {
       smooth
       height={300}
     />
-  )
+  );
 }

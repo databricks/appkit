@@ -1,8 +1,6 @@
-"use client"
+"use client";
 
-import * as React from "react"
-
-import { ScatterChart } from "@databricks/appkit-ui/react"
+import { ScatterChart } from "@databricks/appkit-ui/react";
 
 export default function ScatterChartExample() {
   return (
@@ -21,5 +19,5 @@ export default function ScatterChartExample() {
       yKey="growth"
       height={300}
     />
-  )
+  );
 }

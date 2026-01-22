@@ -1,4 +1,4 @@
-import type React from "react";
+import type { JSX } from "react";
 import { createChart } from "../create-chart";
 import type { DonutChartProps, PieChartProps } from "../types";
 
@@ -8,7 +8,7 @@ import type { DonutChartProps, PieChartProps } from "../types";
  * **Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
  *
  * **Best Practice:** Use the built-in data fetching by passing `queryKey` and `parameters` props instead of pre-fetching data with `useAnalyticsQuery`.
- * 
+ *
  * Supports both query mode (queryKey + parameters) and data mode (static data).
  */
 export const PieChart = createChart<PieChartProps>("pie", "PieChart");
@@ -19,7 +19,7 @@ export const PieChart = createChart<PieChartProps>("pie", "PieChart");
  * **Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
  *
  * **Best Practice:** Use the built-in data fetching by passing `queryKey` and `parameters` props instead of pre-fetching data with `useAnalyticsQuery`.
- * 
+ *
  * Supports both query mode (queryKey + parameters) and data mode (static data).
  */
 export const DonutChart = createChart<DonutChartProps>("donut", "DonutChart");
@@ -31,7 +31,7 @@ export const DonutChart = createChart<DonutChartProps>("donut", "DonutChart");
  * **Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
  *
  * **Best Practice:** Use the built-in data fetching by passing `queryKey` and `parameters` props instead of pre-fetching data with `useAnalyticsQuery`.
- * 
+ *
  * Supports both query mode (queryKey + parameters) and data mode (static data).
  */
 export function PieChartDoc(props: PieChartProps): JSX.Element {
@@ -44,7 +44,7 @@ export function PieChartDoc(props: PieChartProps): JSX.Element {
  * **Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
  *
  * **Best Practice:** Use the built-in data fetching by passing `queryKey` and `parameters` props instead of pre-fetching data with `useAnalyticsQuery`.
- * 
+ *
  * Supports both query mode (queryKey + parameters) and data mode (static data).
  */
 export function DonutChartDoc(props: DonutChartProps): JSX.Element {

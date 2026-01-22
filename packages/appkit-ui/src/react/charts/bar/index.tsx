@@ -1,4 +1,4 @@
-import type React from "react";
+import type { JSX } from "react";
 import { createChart } from "../create-chart";
 import type { BarChartProps } from "../types";
 
@@ -8,7 +8,7 @@ import type { BarChartProps } from "../types";
  * **Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
  *
  * **Best Practice:** Use the built-in data fetching by passing `queryKey` and `parameters` props instead of pre-fetching data with `useAnalyticsQuery`.
- * 
+ *
  * Supports both query mode (queryKey + parameters) and data mode (static data).
  */
 export const BarChart = createChart<BarChartProps>("bar", "BarChart");
@@ -20,7 +20,7 @@ export const BarChart = createChart<BarChartProps>("bar", "BarChart");
  * **Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
  *
  * **Best Practice:** Use the built-in data fetching by passing `queryKey` and `parameters` props instead of pre-fetching data with `useAnalyticsQuery`.
- * 
+ *
  * Supports both query mode (queryKey + parameters) and data mode (static data).
  */
 export function BarChartDoc(props: BarChartProps): JSX.Element {

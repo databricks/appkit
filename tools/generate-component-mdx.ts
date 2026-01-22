@@ -10,7 +10,7 @@ const COMPONENTS_EXAMPLES_DIR = "packages/appkit-ui/src/react/ui/examples";
 const COMPONENTS_DIR = "packages/appkit-ui/src/react/ui";
 const CHARTS_DIR = "packages/appkit-ui/src/react/charts";
 const TABLE_DIR = "packages/appkit-ui/src/react/table";
-const DOCS_OUTPUT_DIR = "docs/docs/api/appkit-ui/components";
+const DOCS_OUTPUT_DIR = "docs/docs/api/appkit-ui";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -39,14 +39,14 @@ function toGithubPath(component: ComponentDoc): string {
 function sanitizeDescriptionText(text: string): string {
   // Extract only the first paragraph (before first blank line)
   const firstParagraph = text.split(/\n\s*\n/)[0];
-  
+
   return firstParagraph
     .replace(/\{@link\s+([^}]+)\}/g, "$1")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/\{/g, "&#123;")
     .replace(/\}/g, "&#125;")
-    .replace(/\s+/g, " ")  // Collapse whitespace within the paragraph
+    .replace(/\s+/g, " ") // Collapse whitespace within the paragraph
     .trim();
 }
 
@@ -102,7 +102,9 @@ ${rows}
 function buildUsageSection(displayName: string, headingLevel = 2): string {
   const headingPrefix = "#".repeat(headingLevel);
   // Strip "Doc" suffix from display name for usage examples
-  const actualName = displayName.endsWith("Doc") ? displayName.slice(0, -3) : displayName;
+  const actualName = displayName.endsWith("Doc")
+    ? displayName.slice(0, -3)
+    : displayName;
   return `
 ${headingPrefix} Usage
 
@@ -150,7 +152,7 @@ function buildExampleInfo(component: ComponentDoc): ExampleInfo | undefined {
     return undefined;
   }
   const baseName = path.basename(filePath, path.extname(filePath));
-  
+
   // Check UI examples directory
   let examplePath = path.join(
     repoRoot,
@@ -163,20 +165,20 @@ function buildExampleInfo(component: ComponentDoc): ExampleInfo | undefined {
       path: examplePath,
     };
   }
-  
+
   // Check if this is a chart component (in charts/{name}/index.tsx)
   const relativePath = path.relative(repoRoot, filePath);
   const chartsMatch = relativePath.match(/charts\/([^/]+)\/index\.tsx$/);
   if (chartsMatch) {
     const chartDir = chartsMatch[1];
-    
+
     // For chart components, try to match by display name (e.g., "DonutChart" -> "donut")
     const displayName = component.displayName || "";
-    const componentBaseName = displayName.endsWith("Doc") 
-      ? displayName.slice(0, -3) 
+    const componentBaseName = displayName.endsWith("Doc")
+      ? displayName.slice(0, -3)
       : displayName;
     const exampleName = componentBaseName.replace(/Chart$/, "").toLowerCase();
-    
+
     // Try component-specific example first (e.g., donut.example.tsx)
     examplePath = path.join(
       repoRoot,
@@ -191,7 +193,7 @@ function buildExampleInfo(component: ComponentDoc): ExampleInfo | undefined {
         path: examplePath,
       };
     }
-    
+
     // Fallback to directory-based example (e.g., pie.example.tsx)
     examplePath = path.join(
       repoRoot,
@@ -207,7 +209,7 @@ function buildExampleInfo(component: ComponentDoc): ExampleInfo | undefined {
       };
     }
   }
-  
+
   // Check if this is a table component
   if (relativePath.includes("table/")) {
     examplePath = path.join(
@@ -239,7 +241,7 @@ function generateGroupedComponentPage(
       const displayName = component.displayName?.endsWith("Doc")
         ? component.displayName.slice(0, -3)
         : component.displayName;
-        
+
       return `## ${displayName}
 
 ${buildComponentDetails(component, {
@@ -303,13 +305,15 @@ function findTsxFiles(dir: string) {
   return files;
 }
 
-function findExampleFiles(dir: string): Array<{ file: string; fullPath: string }> {
+function findExampleFiles(
+  dir: string,
+): Array<{ file: string; fullPath: string }> {
   const results: Array<{ file: string; fullPath: string }> = [];
-  
+
   if (!fs.existsSync(dir)) {
     return results;
   }
-  
+
   const entries = fs.readdirSync(dir, { withFileTypes: true });
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
@@ -319,7 +323,7 @@ function findExampleFiles(dir: string): Array<{ file: string; fullPath: string }
       results.push({ file: entry.name, fullPath });
     }
   }
-  
+
   return results;
 }
 
@@ -333,11 +337,11 @@ function generateExamplesRegistry() {
   const uiExamplesDir = path.join(repoRoot, COMPONENTS_EXAMPLES_DIR);
   const chartsDir = path.join(repoRoot, CHARTS_DIR);
   const tableDir = path.join(repoRoot, TABLE_DIR);
-  
+
   const uiExamples = findExampleFiles(uiExamplesDir);
   const chartExamples = findExampleFiles(chartsDir);
   const tableExamples = findExampleFiles(tableDir);
-  
+
   const allExamples = [...uiExamples, ...chartExamples, ...tableExamples];
   allExamples.sort((a, b) => a.file.localeCompare(b.file));
 
@@ -352,7 +356,7 @@ function generateExamplesRegistry() {
       const importName = `${componentName}Example`;
       const relativePath = path.relative(
         path.join(repoRoot, "docs/src/components/DocExample"),
-        fullPath.replace(".tsx", "")
+        fullPath.replace(".tsx", ""),
       );
       return `import ${importName} from "${relativePath}";`;
     })
@@ -408,12 +412,12 @@ function main() {
   const chartsDir = path.join(repoRoot, CHARTS_DIR);
   const tableDir = path.join(repoRoot, TABLE_DIR);
   const outputDir = path.join(repoRoot, DOCS_OUTPUT_DIR);
-  
+
   // Scan all directories
   const uiFiles = findTsxFiles(componentsDir);
   const chartFiles = findTsxFiles(chartsDir);
   const tableFiles = findTsxFiles(tableDir);
-  
+
   const allFiles = [...uiFiles, ...chartFiles, ...tableFiles];
   const componentDocs = parser.parse(allFiles);
 
@@ -430,13 +434,15 @@ function main() {
   const validComponents = componentDocs.filter((component) => {
     const displayName = component.displayName || "";
     const filePath = component.filePath || "";
-    
+
     return (
       Boolean(displayName) &&
       !excludeList.includes(displayName) &&
       !component.filePath?.includes(".example.") &&
       // For charts: only include *Doc components
-      (filePath.includes("src/react/charts/") ? displayName.endsWith("Doc") : true)
+      (filePath.includes("src/react/charts/")
+        ? displayName.endsWith("Doc")
+        : true)
     );
   });
 
@@ -448,12 +454,13 @@ function main() {
   sortedComponents.forEach((component) => {
     const filePath = component.filePath || "";
     const displayName = component.displayName || "";
-    
+
     // For Doc components from charts, use display name as key (separate pages)
     // For other components, group by file path
-    const key = filePath.includes("src/react/charts/") && displayName.endsWith("Doc")
-      ? displayName  // Each Doc component gets its own page
-      : filePath || displayName;  // Other components grouped by file
+    const key =
+      filePath.includes("src/react/charts/") && displayName.endsWith("Doc")
+        ? displayName // Each Doc component gets its own page
+        : filePath || displayName; // Other components grouped by file
 
     if (!componentsByFile.has(key)) {
       componentsByFile.set(key, []);
@@ -465,7 +472,10 @@ function main() {
   function getOutputSubdir(component: ComponentDoc): string {
     const filePath = component.filePath || "";
     // Data visualization components (charts + tables)
-    if (filePath.includes("src/react/charts/") || filePath.includes("src/react/table/")) {
+    if (
+      filePath.includes("src/react/charts/") ||
+      filePath.includes("src/react/table/")
+    ) {
       return "data";
     }
     // All other UI components
@@ -474,7 +484,7 @@ function main() {
 
   function toPageName(key: string): string {
     const components = componentsByFile.get(key);
-    if (components && components[0]) {
+    if (components?.[0]) {
       const displayName = components[0].displayName || "";
       // Strip "Doc" suffix from display names
       if (displayName.endsWith("Doc")) {
@@ -484,7 +494,7 @@ function main() {
         return displayName;
       }
     }
-    
+
     // Fallback to filename-based name
     const baseName = path.basename(key, path.extname(key));
     const pascal = baseName
@@ -497,18 +507,25 @@ function main() {
 
   const outputPageNames: string[] = [];
 
+  // Create output directory if it doesn't exist
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  // Delete only subdirectories (preserve files like index.md)
   if (fs.existsSync(outputDir)) {
-    fs.rmSync(outputDir, { recursive: true });
+    const entries = fs.readdirSync(outputDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        fs.rmSync(path.join(outputDir, entry.name), { recursive: true });
+      }
+    }
   }
 
-  fs.mkdirSync(outputDir, { recursive: true });
-  
   // Create subdirectories
   const dataOutputDir = path.join(outputDir, "data");
   const uiOutputDir = path.join(outputDir, "ui");
   fs.mkdirSync(dataOutputDir, { recursive: true });
   fs.mkdirSync(uiOutputDir, { recursive: true });
-  
+
   let count = 0;
 
   const fileNameCounts = new Map<string, number>();
@@ -531,15 +548,20 @@ function main() {
     const exampleInfo = sortedMembers[0]
       ? buildExampleInfo(sortedMembers[0])
       : undefined;
-    
+
     // Determine subdirectory based on first component's source
     const subdir = sortedMembers[0] ? getOutputSubdir(sortedMembers[0]) : "ui";
     const outputPath = path.join(outputDir, subdir, `${outputName}.mdx`);
-    
+
     try {
       fs.writeFileSync(
         outputPath,
-        generateGroupedComponentPage(pageName, sortedMembers, exampleInfo, subdir),
+        generateGroupedComponentPage(
+          pageName,
+          sortedMembers,
+          exampleInfo,
+          subdir,
+        ),
         "utf8",
       );
       outputPageNames.push(`${subdir}/${outputName}`);
