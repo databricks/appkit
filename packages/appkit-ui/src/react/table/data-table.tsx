@@ -29,6 +29,7 @@ import type { DataTableLabels, DataTableProps } from "./types";
 
 /**
  * Production-ready data table with automatic data fetching and state management
+ * 
  * Features:
  *  - Automatic column generation from data structure
  *  - Integrated with useAnalyticsQuery for data fetching

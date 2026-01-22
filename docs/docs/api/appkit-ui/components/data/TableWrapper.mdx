@@ -1,0 +1,45 @@
+# TableWrapper
+
+Wrapper component for tables with automatic data fetching and state management This component handles: - Data fetching via useAnalyticsQuery - Loading, error, and empty states with proper UI components - Data transformation (optional) - Dynamic column generation from data structure - TanStack Table instance creation with all features (sorting, filtering, pagination, etc.)
+
+
+## TableWrapper
+
+Wrapper component for tables with automatic data fetching and state management
+This component handles:
+- Data fetching via useAnalyticsQuery
+- Loading, error, and empty states with proper UI components
+- Data transformation (optional)
+- Dynamic column generation from data structure
+- TanStack Table instance creation with all features (sorting, filtering, pagination, etc.)
+
+
+**Source:** [`packages/appkit-ui/src/react/table/table-wrapper.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/table/table-wrapper.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `queryKey` | `string` | ✓ | - | The query key to fetch the data |
+| `parameters` | `Record<string, any>` | ✓ | - | The parameters to pass to the query |
+| `transformer` | `((data: TRaw[]) => TProcessed[])` |  | - | Optional function to transform raw data before creating table |
+| `asUser` | `boolean` |  | - | Whether to execute the query as a user. Default is false. |
+| `children` | `(data: Table<TProcessed>) => ReactNode` | ✓ | - | Render function that receives the TanStack Table instance |
+| `className` | `string` |  | - | Optional CSS class name for the wrapper |
+| `ariaLabel` | `string` |  | - | Optional accessibility label for the wrapper |
+| `testId` | `string` |  | - | Optional test ID for the wrapper |
+| `enableRowSelection` | `boolean` |  | - | Enable row selection with checkboxes |
+| `onRowSelectionChange` | `((rowSelection: RowSelectionState) => void)` |  | - | Callback function to handle row selection changes |
+| `pageSize` | `number` |  | - | Number of rows to display per page |
+
+
+
+### Usage
+
+```tsx
+import { TableWrapper } from '@databricks/appkit-ui';
+
+<TableWrapper /* props */ />
+```
+

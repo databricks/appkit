@@ -8,6 +8,8 @@ type ComponentDoc = docgen.ComponentDoc;
 const GITHUB_REPO_URL = "https://github.com/databricks/appkit/blob/main";
 const COMPONENTS_EXAMPLES_DIR = "packages/appkit-ui/src/react/ui/examples";
 const COMPONENTS_DIR = "packages/appkit-ui/src/react/ui";
+const CHARTS_DIR = "packages/appkit-ui/src/react/charts";
+const TABLE_DIR = "packages/appkit-ui/src/react/table";
 const DOCS_OUTPUT_DIR = "docs/docs/api/appkit-ui/components";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -35,14 +37,28 @@ function toGithubPath(component: ComponentDoc): string {
 }
 
 function sanitizeDescriptionText(text: string): string {
-  return text
+  // Extract only the first paragraph (before first blank line)
+  const firstParagraph = text.split(/\n\s*\n/)[0];
+  
+  return firstParagraph
     .replace(/\{@link\s+([^}]+)\}/g, "$1")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/\{/g, "&#123;")
     .replace(/\}/g, "&#125;")
-    .replace(/\s+/g, " ")
+    .replace(/\s+/g, " ")  // Collapse whitespace within the paragraph
     .trim();
+}
+
+function sanitizeDescriptionFull(text: string): string {
+  // Basic sanitization only - preserve original formatting
+  return text
+    .replace(/\{@link\s+([^}]+)\}/g, "$1")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\{/g, "&#123;")
+    .replace(/\}/g, "&#125;");
+  // No whitespace collapsing - JSDoc already has proper formatting!
 }
 
 function buildPropsSection(
@@ -85,13 +101,15 @@ ${rows}
 
 function buildUsageSection(displayName: string, headingLevel = 2): string {
   const headingPrefix = "#".repeat(headingLevel);
+  // Strip "Doc" suffix from display name for usage examples
+  const actualName = displayName.endsWith("Doc") ? displayName.slice(0, -3) : displayName;
   return `
 ${headingPrefix} Usage
 
 \`\`\`tsx
-import { ${displayName} } from '@databricks/appkit-ui';
+import { ${actualName} } from '@databricks/appkit-ui';
 
-<${displayName} /* props */ />
+<${actualName} /* props */ />
 \`\`\`
 `;
 }
@@ -101,7 +119,7 @@ function buildComponentDetails(
   opts?: { propsHeadingLevel?: number; usageHeadingLevel?: number },
 ): string {
   const description = component.description
-    ? sanitizeDescriptionText(component.description)
+    ? sanitizeDescriptionFull(component.description)
     : "";
   const relativePath = toGithubPath(component);
   const propsSection = buildPropsSection(
@@ -123,6 +141,7 @@ ${usageSection}`;
 
 interface ExampleInfo {
   name: string;
+  path: string;
 }
 
 function buildExampleInfo(component: ComponentDoc): ExampleInfo | undefined {
@@ -131,28 +150,97 @@ function buildExampleInfo(component: ComponentDoc): ExampleInfo | undefined {
     return undefined;
   }
   const baseName = path.basename(filePath, path.extname(filePath));
-  const examplePath = path.join(
+  
+  // Check UI examples directory
+  let examplePath = path.join(
     repoRoot,
     COMPONENTS_EXAMPLES_DIR,
     `${baseName}.example.tsx`,
   );
-  if (!fs.existsSync(examplePath)) {
-    return undefined;
+  if (fs.existsSync(examplePath)) {
+    return {
+      name: baseName,
+      path: examplePath,
+    };
+  }
+  
+  // Check if this is a chart component (in charts/{name}/index.tsx)
+  const relativePath = path.relative(repoRoot, filePath);
+  const chartsMatch = relativePath.match(/charts\/([^/]+)\/index\.tsx$/);
+  if (chartsMatch) {
+    const chartDir = chartsMatch[1];
+    
+    // For chart components, try to match by display name (e.g., "DonutChart" -> "donut")
+    const displayName = component.displayName || "";
+    const componentBaseName = displayName.endsWith("Doc") 
+      ? displayName.slice(0, -3) 
+      : displayName;
+    const exampleName = componentBaseName.replace(/Chart$/, "").toLowerCase();
+    
+    // Try component-specific example first (e.g., donut.example.tsx)
+    examplePath = path.join(
+      repoRoot,
+      CHARTS_DIR,
+      chartDir,
+      "examples",
+      `${exampleName}.example.tsx`,
+    );
+    if (fs.existsSync(examplePath)) {
+      return {
+        name: exampleName,
+        path: examplePath,
+      };
+    }
+    
+    // Fallback to directory-based example (e.g., pie.example.tsx)
+    examplePath = path.join(
+      repoRoot,
+      CHARTS_DIR,
+      chartDir,
+      "examples",
+      `${chartDir}.example.tsx`,
+    );
+    if (fs.existsSync(examplePath)) {
+      return {
+        name: chartDir,
+        path: examplePath,
+      };
+    }
+  }
+  
+  // Check if this is a table component
+  if (relativePath.includes("table/")) {
+    examplePath = path.join(
+      repoRoot,
+      TABLE_DIR,
+      "examples",
+      `${baseName}.example.tsx`,
+    );
+    if (fs.existsSync(examplePath)) {
+      return {
+        name: baseName,
+        path: examplePath,
+      };
+    }
   }
 
-  return {
-    name: baseName,
-  };
+  return undefined;
 }
 
 function generateGroupedComponentPage(
   groupName: string,
   components: ComponentDoc[],
   example?: ExampleInfo,
+  subdir?: string,
 ): string {
   const sections = components
     .map((component) => {
-      return `## ${component.displayName}
+      // Strip "Doc" suffix from display name in sections
+      const displayName = component.displayName?.endsWith("Doc")
+        ? component.displayName.slice(0, -3)
+        : component.displayName;
+        
+      return `## ${displayName}
 
 ${buildComponentDetails(component, {
   propsHeadingLevel: 3,
@@ -161,16 +249,32 @@ ${buildComponentDetails(component, {
     })
     .join("\n\n");
 
-  const exampleSection = example
-    ? `
+  // Generate example section based on component type
+  let exampleSection = "";
+  if (example) {
+    if (subdir === "data") {
+      // For data components: show code only (no interactive preview)
+      const sourceCode = fs.readFileSync(example.path, "utf-8");
+      exampleSection = `
+## Example
+
+\`\`\`tsx
+${sourceCode}
+\`\`\`
+
+`;
+    } else {
+      // For UI components: show interactive preview
+      exampleSection = `
 ## Example
 
 import { DocExample } from "@site/src/components/DocExample";
 
 <DocExample name="${example.name}" />
 
-`
-    : "";
+`;
+    }
+  }
 
   const pageDescription = components[0]?.description
     ? `${sanitizeDescriptionText(components[0].description)}\n\n`
@@ -190,7 +294,7 @@ function findTsxFiles(dir: string) {
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      findTsxFiles(fullPath);
+      files.push(...findTsxFiles(fullPath)); // FIX: Collect recursive results
     } else if (entry.name.endsWith(".tsx") && !entry.name.includes(".test.")) {
       files.push(fullPath);
     }
@@ -199,47 +303,69 @@ function findTsxFiles(dir: string) {
   return files;
 }
 
+function findExampleFiles(dir: string): Array<{ file: string; fullPath: string }> {
+  const results: Array<{ file: string; fullPath: string }> = [];
+  
+  if (!fs.existsSync(dir)) {
+    return results;
+  }
+  
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...findExampleFiles(fullPath));
+    } else if (entry.name.endsWith(".example.tsx")) {
+      results.push({ file: entry.name, fullPath });
+    }
+  }
+  
+  return results;
+}
+
 function generateExamplesRegistry() {
-  const examplesDir = path.join(repoRoot, COMPONENTS_EXAMPLES_DIR);
   const outputPath = path.join(
     repoRoot,
     "docs/src/components/DocExample/examples.gen.ts",
   );
 
-  const files = fs.readdirSync(examplesDir);
-  const exampleFiles = files.filter(
-    (file) =>
-      file.endsWith(".example.tsx") &&
-      fs.statSync(path.join(examplesDir, file)).isFile(),
-  );
-
-  exampleFiles.sort();
+  // Collect examples from all directories
+  const uiExamplesDir = path.join(repoRoot, COMPONENTS_EXAMPLES_DIR);
+  const chartsDir = path.join(repoRoot, CHARTS_DIR);
+  const tableDir = path.join(repoRoot, TABLE_DIR);
+  
+  const uiExamples = findExampleFiles(uiExamplesDir);
+  const chartExamples = findExampleFiles(chartsDir);
+  const tableExamples = findExampleFiles(tableDir);
+  
+  const allExamples = [...uiExamples, ...chartExamples, ...tableExamples];
+  allExamples.sort((a, b) => a.file.localeCompare(b.file));
 
   // Generate import statements
-  const imports = exampleFiles
-    .map((file) => {
+  const imports = allExamples
+    .map(({ file, fullPath }) => {
       const baseName = path.basename(file, ".example.tsx");
       const componentName = baseName
         .split("-")
         .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
         .join("");
       const importName = `${componentName}Example`;
-      return `import ${importName} from "../../../../${COMPONENTS_EXAMPLES_DIR}/${file.replace(
-        ".tsx",
-        "",
-      )}";`;
+      const relativePath = path.relative(
+        path.join(repoRoot, "docs/src/components/DocExample"),
+        fullPath.replace(".tsx", "")
+      );
+      return `import ${importName} from "${relativePath}";`;
     })
     .join("\n");
 
   // Read example source code
-  const exampleEntries = exampleFiles.map((file) => {
+  const exampleEntries = allExamples.map(({ file, fullPath }) => {
     const baseName = path.basename(file, ".example.tsx");
     const componentName = baseName
       .split("-")
       .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
       .join("");
     const importName = `${componentName}Example`;
-    const fullPath = path.join(examplesDir, file);
     const sourceCode = fs.readFileSync(fullPath, "utf-8");
 
     // Escape backticks and backslashes in source code
@@ -279,9 +405,17 @@ export type AppKitExampleKey = keyof typeof examples;
 
 function main() {
   const componentsDir = path.join(repoRoot, COMPONENTS_DIR);
+  const chartsDir = path.join(repoRoot, CHARTS_DIR);
+  const tableDir = path.join(repoRoot, TABLE_DIR);
   const outputDir = path.join(repoRoot, DOCS_OUTPUT_DIR);
-  const files = findTsxFiles(componentsDir);
-  const componentDocs = parser.parse(files);
+  
+  // Scan all directories
+  const uiFiles = findTsxFiles(componentsDir);
+  const chartFiles = findTsxFiles(chartsDir);
+  const tableFiles = findTsxFiles(tableDir);
+  
+  const allFiles = [...uiFiles, ...chartFiles, ...tableFiles];
+  const componentDocs = parser.parse(allFiles);
 
   // Generate examples registry first
   generateExamplesRegistry();
@@ -295,10 +429,14 @@ function main() {
 
   const validComponents = componentDocs.filter((component) => {
     const displayName = component.displayName || "";
+    const filePath = component.filePath || "";
+    
     return (
       Boolean(displayName) &&
       !excludeList.includes(displayName) &&
-      !component.filePath?.includes(".example.")
+      !component.filePath?.includes(".example.") &&
+      // For charts: only include *Doc components
+      (filePath.includes("src/react/charts/") ? displayName.endsWith("Doc") : true)
     );
   });
 
@@ -309,8 +447,13 @@ function main() {
 
   sortedComponents.forEach((component) => {
     const filePath = component.filePath || "";
-    const relativePath = filePath ? path.relative(componentsDir, filePath) : "";
-    const key = relativePath || component.displayName || "";
+    const displayName = component.displayName || "";
+    
+    // For Doc components from charts, use display name as key (separate pages)
+    // For other components, group by file path
+    const key = filePath.includes("src/react/charts/") && displayName.endsWith("Doc")
+      ? displayName  // Each Doc component gets its own page
+      : filePath || displayName;  // Other components grouped by file
 
     if (!componentsByFile.has(key)) {
       componentsByFile.set(key, []);
@@ -319,22 +462,37 @@ function main() {
     componentsByFile.get(key)?.push(component);
   });
 
+  function getOutputSubdir(component: ComponentDoc): string {
+    const filePath = component.filePath || "";
+    // Data visualization components (charts + tables)
+    if (filePath.includes("src/react/charts/") || filePath.includes("src/react/table/")) {
+      return "data";
+    }
+    // All other UI components
+    return "ui";
+  }
+
   function toPageName(key: string): string {
-    const relativePath = key;
-    if (relativePath) {
-      const baseName = path.basename(relativePath, path.extname(relativePath));
-      const pascal = baseName
-        .split(/[^a-zA-Z0-9]+/)
-        .filter(Boolean)
-        .map((segment) => segment[0].toUpperCase() + segment.slice(1))
-        .join("");
-      if (pascal) {
-        return pascal;
+    const components = componentsByFile.get(key);
+    if (components && components[0]) {
+      const displayName = components[0].displayName || "";
+      // Strip "Doc" suffix from display names
+      if (displayName.endsWith("Doc")) {
+        return displayName.slice(0, -3);
+      }
+      if (displayName) {
+        return displayName;
       }
     }
-
-    const components = componentsByFile.get(key);
-    return components?.[0].displayName || "Component";
+    
+    // Fallback to filename-based name
+    const baseName = path.basename(key, path.extname(key));
+    const pascal = baseName
+      .split(/[^a-zA-Z0-9]+/)
+      .filter(Boolean)
+      .map((segment) => segment[0].toUpperCase() + segment.slice(1))
+      .join("");
+    return pascal || "Component";
   }
 
   const outputPageNames: string[] = [];
@@ -344,6 +502,13 @@ function main() {
   }
 
   fs.mkdirSync(outputDir, { recursive: true });
+  
+  // Create subdirectories
+  const dataOutputDir = path.join(outputDir, "data");
+  const uiOutputDir = path.join(outputDir, "ui");
+  fs.mkdirSync(dataOutputDir, { recursive: true });
+  fs.mkdirSync(uiOutputDir, { recursive: true });
+  
   let count = 0;
 
   const fileNameCounts = new Map<string, number>();
@@ -366,14 +531,18 @@ function main() {
     const exampleInfo = sortedMembers[0]
       ? buildExampleInfo(sortedMembers[0])
       : undefined;
-    const outputPath = path.join(outputDir, `${outputName}.mdx`);
+    
+    // Determine subdirectory based on first component's source
+    const subdir = sortedMembers[0] ? getOutputSubdir(sortedMembers[0]) : "ui";
+    const outputPath = path.join(outputDir, subdir, `${outputName}.mdx`);
+    
     try {
       fs.writeFileSync(
         outputPath,
-        generateGroupedComponentPage(pageName, sortedMembers, exampleInfo),
+        generateGroupedComponentPage(pageName, sortedMembers, exampleInfo, subdir),
         "utf8",
       );
-      outputPageNames.push(outputName);
+      outputPageNames.push(`${subdir}/${outputName}`);
       count++;
     } catch (error) {
       console.error(`✗ Failed to write ${outputName}.mdx:`, error);

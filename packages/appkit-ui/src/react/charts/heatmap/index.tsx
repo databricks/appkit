@@ -1,44 +1,41 @@
+import type React from "react";
 import { createChart } from "../create-chart";
 import type { HeatmapChartProps } from "../types";
 
 /**
  * Heatmap Chart component for matrix-style data visualization.
- * Built on Apache ECharts. Configure via props, NOT children.
  *
- * ⚠️ CRITICAL: This is NOT a Recharts wrapper.
+ * **Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
  *
+ * **Best Practice:** Use the built-in data fetching by passing `queryKey` and `parameters` props instead of pre-fetching data with `useAnalyticsQuery`.
+ * 
  * Data should be in "long format" with three fields:
  * - xKey: X-axis category (columns)
  * - yAxisKey: Y-axis category (rows)
  * - yKey: The numeric value for each cell
- *
- * @example Query mode
- * ```tsx
- * <HeatmapChart
- *   queryKey="activity_matrix"
- *   parameters={{}}
- *   xKey="day"
- *   yAxisKey="hour"
- *   yKey="count"
- * />
- * ```
- *
- * @example With custom color scale
- * ```tsx
- * <HeatmapChart
- *   queryKey="correlation_matrix"
- *   parameters={{}}
- *   xKey="variable_x"
- *   yAxisKey="variable_y"
- *   yKey="correlation"
- *   min={-1}
- *   max={1}
- *   showLabels={true}
- *   colorPalette="diverging"
- * />
- * ```
+ * 
+ * Supports both query mode (queryKey + parameters) and data mode (static data).
  */
 export const HeatmapChart = createChart<HeatmapChartProps>(
   "heatmap",
   "HeatmapChart",
 );
+
+// Type-only definition for documentation generation (not used at runtime)
+/**
+ * Heatmap Chart component for matrix-style data visualization.
+ *
+ * **Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
+ *
+ * **Best Practice:** Use the built-in data fetching by passing `queryKey` and `parameters` props instead of pre-fetching data with `useAnalyticsQuery`.
+ * 
+ * Data should be in "long format" with three fields:
+ * - xKey: X-axis category (columns)
+ * - yAxisKey: Y-axis category (rows)
+ * - yKey: The numeric value for each cell
+ * 
+ * Supports both query mode (queryKey + parameters) and data mode (static data).
+ */
+export function HeatmapChartDoc(props: HeatmapChartProps): JSX.Element {
+  return HeatmapChart(props);
+}

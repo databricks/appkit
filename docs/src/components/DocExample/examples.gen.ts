@@ -3,9 +3,11 @@ import type { ComponentType } from "react";
 import AccordionExample from "../../../../packages/appkit-ui/src/react/ui/examples/accordion.example";
 import AlertDialogExample from "../../../../packages/appkit-ui/src/react/ui/examples/alert-dialog.example";
 import AlertExample from "../../../../packages/appkit-ui/src/react/ui/examples/alert.example";
+import AreaExample from "../../../../packages/appkit-ui/src/react/charts/area/examples/area.example";
 import AspectRatioExample from "../../../../packages/appkit-ui/src/react/ui/examples/aspect-ratio.example";
 import AvatarExample from "../../../../packages/appkit-ui/src/react/ui/examples/avatar.example";
 import BadgeExample from "../../../../packages/appkit-ui/src/react/ui/examples/badge.example";
+import BarExample from "../../../../packages/appkit-ui/src/react/charts/bar/examples/bar.example";
 import BreadcrumbExample from "../../../../packages/appkit-ui/src/react/ui/examples/breadcrumb.example";
 import ButtonExample from "../../../../packages/appkit-ui/src/react/ui/examples/button.example";
 import CalendarExample from "../../../../packages/appkit-ui/src/react/ui/examples/calendar.example";
@@ -15,20 +17,27 @@ import CheckboxExample from "../../../../packages/appkit-ui/src/react/ui/example
 import CollapsibleExample from "../../../../packages/appkit-ui/src/react/ui/examples/collapsible.example";
 import CommandExample from "../../../../packages/appkit-ui/src/react/ui/examples/command.example";
 import ContextMenuExample from "../../../../packages/appkit-ui/src/react/ui/examples/context-menu.example";
+import DataTableExample from "../../../../packages/appkit-ui/src/react/table/examples/data-table.example";
 import DialogExample from "../../../../packages/appkit-ui/src/react/ui/examples/dialog.example";
+import DonutExample from "../../../../packages/appkit-ui/src/react/charts/pie/examples/donut.example";
 import DrawerExample from "../../../../packages/appkit-ui/src/react/ui/examples/drawer.example";
 import DropdownMenuExample from "../../../../packages/appkit-ui/src/react/ui/examples/dropdown-menu.example";
+import HeatmapExample from "../../../../packages/appkit-ui/src/react/charts/heatmap/examples/heatmap.example";
 import HoverCardExample from "../../../../packages/appkit-ui/src/react/ui/examples/hover-card.example";
 import InputOtpExample from "../../../../packages/appkit-ui/src/react/ui/examples/input-otp.example";
 import InputExample from "../../../../packages/appkit-ui/src/react/ui/examples/input.example";
 import LabelExample from "../../../../packages/appkit-ui/src/react/ui/examples/label.example";
+import LineExample from "../../../../packages/appkit-ui/src/react/charts/line/examples/line.example";
 import MenubarExample from "../../../../packages/appkit-ui/src/react/ui/examples/menubar.example";
 import NavigationMenuExample from "../../../../packages/appkit-ui/src/react/ui/examples/navigation-menu.example";
 import PaginationExample from "../../../../packages/appkit-ui/src/react/ui/examples/pagination.example";
+import PieExample from "../../../../packages/appkit-ui/src/react/charts/pie/examples/pie.example";
 import PopoverExample from "../../../../packages/appkit-ui/src/react/ui/examples/popover.example";
 import ProgressExample from "../../../../packages/appkit-ui/src/react/ui/examples/progress.example";
+import RadarExample from "../../../../packages/appkit-ui/src/react/charts/radar/examples/radar.example";
 import RadioGroupExample from "../../../../packages/appkit-ui/src/react/ui/examples/radio-group.example";
 import ResizableExample from "../../../../packages/appkit-ui/src/react/ui/examples/resizable.example";
+import ScatterExample from "../../../../packages/appkit-ui/src/react/charts/scatter/examples/scatter.example";
 import ScrollAreaExample from "../../../../packages/appkit-ui/src/react/ui/examples/scroll-area.example";
 import SelectExample from "../../../../packages/appkit-ui/src/react/ui/examples/select.example";
 import SeparatorExample from "../../../../packages/appkit-ui/src/react/ui/examples/separator.example";
@@ -149,6 +158,35 @@ export default function AlertExample() {
 }
 `,
   },
+  "area": {
+    Component: AreaExample,
+    source: `"use client"
+
+import * as React from "react"
+
+import { AreaChart } from "@databricks/appkit-ui/react"
+
+export default function AreaChartExample() {
+  return (
+    <AreaChart
+      data={[
+        { month: "Jan", visitors: 1000, revenue: 5000 },
+        { month: "Feb", visitors: 1500, revenue: 7000 },
+        { month: "Mar", visitors: 2000, revenue: 9000 },
+        { month: "Apr", visitors: 1800, revenue: 8500 },
+        { month: "May", visitors: 2200, revenue: 10000 },
+        { month: "Jun", visitors: 2500, revenue: 11000 },
+      ]}
+      xKey="month"
+      yKey={["visitors", "revenue"]}
+      stacked
+      showLegend
+      height={300}
+    />
+  )
+}
+`,
+  },
   "aspect-ratio": {
     Component: AspectRatioExample,
     source: `import { AspectRatio } from "@databricks/appkit-ui/react"
@@ -190,6 +228,32 @@ export default function AvatarExample() {
 
 export default function BadgeExample() {
   return <Badge>Badge</Badge>
+}
+`,
+  },
+  "bar": {
+    Component: BarExample,
+    source: `"use client"
+
+import * as React from "react"
+
+import { BarChart } from "@databricks/appkit-ui/react"
+
+export default function BarChartExample() {
+  return (
+    <BarChart
+      data={[
+        { category: "Product A", value: 100 },
+        { category: "Product B", value: 200 },
+        { category: "Product C", value: 150 },
+        { category: "Product D", value: 300 },
+        { category: "Product E", value: 250 },
+      ]}
+      xKey="category"
+      yKey="value"
+      height={300}
+    />
+  )
 }
 `,
   },
@@ -602,6 +666,27 @@ export default function ContextMenuExample() {
 }
 `,
   },
+  "data-table": {
+    Component: DataTableExample,
+    source: `"use client"
+
+import * as React from "react"
+
+import { DataTable } from "@databricks/appkit-ui/react"
+
+export default function DataTableExample() {
+  return (
+    <DataTable
+      queryKey="example_query"
+      parameters={{}}
+      filterColumn="name"
+      filterPlaceholder="Filter by name..."
+      pageSize={10}
+    />
+  )
+}
+`,
+  },
   "dialog": {
     Component: DialogExample,
     source: `import {
@@ -657,6 +742,29 @@ export default function DialogExample() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+`,
+  },
+  "donut": {
+    Component: DonutExample,
+    source: `"use client"
+
+import * as React from "react"
+
+import { DonutChart } from "@databricks/appkit-ui/react"
+
+export default function DonutChartExample() {
+  return (
+    <DonutChart
+      data={[
+        { name: "Engineering", value: 450 },
+        { name: "Marketing", value: 250 },
+        { name: "Sales", value: 300 },
+        { name: "Operations", value: 200 },
+      ]}
+      height={300}
+    />
   )
 }
 `,
@@ -925,6 +1033,41 @@ export default function DropdownMenuExample() {
 }
 `,
   },
+  "heatmap": {
+    Component: HeatmapExample,
+    source: `"use client"
+
+import * as React from "react"
+
+import { HeatmapChart } from "@databricks/appkit-ui/react"
+
+export default function HeatmapChartExample() {
+  const data = []
+  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+  const hours = ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00"]
+  
+  for (const day of days) {
+    for (const hour of hours) {
+      data.push({
+        day,
+        hour,
+        count: Math.floor(Math.random() * 100),
+      })
+    }
+  }
+
+  return (
+    <HeatmapChart
+      data={data}
+      xKey="day"
+      yAxisKey="hour"
+      yKey="count"
+      height={300}
+    />
+  )
+}
+`,
+  },
   "hover-card": {
     Component: HoverCardExample,
     source: `import { CalendarDays } from "lucide-react"
@@ -1019,6 +1162,34 @@ export default function LabelExample() {
         <Label htmlFor="terms">Accept terms and conditions</Label>
       </div>
     </div>
+  )
+}
+`,
+  },
+  "line": {
+    Component: LineExample,
+    source: `"use client"
+
+import * as React from "react"
+
+import { LineChart } from "@databricks/appkit-ui/react"
+
+export default function LineChartExample() {
+  return (
+    <LineChart
+      data={[
+        { month: "Jan", sales: 100 },
+        { month: "Feb", sales: 150 },
+        { month: "Mar", sales: 200 },
+        { month: "Apr", sales: 180 },
+        { month: "May", sales: 220 },
+        { month: "Jun", sales: 250 },
+      ]}
+      xKey="month"
+      yKey="sales"
+      smooth
+      height={300}
+    />
   )
 }
 `,
@@ -1321,6 +1492,29 @@ export default function PaginationExample() {
 }
 `,
   },
+  "pie": {
+    Component: PieExample,
+    source: `"use client"
+
+import * as React from "react"
+
+import { PieChart } from "@databricks/appkit-ui/react"
+
+export default function PieChartExample() {
+  return (
+    <PieChart
+      data={[
+        { name: "Product A", value: 400 },
+        { name: "Product B", value: 300 },
+        { name: "Product C", value: 300 },
+        { name: "Product D", value: 200 },
+      ]}
+      height={300}
+    />
+  )
+}
+`,
+  },
   "popover": {
     Component: PopoverExample,
     source: `import {
@@ -1407,6 +1601,33 @@ export default function ProgressExample() {
 }
 `,
   },
+  "radar": {
+    Component: RadarExample,
+    source: `"use client"
+
+import * as React from "react"
+
+import { RadarChart } from "@databricks/appkit-ui/react"
+
+export default function RadarChartExample() {
+  return (
+    <RadarChart
+      data={[
+        { skill: "Communication", score: 85 },
+        { skill: "Problem Solving", score: 90 },
+        { skill: "Teamwork", score: 75 },
+        { skill: "Leadership", score: 80 },
+        { skill: "Technical", score: 95 },
+        { skill: "Creativity", score: 70 },
+      ]}
+      xKey="skill"
+      yKey="score"
+      height={300}
+    />
+  )
+}
+`,
+  },
   "radio-group": {
     Component: RadioGroupExample,
     source: `import { Label, RadioGroup, RadioGroupItem } from "@databricks/appkit-ui/react"
@@ -1467,6 +1688,35 @@ export default function ResizableExample() {
         </ResizablePanelGroup>
       </ResizablePanel>
     </ResizablePanelGroup>
+  )
+}
+`,
+  },
+  "scatter": {
+    Component: ScatterExample,
+    source: `"use client"
+
+import * as React from "react"
+
+import { ScatterChart } from "@databricks/appkit-ui/react"
+
+export default function ScatterChartExample() {
+  return (
+    <ScatterChart
+      data={[
+        { revenue: 100, growth: 5 },
+        { revenue: 200, growth: 10 },
+        { revenue: 150, growth: 7 },
+        { revenue: 300, growth: 15 },
+        { revenue: 250, growth: 12 },
+        { revenue: 400, growth: 20 },
+        { revenue: 180, growth: 8 },
+        { revenue: 320, growth: 16 },
+      ]}
+      xKey="revenue"
+      yKey="growth"
+      height={300}
+    />
   )
 }
 `,

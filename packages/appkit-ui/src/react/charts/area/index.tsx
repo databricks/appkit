@@ -1,33 +1,28 @@
+import type React from "react";
 import { createChart } from "../create-chart";
 import type { AreaChartProps } from "../types";
 
 /**
  * Area Chart component for trend visualization with filled areas.
- * Built on Apache ECharts. Configure via props, NOT children.
  *
- * ⚠️ CRITICAL: This is NOT a Recharts wrapper.
+ * **Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
  *
- * @example Stacked area chart
- * ```tsx
- * <AreaChart
- *   queryKey="revenue_breakdown"
- *   parameters={{}}
- *   xKey="date"
- *   yKey={["product_a", "product_b", "product_c"]}
- *   stacked
- *   showLegend
- * />
- * ```
- *
- * @example Query mode with format selection
- * ```tsx
- * <AreaChart
- *   queryKey="traffic_data"
- *   parameters={{ period: "weekly" }}
- *   format="arrow"  // Force Arrow for large datasets
- *   xKey="week"
- *   yKey="visitors"
- * />
- * ```
+ * **Best Practice:** Use the built-in data fetching by passing `queryKey` and `parameters` props instead of pre-fetching data with `useAnalyticsQuery`.
+ * 
+ * Supports both query mode (queryKey + parameters) and data mode (static data).
  */
 export const AreaChart = createChart<AreaChartProps>("area", "AreaChart");
+
+// Type-only definition for documentation generation (not used at runtime)
+/**
+ * Area Chart component for trend visualization with filled areas.
+ *
+ * **Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
+ *
+ * **Best Practice:** Use the built-in data fetching by passing `queryKey` and `parameters` props instead of pre-fetching data with `useAnalyticsQuery`.
+ * 
+ * Supports both query mode (queryKey + parameters) and data mode (static data).
+ */
+export function AreaChartDoc(props: AreaChartProps): JSX.Element {
+  return AreaChart(props);
+}

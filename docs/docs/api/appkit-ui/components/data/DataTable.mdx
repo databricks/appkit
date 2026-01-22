@@ -1,0 +1,75 @@
+# DataTable
+
+Production-ready data table with automatic data fetching and state management
+
+
+## Example
+
+```tsx
+"use client"
+
+import * as React from "react"
+
+import { DataTable } from "@databricks/appkit-ui/react"
+
+export default function DataTableExample() {
+  return (
+    <DataTable
+      queryKey="example_query"
+      parameters={{}}
+      filterColumn="name"
+      filterPlaceholder="Filter by name..."
+      pageSize={10}
+    />
+  )
+}
+
+```
+
+
+## DataTable
+
+Production-ready data table with automatic data fetching and state management
+
+Features:
+ - Automatic column generation from data structure
+ - Integrated with useAnalyticsQuery for data fetching
+ - Built-in loading, error, and empty states
+ - Dynamic filtering, sorting and pagination
+ - Column visibility controls
+ - Responsive design
+ - Supports opinionated mode (auto columns) and full-control mode (`children(table)`)
+
+
+**Source:** [`packages/appkit-ui/src/react/table/data-table.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/table/data-table.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `queryKey` | `string` | ✓ | - | The query key to fetch the data |
+| `parameters` | `Record<string, any>` | ✓ | - | The parameters to pass to the query |
+| `filterColumn` | `string` |  | - | The column to filter by |
+| `filterPlaceholder` | `string` |  | - | Optional placeholder for the filter input |
+| `transform` | `((data: any[]) => any[])` |  | - | Optional function to transform data before creating table |
+| `labels` | `DataTableLabels` |  | - | Optional labels for the DataTable component |
+| `ariaLabel` | `string` |  | - | Optional accessibility label for the DataTable component |
+| `testId` | `string` |  | - | Optional test ID for the DataTable component |
+| `className` | `string` |  | - | Optional CSS class name for the DataTable component |
+| `enableRowSelection` | `boolean` |  | - | Enable row selection with checkboxes |
+| `onRowSelectionChange` | `((rowSelection: RowSelectionState) => void)` |  | - | Callback function to handle row selection changes |
+| `children` | `((table: Table<any>) => ReactNode)` |  | - | Optional children for full control mode |
+| `pageSize` | `number` |  | - | Number of rows to display per page |
+| `pageSizeOptions` | `number[]` |  | - | Options for the page size selector |
+
+
+
+### Usage
+
+```tsx
+import { DataTable } from '@databricks/appkit-ui';
+
+<DataTable /* props */ />
+```
+
