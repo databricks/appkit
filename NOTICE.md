@@ -64,6 +64,7 @@ This Software contains code from the following open source projects:
 | [input-otp](https://www.npmjs.com/package/input-otp) | 1.4.2 | MIT | https://input-otp.rodz.dev/ |
 | [lucide-react](https://www.npmjs.com/package/lucide-react) | 0.554.0 | ISC | https://lucide.dev |
 | [next-themes](https://www.npmjs.com/package/next-themes) | 0.4.6 | MIT | https://github.com/pacocoursey/next-themes#readme |
+| [obug](https://www.npmjs.com/package/obug) | 2.1.1 | MIT | https://github.com/sxzz/obug#readme |
 | [pg](https://www.npmjs.com/package/pg) | 8.16.3 | MIT | https://github.com/brianc/node-postgres |
 | [react-day-picker](https://www.npmjs.com/package/react-day-picker) | 9.12.0 | MIT | https://daypicker.dev |
 | [react-hook-form](https://www.npmjs.com/package/react-hook-form) | 7.68.0 | MIT | https://react-hook-form.com |

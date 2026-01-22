@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0](https://github.com/databricks/appkit/compare/v0.1.5...v0.2.0) (2026-01-22)
+
+### observability
+
+* **observability:** add structured logging ([#51](https://github.com/databricks/appkit/issues/51)) ([a827c5d](https://github.com/databricks/appkit/commit/a827c5d03b116e4905ba142d672724205f8c094e))
+
 ## [0.1.5](https://github.com/databricks/appkit/compare/v0.1.4...v0.1.5) (2026-01-08)
 
 ### appkit
