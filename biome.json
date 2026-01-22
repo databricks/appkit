@@ -17,7 +17,10 @@
       "!packages/appkit-ui/src/react/ui",
       "!**/routeTree.gen.ts",
       "!docs/.docusaurus",
-      "!**/typedoc-sidebar.ts"
+      "!**/*.gen.css",
+      "!**/*.gen.ts",
+      "!**/typedoc-sidebar.ts",
+      "!**/template"
     ]
   },
   "formatter": {
