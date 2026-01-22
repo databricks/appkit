@@ -8,7 +8,7 @@ function createApp<T>(config: {
 }): Promise<PluginMap<T>>;
 ```
 
-Defined in: [appkit/src/core/appkit.ts:133](https://github.com/databricks/appkit/blob/main/packages/appkit/src/core/appkit.ts#L133)
+Defined in: appkit/src/core/appkit.ts:133
 
 Bootstraps AppKit with the provided configuration.
 

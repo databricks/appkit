@@ -1,6 +1,6 @@
 # Interface: TelemetryConfig
 
-Defined in: [appkit/src/telemetry/types.ts:5](https://github.com/databricks/appkit/blob/main/packages/appkit/src/telemetry/types.ts#L5)
+Defined in: appkit/src/telemetry/types.ts:5
 
 ## Properties
 
@@ -10,7 +10,7 @@ Defined in: [appkit/src/telemetry/types.ts:5](https://github.com/databricks/appk
 optional exportIntervalMs: number;
 ```
 
-Defined in: [appkit/src/telemetry/types.ts:9](https://github.com/databricks/appkit/blob/main/packages/appkit/src/telemetry/types.ts#L9)
+Defined in: appkit/src/telemetry/types.ts:9
 
 ***
 
@@ -20,7 +20,7 @@ Defined in: [appkit/src/telemetry/types.ts:9](https://github.com/databricks/appk
 optional headers: Record<string, string>;
 ```
 
-Defined in: [appkit/src/telemetry/types.ts:10](https://github.com/databricks/appkit/blob/main/packages/appkit/src/telemetry/types.ts#L10)
+Defined in: appkit/src/telemetry/types.ts:10
 
 ***
 
@@ -30,7 +30,7 @@ Defined in: [appkit/src/telemetry/types.ts:10](https://github.com/databricks/app
 optional instrumentations: Instrumentation<InstrumentationConfig>[];
 ```
 
-Defined in: [appkit/src/telemetry/types.ts:8](https://github.com/databricks/appkit/blob/main/packages/appkit/src/telemetry/types.ts#L8)
+Defined in: appkit/src/telemetry/types.ts:8
 
 ***
 
@@ -40,7 +40,7 @@ Defined in: [appkit/src/telemetry/types.ts:8](https://github.com/databricks/appk
 optional serviceName: string;
 ```
 
-Defined in: [appkit/src/telemetry/types.ts:6](https://github.com/databricks/appkit/blob/main/packages/appkit/src/telemetry/types.ts#L6)
+Defined in: appkit/src/telemetry/types.ts:6
 
 ***
 
@@ -50,4 +50,4 @@ Defined in: [appkit/src/telemetry/types.ts:6](https://github.com/databricks/appk
 optional serviceVersion: string;
 ```
 
-Defined in: [appkit/src/telemetry/types.ts:7](https://github.com/databricks/appkit/blob/main/packages/appkit/src/telemetry/types.ts#L7)
+Defined in: appkit/src/telemetry/types.ts:7

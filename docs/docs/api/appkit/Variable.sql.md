@@ -11,7 +11,7 @@ const sql: {
 };
 ```
 
-Defined in: [shared/src/sql/helpers.ts:14](https://github.com/databricks/appkit/blob/main/packages/shared/src/sql/helpers.ts#L14)
+Defined in: shared/src/sql/helpers.ts:14
 
 SQL helper namespace
 

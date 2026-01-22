@@ -7,8 +7,53 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
+          id: "api/appkit/Class.AppKitError",
+          label: "AppKitError"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Class.AuthenticationError",
+          label: "AuthenticationError"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Class.ConfigurationError",
+          label: "ConfigurationError"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Class.ConnectionError",
+          label: "ConnectionError"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Class.ExecutionError",
+          label: "ExecutionError"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Class.InitializationError",
+          label: "InitializationError"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Class.Plugin",
           label: "Plugin"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Class.ServerError",
+          label: "ServerError"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Class.TunnelError",
+          label: "TunnelError"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Class.ValidationError",
+          label: "ValidationError"
         }
       ]
     },

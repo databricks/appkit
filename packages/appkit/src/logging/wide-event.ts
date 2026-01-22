@@ -1,14 +1,5 @@
 import type { LogLevel } from "./types";
 
-export interface QueryData {
-  key?: string;
-  warehouse_id?: string;
-  rows_returned?: number;
-  query_duration_ms?: number;
-  bytes_scanned?: number;
-  [key: string]: unknown;
-}
-
 /**
  * WideEvent data interface
  * - Represents a single event for a request
