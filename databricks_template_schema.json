@@ -1,0 +1,77 @@
+{
+  "properties": {
+    "project_name": {
+      "type": "string",
+      "description": "Project Name",
+      "order": 1,
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "pattern_match_failure_message": "Name must consist of letters, numbers, underscores, or hyphens."
+    },
+    "sql_warehouse_id": {
+      "type": "string",
+      "description": "SQL Warehouse ID",
+      "order": 2
+    },
+    "profile": {
+      "type": "string",
+      "description": "Profile Name",
+      "default": "",
+      "order": 3
+    },
+    "app_description": {
+      "type": "string",
+      "description": "App Description (Optional)",
+      "default": "A Databricks App powered by Databricks AppKit",
+      "order": 4
+    },
+    "dotenv": {
+      "type": "string",
+      "description": "Additional .env content",
+      "default": "",
+      "hidden": true
+    },
+    "dotenv_example": {
+      "type": "string",
+      "description": "Additional .env.example content",
+      "default": "",
+      "hidden": true
+    },
+    "app_env": {
+      "type": "string",
+      "description": "App environment variables for app.yaml",
+      "default": "",
+      "hidden": true
+    },
+    "bundle_variables": {
+      "type": "string",
+      "description": "Additional bundle variables",
+      "default": "",
+      "hidden": true
+    },
+    "bundle_resources": {
+      "type": "string",
+      "description": "Additional bundle resources",
+      "default": "",
+      "hidden": true
+    },
+    "target_variables": {
+      "type": "string",
+      "description": "Target-specific variables",
+      "default": "",
+      "hidden": true
+    },
+    "plugin_import": {
+      "type": "string",
+      "description": "Plugin imports for server.ts",
+      "default": "analytics",
+      "hidden": true
+    },
+    "plugin_usage": {
+      "type": "string",
+      "description": "Plugin usage in createApp",
+      "default": "analytics()",
+      "hidden": true
+    }
+  },
+  "success_message": "\nYour new project has been created in the '{{.project_name}}' directory!"
+}
