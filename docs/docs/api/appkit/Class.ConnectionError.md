@@ -1,6 +1,6 @@
 # Class: ConnectionError
 
-Defined in: appkit/src/errors/connection.ts:13
+Defined in: [appkit/src/errors/connection.ts:13](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/connection.ts#L13)
 
 Error thrown when a connection or network operation fails.
 Use for database pool errors, API failures, timeouts, etc.
@@ -27,7 +27,7 @@ new ConnectionError(message: string, options?: {
 }): ConnectionError;
 ```
 
-Defined in: appkit/src/errors/base.ts:49
+Defined in: [appkit/src/errors/base.ts:49](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L49)
 
 #### Parameters
 
@@ -54,7 +54,7 @@ Defined in: appkit/src/errors/base.ts:49
 readonly optional cause: Error;
 ```
 
-Defined in: appkit/src/errors/base.ts:44
+Defined in: [appkit/src/errors/base.ts:44](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L44)
 
 Optional cause of the error
 
@@ -70,7 +70,7 @@ Optional cause of the error
 readonly code: "CONNECTION_ERROR" = "CONNECTION_ERROR";
 ```
 
-Defined in: appkit/src/errors/connection.ts:14
+Defined in: [appkit/src/errors/connection.ts:14](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/connection.ts#L14)
 
 Error code for programmatic error handling
 
@@ -86,7 +86,7 @@ Error code for programmatic error handling
 readonly optional context: Record<string, unknown>;
 ```
 
-Defined in: appkit/src/errors/base.ts:47
+Defined in: [appkit/src/errors/base.ts:47](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L47)
 
 Additional context for the error
 
@@ -102,7 +102,7 @@ Additional context for the error
 readonly isRetryable: true = true;
 ```
 
-Defined in: appkit/src/errors/connection.ts:16
+Defined in: [appkit/src/errors/connection.ts:16](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/connection.ts#L16)
 
 Whether this error type is generally safe to retry
 
@@ -118,7 +118,7 @@ Whether this error type is generally safe to retry
 readonly statusCode: 503 = 503;
 ```
 
-Defined in: appkit/src/errors/connection.ts:15
+Defined in: [appkit/src/errors/connection.ts:15](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/connection.ts#L15)
 
 HTTP status code suggestion (can be overridden)
 
@@ -134,7 +134,7 @@ HTTP status code suggestion (can be overridden)
 toJSON(): Record<string, unknown>;
 ```
 
-Defined in: appkit/src/errors/base.ts:68
+Defined in: [appkit/src/errors/base.ts:68](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L68)
 
 Convert error to JSON for logging/serialization.
 Sensitive values in context are automatically redacted.
@@ -155,7 +155,7 @@ Sensitive values in context are automatically redacted.
 toString(): string;
 ```
 
-Defined in: appkit/src/errors/base.ts:84
+Defined in: [appkit/src/errors/base.ts:84](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L84)
 
 Create a human-readable string representation
 
@@ -175,7 +175,7 @@ Create a human-readable string representation
 static apiFailure(service: string, cause?: Error): ConnectionError;
 ```
 
-Defined in: appkit/src/errors/connection.ts:44
+Defined in: [appkit/src/errors/connection.ts:44](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/connection.ts#L44)
 
 Create a connection error for API failures
 
@@ -198,7 +198,7 @@ Create a connection error for API failures
 static clientUnavailable(clientType: string, hint?: string): ConnectionError;
 ```
 
-Defined in: appkit/src/errors/connection.ts:54
+Defined in: [appkit/src/errors/connection.ts:54](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/connection.ts#L54)
 
 Create a connection error for client unavailable
 
@@ -221,7 +221,7 @@ Create a connection error for client unavailable
 static poolError(operation: string, cause?: Error): ConnectionError;
 ```
 
-Defined in: appkit/src/errors/connection.ts:35
+Defined in: [appkit/src/errors/connection.ts:35](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/connection.ts#L35)
 
 Create a connection error for pool errors
 
@@ -244,7 +244,7 @@ Create a connection error for pool errors
 static queryFailed(cause?: Error): ConnectionError;
 ```
 
-Defined in: appkit/src/errors/connection.ts:21
+Defined in: [appkit/src/errors/connection.ts:21](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/connection.ts#L21)
 
 Create a connection error for query failure
 
@@ -266,7 +266,7 @@ Create a connection error for query failure
 static transactionFailed(cause?: Error): ConnectionError;
 ```
 
-Defined in: appkit/src/errors/connection.ts:28
+Defined in: [appkit/src/errors/connection.ts:28](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/connection.ts#L28)
 
 Create a connection error for transaction failure
 

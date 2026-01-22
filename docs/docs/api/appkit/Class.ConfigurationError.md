@@ -1,6 +1,6 @@
 # Class: ConfigurationError
 
-Defined in: appkit/src/errors/configuration.ts:13
+Defined in: [appkit/src/errors/configuration.ts:13](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/configuration.ts#L13)
 
 Error thrown when configuration is missing or invalid.
 Use for missing environment variables, invalid settings, or setup issues.
@@ -27,7 +27,7 @@ new ConfigurationError(message: string, options?: {
 }): ConfigurationError;
 ```
 
-Defined in: appkit/src/errors/base.ts:49
+Defined in: [appkit/src/errors/base.ts:49](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L49)
 
 #### Parameters
 
@@ -54,7 +54,7 @@ Defined in: appkit/src/errors/base.ts:49
 readonly optional cause: Error;
 ```
 
-Defined in: appkit/src/errors/base.ts:44
+Defined in: [appkit/src/errors/base.ts:44](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L44)
 
 Optional cause of the error
 
@@ -70,7 +70,7 @@ Optional cause of the error
 readonly code: "CONFIGURATION_ERROR" = "CONFIGURATION_ERROR";
 ```
 
-Defined in: appkit/src/errors/configuration.ts:14
+Defined in: [appkit/src/errors/configuration.ts:14](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/configuration.ts#L14)
 
 Error code for programmatic error handling
 
@@ -86,7 +86,7 @@ Error code for programmatic error handling
 readonly optional context: Record<string, unknown>;
 ```
 
-Defined in: appkit/src/errors/base.ts:47
+Defined in: [appkit/src/errors/base.ts:47](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L47)
 
 Additional context for the error
 
@@ -102,7 +102,7 @@ Additional context for the error
 readonly isRetryable: false = false;
 ```
 
-Defined in: appkit/src/errors/configuration.ts:16
+Defined in: [appkit/src/errors/configuration.ts:16](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/configuration.ts#L16)
 
 Whether this error type is generally safe to retry
 
@@ -118,7 +118,7 @@ Whether this error type is generally safe to retry
 readonly statusCode: 500 = 500;
 ```
 
-Defined in: appkit/src/errors/configuration.ts:15
+Defined in: [appkit/src/errors/configuration.ts:15](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/configuration.ts#L15)
 
 HTTP status code suggestion (can be overridden)
 
@@ -134,7 +134,7 @@ HTTP status code suggestion (can be overridden)
 toJSON(): Record<string, unknown>;
 ```
 
-Defined in: appkit/src/errors/base.ts:68
+Defined in: [appkit/src/errors/base.ts:68](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L68)
 
 Convert error to JSON for logging/serialization.
 Sensitive values in context are automatically redacted.
@@ -155,7 +155,7 @@ Sensitive values in context are automatically redacted.
 toString(): string;
 ```
 
-Defined in: appkit/src/errors/base.ts:84
+Defined in: [appkit/src/errors/base.ts:84](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L84)
 
 Create a human-readable string representation
 
@@ -175,7 +175,7 @@ Create a human-readable string representation
 static invalidConnection(service: string, details?: string): ConfigurationError;
 ```
 
-Defined in: appkit/src/errors/configuration.ts:41
+Defined in: [appkit/src/errors/configuration.ts:41](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/configuration.ts#L41)
 
 Create a configuration error for invalid connection config
 
@@ -198,7 +198,7 @@ Create a configuration error for invalid connection config
 static missingConnectionParam(param: string): ConfigurationError;
 ```
 
-Defined in: appkit/src/errors/configuration.ts:54
+Defined in: [appkit/src/errors/configuration.ts:54](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/configuration.ts#L54)
 
 Create a configuration error for missing connection string parameter
 
@@ -220,7 +220,7 @@ Create a configuration error for missing connection string parameter
 static missingEnvVar(varName: string): ConfigurationError;
 ```
 
-Defined in: appkit/src/errors/configuration.ts:21
+Defined in: [appkit/src/errors/configuration.ts:21](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/configuration.ts#L21)
 
 Create a configuration error for missing environment variable
 
@@ -242,7 +242,7 @@ Create a configuration error for missing environment variable
 static resourceNotFound(resource: string, hint?: string): ConfigurationError;
 ```
 
-Defined in: appkit/src/errors/configuration.ts:31
+Defined in: [appkit/src/errors/configuration.ts:31](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/configuration.ts#L31)
 
 Create a configuration error for missing resource
 

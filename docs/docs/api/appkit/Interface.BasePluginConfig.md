@@ -1,6 +1,6 @@
 # Interface: BasePluginConfig
 
-Defined in: shared/src/plugin.ts:17
+Defined in: [shared/src/plugin.ts:17](https://github.com/databricks/appkit/blob/main/packages/shared/src/plugin.ts#L17)
 
 ## Indexable
 
@@ -16,7 +16,7 @@ Defined in: shared/src/plugin.ts:17
 optional host: string;
 ```
 
-Defined in: shared/src/plugin.ts:19
+Defined in: [shared/src/plugin.ts:19](https://github.com/databricks/appkit/blob/main/packages/shared/src/plugin.ts#L19)
 
 ***
 
@@ -26,7 +26,7 @@ Defined in: shared/src/plugin.ts:19
 optional name: string;
 ```
 
-Defined in: shared/src/plugin.ts:18
+Defined in: [shared/src/plugin.ts:18](https://github.com/databricks/appkit/blob/main/packages/shared/src/plugin.ts#L18)
 
 ***
 
@@ -36,4 +36,4 @@ Defined in: shared/src/plugin.ts:18
 optional telemetry: TelemetryOptions;
 ```
 
-Defined in: shared/src/plugin.ts:27
+Defined in: [shared/src/plugin.ts:27](https://github.com/databricks/appkit/blob/main/packages/shared/src/plugin.ts#L27)

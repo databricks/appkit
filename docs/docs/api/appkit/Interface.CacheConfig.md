@@ -1,6 +1,6 @@
 # Interface: CacheConfig
 
-Defined in: shared/src/cache.ts:36
+Defined in: [shared/src/cache.ts:36](https://github.com/databricks/appkit/blob/main/packages/shared/src/cache.ts#L36)
 
 Configuration for caching
 
@@ -18,7 +18,7 @@ Configuration for caching
 optional cacheKey: (string | number | object)[];
 ```
 
-Defined in: shared/src/cache.ts:46
+Defined in: [shared/src/cache.ts:46](https://github.com/databricks/appkit/blob/main/packages/shared/src/cache.ts#L46)
 
 Cache key
 
@@ -30,7 +30,7 @@ Cache key
 optional cleanupProbability: number;
 ```
 
-Defined in: shared/src/cache.ts:55
+Defined in: [shared/src/cache.ts:55](https://github.com/databricks/appkit/blob/main/packages/shared/src/cache.ts#L55)
 
 Probability (0-1) of triggering cleanup on each get operation
 
@@ -42,7 +42,7 @@ Probability (0-1) of triggering cleanup on each get operation
 optional enabled: boolean;
 ```
 
-Defined in: shared/src/cache.ts:38
+Defined in: [shared/src/cache.ts:38](https://github.com/databricks/appkit/blob/main/packages/shared/src/cache.ts#L38)
 
 Whether caching is enabled
 
@@ -54,7 +54,7 @@ Whether caching is enabled
 optional evictionCheckProbability: number;
 ```
 
-Defined in: shared/src/cache.ts:58
+Defined in: [shared/src/cache.ts:58](https://github.com/databricks/appkit/blob/main/packages/shared/src/cache.ts#L58)
 
 Probability (0-1) of checking total bytes on each write operation
 
@@ -66,7 +66,7 @@ Probability (0-1) of checking total bytes on each write operation
 optional maxBytes: number;
 ```
 
-Defined in: shared/src/cache.ts:42
+Defined in: [shared/src/cache.ts:42](https://github.com/databricks/appkit/blob/main/packages/shared/src/cache.ts#L42)
 
 Maximum number of bytes in the cache
 
@@ -78,7 +78,7 @@ Maximum number of bytes in the cache
 optional maxEntryBytes: number;
 ```
 
-Defined in: shared/src/cache.ts:61
+Defined in: [shared/src/cache.ts:61](https://github.com/databricks/appkit/blob/main/packages/shared/src/cache.ts#L61)
 
 Maximum number of bytes per entry in the cache
 
@@ -90,7 +90,7 @@ Maximum number of bytes per entry in the cache
 optional maxSize: number;
 ```
 
-Defined in: shared/src/cache.ts:44
+Defined in: [shared/src/cache.ts:44](https://github.com/databricks/appkit/blob/main/packages/shared/src/cache.ts#L44)
 
 Maximum number of entries in the cache
 
@@ -102,7 +102,7 @@ Maximum number of entries in the cache
 optional storage: CacheStorage;
 ```
 
-Defined in: shared/src/cache.ts:48
+Defined in: [shared/src/cache.ts:48](https://github.com/databricks/appkit/blob/main/packages/shared/src/cache.ts#L48)
 
 Cache Storage provider instance
 
@@ -114,7 +114,7 @@ Cache Storage provider instance
 optional strictPersistence: boolean;
 ```
 
-Defined in: shared/src/cache.ts:50
+Defined in: [shared/src/cache.ts:50](https://github.com/databricks/appkit/blob/main/packages/shared/src/cache.ts#L50)
 
 Whether to enforce strict persistence
 
@@ -126,7 +126,7 @@ Whether to enforce strict persistence
 optional telemetry: TelemetryOptions;
 ```
 
-Defined in: shared/src/cache.ts:52
+Defined in: [shared/src/cache.ts:52](https://github.com/databricks/appkit/blob/main/packages/shared/src/cache.ts#L52)
 
 Telemetry configuration
 
@@ -138,6 +138,6 @@ Telemetry configuration
 optional ttl: number;
 ```
 
-Defined in: shared/src/cache.ts:40
+Defined in: [shared/src/cache.ts:40](https://github.com/databricks/appkit/blob/main/packages/shared/src/cache.ts#L40)
 
 Time to live in seconds

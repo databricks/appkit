@@ -1,6 +1,6 @@
 # Abstract Class: AppKitError
 
-Defined in: appkit/src/errors/base.ts:33
+Defined in: [appkit/src/errors/base.ts:33](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L33)
 
 Base error class for all AppKit errors.
 Provides a consistent structure for error handling across the framework.
@@ -49,7 +49,7 @@ new AppKitError(message: string, options?: {
 }): AppKitError;
 ```
 
-Defined in: appkit/src/errors/base.ts:49
+Defined in: [appkit/src/errors/base.ts:49](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L49)
 
 #### Parameters
 
@@ -78,7 +78,7 @@ Error.constructor
 readonly optional cause: Error;
 ```
 
-Defined in: appkit/src/errors/base.ts:44
+Defined in: [appkit/src/errors/base.ts:44](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L44)
 
 Optional cause of the error
 
@@ -90,7 +90,7 @@ Optional cause of the error
 abstract readonly code: string;
 ```
 
-Defined in: appkit/src/errors/base.ts:35
+Defined in: [appkit/src/errors/base.ts:35](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L35)
 
 Error code for programmatic error handling
 
@@ -102,7 +102,7 @@ Error code for programmatic error handling
 readonly optional context: Record<string, unknown>;
 ```
 
-Defined in: appkit/src/errors/base.ts:47
+Defined in: [appkit/src/errors/base.ts:47](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L47)
 
 Additional context for the error
 
@@ -114,7 +114,7 @@ Additional context for the error
 abstract readonly isRetryable: boolean;
 ```
 
-Defined in: appkit/src/errors/base.ts:41
+Defined in: [appkit/src/errors/base.ts:41](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L41)
 
 Whether this error type is generally safe to retry
 
@@ -126,7 +126,7 @@ Whether this error type is generally safe to retry
 abstract readonly statusCode: number;
 ```
 
-Defined in: appkit/src/errors/base.ts:38
+Defined in: [appkit/src/errors/base.ts:38](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L38)
 
 HTTP status code suggestion (can be overridden)
 
@@ -138,7 +138,7 @@ HTTP status code suggestion (can be overridden)
 toJSON(): Record<string, unknown>;
 ```
 
-Defined in: appkit/src/errors/base.ts:68
+Defined in: [appkit/src/errors/base.ts:68](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L68)
 
 Convert error to JSON for logging/serialization.
 Sensitive values in context are automatically redacted.
@@ -155,7 +155,7 @@ Sensitive values in context are automatically redacted.
 toString(): string;
 ```
 
-Defined in: appkit/src/errors/base.ts:84
+Defined in: [appkit/src/errors/base.ts:84](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L84)
 
 Create a human-readable string representation
 

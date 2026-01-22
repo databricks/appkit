@@ -1,6 +1,6 @@
 # Class: ServerError
 
-Defined in: appkit/src/errors/server.ts:13
+Defined in: [appkit/src/errors/server.ts:13](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/server.ts#L13)
 
 Error thrown when server lifecycle operations fail.
 Use for server start/stop issues, configuration conflicts, etc.
@@ -27,7 +27,7 @@ new ServerError(message: string, options?: {
 }): ServerError;
 ```
 
-Defined in: appkit/src/errors/base.ts:49
+Defined in: [appkit/src/errors/base.ts:49](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L49)
 
 #### Parameters
 
@@ -54,7 +54,7 @@ Defined in: appkit/src/errors/base.ts:49
 readonly optional cause: Error;
 ```
 
-Defined in: appkit/src/errors/base.ts:44
+Defined in: [appkit/src/errors/base.ts:44](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L44)
 
 Optional cause of the error
 
@@ -70,7 +70,7 @@ Optional cause of the error
 readonly code: "SERVER_ERROR" = "SERVER_ERROR";
 ```
 
-Defined in: appkit/src/errors/server.ts:14
+Defined in: [appkit/src/errors/server.ts:14](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/server.ts#L14)
 
 Error code for programmatic error handling
 
@@ -86,7 +86,7 @@ Error code for programmatic error handling
 readonly optional context: Record<string, unknown>;
 ```
 
-Defined in: appkit/src/errors/base.ts:47
+Defined in: [appkit/src/errors/base.ts:47](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L47)
 
 Additional context for the error
 
@@ -102,7 +102,7 @@ Additional context for the error
 readonly isRetryable: false = false;
 ```
 
-Defined in: appkit/src/errors/server.ts:16
+Defined in: [appkit/src/errors/server.ts:16](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/server.ts#L16)
 
 Whether this error type is generally safe to retry
 
@@ -118,7 +118,7 @@ Whether this error type is generally safe to retry
 readonly statusCode: 500 = 500;
 ```
 
-Defined in: appkit/src/errors/server.ts:15
+Defined in: [appkit/src/errors/server.ts:15](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/server.ts#L15)
 
 HTTP status code suggestion (can be overridden)
 
@@ -134,7 +134,7 @@ HTTP status code suggestion (can be overridden)
 toJSON(): Record<string, unknown>;
 ```
 
-Defined in: appkit/src/errors/base.ts:68
+Defined in: [appkit/src/errors/base.ts:68](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L68)
 
 Convert error to JSON for logging/serialization.
 Sensitive values in context are automatically redacted.
@@ -155,7 +155,7 @@ Sensitive values in context are automatically redacted.
 toString(): string;
 ```
 
-Defined in: appkit/src/errors/base.ts:84
+Defined in: [appkit/src/errors/base.ts:84](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L84)
 
 Create a human-readable string representation
 
@@ -175,7 +175,7 @@ Create a human-readable string representation
 static autoStartConflict(operation: string): ServerError;
 ```
 
-Defined in: appkit/src/errors/server.ts:21
+Defined in: [appkit/src/errors/server.ts:21](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/server.ts#L21)
 
 Create a server error for autoStart conflict
 
@@ -197,7 +197,7 @@ Create a server error for autoStart conflict
 static clientDirectoryNotFound(searchedPaths: string[]): ServerError;
 ```
 
-Defined in: appkit/src/errors/server.ts:46
+Defined in: [appkit/src/errors/server.ts:46](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/server.ts#L46)
 
 Create a server error for missing client directory
 
@@ -219,7 +219,7 @@ Create a server error for missing client directory
 static notStarted(): ServerError;
 ```
 
-Defined in: appkit/src/errors/server.ts:30
+Defined in: [appkit/src/errors/server.ts:30](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/server.ts#L30)
 
 Create a server error for server not started
 
@@ -235,7 +235,7 @@ Create a server error for server not started
 static viteNotInitialized(): ServerError;
 ```
 
-Defined in: appkit/src/errors/server.ts:39
+Defined in: [appkit/src/errors/server.ts:39](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/server.ts#L39)
 
 Create a server error for Vite dev server not initialized
 

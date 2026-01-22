@@ -1,6 +1,6 @@
 # Class: ExecutionError
 
-Defined in: appkit/src/errors/execution.ts:13
+Defined in: [appkit/src/errors/execution.ts:13](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/execution.ts#L13)
 
 Error thrown when an operation execution fails.
 Use for statement failures, canceled operations, or unexpected states.
@@ -27,7 +27,7 @@ new ExecutionError(message: string, options?: {
 }): ExecutionError;
 ```
 
-Defined in: appkit/src/errors/base.ts:49
+Defined in: [appkit/src/errors/base.ts:49](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L49)
 
 #### Parameters
 
@@ -54,7 +54,7 @@ Defined in: appkit/src/errors/base.ts:49
 readonly optional cause: Error;
 ```
 
-Defined in: appkit/src/errors/base.ts:44
+Defined in: [appkit/src/errors/base.ts:44](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L44)
 
 Optional cause of the error
 
@@ -70,7 +70,7 @@ Optional cause of the error
 readonly code: "EXECUTION_ERROR" = "EXECUTION_ERROR";
 ```
 
-Defined in: appkit/src/errors/execution.ts:14
+Defined in: [appkit/src/errors/execution.ts:14](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/execution.ts#L14)
 
 Error code for programmatic error handling
 
@@ -86,7 +86,7 @@ Error code for programmatic error handling
 readonly optional context: Record<string, unknown>;
 ```
 
-Defined in: appkit/src/errors/base.ts:47
+Defined in: [appkit/src/errors/base.ts:47](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L47)
 
 Additional context for the error
 
@@ -102,7 +102,7 @@ Additional context for the error
 readonly isRetryable: false = false;
 ```
 
-Defined in: appkit/src/errors/execution.ts:16
+Defined in: [appkit/src/errors/execution.ts:16](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/execution.ts#L16)
 
 Whether this error type is generally safe to retry
 
@@ -118,7 +118,7 @@ Whether this error type is generally safe to retry
 readonly statusCode: 500 = 500;
 ```
 
-Defined in: appkit/src/errors/execution.ts:15
+Defined in: [appkit/src/errors/execution.ts:15](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/execution.ts#L15)
 
 HTTP status code suggestion (can be overridden)
 
@@ -134,7 +134,7 @@ HTTP status code suggestion (can be overridden)
 toJSON(): Record<string, unknown>;
 ```
 
-Defined in: appkit/src/errors/base.ts:68
+Defined in: [appkit/src/errors/base.ts:68](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L68)
 
 Convert error to JSON for logging/serialization.
 Sensitive values in context are automatically redacted.
@@ -155,7 +155,7 @@ Sensitive values in context are automatically redacted.
 toString(): string;
 ```
 
-Defined in: appkit/src/errors/base.ts:84
+Defined in: [appkit/src/errors/base.ts:84](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L84)
 
 Create a human-readable string representation
 
@@ -175,7 +175,7 @@ Create a human-readable string representation
 static canceled(): ExecutionError;
 ```
 
-Defined in: appkit/src/errors/execution.ts:31
+Defined in: [appkit/src/errors/execution.ts:31](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/execution.ts#L31)
 
 Create an execution error for canceled operation
 
@@ -191,7 +191,7 @@ Create an execution error for canceled operation
 static missingData(dataType: string): ExecutionError;
 ```
 
-Defined in: appkit/src/errors/execution.ts:56
+Defined in: [appkit/src/errors/execution.ts:56](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/execution.ts#L56)
 
 Create an execution error for missing data
 
@@ -213,7 +213,7 @@ Create an execution error for missing data
 static resultsClosed(): ExecutionError;
 ```
 
-Defined in: appkit/src/errors/execution.ts:38
+Defined in: [appkit/src/errors/execution.ts:38](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/execution.ts#L38)
 
 Create an execution error for closed/expired results
 
@@ -229,7 +229,7 @@ Create an execution error for closed/expired results
 static statementFailed(errorMessage?: string): ExecutionError;
 ```
 
-Defined in: appkit/src/errors/execution.ts:21
+Defined in: [appkit/src/errors/execution.ts:21](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/execution.ts#L21)
 
 Create an execution error for statement failure
 
@@ -251,7 +251,7 @@ Create an execution error for statement failure
 static unknownState(state: string): ExecutionError;
 ```
 
-Defined in: appkit/src/errors/execution.ts:47
+Defined in: [appkit/src/errors/execution.ts:47](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/execution.ts#L47)
 
 Create an execution error for unknown state
 
