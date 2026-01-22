@@ -8,6 +8,10 @@
       "development": "./src/index.ts",
       "default": "./dist/index.js"
     },
+    "./cli": {
+      "development": "./src/cli/index.ts",
+      "default": "./dist/cli/index.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -29,6 +33,7 @@
   "publishConfig": {
     "exports": {
       ".": "./dist/index.js",
+      "./cli": "./dist/cli/index.js",
       "./package.json": "./package.json"
     }
   },

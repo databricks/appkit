@@ -34,10 +34,15 @@ function runDocs(docPath?: string) {
     return;
   }
 
-  // Handle path - remove leading /appkit/docs/ or /docs/ prefix
+  // Handle path - remove leading ./ and / first, then strip prefixes
   let normalizedPath = docPath;
-  normalizedPath = normalizedPath.replace(/^\/appkit\/docs\//, "");
-  normalizedPath = normalizedPath.replace(/^\/docs\//, "");
+
+  // Strip leading ./ or /
+  normalizedPath = normalizedPath.replace(/^\.\//, "");
+  normalizedPath = normalizedPath.replace(/^\//, "");
+
+  // Remove /appkit/docs/ or docs/ prefix since files are in packageRoot/docs/
+  normalizedPath = normalizedPath.replace(/^appkit\/docs\//, "");
   normalizedPath = normalizedPath.replace(/^docs\//, "");
 
   const fullPath = path.join(packageRoot, "docs", normalizedPath);

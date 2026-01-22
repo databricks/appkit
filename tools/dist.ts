@@ -44,6 +44,14 @@ if (isAppKitPackage) {
   if (fs.existsSync(sharedBin)) {
     fs.mkdirSync("tmp/bin", { recursive: true });
     fs.copyFileSync(sharedBin, "tmp/bin/appkit.js");
+    
+    // Copy CLI code from shared/dist/cli to tmp/dist/cli
+    const sharedCliDist = path.join(__dirname, "../packages/shared/dist/cli");
+    if (fs.existsSync(sharedCliDist)) {
+      const tmpCliDist = "tmp/dist/cli";
+      fs.mkdirSync(tmpCliDist, { recursive: true });
+      fs.cpSync(sharedCliDist, tmpCliDist, { recursive: true });
+    }
   }
   if (fs.existsSync(sharedPostinstall)) {
     fs.mkdirSync("tmp/scripts", { recursive: true });
