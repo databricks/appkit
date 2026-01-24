@@ -508,6 +508,10 @@ importers:
         version: 11.2.0
 
   packages/taskflow:
+    dependencies:
+      json-canonicalize:
+        specifier: ^2.0.0
+        version: 2.0.0
     devDependencies:
       vitest:
         specifier: ^3.2.4
@@ -7569,6 +7573,9 @@ packages:
 
   json-buffer@3.0.1:
     resolution: {integrity: sha512-4bV5BfR2mqfQTJm+V5tPPdf+ZpuhiIvTuAB5g8kcrXOZpTT/QwwVRWBywX1ozr6lEuPdbHxwaJlm9G6mI2sfSQ==}
+
+  json-canonicalize@2.0.0:
+    resolution: {integrity: sha512-yyrnK/mEm6Na3ChbJUWueXdapueW0p380RUyTW87XGb1ww8l8hU0pRrGC3vSWHe9CxrbPHX2fGUOZpNiHR0IIg==}
 
   json-parse-even-better-errors@2.3.1:
     resolution: {integrity: sha512-xyFwyhro/JEof6Ghe2iz2NcXoj2sloNsWr/XsERDK/oiPCfaNhl5ONfp+jQdAZRQQ0IJWNzH9zIZF7li91kh2w==}
@@ -19578,6 +19585,8 @@ snapshots:
   json-bignum@0.0.3: {}
 
   json-buffer@3.0.1: {}
+
+  json-canonicalize@2.0.0: {}
 
   json-parse-even-better-errors@2.3.1: {}
 

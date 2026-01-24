@@ -26,5 +26,8 @@
   },
   "devDependencies": {
     "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "json-canonicalize": "^2.0.0"
   }
 }
