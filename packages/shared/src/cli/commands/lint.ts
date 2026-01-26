@@ -1,14 +1,17 @@
-#!/usr/bin/env node
-/**
- * AST-based linting using ast-grep.
- * Catches patterns that ESLint/TypeScript miss or handle poorly.
- * Usage: npx appkit-lint
- */
+import { Command } from "commander";
 import { parse, Lang } from "@ast-grep/napi";
 import fs from "node:fs";
 import path from "node:path";
 
-const rules = [
+interface Rule {
+  id: string;
+  pattern: string;
+  message: string;
+  includeTests?: boolean;
+  filter?: (code: string) => boolean;
+}
+
+const rules: Rule[] = [
   {
     id: "no-double-type-assertion",
     pattern: "$X as unknown as $Y",
@@ -37,13 +40,13 @@ const rules = [
   },
 ];
 
-function isTestFile(filePath) {
+function isTestFile(filePath: string): boolean {
   return (
     /\.(test|spec)\.(ts|tsx)$/.test(filePath) || filePath.includes("/tests/")
   );
 }
 
-function findTsFiles(dir, files = []) {
+function findTsFiles(dir: string, files: string[] = []): string[] {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
 
   for (const entry of entries) {
@@ -61,8 +64,17 @@ function findTsFiles(dir, files = []) {
   return files;
 }
 
-function lintFile(filePath, rules) {
-  const violations = [];
+interface Violation {
+  file: string;
+  line: number;
+  column: number;
+  rule: string;
+  message: string;
+  code: string;
+}
+
+function lintFile(filePath: string, rules: Rule[]): Violation[] {
+  const violations: Violation[] = [];
   const content = fs.readFileSync(filePath, "utf-8");
   const lang = filePath.endsWith(".tsx") ? Lang.Tsx : Lang.TypeScript;
   const testFile = isTestFile(filePath);
@@ -96,13 +108,16 @@ function lintFile(filePath, rules) {
   return violations;
 }
 
-function main() {
+/**
+ * Lint command implementation
+ */
+function runLint() {
   const rootDir = process.cwd();
   const files = findTsFiles(rootDir);
 
   console.log(`Scanning ${files.length} TypeScript files...\n`);
 
-  const allViolations = [];
+  const allViolations: Violation[] = [];
 
   for (const file of files) {
     const violations = lintFile(file, rules);
@@ -126,4 +141,6 @@ function main() {
   process.exit(1);
 }
 
-main();
+export const lintCommand = new Command("lint")
+  .description("Run AST-based linting on TypeScript files")
+  .action(runLint);

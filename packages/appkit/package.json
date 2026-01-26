@@ -13,9 +13,9 @@
     "dist",
     "bin",
     "scripts",
+    "docs",
     "CLAUDE.md",
     "llms.txt",
-    "AGENTS.md",
     "README.md",
     "DCO",
     "NOTICE.md"
@@ -25,23 +25,23 @@
       "development": "./src/index.ts",
       "default": "./dist/index.js"
     },
+    "./type-generator": {
+      "types": "./dist/type-generator/index.d.ts",
+      "development": "./src/type-generator/index.ts",
+      "default": "./dist/type-generator/index.js"
+    },
     "./package.json": "./package.json"
-  },
-  "bin": {
-    "appkit-generate-types": "./bin/generate-types.js",
-    "appkit-lint": "./bin/appkit-lint.js"
   },
   "scripts": {
     "build:package": "tsdown --config tsdown.config.ts",
     "build:watch": "tsdown --config tsdown.config.ts --watch",
     "clean:full": "rm -rf dist node_modules tmp",
     "clean": "rm -rf dist tmp",
-    "dist": "tsx ../../tools/dist.ts",
-    "tarball": "rm -rf tmp && tsx ../../tools/dist.ts && npm pack ./tmp --pack-destination ./tmp",
+    "dist": "pnpm --filter=docs build && tsx ../../tools/dist.ts",
+    "tarball": "rm -rf tmp && pnpm dist && npm pack ./tmp --pack-destination ./tmp",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ast-grep/napi": "^0.37.0",
     "@databricks/sdk-experimental": "^0.15.0",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/api-logs": "^0.208.0",
@@ -81,6 +81,7 @@
   "publishConfig": {
     "exports": {
       ".": "./dist/index.js",
+      "./type-generator": "./dist/type-generator/index.js",
       "./package.json": "./package.json"
     }
   }
