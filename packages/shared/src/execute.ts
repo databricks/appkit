@@ -45,6 +45,7 @@ export type StreamExecuteHandler<T> =
   | ((signal?: AbortSignal) => Promise<T>)
   | ((signal?: AbortSignal) => AsyncGenerator<T, void, unknown>);
 
+/** Configuration for streaming execution with default and user-scoped settings */
 export interface StreamExecutionSettings {
   default: PluginExecuteConfig;
   user?: PluginExecuteConfig;

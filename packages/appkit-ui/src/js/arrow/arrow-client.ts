@@ -40,6 +40,19 @@ export class ArrowClient {
     }
   }
 
+  /**
+   * Fetches Arrow data from a URL and processes it into a Table.
+   * Convenience method that combines fetchArrow and processArrowBuffer.
+   *
+   * @param url - URL to fetch Arrow data from
+   * @param headers - Optional HTTP headers to include in the request
+   * @returns Promise resolving to an Arrow Table
+   * @example
+   * ```typescript
+   * const table = await ArrowClient.fetchAndProcessArrow('/api/data/arrow');
+   * console.log(`Loaded ${table.numRows} rows`);
+   * ```
+   */
   static async fetchAndProcessArrow(
     url: string,
     headers?: Record<string, string>,
@@ -57,6 +70,17 @@ export class ArrowClient {
     }
   }
 
+  /**
+   * Extracts field metadata (name and type) from an Arrow Table.
+   *
+   * @param table - Arrow Table to extract fields from
+   * @returns Array of field metadata objects
+   * @example
+   * ```typescript
+   * const fields = ArrowClient.extractArrowFields(table);
+   * // [{ name: "date", type: Date32 }, { name: "value", type: Float64 }]
+   * ```
+   */
   static extractArrowFields(table: Table) {
     return table.schema.fields.map((field: Field) => {
       return {
@@ -66,6 +90,18 @@ export class ArrowClient {
     });
   }
 
+  /**
+   * Extracts all columns from an Arrow Table as JavaScript arrays.
+   * Each column is converted to a native JavaScript array.
+   *
+   * @param table - Arrow Table to extract columns from
+   * @returns Object mapping column names to arrays
+   * @example
+   * ```typescript
+   * const columns = ArrowClient.extractArrowColumns(table);
+   * // { date: ["2024-01-01", "2024-01-02"], value: [100, 200] }
+   * ```
+   */
   static extractArrowColumns(table: Table): Record<string, any> {
     const cols: Record<string, any> = {};
 
@@ -254,6 +290,18 @@ export class ArrowClient {
     };
   }
 
+  /**
+   * Fetches raw Arrow IPC data from a URL.
+   *
+   * @param url - URL to fetch Arrow data from
+   * @param headers - Optional HTTP headers to include in the request
+   * @returns Promise resolving to the raw Arrow buffer as Uint8Array
+   * @example
+   * ```typescript
+   * const buffer = await ArrowClient.fetchArrow('/api/data/arrow');
+   * const table = await ArrowClient.processArrowBuffer(buffer);
+   * ```
+   */
   static async fetchArrow(
     url: string,
     headers?: Record<string, string>,

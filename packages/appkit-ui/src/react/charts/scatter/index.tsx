@@ -1,27 +1,31 @@
+import type { JSX } from "react";
 import { createChart } from "../create-chart";
 import type { ScatterChartProps } from "../types";
 
 /**
- * Scatter Chart component.
- * Supports both JSON and Arrow data formats with automatic format selection.
+ * Scatter Chart component for correlation and distribution visualization.
  *
- * @example Simple usage
- * ```tsx
- * <ScatterChart
- *   queryKey="correlation_data"
- *   parameters={{ metrics: ["revenue", "growth"] }}
- * />
- * ```
+ * **Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
  *
- * @example With custom symbol size
- * ```tsx
- * <ScatterChart
- *   queryKey="data_points"
- *   symbolSize={12}
- * />
- * ```
+ * **Best Practice:** Use the built-in data fetching by passing `queryKey` and `parameters` props instead of pre-fetching data with `useAnalyticsQuery`.
+ *
+ * Supports both query mode (queryKey + parameters) and data mode (static data).
  */
 export const ScatterChart = createChart<ScatterChartProps>(
   "scatter",
   "ScatterChart",
 );
+
+// Type-only definition for documentation generation (not used at runtime)
+/**
+ * Scatter Chart component for correlation and distribution visualization.
+ *
+ * **Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
+ *
+ * **Best Practice:** Use the built-in data fetching by passing `queryKey` and `parameters` props instead of pre-fetching data with `useAnalyticsQuery`.
+ *
+ * Supports both query mode (queryKey + parameters) and data mode (static data).
+ */
+export function ScatterChartDoc(props: ScatterChartProps): JSX.Element {
+  return ScatterChart(props);
+}

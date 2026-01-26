@@ -5,6 +5,7 @@ import * as SliderPrimitive from "@radix-ui/react-slider";
 
 import { cn } from "../lib/utils";
 
+/** Draggable input for selecting numeric values within a range */
 function Slider({
   className,
   defaultValue,

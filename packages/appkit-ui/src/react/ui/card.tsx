@@ -2,6 +2,7 @@ import type * as React from "react";
 
 import { cn } from "../lib/utils";
 
+/** Container for grouping related content with header, body, and footer sections */
 function Card({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -15,6 +16,7 @@ function Card({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/** Header section containing title, description, and actions */
 function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -28,6 +30,7 @@ function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/** Title heading for the card */
 function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -38,6 +41,7 @@ function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/** Descriptive text providing context for the card */
 function CardDescription({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -48,6 +52,7 @@ function CardDescription({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/** Action buttons or controls positioned in the card header */
 function CardAction({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -61,6 +66,7 @@ function CardAction({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/** Main content area of the card */
 function CardContent({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -71,6 +77,7 @@ function CardContent({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/** Footer section for additional actions or information */
 function CardFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div

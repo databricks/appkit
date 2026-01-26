@@ -3,6 +3,7 @@ import * as AvatarPrimitive from "@radix-ui/react-avatar";
 
 import { cn } from "../lib/utils";
 
+/** Displays user profile picture or initials in a circular container */
 function Avatar({
   className,
   ...props
@@ -19,6 +20,7 @@ function Avatar({
   );
 }
 
+/** Image element for the avatar */
 function AvatarImage({
   className,
   ...props
@@ -32,6 +34,7 @@ function AvatarImage({
   );
 }
 
+/** Fallback content displayed when avatar image fails to load */
 function AvatarFallback({
   className,
   ...props

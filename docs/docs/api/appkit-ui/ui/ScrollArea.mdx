@@ -1,0 +1,66 @@
+# ScrollArea
+
+Container with custom scrollbars for overflow content
+
+
+## Example
+
+import { DocExample } from "@site/src/components/DocExample";
+
+<DocExample name="scroll-area" />
+
+
+## ScrollArea
+
+Container with custom scrollbars for overflow content
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/scroll-area.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/scroll-area.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `type` | `enum` |  | - | - |
+| `dir` | `enum` |  | - | - |
+| `scrollHideDelay` | `number` |  | - | - |
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ScrollArea } from '@databricks/appkit-ui';
+
+<ScrollArea /* props */ />
+```
+
+
+## ScrollBar
+
+Scrollbar component for the scroll area
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/scroll-area.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/scroll-area.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `forceMount` | `true` |  | - | - |
+| `orientation` | `enum` |  | `vertical` | - |
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ScrollBar } from '@databricks/appkit-ui';
+
+<ScrollBar /* props */ />
+```
+

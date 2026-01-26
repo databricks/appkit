@@ -51,6 +51,7 @@ const itemVariants = cva(
   },
 );
 
+/** Flexible container for list items with media, content, and actions */
 function Item({
   className,
   variant = "default",

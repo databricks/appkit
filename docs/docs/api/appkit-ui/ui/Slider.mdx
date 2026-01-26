@@ -1,0 +1,50 @@
+# Slider
+
+Draggable input for selecting numeric values within a range
+
+
+## Example
+
+import { DocExample } from "@site/src/components/DocExample";
+
+<DocExample name="slider" />
+
+
+## Slider
+
+Draggable input for selecting numeric values within a range
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/slider.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/slider.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `name` | `string` |  | - | - |
+| `disabled` | `boolean` |  | - | - |
+| `orientation` | `enum` |  | - | - |
+| `dir` | `enum` |  | - | - |
+| `min` | `number` |  | - | - |
+| `max` | `number` |  | - | - |
+| `step` | `number` |  | - | - |
+| `minStepsBetweenThumbs` | `number` |  | - | - |
+| `value` | `number[]` |  | - | - |
+| `defaultValue` | `number[]` |  | - | - |
+| `onValueChange` | `((value: number[]) => void)` |  | - | - |
+| `onValueCommit` | `((value: number[]) => void)` |  | - | - |
+| `inverted` | `boolean` |  | - | - |
+| `form` | `string` |  | - | - |
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { Slider } from '@databricks/appkit-ui';
+
+<Slider /* props */ />
+```
+

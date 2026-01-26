@@ -2,6 +2,7 @@ import type * as React from "react";
 
 import { cn } from "../lib/utils";
 
+/** Structured data display with rows and columns */
 function Table({ className, ...props }: React.ComponentProps<"table">) {
   return (
     <div

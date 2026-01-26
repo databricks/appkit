@@ -6,6 +6,7 @@ import { CheckIcon } from "lucide-react";
 
 import { cn } from "../lib/utils";
 
+/** Checkbox input for selecting multiple options */
 function Checkbox({
   className,
   ...props

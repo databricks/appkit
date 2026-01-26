@@ -1,5 +1,6 @@
 import type express from "express";
 
+/** Base plugin interface. */
 export interface BasePlugin {
   name: string;
 
@@ -14,6 +15,7 @@ export interface BasePlugin {
   getEndpoints(): PluginEndpointMap;
 }
 
+/** Base configuration interface for AppKit plugins */
 export interface BasePluginConfig {
   name?: string;
   host?: string;
@@ -91,6 +93,7 @@ export type ToPlugin<T, U, N extends string> = (
   config?: U,
 ) => PluginData<T, U, N>;
 
+/** Express router type for plugin route registration */
 export type IAppRouter = express.Router;
 export type IAppResponse = express.Response;
 export type IAppRequest = express.Request;

@@ -1,0 +1,39 @@
+# Progress
+
+Visual indicator showing task completion percentage
+
+
+## Example
+
+import { DocExample } from "@site/src/components/DocExample";
+
+<DocExample name="progress" />
+
+
+## Progress
+
+Visual indicator showing task completion percentage
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/progress.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/progress.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `value` | `number \| null` |  | - | - |
+| `max` | `number` |  | - | - |
+| `getValueLabel` | `((value: number, max: number) => string)` |  | - | - |
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { Progress } from '@databricks/appkit-ui';
+
+<Progress /* props */ />
+```
+

@@ -1,5 +1,6 @@
 import { cn } from "../lib/utils";
 
+/** Visual representation of keyboard keys */
 function Kbd({ className, ...props }: React.ComponentProps<"kbd">) {
   return (
     <kbd

@@ -1,0 +1,88 @@
+# Avatar
+
+Displays user profile picture or initials in a circular container
+
+
+## Example
+
+import { DocExample } from "@site/src/components/DocExample";
+
+<DocExample name="avatar" />
+
+
+## Avatar
+
+Displays user profile picture or initials in a circular container
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/avatar.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/avatar.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { Avatar } from '@databricks/appkit-ui';
+
+<Avatar /* props */ />
+```
+
+
+## AvatarFallback
+
+Fallback content displayed when avatar image fails to load
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/avatar.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/avatar.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `delayMs` | `number` |  | - | - |
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { AvatarFallback } from '@databricks/appkit-ui';
+
+<AvatarFallback /* props */ />
+```
+
+
+## AvatarImage
+
+Image element for the avatar
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/avatar.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/avatar.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `onLoadingStatusChange` | `((status: ImageLoadingStatus) => void)` |  | - | - |
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { AvatarImage } from '@databricks/appkit-ui';
+
+<AvatarImage /* props */ />
+```
+

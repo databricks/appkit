@@ -1,3 +1,10 @@
+/**
+ * @packageDocumentation
+ *
+ * Core library for building Databricks applications with type-safe SQL queries,
+ * plugin architecture, and React integration.
+ */
+
 // Types from shared
 export type {
   BasePluginConfig,
