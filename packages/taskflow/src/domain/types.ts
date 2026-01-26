@@ -1,4 +1,4 @@
-import { IdempotencyKey, TaskId, TaskName, UserId } from "@/core/branded";
+import type { IdempotencyKey, TaskName, UserId } from "@/core/branded";
 import type { TaskStatus, TaskType } from "@/core/types";
 
 /**
@@ -9,6 +9,8 @@ export interface TaskExecutionOptions {
   maxRetries?: number;
   /** override the default timeout in milliseconds */
   timeoutMs?: number;
+  /** override the default max concurrent executions */
+  maxConcurrentExecutions?: number;
 }
 
 /**
