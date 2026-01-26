@@ -525,13 +525,13 @@ export default defineConfig({
             <CardContent>
               <CodeBlock
                 code={`# Generate types from project root
-npx appkit-generate-types
+npx @databricks/appkit generate-types
 
 # Custom output path
-npx appkit-generate-types . client/src/types.d.ts
+npx @databricks/appkit generate-types . client/src/types.d.ts
 
 # Force regeneration (skip cache)
-npx appkit-generate-types --no-cache`}
+npx @databricks/appkit generate-types --no-cache`}
                 lang="bash"
               />
             </CardContent>

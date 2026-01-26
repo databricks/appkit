@@ -562,7 +562,10 @@ function main() {
     const entries = fs.readdirSync(outputDir, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.isDirectory()) {
-        fs.rmSync(path.join(outputDir, entry.name), { recursive: true });
+        fs.rmSync(path.join(outputDir, entry.name), {
+          recursive: true,
+          force: true,
+        });
       }
     }
   }

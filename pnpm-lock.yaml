@@ -233,9 +233,6 @@ importers:
 
   packages/appkit:
     dependencies:
-      '@ast-grep/napi':
-        specifier: ^0.37.0
-        version: 0.37.0
       '@databricks/sdk-experimental':
         specifier: ^0.15.0
         version: 0.15.0
@@ -493,9 +490,12 @@ importers:
 
   packages/shared:
     dependencies:
-      fast-glob:
-        specifier: ^3.3.3
-        version: 3.3.3
+      '@ast-grep/napi':
+        specifier: ^0.37.0
+        version: 0.37.0
+      commander:
+        specifier: ^12.1.0
+        version: 12.1.0
     devDependencies:
       '@types/dependency-tree':
         specifier: ^8.1.4
