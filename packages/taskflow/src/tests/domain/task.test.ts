@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { idempotencyKey, taskName, userId } from "@/core/branded";
 import { TaskStateError } from "@/core/errors";
 import type { TaskRecord } from "@/domain";
 import { Task } from "@/domain/task";
@@ -7,9 +8,9 @@ describe("Task", () => {
   describe("Constructor", () => {
     it("should create a task with default values", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
 
       expect(task.id).toBeDefined();
@@ -25,9 +26,9 @@ describe("Task", () => {
 
     it("should create a task with custom type (background)", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: null,
+        userId: userId(null),
         type: "background",
       });
 
@@ -37,19 +38,19 @@ describe("Task", () => {
 
     it("should use provided idempotencyKey", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: {},
-        userId: "user123",
-        idempotencyKey: "abc123",
+        userId: userId("user123"),
+        idempotencyKey: idempotencyKey("abc123"),
       });
       expect(task.idempotencyKey).toBe("abc123");
     });
 
     it("should generate deterministic idempotencyKey", () => {
       const params = {
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       };
       const task1 = new Task(params);
       const task2 = new Task(params);
@@ -58,27 +59,27 @@ describe("Task", () => {
 
     it("should generate different idempotencykey for different inputs", () => {
       const task1 = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       const task2 = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 43 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       expect(task1.idempotencyKey).not.toBe(task2.idempotencyKey);
     });
 
     it("should generate same idempotencyKey regardless of object key order", () => {
       const task1 = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       const task2 = new Task({
-        name: "my-task",
-        userId: "user123",
+        name: taskName("my-task"),
+        userId: userId("user123"),
         input: { value: 42 },
       });
       expect(task1.idempotencyKey).toBe(task2.idempotencyKey);
@@ -88,9 +89,9 @@ describe("Task", () => {
   describe("start()", () => {
     it("should transition from created to running", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       task.start();
       expect(task.status).toBe("running");
@@ -101,9 +102,9 @@ describe("Task", () => {
 
     it("should throw if task is already running", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       task.start();
       expect(() => task.start()).toThrow(TaskStateError);
@@ -114,9 +115,9 @@ describe("Task", () => {
 
     it("should throw if task is in terminal state", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       task.start();
       task.complete();
@@ -128,9 +129,9 @@ describe("Task", () => {
   describe("complete()", () => {
     it("should transition from running to completed", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
 
       task.start();
@@ -143,9 +144,9 @@ describe("Task", () => {
 
     it("should work without result", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       task.start();
       task.complete();
@@ -155,9 +156,9 @@ describe("Task", () => {
 
     it("should throw if task is not running", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       task.start();
       task.complete();
@@ -167,9 +168,9 @@ describe("Task", () => {
 
     it("should throw if task is already completed", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       task.start();
       task.complete();
@@ -180,9 +181,9 @@ describe("Task", () => {
   describe("fail()", () => {
     it("should transition from running to failed with string error", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       task.start();
       task.fail("test error");
@@ -194,9 +195,9 @@ describe("Task", () => {
 
     it("should extract message from Error object", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       task.start();
       task.fail(new Error("test error"));
@@ -204,9 +205,9 @@ describe("Task", () => {
     });
     it("should throw if task is not running", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       expect(() => task.fail("error")).toThrow(TaskStateError);
       expect(() => task.fail("error")).toThrow(
@@ -218,9 +219,9 @@ describe("Task", () => {
   describe("cancel()", () => {
     it("should transition from created to cancelled", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       task.cancel("test reason");
       expect(task.status).toBe("cancelled");
@@ -229,9 +230,9 @@ describe("Task", () => {
     });
     it("should transition from running to cancelled", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       task.start();
       task.cancel("test reason");
@@ -241,9 +242,9 @@ describe("Task", () => {
 
     it("should throw if task is in terminal state", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       task.start();
       task.complete();
@@ -254,9 +255,9 @@ describe("Task", () => {
   describe("recordHeartbeat()", () => {
     it("should update lastHeartbeatAt", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       task.start();
       task.recordHeartbeat();
@@ -265,9 +266,9 @@ describe("Task", () => {
 
     it("should throw if task is not running", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       expect(() => task.recordHeartbeat()).toThrow(
         "Cannot recordHeartbeat from state created, allowed: running",
@@ -278,9 +279,9 @@ describe("Task", () => {
   describe("incrementAttempt()", () => {
     it("should increment attempt counter", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       task.start();
       expect(task.attempt).toBe(1);
@@ -293,9 +294,9 @@ describe("Task", () => {
 
     it("should throw if task is not running", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
 
       expect(() => task.incrementAttempt()).toThrow(TaskStateError);
@@ -305,9 +306,9 @@ describe("Task", () => {
   describe("resetToPending()", () => {
     it("should reset failed task to created", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
 
       task.start();
@@ -323,9 +324,9 @@ describe("Task", () => {
 
     it("should throw if task is not failed", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       expect(() => task.resetToPending()).toThrow(TaskStateError);
       task.start();
@@ -337,9 +338,9 @@ describe("Task", () => {
     describe("durationMs", () => {
       it("should return undefined if task not started", async () => {
         const task = new Task({
-          name: "my-task",
+          name: taskName("my-task"),
           input: { value: 42 },
-          userId: "user123",
+          userId: userId("user123"),
         });
 
         task.start();
@@ -351,9 +352,9 @@ describe("Task", () => {
 
       it("should calculate running duration for active tasks", async () => {
         const task = new Task({
-          name: "my-task",
+          name: taskName("my-task"),
           input: { value: 42 },
-          userId: "user123",
+          userId: userId("user123"),
         });
         task.start();
         await new Promise((resolve) => setTimeout(resolve, 30));
@@ -364,9 +365,9 @@ describe("Task", () => {
     describe("isTerminal", () => {
       it("should return false for created and running", () => {
         const task = new Task({
-          name: "my-task",
+          name: taskName("my-task"),
           input: { value: 42 },
-          userId: "user123",
+          userId: userId("user123"),
         });
         expect(task.isTerminal).toBe(false);
         task.start();
@@ -375,9 +376,9 @@ describe("Task", () => {
 
       it("should return true for completed, failed, cancelled", () => {
         const task1 = new Task({
-          name: "my-task",
+          name: taskName("my-task"),
           input: { value: 42 },
-          userId: "user123",
+          userId: userId("user123"),
         });
 
         task1.start();
@@ -385,9 +386,9 @@ describe("Task", () => {
         expect(task1.isTerminal).toBe(true);
 
         const task2 = new Task({
-          name: "my-task",
+          name: taskName("my-task"),
           input: { value: 42 },
-          userId: "user123",
+          userId: userId("user123"),
         });
 
         task2.start();
@@ -395,9 +396,9 @@ describe("Task", () => {
         expect(task2.isTerminal).toBe(true);
 
         const task3 = new Task({
-          name: "my-task",
+          name: taskName("my-task"),
           input: { value: 42 },
-          userId: "user123",
+          userId: userId("user123"),
         });
         task3.cancel();
         expect(task3.isTerminal).toBe(true);
@@ -407,9 +408,9 @@ describe("Task", () => {
     describe("isRunning", () => {
       it("should return true only when running", () => {
         const task = new Task({
-          name: "my-task",
+          name: taskName("my-task"),
           input: { value: 42 },
-          userId: "user123",
+          userId: userId("user123"),
         });
         expect(task.isRunning).toBe(false);
         task.start();
@@ -423,9 +424,9 @@ describe("Task", () => {
   describe("toJSON", () => {
     it("should serialize task to JSON", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
         type: "background",
       });
       task.start();
@@ -448,9 +449,9 @@ describe("Task", () => {
   describe("generateIdempotencyKey", () => {
     it("should generate consistent key for same params", () => {
       const params = {
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       };
       const key1 = Task.generateIdempotencyKey(params);
       const key2 = Task.generateIdempotencyKey(params);
@@ -460,9 +461,9 @@ describe("Task", () => {
 
     it("should handle null userId", () => {
       const key = Task.generateIdempotencyKey({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: null,
+        userId: userId(null),
       });
       expect(key).toHaveLength(64);
     });
@@ -535,9 +536,9 @@ describe("Task", () => {
     it("should follow valid state transitions", () => {
       // created -> running -> completed
       const task1 = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       expect(task1.status).toBe("created");
       task1.start();
@@ -547,9 +548,9 @@ describe("Task", () => {
 
       // created -> running -> failed
       const task2 = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       expect(task2.status).toBe("created");
       task2.start();
@@ -558,9 +559,9 @@ describe("Task", () => {
 
       // created -> running -> cancelled
       const task3 = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       task3.start();
       task3.cancel("test reason");
@@ -568,18 +569,18 @@ describe("Task", () => {
 
       // created -> cancelled
       const task4 = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       task4.cancel("test reason");
       expect(task4.status).toBe("cancelled");
 
       // failed -> created (via resetToPending)
       const task5 = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
       task5.start();
       task5.fail("error");
@@ -590,9 +591,9 @@ describe("Task", () => {
 
     it("should reject invalid state transitions", () => {
       const task = new Task({
-        name: "my-task",
+        name: taskName("my-task"),
         input: { value: 42 },
-        userId: "user123",
+        userId: userId("user123"),
       });
 
       // created -> complete (invalid, must be running)

@@ -1,3 +1,11 @@
+import {
+  type EventId,
+  eventId,
+  type IdempotencyKey,
+  type TaskId,
+  type TaskName,
+  type UserId,
+} from "@/core/branded";
 import type { TaskType } from "@/core/types";
 import type { TaskExecutionOptions } from "./types";
 
@@ -58,13 +66,13 @@ export interface TaskEventInput {
  */
 export interface TaskEventContext {
   /** Unique task ID */
-  taskId: string;
+  taskId: TaskId;
   /** Task name/template */
-  name: string;
+  name: TaskName;
   /** Idempotency key for deduplication */
-  idempotencyKey: string;
+  idempotencyKey: IdempotencyKey;
   /** User ID */
-  userId: string;
+  userId: UserId | null;
   /** Task type */
   taskType: TaskType;
   /** Execution options */
@@ -76,15 +84,15 @@ export interface TaskEventContext {
  */
 export interface TaskEvent extends TaskEventInput {
   /** Unique event ID */
-  id: string;
+  id: EventId;
   /** Task ID this event belongs to */
-  taskId: string;
+  taskId: TaskId;
   /** Task name/template */
-  name: string;
+  name: TaskName;
   /** Idempotency key for the task */
-  idempotencyKey: string;
+  idempotencyKey: IdempotencyKey;
   /** User ID */
-  userId: string;
+  userId: UserId | null;
   /** Task type */
   taskType: TaskType;
   /** Task input (included for context) */
@@ -116,7 +124,7 @@ export interface EventLogEntry {
   /** Task name */
   name: string;
   /** User ID */
-  userId: string;
+  userId: string | null;
   /** Task type */
   taskType: TaskType;
   /** Event timestamp */
@@ -208,7 +216,7 @@ export function createTaskEvent(
 ): TaskEvent {
   return {
     ...input,
-    id: input.id || generateEventId(),
+    id: input.id ? eventId(input.id) : generateEventId(),
     taskId: context.taskId,
     name: context.name,
     idempotencyKey: context.idempotencyKey,
@@ -231,7 +239,7 @@ export function toEventLogEntry(event: TaskEvent): EventLogEntry | null {
     taskId: event.taskId,
     idempotencyKey: event.idempotencyKey,
     name: event.name,
-    userId: event.userId,
+    userId: event.userId ?? null,
     taskType: event.taskType,
     timestamp: event.timestamp ?? Date.now(),
     input: event.input,
@@ -245,6 +253,8 @@ export function toEventLogEntry(event: TaskEvent): EventLogEntry | null {
 /**
  * Generates a unique event ID
  */
-function generateEventId(): string {
-  return `evt_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+function generateEventId(): EventId {
+  return eventId(
+    `evt_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+  );
 }

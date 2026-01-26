@@ -72,6 +72,19 @@ export class TaskSystemError extends Error {
   }
 
   /**
+   * Type guard to check if an error is a TaskSystemError
+   */
+
+  static is(value: unknown): value is TaskSystemError {
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      "name" in value &&
+      (value as Error).name === "TaskSystemError"
+    );
+  }
+
+  /**
    * Serializes the error to a JSON-compatible object
    */
   toJSON(): Record<string, unknown> {
@@ -103,6 +116,15 @@ export class ValidationError extends TaskSystemError {
     this.name = "ValidationError";
     this.field = field;
   }
+
+  static is(value: unknown): value is ValidationError {
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      "name" in value &&
+      (value as Error).name === "ValidationError"
+    );
+  }
 }
 
 /**
@@ -118,6 +140,15 @@ export class ConfigValidationError extends TaskSystemError {
     });
     this.name = "ConfigValidationError";
     this.configPath = configPath;
+  }
+
+  static is(value: unknown): value is ConfigValidationError {
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      "name" in value &&
+      (value as Error).name === "ConfigValidationError"
+    );
   }
 }
 
@@ -142,6 +173,15 @@ export class NotFoundError extends TaskSystemError {
     this.name = "NotFoundError";
     this.resourceType = resourceType;
   }
+
+  static is(value: unknown): value is NotFoundError {
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      "name" in value &&
+      (value as Error).name === "NotFoundError"
+    );
+  }
 }
 
 /**
@@ -151,6 +191,15 @@ export class ConflictError extends TaskSystemError {
   constructor(message: string, context?: ErrorContext) {
     super(message, ErrorCodes.CONFLICT, context);
     this.name = "ConflictError";
+  }
+
+  static is(value: unknown): value is ConflictError {
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      "name" in value &&
+      (value as Error).name === "ConflictError"
+    );
   }
 }
 
@@ -179,6 +228,15 @@ export class TaskStateError extends TaskSystemError {
     this.attemptedTransition = attemptedTransition;
     this.validTransitions = validTransitions;
   }
+
+  static is(value: unknown): value is TaskStateError {
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      "name" in value &&
+      (value as Error).name === "TaskStateError"
+    );
+  }
 }
 
 /**
@@ -190,6 +248,15 @@ export class SlotTimeoutError extends TaskSystemError {
     super(message, ErrorCodes.SLOT_TIMEOUT, { ...context, timeoutMs });
     this.name = "SlotTimeoutError";
     this.timeoutMs = timeoutMs;
+  }
+
+  static is(value: unknown): value is SlotTimeoutError {
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      "name" in value &&
+      (value as Error).name === "SlotTimeoutError"
+    );
   }
 }
 
@@ -234,6 +301,15 @@ export class BackpressureError extends TaskSystemError {
     this.retryAfterMs = retryAfterMs;
   }
 
+  static is(value: unknown): value is BackpressureError {
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      "name" in value &&
+      (value as Error).name === "BackpressureError"
+    );
+  }
+
   toHTTPResponse(): HTTP429Response {
     return {
       status: 429,
@@ -261,6 +337,15 @@ export class InitializationError extends TaskSystemError {
     super(message, ErrorCodes.INITIALIZATION_FAILED, { ...context, component });
     this.name = "InitializationError";
     this.component = component;
+  }
+
+  static is(value: unknown): value is InitializationError {
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      "name" in value &&
+      (value as Error).name === "InitializationError"
+    );
   }
 }
 
@@ -291,6 +376,15 @@ export class RetryExhaustedError extends TaskSystemError {
     this.attempts = attempts;
     this.maxAttempts = maxAttempts;
   }
+
+  static is(value: unknown): value is RetryExhaustedError {
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      "name" in value &&
+      (value as Error).name === "RetryExhaustedError"
+    );
+  }
 }
 
 /**
@@ -300,6 +394,15 @@ export class StreamOverflowError extends TaskSystemError {
   constructor(message: string, context?: ErrorContext) {
     super(message, ErrorCodes.STREAM_OVERFLOW, context);
     this.name = "StreamOverflowError";
+  }
+
+  static is(value: unknown): value is StreamOverflowError {
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      "name" in value &&
+      (value as Error).name === "StreamOverflowError"
+    );
   }
 }
 

@@ -1,5 +1,15 @@
 import { createHash } from "node:crypto";
 import { canonicalize } from "json-canonicalize";
+import {
+  type IdempotencyKey,
+  idempotencyKey,
+  type TaskId,
+  type TaskName,
+  taskId,
+  taskName,
+  type UserId,
+  userId,
+} from "@/core/branded";
 import { TaskStateError } from "@/core/errors";
 import {
   isTerminalStatus,
@@ -26,15 +36,15 @@ import type {
  */
 export class Task {
   /** Unique task identifier */
-  readonly id: string;
+  readonly id: TaskId;
   /** Task name/template */
-  readonly name: string;
+  readonly name: TaskName;
   /** Input data for the handler */
   readonly input: unknown;
   /** User ID (null for background tasks) */
-  readonly userId: string | null;
+  readonly userId: UserId | null;
   /** Idempotency key for deduplication */
-  readonly idempotencyKey: string;
+  readonly idempotencyKey: IdempotencyKey;
   /** Creation timestamp */
   readonly createdAt: Date;
   /** Task type: user or background */
@@ -104,7 +114,7 @@ export class Task {
   }
 
   constructor(params: TaskCreationParams) {
-    this.id = crypto.randomUUID();
+    this.id = taskId(crypto.randomUUID());
     this.name = params.name;
     this.input = params.input;
     this.userId = params.userId;
@@ -115,7 +125,8 @@ export class Task {
     this._attempt = 0;
 
     this.idempotencyKey =
-      params.idempotencyKey ?? Task.generateIdempotencyKey(params);
+      params.idempotencyKey ??
+      idempotencyKey(Task.generateIdempotencyKey(params));
   }
 
   /**
@@ -241,11 +252,11 @@ export class Task {
    */
   static fromRecord(record: TaskRecord): Task {
     const task = new Task({
-      name: record.name,
+      name: taskName(record.name),
       input: JSON.parse(record.input),
-      userId: record.user_id,
+      userId: userId(record.user_id),
       type: record.task_type as TaskType,
-      idempotencyKey: record.idempotency_key,
+      idempotencyKey: idempotencyKey(record.idempotency_key),
       executionOptions: record.execution_options
         ? JSON.parse(record.execution_options)
         : undefined,
@@ -281,7 +292,9 @@ export class Task {
       input: params.input,
       userId: params.userId,
     };
-    return createHash("sha256").update(canonicalize(payload)).digest("hex");
+    return idempotencyKey(
+      createHash("sha256").update(canonicalize(payload)).digest("hex"),
+    );
   }
 
   /**

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  eventId,
+  idempotencyKey,
+  taskId,
+  taskName,
+  userId,
+} from "@/core/branded";
+import {
   createTaskEvent,
   isRecoveryRelevant,
   shouldStoreInTaskEvents,
@@ -130,10 +137,10 @@ describe("Domain Events", () => {
         payload: { percent: 50 },
       };
       const context: TaskEventContext = {
-        taskId: "123",
-        name: "my-task",
-        idempotencyKey: "abc123",
-        userId: "user123",
+        taskId: taskId("123"),
+        name: taskName("my-task"),
+        idempotencyKey: idempotencyKey("abc123"),
+        userId: userId("user123"),
         taskType: "user",
       };
       const event = createTaskEvent(input, context);
@@ -156,10 +163,10 @@ describe("Domain Events", () => {
         type: "complete",
       };
       const context: TaskEventContext = {
-        taskId: "123",
-        name: "my-task",
-        idempotencyKey: "abc123",
-        userId: "user123",
+        taskId: taskId("123"),
+        name: taskName("my-task"),
+        idempotencyKey: idempotencyKey("abc123"),
+        userId: userId("user123"),
         taskType: "user",
       };
       const event = createTaskEvent(input, context);
@@ -173,10 +180,10 @@ describe("Domain Events", () => {
         payload: { percent: 50 },
       };
       const context: TaskEventContext = {
-        taskId: "123",
-        name: "my-task",
-        idempotencyKey: "abc123",
-        userId: "user123",
+        taskId: taskId("123"),
+        name: taskName("my-task"),
+        idempotencyKey: idempotencyKey("abc123"),
+        userId: userId("user123"),
         taskType: "user",
         executionOptions: {
           maxRetries: 3,
@@ -194,12 +201,12 @@ describe("Domain Events", () => {
   describe("toEventLogEntry", () => {
     it("should convert TaskEvent to EventLogEntry (for WAL persistence)", () => {
       const event: TaskEvent = {
-        id: "evt_123",
-        taskId: "123",
-        name: "my-task",
+        id: eventId("evt_123"),
+        taskId: taskId("123"),
+        name: taskName("my-task"),
         type: "complete",
-        idempotencyKey: "abc123",
-        userId: "user123",
+        idempotencyKey: idempotencyKey("abc123"),
+        userId: userId("user123"),
         taskType: "user",
         timestamp: Date.now(),
         result: { data: "success" },
@@ -214,12 +221,12 @@ describe("Domain Events", () => {
 
     it("should return null for retry events (not persisted to WAL)", () => {
       const event: TaskEvent = {
-        id: "evt_123",
-        taskId: "123",
-        name: "my-task",
+        id: eventId("evt_123"),
+        taskId: taskId("123"),
+        name: taskName("my-task"),
         type: "retry",
-        idempotencyKey: "abc123",
-        userId: "user123",
+        idempotencyKey: idempotencyKey("abc123"),
+        userId: userId("user123"),
         taskType: "user",
         timestamp: Date.now(),
         nextRetryDelayMs: 1000,
@@ -229,12 +236,12 @@ describe("Domain Events", () => {
 
     it("should return null for recovered events (internal event)", () => {
       const event: TaskEvent = {
-        id: "evt_123",
-        taskId: "123",
-        name: "my-task",
+        id: eventId("evt_123"),
+        taskId: taskId("123"),
+        name: taskName("my-task"),
         type: "recovered",
-        idempotencyKey: "abc123",
-        userId: "user123",
+        idempotencyKey: idempotencyKey("abc123"),
+        userId: userId("user123"),
         taskType: "user",
       };
 
@@ -243,12 +250,12 @@ describe("Domain Events", () => {
 
     it("should include executionOptions in entry", () => {
       const event: TaskEvent = {
-        id: "evt_123",
-        taskId: "123",
-        name: "my-task",
+        id: eventId("evt_123"),
+        taskId: taskId("123"),
+        name: taskName("my-task"),
         type: "created",
-        idempotencyKey: "abc123",
-        userId: "user123",
+        idempotencyKey: idempotencyKey("abc123"),
+        userId: userId("user123"),
         taskType: "user",
         timestamp: Date.now(),
         executionOptions: {

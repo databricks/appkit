@@ -1,3 +1,4 @@
+import { IdempotencyKey, TaskId, TaskName, UserId } from "@/core/branded";
 import type { TaskStatus, TaskType } from "@/core/types";
 
 /**
@@ -15,17 +16,17 @@ export interface TaskExecutionOptions {
  */
 export interface TaskCreationParams {
   /** The registered task name/template */
-  name: string;
+  name: TaskName;
   /** Input data for the task handler */
   input: unknown;
   /** User ID for user-initiated tasks, null for background tasks */
-  userId: string | null;
+  userId: UserId | null;
   /** Task type: user or background */
   type?: TaskType;
   /** Execution options for the task */
   executionOptions?: TaskExecutionOptions;
   /** Custom idempotency key (auto-generated if not provided) */
-  idempotencyKey?: string;
+  idempotencyKey?: IdempotencyKey;
 }
 
 /**
