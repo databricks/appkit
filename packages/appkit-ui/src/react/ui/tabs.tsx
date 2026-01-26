@@ -5,6 +5,7 @@ import * as TabsPrimitive from "@radix-ui/react-tabs";
 
 import { cn } from "../lib/utils";
 
+/** Tabbed interface for organizing content into separate panels */
 function Tabs({
   className,
   ...props
@@ -18,6 +19,7 @@ function Tabs({
   );
 }
 
+/** Container for tab trigger buttons */
 function TabsList({
   className,
   ...props
@@ -34,6 +36,7 @@ function TabsList({
   );
 }
 
+/** Button that activates a tab panel */
 function TabsTrigger({
   className,
   ...props
@@ -50,6 +53,7 @@ function TabsTrigger({
   );
 }
 
+/** Content panel associated with a tab */
 function TabsContent({
   className,
   ...props

@@ -123,6 +123,7 @@ const config: Config = {
         flattenOutputFiles: true,
         expandObjects: true,
         expandParameters: true,
+        disableSources: true,
         sidebar: {
           autoConfiguration: true,
           pretty: true,

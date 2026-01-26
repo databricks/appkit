@@ -1,0 +1,270 @@
+# Dialog
+
+Modal dialog that overlays the page content
+
+
+## Example
+
+import { DocExample } from "@site/src/components/DocExample";
+
+<DocExample name="dialog" />
+
+
+## Dialog
+
+Modal dialog that overlays the page content
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/dialog.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/dialog.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `open` | `boolean` |  | - | - |
+| `defaultOpen` | `boolean` |  | - | - |
+| `onOpenChange` | `((open: boolean) => void)` |  | - | - |
+| `modal` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { Dialog } from '@databricks/appkit-ui';
+
+<Dialog /* props */ />
+```
+
+
+## DialogClose
+
+Button that closes the dialog
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/dialog.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/dialog.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { DialogClose } from '@databricks/appkit-ui';
+
+<DialogClose /* props */ />
+```
+
+
+## DialogContent
+
+Main content area of the dialog
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/dialog.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/dialog.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `forceMount` | `true` |  | - | Used to force mounting when more control is needed. Useful when controlling animation with React animation libraries. |
+| `asChild` | `boolean` |  | - | - |
+| `onEscapeKeyDown` | `((event: KeyboardEvent) => void)` |  | - | Event handler called when the escape key is down. Can be prevented. |
+| `onPointerDownOutside` | `((event: PointerDownOutsideEvent) => void)` |  | - | Event handler called when the a `pointerdown` event happens outside of the `DismissableLayer`. Can be prevented. |
+| `onFocusOutside` | `((event: FocusOutsideEvent) => void)` |  | - | Event handler called when the focus moves outside of the `DismissableLayer`. Can be prevented. |
+| `onInteractOutside` | `((event: FocusOutsideEvent \| PointerDownOutsideEvent) => void)` |  | - | Event handler called when an interaction happens outside the `DismissableLayer`. Specifically, when a `pointerdown` event happens outside or focus moves outside of it. Can be prevented. |
+| `onOpenAutoFocus` | `((event: Event) => void)` |  | - | Event handler called when auto-focusing on open. Can be prevented. |
+| `onCloseAutoFocus` | `((event: Event) => void)` |  | - | Event handler called when auto-focusing on close. Can be prevented. |
+| `showCloseButton` | `boolean` |  | `true` | - |
+
+
+
+### Usage
+
+```tsx
+import { DialogContent } from '@databricks/appkit-ui';
+
+<DialogContent /* props */ />
+```
+
+
+## DialogDescription
+
+Description text for the dialog
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/dialog.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/dialog.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { DialogDescription } from '@databricks/appkit-ui';
+
+<DialogDescription /* props */ />
+```
+
+
+## DialogFooter
+
+Footer section of the dialog
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/dialog.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/dialog.tsx)
+
+
+### Props
+
+This component extends standard HTML element attributes.
+
+
+
+### Usage
+
+```tsx
+import { DialogFooter } from '@databricks/appkit-ui';
+
+<DialogFooter /* props */ />
+```
+
+
+## DialogHeader
+
+Header section of the dialog
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/dialog.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/dialog.tsx)
+
+
+### Props
+
+This component extends standard HTML element attributes.
+
+
+
+### Usage
+
+```tsx
+import { DialogHeader } from '@databricks/appkit-ui';
+
+<DialogHeader /* props */ />
+```
+
+
+## DialogOverlay
+
+Dimmed overlay behind the dialog
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/dialog.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/dialog.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `forceMount` | `true` |  | - | Used to force mounting when more control is needed. Useful when controlling animation with React animation libraries. |
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { DialogOverlay } from '@databricks/appkit-ui';
+
+<DialogOverlay /* props */ />
+```
+
+
+## DialogPortal
+
+Portal container for dialog content
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/dialog.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/dialog.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `container` | `Element \| DocumentFragment \| null` |  | - | Specify a container element to portal the content into. |
+| `forceMount` | `true` |  | - | Used to force mounting when more control is needed. Useful when controlling animation with React animation libraries. |
+
+
+
+### Usage
+
+```tsx
+import { DialogPortal } from '@databricks/appkit-ui';
+
+<DialogPortal /* props */ />
+```
+
+
+## DialogTitle
+
+Title text for the dialog
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/dialog.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/dialog.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { DialogTitle } from '@databricks/appkit-ui';
+
+<DialogTitle /* props */ />
+```
+
+
+## DialogTrigger
+
+Button that opens the dialog
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/dialog.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/dialog.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { DialogTrigger } from '@databricks/appkit-ui';
+
+<DialogTrigger /* props */ />
+```
+

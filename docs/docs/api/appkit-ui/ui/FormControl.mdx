@@ -1,0 +1,153 @@
+# FormControl
+
+Wrapper for form control elements with accessibility attributes
+
+
+## FormControl
+
+Wrapper for form control elements with accessibility attributes
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/form.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/form.tsx)
+
+
+### Props
+
+This component extends standard HTML element attributes.
+
+
+
+### Usage
+
+```tsx
+import { FormControl } from '@databricks/appkit-ui';
+
+<FormControl /* props */ />
+```
+
+
+## FormDescription
+
+Helper text providing guidance for a form field
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/form.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/form.tsx)
+
+
+### Props
+
+This component extends standard HTML element attributes.
+
+
+
+### Usage
+
+```tsx
+import { FormDescription } from '@databricks/appkit-ui';
+
+<FormDescription /* props */ />
+```
+
+
+## FormField
+
+Controlled field component for react-hook-form integration
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/form.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/form.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `render` | `({ field, fieldState, formState, }: { field: ControllerRenderProps<TFieldValues, TName>; fieldState: ControllerFieldState; formState: UseFormStateReturn<TFieldValues>; }) => ReactElement<...>` | ✓ | - | - |
+| `name` | `string` | ✓ | - | - |
+| `rules` | `Omit<RegisterOptions<TFieldValues, TName>, "disabled" \| "valueAsNumber" \| "valueAsDate" \| "setValueAs">` |  | - | - |
+| `shouldUnregister` | `boolean` |  | - | - |
+| `defaultValue` | `any` |  | - | - |
+| `control` | `Control<TFieldValues, any, TFieldValues>` |  | - | - |
+| `disabled` | `boolean` |  | - | - |
+| `exact` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { FormField } from '@databricks/appkit-ui';
+
+<FormField /* props */ />
+```
+
+
+## FormItem
+
+Container for a single form field with label and messages
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/form.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/form.tsx)
+
+
+### Props
+
+This component extends standard HTML element attributes.
+
+
+
+### Usage
+
+```tsx
+import { FormItem } from '@databricks/appkit-ui';
+
+<FormItem /* props */ />
+```
+
+
+## FormLabel
+
+Label for a form field with error state styling
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/form.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/form.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { FormLabel } from '@databricks/appkit-ui';
+
+<FormLabel /* props */ />
+```
+
+
+## FormMessage
+
+Validation error message for a form field
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/form.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/form.tsx)
+
+
+### Props
+
+This component extends standard HTML element attributes.
+
+
+
+### Usage
+
+```tsx
+import { FormMessage } from '@databricks/appkit-ui';
+
+<FormMessage /* props */ />
+```
+

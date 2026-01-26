@@ -1,0 +1,139 @@
+# Carousel
+
+Slideshow component for cycling through content with navigation controls
+
+
+## Example
+
+import { DocExample } from "@site/src/components/DocExample";
+
+<DocExample name="carousel" />
+
+
+## Carousel
+
+Slideshow component for cycling through content with navigation controls
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/carousel.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/carousel.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `opts` | `Partial<OptionsType>` |  | - | - |
+| `plugins` | `CreatePluginType<LoosePluginType, {}>[]` |  | - | - |
+| `orientation` | `enum` |  | `horizontal` | - |
+| `setApi` | `((api: EmblaCarouselType) => void)` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { Carousel } from '@databricks/appkit-ui';
+
+<Carousel /* props */ />
+```
+
+
+## CarouselContent
+
+Container for carousel slides with horizontal or vertical scrolling
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/carousel.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/carousel.tsx)
+
+
+### Props
+
+This component extends standard HTML element attributes.
+
+
+
+### Usage
+
+```tsx
+import { CarouselContent } from '@databricks/appkit-ui';
+
+<CarouselContent /* props */ />
+```
+
+
+## CarouselItem
+
+Individual slide within the carousel
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/carousel.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/carousel.tsx)
+
+
+### Props
+
+This component extends standard HTML element attributes.
+
+
+
+### Usage
+
+```tsx
+import { CarouselItem } from '@databricks/appkit-ui';
+
+<CarouselItem /* props */ />
+```
+
+
+## CarouselNext
+
+Button to navigate to the next carousel slide
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/carousel.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/carousel.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `variant` | `"link" \| "default" \| "destructive" \| "secondary" \| "outline" \| "ghost" \| null` |  | `outline` | - |
+| `size` | `"default" \| "sm" \| "lg" \| "icon" \| "icon-sm" \| "icon-lg" \| null` |  | `icon` | - |
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { CarouselNext } from '@databricks/appkit-ui';
+
+<CarouselNext /* props */ />
+```
+
+
+## CarouselPrevious
+
+Button to navigate to the previous carousel slide
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/carousel.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/carousel.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `variant` | `"link" \| "default" \| "destructive" \| "secondary" \| "outline" \| "ghost" \| null` |  | `outline` | - |
+| `size` | `"default" \| "sm" \| "lg" \| "icon" \| "icon-sm" \| "icon-lg" \| null` |  | `icon` | - |
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { CarouselPrevious } from '@databricks/appkit-ui';
+
+<CarouselPrevious /* props */ />
+```
+

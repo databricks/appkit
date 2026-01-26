@@ -1,26 +1,28 @@
+import type { JSX } from "react";
 import { createChart } from "../create-chart";
 import type { LineChartProps } from "../types";
 
 /**
- * Line Chart component.
- * Supports both JSON and Arrow data formats with automatic format selection.
+ * Line Chart component for time-series and trend visualization.
  *
- * @example Simple usage
- * ```tsx
- * <LineChart
- *   queryKey="revenue_over_time"
- *   parameters={{ period: "monthly" }}
- * />
- * ```
+ * **Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
  *
- * @example With custom styling
- * ```tsx
- * <LineChart
- *   queryKey="trends"
- *   parameters={{ metric: "users" }}
- *   smooth={false}
- *   showSymbol={true}
- * />
- * ```
+ * **Best Practice:** Use the built-in data fetching by passing `queryKey` and `parameters` props instead of pre-fetching data with `useAnalyticsQuery`.
+ *
+ * Supports both query mode (queryKey + parameters) and data mode (static data).
  */
 export const LineChart = createChart<LineChartProps>("line", "LineChart");
+
+// Type-only definition for documentation generation (not used at runtime)
+/**
+ * Line Chart component for time-series and trend visualization.
+ *
+ * **Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
+ *
+ * **Best Practice:** Use the built-in data fetching by passing `queryKey` and `parameters` props instead of pre-fetching data with `useAnalyticsQuery`.
+ *
+ * Supports both query mode (queryKey + parameters) and data mode (static data).
+ */
+export function LineChartDoc(props: LineChartProps): JSX.Element {
+  return LineChart(props);
+}

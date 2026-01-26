@@ -1,0 +1,41 @@
+# Toggle
+
+Button that toggles between pressed and unpressed states
+
+
+## Example
+
+import { DocExample } from "@site/src/components/DocExample";
+
+<DocExample name="toggle" />
+
+
+## Toggle
+
+Button that toggles between pressed and unpressed states
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/toggle.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/toggle.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `pressed` | `boolean` |  | - | The controlled state of the toggle. |
+| `defaultPressed` | `boolean` |  | - | The state of the toggle when initially rendered. Use `defaultPressed` if you do not need to control the state of the toggle. @defaultValue false |
+| `onPressedChange` | `((pressed: boolean) => void)` |  | - | The callback that fires when the state of the toggle changes. |
+| `asChild` | `boolean` |  | - | - |
+| `variant` | `"default" \| "outline" \| null` |  | - | - |
+| `size` | `"default" \| "sm" \| "lg" \| null` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { Toggle } from '@databricks/appkit-ui';
+
+<Toggle /* props */ />
+```
+

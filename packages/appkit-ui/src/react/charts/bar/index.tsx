@@ -1,35 +1,28 @@
+import type { JSX } from "react";
 import { createChart } from "../create-chart";
 import type { BarChartProps } from "../types";
 
 /**
- * Bar Chart component.
- * Supports both JSON and Arrow data formats with automatic format selection.
+ * Bar Chart component for categorical comparisons.
  *
- * @example Query mode with auto format selection
- * ```tsx
- * <BarChart
- *   queryKey="top_contributors"
- *   parameters={{ limit: 10 }}
- * />
- * ```
+ * **Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
  *
- * @example Query mode with explicit Arrow format
- * ```tsx
- * <BarChart
- *   queryKey="spend_data"
- *   parameters={{ startDate, endDate }}
- *   format="arrow"
- * />
- * ```
+ * **Best Practice:** Use the built-in data fetching by passing `queryKey` and `parameters` props instead of pre-fetching data with `useAnalyticsQuery`.
  *
- * @example Data mode with JSON array
- * ```tsx
- * <BarChart
- *   data={[
- *     { category: "A", value: 100 },
- *     { category: "B", value: 200 },
- *   ]}
- * />
- * ```
+ * Supports both query mode (queryKey + parameters) and data mode (static data).
  */
 export const BarChart = createChart<BarChartProps>("bar", "BarChart");
+
+// Type-only definition for documentation generation (not used at runtime)
+/**
+ * Bar Chart component for categorical comparisons.
+ *
+ * **Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
+ *
+ * **Best Practice:** Use the built-in data fetching by passing `queryKey` and `parameters` props instead of pre-fetching data with `useAnalyticsQuery`.
+ *
+ * Supports both query mode (queryKey + parameters) and data mode (static data).
+ */
+export function BarChartDoc(props: BarChartProps): JSX.Element {
+  return BarChart(props);
+}

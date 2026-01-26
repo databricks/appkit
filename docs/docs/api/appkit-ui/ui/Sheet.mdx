@@ -1,0 +1,218 @@
+# Sheet
+
+Sliding panel that overlays content from screen edges
+
+
+## Example
+
+import { DocExample } from "@site/src/components/DocExample";
+
+<DocExample name="sheet" />
+
+
+## Sheet
+
+Sliding panel that overlays content from screen edges
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/sheet.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/sheet.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `open` | `boolean` |  | - | - |
+| `defaultOpen` | `boolean` |  | - | - |
+| `onOpenChange` | `((open: boolean) => void)` |  | - | - |
+| `modal` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { Sheet } from '@databricks/appkit-ui';
+
+<Sheet /* props */ />
+```
+
+
+## SheetClose
+
+Button that closes the sheet
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/sheet.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/sheet.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { SheetClose } from '@databricks/appkit-ui';
+
+<SheetClose /* props */ />
+```
+
+
+## SheetContent
+
+Main content area of the sheet
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/sheet.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/sheet.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `forceMount` | `true` |  | - | Used to force mounting when more control is needed. Useful when controlling animation with React animation libraries. |
+| `asChild` | `boolean` |  | - | - |
+| `onEscapeKeyDown` | `((event: KeyboardEvent) => void)` |  | - | Event handler called when the escape key is down. Can be prevented. |
+| `onPointerDownOutside` | `((event: PointerDownOutsideEvent) => void)` |  | - | Event handler called when the a `pointerdown` event happens outside of the `DismissableLayer`. Can be prevented. |
+| `onFocusOutside` | `((event: FocusOutsideEvent) => void)` |  | - | Event handler called when the focus moves outside of the `DismissableLayer`. Can be prevented. |
+| `onInteractOutside` | `((event: FocusOutsideEvent \| PointerDownOutsideEvent) => void)` |  | - | Event handler called when an interaction happens outside the `DismissableLayer`. Specifically, when a `pointerdown` event happens outside or focus moves outside of it. Can be prevented. |
+| `onOpenAutoFocus` | `((event: Event) => void)` |  | - | Event handler called when auto-focusing on open. Can be prevented. |
+| `onCloseAutoFocus` | `((event: Event) => void)` |  | - | Event handler called when auto-focusing on close. Can be prevented. |
+| `side` | `enum` |  | `right` | - |
+
+
+
+### Usage
+
+```tsx
+import { SheetContent } from '@databricks/appkit-ui';
+
+<SheetContent /* props */ />
+```
+
+
+## SheetDescription
+
+Description text for the sheet
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/sheet.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/sheet.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { SheetDescription } from '@databricks/appkit-ui';
+
+<SheetDescription /* props */ />
+```
+
+
+## SheetFooter
+
+Footer section of the sheet
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/sheet.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/sheet.tsx)
+
+
+### Props
+
+This component extends standard HTML element attributes.
+
+
+
+### Usage
+
+```tsx
+import { SheetFooter } from '@databricks/appkit-ui';
+
+<SheetFooter /* props */ />
+```
+
+
+## SheetHeader
+
+Header section of the sheet
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/sheet.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/sheet.tsx)
+
+
+### Props
+
+This component extends standard HTML element attributes.
+
+
+
+### Usage
+
+```tsx
+import { SheetHeader } from '@databricks/appkit-ui';
+
+<SheetHeader /* props */ />
+```
+
+
+## SheetTitle
+
+Title text for the sheet
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/sheet.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/sheet.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { SheetTitle } from '@databricks/appkit-ui';
+
+<SheetTitle /* props */ />
+```
+
+
+## SheetTrigger
+
+Button that opens the sheet
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/sheet.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/sheet.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { SheetTrigger } from '@databricks/appkit-ui';
+
+<SheetTrigger /* props */ />
+```
+

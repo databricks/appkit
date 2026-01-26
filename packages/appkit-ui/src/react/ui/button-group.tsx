@@ -21,6 +21,7 @@ const buttonGroupVariants = cva(
   }
 );
 
+/** Container for grouping related buttons together with shared borders */
 function ButtonGroup({
   className,
   orientation,
@@ -37,6 +38,7 @@ function ButtonGroup({
   );
 }
 
+/** Text label or content within a button group */
 function ButtonGroupText({
   className,
   asChild = false,
@@ -57,6 +59,7 @@ function ButtonGroupText({
   );
 }
 
+/** Visual separator between buttons in a button group */
 function ButtonGroupSeparator({
   className,
   orientation = "vertical",

@@ -1,0 +1,291 @@
+# AlertDialog
+
+Modal dialog that interrupts the user with critical information requiring immediate action
+
+
+## Example
+
+import { DocExample } from "@site/src/components/DocExample";
+
+<DocExample name="alert-dialog" />
+
+
+## AlertDialog
+
+Modal dialog that interrupts the user with critical information requiring immediate action
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/alert-dialog.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/alert-dialog.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `defaultOpen` | `boolean` |  | - | - |
+| `open` | `boolean` |  | - | - |
+| `onOpenChange` | `((open: boolean) => void)` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { AlertDialog } from '@databricks/appkit-ui';
+
+<AlertDialog /* props */ />
+```
+
+
+## AlertDialogAction
+
+Primary action button that confirms the alert
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/alert-dialog.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/alert-dialog.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { AlertDialogAction } from '@databricks/appkit-ui';
+
+<AlertDialogAction /* props */ />
+```
+
+
+## AlertDialogCancel
+
+Cancel button that dismisses the alert dialog
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/alert-dialog.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/alert-dialog.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { AlertDialogCancel } from '@databricks/appkit-ui';
+
+<AlertDialogCancel /* props */ />
+```
+
+
+## AlertDialogContent
+
+Main content container for the alert dialog
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/alert-dialog.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/alert-dialog.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+| `forceMount` | `true` |  | - | Used to force mounting when more control is needed. Useful when controlling animation with React animation libraries. |
+| `onEscapeKeyDown` | `((event: KeyboardEvent) => void)` |  | - | Event handler called when the escape key is down. Can be prevented. |
+| `onFocusOutside` | `((event: FocusOutsideEvent) => void)` |  | - | Event handler called when the focus moves outside of the `DismissableLayer`. Can be prevented. |
+| `onOpenAutoFocus` | `((event: Event) => void)` |  | - | Event handler called when auto-focusing on open. Can be prevented. |
+| `onCloseAutoFocus` | `((event: Event) => void)` |  | - | Event handler called when auto-focusing on close. Can be prevented. |
+
+
+
+### Usage
+
+```tsx
+import { AlertDialogContent } from '@databricks/appkit-ui';
+
+<AlertDialogContent /* props */ />
+```
+
+
+## AlertDialogDescription
+
+Descriptive text explaining the alert
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/alert-dialog.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/alert-dialog.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { AlertDialogDescription } from '@databricks/appkit-ui';
+
+<AlertDialogDescription /* props */ />
+```
+
+
+## AlertDialogFooter
+
+Footer section containing action buttons
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/alert-dialog.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/alert-dialog.tsx)
+
+
+### Props
+
+This component extends standard HTML element attributes.
+
+
+
+### Usage
+
+```tsx
+import { AlertDialogFooter } from '@databricks/appkit-ui';
+
+<AlertDialogFooter /* props */ />
+```
+
+
+## AlertDialogHeader
+
+Header section containing title and description
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/alert-dialog.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/alert-dialog.tsx)
+
+
+### Props
+
+This component extends standard HTML element attributes.
+
+
+
+### Usage
+
+```tsx
+import { AlertDialogHeader } from '@databricks/appkit-ui';
+
+<AlertDialogHeader /* props */ />
+```
+
+
+## AlertDialogOverlay
+
+Background overlay that dims content behind the alert dialog
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/alert-dialog.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/alert-dialog.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+| `forceMount` | `true` |  | - | Used to force mounting when more control is needed. Useful when controlling animation with React animation libraries. |
+
+
+
+### Usage
+
+```tsx
+import { AlertDialogOverlay } from '@databricks/appkit-ui';
+
+<AlertDialogOverlay /* props */ />
+```
+
+
+## AlertDialogPortal
+
+Portal container for rendering alert dialog content outside the DOM hierarchy
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/alert-dialog.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/alert-dialog.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `container` | `Element \| DocumentFragment \| null` |  | - | Specify a container element to portal the content into. |
+| `forceMount` | `true` |  | - | Used to force mounting when more control is needed. Useful when controlling animation with React animation libraries. |
+
+
+
+### Usage
+
+```tsx
+import { AlertDialogPortal } from '@databricks/appkit-ui';
+
+<AlertDialogPortal /* props */ />
+```
+
+
+## AlertDialogTitle
+
+Title heading for the alert dialog
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/alert-dialog.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/alert-dialog.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { AlertDialogTitle } from '@databricks/appkit-ui';
+
+<AlertDialogTitle /* props */ />
+```
+
+
+## AlertDialogTrigger
+
+Button that triggers the alert dialog to open
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/alert-dialog.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/alert-dialog.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { AlertDialogTrigger } from '@databricks/appkit-ui';
+
+<AlertDialogTrigger /* props */ />
+```
+

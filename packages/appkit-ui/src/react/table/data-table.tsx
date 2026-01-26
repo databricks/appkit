@@ -29,6 +29,7 @@ import type { DataTableLabels, DataTableProps } from "./types";
 
 /**
  * Production-ready data table with automatic data fetching and state management
+ *
  * Features:
  *  - Automatic column generation from data structure
  *  - Integrated with useAnalyticsQuery for data fetching
@@ -36,9 +37,11 @@ import type { DataTableLabels, DataTableProps } from "./types";
  *  - Dynamic filtering, sorting and pagination
  *  - Column visibility controls
  *  - Responsive design
+ *  - Supports opinionated mode (auto columns) and full-control mode (`children(table)`)
+ *
  * @param props - Props for the DataTable component
  * @param props.queryKey - The query key to fetch the data
- * @param props.parameters - The parameters to pass to the query
+ * @param props.parameters - The parameters to pass to the query. Required - use `{}` if none.
  * @param props.filterColumn - The column to filter by
  * @param props.filterPlaceholder - The placeholder for the filter input
  * @param props.children - Optional children for full control mode
