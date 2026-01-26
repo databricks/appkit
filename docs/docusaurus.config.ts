@@ -3,6 +3,7 @@ import path from "node:path";
 import type { Config } from "@docusaurus/types";
 import type * as Preset from "@docusaurus/preset-classic";
 import webpack from "webpack";
+import type { PluginOptions } from "@signalwire/docusaurus-plugin-llms-txt/public";
 
 function appKitAliasPlugin() {
   return {
@@ -132,6 +133,35 @@ const config: Config = {
       },
     ],
     appKitAliasPlugin,
+    [
+      "@signalwire/docusaurus-plugin-llms-txt",
+      // docs: https://github.com/signalwire/docusaurus-plugins/blob/main/packages/docusaurus-plugin-llms-txt/README.md
+      {
+        id: "appkit",
+        markdown: {
+          enableFiles: true,
+          relativePaths: true,
+          includeDocs: true,
+          includeVersionedDocs: false,
+          includeBlog: false,
+          includePages: false,
+          includeGeneratedIndex: true,
+        },
+        llmsTxt: {
+          siteTitle: "AppKit",
+          siteDescription:
+            "Node.js + React SDK for Databricks Apps. Built for humans and AI.",
+          enableLlmsFullTxt: true,
+        },
+        ui: {
+          copyPageContent: {
+            display: {
+              docs: true,
+            },
+          },
+        },
+      } satisfies PluginOptions,
+    ],
   ],
 
   themeConfig: {
