@@ -11,8 +11,8 @@
     "dist",
     "bin",
     "scripts",
+    "docs",
     "CLAUDE.md",
-    "AGENTS.md",
     "llms.txt",
     "README.md",
     "DCO",
@@ -39,7 +39,7 @@
     "clean:full": "rm -rf dist node_modules tmp",
     "clean": "rm -rf dist tmp",
     "dist": "tsx ../../tools/dist.ts",
-    "tarball": "rm -rf tmp && tsx ../../tools/dist.ts && npm pack ./tmp --pack-destination ./tmp",
+    "tarball": "rm -rf tmp && pnpm dist && npm pack ./tmp --pack-destination ./tmp",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

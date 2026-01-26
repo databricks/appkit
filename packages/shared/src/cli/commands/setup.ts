@@ -1,16 +1,4 @@
-#!/usr/bin/env node
-
-/**
- * CLI tool to setup CLAUDE.md for Databricks AppKit packages.
- *
- * This bin is included in both @databricks/appkit and @databricks/appkit-ui
- * so it's available regardless of which package the user installs.
- *
- * Usage:
- *   npx appkit-setup          # Show detected packages and content
- *   npx appkit-setup --write  # Create or update CLAUDE.md file
- */
-
+import { Command } from "commander";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -26,15 +14,20 @@ const SECTION_START = "<!-- appkit-instructions-start -->";
 const SECTION_END = "<!-- appkit-instructions-end -->";
 
 /**
- * Find which AppKit packages are installed by checking for CLAUDE.md
+ * Find which AppKit packages are installed by checking for package.json
  */
 function findInstalledPackages() {
   const cwd = process.cwd();
   const installed = [];
 
   for (const pkg of PACKAGES) {
-    const claudePath = path.join(cwd, "node_modules", pkg.name, "package.json");
-    if (fs.existsSync(claudePath)) {
+    const packagePath = path.join(
+      cwd,
+      "node_modules",
+      pkg.name,
+      "package.json",
+    );
+    if (fs.existsSync(packagePath)) {
       installed.push(pkg);
     }
   }
@@ -45,7 +38,7 @@ function findInstalledPackages() {
 /**
  * Generate the AppKit section content
  */
-function generateSection(packages) {
+function generateSection(packages: typeof PACKAGES) {
   const links = packages
     .map((pkg) => {
       const docPath = `./node_modules/${pkg.name}/CLAUDE.md`;
@@ -65,7 +58,7 @@ ${SECTION_END}`;
 /**
  * Generate standalone CLAUDE.md content (when no existing file)
  */
-function generateStandalone(packages) {
+function generateStandalone(packages: typeof PACKAGES) {
   const links = packages
     .map((pkg) => {
       const docPath = `./node_modules/${pkg.name}/CLAUDE.md`;
@@ -88,7 +81,7 @@ ${SECTION_END}
 /**
  * Update existing content with AppKit section
  */
-function updateContent(existingContent, packages) {
+function updateContent(existingContent: string, packages: typeof PACKAGES) {
   const newSection = generateSection(packages);
 
   // Check if AppKit section already exists
@@ -107,27 +100,10 @@ function updateContent(existingContent, packages) {
 }
 
 /**
- * Main CLI logic
+ * Setup command implementation
  */
-function main() {
-  const args = process.argv.slice(2);
-  const shouldWrite = args.includes("--write") || args.includes("-w");
-  const help = args.includes("--help") || args.includes("-h");
-
-  if (help) {
-    console.log(`
-Usage: npx appkit-setup [options]
-
-Options:
-  --write, -w   Create or update CLAUDE.md file in current directory
-  --help, -h    Show this help message
-
-Examples:
-  npx appkit-setup              # Show detected packages and preview content
-  npx appkit-setup --write      # Create or update CLAUDE.md
-`);
-    return;
-  }
+function runSetup(options: { write?: boolean }) {
+  const shouldWrite = options.write;
 
   // Find installed packages
   const installed = findInstalledPackages();
@@ -151,8 +127,8 @@ Examples:
     ? fs.readFileSync(claudePath, "utf-8")
     : null;
 
-  let finalContent;
-  let action;
+  let finalContent: string;
+  let action: string;
 
   if (existingContent) {
     finalContent = updateContent(existingContent, installed);
@@ -168,7 +144,7 @@ Examples:
     console.log(`  Path: ${claudePath}`);
   } else {
     console.log("\nTo create/update CLAUDE.md, run:");
-    console.log("  npx appkit-setup --write\n");
+    console.log("  npx appkit setup --write\n");
 
     if (existingContent) {
       console.log(
@@ -187,4 +163,7 @@ Examples:
   }
 }
 
-main();
+export const setupCommand = new Command("setup")
+  .description("Setup CLAUDE.md with AppKit package references")
+  .option("-w, --write", "Create or update CLAUDE.md file in current directory")
+  .action(runSetup);

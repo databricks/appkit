@@ -26,7 +26,7 @@
     "format": "biome format --write .",
     "lint:fix": "biome lint --write .",
     "lint": "biome lint .",
-    "pack:sdk": "pnpm build && pnpm -r tarball",
+    "pack:sdk": "pnpm build && pnpm --filter=docs build && pnpm -r tarball",
     "prepare": "husky",
     "release": "release-it",
     "release:dry": "release-it --dry-run",

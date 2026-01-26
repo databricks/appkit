@@ -20,7 +20,7 @@
   "npm": false,
   "hooks": {
     "after:bump": "tsx tools/sync-versions.ts ${version} && pnpm build:notice && git add NOTICE.md",
-    "before:release": "pnpm build && pnpm --filter=@databricks/appkit dist && pnpm --filter=@databricks/appkit-ui dist",
+    "before:release": "pnpm build && pnpm --filter=docs build && pnpm --filter=@databricks/appkit dist && pnpm --filter=@databricks/appkit-ui dist",
     "after:release": "npm publish packages/appkit/tmp --access public --provenance && npm publish packages/appkit-ui/tmp --access public --provenance"
   },
   "plugins": {
