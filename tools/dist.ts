@@ -89,6 +89,29 @@ let llmsContent = fs.readFileSync(llmsSourcePath, "utf-8");
 // Replace /appkit/ with ./docs/ to match new structure
 llmsContent = llmsContent.replace(/\/appkit\//g, "./docs/");
 
+// Prepend AI agent guidance for navigating documentation
+const agentGuidance = `## For AI Agents/Assistants
+
+To view specific documentation files referenced below, use the appkit CLI:
+
+\`\`\`bash
+npx @databricks/appkit docs <path>
+\`\`\`
+
+Examples:
+- View main documentation: \`npx @databricks/appkit docs\`
+- View specific file: \`npx @databricks/appkit docs ./docs/docs.md\`
+- View API reference: \`npx @databricks/appkit docs ./docs/docs/api.md\`
+- View component docs: \`npx @databricks/appkit docs ./docs/docs/api/appkit-ui/components/Sidebar.md\`
+
+The CLI will display the documentation content directly in the terminal.
+
+---
+
+`;
+
+llmsContent = agentGuidance + llmsContent;
+
 fs.writeFileSync("tmp/llms.txt", llmsContent);
 
 // Copy llms.txt as CLAUDE.md (npm pack doesn't support symlinks)
