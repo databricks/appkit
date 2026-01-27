@@ -32,7 +32,7 @@
     "release:dry": "release-it --dry-run",
     "release:ci": "release-it --ci",
     "setup:repo": "./tools/setup.sh",
-    "start": "NODE_ENV=production pnpm build:sdk && pnpm --filter=sdk-playground build:app && pnpm --filter=sdk-playground start:local",
+    "start": "NODE_ENV=production pnpm build && pnpm --filter=sdk-playground build:app && pnpm --filter=sdk-playground start:local",
     "test:watch": "vitest",
     "test": "vitest run --coverage",
     "typecheck": "pnpm -r typecheck"
