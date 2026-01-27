@@ -7,6 +7,7 @@ export default {
       [
         "appkit", // @databricks/appkit
         "appkit-ui", // @databricks/appkit-ui
+        "taskflow", // @databricks/taskflow
         "shared", // shared package
         "playground", // dev-playground app
         "docs", // documentation

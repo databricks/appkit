@@ -16,7 +16,8 @@
       "@databricks/appkit": ["packages/appkit/*"],
       "@databricks/appkit-ui": ["packages/appkit-ui/*"],
       "shared": ["packages/shared/src"],
-      "@tools/*": ["tools/*"]
+      "@tools/*": ["tools/*"],
+      "taskflow": ["packages/taskflow/src"]
     }
   },
   "exclude": ["node_modules", "dist"]

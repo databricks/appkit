@@ -1,5 +1,5 @@
-import react from "@vitejs/plugin-react";
 import path from "node:path";
+import react from "@vitejs/plugin-react";
 import tsconfigPaths from "vite-tsconfig-paths";
 import { defineConfig } from "vitest/config";
 
@@ -46,6 +46,14 @@ export default defineConfig({
         test: {
           name: "shared",
           root: "./packages/shared",
+          environment: "node",
+        },
+      },
+      {
+        plugins: [tsconfigPaths()],
+        test: {
+          name: "taskflow",
+          root: "./packages/taskflow",
           environment: "node",
         },
       },

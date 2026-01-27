@@ -1,0 +1,37 @@
+{
+  "name": "@databricks/taskflow",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "packageManager": "pnpm@10.21.0",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build:package": "tsdown --config tsdown.config.ts",
+    "build:watch": "tsdown --config tsdown.config.ts --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "clean:full": "rm -rf dist node_modules",
+    "test": "cd ../.. && vitest run --project=taskflow"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/pg": "^8.15.6",
+    "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "json-canonicalize": "^2.0.0",
+    "pg": "^8.16.3"
+  }
+}
