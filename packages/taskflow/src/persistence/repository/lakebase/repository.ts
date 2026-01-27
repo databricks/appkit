@@ -2,8 +2,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { IdempotencyKey, TaskId } from "@/core/branded";
+import { RepositoryError } from "@/core/errors";
 import type { TaskStatus } from "@/core/types";
 import { type EventLogEntry, type EventLogEntryType, Task } from "@/domain";
+import {
+  noopHooks,
+  TaskAttributes,
+  TaskMetrics,
+  type TaskSystemHooks,
+} from "@/observability";
 import type { StoredEvent, TaskRepository } from "../types";
 import type {
   LakebaseConnector,
@@ -12,13 +19,6 @@ import type {
   LakebaseTaskRecord,
   LakebaseTransactionClient,
 } from "./types";
-import {
-  noopHooks,
-  TaskAttributes,
-  TaskMetrics,
-  TaskSystemHooks,
-} from "@/observability";
-import { RepositoryError } from "@/core/errors";
 
 /**
  * Lakebase Task Repository

@@ -4,7 +4,7 @@ import path from "node:path";
 import { canonicalize } from "json-canonicalize";
 import { EventLogError } from "@/core/errors";
 import type { TaskStatus } from "@/core/types";
-import type { EventLogEntry, TaskEvent } from "@/domain";
+import { type EventLogEntry, type TaskEvent, toEventLogEntry } from "@/domain";
 import {
   noopHooks,
   TaskAttributes,
@@ -47,6 +47,8 @@ export class EventLog {
   private entriesWritten = 0;
   /** count of malformed entries skipped during reads */
   private malformedEntriesSkipped = 0;
+  /** current file size in bytes (tracked in memory for reliable rotation checks) */
+  private currentFileSize = 0;
 
   constructor(
     config: Partial<EventLogConfig>,
@@ -68,6 +70,14 @@ export class EventLog {
     const dir = path.dirname(this.config.eventLogPath);
     await fs.mkdir(dir, { recursive: true });
     this.fileHandle = await fs.open(this.config.eventLogPath, "a");
+
+    // initialize file size from existing file
+    try {
+      const stats = await fs.stat(this.config.eventLogPath);
+      this.currentFileSize = stats.size;
+    } catch {
+      this.currentFileSize = 0;
+    }
 
     // load or create checkpoint
     const previousSeq = await this.loadCheckpoint();
@@ -121,7 +131,9 @@ export class EventLog {
 
       // write to file
       const line = `${JSON.stringify(eventPayload)}\n`;
+      const lineBytes = Buffer.byteLength(line, "utf8");
       await this.fileHandle.write(line);
+      this.currentFileSize += lineBytes;
 
       if (fsync) await this.fileHandle.sync();
 
@@ -171,80 +183,22 @@ export class EventLog {
    * Converts TaskEvent to EventLogEntry format
    */
   async appendEvent(event: TaskEvent): Promise<void> {
-    const base = {
-      taskId: event.taskId,
-      idempotencyKey: event.idempotencyKey,
-      name: event.name,
-      userId: event.userId ?? null,
-      taskType: event.taskType,
-      timestamp: event.timestamp ?? Date.now(),
-    };
-
-    switch (event.type) {
-      case "created":
-        await this.appendEntry(
-          {
-            ...base,
-            type: "TASK_CREATED",
-            input: event.input,
-            executionOptions: event.executionOptions,
-          },
-          true,
-        );
-        break;
-      case "start":
-        await this.appendEntry(
-          {
-            ...base,
-            type: "TASK_START",
-          },
-          true,
-        );
-        break;
-      case "progress":
-        await this.appendEntry({
-          ...base,
-          type: "TASK_PROGRESS",
-          payload: event.payload,
-        });
-        break;
-      case "complete":
-        await this.appendEntry(
-          {
-            ...base,
-            type: "TASK_COMPLETE",
-            result: event.result,
-          },
-          true,
-        );
-        break;
-      case "heartbeat":
-        await this.appendEntry({
-          ...base,
-          type: "TASK_HEARTBEAT",
-        });
-        break;
-      case "error":
-        await this.appendEntry(
-          {
-            ...base,
-            type: "TASK_CANCELLED",
-            error: event.error ?? "Unknown reason",
-          },
-          true,
-        );
-        break;
-      case "custom":
-        await this.appendEntry({
-          ...base,
-          type: "TASK_CUSTOM",
-          payload: {
-            eventName: event.eventName,
-            ...event.payload,
-          },
-        });
-        break;
+    const entry = toEventLogEntry(event);
+    if (!entry) {
+      return;
     }
+
+    // critical events to be written to disk immediately
+    const criticalEvents = [
+      "TASK_CREATED",
+      "TASK_START",
+      "TASK_COMPLETE",
+      "TASK_ERROR",
+      "TASK_CANCELLED",
+    ];
+    const fsync = criticalEvents.includes(entry.type);
+
+    await this.appendEntry(entry, fsync);
   }
 
   /**
@@ -278,13 +232,16 @@ export class EventLog {
    * Check if log file should be rotated
    */
   async shouldRotateEventLog(): Promise<boolean> {
+    // use tracked file size for reliable size-based rotation
+    if (this.currentFileSize >= this.config.maxSizeBytesPerFile) {
+      return true;
+    }
+
+    // check age-based rotation using fs.stat
     try {
       const stats = await fs.stat(this.config.eventLogPath);
       const age = Date.now() - stats.mtime.getTime();
-      return (
-        stats.size >= this.config.maxSizeBytesPerFile ||
-        age >= this.config.maxAgePerFile
-      );
+      return age >= this.config.maxAgePerFile;
     } catch {
       return false;
     }
@@ -407,6 +364,7 @@ export class EventLog {
     }
 
     this.currentSeq = 0;
+    this.currentFileSize = 0;
 
     if (deleteFiles) {
       try {
@@ -523,8 +481,9 @@ export class EventLog {
         );
       }
 
-      // open new file handle
+      // open new file handle and reset tracked size
       this.fileHandle = await fs.open(this.config.eventLogPath, "a+");
+      this.currentFileSize = 0;
     } catch (error) {
       throw new EventLogError(
         "Failed to rotate event log",

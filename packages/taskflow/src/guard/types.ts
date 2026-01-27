@@ -1,4 +1,4 @@
-import { IdempotencyKey, TaskName, UserId } from "@/core/branded";
+import type { IdempotencyKey, TaskName, UserId } from "@/core/branded";
 import type { Task } from "@/domain";
 
 /**

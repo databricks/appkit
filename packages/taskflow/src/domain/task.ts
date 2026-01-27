@@ -286,7 +286,7 @@ export class Task {
    * Generate a deterministic idempotency key from task parameters
    * Uses json-canonicalize fro consistent key ordering
    */
-  static generateIdempotencyKey(params: TaskCreationParams): string {
+  static generateIdempotencyKey(params: TaskCreationParams): IdempotencyKey {
     const payload = {
       name: params.name,
       input: params.input,

@@ -1,3 +1,5 @@
+import type { ZodType } from "zod";
+import type { TaskType } from "@/core/types";
 import type { TaskEvent, TaskEventInput } from "./events";
 import type { TaskExecutionOptions } from "./types";
 
@@ -110,8 +112,12 @@ export interface TaskDefinition<TInput = unknown, TResult = unknown> {
   recover?: RecoveryHandler<TInput, TResult>;
   /** Task description for documentation */
   description?: string;
+  /** Task type: user or background (defaults to "user") */
+  type?: TaskType;
+  /** Optional Zod schema for input validation */
+  inputSchema?: ZodType<TInput>;
   /** Default execution options */
-  defaultOptions: TaskExecutionOptions;
+  defaultOptions?: TaskExecutionOptions;
 }
 
 /**
