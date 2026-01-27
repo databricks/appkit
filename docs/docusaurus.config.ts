@@ -232,7 +232,7 @@ const config: Config = {
       darkTheme: prismThemes.vsDark,
     },
     mermaid: {
-      theme: { light: "base", dark: "base" },
+      theme: { light: "base", dark: "dark" },
       options: {
         themeVariables: {
           // Light mode colors (bluish) - matches Docusaurus theme
