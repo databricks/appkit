@@ -24,12 +24,7 @@ interface Cache {
 
 export const CACHE_VERSION = "1";
 const CACHE_FILE = ".appkit-types-cache.json";
-const CACHE_DIR = path.join(
-  process.cwd(),
-  "node_modules",
-  ".databricks",
-  "appkit",
-);
+const CACHE_DIR = path.join(process.cwd(), ".databricks", "appkit");
 
 /**
  * Hash the SQL query
