@@ -6,7 +6,7 @@
   "packageManager": "pnpm@10.21.0",
   "scripts": {
     "build": "pnpm -r --filter=!docs build:package",
-    "build:watch": "pnpm -r --filter=!sdk-playground --filter=!docs build:watch",
+    "build:watch": "pnpm -r --filter=!dev-playground --filter=!docs build:watch",
     "check:fix": "biome check --write .",
     "check": "biome check .",
     "check:licenses": "tsx tools/check-licenses.ts",
@@ -15,7 +15,7 @@
     "clean:full": "rm -rf node_modules dist coverage && pnpm -r clean:full",
     "clean": "pnpm -r clean",
     "dev": "pnpm build && NODE_ENV=development turbo watch build:watch dev",
-    "dev:inspect": "NODE_ENV=development pnpm --filter=sdk-playground dev:inspect",
+    "dev:inspect": "NODE_ENV=development pnpm --filter=dev-playground dev:inspect",
     "docs:dev": "pnpm --filter=docs dev",
     "docs:build": "pnpm --filter=docs build",
     "docs:serve": "pnpm --filter=docs serve",
@@ -32,7 +32,7 @@
     "release:dry": "release-it --dry-run",
     "release:ci": "release-it --ci",
     "setup:repo": "./tools/setup.sh",
-    "start": "NODE_ENV=production pnpm build && pnpm --filter=sdk-playground build:app && pnpm --filter=sdk-playground start:local",
+    "start": "NODE_ENV=production pnpm build && pnpm --filter=dev-playground build:app && pnpm --filter=dev-playground start:local",
     "test:watch": "vitest",
     "test": "vitest run --coverage",
     "typecheck": "pnpm -r typecheck"

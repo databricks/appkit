@@ -48,13 +48,13 @@ pnpm dev              # Build all packages + watch mode (sets NODE_ENV=developme
 pnpm dev:inspect      # Dev mode with Node.js inspector for debugging
 
 # Individual package commands (from root)
-pnpm --filter=sdk-playground dev     # Run only dev-playground in watch mode
+pnpm --filter=dev-playground dev     # Run only dev-playground in watch mode
 ```
 
 ### Building
 ```bash
 pnpm build            # Build all packages (runs pnpm -r build:package)
-pnpm build:watch      # Watch mode for all packages except sdk-playground
+pnpm build:watch      # Watch mode for all packages except dev-playground
 pnpm pack:sdk         # Build and package SDK for distribution
 ```
 
@@ -319,7 +319,7 @@ pnpm add -Dw <package>
 pnpm --filter=@databricks/appkit add <package>
 
 # App dependencies
-pnpm --filter=sdk-playground add <package>
+pnpm --filter=dev-playground add <package>
 ```
 
 ### Creating New Packages
