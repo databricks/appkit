@@ -39,6 +39,14 @@ export const ErrorCodes = {
 
   // system errors
   INITIALIZATION_FAILED: "INITIALIZATION_FAILED",
+
+  // persistence errors
+  EVENTLOG_WRITE_FAILED: "EVENTLOG_WRITE_FAILED",
+  EVENTLOG_ROTATION_FAILED: "EVENTLOG_ROTATION_FAILED",
+  REPOSITORY_MIGRATION_FAILED: "REPOSITORY_MIGRATION_FAILED",
+  REPOSITORY_QUERY_FAILED: "REPOSITORY_QUERY_FAILED",
+  REPOSITORY_BATCH_FAILED: "REPOSITORY_BATCH_FAILED",
+  INVALID_PATH: "INVALID_PATH",
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
@@ -402,6 +410,109 @@ export class StreamOverflowError extends TaskSystemError {
       typeof value === "object" &&
       "name" in value &&
       (value as Error).name === "StreamOverflowError"
+    );
+  }
+}
+
+/**
+ * EventLog write failure error
+ */
+export class EventLogError extends TaskSystemError {
+  readonly operation: "write" | "rotate" | "compact" | "read";
+  readonly path?: string;
+
+  constructor(
+    message: string,
+    operation: "write" | "rotate" | "compact" | "read",
+    path?: string,
+    cause?: Error,
+  ) {
+    super(
+      message,
+      operation === "write"
+        ? ErrorCodes.EVENTLOG_WRITE_FAILED
+        : ErrorCodes.EVENTLOG_ROTATION_FAILED,
+      { path, operation },
+      cause,
+    );
+    this.name = "EventLogError";
+    this.operation = operation;
+    this.path = path;
+  }
+
+  static is(value: unknown): value is EventLogError {
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      "name" in value &&
+      (value as Error).name === "EventLogError"
+    );
+  }
+}
+
+/**
+ * Repository operation failure error
+ */
+export class RepositoryError extends TaskSystemError {
+  readonly repositoryType: "sqlite" | "lakebase";
+  readonly operation: "query" | "batch" | "migration";
+  readonly isRetryable: boolean;
+
+  constructor(
+    message: string,
+    repositoryType: "sqlite" | "lakebase",
+    operation: "query" | "batch" | "migration",
+    isRetryable = false,
+    cause?: Error,
+  ) {
+    const code =
+      operation === "migration"
+        ? ErrorCodes.REPOSITORY_MIGRATION_FAILED
+        : operation === "query"
+          ? ErrorCodes.REPOSITORY_QUERY_FAILED
+          : ErrorCodes.REPOSITORY_BATCH_FAILED;
+
+    super(message, code, { repositoryType, operation, isRetryable }, cause);
+    this.name = "RepositoryError";
+    this.repositoryType = repositoryType;
+    this.operation = operation;
+    this.isRetryable = isRetryable;
+  }
+
+  static is(value: unknown): value is RepositoryError {
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      "name" in value &&
+      (value as Error).name === "RepositoryError"
+    );
+  }
+}
+
+/**
+ * Invalid path error for security violations
+ */
+export class InvalidPathError extends TaskSystemError {
+  readonly path: string;
+  readonly reason: "traversal" | "absolute" | "invalid";
+
+  constructor(path: string, reason: "traversal" | "absolute" | "invalid") {
+    super(
+      `Invalid path detected: ${reason} in "${path}"`,
+      ErrorCodes.INVALID_PATH,
+      { path, reason },
+    );
+    this.name = "InvalidPathError";
+    this.path = path;
+    this.reason = reason;
+  }
+
+  static is(value: unknown): value is InvalidPathError {
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      "name" in value &&
+      (value as Error).name === "InvalidPathError"
     );
   }
 }

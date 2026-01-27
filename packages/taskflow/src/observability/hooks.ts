@@ -84,6 +84,17 @@ export const TaskMetrics = {
   DLQ_ADDED: "taskflow.dlq.added",
   DLQ_RETRIED: "taskflow.dlq.retried",
 
+  // persistence counters
+  EVENTLOG_ENTRIES_WRITTEN: "taskflow.eventlog.entries_written",
+  EVENTLOG_ROTATIONS: "taskflow.eventlog.rotations",
+  EVENTLOG_COMPACTIONS: "taskflow.eventlog.compactions",
+  EVENTLOG_MALFORMED_SKIPPED: "taskflow.eventlog.malformed_skipped",
+
+  REPOSITORY_BATCH_EXECUTED: "taskflow.repository.batch_executed",
+  REPOSITORY_QUERIES: "taskflow.repository.queries",
+  REPOSITORY_ERRORS: "taskflow.repository.errors",
+  REPOSITORY_RETRIES: "taskflow.repository.retries",
+
   // gauges
   TASKS_RUNNING: "taskflow.tasks.running",
   TASKS_QUEUED: "taskflow.tasks.queued",
@@ -91,11 +102,19 @@ export const TaskMetrics = {
   DLQ_SIZE: "taskflow.dlq.size",
   STREAMS_ACTIVE: "taskflow.streams.active",
 
+  EVENTLOG_SEQUENCE: "taskflow.eventlog.sequence",
+  EVENTLOG_SIZE_BYTES: "taskflow.eventlog.size_bytes",
+
   // histograms
   TASK_DURATION_MS: "taskflow.task.duration_ms",
   TASK_QUEUE_WAIT_MS: "taskflow.task.queue_wait_ms",
   FLUSH_DURATION_MS: "taskflow.flush.duration_ms",
   FLUSH_BATCH_SIZE: "taskflow.flush.batch_size",
+
+  EVENTLOG_WRITE_LATENCY_MS: "taskflow.eventlog.write_latency_ms",
+  EVENTLOG_ROTATION_DURATION_MS: "taskflow.eventlog.rotation_duration_ms",
+  REPOSITORY_QUERY_LATENCY_MS: "taskflow.repository.query_latency_ms",
+  REPOSITORY_BATCH_LATENCY_MS: "taskflow.repository.batch_latency_ms",
 } as const;
 
 /**
@@ -118,6 +137,12 @@ export const TaskSpans = {
 
   REPOSITORY_QUERY: "taskflow.repository.query",
   REPOSITORY_WRITE: "taskflow.repository.write",
+
+  EVENTLOG_APPEND: "taskflow.eventlog.append",
+  EVENTLOG_ROTATE: "taskflow.eventlog.rotate",
+  EVENTLOG_COMPACT: "taskflow.eventlog.compact",
+  REPOSITORY_BATCH: "taskflow.repository.batch",
+  REPOSITORY_MIGRATION: "taskflow.repository.migration",
 } as const;
 
 /**
@@ -139,4 +164,13 @@ export const TaskAttributes = {
 
   FLUSH_BATCH_SIZE: "taskflow.flush.batch_size",
   REPOSITORY_TYPE: "taskflow.repository.type",
+
+  EVENTLOG_PATH: "taskflow.eventlog.path",
+  EVENTLOG_SEQUENCE: "taskflow.eventlog.sequence",
+  EVENTLOG_FSYNC: "taskflow.eventlog.fsync",
+  EVENTLOG_COMPACTIONS: "taskflow.eventlog.compactions",
+  EVENTLOG_COMPACTION_DURATION_MS: "taskflow.eventlog.compaction_duration_ms",
+  EVENT_TYPE: "taskflow.event.type",
+  BATCH_SIZE: "taskflow.batch.size",
+  MIGRATION_NAME: "taskflow.migration.name",
 } as const;

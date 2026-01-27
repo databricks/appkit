@@ -25,9 +25,13 @@
     "test": "cd ../.. && vitest run --project=taskflow"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/pg": "^8.15.6",
     "vitest": "^3.2.4"
   },
   "dependencies": {
-    "json-canonicalize": "^2.0.0"
+    "better-sqlite3": "^12.6.2",
+    "json-canonicalize": "^2.0.0",
+    "pg": "^8.16.3"
   }
 }
