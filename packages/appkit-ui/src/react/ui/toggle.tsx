@@ -26,6 +26,7 @@ const toggleVariants = cva(
   },
 );
 
+/** Button that toggles between pressed and unpressed states */
 function Toggle({
   className,
   variant,

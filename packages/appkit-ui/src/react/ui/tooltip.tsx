@@ -6,6 +6,7 @@ import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { cn } from "../lib/utils";
 import { useResolvedPortalContainer } from "../portal-container-context";
 
+/** Context provider for tooltip configuration */
 function TooltipProvider({
   delayDuration = 0,
   ...props
@@ -19,6 +20,7 @@ function TooltipProvider({
   );
 }
 
+/** Brief informational message that appears on hover */
 function Tooltip({
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Root>) {

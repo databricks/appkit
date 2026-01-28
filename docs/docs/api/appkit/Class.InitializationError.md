@@ -1,7 +1,5 @@
 # Class: InitializationError
 
-Defined in: [appkit/src/errors/initialization.ts:13](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/initialization.ts#L13)
-
 Error thrown when a service or component is not properly initialized.
 Use when accessing services before they are ready.
 
@@ -26,8 +24,6 @@ new InitializationError(message: string, options?: {
   context?: Record<string, unknown>;
 }): InitializationError;
 ```
-
-Defined in: [appkit/src/errors/base.ts:49](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L49)
 
 #### Parameters
 
@@ -54,8 +50,6 @@ Defined in: [appkit/src/errors/base.ts:49](https://github.com/databricks/appkit/
 readonly optional cause: Error;
 ```
 
-Defined in: [appkit/src/errors/base.ts:44](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L44)
-
 Optional cause of the error
 
 #### Inherited from
@@ -69,8 +63,6 @@ Optional cause of the error
 ```ts
 readonly code: "INITIALIZATION_ERROR" = "INITIALIZATION_ERROR";
 ```
-
-Defined in: [appkit/src/errors/initialization.ts:14](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/initialization.ts#L14)
 
 Error code for programmatic error handling
 
@@ -86,8 +78,6 @@ Error code for programmatic error handling
 readonly optional context: Record<string, unknown>;
 ```
 
-Defined in: [appkit/src/errors/base.ts:47](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L47)
-
 Additional context for the error
 
 #### Inherited from
@@ -101,8 +91,6 @@ Additional context for the error
 ```ts
 readonly isRetryable: true = true;
 ```
-
-Defined in: [appkit/src/errors/initialization.ts:16](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/initialization.ts#L16)
 
 Whether this error type is generally safe to retry
 
@@ -118,8 +106,6 @@ Whether this error type is generally safe to retry
 readonly statusCode: 500 = 500;
 ```
 
-Defined in: [appkit/src/errors/initialization.ts:15](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/initialization.ts#L15)
-
 HTTP status code suggestion (can be overridden)
 
 #### Overrides
@@ -133,8 +119,6 @@ HTTP status code suggestion (can be overridden)
 ```ts
 toJSON(): Record<string, unknown>;
 ```
-
-Defined in: [appkit/src/errors/base.ts:68](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L68)
 
 Convert error to JSON for logging/serialization.
 Sensitive values in context are automatically redacted.
@@ -155,8 +139,6 @@ Sensitive values in context are automatically redacted.
 toString(): string;
 ```
 
-Defined in: [appkit/src/errors/base.ts:84](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L84)
-
 Create a human-readable string representation
 
 #### Returns
@@ -174,8 +156,6 @@ Create a human-readable string representation
 ```ts
 static migrationFailed(cause?: Error): InitializationError;
 ```
-
-Defined in: [appkit/src/errors/initialization.ts:46](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/initialization.ts#L46)
 
 Create an initialization error for migration failure
 
@@ -197,8 +177,6 @@ Create an initialization error for migration failure
 static notInitialized(serviceName: string, hint?: string): InitializationError;
 ```
 
-Defined in: [appkit/src/errors/initialization.ts:21](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/initialization.ts#L21)
-
 Create an initialization error for a service that is not ready
 
 #### Parameters
@@ -219,8 +197,6 @@ Create an initialization error for a service that is not ready
 ```ts
 static setupFailed(component: string, cause?: Error): InitializationError;
 ```
-
-Defined in: [appkit/src/errors/initialization.ts:36](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/initialization.ts#L36)
 
 Create an initialization error for setup failure
 

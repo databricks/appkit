@@ -1,0 +1,441 @@
+# Menubar
+
+Horizontal menu bar with dropdown menus
+
+
+## Example
+
+import { DocExample } from "@site/src/components/DocExample";
+
+<DocExample name="menubar" />
+
+
+## Menubar
+
+Horizontal menu bar with dropdown menus
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/menubar.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/menubar.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `value` | `string` |  | - | - |
+| `defaultValue` | `string` |  | - | - |
+| `onValueChange` | `((value: string) => void)` |  | - | - |
+| `loop` | `boolean` |  | - | - |
+| `dir` | `enum` |  | - | - |
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { Menubar } from '@databricks/appkit-ui';
+
+<Menubar /* props */ />
+```
+
+
+## MenubarCheckboxItem
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/menubar.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/menubar.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `onSelect` | `((event: Event) => void)` |  | - | - |
+| `asChild` | `boolean` |  | - | - |
+| `disabled` | `boolean` |  | - | - |
+| `checked` | `CheckedState` |  | - | - |
+| `onCheckedChange` | `((checked: boolean) => void)` |  | - | - |
+| `textValue` | `string` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { MenubarCheckboxItem } from '@databricks/appkit-ui';
+
+<MenubarCheckboxItem /* props */ />
+```
+
+
+## MenubarContent
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/menubar.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/menubar.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+| `forceMount` | `true` |  | - | Used to force mounting when more control is needed. Useful when controlling animation with React animation libraries. |
+| `onEscapeKeyDown` | `((event: KeyboardEvent) => void)` |  | - | - |
+| `onPointerDownOutside` | `((event: PointerDownOutsideEvent) => void)` |  | - | - |
+| `onFocusOutside` | `((event: FocusOutsideEvent) => void)` |  | - | - |
+| `onInteractOutside` | `((event: FocusOutsideEvent \| PointerDownOutsideEvent) => void)` |  | - | - |
+| `onCloseAutoFocus` | `((event: Event) => void)` |  | - | Event handler called when auto-focusing on close. Can be prevented. |
+| `loop` | `boolean` |  | - | Whether keyboard navigation should loop around @defaultValue false |
+| `align` | `enum` |  | - | - |
+| `side` | `enum` |  | - | - |
+| `sideOffset` | `number` |  | - | - |
+| `alignOffset` | `number` |  | - | - |
+| `arrowPadding` | `number` |  | - | - |
+| `avoidCollisions` | `boolean` |  | - | - |
+| `collisionBoundary` | `Boundary \| Boundary[]` |  | - | - |
+| `collisionPadding` | `number \| Partial<Record<"left" \| "right" \| "top" \| "bottom", number>>` |  | - | - |
+| `sticky` | `enum` |  | - | - |
+| `hideWhenDetached` | `boolean` |  | - | - |
+| `updatePositionStrategy` | `enum` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { MenubarContent } from '@databricks/appkit-ui';
+
+<MenubarContent /* props */ />
+```
+
+
+## MenubarGroup
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/menubar.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/menubar.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { MenubarGroup } from '@databricks/appkit-ui';
+
+<MenubarGroup /* props */ />
+```
+
+
+## MenubarItem
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/menubar.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/menubar.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `onSelect` | `((event: Event) => void)` |  | - | - |
+| `asChild` | `boolean` |  | - | - |
+| `disabled` | `boolean` |  | - | - |
+| `textValue` | `string` |  | - | - |
+| `inset` | `boolean` |  | - | - |
+| `variant` | `enum` |  | `default` | - |
+
+
+
+### Usage
+
+```tsx
+import { MenubarItem } from '@databricks/appkit-ui';
+
+<MenubarItem /* props */ />
+```
+
+
+## MenubarLabel
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/menubar.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/menubar.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+| `inset` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { MenubarLabel } from '@databricks/appkit-ui';
+
+<MenubarLabel /* props */ />
+```
+
+
+## MenubarMenu
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/menubar.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/menubar.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `value` | `string` |  | - | - |
+| `__scopeMenubar` | `Scope` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { MenubarMenu } from '@databricks/appkit-ui';
+
+<MenubarMenu /* props */ />
+```
+
+
+## MenubarPortal
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/menubar.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/menubar.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `container` | `Element \| DocumentFragment \| null` |  | - | Specify a container element to portal the content into. |
+| `forceMount` | `true` |  | - | Used to force mounting when more control is needed. Useful when controlling animation with React animation libraries. |
+
+
+
+### Usage
+
+```tsx
+import { MenubarPortal } from '@databricks/appkit-ui';
+
+<MenubarPortal /* props */ />
+```
+
+
+## MenubarRadioGroup
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/menubar.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/menubar.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+| `value` | `string` | ✓ | - | - |
+| `onValueChange` | `((value: string) => void)` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { MenubarRadioGroup } from '@databricks/appkit-ui';
+
+<MenubarRadioGroup /* props */ />
+```
+
+
+## MenubarRadioItem
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/menubar.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/menubar.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `onSelect` | `((event: Event) => void)` |  | - | - |
+| `asChild` | `boolean` |  | - | - |
+| `disabled` | `boolean` |  | - | - |
+| `value` | `string` | ✓ | - | - |
+| `textValue` | `string` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { MenubarRadioItem } from '@databricks/appkit-ui';
+
+<MenubarRadioItem /* props */ />
+```
+
+
+## MenubarSeparator
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/menubar.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/menubar.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { MenubarSeparator } from '@databricks/appkit-ui';
+
+<MenubarSeparator /* props */ />
+```
+
+
+## MenubarShortcut
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/menubar.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/menubar.tsx)
+
+
+### Props
+
+This component extends standard HTML element attributes.
+
+
+
+### Usage
+
+```tsx
+import { MenubarShortcut } from '@databricks/appkit-ui';
+
+<MenubarShortcut /* props */ />
+```
+
+
+## MenubarSub
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/menubar.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/menubar.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `open` | `boolean` |  | - | - |
+| `defaultOpen` | `boolean` |  | - | - |
+| `onOpenChange` | `((open: boolean) => void)` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { MenubarSub } from '@databricks/appkit-ui';
+
+<MenubarSub /* props */ />
+```
+
+
+## MenubarSubContent
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/menubar.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/menubar.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+| `forceMount` | `true` |  | - | Used to force mounting when more control is needed. Useful when controlling animation with React animation libraries. |
+| `onEscapeKeyDown` | `((event: KeyboardEvent) => void)` |  | - | - |
+| `onPointerDownOutside` | `((event: PointerDownOutsideEvent) => void)` |  | - | - |
+| `onFocusOutside` | `((event: FocusOutsideEvent) => void)` |  | - | - |
+| `onInteractOutside` | `((event: FocusOutsideEvent \| PointerDownOutsideEvent) => void)` |  | - | - |
+| `loop` | `boolean` |  | - | Whether keyboard navigation should loop around @defaultValue false |
+| `sideOffset` | `number` |  | - | - |
+| `alignOffset` | `number` |  | - | - |
+| `arrowPadding` | `number` |  | - | - |
+| `avoidCollisions` | `boolean` |  | - | - |
+| `collisionBoundary` | `Boundary \| Boundary[]` |  | - | - |
+| `collisionPadding` | `number \| Partial<Record<"left" \| "right" \| "top" \| "bottom", number>>` |  | - | - |
+| `sticky` | `enum` |  | - | - |
+| `hideWhenDetached` | `boolean` |  | - | - |
+| `updatePositionStrategy` | `enum` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { MenubarSubContent } from '@databricks/appkit-ui';
+
+<MenubarSubContent /* props */ />
+```
+
+
+## MenubarSubTrigger
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/menubar.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/menubar.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+| `disabled` | `boolean` |  | - | - |
+| `textValue` | `string` |  | - | - |
+| `inset` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { MenubarSubTrigger } from '@databricks/appkit-ui';
+
+<MenubarSubTrigger /* props */ />
+```
+
+
+## MenubarTrigger
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/menubar.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/menubar.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { MenubarTrigger } from '@databricks/appkit-ui';
+
+<MenubarTrigger /* props */ />
+```
+

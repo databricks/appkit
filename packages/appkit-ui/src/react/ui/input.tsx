@@ -2,6 +2,7 @@ import type * as React from "react";
 
 import { cn } from "../lib/utils";
 
+/** Text input field for single-line user input */
 function Input({ className, type, ...props }: React.ComponentProps<"input">) {
   return (
     <input

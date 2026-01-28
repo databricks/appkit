@@ -19,6 +19,7 @@ const alertVariants = cva(
   },
 );
 
+/** Displays important information with optional icon and multiple variants */
 function Alert({
   className,
   variant,
@@ -34,6 +35,7 @@ function Alert({
   );
 }
 
+/** Title text for an alert component */
 function AlertTitle({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -47,6 +49,7 @@ function AlertTitle({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/** Descriptive text content for an alert component */
 function AlertDescription({
   className,
   ...props

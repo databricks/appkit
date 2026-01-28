@@ -1,7 +1,5 @@
 # Class: ExecutionError
 
-Defined in: [appkit/src/errors/execution.ts:13](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/execution.ts#L13)
-
 Error thrown when an operation execution fails.
 Use for statement failures, canceled operations, or unexpected states.
 
@@ -26,8 +24,6 @@ new ExecutionError(message: string, options?: {
   context?: Record<string, unknown>;
 }): ExecutionError;
 ```
-
-Defined in: [appkit/src/errors/base.ts:49](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L49)
 
 #### Parameters
 
@@ -54,8 +50,6 @@ Defined in: [appkit/src/errors/base.ts:49](https://github.com/databricks/appkit/
 readonly optional cause: Error;
 ```
 
-Defined in: [appkit/src/errors/base.ts:44](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L44)
-
 Optional cause of the error
 
 #### Inherited from
@@ -69,8 +63,6 @@ Optional cause of the error
 ```ts
 readonly code: "EXECUTION_ERROR" = "EXECUTION_ERROR";
 ```
-
-Defined in: [appkit/src/errors/execution.ts:14](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/execution.ts#L14)
 
 Error code for programmatic error handling
 
@@ -86,8 +78,6 @@ Error code for programmatic error handling
 readonly optional context: Record<string, unknown>;
 ```
 
-Defined in: [appkit/src/errors/base.ts:47](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L47)
-
 Additional context for the error
 
 #### Inherited from
@@ -101,8 +91,6 @@ Additional context for the error
 ```ts
 readonly isRetryable: false = false;
 ```
-
-Defined in: [appkit/src/errors/execution.ts:16](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/execution.ts#L16)
 
 Whether this error type is generally safe to retry
 
@@ -118,8 +106,6 @@ Whether this error type is generally safe to retry
 readonly statusCode: 500 = 500;
 ```
 
-Defined in: [appkit/src/errors/execution.ts:15](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/execution.ts#L15)
-
 HTTP status code suggestion (can be overridden)
 
 #### Overrides
@@ -133,8 +119,6 @@ HTTP status code suggestion (can be overridden)
 ```ts
 toJSON(): Record<string, unknown>;
 ```
-
-Defined in: [appkit/src/errors/base.ts:68](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L68)
 
 Convert error to JSON for logging/serialization.
 Sensitive values in context are automatically redacted.
@@ -155,8 +139,6 @@ Sensitive values in context are automatically redacted.
 toString(): string;
 ```
 
-Defined in: [appkit/src/errors/base.ts:84](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L84)
-
 Create a human-readable string representation
 
 #### Returns
@@ -175,8 +157,6 @@ Create a human-readable string representation
 static canceled(): ExecutionError;
 ```
 
-Defined in: [appkit/src/errors/execution.ts:31](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/execution.ts#L31)
-
 Create an execution error for canceled operation
 
 #### Returns
@@ -190,8 +170,6 @@ Create an execution error for canceled operation
 ```ts
 static missingData(dataType: string): ExecutionError;
 ```
-
-Defined in: [appkit/src/errors/execution.ts:56](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/execution.ts#L56)
 
 Create an execution error for missing data
 
@@ -213,8 +191,6 @@ Create an execution error for missing data
 static resultsClosed(): ExecutionError;
 ```
 
-Defined in: [appkit/src/errors/execution.ts:38](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/execution.ts#L38)
-
 Create an execution error for closed/expired results
 
 #### Returns
@@ -228,8 +204,6 @@ Create an execution error for closed/expired results
 ```ts
 static statementFailed(errorMessage?: string): ExecutionError;
 ```
-
-Defined in: [appkit/src/errors/execution.ts:21](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/execution.ts#L21)
 
 Create an execution error for statement failure
 
@@ -250,8 +224,6 @@ Create an execution error for statement failure
 ```ts
 static unknownState(state: string): ExecutionError;
 ```
-
-Defined in: [appkit/src/errors/execution.ts:47](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/execution.ts#L47)
 
 Create an execution error for unknown state
 

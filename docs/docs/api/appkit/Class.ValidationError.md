@@ -1,7 +1,5 @@
 # Class: ValidationError
 
-Defined in: [appkit/src/errors/validation.ts:13](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/validation.ts#L13)
-
 Error thrown when input validation fails.
 Use for invalid parameters, missing required fields, or type mismatches.
 
@@ -26,8 +24,6 @@ new ValidationError(message: string, options?: {
   context?: Record<string, unknown>;
 }): ValidationError;
 ```
-
-Defined in: [appkit/src/errors/base.ts:49](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L49)
 
 #### Parameters
 
@@ -54,8 +50,6 @@ Defined in: [appkit/src/errors/base.ts:49](https://github.com/databricks/appkit/
 readonly optional cause: Error;
 ```
 
-Defined in: [appkit/src/errors/base.ts:44](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L44)
-
 Optional cause of the error
 
 #### Inherited from
@@ -69,8 +63,6 @@ Optional cause of the error
 ```ts
 readonly code: "VALIDATION_ERROR" = "VALIDATION_ERROR";
 ```
-
-Defined in: [appkit/src/errors/validation.ts:14](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/validation.ts#L14)
 
 Error code for programmatic error handling
 
@@ -86,8 +78,6 @@ Error code for programmatic error handling
 readonly optional context: Record<string, unknown>;
 ```
 
-Defined in: [appkit/src/errors/base.ts:47](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L47)
-
 Additional context for the error
 
 #### Inherited from
@@ -101,8 +91,6 @@ Additional context for the error
 ```ts
 readonly isRetryable: false = false;
 ```
-
-Defined in: [appkit/src/errors/validation.ts:16](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/validation.ts#L16)
 
 Whether this error type is generally safe to retry
 
@@ -118,8 +106,6 @@ Whether this error type is generally safe to retry
 readonly statusCode: 400 = 400;
 ```
 
-Defined in: [appkit/src/errors/validation.ts:15](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/validation.ts#L15)
-
 HTTP status code suggestion (can be overridden)
 
 #### Overrides
@@ -133,8 +119,6 @@ HTTP status code suggestion (can be overridden)
 ```ts
 toJSON(): Record<string, unknown>;
 ```
-
-Defined in: [appkit/src/errors/base.ts:68](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L68)
 
 Convert error to JSON for logging/serialization.
 Sensitive values in context are automatically redacted.
@@ -154,8 +138,6 @@ Sensitive values in context are automatically redacted.
 ```ts
 toString(): string;
 ```
-
-Defined in: [appkit/src/errors/base.ts:84](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L84)
 
 Create a human-readable string representation
 
@@ -177,8 +159,6 @@ static invalidValue(
    value: unknown, 
    expected?: string): ValidationError;
 ```
-
-Defined in: [appkit/src/errors/validation.ts:32](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/validation.ts#L32)
 
 Create a validation error for an invalid field value.
 Note: The actual value is not stored in context for security reasons.
@@ -204,8 +184,6 @@ Only the value's type is recorded.
 static missingEnvVars(vars: string[]): ValidationError;
 ```
 
-Defined in: [appkit/src/errors/validation.ts:52](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/validation.ts#L52)
-
 Create a validation error for missing environment variables
 
 #### Parameters
@@ -225,8 +203,6 @@ Create a validation error for missing environment variables
 ```ts
 static missingField(fieldName: string): ValidationError;
 ```
-
-Defined in: [appkit/src/errors/validation.ts:21](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/validation.ts#L21)
 
 Create a validation error for a missing required field
 

@@ -1,0 +1,71 @@
+# RadioGroup
+
+Group of radio buttons for selecting a single option
+
+
+## Example
+
+import { DocExample } from "@site/src/components/DocExample";
+
+<DocExample name="radio-group" />
+
+
+## RadioGroup
+
+Group of radio buttons for selecting a single option
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/radio-group.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/radio-group.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `name` | `string` |  | - | - |
+| `required` | `boolean` |  | - | - |
+| `disabled` | `boolean` |  | - | - |
+| `dir` | `enum` |  | - | - |
+| `orientation` | `enum` |  | - | - |
+| `loop` | `boolean` |  | - | - |
+| `defaultValue` | `string` |  | - | - |
+| `value` | `string \| null` |  | - | - |
+| `onValueChange` | `((value: string) => void)` |  | - | - |
+| `asChild` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { RadioGroup } from '@databricks/appkit-ui';
+
+<RadioGroup /* props */ />
+```
+
+
+## RadioGroupItem
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/radio-group.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/radio-group.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `value` | `string \| null` |  | - | - |
+| `asChild` | `boolean` |  | - | - |
+| `checked` | `boolean` |  | - | - |
+| `required` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { RadioGroupItem } from '@databricks/appkit-ui';
+
+<RadioGroupItem /* props */ />
+```
+

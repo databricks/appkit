@@ -8,6 +8,7 @@ import {
 import { cn } from "../lib/utils";
 import { type Button, buttonVariants } from "./button";
 
+/** Navigation component for paginated content */
 function Pagination({ className, ...props }: React.ComponentProps<"nav">) {
   return (
     <nav
@@ -20,6 +21,7 @@ function Pagination({ className, ...props }: React.ComponentProps<"nav">) {
   );
 }
 
+/** Container for pagination items */
 function PaginationContent({
   className,
   ...props
@@ -33,6 +35,7 @@ function PaginationContent({
   );
 }
 
+/** Individual pagination item wrapper */
 function PaginationItem({ ...props }: React.ComponentProps<"li">) {
   return <li data-slot="pagination-item" {...props} />;
 }
@@ -42,6 +45,7 @@ type PaginationLinkProps = {
 } & Pick<React.ComponentProps<typeof Button>, "size"> &
   React.ComponentProps<"a">;
 
+/** Clickable link for navigating to a specific page */
 function PaginationLink({
   className,
   isActive,
@@ -65,6 +69,7 @@ function PaginationLink({
   );
 }
 
+/** Button for navigating to the previous page */
 function PaginationPrevious({
   className,
   ...props
@@ -82,6 +87,7 @@ function PaginationPrevious({
   );
 }
 
+/** Button for navigating to the next page */
 function PaginationNext({
   className,
   ...props
@@ -99,6 +105,7 @@ function PaginationNext({
   );
 }
 
+/** Ellipsis indicator for skipped page numbers */
 function PaginationEllipsis({
   className,
   ...props

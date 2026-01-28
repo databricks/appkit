@@ -8,6 +8,7 @@ import { Button } from "./button";
 import { Input } from "./input";
 import { Textarea } from "./textarea";
 
+/** Container for combining input fields with addons and buttons */
 function InputGroup({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -57,6 +58,7 @@ const inputGroupAddonVariants = cva(
   },
 );
 
+/** Decorative content positioned at the start or end of an input group */
 function InputGroupAddon({
   className,
   align = "inline-start",
@@ -97,6 +99,7 @@ const inputGroupButtonVariants = cva(
   },
 );
 
+/** Button integrated within an input group */
 function InputGroupButton({
   className,
   type = "button",
@@ -116,6 +119,7 @@ function InputGroupButton({
   );
 }
 
+/** Static text or icon displayed within an input group */
 function InputGroupText({ className, ...props }: React.ComponentProps<"span">) {
   return (
     <span
@@ -128,6 +132,7 @@ function InputGroupText({ className, ...props }: React.ComponentProps<"span">) {
   );
 }
 
+/** Text input styled for use within an input group */
 function InputGroupInput({
   className,
   ...props
@@ -144,6 +149,7 @@ function InputGroupInput({
   );
 }
 
+/** Textarea styled for use within an input group */
 function InputGroupTextarea({
   className,
   ...props

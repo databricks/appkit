@@ -5,6 +5,7 @@ import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useResolvedPortalContainer } from "../portal-container-context";
 
+/** Dropdown control for selecting a value from a list */
 function Select({
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Root>) {
@@ -99,6 +100,17 @@ function SelectLabel({
   );
 }
 
+/**
+ * Select item component for individual options in a dropdown.
+ * 
+ * @warning SelectItem cannot have value="". Use a sentinel value like "all" or "none" instead due to Radix UI constraint.
+ * 
+ * @example
+ * ```tsx
+ * <SelectItem value="option1">Option 1</SelectItem>
+ * <SelectItem value="all">All Items</SelectItem> // Use "all" instead of ""
+ * ```
+ */
 function SelectItem({
   className,
   children,

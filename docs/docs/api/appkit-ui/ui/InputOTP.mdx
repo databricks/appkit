@@ -1,0 +1,116 @@
+# InputOTP
+
+One-time password input with individual character slots
+
+
+## Example
+
+import { DocExample } from "@site/src/components/DocExample";
+
+<DocExample name="input-otp" />
+
+
+## InputOTP
+
+One-time password input with individual character slots
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/input-otp.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/input-otp.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `value` | `string` |  | - | - |
+| `onChange` | `((newValue: string) => unknown)` |  | - | - |
+| `maxLength` | `number` | ✓ | - | - |
+| `textAlign` | `enum` |  | - | - |
+| `onComplete` | `((...args: any[]) => unknown)` |  | - | - |
+| `pushPasswordManagerStrategy` | `enum` |  | - | - |
+| `pasteTransformer` | `((pasted: string) => string)` |  | - | - |
+| `containerClassName` | `string` |  | - | - |
+| `noScriptCSSFallback` | `string \| null` |  | - | - |
+| `render` | `InputOTPRenderFn` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { InputOTP } from '@databricks/appkit-ui';
+
+<InputOTP /* props */ />
+```
+
+
+## InputOTPGroup
+
+Container grouping OTP input slots together
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/input-otp.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/input-otp.tsx)
+
+
+### Props
+
+This component extends standard HTML element attributes.
+
+
+
+### Usage
+
+```tsx
+import { InputOTPGroup } from '@databricks/appkit-ui';
+
+<InputOTPGroup /* props */ />
+```
+
+
+## InputOTPSeparator
+
+Visual separator between OTP slot groups
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/input-otp.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/input-otp.tsx)
+
+
+### Props
+
+This component extends standard HTML element attributes.
+
+
+
+### Usage
+
+```tsx
+import { InputOTPSeparator } from '@databricks/appkit-ui';
+
+<InputOTPSeparator /* props */ />
+```
+
+
+## InputOTPSlot
+
+Individual character slot within the OTP input
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/input-otp.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/input-otp.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `index` | `number` | ✓ | - | - |
+
+
+
+### Usage
+
+```tsx
+import { InputOTPSlot } from '@databricks/appkit-ui';
+
+<InputOTPSlot /* props */ />
+```
+
