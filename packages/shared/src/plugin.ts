@@ -3,15 +3,15 @@ import type express from "express";
 export interface BasePlugin {
   name: string;
 
-  abortActiveOperations?(): void;
+  _abortActiveOperations?(): void;
 
-  validateEnv(): void;
+  _validateEnv(): void;
 
-  setup(): Promise<void>;
+  _setup(): Promise<void>;
 
-  injectRoutes(router: express.Router): void;
+  _injectRoutes(router: express.Router): void;
 
-  getEndpoints(): PluginEndpointMap;
+  _getEndpoints(): PluginEndpointMap;
 }
 
 export interface BasePluginConfig {
@@ -80,10 +80,30 @@ export type AppKitWithPlugins<T extends InputPluginMap> = {
     : never;
 };
 
+/**
+ * Keys that should be excluded from the public plugin API.
+ * - `_${string}` - Convention for private/internal methods
+ */
+type InternalPluginKeys = `_${string}`;
+
+/**
+ * Extracts the public API from a plugin instance by filtering out:
+ * - Methods starting with underscore (_)
+ */
+export type PublicPluginAPI<T> = {
+  [K in keyof T as K extends InternalPluginKeys ? never : K]: T[K];
+};
+
+/**
+ * Plugin API scoped to a user context (returned by asUser()).
+ * Same as PublicPluginAPI but also excludes `asUser` to prevent chaining.
+ */
+export type UserScopedPluginAPI<T> = Omit<PublicPluginAPI<T>, "asUser">;
+
 export type PluginMap<
   U extends readonly PluginData<PluginConstructor, unknown, string>[],
 > = {
-  [P in U[number] as P["name"]]: InstanceType<P["plugin"]>;
+  [P in U[number] as P["name"]]: PublicPluginAPI<InstanceType<P["plugin"]>>;
 };
 
 export type PluginData<T, U, N> = { plugin: T; config: U; name: N };

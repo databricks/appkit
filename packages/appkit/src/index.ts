@@ -37,3 +37,4 @@ export {
 
 // Vite plugin
 export { appKitTypesPlugin } from "./type-generator/vite-plugin";
+export { getExecutionContext } from "./context";

@@ -182,7 +182,6 @@ describe("ServerPlugin", () => {
       const plugin = new ServerPlugin({});
 
       expect(plugin.name).toBe("server");
-      expect(plugin.envVars).toEqual([]);
     });
 
     test("should use provided config values", () => {
@@ -212,24 +211,24 @@ describe("ServerPlugin", () => {
     });
   });
 
-  describe("shouldAutoStart", () => {
+  describe("_shouldAutoStart", () => {
     test("should return true when autoStart is true", () => {
       const plugin = new ServerPlugin({ autoStart: true });
-      expect(plugin.shouldAutoStart()).toBe(true);
+      expect(plugin._shouldAutoStart()).toBe(true);
     });
 
     test("should return false when autoStart is false", () => {
       const plugin = new ServerPlugin({ autoStart: false });
-      expect(plugin.shouldAutoStart()).toBe(false);
+      expect(plugin._shouldAutoStart()).toBe(false);
     });
   });
 
-  describe("setup", () => {
+  describe("_setup", () => {
     test("should call start when autoStart is true", async () => {
       const plugin = new ServerPlugin({ autoStart: true });
       const startSpy = vi.spyOn(plugin, "start").mockResolvedValue({} as any);
 
-      await plugin.setup();
+      await plugin._setup();
 
       expect(startSpy).toHaveBeenCalled();
     });
@@ -238,7 +237,7 @@ describe("ServerPlugin", () => {
       const plugin = new ServerPlugin({ autoStart: false });
       const startSpy = vi.spyOn(plugin, "start").mockResolvedValue({} as any);
 
-      await plugin.setup();
+      await plugin._setup();
 
       expect(startSpy).not.toHaveBeenCalled();
     });
@@ -285,12 +284,12 @@ describe("ServerPlugin", () => {
     test("extendRoutes registers plugin routes correctly", async () => {
       process.env.NODE_ENV = "production";
 
-      const injectRoutes = vi.fn();
+      const _injectRoutes = vi.fn();
       const plugins: any = {
         "test-plugin": {
           name: "test-plugin",
-          injectRoutes,
-          getEndpoints: vi.fn().mockReturnValue({}),
+          _injectRoutes,
+          _getEndpoints: vi.fn().mockReturnValue({}),
         },
       };
 
@@ -301,7 +300,7 @@ describe("ServerPlugin", () => {
       expect(routerFn).toHaveBeenCalledTimes(1);
       const routerInstance = routerFn.mock.results[0].value;
 
-      expect(injectRoutes).toHaveBeenCalledWith(routerInstance);
+      expect(_injectRoutes).toHaveBeenCalledWith(routerInstance);
       expect(mockExpressApp.use).toHaveBeenCalledWith(
         "/api/test-plugin",
         routerInstance,
@@ -466,11 +465,11 @@ describe("ServerPlugin", () => {
         plugins: {
           ok: {
             name: "ok",
-            abortActiveOperations: vi.fn(),
+            _abortActiveOperations: vi.fn(),
           } as any,
           bad: {
             name: "bad",
-            abortActiveOperations: vi.fn(() => {
+            _abortActiveOperations: vi.fn(() => {
               throw new Error("boom");
             }),
           } as any,

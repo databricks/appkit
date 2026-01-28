@@ -71,9 +71,9 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
     this.pluginInstances[name] = pluginInstance;
 
-    pluginInstance.validateEnv();
+    pluginInstance._validateEnv();
 
-    this.setupPromises.push(pluginInstance.setup());
+    this.setupPromises.push(pluginInstance._setup());
 
     Object.defineProperty(this, name, {
       get() {

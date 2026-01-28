@@ -99,9 +99,9 @@ describe("ServerPlugin with custom plugin", () => {
     // Create a simple test plugin
     class TestPlugin extends Plugin {
       name = "test-plugin" as const;
-      envVars: string[] = [];
+      _envVars: string[] = [];
 
-      injectRoutes(router: any) {
+      _injectRoutes(router: any) {
         router.get("/echo", (_req: any, res: any) => {
           res.json({ message: "hello from test plugin" });
         });

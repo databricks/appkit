@@ -40,7 +40,7 @@ export class ServerPlugin extends Plugin {
   };
 
   public name = "server" as const;
-  public envVars: string[] = [];
+  protected _envVars: string[] = [];
   private serverApplication: express.Application;
   private server: HTTPServer | null;
   private viteDevServer?: ViteDevServer;
@@ -62,8 +62,8 @@ export class ServerPlugin extends Plugin {
   }
 
   /** Setup the server plugin. */
-  async setup() {
-    if (this.shouldAutoStart()) {
+  async _setup() {
+    if (this._shouldAutoStart()) {
       await this.start();
     }
   }
@@ -76,7 +76,7 @@ export class ServerPlugin extends Plugin {
   }
 
   /** Check if the server should auto start. */
-  shouldAutoStart() {
+  _shouldAutoStart() {
     return this.config.autoStart;
   }
 
@@ -135,7 +135,7 @@ export class ServerPlugin extends Plugin {
    * @returns {HTTPServer} The server instance.
    */
   getServer(): HTTPServer {
-    if (this.shouldAutoStart()) {
+    if (this._shouldAutoStart()) {
       throw ServerError.autoStartConflict("get server");
     }
 
@@ -154,7 +154,7 @@ export class ServerPlugin extends Plugin {
    * @throws {Error} If autoStart is true.
    */
   extend(fn: (app: express.Application) => void) {
-    if (this.shouldAutoStart()) {
+    if (this._shouldAutoStart()) {
       throw ServerError.autoStartConflict("extend server");
     }
 
@@ -181,16 +181,16 @@ export class ServerPlugin extends Plugin {
     for (const plugin of Object.values(this.config.plugins)) {
       if (EXCLUDED_PLUGINS.includes(plugin.name)) continue;
 
-      if (plugin?.injectRoutes && typeof plugin.injectRoutes === "function") {
+      if (plugin?._injectRoutes && typeof plugin._injectRoutes === "function") {
         const router = express.Router();
 
-        plugin.injectRoutes(router);
+        plugin._injectRoutes(router);
 
         const basePath = `/api/${plugin.name}`;
         this.serverApplication.use(basePath, router);
 
         // Collect named endpoints from the plugin
-        endpoints[plugin.name] = plugin.getEndpoints();
+        endpoints[plugin.name] = plugin._getEndpoints();
       }
     }
 
@@ -293,9 +293,9 @@ export class ServerPlugin extends Plugin {
     // 1. abort active operations from plugins
     if (this.config.plugins) {
       for (const plugin of Object.values(this.config.plugins)) {
-        if (plugin.abortActiveOperations) {
+        if (plugin._abortActiveOperations) {
           try {
-            plugin.abortActiveOperations();
+            plugin._abortActiveOperations();
           } catch (err) {
             logger.error(
               "Error aborting operations for plugin %s: %O",

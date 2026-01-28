@@ -26,7 +26,7 @@ const logger = createLogger("analytics");
 
 export class AnalyticsPlugin extends Plugin {
   name = "analytics";
-  envVars = [];
+  protected _envVars: string[] = [];
 
   protected static description = "Analytics plugin for data analysis";
   protected declare config: IAnalyticsConfig;
@@ -46,7 +46,7 @@ export class AnalyticsPlugin extends Plugin {
     });
   }
 
-  injectRoutes(router: IAppRouter) {
+  _injectRoutes(router: IAppRouter) {
     // Service principal endpoints
     this.route(router, {
       name: "arrow",
@@ -149,7 +149,8 @@ export class AnalyticsPlugin extends Plugin {
     const { query, isAsUser } = queryResult;
 
     // get execution context - user-scoped if .obo.sql, otherwise service principal
-    const executor = isAsUser ? this.asUser(req) : this;
+    // Cast to `this` for internal use - we need access to protected methods like executeStream
+    const executor = (isAsUser ? this.asUser(req) : this) as this;
     const userKey = getCurrentUserId();
     const executorKey = isAsUser ? userKey : "global";
 
@@ -261,7 +262,7 @@ export class AnalyticsPlugin extends Plugin {
     return await this.SQLClient.getArrowData(workspaceClient, jobId, signal);
   }
 
-  async shutdown(): Promise<void> {
+  async _shutdown(): Promise<void> {
     this.streamManager.abortAll();
   }
 }

@@ -85,7 +85,7 @@ vi.mock("../interceptors/telemetry", () => ({
 
 // Test plugin implementations
 class TestPlugin extends Plugin<BasePluginConfig> {
-  envVars = ["TEST_ENV_VAR"];
+  _envVars = ["TEST_ENV_VAR"];
 
   async customMethod(value: string): Promise<string> {
     return `processed-${value}`;
@@ -107,7 +107,7 @@ class TestPlugin extends Plugin<BasePluginConfig> {
 class PluginWithCustomSetup extends TestPlugin {
   setupCalled = false;
 
-  async setup() {
+  async _setup() {
     await new Promise((resolve) => setTimeout(resolve, 10));
     this.setupCalled = true;
   }
@@ -116,7 +116,7 @@ class PluginWithCustomSetup extends TestPlugin {
 class PluginWithRoutes extends TestPlugin {
   routesInjected = false;
 
-  injectRoutes(_router: express.Router) {
+  _injectRoutes(_router: express.Router) {
     this.routesInjected = true;
     // Mock route injection
   }
@@ -203,11 +203,11 @@ describe("Plugin", () => {
     });
   });
 
-  describe("validateEnv", () => {
+  describe("_validateEnv", () => {
     test("should call validateEnv with plugin envVars", () => {
       const plugin = new TestPlugin(config);
 
-      plugin.validateEnv();
+      plugin._validateEnv();
 
       expect(validateEnv).toHaveBeenCalledWith(["TEST_ENV_VAR"]);
     });
@@ -219,15 +219,15 @@ describe("Plugin", () => {
 
       const plugin = new TestPlugin(config);
 
-      expect(() => plugin.validateEnv()).toThrow("Validation failed");
+      expect(() => plugin._validateEnv()).toThrow("Validation failed");
     });
   });
 
-  describe("setup", () => {
+  describe("_setup", () => {
     test("should have empty default setup", async () => {
       const plugin = new TestPlugin(config);
 
-      await expect(plugin.setup()).resolves.toBeUndefined();
+      await expect(plugin._setup()).resolves.toBeUndefined();
     });
 
     test("should allow custom setup implementation", async () => {
@@ -235,7 +235,7 @@ describe("Plugin", () => {
 
       const plugin = new PluginWithCustomSetup(config);
 
-      await plugin.setup();
+      await plugin._setup();
 
       expect(plugin.setupCalled).toBe(true);
 
@@ -243,29 +243,29 @@ describe("Plugin", () => {
     });
   });
 
-  describe("injectRoutes", () => {
+  describe("_injectRoutes", () => {
     test("should have empty default implementation", () => {
       const plugin = new TestPlugin(config);
       const mockRouter = {} as express.Router;
 
-      expect(() => plugin.injectRoutes(mockRouter)).not.toThrow();
+      expect(() => plugin._injectRoutes(mockRouter)).not.toThrow();
     });
 
     test("should allow custom route injection", () => {
       const plugin = new PluginWithRoutes(config);
       const mockRouter = {} as express.Router;
 
-      plugin.injectRoutes(mockRouter);
+      plugin._injectRoutes(mockRouter);
 
       expect(plugin.routesInjected).toBe(true);
     });
   });
 
-  describe("abortActiveOperations", () => {
+  describe("_abortActiveOperations", () => {
     test("should call streamManager.abortAll", () => {
       const plugin = new TestPlugin(config);
 
-      plugin.abortActiveOperations();
+      plugin._abortActiveOperations();
 
       expect(mockStreamManager.abortAll).toHaveBeenCalledTimes(1);
     });
