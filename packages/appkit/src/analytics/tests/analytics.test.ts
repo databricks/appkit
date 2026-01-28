@@ -83,7 +83,7 @@ describe("Analytics Plugin", () => {
       const plugin = new AnalyticsPlugin(config);
       const { router } = createMockRouter();
 
-      plugin.injectRoutes(router);
+      plugin._injectRoutes(router);
 
       // Only 1 POST route - asUser is determined by .obo.sql file convention
       expect(router.post).toHaveBeenCalledTimes(1);
@@ -97,7 +97,7 @@ describe("Analytics Plugin", () => {
       const plugin = new AnalyticsPlugin(config);
       const { router } = createMockRouter();
 
-      plugin.injectRoutes(router);
+      plugin._injectRoutes(router);
 
       expect(router.get).toHaveBeenCalledTimes(1);
       expect(router.get).toHaveBeenCalledWith(
@@ -110,7 +110,7 @@ describe("Analytics Plugin", () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
-      plugin.injectRoutes(router);
+      plugin._injectRoutes(router);
 
       const handler = getHandler("POST", "/query/:query_key");
       const mockReq = createMockRequest({
@@ -148,7 +148,7 @@ describe("Analytics Plugin", () => {
         });
       (plugin as any).SQLClient.executeStatement = executeMock;
 
-      plugin.injectRoutes(router);
+      plugin._injectRoutes(router);
 
       const handler = getHandler("POST", "/query/:query_key");
       const mockReq = createMockRequest({
@@ -214,7 +214,7 @@ describe("Analytics Plugin", () => {
         });
       (plugin as any).SQLClient.executeStatement = executeMock;
 
-      plugin.injectRoutes(router);
+      plugin._injectRoutes(router);
 
       const handler = getHandler("POST", "/query/:query_key");
       // Request with user headers for .obo.sql queries
@@ -268,7 +268,7 @@ describe("Analytics Plugin", () => {
       });
       (plugin as any).SQLClient.executeStatement = executeMock;
 
-      plugin.injectRoutes(router);
+      plugin._injectRoutes(router);
       const handler = getHandler("POST", "/query/:query_key");
 
       // First request: .sql file (isAsUser: false)
@@ -319,7 +319,7 @@ describe("Analytics Plugin", () => {
       });
       (plugin as any).SQLClient.executeStatement = executeMock;
 
-      plugin.injectRoutes(router);
+      plugin._injectRoutes(router);
 
       const handler = getHandler("POST", "/query/:query_key");
       const mockReq = createMockRequest({
@@ -354,7 +354,7 @@ describe("Analytics Plugin", () => {
       });
       (plugin as any).SQLClient.executeStatement = executeMock;
 
-      plugin.injectRoutes(router);
+      plugin._injectRoutes(router);
 
       const handler = getHandler("POST", "/query/:query_key");
 
@@ -429,7 +429,7 @@ describe("Analytics Plugin", () => {
         });
       (plugin as any).SQLClient.executeStatement = executeMock;
 
-      plugin.injectRoutes(router);
+      plugin._injectRoutes(router);
 
       const handler = getHandler("POST", "/query/:query_key");
 
@@ -503,7 +503,7 @@ describe("Analytics Plugin", () => {
         );
       (plugin as any).SQLClient.executeStatement = executeMock;
 
-      plugin.injectRoutes(router);
+      plugin._injectRoutes(router);
 
       const handler = getHandler("POST", "/query/:query_key");
       const mockReq = createMockRequest({
@@ -532,7 +532,7 @@ describe("Analytics Plugin", () => {
       // Mock getAppQuery to return null (query not found)
       (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue(null);
 
-      plugin.injectRoutes(router);
+      plugin._injectRoutes(router);
 
       const handler = getHandler("POST", "/query/:query_key");
       const mockReq = createMockRequest({

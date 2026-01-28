@@ -15,9 +15,9 @@ interface ReconnectStreamResponse {
 
 export class ReconnectPlugin extends Plugin {
   public name = "reconnect";
-  public envVars = [];
+  protected _envVars: string[] = [];
 
-  injectRoutes(router: IAppRouter): void {
+  _injectRoutes(router: IAppRouter): void {
     this.route<ReconnectResponse>(router, {
       name: "reconnect",
       method: "get",

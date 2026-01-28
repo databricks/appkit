@@ -10,6 +10,7 @@ import type {
   RouteConfig,
   StreamExecuteHandler,
   StreamExecutionSettings,
+  UserScopedPluginAPI,
 } from "shared";
 import { AppManager } from "../app";
 import { CacheManager } from "../cache";
@@ -49,7 +50,7 @@ const EXCLUDED_FROM_PROXY = new Set([
   // Lifecycle methods
   "setup",
   "shutdown",
-  "validateEnv",
+  "_validateEnv",
   "injectRoutes",
   "getEndpoints",
   "abortActiveOperations",
@@ -69,7 +70,7 @@ export abstract class Plugin<
   protected devFileReader: DevFileReader;
   protected streamManager: StreamManager;
   protected telemetry: ITelemetry;
-  protected abstract envVars: string[];
+  protected abstract _envVars: string[];
 
   /** Registered endpoints for this plugin */
   private registeredEndpoints: PluginEndpointMap = {};
@@ -88,21 +89,21 @@ export abstract class Plugin<
     this.isReady = true;
   }
 
-  validateEnv() {
-    validateEnv(this.envVars);
+  _validateEnv() {
+    validateEnv(this._envVars);
   }
 
-  injectRoutes(_: express.Router) {
+  _injectRoutes(_: express.Router) {
     return;
   }
 
-  async setup() {}
+  async _setup() {}
 
-  getEndpoints(): PluginEndpointMap {
+  _getEndpoints(): PluginEndpointMap {
     return this.registeredEndpoints;
   }
 
-  abortActiveOperations(): void {
+  _abortActiveOperations(): void {
     this.streamManager.abortAll();
   }
 
@@ -135,7 +136,7 @@ export abstract class Plugin<
    * })
    * ```
    */
-  asUser(req: express.Request): this {
+  asUser(req: express.Request): UserScopedPluginAPI<this> {
     const token = req.headers["x-forwarded-access-token"] as string;
     const userId = req.headers["x-forwarded-user"] as string;
     const isDev = process.env.NODE_ENV === "development";
@@ -147,7 +148,7 @@ export abstract class Plugin<
         "asUser() called without user token in development mode. Using service principal.",
       );
 
-      return this;
+      return this as unknown as UserScopedPluginAPI<this>;
     }
 
     if (!token) {
@@ -166,7 +167,7 @@ export abstract class Plugin<
     );
 
     // Return a proxy that wraps method calls in user context
-    return this.createUserContextProxy(userContext);
+    return this._createUserContextProxy(userContext);
   }
 
   /**
@@ -174,7 +175,9 @@ export abstract class Plugin<
    * This allows all plugin methods to automatically use the user's
    * Databricks credentials.
    */
-  private createUserContextProxy(userContext: UserContext): this {
+  private _createUserContextProxy(
+    userContext: UserContext,
+  ): UserScopedPluginAPI<this> {
     return new Proxy(this, {
       get: (target, prop, receiver) => {
         const value = Reflect.get(target, prop, receiver);
@@ -191,7 +194,7 @@ export abstract class Plugin<
           return runInUserContext(userContext, () => value.apply(target, args));
         };
       },
-    }) as this;
+    }) as unknown as UserScopedPluginAPI<this>;
   }
 
   // streaming execution with interceptors

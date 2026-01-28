@@ -41,21 +41,21 @@ class CoreTestPlugin implements BasePlugin {
     this.injectedConfig = config;
   }
 
-  validateEnv() {
+  _validateEnv() {
     this.validateEnvCalled = true;
   }
 
-  async setup() {
+  async _setup() {
     this.setupCalled = true;
   }
 
-  injectRoutes() {}
+  _injectRoutes() {}
 
   asUser() {
     return this;
   }
 
-  getEndpoints() {
+  _getEndpoints() {
     return {};
   }
 }
@@ -72,21 +72,21 @@ class NormalTestPlugin implements BasePlugin {
     this.injectedConfig = config;
   }
 
-  validateEnv() {
+  _validateEnv() {
     this.validateEnvCalled = true;
   }
 
-  async setup() {
+  async _setup() {
     this.setupCalled = true;
   }
 
-  injectRoutes() {}
+  _injectRoutes() {}
 
   asUser() {
     return this;
   }
 
-  getEndpoints() {
+  _getEndpoints() {
     return {};
   }
 }
@@ -105,21 +105,21 @@ class DeferredTestPlugin implements BasePlugin {
     this.injectedPlugins = config.plugins;
   }
 
-  validateEnv() {
+  _validateEnv() {
     this.validateEnvCalled = true;
   }
 
-  async setup() {
+  async _setup() {
     this.setupCalled = true;
   }
 
-  injectRoutes() {}
+  _injectRoutes() {}
 
   asUser(): any {
     return this;
   }
 
-  getEndpoints() {
+  _getEndpoints() {
     return {};
   }
 }
@@ -134,20 +134,20 @@ class SlowSetupPlugin implements BasePlugin {
     this.setupDelay = config.setupDelay || 100;
   }
 
-  validateEnv() {}
+  _validateEnv() {}
 
-  async setup() {
+  async _setup() {
     await new Promise((resolve) => setTimeout(resolve, this.setupDelay));
     this.setupCalled = true;
   }
 
-  injectRoutes() {}
+  _injectRoutes() {}
 
   asUser(): any {
     return this;
   }
 
-  getEndpoints() {
+  _getEndpoints() {
     return {};
   }
 }
@@ -156,21 +156,21 @@ class FailingPlugin implements BasePlugin {
   static DEFAULT_CONFIG = {};
   name = "failing";
 
-  validateEnv() {
+  _validateEnv() {
     throw new Error("Environment validation failed");
   }
 
-  async setup() {
+  async _setup() {
     throw new Error("Setup failed");
   }
 
-  injectRoutes() {}
+  _injectRoutes() {}
 
   asUser(): any {
     return this;
   }
 
-  getEndpoints() {
+  _getEndpoints() {
     return {};
   }
 }
@@ -239,23 +239,23 @@ describe("AppKit", () => {
       const setupOrder: string[] = [];
 
       const CoreWithTracking = class extends CoreTestPlugin {
-        async setup() {
+        async _setup() {
           setupOrder.push("core");
-          await super.setup();
+          await super._setup();
         }
       };
 
       const NormalWithTracking = class extends NormalTestPlugin {
-        async setup() {
+        async _setup() {
           setupOrder.push("normal");
-          await super.setup();
+          await super._setup();
         }
       };
 
       const DeferredWithTracking = class extends DeferredTestPlugin {
-        async setup() {
+        async _setup() {
           setupOrder.push("deferred");
-          await super.setup();
+          await super._setup();
         }
       };
 
@@ -342,7 +342,7 @@ describe("AppKit", () => {
 
     test("should throw error if plugin setup fails", async () => {
       const FailingSetupPlugin = class extends FailingPlugin {
-        validateEnv() {
+        _validateEnv() {
           // Don't throw in validateEnv for this test
         }
       };
@@ -484,7 +484,7 @@ describe("AppKit", () => {
 
     test("should propagate setup promise rejections", async () => {
       const FailingSetupPlugin = class extends CoreTestPlugin {
-        async setup() {
+        async _setup() {
           throw new Error("Async setup failure");
         }
       };
