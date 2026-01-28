@@ -102,6 +102,13 @@ class TestPlugin extends Plugin<BasePluginConfig> {
   async asyncMethodThatThrows(): Promise<string> {
     throw new Error("Async method error");
   }
+
+  sdk() {
+    return {
+      customMethod: this.customMethod,
+      syncMethod: this.syncMethod,
+    };
+  }
 }
 
 class PluginWithCustomSetup extends TestPlugin {

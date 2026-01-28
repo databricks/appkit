@@ -110,6 +110,10 @@ describe("ServerPlugin with custom plugin", () => {
           res.json({ received: req.body });
         });
       }
+
+      sdk() {
+        return {};
+      }
     }
 
     const testPlugin = toPlugin<typeof TestPlugin, any, "test-plugin">(

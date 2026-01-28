@@ -13,6 +13,8 @@ export interface BasePlugin {
   injectRoutes(router: express.Router): void;
 
   getEndpoints(): PluginEndpointMap;
+
+  sdk?(): unknown;
 }
 
 /** Base configuration interface for AppKit plugins */
@@ -82,10 +84,39 @@ export type AppKitWithPlugins<T extends InputPluginMap> = {
     : never;
 };
 
+/**
+ * Extracts the SDK type from a plugin.
+ * This is the return type of the plugin's sdk() method.
+ * If the plugin doesn't implement sdk(), returns an empty object type.
+ */
+export type PluginSDK<T extends BasePlugin> = T["sdk"] extends () => infer R
+  ? R
+  : Record<string, never>;
+
+/**
+ * Wraps an SDK with the `asUser` method that AppKit automatically adds.
+ * When `asUser(req)` is called, it returns the same SDK but scoped to the user's credentials.
+ */
+export type WithAsUser<SDK> = SDK & {
+  /**
+   * Execute operations using the user's identity from the request.
+   * Returns a user-scoped SDK where all methods execute with the
+   * user's Databricks credentials instead of the service principal.
+   */
+  asUser: (req: IAppRequest) => SDK;
+};
+
+/**
+ * Maps plugin names to their SDK types (with asUser automatically added).
+ * Each plugin exposes its public API via the sdk() method,
+ * and AppKit wraps it with asUser() for user-scoped execution.
+ */
 export type PluginMap<
   U extends readonly PluginData<PluginConstructor, unknown, string>[],
 > = {
-  [P in U[number] as P["name"]]: InstanceType<P["plugin"]>;
+  [P in U[number] as P["name"]]: WithAsUser<
+    PluginSDK<InstanceType<P["plugin"]>>
+  >;
 };
 
 export type PluginData<T, U, N> = { plugin: T; config: U; name: N };

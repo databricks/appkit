@@ -219,17 +219,25 @@ import type express from "express";
 
 class MyPlugin extends Plugin {
   name = "myPlugin";
-  envVars = [];                 // list required env vars here
+  envVars = ["MY_API_KEY"];
 
-  injectRoutes(router: express.Router) {
-    this.route(router, {
-      name: "hello",
-      method: "get",
-      path: "/hello",
-      handler: async (_req, res) => {
-        res.json({ ok: true });
-      },
-    });
+  async setup() {
+    // Initialize your plugin
+  }
+
+  myCustomMethod() {
+    // Some implementation
+  }
+
+  async shutdown() {
+    // Clean up resources
+  }
+
+  sdk() {
+    // an object with the methods from this plugin to expose as SDK
+    return {
+      myCustomMethod: this.myCustomMethod
+    }
   }
 }
 
@@ -247,6 +255,23 @@ export const myPlugin = toPlugin<typeof MyPlugin, Record<string, never>, "myPlug
   - **Cache management**: Access the cache service via `this.cache`. See [`CacheConfig`](api/appkit/Interface.CacheConfig.md) for configuration.
   - **Telemetry**: Instrument your plugin with traces and metrics via `this.telemetry`. See [`ITelemetry`](api/appkit/Interface.ITelemetry.md).
 - **Execution interceptors**: Use `execute()` and `executeStream()` with [`StreamExecutionSettings`](api/appkit/Interface.StreamExecutionSettings.md)
+
+**Consuming your plugin as an SDK**
+
+Optionally, you may want to provide a way to consume your plugin in an imperative way using the AppKit object.
+To do that, your plugin needs to implement the `sdk` method, returning an object with the API methods you want to expose. From the previous example, the plugin could be consumed as follows:
+
+```ts
+const AppKit = await createApp({
+  plugins: [
+    server({ port: 8000 }),
+    analytics(),
+    myPlugin(),
+  ],
+});
+
+AppKit.myPlugin.myCustomMethod();
+```
 
 See the [`Plugin`](api/appkit/Class.Plugin.md) API reference for complete documentation.
 

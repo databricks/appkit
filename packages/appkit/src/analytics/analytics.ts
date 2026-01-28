@@ -26,7 +26,7 @@ const logger = createLogger("analytics");
 
 export class AnalyticsPlugin extends Plugin {
   name = "analytics";
-  envVars = [];
+  protected envVars: string[] = [];
 
   protected static description = "Analytics plugin for data analysis";
   protected declare config: IAnalyticsConfig;
@@ -263,6 +263,19 @@ export class AnalyticsPlugin extends Plugin {
 
   async shutdown(): Promise<void> {
     this.streamManager.abortAll();
+  }
+
+  /**
+   * Returns the public SDK for the analytics plugin.
+   * Note: `asUser()` is automatically added by AppKit.
+   */
+  sdk() {
+    return {
+      /**
+       * Execute a SQL query using service principal credentials.
+       */
+      query: this.query,
+    };
   }
 }
 

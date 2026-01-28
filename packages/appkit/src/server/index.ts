@@ -40,7 +40,7 @@ export class ServerPlugin extends Plugin {
   };
 
   public name = "server" as const;
-  public envVars: string[] = [];
+  protected envVars: string[] = [];
   private serverApplication: express.Application;
   private server: HTTPServer | null;
   private viteDevServer?: ViteDevServer;
@@ -322,6 +322,27 @@ export class ServerPlugin extends Plugin {
     } else {
       process.exit(0);
     }
+  }
+
+  /**
+   * Returns the public SDK for the server plugin.
+   * Exposes server management methods.
+   */
+  sdk() {
+    const self = this;
+    return {
+      /** Start the server */
+      start: this.start,
+      /** Extend the server with custom routes or middleware */
+      extend(fn: (app: express.Application) => void) {
+        self.extend(fn);
+        return this;
+      },
+      /** Get the underlying HTTP server instance */
+      getServer: this.getServer,
+      /** Get the server configuration */
+      getConfig: this.getConfig,
+    };
   }
 }
 

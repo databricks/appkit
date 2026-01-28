@@ -17,6 +17,7 @@ export default defineConfig({
         "**/*.test.*",
         "**/tests/**",
         "**/template/**",
+        "**/docs/**",
       ],
     },
     projects: [

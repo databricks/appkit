@@ -76,6 +76,12 @@ readonly optional cause: Error;
 
 Optional cause of the error
 
+#### Overrides
+
+```ts
+Error.cause
+```
+
 ***
 
 ### code
