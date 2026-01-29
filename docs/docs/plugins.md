@@ -233,8 +233,8 @@ class MyPlugin extends Plugin {
     // Clean up resources
   }
 
-  sdk() {
-    // an object with the methods from this plugin to expose as SDK
+  exports() {
+    // an object with the methods from this plugin to expose
     return {
       myCustomMethod: this.myCustomMethod
     }
@@ -256,10 +256,10 @@ export const myPlugin = toPlugin<typeof MyPlugin, Record<string, never>, "myPlug
   - **Telemetry**: Instrument your plugin with traces and metrics via `this.telemetry`. See [`ITelemetry`](api/appkit/Interface.ITelemetry.md).
 - **Execution interceptors**: Use `execute()` and `executeStream()` with [`StreamExecutionSettings`](api/appkit/Interface.StreamExecutionSettings.md)
 
-**Consuming your plugin as an SDK**
+**Consuming your plugin programmatically**
 
-Optionally, you may want to provide a way to consume your plugin in an imperative way using the AppKit object.
-To do that, your plugin needs to implement the `sdk` method, returning an object with the API methods you want to expose. From the previous example, the plugin could be consumed as follows:
+Optionally, you may want to provide a way to consume your plugin programmatically using the AppKit object.
+To do that, your plugin needs to implement the `exports` method, returning an object with the methods you want to expose. From the previous example, the plugin could be consumed as follows:
 
 ```ts
 const AppKit = await createApp({

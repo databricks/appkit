@@ -325,10 +325,10 @@ export class ServerPlugin extends Plugin {
   }
 
   /**
-   * Returns the public SDK for the server plugin.
+   * Returns the public exports for the server plugin.
    * Exposes server management methods.
    */
-  sdk() {
+  exports() {
     const self = this;
     return {
       /** Start the server */

@@ -86,42 +86,50 @@ export class AppKit<TPlugins extends InputPluginMap> {
   }
 
   /**
-   * Binds all function properties in an SDK object to the given context.
+   * Binds all function properties in an exports object to the given context.
    */
-  private bindSdkMethods(sdk: Record<string, unknown>, context: BasePlugin) {
-    for (const key in sdk) {
-      if (Object.hasOwn(sdk, key) && typeof sdk[key] === "function") {
-        sdk[key] = (sdk[key] as (...args: unknown[]) => unknown).bind(context);
+  private bindExportMethods(
+    exports: Record<string, unknown>,
+    context: BasePlugin,
+  ) {
+    for (const key in exports) {
+      if (Object.hasOwn(exports, key) && typeof exports[key] === "function") {
+        exports[key] = (exports[key] as (...args: unknown[]) => unknown).bind(
+          context,
+        );
       }
     }
   }
 
   /**
-   * Wraps a plugin's SDK with an `asUser` method that returns
-   * a user-scoped version of the SDK.
+   * Wraps a plugin's exports with an `asUser` method that returns
+   * a user-scoped version of the exports.
    */
   private wrapWithAsUser<T extends BasePlugin>(plugin: T) {
-    // If plugin doesn't implement sdk(), return empty object
-    const sdk = (plugin.sdk?.() ?? {}) as Record<string, unknown>;
-    this.bindSdkMethods(sdk, plugin);
+    // If plugin doesn't implement exports(), return empty object
+    const pluginExports = (plugin.exports?.() ?? {}) as Record<string, unknown>;
+    this.bindExportMethods(pluginExports, plugin);
 
-    // If plugin doesn't support asUser (no asUser method), return SDK as-is
+    // If plugin doesn't support asUser (no asUser method), return exports as-is
     if (typeof (plugin as any).asUser !== "function") {
-      return sdk;
+      return pluginExports;
     }
 
     return {
-      ...sdk,
+      ...pluginExports,
       /**
        * Execute operations using the user's identity from the request.
-       * Returns a user-scoped SDK where all methods execute with the
+       * Returns user-scoped exports where all methods execute with the
        * user's Databricks credentials instead of the service principal.
        */
       asUser: (req: import("express").Request) => {
         const userPlugin = (plugin as any).asUser(req);
-        const userSdk = (userPlugin.sdk?.() ?? {}) as Record<string, unknown>;
-        this.bindSdkMethods(userSdk, userPlugin);
-        return userSdk;
+        const userExports = (userPlugin.exports?.() ?? {}) as Record<
+          string,
+          unknown
+        >;
+        this.bindExportMethods(userExports, userPlugin);
+        return userExports;
       },
     };
   }

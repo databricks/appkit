@@ -103,7 +103,7 @@ class TestPlugin extends Plugin<BasePluginConfig> {
     throw new Error("Async method error");
   }
 
-  sdk() {
+  exports() {
     return {
       customMethod: this.customMethod,
       syncMethod: this.syncMethod,

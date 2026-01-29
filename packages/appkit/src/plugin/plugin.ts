@@ -108,11 +108,11 @@ export abstract class Plugin<
   }
 
   /**
-   * Returns the public SDK for this plugin.
+   * Returns the public exports for this plugin.
    * Override this to define a custom public API.
    * By default, returns an empty object.
    */
-  sdk(): unknown {
+  exports(): unknown {
     return {};
   }
 

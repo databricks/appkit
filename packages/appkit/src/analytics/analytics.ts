@@ -266,10 +266,10 @@ export class AnalyticsPlugin extends Plugin {
   }
 
   /**
-   * Returns the public SDK for the analytics plugin.
+   * Returns the public exports for the analytics plugin.
    * Note: `asUser()` is automatically added by AppKit.
    */
-  sdk() {
+  exports() {
     return {
       /**
        * Execute a SQL query using service principal credentials.

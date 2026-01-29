@@ -111,7 +111,7 @@ describe("ServerPlugin with custom plugin", () => {
         });
       }
 
-      sdk() {
+      exports() {
         return {};
       }
     }

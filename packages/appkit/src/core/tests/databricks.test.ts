@@ -55,7 +55,7 @@ class CoreTestPlugin implements BasePlugin {
     return {};
   }
 
-  sdk() {
+  exports() {
     return {
       // Expose internal state for testing
       setupCalled: this.setupCalled,
@@ -91,7 +91,7 @@ class NormalTestPlugin implements BasePlugin {
     return {};
   }
 
-  sdk() {
+  exports() {
     return {
       setupCalled: this.setupCalled,
       validateEnvCalled: this.validateEnvCalled,
@@ -128,7 +128,7 @@ class DeferredTestPlugin implements BasePlugin {
     return {};
   }
 
-  sdk() {
+  exports() {
     return {
       setupCalled: this.setupCalled,
       validateEnvCalled: this.validateEnvCalled,
@@ -161,7 +161,7 @@ class SlowSetupPlugin implements BasePlugin {
     return {};
   }
 
-  sdk() {
+  exports() {
     return {
       setupCalled: this.setupCalled,
     };
@@ -186,7 +186,7 @@ class FailingPlugin implements BasePlugin {
     return {};
   }
 
-  sdk() {
+  exports() {
     return {};
   }
 }
@@ -541,7 +541,7 @@ describe("AppKit", () => {
           this.counter++;
         }
 
-        sdk() {
+        exports() {
           return {
             increment: this.increment,
             getCounter: () => this.counter,
@@ -581,7 +581,7 @@ describe("AppKit", () => {
           this.values.push(value);
         }
 
-        sdk() {
+        exports() {
           return {
             addValue: this.addValue,
             getValues: () => [...this.values],

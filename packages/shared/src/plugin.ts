@@ -14,7 +14,7 @@ export interface BasePlugin {
 
   getEndpoints(): PluginEndpointMap;
 
-  sdk?(): unknown;
+  exports?(): unknown;
 }
 
 /** Base configuration interface for AppKit plugins */
@@ -85,13 +85,12 @@ export type AppKitWithPlugins<T extends InputPluginMap> = {
 };
 
 /**
- * Extracts the SDK type from a plugin.
- * This is the return type of the plugin's sdk() method.
- * If the plugin doesn't implement sdk(), returns an empty object type.
+ * Extracts the exports type from a plugin.
+ * This is the return type of the plugin's exports() method.
+ * If the plugin doesn't implement exports(), returns an empty object type.
  */
-export type PluginSDK<T extends BasePlugin> = T["sdk"] extends () => infer R
-  ? R
-  : Record<string, never>;
+export type PluginExports<T extends BasePlugin> =
+  T["exports"] extends () => infer R ? R : Record<string, never>;
 
 /**
  * Wraps an SDK with the `asUser` method that AppKit automatically adds.
@@ -107,15 +106,15 @@ export type WithAsUser<SDK> = SDK & {
 };
 
 /**
- * Maps plugin names to their SDK types (with asUser automatically added).
- * Each plugin exposes its public API via the sdk() method,
+ * Maps plugin names to their exported types (with asUser automatically added).
+ * Each plugin exposes its public API via the exports() method,
  * and AppKit wraps it with asUser() for user-scoped execution.
  */
 export type PluginMap<
   U extends readonly PluginData<PluginConstructor, unknown, string>[],
 > = {
   [P in U[number] as P["name"]]: WithAsUser<
-    PluginSDK<InstanceType<P["plugin"]>>
+    PluginExports<InstanceType<P["plugin"]>>
   >;
 };
 

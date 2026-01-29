@@ -224,6 +224,28 @@ userKey?: string): Promise<void>;
 
 ***
 
+### exports()
+
+```ts
+exports(): unknown;
+```
+
+Returns the public exports for this plugin.
+Override this to define a custom public API.
+By default, returns an empty object.
+
+#### Returns
+
+`unknown`
+
+#### Implementation of
+
+```ts
+BasePlugin.exports
+```
+
+***
+
 ### getEndpoints()
 
 ```ts
@@ -307,28 +329,6 @@ protected route<_TResponse>(router: Router, config: RouteConfig): void;
 #### Returns
 
 `void`
-
-***
-
-### sdk()
-
-```ts
-sdk(): unknown;
-```
-
-Returns the public SDK for this plugin.
-Override this to define a custom public API.
-By default, returns an empty object.
-
-#### Returns
-
-`unknown`
-
-#### Implementation of
-
-```ts
-BasePlugin.sdk
-```
 
 ***
 
