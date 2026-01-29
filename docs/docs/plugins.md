@@ -178,7 +178,6 @@ router.post("/system/data", async (req, res) => {
 
 Exported from `@databricks/appkit`:
 
-- `getExecutionContext()`: Returns current context (user or service)
 - `getCurrentUserId()`: Returns user ID in user context, service user ID otherwise
 - `getWorkspaceClient()`: Returns the appropriate WorkspaceClient for current context
 - `getWarehouseId()`: `Promise<string>` (from `DATABRICKS_WAREHOUSE_ID` or auto-selected in dev)
@@ -219,7 +218,7 @@ import { Plugin, toPlugin } from "@databricks/appkit";
 import type express from "express";
 
 class MyPlugin extends Plugin {
-  name = "my-plugin";
+  name = "myPlugin";
   envVars = [];                 // list required env vars here
 
   injectRoutes(router: express.Router) {
@@ -234,9 +233,9 @@ class MyPlugin extends Plugin {
   }
 }
 
-export const myPlugin = toPlugin<typeof MyPlugin, Record<string, never>, "my-plugin">(
+export const myPlugin = toPlugin<typeof MyPlugin, Record<string, never>, "myPlugin">(
   MyPlugin,
-  "my-plugin",
+  "myPlugin",
 );
 ```
 
@@ -276,7 +275,7 @@ Inside a Plugin subclass:
 
 ```ts
 const value = await this.cache.getOrExecute(
-  ["my-plugin", "data", userId],
+  ["myPlugin", "data", userId],
   async () => expensiveWork(),
   userKey,
   { ttl: 300 },

@@ -172,7 +172,7 @@ AppKit uses a **phase-based plugin architecture** with three initialization phas
 import { Plugin, toPlugin } from '@databricks/appkit';
 
 class MyPlugin extends Plugin {
-  name: string = "my-plugin";
+  name: string = "myPlugin";
 
   // Validate required environment variables
   validateEnv() {
