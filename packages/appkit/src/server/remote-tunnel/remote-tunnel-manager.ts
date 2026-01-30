@@ -359,6 +359,18 @@ export class RemoteTunnelManager {
                 pending.resolve(data.content);
               }
             }
+          } else if (data.type === "dir:list:response") {
+            const pending = tunnel.pendingFileReads.get(data.requestId);
+            if (pending) {
+              clearTimeout(pending.timeout);
+              tunnel.pendingFileReads.delete(data.requestId);
+
+              if (data.error) {
+                pending.reject(new Error(data.error));
+              } else {
+                pending.resolve(data.content);
+              }
+            }
           }
         } catch (e) {
           logger.error("Failed to parse WebSocket message: %O", e);

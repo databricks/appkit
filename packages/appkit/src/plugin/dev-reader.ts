@@ -88,4 +88,53 @@ export class DevFileReader {
       );
     });
   }
+
+  async readdir(
+    dirPath: string,
+    req: import("express").Request,
+  ): Promise<string[]> {
+    if (!this.getTunnelForRequest) {
+      throw TunnelError.getterNotRegistered();
+    }
+    const tunnel = this.getTunnelForRequest(req);
+
+    if (!tunnel) {
+      throw TunnelError.noConnection();
+    }
+
+    const { ws, pendingFileReads } = tunnel;
+    const requestId = randomUUID();
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        pendingFileReads.delete(requestId);
+        reject(new Error(`Directory read timeout: ${dirPath}`));
+      }, 10000);
+
+      pendingFileReads.set(requestId, {
+        resolve: (data: string) => {
+          try {
+            const files = JSON.parse(data);
+            resolve(files);
+          } catch (error) {
+            reject(
+              new Error(
+                `Failed to parse directory listing: ${(error as Error).message}`,
+              ),
+            );
+          }
+        },
+        reject,
+        timeout,
+      });
+
+      ws.send(
+        JSON.stringify({
+          type: "dir:list",
+          requestId,
+          path: dirPath,
+        }),
+      );
+    });
+  }
 }
