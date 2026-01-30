@@ -31,6 +31,24 @@ export const DEFAULT_RETRY_CONFIG: RetryConfig = {
 };
 
 /**
+ * Configuration for the scheduler that processes pending tasks
+ */
+export interface SchedulerConfig {
+  /** interval between scheduler ticks in milliseconds */
+  tickIntervalMs: number;
+  /** maximum number of tasks to start per tick */
+  maxTasksPerTick: number;
+}
+
+/**
+ * Default scheduler configuration
+ */
+export const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
+  tickIntervalMs: 50,
+  maxTasksPerTick: 50,
+};
+
+/**
  * Configuration for TaskExecutor
  */
 export interface ExecutorConfig {
@@ -38,6 +56,8 @@ export interface ExecutorConfig {
   heartbeatIntervalMs: number;
   /** retry configuration */
   retry: RetryConfig;
+  /** scheduler configuration */
+  scheduler: SchedulerConfig;
 }
 
 /**
@@ -46,6 +66,7 @@ export interface ExecutorConfig {
 export const DEFAULT_EXECUTOR_CONFIG: ExecutorConfig = {
   heartbeatIntervalMs: 30_000, // 30 seconds
   retry: DEFAULT_RETRY_CONFIG,
+  scheduler: DEFAULT_SCHEDULER_CONFIG,
 };
 
 /**
@@ -341,6 +362,10 @@ export function mergeExecutorConfig(
     retry: {
       ...DEFAULT_RETRY_CONFIG,
       ...partial.retry,
+    },
+    scheduler: {
+      ...DEFAULT_SCHEDULER_CONFIG,
+      ...partial.scheduler,
     },
   };
 }

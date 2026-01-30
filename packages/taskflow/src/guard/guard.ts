@@ -79,12 +79,28 @@ export class Guard {
 
   /**
    * Accept a task for processing
-   * Validates raate limits and queue capacity
+   * Validates rate limits and queue capacity
    * @throws {ValidationError} if task is in DLQ
    * @throws {BackpressureError} if limits exceeded
    */
   acceptTask(task: Task): void {
     this.backpressure.accept(task, this.dlq.has(task.idempotencyKey));
+  }
+
+  /**
+   * Accept a task for processing with waiting for capacity
+   * If queue is full or rate limited, waits until capacity is available
+   * @param task The task to accept
+   * @param timeoutMs Maximum time to wait for capacity (default: 30s)
+   * @throws {ValidationError} if task is in DLQ
+   * @throws {BackpressureError} if timeout reached while waiting
+   */
+  async acceptTaskWithWait(task: Task, timeoutMs?: number): Promise<void> {
+    await this.backpressure.acceptWithWait(
+      task,
+      this.dlq.has(task.idempotencyKey),
+      timeoutMs,
+    );
   }
 
   /**
@@ -258,11 +274,12 @@ export class Guard {
   }
 
   /**
-   * Shutdown the guard (clears all state, stop timers)
+   * Shutdown the guard
    */
   shutdown(): void {
     this.dlq.shutdown();
-    this.clear();
+    this.slotManager.clear();
+    this.recoverySlotsInUse = 0;
   }
 
   /**

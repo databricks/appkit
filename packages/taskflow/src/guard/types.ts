@@ -234,14 +234,14 @@ export interface GuardConfig {
 export const DEFAULT_GUARD_CONFIG: GuardConfig = {
   backpressure: {
     windowSizeMs: 60_000, // 1 minute
-    maxTasksPerWindow: 1000,
-    maxTasksPerUserWindow: 100,
-    maxQueuedSize: 500,
+    maxTasksPerWindow: 5000,
+    maxTasksPerUserWindow: 200,
+    maxQueuedSize: 1000,
   },
   slots: {
-    maxExecutionGlobal: 50,
+    maxExecutionGlobal: 100,
     maxExecutionPerUser: 10,
-    slotTimeoutMs: 30_000, // 30 seconds
+    slotTimeoutMs: 60_000, // 60 seconds
   },
   dlq: {
     maxSize: 1000,

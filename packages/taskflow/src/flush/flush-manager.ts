@@ -9,7 +9,7 @@ import {
   type FlushConfig,
   type FlushStats,
   type FlushStatus,
-  type FlushWorkerStats,
+  type FlushWorkerRuntimeStats,
   type IPCCommand,
   type IPCMessage,
 } from "./types";
@@ -35,7 +35,7 @@ export class Flush {
   private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
   private restartCount: number = 0;
   private isShuttingDown: boolean = false;
-  private lastStats: FlushWorkerStats | null = null;
+  private lastStats: FlushWorkerRuntimeStats | null = null;
 
   constructor(
     config: Partial<FlushManagerConfig> & { repository: RepositoryConfig },
@@ -88,6 +88,15 @@ export class Flush {
         resolve();
       }, timeoutMs);
 
+      // listen for shutdown-complete message
+      const onMessage = (message: IPCMessage) => {
+        if (message.type === "shutdown-complete") {
+          this.lastStats = message.payload;
+          this.worker?.off("message", onMessage);
+        }
+      };
+      this.worker?.on("message", onMessage);
+
       this.worker?.once("exit", () => {
         clearTimeout(timeout);
         resolve();
@@ -118,7 +127,7 @@ export class Flush {
    * Get worker stats via IPC (async, fetches fresh stats)
    * Returns cached stats if worker doesn't respond in time
    */
-  async getWorkerStats(): Promise<FlushWorkerStats | null> {
+  async getWorkerStats(): Promise<FlushWorkerRuntimeStats | null> {
     if (!this.isAlive()) return null;
 
     return new Promise((resolve) => {
@@ -155,13 +164,14 @@ export class Flush {
       },
       worker: workerStats
         ? {
-            isRunning: true,
+            isRunning: workerStats.isRunning,
             flushCount: workerStats.flushCount,
             errorCount: workerStats.errorCount,
             consecutiveErrors: workerStats.consecutiveErrors,
             totalEntriesFlushed: workerStats.totalEntriesFlushed,
             lastFlushAt: workerStats.lastFlushAt,
             lastErrorAt: workerStats.lastErrorAt,
+            lastError: workerStats.lastError,
           }
         : null,
     };
@@ -204,6 +214,13 @@ export class Flush {
 
       this.worker.stderr?.on("data", (data: Buffer) => {
         process.stderr.write(`[FlushWorker] ${data.toString()}`);
+      });
+
+      // get stats from worker
+      this.worker?.on("message", (message: IPCMessage) => {
+        if (message.type === "stats") {
+          this.lastStats = message.payload;
+        }
       });
 
       // wait for ready message
@@ -305,6 +322,9 @@ export class Flush {
           message: "Health check detected dead worker, restarting",
         });
         this.handleWorkerExit();
+      } else if (this.isAlive()) {
+        // requests stats from worker periodically
+        this.sendCommand({ type: "get-stats" });
       }
     }, this.config.healthCheckIntervalMs);
 

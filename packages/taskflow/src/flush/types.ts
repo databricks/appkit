@@ -8,8 +8,14 @@ export interface FlushConfig {
   flushIntervalMs: number;
   /** path to the event log file */
   eventLogPath: string;
+  /** minimum batch size (dynamic batching lower bound) */
+  minBatchSize: number;
   /** maximum number of entries to flush per batch */
   maxBatchSize: number;
+  /** WAL lag threshold to trigger batch size increase */
+  lagThresholdForIncrease: number;
+  /** WAL lag threshold to trigger batch size decrease */
+  lagThresholdForDecrease: number;
   /** maximum number of retry attempts per flush */
   maxFlushRetries: number;
   /** base delay for exponential backoff in milliseconds */
@@ -33,9 +39,12 @@ export interface FlushConfig {
  */
 
 export const DEFAULT_FLUSH_CONFIG: Required<Omit<FlushConfig, "repository">> = {
-  flushIntervalMs: 1000,
+  flushIntervalMs: 100,
   eventLogPath: "./.taskflow/event.log",
-  maxBatchSize: 1000,
+  minBatchSize: 500,
+  maxBatchSize: 5000,
+  lagThresholdForIncrease: 10000,
+  lagThresholdForDecrease: 1000,
   maxFlushRetries: 3,
   retryBaseDelayMs: 100,
   circuitBreakerDurationMs: 30_000,
@@ -61,6 +70,8 @@ export interface FlushWorkerStats {
   lastFlushAt: number | null;
   /** timestamp of last error */
   lastErrorAt: number | null;
+  /** last error message for debugging */
+  lastError: string | null;
 }
 
 /**
@@ -81,7 +92,7 @@ export interface FlushWorkerRuntimeStats extends FlushWorkerStats {
 export type IPCMessage =
   | { type: "ready" }
   | { type: "stats"; payload: FlushWorkerRuntimeStats }
-  | { type: "shutdown-complete" }
+  | { type: "shutdown-complete"; payload: FlushWorkerRuntimeStats }
   | { type: "error"; payload: string };
 
 /**
@@ -127,5 +138,6 @@ export interface FlushStats {
     totalEntriesFlushed: number;
     lastFlushAt: number | null;
     lastErrorAt: number | null;
+    lastError: string | null;
   } | null;
 }

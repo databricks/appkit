@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import {
   noopHooks,
   TaskAttributes,
@@ -23,11 +24,13 @@ export class FlushWorker {
   private readonly hooks: TaskSystemHooks;
   private readonly eventLog: EventLog;
 
-  private checkpoint: number = 0;
+  private byteOffset: number = 0;
   private isShuttingDown: boolean = false;
   private _isRunning: boolean = false;
   private flushInterval: ReturnType<typeof setInterval> | null = null;
   private circuitBreakerOpenUntil: number | null = null;
+
+  private currentBatchSize: number;
 
   private stats: FlushWorkerStats = {
     flushCount: 0,
@@ -36,6 +39,7 @@ export class FlushWorker {
     totalEntriesFlushed: 0,
     lastFlushAt: null,
     lastErrorAt: null,
+    lastError: null,
   };
 
   constructor(
@@ -52,17 +56,25 @@ export class FlushWorker {
       },
       hooks,
     );
+    this.currentBatchSize = this.config.minBatchSize;
   }
 
   /**
    * Start the flush worker
    * - Initialize repository
+   * - Ensure checkpoint directory exists
    * - Load checkpoint from file
    * - Start periodic flush interval
    */
   async start(): Promise<void> {
     await this.repository.initialize();
-    this.checkpoint = await this.loadCheckpoint();
+
+    // ensure checkpoint directory exists
+    const checkpointDir = path.dirname(this.getCheckpointPath());
+    await fs.mkdir(checkpointDir, { recursive: true });
+
+    // load byte offset from checkpoint file
+    this.byteOffset = await this.loadByteOffset();
 
     this.flushInterval = setInterval(async () => {
       await this.flush();
@@ -77,7 +89,7 @@ export class FlushWorker {
       severity: "info",
       message: "FlushWorker started",
       attributes: {
-        checkpoint: this.checkpoint,
+        byteOffset: this.byteOffset,
         flushInterval: this.config.flushIntervalMs,
       },
     });
@@ -97,7 +109,7 @@ export class FlushWorker {
       severity: "info",
       message: "FlushWorker stopped",
       attributes: {
-        checkpoint: this.checkpoint,
+        byteOffset: this.byteOffset,
       },
     });
   }
@@ -105,8 +117,12 @@ export class FlushWorker {
   /**
    * Graceful shutdown - drain remaining events before stopping
    * @param timeoutMs - Maximum time to wait for draining
+   * @param onStats - Optional callback to send stats to parent process
    */
-  async gracefulShutdown(timeoutMs: number = 30_000): Promise<void> {
+  async gracefulShutdown(
+    timeoutMs: number = 30_000,
+    onStats?: (stats: FlushWorkerRuntimeStats) => void,
+  ): Promise<void> {
     this.isShuttingDown = true;
     this.stop();
 
@@ -114,14 +130,16 @@ export class FlushWorker {
 
     // drain remaining events
     while (Date.now() - startTime < timeoutMs) {
-      const entries = await this.eventLog.readEntriesFromCheckpoint(
-        this.checkpoint,
-      );
+      // check if there are any remaining entries
+      const { entries: remaining } =
+        await this.eventLog.readEntriesFromByteOffset(this.byteOffset, 1);
 
-      if (entries.length === 0) break;
+      if (remaining.length === 0) break;
 
       try {
         await this.flush();
+        // send stats to parent process
+        onStats?.(this.getStats());
       } catch (error) {
         this.hooks.log({
           severity: "error",
@@ -131,7 +149,7 @@ export class FlushWorker {
       }
 
       // small delay between flush attempts
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
     await this.repository.close();
@@ -164,15 +182,39 @@ export class FlushWorker {
         [TaskAttributes.REPOSITORY_TYPE]: this.repository.type,
       },
       async (span) => {
-        let batch = await this.eventLog.readEntriesFromCheckpoint(
-          this.checkpoint,
-        );
+        // read entries from byte offset
+        let batch: Awaited<
+          ReturnType<typeof this.eventLog.readEntriesFromByteOffset>
+        >["entries"];
+        let newByteOffset: number;
 
-        if (batch.length === 0) return;
+        try {
+          const result = await this.eventLog.readEntriesFromByteOffset(
+            this.byteOffset,
+            this.currentBatchSize,
+          );
+          batch = result.entries;
+          newByteOffset = result.newByteOffset;
+        } catch (error) {
+          // handle file not found error
+          if (
+            error instanceof Error &&
+            (error as NodeJS.ErrnoException).code === "ENOENT"
+          ) {
+            this.hooks.log({
+              severity: "warn",
+              message:
+                "Event log file not found (rotation in progress?), will retry",
+            });
+            return;
+          }
+          throw error;
+        }
 
-        // limit batch size
-        if (batch.length > this.config.maxBatchSize) {
-          batch = batch.slice(0, this.config.maxBatchSize);
+        if (batch.length === 0) {
+          // no work to do, shrink batch size
+          this.adjustBatchSize(0);
+          return;
         }
 
         span.setAttribute(TaskAttributes.FLUSH_BATCH_SIZE, batch.length);
@@ -185,7 +227,7 @@ export class FlushWorker {
         ) {
           try {
             await this.repository.executeBatch(batch);
-            await this.saveCheckpoint(this.checkpoint + batch.length);
+            await this.saveByteOffset(newByteOffset);
 
             // update stats on success
             this.stats.lastFlushAt = Date.now();
@@ -222,9 +264,21 @@ export class FlushWorker {
               },
             );
 
+            // adjust batch size based on how much work we got
+            this.adjustBatchSize(batch.length);
+
             span.setStatus("ok");
             return;
           } catch (error) {
+            // extract root cause from error
+            const err = error as Error & { cause?: Error };
+            const rootCause = err.cause?.message ?? null;
+            const errorMessage = rootCause
+              ? `${err.message} - Cause: ${rootCause}`
+              : error instanceof Error
+                ? error.message
+                : String(error);
+
             this.hooks.log({
               severity: "error",
               message: `Flush attempt ${attempt}/${this.config.maxFlushRetries} failed`,
@@ -238,6 +292,7 @@ export class FlushWorker {
             this.stats.errorCount++;
             this.stats.lastErrorAt = Date.now();
             this.stats.consecutiveErrors++;
+            this.stats.lastError = errorMessage;
 
             this.hooks.incrementCounter(TaskMetrics.FLUSH_ERRORS, 1, {
               [TaskAttributes.REPOSITORY_TYPE]: this.repository.type,
@@ -279,34 +334,57 @@ export class FlushWorker {
     };
   }
 
-  /**
-   * Save checkpoint atomically using write-then-rename
-   */
-  private async saveCheckpoint(newCheckpoint: number): Promise<void> {
+  private async saveByteOffset(newByteOffset: number): Promise<void> {
+    // update in-memory offset
+    this.byteOffset = newByteOffset;
+
     const checkpointPath = this.getCheckpointPath();
     const tempPath = `${checkpointPath}.temp`;
 
-    // write new checkpoint
-    await fs.writeFile(tempPath, newCheckpoint.toString(), "utf-8");
-    await fs.rename(tempPath, checkpointPath);
-
-    this.checkpoint = newCheckpoint;
+    try {
+      await fs.writeFile(tempPath, newByteOffset.toString(), "utf-8");
+      await fs.rename(tempPath, checkpointPath);
+    } catch (error) {
+      // handle file not found error
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        try {
+          await fs.mkdir(path.dirname(checkpointPath), { recursive: true });
+          await fs.writeFile(tempPath, newByteOffset.toString(), "utf-8");
+          await fs.rename(tempPath, checkpointPath);
+        } catch (retryError) {
+          // log error that checkpoint directory was deleted
+          this.hooks.log({
+            severity: "warn",
+            message: "Failed to persist checkpoint to disk",
+            error:
+              retryError instanceof Error
+                ? retryError
+                : new Error(String(retryError)),
+          });
+        }
+      } else {
+        // log error that checkpoint file could not be saved
+        this.hooks.log({
+          severity: "warn",
+          message: "Failed to save checkpoint",
+          error: error instanceof Error ? error : new Error(String(error)),
+        });
+      }
+    }
   }
 
-  /**
-   * Load checkpoint from file, returns 0 if not found or invalid
-   */
-  private async loadCheckpoint(): Promise<number> {
+  private async loadByteOffset(): Promise<number> {
     const checkpointPath = this.getCheckpointPath();
 
     try {
       const content = await fs.readFile(checkpointPath, "utf-8");
       const parsed = parseInt(content.trim(), 10);
 
+      // check if byte offset is valid
       if (Number.isNaN(parsed) || parsed < 0) {
         this.hooks.log({
           severity: "warn",
-          message: `Invalid checkpoint value: ${content.trim()}, resetting to 0`,
+          message: `Invalid byte offset value: ${content.trim()}, resetting to 0`,
         });
         return 0;
       }
@@ -360,5 +438,32 @@ export class FlushWorker {
    */
   private getCheckpointPath(): string {
     return `${this.config.eventLogPath}.flush-checkpoint`;
+  }
+
+  /**
+   * Adjust batch size based on WAL lag heuristic
+   */
+  private adjustBatchSize(entriesRead: number): void {
+    const { minBatchSize, maxBatchSize } = this.config;
+
+    if (entriesRead === 0) {
+      // no work to do, shrink batch size
+      this.currentBatchSize = Math.max(
+        minBatchSize,
+        Math.floor(this.currentBatchSize * 0.75),
+      );
+    } else if (entriesRead >= this.currentBatchSize) {
+      // full batch, grow aggressively
+      this.currentBatchSize = Math.min(
+        maxBatchSize,
+        Math.floor(this.currentBatchSize * 1.5),
+      );
+    } else if (entriesRead < this.currentBatchSize * 0.5) {
+      // less than half full, shrink gradually
+      this.currentBatchSize = Math.max(
+        minBatchSize,
+        Math.floor(this.currentBatchSize * 0.9),
+      );
+    }
   }
 }

@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { createInterface, type Interface } from "node:readline";
 import { canonicalize } from "json-canonicalize";
 import { EventLogError } from "@/core/errors";
 import type { TaskStatus } from "@/core/types";
@@ -207,12 +209,222 @@ export class EventLog {
    */
   async readEntriesFromCheckpoint(
     checkpoint: number,
+    limit: number = 1000,
   ): Promise<EventLogEntry[]> {
-    const entries = await this.readEntries(this.config.eventLogPath);
-    return entries.filter((entry) => {
-      const eventLogPath = entry as EventLogEvent;
-      return eventLogPath.seq > checkpoint;
-    });
+    const entries: EventLogEntry[] = [];
+
+    const stream = this.createStreamReader();
+    if (!stream) return entries;
+
+    try {
+      // read entries from checkpoint position
+      for await (const line of stream.readline) {
+        if (!line.trim()) continue;
+
+        // parse entry
+        try {
+          const entry = JSON.parse(line) as EventLogEvent;
+
+          // skip entries already processed
+          if (entry.seq <= checkpoint) continue;
+
+          entries.push(entry);
+
+          // stop early once we have enough entries
+          if (entries.length >= limit) break;
+        } catch {
+          this.malformedEntriesSkipped++;
+          this.hooks?.incrementCounter(
+            TaskMetrics.EVENTLOG_MALFORMED_SKIPPED,
+            1,
+          );
+        }
+      }
+    } finally {
+      stream.close();
+    }
+
+    return entries;
+  }
+
+  /**
+   * Read entries starting from a byte offset
+   */
+  async readEntriesFromByteOffset(
+    byteOffset: number,
+    limit: number = 1000,
+  ): Promise<{ entries: EventLogEntry[]; newByteOffset: number }> {
+    const entries: EventLogEntry[] = [];
+    let currentOffset = byteOffset;
+
+    // check if rotation happened
+    const rotationResult = await this.handleRotationIfNeeded(byteOffset, limit);
+    if (rotationResult) {
+      // rotation detected, read from rotated file first
+      entries.push(...rotationResult.entries);
+      if (entries.length >= limit) {
+        return {
+          entries: entries.slice(0, limit),
+          newByteOffset: rotationResult.newByteOffset,
+        };
+      }
+      // continue reading from current file
+      currentOffset = 0;
+      limit -= entries.length;
+    }
+
+    const stream = this.createStreamReaderFromOffset(currentOffset);
+    if (!stream) return { entries, newByteOffset: currentOffset };
+
+    try {
+      for await (const line of stream.readline) {
+        // compute line bytes
+        const lineBytes = Buffer.byteLength(line, "utf-8") + 1;
+
+        if (!line.trim()) {
+          currentOffset += lineBytes;
+          continue;
+        }
+
+        try {
+          const entry = JSON.parse(line) as EventLogEvent;
+          entries.push(entry);
+          currentOffset += lineBytes;
+
+          // stop early once we have enough entries
+          if (entries.length >= limit) break;
+        } catch {
+          // malformed line, skip but still advance offset
+          currentOffset += lineBytes;
+          this.malformedEntriesSkipped++;
+          this.hooks?.incrementCounter(
+            TaskMetrics.EVENTLOG_MALFORMED_SKIPPED,
+            1,
+          );
+        }
+      }
+    } finally {
+      stream.close();
+    }
+
+    return { entries, newByteOffset: currentOffset };
+  }
+
+  /**
+   * Check if rotation happened and read remaining entries from rotated file
+   */
+  private async handleRotationIfNeeded(
+    byteOffset: number,
+    limit: number,
+  ): Promise<{ entries: EventLogEntry[]; newByteOffset: number } | null> {
+    if (byteOffset === 0) return null;
+
+    try {
+      const stats = await fs.stat(this.config.eventLogPath);
+
+      // no rotation, return null
+      if (stats.size >= byteOffset) return null;
+
+      // get rotated file path
+      const rotatedPath = `${this.config.eventLogPath}.1`;
+
+      try {
+        await fs.access(rotatedPath);
+      } catch {
+        // log rotation was detected but rotated file not found
+        this.hooks?.log({
+          severity: "warn",
+          message:
+            "Rotation detected but rotated file not found, resetting offset",
+          attributes: { byteOffset, currentFileSize: stats.size },
+        });
+        return { entries: [], newByteOffset: 0 };
+      }
+
+      // read entries from rotated file
+      const entries: EventLogEntry[] = [];
+
+      const fileStream = createReadStream(rotatedPath, {
+        encoding: "utf-8",
+        start: byteOffset,
+      });
+
+      const rl = createInterface({
+        input: fileStream,
+        crlfDelay: Infinity,
+      });
+
+      try {
+        for await (const line of rl) {
+          if (!line.trim()) continue;
+
+          try {
+            const entry = JSON.parse(line) as EventLogEvent;
+            entries.push(entry);
+            if (entries.length >= limit) break;
+          } catch {
+            this.malformedEntriesSkipped++;
+          }
+        }
+      } finally {
+        rl.close();
+        fileStream.destroy();
+      }
+
+      this.hooks?.log({
+        severity: "info",
+        message: "Read entries from rotated file after rotation",
+        attributes: { entriesRead: entries.length, fromOffset: byteOffset },
+      });
+
+      // return entries, signal to continue from offset 0 in current file
+      return { entries, newByteOffset: 0 };
+    } catch {
+      return { entries: [], newByteOffset: 0 };
+    }
+  }
+
+  private createStreamReader(): {
+    readline: Interface;
+    close: () => void;
+  } | null {
+    return this.createStreamReaderFromOffset(0);
+  }
+
+  private createStreamReaderFromOffset(byteOffset: number): {
+    readline: Interface;
+    close: () => void;
+  } | null {
+    try {
+      // check if file exists
+      const fileStream = createReadStream(this.config.eventLogPath, {
+        encoding: "utf-8",
+        start: byteOffset,
+      });
+
+      // handle file not found error
+      fileStream.on("error", (err) => {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+          // file not found error, destroy stream
+          fileStream.destroy();
+        }
+      });
+
+      const rl = createInterface({
+        input: fileStream,
+        crlfDelay: Infinity,
+      });
+
+      return {
+        readline: rl,
+        close: () => {
+          rl.close();
+          fileStream.destroy();
+        },
+      };
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -344,6 +556,31 @@ export class EventLog {
         malformedSkipped: this.malformedEntriesSkipped,
       },
     };
+  }
+
+  /**
+   * Sync all buffered writes to disk
+   */
+  async sync(): Promise<void> {
+    // wait for ongoing rotation
+    await this.rotationLock;
+
+    if (this.fileHandle) {
+      try {
+        await this.saveCheckpoint();
+        await this.fileHandle.sync();
+      } catch (error) {
+        // handle file closed error
+        if (error instanceof Error && error.message.includes("file closed")) {
+          this.hooks?.log({
+            severity: "warn",
+            message: "File handle closed during sync, likely due to rotation",
+          });
+          return;
+        }
+        throw error;
+      }
+    }
   }
 
   /**

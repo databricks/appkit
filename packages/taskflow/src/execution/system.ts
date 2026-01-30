@@ -32,6 +32,7 @@ import { TaskExecutor } from "./executor";
 import { TaskRecovery } from "./recovery";
 import {
   type ExecutorConfig,
+  mergeExecutorConfig,
   mergeShutdownConfig,
   type RecoveryConfig,
   type ShutdownConfig,
@@ -78,6 +79,7 @@ export interface TaskSystemConfig {
 export class TaskSystem {
   private readonly config: TaskSystemConfig;
   private readonly shutdownConfig: ShutdownConfig;
+  private readonly executorConfig: ExecutorConfig;
   private readonly hooks: TaskSystemHooks;
 
   // state
@@ -108,6 +110,7 @@ export class TaskSystem {
   constructor(config?: TaskSystemConfig, hooks: TaskSystemHooks = noopHooks) {
     this.config = config ?? {};
     this.shutdownConfig = mergeShutdownConfig(config?.shutdown);
+    this.executorConfig = mergeExecutorConfig(config?.executor);
     this.hooks = hooks;
 
     // initialize components
@@ -270,7 +273,8 @@ export class TaskSystem {
     this.runningTasks.clear();
     this.streamManager.clearAll();
 
-    // shutdown persistence layer
+    // sync event log to disk before shutting down flush (drain remaining events)
+    await this.eventLog.sync();
     await this.flush.shutdown();
     await this.eventLog.close(deleteFiles);
 
@@ -342,7 +346,7 @@ export class TaskSystem {
         successRate,
       },
       scheduler: {
-        tickIntervalMs: 100,
+        tickIntervalMs: this.executorConfig.scheduler.tickIntervalMs,
         isTickActive: this.isExecutorTickRunning,
       },
       registry: {
@@ -434,8 +438,8 @@ export class TaskSystem {
 
     const task = new Task(taskParams);
 
-    // validate through guard (rate limiting, etc.)
-    this.guard.acceptTask(task);
+    // accept task and wait for capacity if needed (with timeout)
+    await this.guard.acceptTaskWithWait(task);
 
     // create stream and emit created event
     this.streamManager.getOrCreate(taskIdempotencyKey);
@@ -512,43 +516,83 @@ export class TaskSystem {
    * Start executor tick interval
    */
   private startExecutorTick(): void {
-    this.executorInterval = setInterval(async () => {
-      if (this.isExecutorTickRunning) return;
+    const { tickIntervalMs, maxTasksPerTick } = this.executorConfig.scheduler;
 
+    this.executorInterval = setInterval(() => {
+      if (this.isExecutorTickRunning) return;
       this.isExecutorTickRunning = true;
 
       try {
-        // get first task from queue
-        const task = this.pendingQueue.values().next().value as
-          | Task
-          | undefined;
-        if (!task) return;
+        // check if there's work to do
+        if (this.pendingQueue.size === 0) return;
 
-        // remove from pending queue
-        this.pendingQueue.delete(task.idempotencyKey);
+        // get available slots from guard
+        const guardStats = this.guard.getStats();
+        const availableSlots = guardStats.slots.current.available;
+        if (availableSlots === 0) return;
 
-        // skip if already running (race condition)
-        if (this.runningTasks.has(task.idempotencyKey)) return;
+        // determine how many tasks to process this tick
+        const tasksToStart = Math.min(
+          availableSlots,
+          maxTasksPerTick,
+          this.pendingQueue.size,
+        );
 
-        // acquire execution slot
-        try {
-          await this.guard.acquireExecutionSlot(task);
-        } catch (error) {
-          this.guard.addToDLQ(task, "Slot acquisition failed", String(error));
-          return;
+        // get tasks to process
+        const tasks: Task[] = [];
+        for (const task of this.pendingQueue.values()) {
+          if (tasks.length >= tasksToStart) break;
+          // skip if already running
+          if (this.runningTasks.has(task.idempotencyKey)) continue;
+          tasks.push(task);
         }
 
+        // remove tasks from pending queue
+        for (const task of tasks) {
+          this.pendingQueue.delete(task.idempotencyKey);
+        }
+
+        // start tasks concurrently
+        for (const task of tasks) {
+          this.startTaskExecution(task);
+        }
+      } finally {
+        this.isExecutorTickRunning = false;
+      }
+    }, tickIntervalMs);
+  }
+
+  /**
+   * Start task execution
+   *
+   * Acquires slot and starts execution.
+   */
+  private startTaskExecution(task: Task): void {
+    // acquire slot and execute
+    this.guard
+      .acquireExecutionSlot(task)
+      .then(() => {
         // add to running tasks
         this.runningTasks.set(task.idempotencyKey, task);
         this.streamManager.getOrCreate(task.idempotencyKey);
 
-        // execute task
+        // get definition and execute
         const definition = this.definitions.get(task.name);
-        await this.executor.execute(task, definition);
-      } finally {
-        this.isExecutorTickRunning = false;
-      }
-    }, 100);
+        this.executor.execute(task, definition).catch((error) => {
+          this.hooks.log({
+            severity: "error",
+            message: `Task execution error: ${String(error)}`,
+            attributes: {
+              taskId: task.id,
+              idempotencyKey: task.idempotencyKey,
+            },
+          });
+        });
+      })
+      .catch((error) => {
+        // failed to acquire slot - add to DLQ
+        this.guard.addToDLQ(task, "Slot acquisition failed", String(error));
+      });
   }
 
   /**

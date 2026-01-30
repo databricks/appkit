@@ -151,6 +151,52 @@ export class Backpressure {
   }
 
   /**
+   * Accept a task with waiting for queue capacity
+   * Instead of rejecting when queue is full, waits until capacity is available
+   * Throw BackpressureError if timeout is reached
+   * @param task The task to accept
+   * @param isInDLQ Whether the task is in the DLQ
+   * @param timeoutMs Maximum time to wait for capacity (default: 30s)
+   */
+  async acceptWithWait(
+    task: Task,
+    isInDLQ: boolean,
+    timeoutMs: number = 30_000,
+  ): Promise<void> {
+    const startTime = Date.now();
+    const pollIntervalMs = 50;
+
+    while (Date.now() - startTime < timeoutMs) {
+      try {
+        this.accept(task, isInDLQ);
+        return; // task accepted successfully
+      } catch (error) {
+        if (error instanceof BackpressureError) {
+          // queue full or rate limited - wait and retry
+          await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+          continue;
+        }
+        // other errors (e.g., validation error for DLQ) - rethrow
+        throw error;
+      }
+    }
+
+    // timeout - throw the backpressure error
+    this.trackRejection("queue_full", task);
+    throw new BackpressureError(
+      "Timeout waiting for queue capacity",
+      this.config.maxQueuedSize,
+      0,
+      1000,
+      {
+        taskId: task.id,
+        taskName: task.name,
+        waitedMs: Date.now() - startTime,
+      },
+    );
+  }
+
+  /**
    * Decrement queue size when a task acquires an execution slot
    */
   decrementQueueSize(): void {

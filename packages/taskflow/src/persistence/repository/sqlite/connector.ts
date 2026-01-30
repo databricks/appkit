@@ -1,7 +1,8 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import Database from "better-sqlite3";
+import Database, { type Statement } from "better-sqlite3";
 import type { IdempotencyKey, TaskId } from "@/core/branded";
 import { RepositoryError } from "@/core/errors";
 import type { TaskStatus } from "@/core/types";
@@ -29,6 +30,19 @@ const DEFAULT_RETRY_CONFIG = {
 };
 
 /**
+ * Cached prepared statements
+ */
+interface PreparedStatements {
+  insertTask: Statement;
+  updateTaskStart: Statement;
+  updateTaskComplete: Statement;
+  updateTaskError: Statement;
+  updateTaskCancelled: Statement;
+  updateTaskHeartbeat: Statement;
+  insertTaskEvent: Statement;
+}
+
+/**
  * SQLite Connector
  *
  * Low-level SQLite operations for task persistence
@@ -38,6 +52,7 @@ export class SQLiteConnector {
   private db: Database.Database;
   private _isInitialized = false;
   private hooks: TaskSystemHooks;
+  private statements: PreparedStatements | null = null;
 
   constructor(config: SQLiteConfig, hooks: TaskSystemHooks = noopHooks) {
     this.db = new Database(config.database ?? "./.taskflow/sqlite.db");
@@ -50,14 +65,22 @@ export class SQLiteConnector {
 
   /**
    * Initialize the database
-   * Enables WAL mode and run migrations
+   * Enables WAL mode, runs migrations, and prepares statements
    */
   async initialize(): Promise<void> {
     // enable WAL mode for better performance
     this.db.pragma("journal_mode = WAL");
+    // disable foreign key enforcement (consistency via event ordering)
+    this.db.pragma("foreign_keys = OFF");
+    // optimize for concurrent reads
+    this.db.pragma("synchronous = NORMAL");
 
     // run migrations
     await this.runMigrations();
+
+    // prepare all statements once for reuse
+    this.prepareStatements();
+
     this._isInitialized = true;
 
     this.hooks.log({
@@ -70,7 +93,38 @@ export class SQLiteConnector {
   }
 
   /**
-   * Execute a batch of events in a transaction
+   * Prepare all SQL statements for reuse
+   */
+  private prepareStatements(): void {
+    this.statements = {
+      insertTask: this.db.prepare(`
+        INSERT OR IGNORE INTO tasks (task_id, name, status, type, idempotency_key, user_id, input_data, execution_options, created_at, last_heartbeat_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `),
+      updateTaskStart: this.db.prepare(`
+        UPDATE tasks SET status = ?, started_at = ?, last_heartbeat_at = ? WHERE task_id = ?
+      `),
+      updateTaskComplete: this.db.prepare(`
+        UPDATE tasks SET status = ?, completed_at = ?, result = ? WHERE task_id = ?
+      `),
+      updateTaskError: this.db.prepare(`
+        UPDATE tasks SET status = ?, completed_at = ?, error = ?, attempt = attempt + 1 WHERE task_id = ?
+      `),
+      updateTaskCancelled: this.db.prepare(`
+        UPDATE tasks SET status = ?, completed_at = ?, error = ? WHERE task_id = ?
+      `),
+      updateTaskHeartbeat: this.db.prepare(`
+        UPDATE tasks SET last_heartbeat_at = ? WHERE task_id = ?
+      `),
+      insertTaskEvent: this.db.prepare(`
+        INSERT OR IGNORE INTO task_events (entry_id, task_id, seq, type, timestamp, payload)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `),
+    };
+  }
+
+  /**
+   * Execute a batch of events in a transaction using bulk operations
    */
   async executeBatch(batch: EventLogEntry[]): Promise<void> {
     if (batch.length === 0) return;
@@ -79,9 +133,7 @@ export class SQLiteConnector {
 
     await this.withRetry(async () => {
       const transaction = this.db.transaction((entries: EventLogEntry[]) => {
-        for (const entry of entries) {
-          this.executeEntry(entry);
-        }
+        this.executeBulkOperations(entries);
       });
       transaction(batch);
     }, "executeBatch");
@@ -96,6 +148,273 @@ export class SQLiteConnector {
       Date.now() - startTime,
       { [TaskAttributes.REPOSITORY_TYPE]: "sqlite" },
     );
+  }
+
+  /**
+   * Execute bulk operations for a batch of entries
+   */
+  private executeBulkOperations(entries: EventLogEntry[]): void {
+    // collect entries by type
+    const taskCreated: Array<{ entry: EventLogEntry; seq: number }> = [];
+    const taskStart: Array<{ entry: EventLogEntry; seq: number }> = [];
+    const taskComplete: Array<{ entry: EventLogEntry; seq: number }> = [];
+    const taskError: Array<{ entry: EventLogEntry; seq: number }> = [];
+    const taskCancelled: Array<{ entry: EventLogEntry; seq: number }> = [];
+    const taskProgress: Array<{ entry: EventLogEntry; seq: number }> = [];
+    const taskHeartbeat: EventLogEntry[] = [];
+    const taskCustom: Array<{ entry: EventLogEntry; seq: number }> = [];
+
+    for (const entry of entries) {
+      const seq = (entry as EventLogEntry & { seq?: number }).seq ?? 0;
+      switch (entry.type) {
+        case "TASK_CREATED":
+          taskCreated.push({ entry, seq });
+          break;
+        case "TASK_START":
+          taskStart.push({ entry, seq });
+          break;
+        case "TASK_COMPLETE":
+          taskComplete.push({ entry, seq });
+          break;
+        case "TASK_ERROR":
+          taskError.push({ entry, seq });
+          break;
+        case "TASK_CANCELLED":
+          taskCancelled.push({ entry, seq });
+          break;
+        case "TASK_PROGRESS":
+          taskProgress.push({ entry, seq });
+          break;
+        case "TASK_HEARTBEAT":
+          taskHeartbeat.push(entry);
+          break;
+        case "TASK_CUSTOM":
+          taskCustom.push({ entry, seq });
+          break;
+      }
+    }
+
+    // execute bulk operations for each type
+    if (taskCreated.length > 0) this.bulkInsertTasks(taskCreated);
+    if (taskStart.length > 0) this.bulkUpdateTaskStart(taskStart);
+    if (taskComplete.length > 0) this.bulkUpdateTaskComplete(taskComplete);
+    if (taskError.length > 0) this.bulkUpdateTaskError(taskError);
+    if (taskCancelled.length > 0) this.bulkUpdateTaskCancelled(taskCancelled);
+    if (taskProgress.length > 0) this.bulkUpdateTaskProgress(taskProgress);
+    if (taskHeartbeat.length > 0) this.bulkUpdateHeartbeat(taskHeartbeat);
+    if (taskCustom.length > 0) this.bulkUpdateTaskCustom(taskCustom);
+  }
+
+  /**
+   * Bulk insert tasks and their created events
+   */
+  private bulkInsertTasks(
+    items: Array<{ entry: EventLogEntry; seq: number }>,
+  ): void {
+    for (const { entry, seq } of items) {
+      this.statements!.insertTask.run(
+        entry.taskId,
+        entry.name,
+        "created",
+        entry.taskType,
+        entry.idempotencyKey,
+        entry.userId ?? null,
+        entry.input ? JSON.stringify(entry.input) : null,
+        entry.executionOptions ? JSON.stringify(entry.executionOptions) : null,
+        new Date(entry.timestamp).toISOString(),
+        new Date(entry.timestamp).toISOString(),
+      );
+      this.insertTaskEvent(entry.taskId, "TASK_CREATED", seq, entry.timestamp, {
+        name: entry.name,
+        taskType: entry.taskType,
+        idempotencyKey: entry.idempotencyKey,
+        userId: entry.userId,
+        input: entry.input,
+      });
+    }
+  }
+
+  /**
+   * Bulk update tasks to running status
+   */
+  private bulkUpdateTaskStart(
+    items: Array<{ entry: EventLogEntry; seq: number }>,
+  ): void {
+    if (items.length === 0) return;
+
+    const taskIds = items.map((i) => i.entry.taskId);
+    const timestamp = new Date().toISOString();
+    const placeholders = taskIds.map(() => "?").join(",");
+
+    this.db
+      .prepare(`
+      UPDATE tasks SET status = 'running', started_at = ?, last_heartbeat_at = ?
+      WHERE task_id IN (${placeholders})
+    `)
+      .run(timestamp, timestamp, ...taskIds);
+
+    // insert events
+    for (const { entry, seq } of items) {
+      this.insertTaskEvent(entry.taskId, "TASK_START", seq, entry.timestamp);
+    }
+  }
+
+  /**
+   * Bulk update tasks to completed status
+   */
+  private bulkUpdateTaskComplete(
+    items: Array<{ entry: EventLogEntry; seq: number }>,
+  ): void {
+    if (items.length === 0) return;
+
+    // we need individual updates due to different results
+    for (const { entry, seq } of items) {
+      this.statements!.updateTaskComplete.run(
+        "completed",
+        new Date(entry.timestamp).toISOString(),
+        entry.result ? JSON.stringify(entry.result) : null,
+        entry.taskId,
+      );
+      this.insertTaskEvent(
+        entry.taskId,
+        "TASK_COMPLETE",
+        seq,
+        entry.timestamp,
+        {
+          result: entry.result,
+        },
+      );
+    }
+  }
+
+  /**
+   * Bulk update tasks to failed status
+   */
+  private bulkUpdateTaskError(
+    items: Array<{ entry: EventLogEntry; seq: number }>,
+  ): void {
+    if (items.length === 0) return;
+
+    // we need individual updates due to different error messages
+    for (const { entry, seq } of items) {
+      this.statements!.updateTaskError.run(
+        "failed",
+        new Date(entry.timestamp).toISOString(),
+        entry.error ?? null,
+        entry.taskId,
+      );
+      this.insertTaskEvent(entry.taskId, "TASK_ERROR", seq, entry.timestamp, {
+        error: entry.error,
+      });
+    }
+  }
+
+  /**
+   * Bulk update tasks to cancelled status
+   */
+  private bulkUpdateTaskCancelled(
+    items: Array<{ entry: EventLogEntry; seq: number }>,
+  ): void {
+    if (items.length === 0) return;
+
+    const taskIds = items.map((i) => i.entry.taskId);
+    const timestamp = new Date().toISOString();
+    const placeholders = taskIds.map(() => "?").join(",");
+
+    this.db
+      .prepare(`
+      UPDATE tasks SET status = 'cancelled', completed_at = ?
+      WHERE task_id IN (${placeholders})
+    `)
+      .run(timestamp, ...taskIds);
+
+    for (const { entry, seq } of items) {
+      this.insertTaskEvent(
+        entry.taskId,
+        "TASK_CANCELLED",
+        seq,
+        entry.timestamp,
+        {
+          error: entry.error,
+        },
+      );
+    }
+  }
+
+  /**
+   * Bulk update task progress (heartbeat + event)
+   */
+  private bulkUpdateTaskProgress(
+    items: Array<{ entry: EventLogEntry; seq: number }>,
+  ): void {
+    if (items.length === 0) return;
+
+    const taskIds = items.map((i) => i.entry.taskId);
+    const timestamp = new Date().toISOString();
+    const placeholders = taskIds.map(() => "?").join(",");
+
+    this.db
+      .prepare(`
+      UPDATE tasks SET last_heartbeat_at = ?
+      WHERE task_id IN (${placeholders})
+    `)
+      .run(timestamp, ...taskIds);
+
+    for (const { entry, seq } of items) {
+      this.insertTaskEvent(
+        entry.taskId,
+        "TASK_PROGRESS",
+        seq,
+        entry.timestamp,
+        {
+          ...entry.payload,
+        },
+      );
+    }
+  }
+
+  /**
+   * Bulk update heartbeats (no event insertion)
+   */
+  private bulkUpdateHeartbeat(entries: EventLogEntry[]): void {
+    if (entries.length === 0) return;
+
+    const taskIds = entries.map((e) => e.taskId);
+    const timestamp = new Date().toISOString();
+    const placeholders = taskIds.map(() => "?").join(",");
+
+    this.db
+      .prepare(`
+      UPDATE tasks SET last_heartbeat_at = ?
+      WHERE task_id IN (${placeholders})
+    `)
+      .run(timestamp, ...taskIds);
+  }
+
+  /**
+   * Bulk update custom events
+   */
+  private bulkUpdateTaskCustom(
+    items: Array<{ entry: EventLogEntry; seq: number }>,
+  ): void {
+    if (items.length === 0) return;
+
+    const taskIds = items.map((i) => i.entry.taskId);
+    const timestamp = new Date().toISOString();
+    const placeholders = taskIds.map(() => "?").join(",");
+
+    this.db
+      .prepare(`
+      UPDATE tasks SET last_heartbeat_at = ?
+      WHERE task_id IN (${placeholders})
+    `)
+      .run(timestamp, ...taskIds);
+
+    for (const { entry, seq } of items) {
+      this.insertTaskEvent(entry.taskId, "TASK_CUSTOM", seq, entry.timestamp, {
+        ...entry.payload,
+      });
+    }
   }
 
   /**
@@ -243,176 +562,27 @@ export class SQLiteConnector {
     );
   }
 
-  private executeEntry(entry: EventLogEntry): void {
-    switch (entry.type) {
-      case "TASK_CREATED":
-        this.executeTaskCreated(entry);
-        break;
-      case "TASK_START":
-        this.executeTaskStart(entry);
-        break;
-      case "TASK_COMPLETE":
-        this.executeTaskComplete(entry);
-        break;
-      case "TASK_ERROR":
-        this.executeTaskError(entry);
-        break;
-      case "TASK_PROGRESS":
-        this.executeTaskProgress(entry);
-        break;
-      case "TASK_CANCELLED":
-        this.executeTaskCancelled(entry);
-        break;
-      case "TASK_HEARTBEAT":
-        this.executeTaskHeartbeat(entry);
-        break;
-      case "TASK_CUSTOM":
-        this.executeTaskCustom(entry);
-        break;
-      default:
-        throw new Error(`Unsupported event type: ${entry.type}`);
-    }
-  }
-
-  private executeTaskCreated(entry: EventLogEntry): void {
-    const stmt = this.db.prepare(`
-      INSERT INTO tasks (task_id, name, status, type, idempotency_key, user_id, input_data, execution_options, created_at, last_heartbeat_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    stmt.run(
-      entry.taskId,
-      entry.name,
-      "created",
-      entry.taskType,
-      entry.idempotencyKey,
-      entry.userId ?? null,
-      entry.input ? JSON.stringify(entry.input) : null,
-      entry.executionOptions ? JSON.stringify(entry.executionOptions) : null,
-      new Date(entry.timestamp).toISOString(),
-      new Date(entry.timestamp).toISOString(),
-    );
-
-    this.insertTaskEvent(entry.taskId, "TASK_CREATED", entry.timestamp, {
-      name: entry.name,
-      taskType: entry.taskType,
-      idempotencyKey: entry.idempotencyKey,
-      userId: entry.userId,
-      input: entry.input,
-    });
-  }
-
-  private executeTaskStart(entry: EventLogEntry): void {
-    const stmt = this.db.prepare(`
-      UPDATE tasks SET status = ?, started_at = ?, last_heartbeat_at = ? WHERE task_id = ?
-    `);
-    stmt.run(
-      "running",
-      new Date(entry.timestamp).toISOString(),
-      new Date(entry.timestamp).toISOString(),
-      entry.taskId,
-    );
-
-    this.insertTaskEvent(entry.taskId, "TASK_START", entry.timestamp);
-  }
-
-  private executeTaskComplete(entry: EventLogEntry): void {
-    const stmt = this.db.prepare(`
-      UPDATE tasks SET status = ?, completed_at = ?, result = ? WHERE task_id = ?
-    `);
-    stmt.run(
-      "completed",
-      new Date(entry.timestamp).toISOString(),
-      entry.result ? JSON.stringify(entry.result) : null,
-      entry.taskId,
-    );
-
-    this.insertTaskEvent(entry.taskId, "TASK_COMPLETE", entry.timestamp, {
-      result: entry.result,
-    });
-  }
-
-  private executeTaskError(entry: EventLogEntry): void {
-    const stmt = this.db.prepare(`
-      UPDATE tasks SET status = ?, completed_at = ?, error = ?, attempt = attempt + 1 WHERE task_id = ?
-    `);
-    stmt.run(
-      "failed",
-      new Date(entry.timestamp).toISOString(),
-      entry.error ?? null,
-      entry.taskId,
-    );
-
-    this.insertTaskEvent(entry.taskId, "TASK_ERROR", entry.timestamp, {
-      error: entry.error,
-    });
-  }
-
-  private executeTaskCancelled(entry: EventLogEntry): void {
-    const stmt = this.db.prepare(`
-      UPDATE tasks SET status = ?, completed_at = ?, error = ? WHERE task_id = ?
-    `);
-    stmt.run(
-      "cancelled",
-      new Date(entry.timestamp).toISOString(),
-      entry.error ?? null,
-      entry.taskId,
-    );
-
-    this.insertTaskEvent(entry.taskId, "TASK_CANCELLED", entry.timestamp, {
-      error: entry.error,
-    });
-  }
-
-  private executeTaskProgress(entry: EventLogEntry): void {
-    const stmt = this.db.prepare(`
-      UPDATE tasks SET last_heartbeat_at = ? WHERE task_id = ?
-    `);
-    stmt.run(new Date(entry.timestamp).toISOString(), entry.taskId);
-
-    this.insertTaskEvent(entry.taskId, "TASK_PROGRESS", entry.timestamp, {
-      ...entry.payload,
-    });
-  }
-
-  private executeTaskHeartbeat(entry: EventLogEntry): void {
-    // only update heartbeat, do NOT insert into task_events
-    const stmt = this.db.prepare(`
-      UPDATE tasks SET last_heartbeat_at = ? WHERE task_id = ?
-    `);
-    stmt.run(new Date(entry.timestamp).toISOString(), entry.taskId);
-  }
-
-  private executeTaskCustom(entry: EventLogEntry): void {
-    const stmt = this.db.prepare(`
-      UPDATE tasks SET last_heartbeat_at = ? WHERE task_id = ?
-    `);
-    stmt.run(new Date(entry.timestamp).toISOString(), entry.taskId);
-
-    this.insertTaskEvent(entry.taskId, "TASK_CUSTOM", entry.timestamp, {
-      ...entry.payload,
-    });
-  }
-
+  /**
+   * Insert a task event with deterministic entry_id
+   * Uses the global event log seq for both entry_id hash and task_events.seq
+   * This avoids expensive SELECT MAX(seq) query
+   */
   private insertTaskEvent(
     taskId: string,
     type: EventLogEntryType,
+    globalSeq: number,
     timestampMs: number,
     payload?: Record<string, unknown>,
   ): void {
-    // get next sequence number for this task
-    const seqStmt = this.db.prepare(`
-      SELECT COALESCE(MAX(seq), 0) + 1 as nextSeq FROM task_events WHERE task_id = ?
-    `);
-    const { nextSeq } = seqStmt.get(taskId) as { nextSeq: number };
+    const hash = createHash("sha256")
+      .update(`${taskId}:${globalSeq}`)
+      .digest("hex");
+    const entryId = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`;
 
-    const eventStmt = this.db.prepare(`
-      INSERT INTO task_events (entry_id, task_id, seq, type, timestamp, payload)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-    eventStmt.run(
-      crypto.randomUUID(),
+    this.statements!.insertTaskEvent.run(
+      entryId,
       taskId,
-      nextSeq,
+      globalSeq,
       type,
       new Date(timestampMs).toISOString(),
       payload ? JSON.stringify(payload) : null,

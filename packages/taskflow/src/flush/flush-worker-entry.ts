@@ -54,8 +54,11 @@ async function main(): Promise<void> {
         send({ type: "stats", payload: worker.getStats() });
         break;
       case "shutdown":
-        await worker.gracefulShutdown(command.payload.timeoutMs);
-        send({ type: "shutdown-complete" });
+        await worker.gracefulShutdown(command.payload.timeoutMs, (stats) => {
+          // send stats during graceful shutdown
+          send({ type: "stats", payload: stats });
+        });
+        send({ type: "shutdown-complete", payload: worker.getStats() });
         process.exit(0);
         break;
     }
