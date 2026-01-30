@@ -115,6 +115,24 @@ export class DevFileReader {
         resolve: (data: string) => {
           try {
             const files = JSON.parse(data);
+            // Validate it's an array of strings
+            if (!Array.isArray(files)) {
+              reject(
+                new Error(
+                  "Invalid directory listing format: expected array, got " +
+                    typeof files,
+                ),
+              );
+              return;
+            }
+            if (!files.every((f) => typeof f === "string")) {
+              reject(
+                new Error(
+                  "Invalid directory listing format: expected array of strings",
+                ),
+              );
+              return;
+            }
             resolve(files);
           } catch (error) {
             reject(

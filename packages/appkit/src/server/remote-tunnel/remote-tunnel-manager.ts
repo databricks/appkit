@@ -27,6 +27,50 @@ interface DevFileReader {
 }
 
 /**
+ * WebSocket message types for CLI <-> Server communication
+ */
+type WebSocketMessage =
+  | {
+      type: "connection:response";
+      viewer: string;
+      approved: boolean;
+    }
+  | {
+      type: "fetch:response:meta";
+      requestId: string;
+      status: number;
+      headers: Record<string, string>;
+    }
+  | {
+      type: "file:read:response";
+      requestId: string;
+      content?: string;
+      error?: string;
+    }
+  | {
+      type: "dir:list:response";
+      requestId: string;
+      content?: string;
+      error?: string;
+    }
+  | {
+      type: "hmr:message";
+      body: string;
+    };
+
+/**
+ * Type guard to validate WebSocket message structure
+ */
+function isWebSocketMessage(data: unknown): data is WebSocketMessage {
+  if (!data || typeof data !== "object") {
+    return false;
+  }
+
+  const msg = data as Record<string, unknown>;
+  return typeof msg.type === "string";
+}
+
+/**
  * Remote tunnel manager for the AppKit.
  *
  * This class is responsible for managing the remote tunnels for the development server.
@@ -304,6 +348,12 @@ export class RemoteTunnelManager {
         try {
           const data = JSON.parse(msg.toString());
 
+          // Validate message structure
+          if (!isWebSocketMessage(data)) {
+            logger.error("Invalid WebSocket message format: %O", data);
+            return;
+          }
+
           if (data.type === "connection:response") {
             if (tunnel && data.viewer) {
               tunnel.pendingRequests.delete(data.viewer);
@@ -355,8 +405,12 @@ export class RemoteTunnelManager {
 
               if (data.error) {
                 pending.reject(new Error(data.error));
-              } else {
+              } else if (data.content !== undefined) {
                 pending.resolve(data.content);
+              } else {
+                pending.reject(
+                  new Error("Missing content in file:read:response"),
+                );
               }
             }
           } else if (data.type === "dir:list:response") {
@@ -367,8 +421,12 @@ export class RemoteTunnelManager {
 
               if (data.error) {
                 pending.reject(new Error(data.error));
-              } else {
+              } else if (data.content !== undefined) {
                 pending.resolve(data.content);
+              } else {
+                pending.reject(
+                  new Error("Missing content in dir:list:response"),
+                );
               }
             }
           }
