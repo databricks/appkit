@@ -94,6 +94,8 @@ export class TaskSystem {
   // queues
   private readonly pendingQueue: Map<IdempotencyKey, Task> = new Map();
   private readonly runningTasks: Map<IdempotencyKey, Task> = new Map();
+  private readonly recentlyCompletedTasks: Map<IdempotencyKey, Task> =
+    new Map();
 
   // executor tick
   private executorInterval: ReturnType<typeof setInterval> | null = null;
@@ -115,9 +117,17 @@ export class TaskSystem {
 
     // initialize components
     this.eventLog = new EventLog(this.config.eventLog ?? {}, hooks);
+
+    // ensure flush uses the same event log file as the event log
+    const flushEventLogPath =
+      this.config.flush?.eventLogPath ??
+      this.config.eventLog?.eventLogPath ??
+      "./.taskflow/event.log";
+
     this.flush = new Flush(
       {
         ...this.config.flush,
+        eventLogPath: flushEventLogPath,
         repository: this.config.repository ?? {
           type: "sqlite",
           database: "./.taskflow/sqlite.db",
@@ -165,6 +175,7 @@ export class TaskSystem {
         streamManager: this.streamManager,
         executor: this.executor,
         getDefinition: (name) => this.definitions.get(name),
+        appendEvent: (event) => this.eventLog.appendEvent(event),
       },
       this.hooks,
     );
@@ -271,6 +282,7 @@ export class TaskSystem {
     }
 
     this.runningTasks.clear();
+    this.recentlyCompletedTasks.clear();
     this.streamManager.clearAll();
 
     // sync event log to disk before shutting down flush (drain remaining events)
@@ -406,6 +418,14 @@ export class TaskSystem {
       return this.attachStream(pendingTask, taskIdempotencyKey);
     }
 
+    // check recently completed tasks (not yet flushed to DB)
+    const recentlyCompleted =
+      this.recentlyCompletedTasks.get(taskIdempotencyKey);
+    if (recentlyCompleted) {
+      this.streamManager.getOrCreate(taskIdempotencyKey);
+      return this.attachStream(recentlyCompleted, taskIdempotencyKey);
+    }
+
     // check database for recovery - client-side retry
     if (params.idempotencyKey) {
       this.streamManager.getOrCreate(taskIdempotencyKey);
@@ -459,6 +479,10 @@ export class TaskSystem {
       timestamp: Date.now(),
     };
 
+    // write to event log first to ensure durability
+    await this.eventLog.appendEvent(createdEvent);
+
+    // notify stream subscribers after event log to ensure order
     this.streamManager.push(taskIdempotencyKey, createdEvent);
 
     // add to pending queue
@@ -602,6 +626,18 @@ export class TaskSystem {
     this.guard.releaseExecutionSlot(task);
     this.runningTasks.delete(task.idempotencyKey);
     this.streamManager.close(task.idempotencyKey);
+
+    // add to recently completed tasks to prevent duplicates before flush
+    this.recentlyCompletedTasks.set(task.idempotencyKey, task);
+
+    // cleanup after a delay to ensure DB has the record before we remove from memory
+    const cleanupDelay = Math.max(
+      (this.config.flush?.flushIntervalMs ?? 1000) * 3,
+      5000,
+    );
+    setTimeout(() => {
+      this.recentlyCompletedTasks.delete(task.idempotencyKey);
+    }, cleanupDelay).unref();
   }
 
   /**

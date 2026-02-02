@@ -91,15 +91,16 @@ export class Guard {
    * Accept a task for processing with waiting for capacity
    * If queue is full or rate limited, waits until capacity is available
    * @param task The task to accept
-   * @param timeoutMs Maximum time to wait for capacity (default: 30s)
+   * @param timeoutMs Maximum time to wait for capacity (uses config default)
    * @throws {ValidationError} if task is in DLQ
    * @throws {BackpressureError} if timeout reached while waiting
    */
   async acceptTaskWithWait(task: Task, timeoutMs?: number): Promise<void> {
+    const timeout = timeoutMs ?? this.config.backpressure.queueWaitTimeoutMs;
     await this.backpressure.acceptWithWait(
       task,
       this.dlq.has(task.idempotencyKey),
-      timeoutMs,
+      timeout,
     );
   }
 

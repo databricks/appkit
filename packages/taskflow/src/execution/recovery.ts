@@ -42,6 +42,8 @@ export interface TaskRecoveryDeps {
   executor: TaskExecutor;
   /** function to get task definition by name */
   getDefinition: (taskName: string) => TaskDefinition | undefined;
+  /** event log for persisting recovery events */
+  appendEvent: (event: TaskEvent) => void;
 }
 
 /**
@@ -130,7 +132,15 @@ export class TaskRecovery {
           this.deps.guard.acquireRecoverySlot();
 
           try {
-            for await (const event of this.recoverStaleTask(task)) {
+            // stream existing events from DB
+            for await (const event of this.streamFromDB(task)) {
+              this.deps.streamManager.push(task.idempotencyKey, event);
+            }
+
+            // run recovery handler
+            for await (const event of this.runRecoveryHandler(task)) {
+              // persist new events to event log to ensure durability
+              this.deps.appendEvent(event);
               this.deps.streamManager.push(task.idempotencyKey, event);
             }
             this.backgroundTasksRecovered++;
@@ -171,7 +181,15 @@ export class TaskRecovery {
    */
   async *recoverUserTask(task: Task): AsyncGenerator<TaskEvent, void, unknown> {
     try {
-      for await (const event of this.recoverStaleTask(task)) {
+      // stream existing events from DB
+      for await (const event of this.streamFromDB(task)) {
+        yield event;
+      }
+
+      // run recovery handler
+      for await (const event of this.runRecoveryHandler(task)) {
+        // persist new events to event log to ensure durability
+        this.deps.appendEvent(event);
         yield event;
       }
       this.userTasksRecovered++;
@@ -191,6 +209,23 @@ export class TaskRecovery {
   async *recoverStaleTask(
     task: Task,
   ): AsyncGenerator<TaskEvent, void, unknown> {
+    // yield events from db
+    for await (const event of this.streamFromDB(task)) {
+      yield event;
+    }
+
+    // run recovery handler
+    for await (const event of this.runRecoveryHandler(task)) {
+      yield event;
+    }
+  }
+
+  /**
+   * Run recovery handler and yield only NEW events
+   */
+  async *runRecoveryHandler(
+    task: Task,
+  ): AsyncGenerator<TaskEvent, void, unknown> {
     const definition = this.deps.getDefinition(task.name);
 
     if (!definition) {
@@ -201,11 +236,10 @@ export class TaskRecovery {
       );
     }
 
-    // stream previous events from database
+    // load previous events from db
     const previousEvents: TaskEvent[] = [];
     for await (const event of this.streamFromDB(task)) {
       previousEvents.push(event);
-      yield event;
     }
 
     // create event context
@@ -258,8 +292,18 @@ export class TaskRecovery {
 
     // yield events from recovery/re-execution
     if (isAsyncGenerator(result)) {
-      for await (const event of result) {
-        yield this.enrichEvent(event, context);
+      // iterate and capture the return value
+      let iterResult = await result.next();
+      while (!iterResult.done) {
+        yield this.enrichEvent(iterResult.value, context);
+        iterResult = await result.next();
+      }
+      // generator returned a value - emit complete event
+      if (iterResult.value !== undefined) {
+        yield this.enrichEvent(
+          { type: "complete", result: iterResult.value },
+          context,
+        );
       }
     } else {
       const value = await result;

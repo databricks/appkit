@@ -13,6 +13,8 @@ export interface BackpressureConfig {
   maxTasksPerUserWindow: number;
   /** Maximum tasks that can be queued globally */
   maxQueuedSize: number;
+  /** Timeout for waiting for queue capacity (0 = immediate rejection) */
+  queueWaitTimeoutMs: number;
 }
 
 /**
@@ -237,6 +239,7 @@ export const DEFAULT_GUARD_CONFIG: GuardConfig = {
     maxTasksPerWindow: 5000,
     maxTasksPerUserWindow: 200,
     maxQueuedSize: 1000,
+    queueWaitTimeoutMs: 30_000, // 30 seconds (0 = immediate rejection)
   },
   slots: {
     maxExecutionGlobal: 100,

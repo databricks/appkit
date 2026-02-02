@@ -830,6 +830,8 @@ export class EventLog {
 
   private async saveCheckpoint(): Promise<void> {
     const seqFilePath = `${this.config.eventLogPath}.checkpoint`;
+    const dir = path.dirname(seqFilePath);
+    await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(seqFilePath, this.currentSeq.toString(), "utf8");
   }
 

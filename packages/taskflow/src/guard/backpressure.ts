@@ -166,20 +166,25 @@ export class Backpressure {
     const startTime = Date.now();
     const pollIntervalMs = 50;
 
-    while (Date.now() - startTime < timeoutMs) {
+    // try once, and if not accepted, wait and retry
+    do {
       try {
         this.accept(task, isInDLQ);
         return; // task accepted successfully
       } catch (error) {
         if (error instanceof BackpressureError) {
+          // if timeout is 0, reject immediately without waiting
+          if (timeoutMs === 0) {
+            throw error;
+          }
           // queue full or rate limited - wait and retry
           await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
           continue;
         }
-        // other errors (e.g., validation error for DLQ) - rethrow
+        // other errors - rethrow
         throw error;
       }
-    }
+    } while (Date.now() - startTime < timeoutMs); // keep trying until timeout or accepted
 
     // timeout - throw the backpressure error
     this.trackRejection("queue_full", task);
