@@ -96,10 +96,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Build Docs
         run: pnpm run docs:build
-      - name: Lint Generated Docs
-        run: pnpm run docs:lint
-      - name: Format Generated Docs
-        run: pnpm run docs:format
+      - name: Check Generated Docs
+        run: pnpm run docs:check
       - name: Check for uncommitted docs changes
         run: |
           if ! git diff --exit-code docs/docs/api/; then
@@ -110,7 +108,7 @@ jobs:
             echo ""
             echo "To fix this:"
             echo "  1. Run: pnpm docs:build"
-            echo "  2. Run: pnpm docs:format"
+            echo "  2. Run: pnpm docs:check:fix"
             echo "  3. Review and commit the changes"
             echo ""
             exit 1
