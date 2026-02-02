@@ -1,8 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { ServiceContext } from "./service-context";
 import {
-  isUserContext,
   type ExecutionContext,
+  isUserContext,
   type UserContext,
 } from "./user-context";
 

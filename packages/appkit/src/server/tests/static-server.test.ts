@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import path from "node:path";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // Mock fs
 vi.mock("node:fs", () => ({
@@ -34,8 +34,8 @@ vi.mock("../utils", () => ({
 
 import fs from "node:fs";
 import express from "express";
-import { getConfigScript } from "../utils";
 import { StaticServer } from "../static-server";
+import { getConfigScript } from "../utils";
 
 describe("StaticServer", () => {
   let mockApp: any;

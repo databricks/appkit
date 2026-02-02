@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Command } from "commander";
-import { setupCommand } from "./commands/setup.js";
+import { docsCommand } from "./commands/docs.js";
 import { generateTypesCommand } from "./commands/generate-types.js";
 import { lintCommand } from "./commands/lint.js";
-import { docsCommand } from "./commands/docs.js";
+import { setupCommand } from "./commands/setup.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkgPath = join(__dirname, "../../package.json");

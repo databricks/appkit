@@ -1,8 +1,8 @@
+import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 import type { BasePlugin } from "shared";
-import { setupDatabricksEnv, mockServiceContext } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { createApp, AppKit } from "../appkit";
 import { ServiceContext } from "../../context/service-context";
+import { AppKit, createApp } from "../appkit";
 
 // Mock environment validation
 vi.mock("../utils", () => ({

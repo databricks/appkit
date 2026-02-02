@@ -1,15 +1,15 @@
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import type { Server } from "node:http";
 import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
+import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 // Set required env vars BEFORE imports that use them
 process.env.DATABRICKS_APP_PORT = "8000";
 process.env.FLASK_RUN_HOST = "0.0.0.0";
 
-import { createApp } from "../../core";
-import { server as serverPlugin } from "../index";
-import { Plugin, toPlugin } from "../../plugin";
 import { ServiceContext } from "../../context/service-context";
+import { createApp } from "../../core";
+import { Plugin, toPlugin } from "../../plugin";
+import { server as serverPlugin } from "../index";
 
 // Integration tests - actually start server and make HTTP requests
 describe("ServerPlugin Integration", () => {

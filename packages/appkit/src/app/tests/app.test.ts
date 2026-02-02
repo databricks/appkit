@@ -1,6 +1,6 @@
-import { describe, expect, test, vi, beforeEach, afterEach } from "vitest";
-import { AppManager } from "../index";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { DevFileReader } from "../index";
+import { AppManager } from "../index";
 
 // Mock fs/promises
 vi.mock("node:fs/promises", () => ({

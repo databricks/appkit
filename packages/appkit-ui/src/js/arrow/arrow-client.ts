@@ -6,9 +6,9 @@ import {
 } from "../constants";
 import {
   getArrowModule,
-  initializeTypeIdSets,
-  getTypeIdSets,
   getDecimalTypeId,
+  getTypeIdSets,
+  initializeTypeIdSets,
 } from "./lazy-arrow";
 
 // Re-export for backward compatibility

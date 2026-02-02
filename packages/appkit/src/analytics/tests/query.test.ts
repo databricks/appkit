@@ -1,8 +1,8 @@
 import { mockServiceContext } from "@tools/test-helpers";
 import { sql } from "shared";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { QueryProcessor } from "../query";
 import { ServiceContext } from "../../context/service-context";
+import { QueryProcessor } from "../query";
 
 describe("QueryProcessor", () => {
   const processor = new QueryProcessor();

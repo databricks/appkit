@@ -1,12 +1,12 @@
+import type { Span, SpanOptions } from "@opentelemetry/api";
 import type { IAppRouter } from "shared";
+import { vi } from "vitest";
+import type { ServiceContextState } from "../packages/appkit/src/context/service-context";
+import type { UserContext } from "../packages/appkit/src/context/user-context";
 import type {
   InstrumentConfig,
   ITelemetry,
 } from "../packages/appkit/src/telemetry/types";
-import type { ServiceContextState } from "../packages/appkit/src/context/service-context";
-import type { UserContext } from "../packages/appkit/src/context/user-context";
-import { vi } from "vitest";
-import type { SpanOptions, Span } from "@opentelemetry/api";
 
 /**
  * Creates a mock telemetry provider for testing

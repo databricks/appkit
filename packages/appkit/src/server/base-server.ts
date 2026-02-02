@@ -1,5 +1,5 @@
 import type express from "express";
-import { type PluginEndpoints, getConfigScript } from "./utils";
+import { getConfigScript, type PluginEndpoints } from "./utils";
 
 /**
  * Base server for the AppKit.

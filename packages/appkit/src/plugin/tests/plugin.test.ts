@@ -1,20 +1,20 @@
-import type { ITelemetry, TelemetryProvider } from "../../telemetry";
-import { TelemetryManager } from "../../telemetry";
-import { AppManager } from "../../app";
-import { CacheManager } from "../../cache";
-import { StreamManager } from "../../stream";
+import { createMockTelemetry, mockServiceContext } from "@tools/test-helpers";
+import type express from "express";
 import type {
   BasePluginConfig,
-  PluginExecuteConfig,
   IAppResponse,
+  PluginExecuteConfig,
 } from "shared";
-import { createMockTelemetry, mockServiceContext } from "@tools/test-helpers";
-import { validateEnv } from "../../utils";
-import type express from "express";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { AppManager } from "../../app";
+import { CacheManager } from "../../cache";
+import { ServiceContext } from "../../context/service-context";
+import { StreamManager } from "../../stream";
+import type { ITelemetry, TelemetryProvider } from "../../telemetry";
+import { TelemetryManager } from "../../telemetry";
+import { validateEnv } from "../../utils";
 import type { InterceptorContext } from "../interceptors/types";
 import { Plugin } from "../plugin";
-import { ServiceContext } from "../../context/service-context";
 
 // Mock all dependencies
 vi.mock("../../app");

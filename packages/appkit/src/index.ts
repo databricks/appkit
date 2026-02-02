@@ -15,6 +15,7 @@ export type {
 export { isSQLTypeMarker, sql } from "shared";
 export { analytics } from "./analytics";
 export { CacheManager } from "./cache";
+export { getExecutionContext } from "./context";
 export { createApp } from "./core";
 // Errors
 export {
@@ -41,7 +42,5 @@ export {
   SpanStatusCode,
   type TelemetryConfig,
 } from "./telemetry";
-
 // Vite plugin and type generation
 export { appKitTypesPlugin } from "./type-generator/vite-plugin";
-export { getExecutionContext } from "./context";

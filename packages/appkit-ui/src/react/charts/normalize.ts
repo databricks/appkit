@@ -1,5 +1,5 @@
-import { ArrowClient } from "@/js";
 import type { Table } from "apache-arrow";
+import { ArrowClient } from "@/js";
 import { DATE_FIELD_PATTERNS, NAME_FIELD_PATTERNS } from "./constants";
 import type {
   ChartData,

@@ -10,7 +10,7 @@ export type {
 } from "./types";
 export { useAnalyticsQuery } from "./use-analytics-query";
 export {
-  useChartData,
   type UseChartDataOptions,
   type UseChartDataResult,
+  useChartData,
 } from "./use-chart-data";

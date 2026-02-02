@@ -1,4 +1,3 @@
-import { Header } from "@/components/layout/header";
 import { sql } from "@databricks/appkit-ui/js";
 import {
   AreaChart,
@@ -17,6 +16,7 @@ import {
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { codeToHtml } from "shiki";
+import { Header } from "@/components/layout/header";
 
 export const Route = createFileRoute("/data-visualization")({
   component: DataVisualizationRoute,

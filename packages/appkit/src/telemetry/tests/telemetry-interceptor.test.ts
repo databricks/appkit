@@ -1,5 +1,5 @@
+import { type Span, SpanStatusCode } from "@opentelemetry/api";
 import type { TelemetryConfig } from "shared";
-import { SpanStatusCode, type Span } from "@opentelemetry/api";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { TelemetryInterceptor } from "../../plugin/interceptors/telemetry";
 import type { InterceptorContext } from "../../plugin/interceptors/types";

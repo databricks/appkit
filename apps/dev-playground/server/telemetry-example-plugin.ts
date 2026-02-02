@@ -3,15 +3,15 @@
  */
 
 import {
-  Plugin,
-  toPlugin,
   type BasePluginConfig,
   CacheManager,
-  SpanStatusCode,
-  type Span,
   type Counter,
   type Histogram,
+  Plugin,
   SeverityNumber,
+  type Span,
+  SpanStatusCode,
+  toPlugin,
 } from "@databricks/appkit";
 import type { Request, Response, Router } from "express";
 

@@ -1,6 +1,6 @@
-import { Command } from "commander";
 import fs from "node:fs";
 import path from "node:path";
+import { Command } from "commander";
 
 const PACKAGES = [
   { name: "@databricks/appkit", description: "Backend SDK" },

@@ -1,6 +1,5 @@
 import { sql } from "@databricks/appkit-ui/js";
 import {
-  useAnalyticsQuery,
   Button,
   Card,
   CardContent,
@@ -8,6 +7,7 @@ import {
   CardHeader,
   CardTitle,
   Input,
+  useAnalyticsQuery,
 } from "@databricks/appkit-ui/react";
 import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";

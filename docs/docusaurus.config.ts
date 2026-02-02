@@ -1,9 +1,9 @@
-import { themes as prismThemes } from "prism-react-renderer";
 import path from "node:path";
-import type { Config } from "@docusaurus/types";
 import type * as Preset from "@docusaurus/preset-classic";
-import webpack from "webpack";
+import type { Config } from "@docusaurus/types";
 import type { PluginOptions } from "@signalwire/docusaurus-plugin-llms-txt/public";
+import { themes as prismThemes } from "prism-react-renderer";
+import webpack from "webpack";
 
 function appKitAliasPlugin() {
   return {

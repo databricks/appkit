@@ -1,7 +1,7 @@
-import { Command } from "commander";
-import { parse, Lang } from "@ast-grep/napi";
 import fs from "node:fs";
 import path from "node:path";
+import { Lang, parse } from "@ast-grep/napi";
+import { Command } from "commander";
 
 interface Rule {
   id: string;

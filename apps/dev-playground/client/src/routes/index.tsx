@@ -1,9 +1,9 @@
+import { Button, Card } from "@databricks/appkit-ui/react";
 import {
   createFileRoute,
   retainSearchParams,
   useNavigate,
 } from "@tanstack/react-router";
-import { Button, Card } from "@databricks/appkit-ui/react";
 import { ThemeSelector } from "@/components/theme-selector";
 
 export const Route = createFileRoute("/")({

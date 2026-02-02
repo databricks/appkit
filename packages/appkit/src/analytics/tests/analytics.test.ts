@@ -7,9 +7,9 @@ import {
 } from "@tools/test-helpers";
 import { sql } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { ServiceContext } from "../../context/service-context";
 import { AnalyticsPlugin, analytics } from "../analytics";
 import type { IAnalyticsConfig } from "../types";
-import { ServiceContext } from "../../context/service-context";
 
 // Mock CacheManager singleton with actual caching behavior
 const { mockCacheStore, mockCacheInstance } = vi.hoisted(() => {
