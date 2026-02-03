@@ -46,6 +46,10 @@ export interface PluginConfig {
 
 export type PluginPhase = "core" | "normal" | "deferred";
 
+/**
+ * Plugin constructor with required manifest declaration.
+ * All plugins must declare a manifest with their metadata and resource requirements.
+ */
 export type PluginConstructor<
   C = BasePluginConfig,
   I extends BasePlugin = BasePlugin,
@@ -54,7 +58,56 @@ export type PluginConstructor<
 ) => I) & {
   DEFAULT_CONFIG?: Record<string, unknown>;
   phase?: PluginPhase;
+  /**
+   * Static manifest declaring plugin metadata and resource requirements.
+   * Required for all plugins.
+   */
+  manifest: PluginManifest;
+  /**
+   * Optional runtime resource requirements based on config.
+   * Use this when resource requirements depend on plugin configuration.
+   */
+  getResourceRequirements?(config: C): ResourceRequirement[];
 };
+
+/**
+ * Manifest declaration for plugins (imported from registry types).
+ * Re-exported here to avoid circular dependencies.
+ */
+export interface PluginManifest {
+  name: string;
+  displayName: string;
+  description: string;
+  resources: {
+    required: Omit<ResourceRequirement, "required">[];
+    optional: Omit<ResourceRequirement, "required">[];
+  };
+  config?: {
+    schema: {
+      type: string;
+      properties?: Record<string, unknown>;
+      [key: string]: unknown;
+    };
+  };
+  author?: string;
+  version?: string;
+  repository?: string;
+  keywords?: string[];
+  license?: string;
+}
+
+/**
+ * Resource requirement declaration (imported from registry types).
+ * Re-exported here to avoid circular dependencies.
+ */
+export interface ResourceRequirement {
+  type: string;
+  alias: string;
+  description: string;
+  permission: string;
+  env?: string;
+  required: boolean;
+}
 
 export type ConfigFor<T> = T extends { DEFAULT_CONFIG: infer D }
   ? D
