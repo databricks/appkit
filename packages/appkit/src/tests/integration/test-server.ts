@@ -3,6 +3,7 @@ import {
   setupDatabricksEnv,
   type TestContextOptions,
 } from "@tools/test-helpers";
+import type { Application } from "express";
 import type { Mock } from "vitest";
 import { vi } from "vitest";
 import { AppManager } from "../../app";
@@ -10,13 +11,20 @@ import { ServiceContext } from "../../context/service-context";
 import { createApp } from "../../core";
 import { server as serverPlugin } from "../../server";
 
+/** Minimal type for server plugin exports used in tests */
+interface ServerPluginExports {
+  start: () => Promise<Application>;
+  extend: (fn: (app: Application) => void) => void;
+  getServer: () => Server;
+}
+
 export interface TestServerConfig {
   port?: number;
   executeStatementResponse?: any;
   getStatementResponse?: any;
   contextOptions?: TestContextOptions;
   /** Plugins to include (server plugin is always added automatically) */
-  plugins: any[];
+  plugins?: any[];
   /** Function to extend the server via server.extend() before starting */
   extend?: (app: import("express").Application) => void;
 }
@@ -153,17 +161,18 @@ export async function createTestServer(
       host: "127.0.0.1",
       autoStart: false,
     }),
-    ...config.plugins,
+    ...(config.plugins ?? []),
   ];
 
   const app = await createApp({ plugins });
+  const serverExports = app.server as unknown as ServerPluginExports;
 
   if (config.extend) {
-    app.server.extend(config.extend);
+    serverExports.extend(config.extend);
   }
 
-  await app.server.start();
-  const server = app.server.getServer();
+  await serverExports.start();
+  const server = serverExports.getServer();
   const baseUrl = `http://127.0.0.1:${port}`;
 
   await new Promise((resolve) => setTimeout(resolve, 50));
@@ -179,7 +188,7 @@ export async function createTestServer(
 
     if (server) {
       await new Promise<void>((resolve, reject) => {
-        server.close((err) => {
+        server.close((err: Error | undefined) => {
           if (err) reject(err);
           else resolve();
         });
