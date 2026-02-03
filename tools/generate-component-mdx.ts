@@ -23,6 +23,7 @@ const FILE_EXTENSIONS = {
   EXAMPLE: ".example.tsx",
   TEST_PATTERN: ".test.",
   INDEX: "/index.tsx",
+  CATEGORY_CONFIG: "_category_.json",
 } as const;
 
 const COMPONENT_PATTERNS = {
@@ -557,7 +558,8 @@ function main() {
   // Create output directory if it doesn't exist
   fs.mkdirSync(outputDir, { recursive: true });
 
-  // Delete only subdirectories (preserve files like index.md)
+  // Delete only subdirectories (preserve root-level files)
+  // This preserves files like _index.md (category link) and styling.md (manual docs)
   if (fs.existsSync(outputDir)) {
     const entries = fs.readdirSync(outputDir, { withFileTypes: true });
     for (const entry of entries) {
@@ -575,6 +577,32 @@ function main() {
   const uiOutputDir = path.join(outputDir, OUTPUT_SUBDIRS.UI);
   fs.mkdirSync(dataOutputDir, { recursive: true });
   fs.mkdirSync(uiOutputDir, { recursive: true });
+
+  // Create _category_.json files for proper sidebar labels
+  fs.writeFileSync(
+    path.join(uiOutputDir, FILE_EXTENSIONS.CATEGORY_CONFIG),
+    `${JSON.stringify(
+      {
+        label: "UI components",
+        position: 2,
+      },
+      null,
+      2,
+    )}\n`,
+    MARKDOWN.FILE_ENCODING,
+  );
+  fs.writeFileSync(
+    path.join(dataOutputDir, FILE_EXTENSIONS.CATEGORY_CONFIG),
+    `${JSON.stringify(
+      {
+        label: "Data components",
+        position: 3,
+      },
+      null,
+      2,
+    )}\n`,
+    MARKDOWN.FILE_ENCODING,
+  );
 
   let count = 0;
 
