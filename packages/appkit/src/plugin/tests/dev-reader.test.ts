@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { TunnelError } from "../../errors";
 
 // Mock the gate to allow remote tunnel in tests
-vi.mock("@/server/remote-tunnel/gate", () => ({
+vi.mock("@/plugins/server/remote-tunnel/gate", () => ({
   isRemoteTunnelAllowedByEnv: () => true,
 }));
 

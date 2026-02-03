@@ -62,7 +62,7 @@ vi.mock("express", () => {
 });
 
 // Mock dependencies before imports
-vi.mock("../../telemetry", () => ({
+vi.mock("../../../telemetry", () => ({
   TelemetryManager: {
     getProvider: vi.fn().mockReturnValue({
       getTracer: vi.fn().mockReturnValue({ startActiveSpan: vi.fn() }),
@@ -80,7 +80,7 @@ vi.mock("../../telemetry", () => ({
   },
 }));
 
-vi.mock("../../cache", () => ({
+vi.mock("../../../cache", () => ({
   CacheManager: {
     getInstanceSync: vi.fn().mockReturnValue({
       get: vi.fn(),
@@ -90,7 +90,7 @@ vi.mock("../../cache", () => ({
   },
 }));
 
-vi.mock("../../utils", () => ({
+vi.mock("../../../utils", () => ({
   validateEnv: vi.fn(),
   deepMerge: vi.fn((a, b) => ({ ...a, ...b })),
 }));
@@ -110,7 +110,7 @@ const { mockLoggerDebug, mockLoggerInfo, mockLoggerWarn, mockLoggerError } =
     mockLoggerWarn: vi.fn(),
     mockLoggerError: vi.fn(),
   }));
-vi.mock("../../logging/logger", () => ({
+vi.mock("../../../logging/logger", () => ({
   createLogger: vi.fn(() => ({
     debug: mockLoggerDebug,
     info: mockLoggerInfo,

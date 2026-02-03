@@ -6,9 +6,9 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 process.env.DATABRICKS_APP_PORT = "8000";
 process.env.FLASK_RUN_HOST = "0.0.0.0";
 
-import { ServiceContext } from "../../context/service-context";
-import { createApp } from "../../core";
-import { Plugin, toPlugin } from "../../plugin";
+import { ServiceContext } from "../../../context/service-context";
+import { createApp } from "../../../core";
+import { Plugin, toPlugin } from "../../../plugin";
 import { server as serverPlugin } from "../index";
 
 // Integration tests - actually start server and make HTTP requests
