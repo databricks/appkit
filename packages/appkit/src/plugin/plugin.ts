@@ -59,7 +59,42 @@ const EXCLUDED_FROM_PROXY = new Set([
   "constructor",
 ]);
 
-/** Base abstract class for creating AppKit plugins */
+/**
+ * Base abstract class for creating AppKit plugins.
+ *
+ * Plugins can optionally declare their resource requirements through:
+ * 1. A static `manifest` property - recommended for all plugins
+ * 2. A static `getResourceRequirements()` method - for dynamic requirements
+ *
+ * @example
+ * ```typescript
+ * import { Plugin, toPlugin, PluginManifest, ResourceType } from '@databricks/appkit';
+ *
+ * // Define manifest
+ * const myManifest: PluginManifest = {
+ *   name: 'myPlugin',
+ *   displayName: 'My Plugin',
+ *   description: 'Does something awesome',
+ *   resources: {
+ *     required: [
+ *       {
+ *         type: ResourceType.SQL_WAREHOUSE,
+ *         alias: 'warehouse',
+ *         description: 'SQL Warehouse for queries',
+ *         permission: 'CAN_USE',
+ *         env: 'DATABRICKS_WAREHOUSE_ID'
+ *       }
+ *     ],
+ *     optional: []
+ *   }
+ * };
+ *
+ * class MyPlugin extends Plugin<MyConfig> {
+ *   static manifest = myManifest;
+ *   // ... implementation
+ * }
+ * ```
+ */
 export abstract class Plugin<
   TConfig extends BasePluginConfig = BasePluginConfig,
 > implements BasePlugin
@@ -75,7 +110,17 @@ export abstract class Plugin<
   /** Registered endpoints for this plugin */
   private registeredEndpoints: PluginEndpointMap = {};
 
+  /**
+   * Plugin initialization phase.
+   * - 'core': Initialized first (e.g., config plugins)
+   * - 'normal': Initialized second (most plugins)
+   * - 'deferred': Initialized last (e.g., server plugin)
+   */
   static phase: PluginPhase = "normal";
+
+  /**
+   * Plugin name identifier.
+   */
   name: string;
 
   constructor(protected config: TConfig) {

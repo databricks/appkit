@@ -3,6 +3,17 @@ const typedocSidebar: SidebarsConfig = {
   items: [
     {
       type: "category",
+      label: "Enumerations",
+      items: [
+        {
+          type: "doc",
+          id: "api/appkit/Enumeration.ResourceType",
+          label: "ResourceType"
+        }
+      ]
+    },
+    {
+      type: "category",
       label: "Classes",
       items: [
         {
@@ -73,8 +84,33 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.ConfigSchema",
+          label: "ConfigSchema"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ConfigSchemaProperty",
+          label: "ConfigSchemaProperty"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.ITelemetry",
           label: "ITelemetry"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.PluginManifest",
+          label: "PluginManifest"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ResourceEntry",
+          label: "ResourceEntry"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ResourceRequirement",
+          label: "ResourceRequirement"
         },
         {
           type: "doc",
@@ -85,6 +121,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.TelemetryConfig",
           label: "TelemetryConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ValidationResult",
+          label: "ValidationResult"
         }
       ]
     },
@@ -96,6 +137,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.IAppRouter",
           label: "IAppRouter"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.ResourcePermission",
+          label: "ResourcePermission"
         }
       ]
     },

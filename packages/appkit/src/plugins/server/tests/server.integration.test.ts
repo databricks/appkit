@@ -101,6 +101,16 @@ describe("ServerPlugin with custom plugin", () => {
       name = "test-plugin" as const;
       envVars: string[] = [];
 
+      static manifest = {
+        name: "test-plugin",
+        displayName: "Test Plugin",
+        description: "Test plugin for integration tests",
+        resources: {
+          required: [],
+          optional: [],
+        },
+      };
+
       injectRoutes(router: any) {
         router.get("/echo", (_req: any, res: any) => {
           res.json({ message: "hello from test plugin" });

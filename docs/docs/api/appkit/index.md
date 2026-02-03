@@ -3,6 +3,12 @@
 Core library for building Databricks applications with type-safe SQL queries,
 plugin architecture, and React integration.
 
+## Enumerations
+
+| Enumeration | Description |
+| ------ | ------ |
+| [ResourceType](Enumeration.ResourceType.md) | Supported Databricks resource types that plugins can depend on. |
+
 ## Classes
 
 | Class | Description |
@@ -13,7 +19,7 @@ plugin architecture, and React integration.
 | [ConnectionError](Class.ConnectionError.md) | Error thrown when a connection or network operation fails. Use for database pool errors, API failures, timeouts, etc. |
 | [ExecutionError](Class.ExecutionError.md) | Error thrown when an operation execution fails. Use for statement failures, canceled operations, or unexpected states. |
 | [InitializationError](Class.InitializationError.md) | Error thrown when a service or component is not properly initialized. Use when accessing services before they are ready. |
-| [Plugin](Class.Plugin.md) | Base abstract class for creating AppKit plugins |
+| [Plugin](Class.Plugin.md) | Base abstract class for creating AppKit plugins. |
 | [ServerError](Class.ServerError.md) | Error thrown when server lifecycle operations fail. Use for server start/stop issues, configuration conflicts, etc. |
 | [TunnelError](Class.TunnelError.md) | Error thrown when remote tunnel operations fail. Use for tunnel connection issues, message parsing failures, etc. |
 | [ValidationError](Class.ValidationError.md) | Error thrown when input validation fails. Use for invalid parameters, missing required fields, or type mismatches. |
@@ -24,15 +30,22 @@ plugin architecture, and React integration.
 | ------ | ------ |
 | [BasePluginConfig](Interface.BasePluginConfig.md) | Base configuration interface for AppKit plugins |
 | [CacheConfig](Interface.CacheConfig.md) | Configuration for caching |
+| [ConfigSchema](Interface.ConfigSchema.md) | Configuration schema definition for plugin config. Uses JSON Schema format for validation and documentation. |
+| [ConfigSchemaProperty](Interface.ConfigSchemaProperty.md) | Individual property definition in a config schema. |
 | [ITelemetry](Interface.ITelemetry.md) | Plugin-facing interface for OpenTelemetry instrumentation. Provides a thin abstraction over OpenTelemetry APIs for plugins. |
+| [PluginManifest](Interface.PluginManifest.md) | Plugin manifest that declares metadata and resource requirements. Attached to plugin classes as a static property. |
+| [ResourceEntry](Interface.ResourceEntry.md) | Internal representation of a resource in the registry. Extends ResourceRequirement with resolution state and plugin ownership. |
+| [ResourceRequirement](Interface.ResourceRequirement.md) | Declares a resource requirement for a plugin. Can be defined statically in a manifest or dynamically via getResourceRequirements(). |
 | [StreamExecutionSettings](Interface.StreamExecutionSettings.md) | Configuration for streaming execution with default and user-scoped settings |
 | [TelemetryConfig](Interface.TelemetryConfig.md) | OpenTelemetry configuration for AppKit applications |
+| [ValidationResult](Interface.ValidationResult.md) | Result of validating all registered resources against the environment. |
 
 ## Type Aliases
 
 | Type Alias | Description |
 | ------ | ------ |
 | [IAppRouter](TypeAlias.IAppRouter.md) | Express router type for plugin route registration |
+| [ResourcePermission](TypeAlias.ResourcePermission.md) | Permission levels that can be required for a resource. Based on Databricks permission model. |
 
 ## Variables
 
