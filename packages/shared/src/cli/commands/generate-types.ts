@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
 
@@ -21,6 +22,12 @@ async function runGenerateTypes(
       outFile || path.join(process.cwd(), "client/src/appKitTypes.d.ts");
 
     const queryFolder = path.join(resolvedRootDir, "config/queries");
+    if (!fs.existsSync(queryFolder)) {
+      console.warn(
+        `Warning: No queries found at ${queryFolder}. Skipping type generation.`,
+      );
+      return;
+    }
 
     const resolvedWarehouseId =
       warehouseId || process.env.DATABRICKS_WAREHOUSE_ID;
