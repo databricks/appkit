@@ -219,7 +219,19 @@ import type express from "express";
 
 class MyPlugin extends Plugin {
   name = "myPlugin";
-  envVars = ["MY_API_KEY"];
+
+  // Define resource requirements in the static manifest
+  static manifest = {
+    name: "myPlugin",
+    displayName: "My Plugin",
+    description: "A custom plugin",
+    resources: {
+      required: [
+        { type: "SECRET_SCOPE", alias: "MY_API_KEY" }
+      ],
+      optional: []
+    }
+  };
 
   async setup() {
     // Initialize your plugin
@@ -250,7 +262,7 @@ export const myPlugin = toPlugin<typeof MyPlugin, Record<string, never>, "myPlug
 ### Key extension points
 
 - **Route injection**: Implement `injectRoutes()` to add custom endpoints using [`IAppRouter`](api/appkit/TypeAlias.IAppRouter.md)
-- **Lifecycle hooks**: Override `setup()`, `shutdown()`, and `validateEnv()` methods
+- **Lifecycle hooks**: Override `setup()`, and `shutdown()` methods
 - **Shared services**:
   - **Cache management**: Access the cache service via `this.cache`. See [`CacheConfig`](api/appkit/Interface.CacheConfig.md) for configuration.
   - **Telemetry**: Instrument your plugin with traces and metrics via `this.telemetry`. See [`ITelemetry`](api/appkit/Interface.ITelemetry.md).

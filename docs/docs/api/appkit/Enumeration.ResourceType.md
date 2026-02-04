@@ -1,6 +1,6 @@
 # Enumeration: ResourceType
 
-Supported Databricks resource types that plugins can depend on.
+Supported resource types that plugins can depend on.
 
 ## Enumeration Members
 

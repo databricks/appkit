@@ -7,7 +7,7 @@ plugin architecture, and React integration.
 
 | Enumeration | Description |
 | ------ | ------ |
-| [ResourceType](Enumeration.ResourceType.md) | Supported Databricks resource types that plugins can depend on. |
+| [ResourceType](Enumeration.ResourceType.md) | Supported resource types that plugins can depend on. |
 
 ## Classes
 
@@ -20,6 +20,7 @@ plugin architecture, and React integration.
 | [ExecutionError](Class.ExecutionError.md) | Error thrown when an operation execution fails. Use for statement failures, canceled operations, or unexpected states. |
 | [InitializationError](Class.InitializationError.md) | Error thrown when a service or component is not properly initialized. Use when accessing services before they are ready. |
 | [Plugin](Class.Plugin.md) | Base abstract class for creating AppKit plugins. |
+| [ResourceRegistry](Class.ResourceRegistry.md) | Central registry for tracking plugin resource requirements. Implements singleton pattern to ensure a single source of truth. |
 | [ServerError](Class.ServerError.md) | Error thrown when server lifecycle operations fail. Use for server start/stop issues, configuration conflicts, etc. |
 | [TunnelError](Class.TunnelError.md) | Error thrown when remote tunnel operations fail. Use for tunnel connection issues, message parsing failures, etc. |
 | [ValidationError](Class.ValidationError.md) | Error thrown when input validation fails. Use for invalid parameters, missing required fields, or type mismatches. |

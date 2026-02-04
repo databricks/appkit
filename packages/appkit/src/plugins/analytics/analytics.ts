@@ -27,7 +27,6 @@ const logger = createLogger("analytics");
 
 export class AnalyticsPlugin extends Plugin {
   name = "analytics";
-  protected envVars: string[] = [];
 
   /** Plugin manifest declaring metadata and resource requirements */
   static manifest = analyticsManifest;

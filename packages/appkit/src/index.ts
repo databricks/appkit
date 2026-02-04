@@ -44,6 +44,7 @@ export type {
 export {
   getPluginManifest,
   getResourceRequirements,
+  ResourceRegistry,
   ResourceType,
 } from "./registry";
 // Telemetry (for advanced custom telemetry)

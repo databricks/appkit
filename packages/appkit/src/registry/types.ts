@@ -7,7 +7,7 @@
  */
 
 /**
- * Supported Databricks resource types that plugins can depend on.
+ * Supported resource types that plugins can depend on.
  */
 export enum ResourceType {
   /** Databricks SQL Warehouse for query execution */

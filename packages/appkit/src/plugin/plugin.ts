@@ -27,7 +27,7 @@ import {
   normalizeTelemetryOptions,
   TelemetryManager,
 } from "../telemetry";
-import { deepMerge, validateEnv } from "../utils";
+import { deepMerge } from "../utils";
 import { DevFileReader } from "./dev-reader";
 import { CacheInterceptor } from "./interceptors/cache";
 import { RetryInterceptor } from "./interceptors/retry";
@@ -49,7 +49,6 @@ const EXCLUDED_FROM_PROXY = new Set([
   // Lifecycle methods
   "setup",
   "shutdown",
-  "validateEnv",
   "injectRoutes",
   "getEndpoints",
   "abortActiveOperations",
@@ -91,9 +90,7 @@ const EXCLUDED_FROM_PROXY = new Set([
  *
  * class MyPlugin extends Plugin<MyConfig> {
  *   static manifest = myManifest;  // Required!
- *
  *   name = 'myPlugin';
- *   protected envVars: string[] = [];
  *
  *   async setup() {
  *     // Initialize your plugin
@@ -117,7 +114,6 @@ export abstract class Plugin<
   protected devFileReader: DevFileReader;
   protected streamManager: StreamManager;
   protected telemetry: ITelemetry;
-  protected abstract envVars: string[];
 
   /** Registered endpoints for this plugin */
   private registeredEndpoints: PluginEndpointMap = {};
@@ -144,10 +140,6 @@ export abstract class Plugin<
     this.devFileReader = DevFileReader.getInstance();
 
     this.isReady = true;
-  }
-
-  validateEnv() {
-    validateEnv(this.envVars);
   }
 
   injectRoutes(_: express.Router) {

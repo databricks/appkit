@@ -1,5 +1,6 @@
 import type {
   BasePlugin,
+  BasePluginConfig,
   CacheConfig,
   InputPluginMap,
   OptionalConfigPluginDef,
@@ -9,8 +10,17 @@ import type {
 } from "shared";
 import { CacheManager } from "../cache";
 import { ServiceContext } from "../context";
+import { ConfigurationError } from "../errors";
+import { createLogger } from "../logging";
+import {
+  getPluginManifest,
+  ResourceRegistry,
+  type ResourceRequirement,
+} from "../registry";
 import type { TelemetryConfig } from "../telemetry";
 import { TelemetryManager } from "../telemetry";
+
+const logger = createLogger("appkit");
 
 export class AppKit<TPlugins extends InputPluginMap> {
   #pluginInstances: Record<string, BasePlugin> = {};
@@ -69,8 +79,6 @@ export class AppKit<TPlugins extends InputPluginMap> {
     const pluginInstance = new Plugin(baseConfig);
 
     this.#pluginInstances[name] = pluginInstance;
-
-    pluginInstance.validateEnv();
 
     this.#setupPromises.push(pluginInstance.setup());
 
@@ -152,6 +160,90 @@ export class AppKit<TPlugins extends InputPluginMap> {
     await ServiceContext.initialize();
 
     const rawPlugins = config.plugins as T;
+
+    // Phase 1a: Collect resource requirements from all plugins
+    const registry = ResourceRegistry.getInstance();
+    registry.clear(); // Clear any previous state
+
+    for (const pluginData of rawPlugins) {
+      if (!pluginData?.plugin) continue;
+
+      const pluginName = pluginData.name;
+
+      // Load manifest and register static resources
+      try {
+        const manifest = getPluginManifest(pluginData.plugin);
+
+        // Register required resources
+        for (const resource of manifest.resources.required) {
+          registry.register(pluginName, { ...resource, required: true });
+        }
+
+        // Register optional resources
+        for (const resource of manifest.resources.optional || []) {
+          registry.register(pluginName, { ...resource, required: false });
+        }
+
+        // Check for runtime resource requirements
+        if (typeof pluginData.plugin.getResourceRequirements === "function") {
+          const runtimeResources = pluginData.plugin.getResourceRequirements(
+            pluginData.config as BasePluginConfig,
+          );
+          for (const resource of runtimeResources) {
+            // Cast from shared's ResourceRequirement to registry's ResourceRequirement
+            // The shared type has looser typing (string) vs registry (ResourceType enum)
+            registry.register(pluginName, resource as ResourceRequirement);
+          }
+        }
+
+        logger.debug(
+          "Collected resources from plugin %s: %d total",
+          pluginName,
+          registry.getByPlugin(pluginName).length,
+        );
+      } catch (error) {
+        // Plugin doesn't have a manifest - this is allowed for legacy plugins
+        // or plugins that don't declare resources
+        logger.debug(
+          "Plugin %s has no manifest or invalid manifest: %s",
+          pluginName,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
+
+    // Phase 1b: Validate resources
+    const validation = registry.validate();
+    const isDevelopment = process.env.NODE_ENV === "development";
+
+    if (!validation.valid) {
+      const errorMessage = ResourceRegistry.formatMissingResources(
+        validation.missing,
+      );
+
+      if (isDevelopment) {
+        // In development mode, warn but continue
+        logger.warn(
+          "Missing resources detected (continuing in dev mode):\n%s",
+          errorMessage,
+        );
+      } else {
+        // In production, throw error
+        throw new ConfigurationError(errorMessage, {
+          context: {
+            missingResources: validation.missing.map((r) => ({
+              type: r.type,
+              alias: r.alias,
+              plugin: r.plugin,
+              env: r.env,
+            })),
+          },
+        });
+      }
+    } else if (registry.size() > 0) {
+      logger.debug("All %d resources validated successfully", registry.size());
+    }
+
     const preparedPlugins = AppKit.preparePlugins(rawPlugins);
     const mergedConfig = {
       plugins: preparedPlugins,

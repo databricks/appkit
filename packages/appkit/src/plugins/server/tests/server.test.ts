@@ -91,7 +91,6 @@ vi.mock("../../../cache", () => ({
 }));
 
 vi.mock("../../../utils", () => ({
-  validateEnv: vi.fn(),
   deepMerge: vi.fn((a, b) => ({ ...a, ...b })),
 }));
 

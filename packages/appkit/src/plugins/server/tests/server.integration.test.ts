@@ -105,7 +105,6 @@ describe("ServerPlugin with custom plugin", () => {
         resources: { required: [], optional: [] },
       };
       name = "test-plugin" as const;
-      envVars: string[] = [];
 
       injectRoutes(router: any) {
         router.get("/echo", (_req: any, res: any) => {

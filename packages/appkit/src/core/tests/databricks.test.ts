@@ -16,9 +16,8 @@ const createTestManifest = (name: string): PluginManifest => ({
   },
 });
 
-// Mock environment validation
+// Mock utilities
 vi.mock("../utils", () => ({
-  validateEnv: vi.fn(),
   deepMerge: vi.fn((a, b) => ({ ...a, ...b })),
 }));
 
@@ -47,15 +46,10 @@ class CoreTestPlugin implements BasePlugin {
   static manifest = createTestManifest("coreTest");
   name = "coreTest";
   setupCalled = false;
-  validateEnvCalled = false;
   injectedConfig: any;
 
   constructor(config: any) {
     this.injectedConfig = config;
-  }
-
-  validateEnv() {
-    this.validateEnvCalled = true;
   }
 
   async setup() {
@@ -72,7 +66,6 @@ class CoreTestPlugin implements BasePlugin {
     return {
       // Expose internal state for testing
       setupCalled: this.setupCalled,
-      validateEnvCalled: this.validateEnvCalled,
       injectedConfig: this.injectedConfig,
     };
   }
@@ -84,15 +77,10 @@ class NormalTestPlugin implements BasePlugin {
   static manifest = createTestManifest("normalTest");
   name = "normalTest";
   setupCalled = false;
-  validateEnvCalled = false;
   injectedConfig: any;
 
   constructor(config: any) {
     this.injectedConfig = config;
-  }
-
-  validateEnv() {
-    this.validateEnvCalled = true;
   }
 
   async setup() {
@@ -108,7 +96,6 @@ class NormalTestPlugin implements BasePlugin {
   exports() {
     return {
       setupCalled: this.setupCalled,
-      validateEnvCalled: this.validateEnvCalled,
       injectedConfig: this.injectedConfig,
     };
   }
@@ -120,17 +107,12 @@ class DeferredTestPlugin implements BasePlugin {
   static manifest = createTestManifest("deferredTest");
   name = "deferredTest";
   setupCalled = false;
-  validateEnvCalled = false;
   injectedConfig: any;
   injectedPlugins: any;
 
   constructor(config: any) {
     this.injectedConfig = config;
     this.injectedPlugins = config.plugins;
-  }
-
-  validateEnv() {
-    this.validateEnvCalled = true;
   }
 
   async setup() {
@@ -146,7 +128,6 @@ class DeferredTestPlugin implements BasePlugin {
   exports() {
     return {
       setupCalled: this.setupCalled,
-      validateEnvCalled: this.validateEnvCalled,
       injectedConfig: this.injectedConfig,
       injectedPlugins: this.injectedPlugins,
     };
@@ -163,8 +144,6 @@ class SlowSetupPlugin implements BasePlugin {
   constructor(config: any) {
     this.setupDelay = config.setupDelay || 100;
   }
-
-  validateEnv() {}
 
   async setup() {
     await new Promise((resolve) => setTimeout(resolve, this.setupDelay));
@@ -188,10 +167,6 @@ class FailingPlugin implements BasePlugin {
   static DEFAULT_CONFIG = {};
   static manifest = createTestManifest("failing");
   name = "failing";
-
-  validateEnv() {
-    throw new Error("Environment validation failed");
-  }
 
   async setup() {
     throw new Error("Setup failed");
@@ -245,7 +220,6 @@ describe("AppKit", () => {
       expect(instance.coreTest).toBeDefined();
       // instance.coreTest returns the SDK, not the plugin instance
       expect(instance.coreTest.setupCalled).toBe(true);
-      expect(instance.coreTest.validateEnvCalled).toBe(true);
     });
 
     test("should merge default and custom plugin configs", async () => {
@@ -353,34 +327,8 @@ describe("AppKit", () => {
       expect(instance.slow2.setupCalled).toBe(true);
     });
 
-    test("should validate environment for all plugins", async () => {
-      const pluginData = [
-        { plugin: CoreTestPlugin, config: {}, name: "coreTest" },
-        { plugin: NormalTestPlugin, config: {}, name: "normalTest" },
-      ];
-
-      const instance = (await createApp({ plugins: pluginData })) as any;
-
-      expect(instance.coreTest.validateEnvCalled).toBe(true);
-      expect(instance.normalTest.validateEnvCalled).toBe(true);
-    });
-
-    test("should throw error if plugin environment validation fails", async () => {
-      const pluginData = [
-        { plugin: FailingPlugin, config: {}, name: "failing" },
-      ];
-
-      await expect(createApp({ plugins: pluginData })).rejects.toThrow(
-        "Environment validation failed",
-      );
-    });
-
     test("should throw error if plugin setup fails", async () => {
-      const FailingSetupPlugin = class extends FailingPlugin {
-        validateEnv() {
-          // Don't throw in validateEnv for this test
-        }
-      };
+      const FailingSetupPlugin = class extends FailingPlugin {};
 
       const pluginData = [
         { plugin: FailingSetupPlugin, config: {}, name: "failing" },
@@ -548,7 +496,6 @@ describe("AppKit", () => {
         name = "contextTest";
         private counter = 0;
 
-        validateEnv() {}
         async setup() {}
         injectRoutes() {}
         getEndpoints() {
@@ -589,7 +536,6 @@ describe("AppKit", () => {
         name = "callbackTest";
         private values: number[] = [];
 
-        validateEnv() {}
         async setup() {}
         injectRoutes() {}
         getEndpoints() {

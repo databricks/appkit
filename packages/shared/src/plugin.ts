@@ -6,8 +6,6 @@ export interface BasePlugin {
 
   abortActiveOperations?(): void;
 
-  validateEnv(): void;
-
   setup(): Promise<void>;
 
   injectRoutes(router: express.Router): void;

@@ -7,9 +7,10 @@
  * Components:
  * - Type definitions for resources, manifests, and validation
  * - Manifest loader for reading plugin declarations
- * - (Future) ResourceRegistry singleton for tracking requirements
+ * - ResourceRegistry singleton for tracking requirements across all plugins
  * - (Future) Config generators for app.yaml, databricks.yml, .env.example
  */
 
 export { getPluginManifest, getResourceRequirements } from "./manifest-loader";
+export { ResourceRegistry } from "./resource-registry";
 export * from "./types";

@@ -53,6 +53,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Class.ResourceRegistry",
+          label: "ResourceRegistry"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Class.ServerError",
           label: "ServerError"
         },

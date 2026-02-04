@@ -174,11 +174,6 @@ import { Plugin, toPlugin } from '@databricks/appkit';
 class MyPlugin extends Plugin {
   name: string = "myPlugin";
 
-  // Validate required environment variables
-  validateEnv() {
-    // Check process.env for required vars
-  }
-
   // Async initialization
   async setup() {
     // Initialize resources

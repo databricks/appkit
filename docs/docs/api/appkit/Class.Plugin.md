@@ -32,9 +32,7 @@ const myManifest: PluginManifest = {
 
 class MyPlugin extends Plugin<MyConfig> {
   static manifest = myManifest;  // Required!
-
   name = 'myPlugin';
-  protected envVars: string[] = [];
 
   async setup() {
     // Initialize your plugin
@@ -106,14 +104,6 @@ protected config: TConfig;
 
 ```ts
 protected devFileReader: DevFileReader;
-```
-
-***
-
-### envVars
-
-```ts
-abstract protected envVars: string[];
 ```
 
 ***
@@ -399,22 +389,4 @@ setup(): Promise<void>;
 
 ```ts
 BasePlugin.setup
-```
-
-***
-
-### validateEnv()
-
-```ts
-validateEnv(): void;
-```
-
-#### Returns
-
-`void`
-
-#### Implementation of
-
-```ts
-BasePlugin.validateEnv
 ```
