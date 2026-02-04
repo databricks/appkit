@@ -2,20 +2,19 @@ import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 import type { BasePlugin } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ServiceContext } from "../../context/service-context";
+import type { PluginManifest } from "../../registry/types";
 import { AppKit, createApp } from "../appkit";
 
-// Helper function to create test manifests
-function createTestManifest(name: string, displayName: string) {
-  return {
-    name,
-    displayName,
-    description: `Test plugin for ${name}`,
-    resources: {
-      required: [],
-      optional: [],
-    },
-  };
-}
+// Generic test manifest for test plugins
+const createTestManifest = (name: string): PluginManifest => ({
+  name,
+  displayName: `${name} Test Plugin`,
+  description: `Test plugin for ${name}`,
+  resources: {
+    required: [],
+    optional: [],
+  },
+});
 
 // Mock environment validation
 vi.mock("../utils", () => ({
@@ -45,7 +44,7 @@ vi.mock("@databricks-apps/cache", () => ({
 class CoreTestPlugin implements BasePlugin {
   static DEFAULT_CONFIG = { coreDefault: "core-value" };
   static phase = "core" as const;
-  static manifest = createTestManifest("coreTest", "Core Test Plugin");
+  static manifest = createTestManifest("coreTest");
   name = "coreTest";
   setupCalled = false;
   validateEnvCalled = false;
@@ -82,7 +81,7 @@ class CoreTestPlugin implements BasePlugin {
 class NormalTestPlugin implements BasePlugin {
   static DEFAULT_CONFIG = { normalDefault: "normal-value" };
   static phase = "normal" as const;
-  static manifest = createTestManifest("normalTest", "Normal Test Plugin");
+  static manifest = createTestManifest("normalTest");
   name = "normalTest";
   setupCalled = false;
   validateEnvCalled = false;
@@ -118,7 +117,7 @@ class NormalTestPlugin implements BasePlugin {
 class DeferredTestPlugin implements BasePlugin {
   static DEFAULT_CONFIG = { deferredDefault: "deferred-value" };
   static phase = "deferred" as const;
-  static manifest = createTestManifest("deferredTest", "Deferred Test Plugin");
+  static manifest = createTestManifest("deferredTest");
   name = "deferredTest";
   setupCalled = false;
   validateEnvCalled = false;
@@ -156,7 +155,7 @@ class DeferredTestPlugin implements BasePlugin {
 
 class SlowSetupPlugin implements BasePlugin {
   static DEFAULT_CONFIG = {};
-  static manifest = createTestManifest("slowSetup", "Slow Setup Plugin");
+  static manifest = createTestManifest("slowSetup");
   name = "slowSetup";
   setupDelay: number;
   setupCalled = false;
@@ -187,7 +186,7 @@ class SlowSetupPlugin implements BasePlugin {
 
 class FailingPlugin implements BasePlugin {
   static DEFAULT_CONFIG = {};
-  static manifest = createTestManifest("failing", "Failing Plugin");
+  static manifest = createTestManifest("failing");
   name = "failing";
 
   validateEnv() {
@@ -545,10 +544,7 @@ describe("AppKit", () => {
     test("should bind SDK methods to plugin instance", async () => {
       class ContextTestPlugin implements BasePlugin {
         static DEFAULT_CONFIG = {};
-        static manifest = createTestManifest(
-          "contextTest",
-          "Context Test Plugin",
-        );
+        static manifest = createTestManifest("contextTest");
         name = "contextTest";
         private counter = 0;
 
@@ -589,10 +585,7 @@ describe("AppKit", () => {
     test("should maintain context when SDK method is passed as callback", async () => {
       class CallbackTestPlugin implements BasePlugin {
         static DEFAULT_CONFIG = {};
-        static manifest = createTestManifest(
-          "callbackTest",
-          "Callback Test Plugin",
-        );
+        static manifest = createTestManifest("callbackTest");
         name = "callbackTest";
         private values: number[] = [];
 
