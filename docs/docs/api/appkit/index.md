@@ -60,4 +60,6 @@ plugin architecture, and React integration.
 | [appKitTypesPlugin](Function.appKitTypesPlugin.md) | Vite plugin to generate types for AppKit queries. Calls generateFromEntryPoint under the hood. |
 | [createApp](Function.createApp.md) | Bootstraps AppKit with the provided configuration. |
 | [getExecutionContext](Function.getExecutionContext.md) | Get the current execution context. |
+| [getPluginManifest](Function.getPluginManifest.md) | Loads and validates the manifest from a plugin constructor. |
+| [getResourceRequirements](Function.getResourceRequirements.md) | Gets the resource requirements from a plugin's manifest. |
 | [isSQLTypeMarker](Function.isSQLTypeMarker.md) | Type guard to check if a value is a SQL type marker |

@@ -177,6 +177,16 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.getPluginManifest",
+          label: "getPluginManifest"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.getResourceRequirements",
+          label: "getResourceRequirements"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.isSQLTypeMarker",
           label: "isSQLTypeMarker"
         }

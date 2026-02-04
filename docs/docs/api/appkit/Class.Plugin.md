@@ -2,16 +2,16 @@
 
 Base abstract class for creating AppKit plugins.
 
-Plugins can optionally declare their resource requirements through:
-1. A static `manifest` property - recommended for all plugins
-2. A static `getResourceRequirements()` method - for dynamic requirements
+All plugins must declare a static `manifest` property with their metadata
+and resource requirements. Plugins can also implement a static
+`getResourceRequirements()` method for dynamic requirements based on config.
 
 ## Example
 
 ```typescript
 import { Plugin, toPlugin, PluginManifest, ResourceType } from '@databricks/appkit';
 
-// Define manifest
+// Define manifest (required)
 const myManifest: PluginManifest = {
   name: 'myPlugin',
   displayName: 'My Plugin',
@@ -31,9 +31,21 @@ const myManifest: PluginManifest = {
 };
 
 class MyPlugin extends Plugin<MyConfig> {
-  static manifest = myManifest;
-  // ... implementation
+  static manifest = myManifest;  // Required!
+
+  name = 'myPlugin';
+  protected envVars: string[] = [];
+
+  async setup() {
+    // Initialize your plugin
+  }
+
+  injectRoutes(router: Router) {
+    // Register HTTP endpoints
+  }
 }
+
+export const myPlugin = toPlugin(MyPlugin, 'myPlugin');
 ```
 
 ## Type Parameters
