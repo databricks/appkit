@@ -98,6 +98,12 @@ describe("ServerPlugin with custom plugin", () => {
 
     // Create a simple test plugin
     class TestPlugin extends Plugin {
+      static manifest = {
+        name: "test-plugin",
+        displayName: "Test Plugin",
+        description: "Test plugin for integration tests",
+        resources: { required: [], optional: [] },
+      };
       name = "test-plugin" as const;
       envVars: string[] = [];
 
