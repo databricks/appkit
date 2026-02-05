@@ -195,7 +195,7 @@ describe("Manifest Loader", () => {
           required: [],
           optional: [
             {
-              type: ResourceType.SECRET_SCOPE,
+              type: ResourceType.SECRET,
               alias: "secrets",
               description: "Optional secrets",
               permission: "READ",
@@ -270,7 +270,7 @@ describe("Manifest Loader", () => {
           required: [],
           optional: [
             {
-              type: ResourceType.SECRET_SCOPE,
+              type: ResourceType.SECRET,
               alias: "secrets",
               description: "Optional secrets",
               permission: "READ",
@@ -289,7 +289,7 @@ describe("Manifest Loader", () => {
       );
       expect(resources).toHaveLength(1);
       expect(resources[0]).toMatchObject({
-        type: ResourceType.SECRET_SCOPE,
+        type: ResourceType.SECRET,
         alias: "secrets",
         required: false,
       });
@@ -312,7 +312,7 @@ describe("Manifest Loader", () => {
           ],
           optional: [
             {
-              type: ResourceType.SECRET_SCOPE,
+              type: ResourceType.SECRET,
               alias: "secrets",
               description: "Optional secrets",
               permission: "READ",

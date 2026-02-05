@@ -227,7 +227,13 @@ class MyPlugin extends Plugin {
     description: "A custom plugin",
     resources: {
       required: [
-        { type: "SECRET_SCOPE", alias: "MY_API_KEY" }
+        {
+          type: "secret",
+          alias: "apiKey",
+          description: "API key for external service",
+          permission: "READ",
+          env: "MY_API_KEY"
+        }
       ],
       optional: []
     }
@@ -279,11 +285,11 @@ class MyPlugin extends Plugin<MyPluginConfig> {
     description: "A plugin with optional caching",
     resources: {
       required: [
-        { type: "sql-warehouse", alias: "warehouse", description: "Query execution", permission: "CAN_USE" }
+        { type: "sql_warehouse", alias: "warehouse", description: "Query execution", permission: "CAN_USE" }
       ],
       optional: [
         // Listed as optional in manifest for static analysis
-        { type: "lakebase", alias: "cache", description: "Query result caching (if enabled)", permission: "CAN_USE" }
+        { type: "database", alias: "cache", description: "Query result caching (if enabled)", permission: "CAN_CONNECT_AND_CREATE" }
       ]
     }
   };
@@ -292,13 +298,13 @@ class MyPlugin extends Plugin<MyPluginConfig> {
   static getResourceRequirements(config: MyPluginConfig) {
     const resources = [];
     if (config.enableCaching) {
-      // When caching is enabled, Lakebase becomes required
+      // When caching is enabled, Database becomes required
       resources.push({
-        type: "lakebase",
+        type: "database",
         alias: "cache",
         description: "Query result caching",
-        permission: "CAN_USE",
-        env: "DATABRICKS_LAKEBASE_ID",
+        permission: "CAN_CONNECT_AND_CREATE",
+        env: "DATABRICKS_DATABASE_ID",
         required: true  // Mark as required at runtime
       });
     }

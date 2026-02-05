@@ -6,7 +6,7 @@
   "resources": {
     "required": [
       {
-        "type": "sql-warehouse",
+        "type": "sql_warehouse",
         "alias": "warehouse",
         "description": "SQL Warehouse for executing analytics queries",
         "permission": "CAN_USE",

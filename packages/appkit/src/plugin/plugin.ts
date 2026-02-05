@@ -110,8 +110,8 @@ const EXCLUDED_FROM_PROXY = new Set([
  *       { type: ResourceType.SQL_WAREHOUSE, alias: 'warehouse', ... }
  *     ],
  *     optional: [
- *       // Lakebase is optional in the static manifest
- *       { type: ResourceType.LAKEBASE, alias: 'cache', description: 'Required if caching enabled', ... }
+ *       // Database is optional in the static manifest
+ *       { type: ResourceType.DATABASE, alias: 'cache', description: 'Required if caching enabled', ... }
  *     ]
  *   }
  * };
@@ -124,13 +124,13 @@ const EXCLUDED_FROM_PROXY = new Set([
  *   static getResourceRequirements(config: MyConfig) {
  *     const resources = [];
  *     if (config.enableCaching) {
- *       // When caching is enabled, Lakebase becomes required
+ *       // When caching is enabled, Database becomes required
  *       resources.push({
- *         type: ResourceType.LAKEBASE,
+ *         type: ResourceType.DATABASE,
  *         alias: 'cache',
  *         description: 'Cache storage for query results',
- *         permission: 'CAN_USE',
- *         env: 'DATABRICKS_LAKEBASE_ID',
+ *         permission: 'CAN_CONNECT_AND_CREATE',
+ *         env: 'DATABRICKS_DATABASE_ID',
  *         required: true  // Mark as required at runtime
  *       });
  *     }

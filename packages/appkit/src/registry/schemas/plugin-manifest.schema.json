@@ -93,20 +93,98 @@
     "resourceType": {
       "type": "string",
       "enum": [
-        "sql-warehouse",
-        "lakebase",
+        "secret",
         "job",
-        "secret-scope",
-        "serving-endpoint",
-        "vector-search-index",
-        "unity-catalog"
+        "sql_warehouse",
+        "serving_endpoint",
+        "volume",
+        "vector_search_index",
+        "uc_function",
+        "uc_connection",
+        "database",
+        "genie_space",
+        "experiment",
+        "app"
       ],
       "description": "Type of Databricks resource"
     },
+    "secretPermission": {
+      "type": "string",
+      "enum": ["MANAGE", "READ", "WRITE"],
+      "description": "Permission for secret resources"
+    },
+    "jobPermission": {
+      "type": "string",
+      "enum": ["CAN_MANAGE", "CAN_MANAGE_RUN", "CAN_VIEW"],
+      "description": "Permission for job resources"
+    },
+    "sqlWarehousePermission": {
+      "type": "string",
+      "enum": ["CAN_MANAGE", "CAN_USE"],
+      "description": "Permission for SQL warehouse resources"
+    },
+    "servingEndpointPermission": {
+      "type": "string",
+      "enum": ["CAN_MANAGE", "CAN_QUERY", "CAN_VIEW"],
+      "description": "Permission for serving endpoint resources"
+    },
+    "volumePermission": {
+      "type": "string",
+      "enum": ["READ_VOLUME", "WRITE_VOLUME"],
+      "description": "Permission for Unity Catalog volume resources"
+    },
+    "vectorSearchIndexPermission": {
+      "type": "string",
+      "enum": ["SELECT"],
+      "description": "Permission for vector search index resources"
+    },
+    "ucFunctionPermission": {
+      "type": "string",
+      "enum": ["EXECUTE"],
+      "description": "Permission for Unity Catalog function resources"
+    },
+    "ucConnectionPermission": {
+      "type": "string",
+      "enum": ["USE_CONNECTION"],
+      "description": "Permission for Unity Catalog connection resources"
+    },
+    "databasePermission": {
+      "type": "string",
+      "enum": ["CAN_CONNECT_AND_CREATE"],
+      "description": "Permission for database resources"
+    },
+    "genieSpacePermission": {
+      "type": "string",
+      "enum": ["CAN_EDIT", "CAN_VIEW", "CAN_RUN", "CAN_MANAGE"],
+      "description": "Permission for Genie Space resources"
+    },
+    "experimentPermission": {
+      "type": "string",
+      "enum": ["CAN_READ", "CAN_EDIT", "CAN_MANAGE"],
+      "description": "Permission for MLflow experiment resources"
+    },
+    "appPermission": {
+      "type": "string",
+      "enum": ["CAN_USE"],
+      "description": "Permission for Databricks App resources"
+    },
     "resourcePermission": {
       "type": "string",
-      "enum": ["CAN_USE", "CAN_MANAGE", "CAN_VIEW", "READ", "WRITE", "EXECUTE"],
-      "description": "Permission level required for the resource"
+      "description": "Permission level required for the resource. Valid values depend on resource type.",
+      "oneOf": [
+        { "$ref": "#/$defs/secretPermission" },
+        { "$ref": "#/$defs/jobPermission" },
+        { "$ref": "#/$defs/sqlWarehousePermission" },
+        { "$ref": "#/$defs/servingEndpointPermission" },
+        { "$ref": "#/$defs/volumePermission" },
+        { "$ref": "#/$defs/vectorSearchIndexPermission" },
+        { "$ref": "#/$defs/ucFunctionPermission" },
+        { "$ref": "#/$defs/ucConnectionPermission" },
+        { "$ref": "#/$defs/databasePermission" },
+        { "$ref": "#/$defs/genieSpacePermission" },
+        { "$ref": "#/$defs/experimentPermission" },
+        { "$ref": "#/$defs/appPermission" }
+      ]
     },
     "resourceRequirement": {
       "type": "object",
