@@ -342,39 +342,9 @@ export async function parseSSEResponse(response: Response): Promise<any> {
   };
 }
 
-export interface ConfigurableMockOptions {
-  executeStatementResponse?: any;
-  getStatementResponse?: any;
-}
-
-export function createConfigurableMockWorkspaceClient(
-  options: ConfigurableMockOptions = {},
-) {
-  const defaultExecuteResponse = {
-    status: { state: "SUCCEEDED" },
-    statement_id: "stmt-test-123",
-    result: { data_array: [] },
-    manifest: { schema: { columns: [] } },
-  };
-
-  const defaultGetStatementResponse = {
-    status: { state: "SUCCEEDED" },
-    statement_id: "stmt-test-123",
-    result: { external_links: [] },
-    manifest: { schema: { columns: [] } },
-  };
-
-  const executeStatement = vi
-    .fn()
-    .mockResolvedValue(
-      options.executeStatementResponse ?? defaultExecuteResponse,
-    );
-
-  const getStatement = vi
-    .fn()
-    .mockResolvedValue(
-      options.getStatementResponse ?? defaultGetStatementResponse,
-    );
+export function createConfigurableMockWorkspaceClient() {
+  const executeStatement = vi.fn();
+  const getStatement = vi.fn();
 
   const client = {
     statementExecution: {
