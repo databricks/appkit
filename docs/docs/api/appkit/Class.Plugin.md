@@ -3,47 +3,81 @@
 Base abstract class for creating AppKit plugins.
 
 All plugins must declare a static `manifest` property with their metadata
-and resource requirements. Plugins can also implement a static
-`getResourceRequirements()` method for dynamic requirements based on config.
+and resource requirements. The manifest defines:
+- `required` resources: Always needed for the plugin to function
+- `optional` resources: May be needed depending on plugin configuration
 
-## Example
+## Static vs Runtime Resource Requirements
+
+The manifest is static and doesn't know the plugin's runtime configuration.
+For resources that become required based on config options, plugins can
+implement a static `getResourceRequirements(config)` method.
+
+At runtime, this method is called with the actual config to determine
+which "optional" resources should be treated as "required".
+
+## Examples
 
 ```typescript
 import { Plugin, toPlugin, PluginManifest, ResourceType } from '@databricks/appkit';
 
-// Define manifest (required)
 const myManifest: PluginManifest = {
   name: 'myPlugin',
   displayName: 'My Plugin',
   description: 'Does something awesome',
   resources: {
     required: [
-      {
-        type: ResourceType.SQL_WAREHOUSE,
-        alias: 'warehouse',
-        description: 'SQL Warehouse for queries',
-        permission: 'CAN_USE',
-        env: 'DATABRICKS_WAREHOUSE_ID'
-      }
+      { type: ResourceType.SQL_WAREHOUSE, alias: 'warehouse', ... }
     ],
     optional: []
   }
 };
 
 class MyPlugin extends Plugin<MyConfig> {
-  static manifest = myManifest;  // Required!
+  static manifest = myManifest;
   name = 'myPlugin';
+}
+```
 
-  async setup() {
-    // Initialize your plugin
-  }
-
-  injectRoutes(router: Router) {
-    // Register HTTP endpoints
-  }
+```typescript
+interface MyConfig extends BasePluginConfig {
+  enableCaching?: boolean;
 }
 
-export const myPlugin = toPlugin(MyPlugin, 'myPlugin');
+const myManifest: PluginManifest = {
+  name: 'myPlugin',
+  resources: {
+    required: [
+      { type: ResourceType.SQL_WAREHOUSE, alias: 'warehouse', ... }
+    ],
+    optional: [
+      // Database is optional in the static manifest
+      { type: ResourceType.DATABASE, alias: 'cache', description: 'Required if caching enabled', ... }
+    ]
+  }
+};
+
+class MyPlugin extends Plugin<MyConfig> {
+  static manifest = myManifest;
+  name = 'myPlugin';
+
+  // Runtime method: converts optional resources to required based on config
+  static getResourceRequirements(config: MyConfig) {
+    const resources = [];
+    if (config.enableCaching) {
+      // When caching is enabled, Database becomes required
+      resources.push({
+        type: ResourceType.DATABASE,
+        alias: 'cache',
+        description: 'Cache storage for query results',
+        permission: 'CAN_CONNECT_AND_CREATE',
+        env: 'DATABRICKS_DATABASE_ID',
+        required: true  // Mark as required at runtime
+      });
+    }
+    return resources;
+  }
+}
 ```
 
 ## Type Parameters

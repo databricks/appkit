@@ -7,7 +7,7 @@ plugin architecture, and React integration.
 
 | Enumeration | Description |
 | ------ | ------ |
-| [ResourceType](Enumeration.ResourceType.md) | Supported resource types that plugins can depend on. |
+| [ResourceType](Enumeration.ResourceType.md) | Supported resource types that plugins can depend on. Each type has its own set of valid permissions. |
 
 ## Classes
 
@@ -46,7 +46,7 @@ plugin architecture, and React integration.
 | Type Alias | Description |
 | ------ | ------ |
 | [IAppRouter](TypeAlias.IAppRouter.md) | Express router type for plugin route registration |
-| [ResourcePermission](TypeAlias.ResourcePermission.md) | Permission levels that can be required for a resource. Based on Databricks permission model. |
+| [ResourcePermission](TypeAlias.ResourcePermission.md) | Union of all possible permission levels across all resource types. |
 
 ## Variables
 
