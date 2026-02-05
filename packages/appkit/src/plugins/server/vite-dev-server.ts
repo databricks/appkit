@@ -3,9 +3,9 @@ import path from "node:path";
 import type express from "express";
 import type { ViteDevServer as ViteDevServerType } from "vite";
 import { mergeConfigDedup } from "@/utils";
-import { ServerError } from "../errors";
-import { createLogger } from "../logging/logger";
-import { appKitTypesPlugin } from "../type-generator/vite-plugin";
+import { ServerError } from "../../errors";
+import { createLogger } from "../../logging/logger";
+import { appKitTypesPlugin } from "../../type-generator/vite-plugin";
 import { BaseServer } from "./base-server";
 import type { PluginEndpoints } from "./utils";
 

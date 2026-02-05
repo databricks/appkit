@@ -1,7 +1,7 @@
 import { mockServiceContext } from "@tools/test-helpers";
 import { sql } from "shared";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { ServiceContext } from "../../context/service-context";
+import { ServiceContext } from "../../../context/service-context";
 import { QueryProcessor } from "../query";
 
 describe("QueryProcessor", () => {

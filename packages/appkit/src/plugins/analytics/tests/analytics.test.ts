@@ -7,7 +7,7 @@ import {
 } from "@tools/test-helpers";
 import { sql } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { ServiceContext } from "../../context/service-context";
+import { ServiceContext } from "../../../context/service-context";
 import { AnalyticsPlugin, analytics } from "../analytics";
 import type { IAnalyticsConfig } from "../types";
 
@@ -45,7 +45,7 @@ const { mockCacheStore, mockCacheInstance } = vi.hoisted(() => {
   return { mockCacheStore: store, mockCacheInstance: instance };
 });
 
-vi.mock("../../cache", () => ({
+vi.mock("../../../cache", () => ({
   CacheManager: {
     getInstanceSync: vi.fn(() => mockCacheInstance),
   },

@@ -13,7 +13,6 @@ export type {
   StreamExecutionSettings,
 } from "shared";
 export { isSQLTypeMarker, sql } from "shared";
-export { analytics } from "./analytics";
 export { CacheManager } from "./cache";
 export { getExecutionContext } from "./context";
 export { createApp } from "./core";
@@ -31,7 +30,7 @@ export {
 } from "./errors";
 // Plugin authoring
 export { Plugin, toPlugin } from "./plugin";
-export { server } from "./server";
+export { analytics, server } from "./plugins";
 // Telemetry (for advanced custom telemetry)
 export {
   type Counter,

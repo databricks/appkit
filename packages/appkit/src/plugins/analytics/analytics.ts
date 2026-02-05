@@ -6,14 +6,14 @@ import type {
   SQLTypeMarker,
   StreamExecutionSettings,
 } from "shared";
-import { SQLWarehouseConnector } from "../connectors";
+import { SQLWarehouseConnector } from "../../connectors";
 import {
   getCurrentUserId,
   getWarehouseId,
   getWorkspaceClient,
-} from "../context";
-import { createLogger } from "../logging/logger";
-import { Plugin, toPlugin } from "../plugin";
+} from "../../context";
+import { createLogger } from "../../logging/logger";
+import { Plugin, toPlugin } from "../../plugin";
 import { queryDefaults } from "./defaults";
 import { QueryProcessor } from "./query";
 import type {
