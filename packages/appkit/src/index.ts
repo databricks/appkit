@@ -1,3 +1,10 @@
+/**
+ * @packageDocumentation
+ *
+ * Core library for building Databricks applications with type-safe SQL queries,
+ * plugin architecture, and React integration.
+ */
+
 // Types from shared
 export type {
   BasePluginConfig,
@@ -6,8 +13,8 @@ export type {
   StreamExecutionSettings,
 } from "shared";
 export { isSQLTypeMarker, sql } from "shared";
-export { analytics } from "./analytics";
 export { CacheManager } from "./cache";
+export { getExecutionContext } from "./context";
 export { createApp } from "./core";
 // Errors
 export {
@@ -23,7 +30,7 @@ export {
 } from "./errors";
 // Plugin authoring
 export { Plugin, toPlugin } from "./plugin";
-export { server } from "./server";
+export { analytics, server } from "./plugins";
 // Telemetry (for advanced custom telemetry)
 export {
   type Counter,
@@ -34,6 +41,5 @@ export {
   SpanStatusCode,
   type TelemetryConfig,
 } from "./telemetry";
-
-// Vite plugin
+// Vite plugin and type generation
 export { appKitTypesPlugin } from "./type-generator/vite-plugin";

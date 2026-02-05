@@ -1,6 +1,6 @@
 # Interface: StreamExecutionSettings
 
-Defined in: [shared/src/execute.ts:48](https://github.com/databricks/appkit/blob/main/packages/shared/src/execute.ts#L48)
+Configuration for streaming execution with default and user-scoped settings
 
 ## Properties
 
@@ -10,8 +10,6 @@ Defined in: [shared/src/execute.ts:48](https://github.com/databricks/appkit/blob
 default: PluginExecuteConfig;
 ```
 
-Defined in: [shared/src/execute.ts:49](https://github.com/databricks/appkit/blob/main/packages/shared/src/execute.ts#L49)
-
 ***
 
 ### stream?
@@ -20,8 +18,6 @@ Defined in: [shared/src/execute.ts:49](https://github.com/databricks/appkit/blob
 optional stream: StreamConfig;
 ```
 
-Defined in: [shared/src/execute.ts:51](https://github.com/databricks/appkit/blob/main/packages/shared/src/execute.ts#L51)
-
 ***
 
 ### user?
@@ -29,5 +25,3 @@ Defined in: [shared/src/execute.ts:51](https://github.com/databricks/appkit/blob
 ```ts
 optional user: PluginExecuteConfig;
 ```
-
-Defined in: [shared/src/execute.ts:50](https://github.com/databricks/appkit/blob/main/packages/shared/src/execute.ts#L50)

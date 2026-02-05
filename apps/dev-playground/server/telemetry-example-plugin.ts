@@ -3,21 +3,21 @@
  */
 
 import {
-  Plugin,
-  toPlugin,
   type BasePluginConfig,
   CacheManager,
-  SpanStatusCode,
-  type Span,
   type Counter,
   type Histogram,
+  Plugin,
   SeverityNumber,
+  type Span,
+  SpanStatusCode,
+  toPlugin,
 } from "@databricks/appkit";
 import type { Request, Response, Router } from "express";
 
 class TelemetryExamples extends Plugin {
   public name = "telemetry-examples" as const;
-  public envVars: string[] = [];
+  protected envVars: string[] = [];
 
   private requestCounter: Counter;
   private durationHistogram: Histogram;
@@ -516,5 +516,5 @@ class TelemetryExamples extends Plugin {
 export const telemetryExamples = toPlugin<
   typeof TelemetryExamples,
   BasePluginConfig,
-  "telemetry-examples"
->(TelemetryExamples, "telemetry-examples");
+  "telemetryExamples"
+>(TelemetryExamples, "telemetryExamples");

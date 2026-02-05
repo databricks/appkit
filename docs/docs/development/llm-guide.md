@@ -1,0 +1,82 @@
+---
+sidebar_position: 8
+---
+
+# LLM Guide
+
+import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
+
+export function LlmsTxtLink({ children = '`llms.txt`' }) {
+  const { siteConfig } = useDocusaurusContext();
+  const llmsTxtUrl = `${siteConfig.baseUrl}llms.txt`;
+  return <a href={llmsTxtUrl}>{children}</a>;
+}
+
+This document provides prescriptive guidance for AI coding assistants generating code with Databricks AppKit. It is intentionally opinionated to ensure consistent, production-ready code generation.
+
+:::note
+This file contains just a subset of the LLM guidance.
+To get the complete guidance, see the <LlmsTxtLink /> file for full guidance based on the AppKit documentation.
+:::
+
+## High-level mission
+
+Build **full-stack TypeScript apps** on Databricks using:
+
+- **Backend**: `@databricks/appkit`
+- **Frontend**: `@databricks/appkit-ui`
+- **Analytics**: SQL files in `config/queries/*.sql` executed via the AppKit analytics plugin
+
+This guide is designed to work even when you *do not* have access to the AppKit source repo. Prefer only public package APIs and portable project structures.
+
+## Hard rules (LLM guardrails)
+
+- **Do not invent APIs**. If unsure, stick to the patterns shown in the documentation and only use documented exports from `@databricks/appkit` and `@databricks/appkit-ui`.
+- **`createApp()` is async**. Prefer **top-level `await createApp(...)`**. If you can't, use `void createApp(...)` and do not ignore promise rejection.
+- **Always memoize query parameters** passed to `useAnalyticsQuery` / charts to avoid refetch loops.
+- **Always handle loading/error/empty states** in UI (use `Skeleton`, error text, empty state).
+- **Always use `sql.*` helpers** for query parameters (do not pass raw strings/numbers unless the query expects none).
+- **Never construct SQL strings dynamically**. Use parameterized queries with `:paramName`.
+- **Never use `require()`**. Use ESM `import/export`.
+
+## TypeScript import rules
+
+If your `tsconfig.json` uses `"verbatimModuleSyntax": true`, **always use `import type` for type-only imports** (otherwise builds can fail in strict setups):
+
+```ts
+import type { ReactNode } from "react";
+import { useMemo } from "react";
+```
+
+## LLM checklist (before finalizing code)
+
+### Project setup
+
+- `package.json` has `"type": "module"`
+- `tsx` is in devDependencies for dev server
+- `dev` script uses `NODE_ENV=development tsx watch server/index.ts`
+- `client/index.html` exists with `<div id="root"></div>` and script pointing to `client/src/main.tsx`
+
+### Backend
+
+- `await createApp({ plugins: [...] })` is used (or `void createApp` with intent)
+- `server()` is included (always)
+- If using SQL: `analytics({})` included + `config/queries/*.sql` present
+- Queries use `:param` placeholders, and params are passed from UI using `sql.*`
+- If query needs workspace scoping: uses `:workspaceId`
+
+### Frontend
+
+- `useMemo` wraps parameters objects
+- Loading/error/empty states are explicit
+- Charts use `format="auto"` unless you have a reason to force `"json"`/`"arrow"`
+- Charts use props (`xKey`, `yKey`, `colors`) NOT children (they're ECharts-based, not Recharts)
+- If using tooltips: root is wrapped with `<TooltipProvider>`
+
+### Never
+
+- Don't build SQL strings manually
+- Don't pass untyped raw params for annotated queries
+- Don't ignore `createApp()`'s promise
+- Don't invent UI components not listed in the documentation
+- Don't pass Recharts children (`<Bar>`, `<XAxis>`, etc.) to AppKit chart components

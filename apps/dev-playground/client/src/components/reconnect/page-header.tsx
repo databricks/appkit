@@ -1,9 +1,9 @@
-import { InfoIcon } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@databricks/appkit-ui/react";
+import { InfoIcon } from "lucide-react";
 
 export function PageHeader() {
   return (

@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "./dialog";
 
+/** Command palette for keyboard-driven navigation and actions */
 function Command({
   className,
   ...props
@@ -27,6 +28,7 @@ function Command({
   );
 }
 
+/** Dialog wrapper for the command palette */
 function CommandDialog({
   title = "Command Palette",
   description = "Search for a command to run...",
@@ -58,6 +60,7 @@ function CommandDialog({
   );
 }
 
+/** Search input field for filtering command items */
 function CommandInput({
   className,
   ...props
@@ -80,6 +83,7 @@ function CommandInput({
   );
 }
 
+/** Scrollable list container for command items */
 function CommandList({
   className,
   ...props
@@ -96,6 +100,7 @@ function CommandList({
   );
 }
 
+/** Empty state displayed when no commands match the search */
 function CommandEmpty({
   ...props
 }: React.ComponentProps<typeof CommandPrimitive.Empty>) {
@@ -108,6 +113,7 @@ function CommandEmpty({
   );
 }
 
+/** Group of related command items with an optional heading */
 function CommandGroup({
   className,
   ...props
@@ -124,6 +130,7 @@ function CommandGroup({
   );
 }
 
+/** Visual separator between command groups */
 function CommandSeparator({
   className,
   ...props
@@ -137,6 +144,7 @@ function CommandSeparator({
   );
 }
 
+/** Individual selectable command item */
 function CommandItem({
   className,
   ...props
@@ -153,6 +161,7 @@ function CommandItem({
   );
 }
 
+/** Keyboard shortcut indicator displayed next to command items */
 function CommandShortcut({
   className,
   ...props

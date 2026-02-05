@@ -1,7 +1,7 @@
-import type React from "react";
-import { useEffect, useRef, useState, type RefObject } from "react";
-import { createPortal } from "react-dom";
 import useBaseUrl from "@docusaurus/useBaseUrl";
+import type React from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Toaster } from "sonner";
 import { PortalContainerProvider } from "../../../../packages/appkit-ui/src/react/portal-container-context";
 

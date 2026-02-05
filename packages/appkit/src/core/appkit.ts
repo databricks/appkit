@@ -13,9 +13,8 @@ import type { TelemetryConfig } from "../telemetry";
 import { TelemetryManager } from "../telemetry";
 
 export class AppKit<TPlugins extends InputPluginMap> {
-  private static _instance: AppKit<InputPluginMap> | null = null;
-  private pluginInstances: Record<string, BasePlugin> = {};
-  private setupPromises: Promise<void>[] = [];
+  #pluginInstances: Record<string, BasePlugin> = {};
+  #setupPromises: Promise<void>[] = [];
 
   private constructor(config: { plugins: TPlugins }) {
     const { plugins, ...globalConfig } = config;
@@ -47,7 +46,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
     for (const [name, pluginData] of deferredPlugins) {
       if (pluginData) {
         this.createAndRegisterPlugin(globalConfig, name, pluginData, {
-          plugins: this.pluginInstances,
+          plugins: this.#pluginInstances,
         });
       }
     }
@@ -69,18 +68,70 @@ export class AppKit<TPlugins extends InputPluginMap> {
     };
     const pluginInstance = new Plugin(baseConfig);
 
-    this.pluginInstances[name] = pluginInstance;
+    this.#pluginInstances[name] = pluginInstance;
 
     pluginInstance.validateEnv();
 
-    this.setupPromises.push(pluginInstance.setup());
+    this.#setupPromises.push(pluginInstance.setup());
+
+    const self = this;
 
     Object.defineProperty(this, name, {
       get() {
-        return this.pluginInstances[name];
+        const plugin = self.#pluginInstances[name];
+        return self.wrapWithAsUser(plugin);
       },
       enumerable: true,
     });
+  }
+
+  /**
+   * Binds all function properties in an exports object to the given context.
+   */
+  private bindExportMethods(
+    exports: Record<string, unknown>,
+    context: BasePlugin,
+  ) {
+    for (const key in exports) {
+      if (Object.hasOwn(exports, key) && typeof exports[key] === "function") {
+        exports[key] = (exports[key] as (...args: unknown[]) => unknown).bind(
+          context,
+        );
+      }
+    }
+  }
+
+  /**
+   * Wraps a plugin's exports with an `asUser` method that returns
+   * a user-scoped version of the exports.
+   */
+  private wrapWithAsUser<T extends BasePlugin>(plugin: T) {
+    // If plugin doesn't implement exports(), return empty object
+    const pluginExports = (plugin.exports?.() ?? {}) as Record<string, unknown>;
+    this.bindExportMethods(pluginExports, plugin);
+
+    // If plugin doesn't support asUser (no asUser method), return exports as-is
+    if (typeof (plugin as any).asUser !== "function") {
+      return pluginExports;
+    }
+
+    return {
+      ...pluginExports,
+      /**
+       * Execute operations using the user's identity from the request.
+       * Returns user-scoped exports where all methods execute with the
+       * user's Databricks credentials instead of the service principal.
+       */
+      asUser: (req: import("express").Request) => {
+        const userPlugin = (plugin as any).asUser(req);
+        const userExports = (userPlugin.exports?.() ?? {}) as Record<
+          string,
+          unknown
+        >;
+        this.bindExportMethods(userExports, userPlugin);
+        return userExports;
+      },
+    };
   }
 
   static async _createApp<
@@ -106,11 +157,11 @@ export class AppKit<TPlugins extends InputPluginMap> {
       plugins: preparedPlugins,
     };
 
-    AppKit._instance = new AppKit(mergedConfig);
+    const instance = new AppKit(mergedConfig);
 
-    await Promise.all(AppKit._instance.setupPromises);
+    await Promise.all(instance.#setupPromises);
 
-    return AppKit._instance as unknown as PluginMap<T>;
+    return instance as unknown as PluginMap<T>;
   }
 
   private static preparePlugins(

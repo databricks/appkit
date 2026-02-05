@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
-import { MoonIcon, SunIcon, MonitorIcon } from "lucide-react";
 import {
+  Button,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@databricks/appkit-ui/react";
-import { Button } from "@databricks/appkit-ui/react";
+import { MonitorIcon, MoonIcon, SunIcon } from "lucide-react";
+import { useEffect, useState } from "react";
 
 type Theme = "light" | "dark" | "system";
 

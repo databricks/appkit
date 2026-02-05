@@ -1,4 +1,3 @@
-import { AppsDataTable } from "@/components/apps-data-table";
 import {
   Card,
   CardContent,
@@ -6,6 +5,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@databricks/appkit-ui/react";
+import { AppsDataTable } from "@/components/apps-data-table";
 
 interface UntaggedApp {
   id: string;

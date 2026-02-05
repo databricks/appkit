@@ -1,8 +1,8 @@
-import type { TelemetryOptions } from "shared";
 import type { Meter, Span, SpanOptions, Tracer } from "@opentelemetry/api";
 import { metrics, trace } from "@opentelemetry/api";
 import { type Logger, type LogRecord, logs } from "@opentelemetry/api-logs";
 import type { Instrumentation } from "@opentelemetry/instrumentation";
+import type { TelemetryOptions } from "shared";
 import {
   normalizeTelemetryOptions,
   type TelemetryProviderConfig,

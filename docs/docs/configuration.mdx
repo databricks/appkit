@@ -1,0 +1,145 @@
+---
+sidebar_position: 5
+---
+
+# Configuration
+
+This guide covers environment variables and configuration options for AppKit applications.
+
+## App deployment configuration
+
+### `app.yaml` file
+
+The `app.yaml` file configures your app's runtime environment in Databricks Apps.
+
+**Basic example:**
+
+```yaml
+command:
+  - node
+  - build/index.mjs
+env:
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: sql-warehouse
+```
+
+### Command specification
+
+Specify how to start your app in the `command` field:
+
+```yaml
+command:
+  - node
+  - build/index.mjs
+```
+
+This runs the production build of your AppKit server (created by `npm run build`).
+
+### Binding a SQL warehouse
+
+To use the analytics plugin, bind a SQL warehouse in your `app.yaml`:
+
+```yaml
+env:
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: sql-warehouse
+```
+
+This makes the warehouse ID available to your app at runtime. The `valueFrom: sql-warehouse` directive tells Databricks Apps to inject the configured warehouse ID.
+
+For advanced configuration options (authorization, networking, resource limits), see the [Databricks Apps Configuration](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/configuration) documentation.
+
+## Environment variables
+
+### Required for Databricks Apps deployment
+
+These are typically **provided by Databricks Apps runtime** (exact set can vary by platform/version):
+
+| Variable | Description |
+|----------|-------------|
+| `DATABRICKS_HOST` | Workspace URL (e.g. `https://xxx.cloud.databricks.com`) |
+| `DATABRICKS_APP_PORT` | Port to bind (default: `8000`) |
+| `DATABRICKS_APP_NAME` | App name in Databricks |
+
+### Required for SQL queries (analytics plugin)
+
+| Variable | Description | How to Set |
+|----------|-------------|------------|
+| `DATABRICKS_WAREHOUSE_ID` | SQL warehouse ID | In `app.yaml`: `valueFrom: sql-warehouse` |
+
+See the [App deployment configuration](#app-deployment-configuration) section above for details on how to bind this variable.
+
+### Optional variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DATABRICKS_WORKSPACE_ID` | Workspace ID | Auto-fetched from API |
+| `NODE_ENV` | `"development"` or `"production"` | — |
+| `FLASK_RUN_HOST` | Host to bind | `0.0.0.0` |
+
+### Telemetry (optional)
+
+| Variable | Description |
+|----------|-------------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OpenTelemetry collector endpoint |
+| `OTEL_SERVICE_NAME` | Service name for traces |
+
+## Local development authentication
+
+For local development, you need to authenticate with Databricks. Choose one of the following options:
+
+### Option 1: Databricks CLI authentication (recommended)
+
+Configure authentication once using the Databricks CLI:
+
+```bash
+databricks auth login --host [host] --profile [profile-name]
+```
+
+If you use `DEFAULT` as the profile name, you can run your dev server directly:
+
+```bash
+npm run dev
+```
+
+To run with a specific profile, set the `DATABRICKS_CONFIG_PROFILE` environment variable:
+
+```bash
+DATABRICKS_CONFIG_PROFILE=my-profile npm run dev
+```
+
+Note: Some Databricks SDK versions use `DATABRICKS_PROFILE` instead of `DATABRICKS_CONFIG_PROFILE`.
+
+### Option 2: Environment variables
+
+```bash
+export DATABRICKS_HOST="https://xxx.cloud.databricks.com"
+export DATABRICKS_TOKEN="dapi..."
+export DATABRICKS_WAREHOUSE_ID="abc123..."
+npm run dev
+```
+
+### Option 3: `.env` file (auto-loaded by AppKit)
+
+Create a `.env` file in your project root (add to `.gitignore`!):
+
+```bash
+DATABRICKS_HOST=https://xxx.cloud.databricks.com
+DATABRICKS_TOKEN=dapi...
+DATABRICKS_WAREHOUSE_ID=abc123...
+```
+
+Then run:
+
+```bash
+npm run dev
+```
+
+## Advanced configuration
+
+For advanced Databricks Apps configuration (authorization, networking, resource limits), refer to the [Databricks Apps Configuration](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/configuration) documentation.
+
+## See also
+
+- [App management](./app-management.mdx) - Deploying and managing apps
+- [Plugins](./plugins.md) - Plugin configuration options

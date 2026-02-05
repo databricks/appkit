@@ -1,0 +1,81 @@
+# ScatterChart
+
+Scatter Chart component for correlation and distribution visualization.
+
+
+## Example
+
+```tsx
+"use client";
+
+import { ScatterChart } from "@databricks/appkit-ui/react";
+
+export default function ScatterChartExample() {
+  return (
+    <ScatterChart
+      data={[
+        { revenue: 100, growth: 5 },
+        { revenue: 200, growth: 10 },
+        { revenue: 150, growth: 7 },
+        { revenue: 300, growth: 15 },
+        { revenue: 250, growth: 12 },
+        { revenue: 400, growth: 20 },
+        { revenue: 180, growth: 8 },
+        { revenue: 320, growth: 16 },
+      ]}
+      xKey="revenue"
+      yKey="growth"
+      height={300}
+    />
+  );
+}
+
+```
+
+
+## ScatterChart
+
+Scatter Chart component for correlation and distribution visualization.
+
+**Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
+
+**Best Practice:** Use the built-in data fetching by passing `queryKey` and `parameters` props instead of pre-fetching data with `useAnalyticsQuery`.
+
+Supports both query mode (queryKey + parameters) and data mode (static data).
+
+
+**Source:** [`packages/appkit-ui/src/react/charts/scatter/index.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/charts/scatter/index.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `queryKey` | `string` |  | - | Analytics query key registered with analytics plugin |
+| `parameters` | `Record<string, unknown>` |  | - | Query parameters passed to the analytics endpoint |
+| `format` | `enum` |  | `"auto"` | Data format to use - "json": Use JSON format (smaller payloads, simpler) - "arrow": Use Arrow format (faster for large datasets) - "auto": Automatically select based on expected data size |
+| `transformer` | `(<T>(data: T) => T)` |  | - | Transform raw data before rendering |
+| `data` | `ChartData` |  | - | Arrow Table or JSON array |
+| `title` | `string` |  | - | Chart title |
+| `showLegend` | `boolean` |  | - | Show legend |
+| `colorPalette` | `enum` |  | - | Color palette to use. Auto-selected based on chart type if not specified. - "categorical": Distinct colors for different categories (bar, pie, line) - "sequential": Gradient for magnitude/intensity (heatmap) - "diverging": Two-tone for positive/negative values |
+| `colors` | `string[]` |  | - | Custom colors for series (overrides colorPalette) |
+| `height` | `number` |  | `300` | Chart height in pixels |
+| `className` | `string` |  | - | Additional CSS classes |
+| `xKey` | `string` |  | - | X-axis field key. Auto-detected from schema if not provided. |
+| `yKey` | `string \| string[]` |  | - | Y-axis field key(s). Auto-detected from schema if not provided. |
+| `ariaLabel` | `string` |  | - | Accessibility label for screen readers |
+| `testId` | `string` |  | - | Test ID for automated testing |
+| `options` | `Record<string, unknown>` |  | - | Additional ECharts options to merge |
+| `symbolSize` | `number` |  | `8` | Symbol size |
+
+
+
+### Usage
+
+```tsx
+import { ScatterChart } from '@databricks/appkit-ui';
+
+<ScatterChart /* props */ />
+```
+

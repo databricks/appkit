@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "baseUrl": ".",
-    "target": "ES2020",
+    "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
@@ -11,7 +11,7 @@
     "sourceMap": false,
     "resolveJsonModule": true,
     "skipLibCheck": true,
-    "lib": ["ES2021"],
+    "lib": ["ES2022"],
     "paths": {
       "@databricks/appkit": ["packages/appkit/*"],
       "@databricks/appkit-ui": ["packages/appkit-ui/*"],

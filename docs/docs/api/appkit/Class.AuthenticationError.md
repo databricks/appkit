@@ -1,7 +1,5 @@
 # Class: AuthenticationError
 
-Defined in: [appkit/src/errors/authentication.ts:13](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/authentication.ts#L13)
-
 Error thrown when authentication fails.
 Use for missing tokens, invalid credentials, or authorization failures.
 
@@ -26,8 +24,6 @@ new AuthenticationError(message: string, options?: {
   context?: Record<string, unknown>;
 }): AuthenticationError;
 ```
-
-Defined in: [appkit/src/errors/base.ts:49](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L49)
 
 #### Parameters
 
@@ -54,8 +50,6 @@ Defined in: [appkit/src/errors/base.ts:49](https://github.com/databricks/appkit/
 readonly optional cause: Error;
 ```
 
-Defined in: [appkit/src/errors/base.ts:44](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L44)
-
 Optional cause of the error
 
 #### Inherited from
@@ -69,8 +63,6 @@ Optional cause of the error
 ```ts
 readonly code: "AUTHENTICATION_ERROR" = "AUTHENTICATION_ERROR";
 ```
-
-Defined in: [appkit/src/errors/authentication.ts:14](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/authentication.ts#L14)
 
 Error code for programmatic error handling
 
@@ -86,8 +78,6 @@ Error code for programmatic error handling
 readonly optional context: Record<string, unknown>;
 ```
 
-Defined in: [appkit/src/errors/base.ts:47](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L47)
-
 Additional context for the error
 
 #### Inherited from
@@ -101,8 +91,6 @@ Additional context for the error
 ```ts
 readonly isRetryable: false = false;
 ```
-
-Defined in: [appkit/src/errors/authentication.ts:16](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/authentication.ts#L16)
 
 Whether this error type is generally safe to retry
 
@@ -118,8 +106,6 @@ Whether this error type is generally safe to retry
 readonly statusCode: 401 = 401;
 ```
 
-Defined in: [appkit/src/errors/authentication.ts:15](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/authentication.ts#L15)
-
 HTTP status code suggestion (can be overridden)
 
 #### Overrides
@@ -133,8 +119,6 @@ HTTP status code suggestion (can be overridden)
 ```ts
 toJSON(): Record<string, unknown>;
 ```
-
-Defined in: [appkit/src/errors/base.ts:68](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L68)
 
 Convert error to JSON for logging/serialization.
 Sensitive values in context are automatically redacted.
@@ -155,8 +139,6 @@ Sensitive values in context are automatically redacted.
 toString(): string;
 ```
 
-Defined in: [appkit/src/errors/base.ts:84](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/base.ts#L84)
-
 Create a human-readable string representation
 
 #### Returns
@@ -174,8 +156,6 @@ Create a human-readable string representation
 ```ts
 static credentialsFailed(instance: string, cause?: Error): AuthenticationError;
 ```
-
-Defined in: [appkit/src/errors/authentication.ts:40](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/authentication.ts#L40)
 
 Create an authentication error for credential generation failure
 
@@ -198,8 +178,6 @@ Create an authentication error for credential generation failure
 static missingToken(tokenType: string): AuthenticationError;
 ```
 
-Defined in: [appkit/src/errors/authentication.ts:21](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/authentication.ts#L21)
-
 Create an authentication error for missing token
 
 #### Parameters
@@ -220,8 +198,6 @@ Create an authentication error for missing token
 static missingUserId(): AuthenticationError;
 ```
 
-Defined in: [appkit/src/errors/authentication.ts:30](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/authentication.ts#L30)
-
 Create an authentication error for missing user identity
 
 #### Returns
@@ -235,8 +211,6 @@ Create an authentication error for missing user identity
 ```ts
 static userLookupFailed(cause?: Error): AuthenticationError;
 ```
-
-Defined in: [appkit/src/errors/authentication.ts:53](https://github.com/databricks/appkit/blob/main/packages/appkit/src/errors/authentication.ts#L53)
 
 Create an authentication error for failed user lookup
 

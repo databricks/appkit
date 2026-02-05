@@ -1,4 +1,3 @@
-import { type ErrorComponentProps, Link } from "@tanstack/react-router";
 import {
   Button,
   Card,
@@ -6,6 +5,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@databricks/appkit-ui/react";
+import { type ErrorComponentProps, Link } from "@tanstack/react-router";
 
 export function ErrorComponent({ error }: { error: ErrorComponentProps }) {
   return (

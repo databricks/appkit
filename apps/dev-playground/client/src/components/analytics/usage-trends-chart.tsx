@@ -1,6 +1,6 @@
 import { sql } from "@databricks/appkit-ui/js";
-import { BarChart } from "@databricks/appkit-ui/react";
 import {
+  BarChart,
   Card,
   CardContent,
   CardHeader,

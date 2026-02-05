@@ -126,6 +126,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.getExecutionContext",
+          label: "getExecutionContext"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.isSQLTypeMarker",
           label: "isSQLTypeMarker"
         }

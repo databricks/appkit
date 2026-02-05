@@ -1,0 +1,112 @@
+# ResizableHandle
+
+Draggable handle for resizing panels
+
+
+## Example
+
+import { DocExample } from "@site/src/components/DocExample";
+
+<DocExample name="resizable" />
+
+
+## ResizableHandle
+
+Draggable handle for resizing panels
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/resizable.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/resizable.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `disabled` | `boolean` |  | - | - |
+| `hitAreaMargins` | `PointerHitAreaMargins` |  | - | - |
+| `id` | `string \| null` |  | - | - |
+| `onBlur` | `(() => void)` |  | - | - |
+| `onClick` | `(() => void)` |  | - | - |
+| `onDragging` | `PanelResizeHandleOnDragging` |  | - | - |
+| `onFocus` | `(() => void)` |  | - | - |
+| `onPointerDown` | `(() => void)` |  | - | - |
+| `onPointerUp` | `(() => void)` |  | - | - |
+| `tagName` | `enum` |  | - | - |
+| `withHandle` | `boolean` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ResizableHandle } from '@databricks/appkit-ui';
+
+<ResizableHandle /* props */ />
+```
+
+
+## ResizablePanel
+
+Individual resizable panel within a panel group
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/resizable.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/resizable.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `collapsedSize` | `number` |  | - | - |
+| `collapsible` | `boolean` |  | - | - |
+| `defaultSize` | `number` |  | - | - |
+| `id` | `string` |  | - | - |
+| `maxSize` | `number` |  | - | - |
+| `minSize` | `number` |  | - | - |
+| `onCollapse` | `PanelOnCollapse` |  | - | - |
+| `onExpand` | `PanelOnExpand` |  | - | - |
+| `onResize` | `PanelOnResize` |  | - | - |
+| `order` | `number` |  | - | - |
+| `tagName` | `enum` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ResizablePanel } from '@databricks/appkit-ui';
+
+<ResizablePanel /* props */ />
+```
+
+
+## ResizablePanelGroup
+
+Container for resizable panel layout
+
+
+**Source:** [`packages/appkit-ui/src/react/ui/resizable.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/ui/resizable.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `autoSaveId` | `string \| null` |  | - | - |
+| `direction` | `enum` | ✓ | - | - |
+| `id` | `string \| null` |  | - | - |
+| `keyboardResizeBy` | `number \| null` |  | - | - |
+| `onLayout` | `PanelGroupOnLayout \| null` |  | - | - |
+| `storage` | `PanelGroupStorage` |  | - | - |
+| `tagName` | `enum` |  | - | - |
+
+
+
+### Usage
+
+```tsx
+import { ResizablePanelGroup } from '@databricks/appkit-ui';
+
+<ResizablePanelGroup /* props */ />
+```
+

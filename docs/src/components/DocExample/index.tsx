@@ -1,5 +1,5 @@
 import CodeBlock from "@theme/CodeBlock";
-import { examples, type AppKitExampleKey } from "./examples.gen";
+import { type AppKitExampleKey, examples } from "./examples.gen";
 import { IframePreview } from "./IframePreview";
 
 interface DocExampleProps {

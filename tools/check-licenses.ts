@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { type Package, getDirectDependencyLicenses } from "./license-utils";
+import { getDirectDependencyLicenses, type Package } from "./license-utils";
 
 const allowedLicenses = new Set([
   "MIT",

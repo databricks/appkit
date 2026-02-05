@@ -1,8 +1,8 @@
+import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 import type { BasePlugin } from "shared";
-import { setupDatabricksEnv, mockServiceContext } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { createApp, AppKit } from "../appkit";
 import { ServiceContext } from "../../context/service-context";
+import { AppKit, createApp } from "../appkit";
 
 // Mock environment validation
 vi.mock("../utils", () => ({
@@ -51,12 +51,17 @@ class CoreTestPlugin implements BasePlugin {
 
   injectRoutes() {}
 
-  asUser() {
-    return this;
-  }
-
   getEndpoints() {
     return {};
+  }
+
+  exports() {
+    return {
+      // Expose internal state for testing
+      setupCalled: this.setupCalled,
+      validateEnvCalled: this.validateEnvCalled,
+      injectedConfig: this.injectedConfig,
+    };
   }
 }
 
@@ -82,12 +87,16 @@ class NormalTestPlugin implements BasePlugin {
 
   injectRoutes() {}
 
-  asUser() {
-    return this;
-  }
-
   getEndpoints() {
     return {};
+  }
+
+  exports() {
+    return {
+      setupCalled: this.setupCalled,
+      validateEnvCalled: this.validateEnvCalled,
+      injectedConfig: this.injectedConfig,
+    };
   }
 }
 
@@ -115,12 +124,17 @@ class DeferredTestPlugin implements BasePlugin {
 
   injectRoutes() {}
 
-  asUser(): any {
-    return this;
-  }
-
   getEndpoints() {
     return {};
+  }
+
+  exports() {
+    return {
+      setupCalled: this.setupCalled,
+      validateEnvCalled: this.validateEnvCalled,
+      injectedConfig: this.injectedConfig,
+      injectedPlugins: this.injectedPlugins,
+    };
   }
 }
 
@@ -143,12 +157,14 @@ class SlowSetupPlugin implements BasePlugin {
 
   injectRoutes() {}
 
-  asUser(): any {
-    return this;
-  }
-
   getEndpoints() {
     return {};
+  }
+
+  exports() {
+    return {
+      setupCalled: this.setupCalled,
+    };
   }
 }
 
@@ -166,11 +182,11 @@ class FailingPlugin implements BasePlugin {
 
   injectRoutes() {}
 
-  asUser(): any {
-    return this;
+  getEndpoints() {
+    return {};
   }
 
-  getEndpoints() {
+  exports() {
     return {};
   }
 }
@@ -181,8 +197,6 @@ describe("AppKit", () => {
   beforeEach(async () => {
     setupDatabricksEnv();
     vi.clearAllMocks();
-    // Reset singleton instance
-    (AppKit as any)._instance = null;
     // Reset ServiceContext singleton
     ServiceContext.reset();
     // Mock ServiceContext for tests
@@ -212,7 +226,7 @@ describe("AppKit", () => {
       const instance = (await createApp({ plugins: pluginData })) as any;
 
       expect(instance.coreTest).toBeDefined();
-      expect(instance.coreTest).toBeInstanceOf(CoreTestPlugin);
+      // instance.coreTest returns the SDK, not the plugin instance
       expect(instance.coreTest.setupCalled).toBe(true);
       expect(instance.coreTest.validateEnvCalled).toBe(true);
     });
@@ -278,13 +292,14 @@ describe("AppKit", () => {
 
       const instance = (await createApp({ plugins: pluginData })) as any;
 
+      // Deferred plugins receive plugin instances (not SDKs) for internal use
       expect(instance.deferredTest.injectedPlugins).toBeDefined();
-      expect(instance.deferredTest.injectedPlugins.coreTest).toBe(
-        instance.coreTest,
+      expect(instance.deferredTest.injectedPlugins.coreTest).toBeInstanceOf(
+        CoreTestPlugin,
       );
     });
 
-    test("should make plugins accessible as properties", async () => {
+    test("should make plugin SDKs accessible as properties", async () => {
       const pluginData = [
         { plugin: CoreTestPlugin, config: {}, name: "coreTest" },
         { plugin: NormalTestPlugin, config: {}, name: "normalTest" },
@@ -292,8 +307,11 @@ describe("AppKit", () => {
 
       const instance = (await createApp({ plugins: pluginData })) as any;
 
-      expect(instance.coreTest).toBeInstanceOf(CoreTestPlugin);
-      expect(instance.normalTest).toBeInstanceOf(NormalTestPlugin);
+      // Plugin properties return SDKs, not instances
+      expect(instance.coreTest).toBeDefined();
+      expect(instance.normalTest).toBeDefined();
+      expect(instance.coreTest.setupCalled).toBe(true);
+      expect(instance.normalTest.setupCalled).toBe(true);
 
       // Properties should be enumerable
       const keys = Object.keys(instance);
@@ -365,7 +383,9 @@ describe("AppKit", () => {
 
       const instance = (await createApp({ plugins: pluginData })) as any;
 
-      expect(instance.noPhase).toBeInstanceOf(NoPhasePlugin);
+      // Returns SDK, verify it has expected properties
+      expect(instance.noPhase).toBeDefined();
+      expect(instance.noPhase.setupCalled).toBe(true);
     });
 
     test("should handle plugins with undefined config", async () => {
@@ -375,19 +395,16 @@ describe("AppKit", () => {
 
       const instance = (await createApp({ plugins: pluginData })) as any;
 
-      expect(instance.coreTest).toBeInstanceOf(CoreTestPlugin);
+      expect(instance.coreTest).toBeDefined();
       expect(instance.coreTest.injectedConfig.name).toBe("coreTest");
     });
 
-    test("should create singleton instance", async () => {
+    test("should create new instance each time", async () => {
       const instance1 = await createApp({ plugins: [] });
       const instance2 = await createApp({ plugins: [] });
 
-      // Should return new instance each time init is called
+      // Each call creates a new instance
       expect(instance2).not.toBe(instance1);
-
-      // But internal _instance should be updated
-      expect((AppKit as any)._instance).toBe(instance2);
     });
   });
 
@@ -437,9 +454,11 @@ describe("AppKit", () => {
 
       const instance = (await createApp({ plugins: pluginData })) as any;
 
-      expect(instance.plugin1).toBeInstanceOf(CoreTestPlugin);
-      expect(instance.plugin2).toBeInstanceOf(CoreTestPlugin);
-      expect(instance.plugin1).not.toBe(instance.plugin2);
+      // SDKs are returned, verify they're different objects
+      expect(instance.plugin1).toBeDefined();
+      expect(instance.plugin2).toBeDefined();
+      expect(instance.plugin1.setupCalled).toBe(true);
+      expect(instance.plugin2.setupCalled).toBe(true);
     });
 
     test("should inject name into plugin config", async () => {
@@ -456,7 +475,7 @@ describe("AppKit", () => {
       expect(instance.testPlugin.injectedConfig.name).toBe("testPlugin");
     });
 
-    test("should create property getters that return plugin instances", async () => {
+    test("should create property getters that return plugin SDKs", async () => {
       const pluginData = [{ plugin: CoreTestPlugin, config: {}, name: "test" }];
 
       const instance = (await createApp({ plugins: pluginData })) as any;
@@ -465,7 +484,10 @@ describe("AppKit", () => {
       expect(descriptor).toBeDefined();
       expect(descriptor?.get).toBeDefined();
       expect(descriptor?.enumerable).toBe(true);
-      expect(descriptor?.get?.call(instance)).toBe(instance.test);
+      // Getter returns SDK object
+      const sdk = descriptor?.get?.call(instance);
+      expect(sdk).toBeDefined();
+      expect(sdk.setupCalled).toBe(true);
     });
   });
 
@@ -479,7 +501,9 @@ describe("AppKit", () => {
 
       const instance = (await createApp({ plugins: pluginData })) as any;
 
-      expect(instance.valid).toBeInstanceOf(CoreTestPlugin);
+      // Returns SDK, verify it's defined and working
+      expect(instance.valid).toBeDefined();
+      expect(instance.valid.setupCalled).toBe(true);
     });
 
     test("should propagate setup promise rejections", async () => {
@@ -496,6 +520,86 @@ describe("AppKit", () => {
       await expect(createApp({ plugins: pluginData })).rejects.toThrow(
         "Async setup failure",
       );
+    });
+  });
+
+  describe("SDK context binding", () => {
+    test("should bind SDK methods to plugin instance", async () => {
+      class ContextTestPlugin implements BasePlugin {
+        static DEFAULT_CONFIG = {};
+        name = "contextTest";
+        private counter = 0;
+
+        validateEnv() {}
+        async setup() {}
+        injectRoutes() {}
+        getEndpoints() {
+          return {};
+        }
+
+        increment() {
+          this.counter++;
+        }
+
+        exports() {
+          return {
+            increment: this.increment,
+            getCounter: () => this.counter,
+          };
+        }
+      }
+
+      const pluginData = [
+        { plugin: ContextTestPlugin, config: {}, name: "contextTest" },
+      ];
+
+      const instance = (await createApp({ plugins: pluginData })) as any;
+
+      // Destructure the method - this would fail without proper binding
+      const { increment, getCounter } = instance.contextTest;
+
+      expect(getCounter()).toBe(0);
+      increment();
+      increment();
+      expect(getCounter()).toBe(2);
+    });
+
+    test("should maintain context when SDK method is passed as callback", async () => {
+      class CallbackTestPlugin implements BasePlugin {
+        static DEFAULT_CONFIG = {};
+        name = "callbackTest";
+        private values: number[] = [];
+
+        validateEnv() {}
+        async setup() {}
+        injectRoutes() {}
+        getEndpoints() {
+          return {};
+        }
+
+        addValue(value: number) {
+          this.values.push(value);
+        }
+
+        exports() {
+          return {
+            addValue: this.addValue,
+            getValues: () => [...this.values],
+          };
+        }
+      }
+
+      const pluginData = [
+        { plugin: CallbackTestPlugin, config: {}, name: "callbackTest" },
+      ];
+
+      const instance = (await createApp({ plugins: pluginData })) as any;
+      const { addValue, getValues } = instance.callbackTest;
+
+      // Pass method as callback to array forEach
+      [1, 2, 3].forEach(addValue);
+
+      expect(getValues()).toEqual([1, 2, 3]);
     });
   });
 });

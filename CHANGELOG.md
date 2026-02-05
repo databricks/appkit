@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.2](https://github.com/databricks/appkit/compare/v0.5.1...v0.5.2) (2026-02-04)
+
+* skip type generation when queries directory is missing ([#84](https://github.com/databricks/appkit/issues/84)) ([76b3aa0](https://github.com/databricks/appkit/commit/76b3aa00d2ad4985330c60b4849a3ba4303c9591))
+
+## [0.5.1](https://github.com/databricks/appkit/compare/v0.5.0...v0.5.1) (2026-02-02)
+
+* query reads on dev-remote ([#72](https://github.com/databricks/appkit/issues/72)) ([34bb1dc](https://github.com/databricks/appkit/commit/34bb1dc6fa6a220ecb624b408701c3f73dddeac4))
+
+## [0.5.0](https://github.com/databricks/appkit/compare/v0.4.1...v0.5.0) (2026-01-30)
+
+* appkit exposed apis ([#69](https://github.com/databricks/appkit/issues/69)) ([822d98e](https://github.com/databricks/appkit/commit/822d98e2f607c33fd7aa72166aca86c6d0fdaea3))
+
+## [0.4.1](https://github.com/databricks/appkit/compare/v0.4.0...v0.4.1) (2026-01-30)
+
+* Revert "chore: bump packages in the template (#70)" (#71) ([268c8cf](https://github.com/databricks/appkit/commit/268c8cf52a243abc9f17f96425cfbdf01809e471)), closes [#70](https://github.com/databricks/appkit/issues/70) [#71](https://github.com/databricks/appkit/issues/71)
+
+## [0.4.0](https://github.com/databricks/appkit/compare/v0.3.0...v0.4.0) (2026-01-29)
+
+* embed `appkit` CLI and AI-targeted docs into the `appkit` and `appkit-ui` packages ([#64](https://github.com/databricks/appkit/issues/64)) ([58794e8](https://github.com/databricks/appkit/commit/58794e80a3b56e02d806507e4fbfd5519bc7aa02))
+
 ## [0.3.0](https://github.com/databricks/appkit/compare/v0.2.0...v0.3.0) (2026-01-22)
 
 * add .obo conventions on sql files ([#61](https://github.com/databricks/appkit/issues/61)) ([00a74c1](https://github.com/databricks/appkit/commit/00a74c136ded16b17ae756e0f99f7d0efa3e9fda))

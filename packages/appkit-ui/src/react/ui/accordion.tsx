@@ -4,12 +4,14 @@ import { ChevronDownIcon } from "lucide-react";
 
 import { cn } from "../lib/utils";
 
+/** Collapsible content sections organized in a vertical stack */
 function Accordion({
   ...props
 }: React.ComponentProps<typeof AccordionPrimitive.Root>) {
   return <AccordionPrimitive.Root data-slot="accordion" {...props} />;
 }
 
+/** Individual collapsible section within an accordion */
 function AccordionItem({
   className,
   ...props
@@ -23,6 +25,7 @@ function AccordionItem({
   );
 }
 
+/** Clickable button that triggers accordion content visibility */
 function AccordionTrigger({
   className,
   children,
@@ -45,6 +48,7 @@ function AccordionTrigger({
   );
 }
 
+/** Content area that expands and collapses within an accordion item */
 function AccordionContent({
   className,
   children,

@@ -1,0 +1,84 @@
+# AreaChart
+
+Area Chart component for trend visualization with filled areas.
+
+
+## Example
+
+```tsx
+"use client";
+
+import { AreaChart } from "@databricks/appkit-ui/react";
+
+export default function AreaChartExample() {
+  return (
+    <AreaChart
+      data={[
+        { month: "Jan", visitors: 1000, revenue: 5000 },
+        { month: "Feb", visitors: 1500, revenue: 7000 },
+        { month: "Mar", visitors: 2000, revenue: 9000 },
+        { month: "Apr", visitors: 1800, revenue: 8500 },
+        { month: "May", visitors: 2200, revenue: 10000 },
+        { month: "Jun", visitors: 2500, revenue: 11000 },
+      ]}
+      xKey="month"
+      yKey={["visitors", "revenue"]}
+      stacked
+      showLegend
+      height={300}
+    />
+  );
+}
+
+```
+
+
+## AreaChart
+
+Area Chart component for trend visualization with filled areas.
+
+**Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
+
+**Best Practice:** Use the built-in data fetching by passing `queryKey` and `parameters` props instead of pre-fetching data with `useAnalyticsQuery`.
+
+Supports both query mode (queryKey + parameters) and data mode (static data).
+
+
+**Source:** [`packages/appkit-ui/src/react/charts/area/index.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/charts/area/index.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `queryKey` | `string` |  | - | Analytics query key registered with analytics plugin |
+| `parameters` | `Record<string, unknown>` |  | - | Query parameters passed to the analytics endpoint |
+| `format` | `enum` |  | `"auto"` | Data format to use - "json": Use JSON format (smaller payloads, simpler) - "arrow": Use Arrow format (faster for large datasets) - "auto": Automatically select based on expected data size |
+| `transformer` | `(<T>(data: T) => T)` |  | - | Transform raw data before rendering |
+| `data` | `ChartData` |  | - | Arrow Table or JSON array |
+| `title` | `string` |  | - | Chart title |
+| `showLegend` | `boolean` |  | - | Show legend |
+| `colorPalette` | `enum` |  | - | Color palette to use. Auto-selected based on chart type if not specified. - "categorical": Distinct colors for different categories (bar, pie, line) - "sequential": Gradient for magnitude/intensity (heatmap) - "diverging": Two-tone for positive/negative values |
+| `colors` | `string[]` |  | - | Custom colors for series (overrides colorPalette) |
+| `height` | `number` |  | `300` | Chart height in pixels |
+| `className` | `string` |  | - | Additional CSS classes |
+| `xKey` | `string` |  | - | X-axis field key. Auto-detected from schema if not provided. |
+| `yKey` | `string \| string[]` |  | - | Y-axis field key(s). Auto-detected from schema if not provided. |
+| `ariaLabel` | `string` |  | - | Accessibility label for screen readers |
+| `testId` | `string` |  | - | Test ID for automated testing |
+| `options` | `Record<string, unknown>` |  | - | Additional ECharts options to merge |
+| `orientation` | `enum` |  | `"vertical"` | Chart orientation |
+| `showSymbol` | `boolean` |  | `false` | Show data point symbols |
+| `smooth` | `boolean` |  | `true` | Smooth line curves |
+| `stacked` | `boolean` |  | `false` | Stack areas |
+
+
+
+### Usage
+
+```tsx
+import { AreaChart } from '@databricks/appkit-ui';
+
+<AreaChart /* props */ />
+```
+

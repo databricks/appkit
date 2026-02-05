@@ -55,12 +55,12 @@ This Software contains code from the following open source projects:
 | [class-variance-authority](https://www.npmjs.com/package/class-variance-authority) | 0.7.1 | Apache-2.0 | https://github.com/joe-bell/cva#readme |
 | [clsx](https://www.npmjs.com/package/clsx) | 2.1.1 | MIT | https://github.com/lukeed/clsx#readme |
 | [cmdk](https://www.npmjs.com/package/cmdk) | 1.1.1 | MIT | https://github.com/pacocoursey/cmdk#readme |
+| [commander](https://www.npmjs.com/package/commander) | 2.20.3, 5.1.0, 7.2.0, 8.3.0, 10.0.1, 12.1.0 | MIT | https://github.com/tj/commander.js#readme |
 | [date-fns](https://www.npmjs.com/package/date-fns) | 4.1.0 | MIT | https://github.com/date-fns/date-fns#readme |
 | [dotenv](https://www.npmjs.com/package/dotenv) | 16.6.1 | BSD-2-Clause | https://github.com/motdotla/dotenv#readme |
 | [echarts-for-react](https://www.npmjs.com/package/echarts-for-react) | 3.0.5 | MIT | https://github.com/hustcc/echarts-for-react |
 | [embla-carousel-react](https://www.npmjs.com/package/embla-carousel-react) | 8.6.0 | MIT | https://www.embla-carousel.com |
 | [express](https://www.npmjs.com/package/express) | 4.22.0 | MIT | http://expressjs.com/ |
-| [fast-glob](https://www.npmjs.com/package/fast-glob) | 3.3.3 | MIT | https://github.com/mrmlnc/fast-glob#readme |
 | [input-otp](https://www.npmjs.com/package/input-otp) | 1.4.2 | MIT | https://input-otp.rodz.dev/ |
 | [lucide-react](https://www.npmjs.com/package/lucide-react) | 0.554.0 | ISC | https://lucide.dev |
 | [next-themes](https://www.npmjs.com/package/next-themes) | 0.4.6 | MIT | https://github.com/pacocoursey/next-themes#readme |

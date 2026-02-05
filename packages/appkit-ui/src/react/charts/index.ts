@@ -18,9 +18,9 @@ export { ScatterChart } from "./scatter";
 // ============================================================================
 
 export {
-  useChartData,
   type UseChartDataOptions,
   type UseChartDataResult,
+  useChartData,
 } from "../hooks/use-chart-data";
 export { BaseChart, type BaseChartProps } from "./base";
 export { createChart } from "./create-chart";
@@ -31,9 +31,9 @@ export { ChartWrapper, type ChartWrapperProps } from "./wrapper";
 // ============================================================================
 
 export {
+  type NormalizedHeatmapData,
   normalizeChartData,
   normalizeHeatmapData,
-  type NormalizedHeatmapData,
 } from "./normalize";
 
 // ============================================================================
@@ -48,13 +48,13 @@ export {
   CHART_COLOR_VARS_SEQUENTIAL,
   // Field detection patterns
   DATE_FIELD_PATTERNS,
-  METADATA_DATE_PATTERNS,
-  NAME_FIELD_PATTERNS,
   // Fallback colors
   FALLBACK_COLORS,
   FALLBACK_COLORS_CATEGORICAL,
   FALLBACK_COLORS_DIVERGING,
   FALLBACK_COLORS_SEQUENTIAL,
+  METADATA_DATE_PATTERNS,
+  NAME_FIELD_PATTERNS,
 } from "./constants";
 
 // ============================================================================

@@ -5,6 +5,7 @@ import { cn } from "../lib/utils";
 import { Label } from "./label";
 import { Separator } from "./separator";
 
+/** Container for grouping related form fields */
 function FieldSet({ className, ...props }: React.ComponentProps<"fieldset">) {
   return (
     <fieldset
@@ -19,6 +20,7 @@ function FieldSet({ className, ...props }: React.ComponentProps<"fieldset">) {
   );
 }
 
+/** Title or caption for a fieldset */
 function FieldLegend({
   className,
   variant = "legend",
@@ -39,6 +41,7 @@ function FieldLegend({
   );
 }
 
+/** Container for organizing multiple fields */
 function FieldGroup({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -76,6 +79,7 @@ const fieldVariants = cva(
   },
 );
 
+/** Form field wrapper with label and input positioning */
 function Field({
   className,
   orientation = "vertical",
@@ -92,6 +96,7 @@ function Field({
   );
 }
 
+/** Container for field label, description, and error messages */
 function FieldContent({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -105,6 +110,7 @@ function FieldContent({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/** Label for a form field */
 function FieldLabel({
   className,
   ...props
@@ -123,6 +129,7 @@ function FieldLabel({
   );
 }
 
+/** Title text for a field */
 function FieldTitle({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -136,6 +143,7 @@ function FieldTitle({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/** Helper text providing additional context for a field */
 function FieldDescription({ className, ...props }: React.ComponentProps<"p">) {
   return (
     <p
@@ -151,6 +159,7 @@ function FieldDescription({ className, ...props }: React.ComponentProps<"p">) {
   );
 }
 
+/** Visual separator between fields with optional label */
 function FieldSeparator({
   children,
   className,
@@ -181,6 +190,7 @@ function FieldSeparator({
   );
 }
 
+/** Error message display for invalid field values */
 function FieldError({
   className,
   children,

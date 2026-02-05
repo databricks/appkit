@@ -1,3 +1,4 @@
+import { Button, TooltipProvider } from "@databricks/appkit-ui/react";
 import {
   CatchBoundary,
   createRootRoute,
@@ -6,7 +7,6 @@ import {
   useLocation,
 } from "@tanstack/react-router";
 import { ErrorComponent } from "@/components/error-component";
-import { Button, TooltipProvider } from "@databricks/appkit-ui/react";
 import { ThemeSelector } from "@/components/theme-selector";
 
 export const Route = createRootRoute({

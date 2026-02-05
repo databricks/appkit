@@ -25,6 +25,7 @@ const badgeVariants = cva(
   },
 );
 
+/** Small label for displaying status, categories, or counts */
 function Badge({
   className,
   variant,

@@ -36,6 +36,7 @@
 [data-theme="dark"] {
   --ifm-color-primary: rgb(66, 153, 224);
   --docusaurus-highlighted-code-line-bg: rgb(55, 68, 79);
+  --ifm-code-background: hsl(230, 15%, 15%);
 }
 
 .landing-button-vertical {

@@ -1,7 +1,7 @@
-import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
 import { Button, Card } from "@databricks/appkit-ui/react";
-import { useState } from "react";
+import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
 import { Activity, Loader2 } from "lucide-react";
+import { useState } from "react";
 
 export const Route = createFileRoute("/telemetry")({
   component: TelemetryRoute,
