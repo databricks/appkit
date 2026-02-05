@@ -212,7 +212,6 @@ export class AppKit<TPlugins extends InputPluginMap> {
       }
     }
 
-    // Phase 1b: Validate resources
     const validation = registry.validate();
     const isDevelopment = process.env.NODE_ENV === "development";
 

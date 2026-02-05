@@ -29,5 +29,8 @@ export * from "./types";
  * }
  * ```
  */
+// TODO: We may want to open a PR to https://github.com/SchemaStore/schemastore
+// export const MANIFEST_SCHEMA_ID =
+//   "https://json.schemastore.org/databricks-appkit-plugin-manifest.json";
 export const MANIFEST_SCHEMA_ID =
   "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json";
