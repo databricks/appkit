@@ -3,7 +3,7 @@ import {
   setupMockAPI,
   trackApiCalls,
   waitForPageLoad,
-} from "./fixtures/test-utils";
+} from "./utils/test-utils";
 
 test.describe("Telemetry Route Tests", () => {
   test.beforeEach(async ({ page }) => {

@@ -5,7 +5,7 @@ import {
   trackApiCalls,
   waitForChartsToLoad,
   waitForPageLoad,
-} from "./fixtures/test-utils";
+} from "./utils/test-utils";
 
 test.describe("Arrow Analytics", () => {
   test.beforeEach(async ({ page }) => {

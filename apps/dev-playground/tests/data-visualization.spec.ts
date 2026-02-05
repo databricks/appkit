@@ -4,7 +4,7 @@ import {
   setupMockAPI,
   trackApiCalls,
   waitForPageLoad,
-} from "./fixtures/test-utils";
+} from "./utils/test-utils";
 
 test.describe("Data Visualization Route Tests", () => {
   test.beforeEach(async ({ page }) => {

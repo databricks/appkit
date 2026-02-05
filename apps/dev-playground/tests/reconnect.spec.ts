@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { setupMockAPI, waitForPageLoad } from "./fixtures/test-utils";
+import { setupMockAPI, waitForPageLoad } from "./utils/test-utils";
 
 test.describe("Reconnect Route Tests", () => {
   test.beforeEach(async ({ page }) => {

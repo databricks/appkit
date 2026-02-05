@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { mockAnalyticsData } from "./fixtures/mock-data";
-import { setupMockAPI, waitForPageLoad } from "./fixtures/test-utils";
+import { mockAnalyticsData } from "./utils/mock-data";
+import { setupMockAPI, waitForPageLoad } from "./utils/test-utils";
 
 test.describe("SQL Helpers Route Tests", () => {
   test.beforeEach(async ({ page }) => {
