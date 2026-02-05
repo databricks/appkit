@@ -1,0 +1,216 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "title": "AppKit Plugin Manifest",
+  "description": "Schema for Databricks AppKit plugin manifest files. Defines plugin metadata, resource requirements, and configuration options.",
+  "type": "object",
+  "required": ["name", "displayName", "description", "resources"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Reference to the JSON Schema for validation"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Plugin identifier. Must be lowercase, start with a letter, and contain only letters, numbers, and hyphens.",
+      "examples": ["analytics", "server", "my-custom-plugin"]
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable display name for UI and CLI",
+      "examples": ["Analytics Plugin", "Server Plugin"]
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Brief description of what the plugin does",
+      "examples": ["SQL query execution against Databricks SQL Warehouses"]
+    },
+    "resources": {
+      "type": "object",
+      "required": ["required", "optional"],
+      "description": "Databricks resource requirements for this plugin",
+      "properties": {
+        "required": {
+          "type": "array",
+          "description": "Resources that must be available for the plugin to function",
+          "items": {
+            "$ref": "#/$defs/resourceRequirement"
+          }
+        },
+        "optional": {
+          "type": "array",
+          "description": "Resources that enhance functionality but are not mandatory",
+          "items": {
+            "$ref": "#/$defs/resourceRequirement"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "config": {
+      "type": "object",
+      "description": "Configuration schema for the plugin",
+      "properties": {
+        "schema": {
+          "$ref": "#/$defs/configSchema"
+        }
+      },
+      "additionalProperties": false
+    },
+    "author": {
+      "type": "string",
+      "description": "Author name or organization"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.]+)?$",
+      "description": "Plugin version (semver format)",
+      "examples": ["1.0.0", "2.1.0-beta.1"]
+    },
+    "repository": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL to the plugin's source repository"
+    },
+    "keywords": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Keywords for plugin discovery"
+    },
+    "license": {
+      "type": "string",
+      "description": "SPDX license identifier",
+      "examples": ["Apache-2.0", "MIT"]
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "resourceType": {
+      "type": "string",
+      "enum": [
+        "sql-warehouse",
+        "lakebase",
+        "job",
+        "secret-scope",
+        "serving-endpoint",
+        "vector-search-index",
+        "unity-catalog"
+      ],
+      "description": "Type of Databricks resource"
+    },
+    "resourcePermission": {
+      "type": "string",
+      "enum": ["CAN_USE", "CAN_MANAGE", "CAN_VIEW", "READ", "WRITE", "EXECUTE"],
+      "description": "Permission level required for the resource"
+    },
+    "resourceRequirement": {
+      "type": "object",
+      "required": ["type", "alias", "description", "permission"],
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/resourceType"
+        },
+        "alias": {
+          "type": "string",
+          "pattern": "^[a-z][a-zA-Z0-9_]*$",
+          "description": "Unique alias for this resource within the plugin",
+          "examples": ["warehouse", "secrets", "vectorIndex"]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable description of why this resource is needed"
+        },
+        "permission": {
+          "$ref": "#/$defs/resourcePermission"
+        },
+        "env": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "Environment variable name where the resource ID should be provided",
+          "examples": ["DATABRICKS_WAREHOUSE_ID", "DATABRICKS_SECRET_SCOPE"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "configSchemaProperty": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["object", "array", "string", "number", "boolean", "integer"]
+        },
+        "description": {
+          "type": "string"
+        },
+        "default": {},
+        "enum": {
+          "type": "array"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/configSchemaProperty"
+          }
+        },
+        "items": {
+          "$ref": "#/$defs/configSchemaProperty"
+        },
+        "minimum": {
+          "type": "number"
+        },
+        "maximum": {
+          "type": "number"
+        },
+        "minLength": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxLength": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "required": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "configSchema": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["object", "array", "string", "number", "boolean"]
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/configSchemaProperty"
+          }
+        },
+        "items": {
+          "$ref": "#/$defs/configSchema"
+        },
+        "required": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

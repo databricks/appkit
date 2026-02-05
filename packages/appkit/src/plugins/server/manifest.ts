@@ -1,47 +1,20 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { PluginManifest } from "../../registry";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
  * Server plugin manifest.
  *
  * The server plugin doesn't require any Databricks resources - it only
  * provides HTTP server functionality and static file serving.
+ *
+ * @remarks
+ * The source of truth for this manifest is `manifest.json` in the same directory.
+ * This file loads the JSON and exports it with proper TypeScript typing.
  */
-export const serverManifest: PluginManifest = {
-  name: "server",
-  displayName: "Server Plugin",
-  description:
-    "HTTP server with Express, static file serving, and Vite dev mode support",
-
-  resources: {
-    required: [],
-    optional: [],
-  },
-
-  config: {
-    schema: {
-      type: "object",
-      properties: {
-        autoStart: {
-          type: "boolean",
-          default: true,
-          description: "Automatically start the server on plugin setup",
-        },
-        host: {
-          type: "string",
-          default: "0.0.0.0",
-          description: "Host address to bind the server to",
-        },
-        port: {
-          type: "number",
-          default: 8000,
-          description: "Port number for the server",
-        },
-        staticPath: {
-          type: "string",
-          description:
-            "Path to static files directory (auto-detected if not provided)",
-        },
-      },
-    },
-  },
-};
+export const serverManifest: PluginManifest = JSON.parse(
+  readFileSync(join(__dirname, "manifest.json"), "utf-8"),
+) as PluginManifest;

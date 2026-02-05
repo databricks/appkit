@@ -1,0 +1,36 @@
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "name": "server",
+  "displayName": "Server Plugin",
+  "description": "HTTP server with Express, static file serving, and Vite dev mode support",
+  "resources": {
+    "required": [],
+    "optional": []
+  },
+  "config": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start the server on plugin setup"
+        },
+        "host": {
+          "type": "string",
+          "default": "0.0.0.0",
+          "description": "Host address to bind the server to"
+        },
+        "port": {
+          "type": "number",
+          "default": 8000,
+          "description": "Port number for the server"
+        },
+        "staticPath": {
+          "type": "string",
+          "description": "Path to static files directory (auto-detected if not provided)"
+        }
+      }
+    }
+  }
+}

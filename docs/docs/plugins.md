@@ -193,7 +193,7 @@ In local development (`NODE_ENV=development`), if `asUser(req)` is called withou
 Configure plugins when creating your AppKit instance:
 
 ```typescript
-import { createApp, server, analytics } from "@databricks/app-kit";
+import { createApp, server, analytics } from "@databricks/appkit";
 
 const AppKit = await createApp({
   plugins: [

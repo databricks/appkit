@@ -161,9 +161,9 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
     const rawPlugins = config.plugins as T;
 
-    // Phase 1a: Collect resource requirements from all plugins
     const registry = ResourceRegistry.getInstance();
-    registry.clear(); // Clear any previous state
+
+    registry.clear();
 
     for (const pluginData of rawPlugins) {
       if (!pluginData?.plugin) continue;
