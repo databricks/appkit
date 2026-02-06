@@ -149,7 +149,9 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
     // Initialize ServiceContext for Databricks client management
     // This provides the service principal client and shared resources
-    await ServiceContext.initialize();
+    if (!process.env.CI) {
+      await ServiceContext.initialize();
+    }
 
     const rawPlugins = config.plugins as T;
     const preparedPlugins = AppKit.preparePlugins(rawPlugins);
