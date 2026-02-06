@@ -117,12 +117,8 @@ export async function setupMockAPI(page: Page) {
   });
 }
 
-export async function waitForPageLoad(page: Page) {
-  await page.waitForLoadState("networkidle");
-}
-
 export async function waitForChartsToLoad(page: Page) {
-  await waitForPageLoad(page);
+  await page.waitForLoadState("networkidle");
   await page.waitForFunction(
     () => document.querySelectorAll(".animate-pulse").length === 0,
     { timeout: 10000 },

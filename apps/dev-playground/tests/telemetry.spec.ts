@@ -1,19 +1,13 @@
 import { expect, test } from "@playwright/test";
-import {
-  setupMockAPI,
-  trackApiCalls,
-  waitForPageLoad,
-} from "./utils/test-utils";
+import { setupMockAPI, trackApiCalls } from "./utils/test-utils";
 
 test.describe("Telemetry Route Tests", () => {
   test.beforeEach(async ({ page }) => {
     await setupMockAPI(page);
+    await page.goto("/telemetry", { waitUntil: "networkidle" });
   });
 
   test("telemetry page loads successfully", async ({ page }) => {
-    await page.goto("/telemetry");
-    await waitForPageLoad(page);
-
     await expect(page).toHaveURL("/telemetry");
   });
 
@@ -21,9 +15,6 @@ test.describe("Telemetry Route Tests", () => {
     page,
   }) => {
     const requests = trackApiCalls(page, "/api/telemetry-examples");
-
-    await page.goto("/telemetry");
-    await waitForPageLoad(page);
 
     const runButton = page.getByRole("button", { name: /Run.*Request/i });
     await runButton.click();

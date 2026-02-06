@@ -1,23 +1,18 @@
 import { expect, test } from "@playwright/test";
 import { mockAnalyticsData } from "./utils/mock-data";
-import { setupMockAPI, waitForPageLoad } from "./utils/test-utils";
+import { setupMockAPI } from "./utils/test-utils";
 
 test.describe("SQL Helpers Route Tests", () => {
   test.beforeEach(async ({ page }) => {
     await setupMockAPI(page);
+    await page.goto("/sql-helpers", { waitUntil: "networkidle" });
   });
 
   test("sql-helpers page loads successfully", async ({ page }) => {
-    await page.goto("/sql-helpers");
-    await waitForPageLoad(page);
-
     await expect(page).toHaveURL("/sql-helpers");
   });
 
   test("can interact with string input", async ({ page }) => {
-    await page.goto("/sql-helpers");
-    await waitForPageLoad(page);
-
     const inputs = page.locator("input").first();
     await inputs.fill("Test String Value");
 
@@ -25,9 +20,6 @@ test.describe("SQL Helpers Route Tests", () => {
   });
 
   test("can interact with number input", async ({ page }) => {
-    await page.goto("/sql-helpers");
-    await waitForPageLoad(page);
-
     const numberInput = page.locator('input[type="number"]').first();
     await numberInput.fill("123");
 
@@ -35,9 +27,6 @@ test.describe("SQL Helpers Route Tests", () => {
   });
 
   test("can toggle boolean value", async ({ page }) => {
-    await page.goto("/sql-helpers");
-    await waitForPageLoad(page);
-
     const falseButton = page.getByRole("button", { name: "false" });
     await falseButton.click();
 
@@ -46,9 +35,6 @@ test.describe("SQL Helpers Route Tests", () => {
   });
 
   test("show code button reveals code example", async ({ page }) => {
-    await page.goto("/sql-helpers");
-    await waitForPageLoad(page);
-
     const showCodeButton = page
       .getByRole("button", { name: "Show Code" })
       .first();
@@ -60,9 +46,6 @@ test.describe("SQL Helpers Route Tests", () => {
   test("sql_helpers_test query executes and displays mock data", async ({
     page,
   }) => {
-    await page.goto("/sql-helpers");
-    await waitForPageLoad(page);
-
     await expect(page.getByText("Query executed successfully")).toBeVisible({
       timeout: 5000,
     });

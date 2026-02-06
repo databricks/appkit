@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { setupMockAPI, waitForPageLoad } from "./utils/test-utils";
+import { setupMockAPI } from "./utils/test-utils";
 
 test.describe("Reconnect Route Tests", () => {
   test.beforeEach(async ({ page }) => {
@@ -7,8 +7,7 @@ test.describe("Reconnect Route Tests", () => {
   });
 
   test("reconnect page loads successfully", async ({ page }) => {
-    await page.goto("/reconnect");
-    await waitForPageLoad(page);
+    await page.goto("/reconnect", { waitUntil: "networkidle" });
 
     await expect(page).toHaveURL("/reconnect");
   });
@@ -18,9 +17,8 @@ test.describe("Reconnect Route Tests", () => {
       request.url().includes("/api/reconnect/stream"),
     );
 
-    await page.goto("/reconnect");
+    await page.goto("/reconnect", { waitUntil: "networkidle" });
     await streamRequestPromise;
-    await waitForPageLoad(page);
 
     await expect(
       page.locator('[data-slot="badge"]').filter({ hasText: "Reconnected" }),
@@ -35,8 +33,7 @@ test.describe("Reconnect Route Tests", () => {
   });
 
   test("restart button triggers new stream connection", async ({ page }) => {
-    await page.goto("/reconnect");
-    await waitForPageLoad(page);
+    await page.goto("/reconnect", { waitUntil: "networkidle" });
 
     const newStreamRequestPromise = page.waitForRequest((request) =>
       request.url().includes("/api/reconnect/stream"),

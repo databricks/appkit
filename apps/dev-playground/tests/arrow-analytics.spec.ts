@@ -4,7 +4,6 @@ import {
   setupMockAPI,
   trackApiCalls,
   waitForChartsToLoad,
-  waitForPageLoad,
 } from "./utils/test-utils";
 
 test.describe("Arrow Analytics", () => {
@@ -13,8 +12,8 @@ test.describe("Arrow Analytics", () => {
   });
 
   test("page loads and displays heading", async ({ page }) => {
-    await page.goto("/arrow-analytics");
-    await waitForPageLoad(page);
+    await page.goto("/arrow-analytics", { waitUntil: "networkidle" });
+
     await expect(page.getByText("Unified Charts API")).toBeVisible();
   });
 
@@ -24,7 +23,7 @@ test.describe("Arrow Analytics", () => {
     const topContributorsCalls = trackApiCalls(page, "top_contributors");
     const heatmapCalls = trackApiCalls(page, "app_activity_heatmap");
 
-    await page.goto("/arrow-analytics");
+    await page.goto("/arrow-analytics", { waitUntil: "networkidle" });
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await waitForChartsToLoad(page);
 
@@ -35,7 +34,7 @@ test.describe("Arrow Analytics", () => {
   });
 
   test("charts render with mock data (no empty states)", async ({ page }) => {
-    await page.goto("/arrow-analytics");
+    await page.goto("/arrow-analytics", { waitUntil: "networkidle" });
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await waitForChartsToLoad(page);
 
@@ -63,7 +62,7 @@ test.describe("Arrow Analytics", () => {
   test("chart tooltip appears on hover with mock app data", async ({
     page,
   }) => {
-    await page.goto("/arrow-analytics");
+    await page.goto("/arrow-analytics", { waitUntil: "networkidle" });
     await waitForChartsToLoad(page);
 
     const barChart = page
@@ -75,7 +74,6 @@ test.describe("Arrow Analytics", () => {
     const box = await barChart.boundingBox();
     if (!box) throw new Error("Could not get chart bounding box");
 
-    // Try multiple positions to find a data point (bar positions vary by chart size)
     const positions = [0.2, 0.35, 0.5, 0.65, 0.8];
     for (const xRatio of positions) {
       await page.mouse.move(
@@ -83,14 +81,13 @@ test.describe("Arrow Analytics", () => {
         box.y + box.height * 0.4,
       );
 
-      // Check if tooltip appeared with any of our mock app names
       const tooltip = page
         .locator("div")
         .filter({ hasText: /App One|App Two|App Three/ });
 
       try {
         await expect(tooltip.first()).toBeVisible({ timeout: 1000 });
-        return; // Test passed - tooltip found
+        return;
       } catch {}
     }
 

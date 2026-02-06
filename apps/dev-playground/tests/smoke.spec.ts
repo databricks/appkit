@@ -1,10 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { waitForPageLoad } from "./utils/test-utils";
 
 test.describe("Smoke Tests", () => {
   test("app loads and displays homepage", async ({ page }) => {
-    await page.goto("/");
-    await waitForPageLoad(page);
+    await page.goto("/", { waitUntil: "networkidle" });
 
     await expect(
       page.getByRole("heading", { name: "AppKit Playground" }),
@@ -24,8 +22,7 @@ test.describe("Smoke Tests", () => {
       }
     });
 
-    await page.goto("/");
-    await waitForPageLoad(page);
+    await page.goto("/", { waitUntil: "networkidle" });
 
     expect(
       consoleErrors,
