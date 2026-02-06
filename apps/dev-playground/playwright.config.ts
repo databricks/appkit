@@ -22,5 +22,13 @@ export default defineConfig({
     url: "http://localhost:8000",
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,
+    env: {
+      ...process.env,
+      ...(process.env.CI && {
+        APPKIT_E2E_TEST: "true",
+        DATABRICKS_WAREHOUSE_ID: "e2e-mock",
+        DATABRICKS_WORKSPACE_ID: "e2e-mock",
+      }),
+    },
   },
 });
