@@ -55,8 +55,6 @@ describe("Analytics Plugin Integration", () => {
     await app.server.start();
     server = app.server.getServer();
     baseUrl = `http://127.0.0.1:${TEST_PORT}`;
-
-    await new Promise((resolve) => setTimeout(resolve, 100));
   });
 
   afterAll(async () => {
