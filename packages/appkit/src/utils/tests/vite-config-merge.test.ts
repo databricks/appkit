@@ -2,9 +2,9 @@ import type { Plugin } from "vite";
 import { describe, expect, test } from "vitest";
 import { mergeConfigDedup } from "../vite-config-merge";
 
-const plugin = (name: string): Plugin => ({ name, enforce: "pre" }) as Plugin;
+const plugin = (name: string): Plugin => ({ name, enforce: "pre" });
 
-const simpleMerge = (a: any, b: any) => ({ ...a, ...b });
+const simpleMerge = (a: Plugin, b: Plugin) => ({ ...a, ...b });
 
 describe("mergeConfigDedup", () => {
   test("deduplicates plugins by name, keeping the first occurrence", () => {
