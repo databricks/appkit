@@ -100,6 +100,10 @@ jobs:
         run: pnpm build
       - name: Run Integration Tests
         run: pnpm --filter=dev-playground test:integration
+        env:
+          APPKIT_E2E_TEST: 'true'
+          DATABRICKS_WAREHOUSE_ID: e2e-mock
+          DATABRICKS_WORKSPACE_ID: e2e-mock
 
   docs-build:
     name: Docs Build
