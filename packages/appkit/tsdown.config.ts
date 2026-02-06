@@ -51,6 +51,11 @@ export default defineConfig([
         from: "src/registry/schemas/plugin-manifest.schema.json",
         to: "dist/registry/schemas/plugin-manifest.schema.json",
       },
+      // JSON Schema for template plugins manifest
+      {
+        from: "src/registry/schemas/template-plugins.schema.json",
+        to: "dist/registry/schemas/template-plugins.schema.json",
+      },
     ],
   },
 ]);
