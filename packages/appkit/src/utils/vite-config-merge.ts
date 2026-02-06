@@ -1,7 +1,7 @@
 import type { Plugin } from "vite";
 
 function flattenPlugins(plugins: any[]): Plugin[] {
-  return plugins.flat(Infinity).filter(Boolean) as Plugin[];
+  return plugins.flat(Infinity).filter(Boolean);
 }
 
 export function mergeConfigDedup(
