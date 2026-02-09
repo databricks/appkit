@@ -54,6 +54,13 @@ The following command will compile all the packages and app in watch mode.
 pnpm dev
 ```
 
+> **Note:** To avoid port collisions with the `clean-app` example, you should create a `.env` file in `apps/dev-playground` and set another port for this app:
+>
+> ```
+> DATABRICKS_APP_PORT=8001
+> ```
+
+
 ## Running the project in production mode
 
 Running the following command
