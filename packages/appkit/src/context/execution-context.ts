@@ -67,8 +67,9 @@ export function getWorkspaceClient() {
 export function getWarehouseId(): Promise<string> {
   const ctx = getExecutionContext();
   if (!ctx.warehouseId) {
-    throw new ConfigurationError(
-      "warehouseId is not available - this should not happen, ensure the plugin is correctly configured",
+    throw ConfigurationError.resourceNotFound(
+      "Warehouse ID",
+      'Ensure a plugin declares static requires = ["warehouseId"] or set DATABRICKS_WAREHOUSE_ID',
     );
   }
   return ctx.warehouseId;
