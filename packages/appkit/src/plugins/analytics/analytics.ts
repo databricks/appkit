@@ -3,6 +3,7 @@ import type express from "express";
 import type {
   IAppRouter,
   PluginExecuteConfig,
+  ServiceContextResource,
   SQLTypeMarker,
   StreamExecutionSettings,
 } from "shared";
@@ -25,6 +26,7 @@ import type {
 const logger = createLogger("analytics");
 
 export class AnalyticsPlugin extends Plugin {
+  static requires: ServiceContextResource[] = ["warehouseId"];
   name = "analytics";
   protected envVars: string[] = [];
 

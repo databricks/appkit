@@ -7,6 +7,7 @@ import type {
   PluginConstructor,
   PluginData,
   PluginMap,
+  ServiceContextResource,
 } from "shared";
 import { CacheManager } from "../cache";
 import { ServiceContext } from "../context";
@@ -149,11 +150,13 @@ export class AppKit<TPlugins extends InputPluginMap> {
     TelemetryManager.initialize(config?.telemetry);
     await CacheManager.getInstance(config?.cache);
 
-    // Initialize ServiceContext for Databricks client management
-    // This provides the service principal client and shared resources
-    await ServiceContext.initialize(config?.client);
-
+    // Collect required resources from all plugins before initializing context
     const rawPlugins = config.plugins as T;
+    const requiredResources = AppKit.collectRequiredResources(rawPlugins);
+
+    // Initialize ServiceContext for Databricks client management
+    // Only resolves resources that plugins actually need
+    await ServiceContext.initialize(requiredResources, config?.client);
     const preparedPlugins = AppKit.preparePlugins(rawPlugins);
     const mergedConfig = {
       plugins: preparedPlugins,
@@ -177,6 +180,18 @@ export class AppKit<TPlugins extends InputPluginMap> {
       };
     }
     return result;
+  }
+
+  private static collectRequiredResources(
+    plugins: PluginData<PluginConstructor, unknown, string>[],
+  ): ServiceContextResource[] {
+    const resources = new Set<ServiceContextResource>();
+    for (const { plugin } of plugins) {
+      for (const req of plugin.requires ?? []) {
+        resources.add(req);
+      }
+    }
+    return [...resources];
   }
 }
 

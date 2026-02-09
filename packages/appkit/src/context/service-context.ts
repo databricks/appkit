@@ -4,6 +4,7 @@ import {
   WorkspaceClient,
 } from "@databricks/sdk-experimental";
 import { coerce } from "semver";
+import type { ServiceContextResource } from "shared";
 import {
   name as productName,
   version as productVersion,
@@ -24,8 +25,8 @@ export interface ServiceContextState {
   client: WorkspaceClient;
   /** The service principal's user ID */
   serviceUserId: string;
-  /** Promise that resolves to the warehouse ID */
-  warehouseId: Promise<string>;
+  /** Promise that resolves to the warehouse ID (only present when a plugin requires it) */
+  warehouseId?: Promise<string>;
   /** Promise that resolves to the workspace ID */
   workspaceId: Promise<string>;
 }
@@ -62,6 +63,7 @@ export class ServiceContext {
    *   of creating one from environment credentials.
    */
   static async initialize(
+    requiredResources: ServiceContextResource[] = [],
     client?: WorkspaceClient,
   ): Promise<ServiceContextState> {
     if (ServiceContext.instance) {
@@ -72,7 +74,10 @@ export class ServiceContext {
       return ServiceContext.initPromise;
     }
 
-    ServiceContext.initPromise = ServiceContext.createContext(client);
+    ServiceContext.initPromise = ServiceContext.createContext(
+      requiredResources,
+      client,
+    );
     ServiceContext.instance = await ServiceContext.initPromise;
     return ServiceContext.instance;
   }
@@ -153,11 +158,15 @@ export class ServiceContext {
   }
 
   private static async createContext(
+    requiredResources: ServiceContextResource[] = [],
     client?: WorkspaceClient,
   ): Promise<ServiceContextState> {
     const wsClient = client ?? new WorkspaceClient({}, getClientOptions());
 
-    const warehouseId = ServiceContext.getWarehouseId(wsClient);
+    const warehouseId = requiredResources.includes("warehouseId")
+      ? ServiceContext.getWarehouseId(wsClient)
+      : undefined;
+
     const workspaceId = ServiceContext.getWorkspaceId(wsClient);
     const currentUser = await wsClient.currentUser.me();
 

@@ -8,6 +8,7 @@ import type {
   PluginExecutionSettings,
   PluginPhase,
   RouteConfig,
+  ServiceContextResource,
   StreamExecuteHandler,
   StreamExecutionSettings,
 } from "shared";
@@ -76,6 +77,7 @@ export abstract class Plugin<
   private registeredEndpoints: PluginEndpointMap = {};
 
   static phase: PluginPhase = "normal";
+  static requires: ServiceContextResource[] = [];
   name: string;
 
   constructor(protected config: TConfig) {

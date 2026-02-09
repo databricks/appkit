@@ -62,9 +62,12 @@ export function getWorkspaceClient() {
 
 /**
  * Get the warehouse ID promise.
+ * Safe to use non-null assertion: if a plugin requires warehouseId,
+ * ServiceContext.initialize() will have resolved it at startup.
  */
 export function getWarehouseId(): Promise<string> {
-  return getExecutionContext().warehouseId;
+  // biome-ignore lint/style/noNonNullAssertion: warehouseId is guaranteed to exist when a plugin declares requires=["warehouseId"]
+  return getExecutionContext().warehouseId!;
 }
 
 /**
