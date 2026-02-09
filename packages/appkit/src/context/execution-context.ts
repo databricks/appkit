@@ -69,7 +69,7 @@ export function getWarehouseId(): Promise<string> {
   if (!ctx.warehouseId) {
     throw ConfigurationError.resourceNotFound(
       "Warehouse ID",
-      'Ensure a plugin declares static requires = ["warehouseId"] or set DATABRICKS_WAREHOUSE_ID',
+      'Ensure a plugin declares static requiredResources = ["warehouseId"] or set DATABRICKS_WAREHOUSE_ID',
     );
   }
   return ctx.warehouseId;
