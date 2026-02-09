@@ -77,7 +77,7 @@ export abstract class Plugin<
   private registeredEndpoints: PluginEndpointMap = {};
 
   static phase: PluginPhase = "normal";
-  static requires: ServiceContextResource[] = [];
+  static requiredResources: ServiceContextResource[] = [];
   name: string;
 
   constructor(protected config: TConfig) {

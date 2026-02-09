@@ -9,3 +9,7 @@ coverage
 *.tsbuildinfo
 
 .turbo
+
+# AI generated files
+.serena
+docs/plans/

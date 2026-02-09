@@ -26,7 +26,7 @@ import type {
 const logger = createLogger("analytics");
 
 export class AnalyticsPlugin extends Plugin {
-  static requires: ServiceContextResource[] = ["warehouseId"];
+  static requiredResources: ServiceContextResource[] = ["warehouseId"];
   name = "analytics";
   protected envVars: string[] = [];
 

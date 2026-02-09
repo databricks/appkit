@@ -187,7 +187,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
   ): ServiceContextResource[] {
     const resources = new Set<ServiceContextResource>();
     for (const { plugin } of plugins) {
-      for (const req of plugin.requires ?? []) {
+      for (const req of plugin.requiredResources ?? []) {
         resources.add(req);
       }
     }

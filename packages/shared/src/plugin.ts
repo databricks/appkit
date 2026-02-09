@@ -46,7 +46,7 @@ export interface PluginConfig {
 
 export type PluginPhase = "core" | "normal" | "deferred";
 
-export type ServiceContextResource = "warehouseId" | "workspaceId";
+export type ServiceContextResource = "warehouseId";
 
 export type PluginConstructor<
   C = BasePluginConfig,
@@ -56,7 +56,7 @@ export type PluginConstructor<
 ) => I) & {
   DEFAULT_CONFIG?: Record<string, unknown>;
   phase?: PluginPhase;
-  requires?: ServiceContextResource[];
+  requiredResources?: ServiceContextResource[];
 };
 
 export type ConfigFor<T> = T extends { DEFAULT_CONFIG: infer D }
