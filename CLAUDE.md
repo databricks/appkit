@@ -6,9 +6,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Databricks AppKit is a modular TypeScript SDK for building Databricks applications with a plugin-based architecture. This is a **pnpm monorepo** using **Turbo** for build orchestration.
 
-**AI/Code Assistant Resources:**
-- See [llms.txt](./llms.txt) for full SDK usage guidance and anti-patterns
-- See [llms-compact.txt](./llms-compact.txt) for quick usage patterns
+## API documentation
+View AppKit API reference (docs only, NOT for scaffolding):
+
+```bash
+# ONLY for viewing documentation - do NOT use for init/scaffold
+npx @databricks/appkit docs <path>
+```
+
+**IMPORTANT**: ALWAYS run `npx @databricks/appkit docs` (no path) FIRST to see available pages. DO NOT guess paths - use the index to find correct paths.
+
+Examples of known paths:
+- Root index: `npx @databricks/appkit docs`
+- API reference: `npx @databricks/appkit docs ./docs/docs/api.md`
+- Component docs: `npx @databricks/appkit docs ./docs/docs/api/appkit-ui/components/Sidebar.md`
 
 ## Repository Structure
 
@@ -161,48 +172,7 @@ pnpm release:ci
 
 ### Plugin System
 
-AppKit uses a **phase-based plugin architecture** with three initialization phases:
-
-1. **core** - Initialized first (e.g., config plugins)
-2. **normal** - Initialized second (most plugins)
-3. **deferred** - Initialized third, receives other plugin instances (e.g., ServerPlugin)
-
-**Creating a Plugin:**
-```typescript
-import { Plugin, toPlugin } from '@databricks/appkit';
-
-class MyPlugin extends Plugin {
-  name: string = "myPlugin";
-
-  // Validate required environment variables
-  validateEnv() {
-    // Check process.env for required vars
-  }
-
-  // Async initialization
-  async setup() {
-    // Initialize resources
-  }
-
-  // Register HTTP routes (optional)
-  injectRoutes(router: express.Router) {
-    // Routes are automatically scoped to /api/{plugin-name}
-    router.get("/endpoint", async (req, res) => {
-      // Use this.execute() for interceptor support
-      const result = await this.execute(() => fetchData(), {
-        cache: { ttl: 60000 },
-        retry: { maxRetries: 3 }
-      });
-      res.json(result);
-    });
-  }
-}
-
-export const myPlugin = toPlugin<typeof MyPlugin, MyPluginConfig, "myPlugin">(
-  MyPlugin,
-  "myPlugin"
-);
-```
+For full props API, see: `npx @databricks/appkit docs ./docs/docs/plugins.md`.
 
 ### Execution Interceptor Pattern
 

@@ -28,13 +28,11 @@ AppKit simplifies building data applications on Databricks by providing:
 
 Follow the [Getting Started](https://databricks.github.io/appkit/docs/) guide to get started with AppKit.
 
+🤖 For AI/code assistants, see the [AI-assisted development](https://databricks.github.io/appkit/docs/development/ai-assisted-development) guide.
+
 ## Documentation
 
 📖 For full AppKit documentation, visit the [AppKit Documentation](https://databricks.github.io/appkit/) website.
-
-👉 For AI/code assistants:  
-- Use [llms-compact.txt](./llms-compact.txt) for quick usage patterns.  
-- See [llms.txt](./llms.txt) for full guidance and anti-patterns.
 
 ## Contributing
 
