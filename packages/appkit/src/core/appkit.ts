@@ -1,3 +1,4 @@
+import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type {
   BasePlugin,
   CacheConfig,
@@ -141,6 +142,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
       plugins?: T;
       telemetry?: TelemetryConfig;
       cache?: CacheConfig;
+      client?: WorkspaceClient;
     } = {},
   ): Promise<PluginMap<T>> {
     // Initialize core services
@@ -149,7 +151,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
     // Initialize ServiceContext for Databricks client management
     // This provides the service principal client and shared resources
-    await ServiceContext.initialize();
+    await ServiceContext.initialize(config?.client);
 
     const rawPlugins = config.plugins as T;
     const preparedPlugins = AppKit.preparePlugins(rawPlugins);
@@ -188,6 +190,7 @@ export async function createApp<
     plugins?: T;
     telemetry?: TelemetryConfig;
     cache?: CacheConfig;
+    client?: WorkspaceClient;
   } = {},
 ): Promise<PluginMap<T>> {
   return AppKit._createApp(config);

@@ -77,6 +77,34 @@ jobs:
       - name: Run Tests
         run: pnpm test
 
+  playground-integration-test:
+    name: Playground Integration Tests
+    needs: detect-changes
+    if: needs.detect-changes.outputs.appkit == 'true'
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Playwright Browsers
+        run: pnpm --filter=dev-playground exec playwright install --with-deps chromium
+      - name: Build packages
+        run: pnpm build
+      - name: Run Integration Tests
+        run: pnpm --filter=dev-playground test:integration
+        env:
+          APPKIT_E2E_TEST: 'true'
+          DATABRICKS_WAREHOUSE_ID: e2e-mock
+          DATABRICKS_WORKSPACE_ID: e2e-mock
+
   docs-build:
     name: Docs Build
     needs: detect-changes
