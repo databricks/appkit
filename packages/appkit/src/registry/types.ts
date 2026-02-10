@@ -114,6 +114,17 @@ export type ResourcePermission =
   | AppPermission;
 
 /**
+ * Defines a single field for a resource. Each field has its own environment variable and optional description.
+ * Single-value types use one key (e.g. id); multi-value types (database, secret) use multiple (e.g. instance_name, database_name or scope, key).
+ */
+export interface ResourceFieldEntry {
+  /** Environment variable name for this field */
+  env: string;
+  /** Human-readable description for this field */
+  description?: string;
+}
+
+/**
  * Declares a resource requirement for a plugin.
  * Can be defined statically in a manifest or dynamically via getResourceRequirements().
  */
@@ -121,8 +132,11 @@ export interface ResourceRequirement {
   /** Type of Databricks resource required */
   type: ResourceType;
 
-  /** Unique alias for this resource within the plugin (e.g., 'warehouse', 'secrets') */
+  /** Unique alias for this resource within the plugin (e.g., 'warehouse', 'secrets'). Used for UI/display. */
   alias: string;
+
+  /** Stable key for machine use (env naming, composite keys, app.yaml). Required. */
+  resource_key: string;
 
   /** Human-readable description of why this resource is needed */
   description: string;
@@ -131,10 +145,10 @@ export interface ResourceRequirement {
   permission: ResourcePermission;
 
   /**
-   * Environment variable name where the resource ID/value should be provided
-   * Example: 'DATABRICKS_WAREHOUSE_ID', 'DATABRICKS_SECRET_SCOPE'
+   * Map of field name to env and optional description.
+   * Single-value types use one key (e.g. id); multi-value (database, secret) use multiple keys.
    */
-  env?: string;
+  fields: Record<string, ResourceFieldEntry>;
 
   /** Whether this resource is required (true) or optional (false) */
   required: boolean;
@@ -148,11 +162,11 @@ export interface ResourceEntry extends ResourceRequirement {
   /** Plugin(s) that require this resource (comma-separated if multiple) */
   plugin: string;
 
-  /** Whether the resource has been resolved (environment variable found) */
+  /** Whether the resource has been resolved (all field env vars set) */
   resolved: boolean;
 
-  /** The actual value of the resource (if resolved) */
-  value?: string;
+  /** Resolved value per field name. Populated by validate() when all field env vars are set. */
+  values?: Record<string, string>;
 }
 
 /**

@@ -108,9 +108,33 @@
       "description": "Permission level required for the resource. Valid values depend on resource type.",
       "examples": ["CAN_USE", "CAN_MANAGE", "READ", "WRITE", "EXECUTE"]
     },
+    "resourceFieldEntry": {
+      "type": "object",
+      "required": ["env"],
+      "properties": {
+        "env": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "Environment variable name for this field",
+          "examples": ["DATABRICKS_CACHE_INSTANCE", "SECRET_SCOPE"]
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description for this field"
+        }
+      },
+      "additionalProperties": false
+    },
     "resourceRequirement": {
       "type": "object",
-      "required": ["type", "alias", "description", "permission"],
+      "required": [
+        "type",
+        "alias",
+        "resource_key",
+        "description",
+        "permission",
+        "fields"
+      ],
       "properties": {
         "type": {
           "$ref": "#/$defs/resourceType"
@@ -118,8 +142,14 @@
         "alias": {
           "type": "string",
           "pattern": "^[a-z][a-zA-Z0-9_]*$",
-          "description": "Unique alias for this resource within the plugin",
-          "examples": ["warehouse", "secrets", "vectorIndex"]
+          "description": "Unique alias for this resource within the plugin (UI/display)",
+          "examples": ["SQL Warehouse", "Secret", "Vector search index"]
+        },
+        "resource_key": {
+          "type": "string",
+          "pattern": "^[a-z][a-zA-Z0-9_]*$",
+          "description": "Stable key for machine use (env naming, composite keys, app.yaml).",
+          "examples": ["sql-warehouse", "database", "secret"]
         },
         "description": {
           "type": "string",
@@ -129,11 +159,13 @@
         "permission": {
           "$ref": "#/$defs/resourcePermission"
         },
-        "env": {
-          "type": "string",
-          "pattern": "^[A-Z][A-Z0-9_]*$",
-          "description": "Environment variable name where the resource ID should be provided",
-          "examples": ["DATABRICKS_WAREHOUSE_ID", "DATABRICKS_SECRET_SCOPE"]
+        "fields": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/resourceFieldEntry"
+          },
+          "minProperties": 1,
+          "description": "Map of field name to env and optional description. Single-value types use one key (e.g. id); multi-value (database, secret) use multiple (e.g. instance_name, database_name or scope, key)."
         }
       },
       "additionalProperties": false

@@ -3,14 +3,24 @@ import path from "node:path";
 import { Command } from "commander";
 
 /**
- * Resource requirement as defined in plugin manifests
+ * Field entry in a resource requirement (env var + optional description)
+ */
+interface ResourceFieldEntry {
+  env: string;
+  description?: string;
+}
+
+/**
+ * Resource requirement as defined in plugin manifests.
+ * Uses fields (single key e.g. id, or multiple e.g. instance_name/database_name, scope/key).
  */
 interface ResourceRequirement {
   type: string;
   alias: string;
+  resource_key: string;
   description: string;
   permission: string;
-  env?: string;
+  fields: Record<string, ResourceFieldEntry>;
 }
 
 /**

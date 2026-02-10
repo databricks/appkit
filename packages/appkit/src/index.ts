@@ -37,6 +37,7 @@ export type {
   ConfigSchemaProperty,
   PluginManifest,
   ResourceEntry,
+  ResourceFieldEntry,
   ResourcePermission,
   ResourceRequirement,
   ValidationResult,

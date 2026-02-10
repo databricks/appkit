@@ -15,7 +15,7 @@ Extends ResourceRequirement with resolution state and plugin ownership.
 alias: string;
 ```
 
-Unique alias for this resource within the plugin (e.g., 'warehouse', 'secrets')
+Unique alias for this resource within the plugin (e.g., 'warehouse', 'secrets'). Used for UI/display.
 
 #### Inherited from
 
@@ -37,18 +37,18 @@ Human-readable description of why this resource is needed
 
 ***
 
-### env?
+### fields
 
 ```ts
-optional env: string;
+fields: Record<string, ResourceFieldEntry>;
 ```
 
-Environment variable name where the resource ID/value should be provided
-Example: 'DATABRICKS_WAREHOUSE_ID', 'DATABRICKS_SECRET_SCOPE'
+Map of field name to env and optional description.
+Single-value types use one key (e.g. id); multi-value (database, secret) use multiple keys.
 
 #### Inherited from
 
-[`ResourceRequirement`](Interface.ResourceRequirement.md).[`env`](Interface.ResourceRequirement.md#env)
+[`ResourceRequirement`](Interface.ResourceRequirement.md).[`fields`](Interface.ResourceRequirement.md#fields)
 
 ***
 
@@ -96,7 +96,21 @@ Whether this resource is required (true) or optional (false)
 resolved: boolean;
 ```
 
-Whether the resource has been resolved (environment variable found)
+Whether the resource has been resolved (all field env vars set)
+
+***
+
+### resource\_key
+
+```ts
+resource_key: string;
+```
+
+Stable key for machine use (env naming, composite keys, app.yaml). Required.
+
+#### Inherited from
+
+[`ResourceRequirement`](Interface.ResourceRequirement.md).[`resource_key`](Interface.ResourceRequirement.md#resource_key)
 
 ***
 
@@ -114,10 +128,10 @@ Type of Databricks resource required
 
 ***
 
-### value?
+### values?
 
 ```ts
-optional value: string;
+optional values: Record<string, string>;
 ```
 
-The actual value of the resource (if resolved)
+Resolved value per field name. Populated by validate() when all field env vars are set.

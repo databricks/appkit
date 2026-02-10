@@ -4,9 +4,10 @@
 function getResourceRequirements(plugin: PluginConstructor): {
   alias: string;
   description: string;
-  env?: string;
+  fields: Record<string, ResourceFieldEntry>;
   permission: ResourcePermission;
   required: boolean;
+  resource_key: string;
   type: ResourceType;
 }[];
 ```

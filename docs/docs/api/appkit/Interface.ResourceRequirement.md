@@ -15,7 +15,7 @@ Can be defined statically in a manifest or dynamically via getResourceRequiremen
 alias: string;
 ```
 
-Unique alias for this resource within the plugin (e.g., 'warehouse', 'secrets')
+Unique alias for this resource within the plugin (e.g., 'warehouse', 'secrets'). Used for UI/display.
 
 ***
 
@@ -29,14 +29,14 @@ Human-readable description of why this resource is needed
 
 ***
 
-### env?
+### fields
 
 ```ts
-optional env: string;
+fields: Record<string, ResourceFieldEntry>;
 ```
 
-Environment variable name where the resource ID/value should be provided
-Example: 'DATABRICKS_WAREHOUSE_ID', 'DATABRICKS_SECRET_SCOPE'
+Map of field name to env and optional description.
+Single-value types use one key (e.g. id); multi-value (database, secret) use multiple keys.
 
 ***
 
@@ -57,6 +57,16 @@ required: boolean;
 ```
 
 Whether this resource is required (true) or optional (false)
+
+***
+
+### resource\_key
+
+```ts
+resource_key: string;
+```
+
+Stable key for machine use (env naming, composite keys, app.yaml). Required.
 
 ***
 

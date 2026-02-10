@@ -27,15 +27,29 @@ describe("Manifest Loader Integration", () => {
       expect(manifest?.displayName).toBe("Analytics Plugin");
     });
 
-    it("should require SQL Warehouse", () => {
+    it("should require SQL Warehouse and list optional cache database", () => {
       const resources = getResourceRequirements(AnalyticsPlugin);
-      expect(resources).toHaveLength(1);
-      expect(resources[0]).toMatchObject({
+      expect(resources).toHaveLength(2);
+
+      const required = resources.find((r) => r.required);
+      const optional = resources.find((r) => !r.required);
+      expect(required).toBeDefined();
+      expect(optional).toBeDefined();
+
+      expect(required).toMatchObject({
         type: ResourceType.SQL_WAREHOUSE,
-        alias: "warehouse",
+        resource_key: "sql-warehouse",
         required: true,
         permission: "CAN_USE",
-        env: "DATABRICKS_WAREHOUSE_ID",
+        fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } },
+      });
+
+      expect(optional).toMatchObject({
+        type: ResourceType.DATABASE,
+        alias: "cache",
+        resource_key: "database",
+        required: false,
+        permission: "CAN_CONNECT_AND_CREATE",
       });
     });
 

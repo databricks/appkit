@@ -21,9 +21,12 @@ describe("Manifest Loader", () => {
             {
               type: ResourceType.SQL_WAREHOUSE,
               alias: "warehouse",
+              resource_key: "sql-warehouse",
               description: "Test warehouse",
               permission: "CAN_USE",
-              env: "TEST_WAREHOUSE_ID",
+              fields: {
+                id: { env: "TEST_WAREHOUSE_ID", description: "Warehouse ID" },
+              },
             },
           ],
           optional: [],
@@ -196,10 +199,14 @@ describe("Manifest Loader", () => {
           optional: [
             {
               type: ResourceType.SECRET,
-              alias: "secrets",
+              alias: "Secret",
+              resource_key: "secret",
               description: "Optional secrets",
               permission: "READ",
-              env: "TEST_SECRET_SCOPE",
+              fields: {
+                scope: { env: "TEST_SECRET_SCOPE" },
+                key: { env: "TEST_SECRET_KEY" },
+              },
             },
           ],
         },
@@ -237,9 +244,10 @@ describe("Manifest Loader", () => {
             {
               type: ResourceType.SQL_WAREHOUSE,
               alias: "warehouse",
+              resource_key: "warehouse",
               description: "Test warehouse",
               permission: "CAN_USE",
-              env: "TEST_WAREHOUSE_ID",
+              fields: { id: { env: "TEST_WAREHOUSE_ID" } },
             },
           ],
           optional: [],
@@ -272,9 +280,13 @@ describe("Manifest Loader", () => {
             {
               type: ResourceType.SECRET,
               alias: "secrets",
+              resource_key: "secrets",
               description: "Optional secrets",
               permission: "READ",
-              env: "TEST_SECRET_SCOPE",
+              fields: {
+                scope: { env: "TEST_SECRET_SCOPE" },
+                key: { env: "TEST_SECRET_KEY" },
+              },
             },
           ],
         },
@@ -305,18 +317,23 @@ describe("Manifest Loader", () => {
             {
               type: ResourceType.SQL_WAREHOUSE,
               alias: "warehouse",
+              resource_key: "warehouse",
               description: "Test warehouse",
               permission: "CAN_USE",
-              env: "TEST_WAREHOUSE_ID",
+              fields: { id: { env: "TEST_WAREHOUSE_ID" } },
             },
           ],
           optional: [
             {
               type: ResourceType.SECRET,
               alias: "secrets",
+              resource_key: "secrets",
               description: "Optional secrets",
               permission: "READ",
-              env: "TEST_SECRET_SCOPE",
+              fields: {
+                scope: { env: "TEST_SECRET_SCOPE" },
+                key: { env: "TEST_SECRET_KEY" },
+              },
             },
           ],
         },
@@ -332,6 +349,60 @@ describe("Manifest Loader", () => {
       expect(resources).toHaveLength(2);
       expect(resources[0].required).toBe(true);
       expect(resources[1].required).toBe(false);
+    });
+
+    it("should return resources with fields for multi-field types", () => {
+      const mockManifest: PluginManifest = {
+        name: "test-plugin",
+        displayName: "Test Plugin",
+        description: "A test plugin",
+        resources: {
+          required: [
+            {
+              type: ResourceType.DATABASE,
+              alias: "cache",
+              resource_key: "cache",
+              description: "Database for caching",
+              permission: "CAN_CONNECT_AND_CREATE",
+              fields: {
+                instance_name: {
+                  env: "DATABRICKS_CACHE_INSTANCE",
+                  description: "Lakebase instance name",
+                },
+                database_name: {
+                  env: "DATABRICKS_CACHE_DB",
+                  description: "Database name",
+                },
+              },
+            },
+          ],
+          optional: [],
+        },
+      };
+
+      class TestPlugin {
+        static manifest = mockManifest;
+      }
+
+      const resources = getResourceRequirements(
+        TestPlugin as unknown as PluginConstructor,
+      );
+      expect(resources).toHaveLength(1);
+      expect(resources[0]).toMatchObject({
+        type: ResourceType.DATABASE,
+        alias: "cache",
+        required: true,
+        fields: {
+          instance_name: {
+            env: "DATABRICKS_CACHE_INSTANCE",
+            description: "Lakebase instance name",
+          },
+          database_name: {
+            env: "DATABRICKS_CACHE_DB",
+            description: "Database name",
+          },
+        },
+      });
     });
 
     it("should return empty array for plugin with no resources", () => {
