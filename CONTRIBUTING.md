@@ -26,6 +26,12 @@ This project needs some dependencies in order to run, make sure to have them all
 
 Make sure to have node installed using [nvm](https://github.com/nvm-sh/nvm)
 
+> **Note:** This project requires Node.js version 22. If you use nvm, you can install it using:
+> ```bash
+> nvm install 22
+> nvm use 22
+> ```
+
 ### pnpm
 
 Run the following command
