@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { LakebaseConnector } from "../lakebase";
+import { LakebaseV1Connector } from "../lakebase-v1";
 
 // Mock pg module
 vi.mock("pg", () => {
@@ -55,7 +55,7 @@ vi.mock("@databricks/sdk-experimental", () => {
   };
 });
 
-describe("LakebaseConnector", () => {
+describe("LakebaseV1Connector", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Set required env vars
@@ -68,7 +68,7 @@ describe("LakebaseConnector", () => {
     test("should throw error when maxPoolSize is less than 1", () => {
       expect(
         () =>
-          new LakebaseConnector({
+          new LakebaseV1Connector({
             maxPoolSize: 0,
             workspaceClient: {} as any,
           }),
@@ -76,11 +76,11 @@ describe("LakebaseConnector", () => {
     });
 
     test("should create connector with valid config", () => {
-      const connector = new LakebaseConnector({
+      const connector = new LakebaseV1Connector({
         workspaceClient: {} as any,
       });
 
-      expect(connector).toBeInstanceOf(LakebaseConnector);
+      expect(connector).toBeInstanceOf(LakebaseV1Connector);
     });
 
     test("should throw when env vars are missing", () => {
@@ -88,7 +88,7 @@ describe("LakebaseConnector", () => {
       delete process.env.PGDATABASE;
       delete process.env.PGAPPNAME;
 
-      expect(() => new LakebaseConnector()).toThrow(
+      expect(() => new LakebaseV1Connector()).toThrow(
         "Lakebase connection not configured",
       );
     });
@@ -96,20 +96,20 @@ describe("LakebaseConnector", () => {
     test("should throw when PGPORT is invalid", () => {
       process.env.PGPORT = "invalid";
 
-      expect(() => new LakebaseConnector()).toThrow("Invalid value for port");
+      expect(() => new LakebaseV1Connector()).toThrow("Invalid value for port");
     });
 
     test("should parse env vars correctly", () => {
       process.env.PGPORT = "5433";
       process.env.PGSSLMODE = "disable";
 
-      const connector = new LakebaseConnector();
+      const connector = new LakebaseV1Connector();
 
-      expect(connector).toBeInstanceOf(LakebaseConnector);
+      expect(connector).toBeInstanceOf(LakebaseV1Connector);
     });
 
     test("should use explicit config over env vars", () => {
-      const connector = new LakebaseConnector({
+      const connector = new LakebaseV1Connector({
         host: "explicit-host.databricks.com",
         database: "explicit-db",
         appName: "explicit-app",
@@ -118,12 +118,12 @@ describe("LakebaseConnector", () => {
         workspaceClient: {} as any,
       });
 
-      expect(connector).toBeInstanceOf(LakebaseConnector);
+      expect(connector).toBeInstanceOf(LakebaseV1Connector);
     });
   });
 
   describe("query", () => {
-    let connector: LakebaseConnector;
+    let connector: LakebaseV1Connector;
     let mockQuery: ReturnType<typeof vi.fn>;
     let mockMe: ReturnType<typeof vi.fn>;
     let mockRequest: ReturnType<typeof vi.fn>;
@@ -144,7 +144,7 @@ describe("LakebaseConnector", () => {
       });
       mockQuery.mockResolvedValue({ rows: [{ result: 1 }] });
 
-      connector = new LakebaseConnector({
+      connector = new LakebaseV1Connector({
         workspaceClient: {
           currentUser: { me: mockMe },
           config: { host: "https://test.databricks.com" },
@@ -224,7 +224,7 @@ describe("LakebaseConnector", () => {
   });
 
   describe("transaction", () => {
-    let connector: LakebaseConnector;
+    let connector: LakebaseV1Connector;
     let mockConnect: ReturnType<typeof vi.fn>;
     let mockMe: ReturnType<typeof vi.fn>;
     let mockRequest: ReturnType<typeof vi.fn>;
@@ -249,7 +249,7 @@ describe("LakebaseConnector", () => {
       };
       mockConnect.mockResolvedValue(mockClient);
 
-      connector = new LakebaseConnector({
+      connector = new LakebaseV1Connector({
         workspaceClient: {
           currentUser: { me: mockMe },
           config: { host: "https://test.databricks.com" },
@@ -285,7 +285,7 @@ describe("LakebaseConnector", () => {
   });
 
   describe("healthCheck", () => {
-    let connector: LakebaseConnector;
+    let connector: LakebaseV1Connector;
     let mockQuery: ReturnType<typeof vi.fn>;
     let mockMe: ReturnType<typeof vi.fn>;
     let mockRequest: ReturnType<typeof vi.fn>;
@@ -304,7 +304,7 @@ describe("LakebaseConnector", () => {
         expiration_time: new Date(Date.now() + 3600000).toISOString(),
       });
 
-      connector = new LakebaseConnector({
+      connector = new LakebaseV1Connector({
         workspaceClient: {
           currentUser: { me: mockMe },
           config: { host: "https://test.databricks.com" },
@@ -338,7 +338,7 @@ describe("LakebaseConnector", () => {
   });
 
   describe("close", () => {
-    let connector: LakebaseConnector;
+    let connector: LakebaseV1Connector;
     let mockEnd: ReturnType<typeof vi.fn>;
     let mockQuery: ReturnType<typeof vi.fn>;
     let mockMe: ReturnType<typeof vi.fn>;
@@ -361,7 +361,7 @@ describe("LakebaseConnector", () => {
       mockQuery.mockResolvedValue({ rows: [{ result: 1 }] });
       mockEnd.mockResolvedValue(undefined);
 
-      connector = new LakebaseConnector({
+      connector = new LakebaseV1Connector({
         workspaceClient: {
           currentUser: { me: mockMe },
           config: { host: "https://test.databricks.com" },
@@ -404,7 +404,7 @@ describe("LakebaseConnector", () => {
       mockMe.mockResolvedValue({ userName: null });
       mockRequest.mockResolvedValue({ token: "test-token" });
 
-      const connector = new LakebaseConnector({
+      const connector = new LakebaseV1Connector({
         workspaceClient: {
           currentUser: { me: mockMe },
           config: { host: "https://test.databricks.com" },
@@ -420,7 +420,7 @@ describe("LakebaseConnector", () => {
       mockMe.mockResolvedValue({ userName: "test-user@example.com" });
       mockRequest.mockResolvedValue({ error: "unauthorized" }); // missing token and expiration_time
 
-      const connector = new LakebaseConnector({
+      const connector = new LakebaseV1Connector({
         workspaceClient: {
           currentUser: { me: mockMe },
           config: { host: "https://test.databricks.com" },
@@ -434,7 +434,7 @@ describe("LakebaseConnector", () => {
   });
 
   describe("transient error codes", () => {
-    let connector: LakebaseConnector;
+    let connector: LakebaseV1Connector;
     let mockQuery: ReturnType<typeof vi.fn>;
     let mockMe: ReturnType<typeof vi.fn>;
     let mockRequest: ReturnType<typeof vi.fn>;
@@ -453,7 +453,7 @@ describe("LakebaseConnector", () => {
         expiration_time: new Date(Date.now() + 3600000).toISOString(),
       });
 
-      connector = new LakebaseConnector({
+      connector = new LakebaseV1Connector({
         workspaceClient: {
           currentUser: { me: mockMe },
           config: { host: "https://test.databricks.com" },

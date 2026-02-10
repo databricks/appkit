@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { CacheConfig, CacheEntry, CacheStorage } from "shared";
-import type { LakebaseConnector } from "../../connectors";
+import type { LakebaseV1Connector } from "../../connectors";
 import { InitializationError, ValidationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { lakebaseStorageDefaults } from "./defaults";
@@ -22,7 +22,7 @@ const logger = createLogger("cache:persistent");
  *
  */
 export class PersistentStorage implements CacheStorage {
-  private readonly connector: LakebaseConnector;
+  private readonly connector: LakebaseV1Connector;
   private readonly tableName: string;
   private readonly maxBytes: number;
   private readonly maxEntryBytes: number;
@@ -30,7 +30,7 @@ export class PersistentStorage implements CacheStorage {
   private readonly evictionCheckProbability: number;
   private initialized: boolean;
 
-  constructor(config: CacheConfig, connector: LakebaseConnector) {
+  constructor(config: CacheConfig, connector: LakebaseV1Connector) {
     this.connector = connector;
     this.maxBytes = config.maxBytes ?? lakebaseStorageDefaults.maxBytes;
     this.maxEntryBytes =

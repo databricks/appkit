@@ -2,10 +2,10 @@ import type { CacheStorage } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { CacheManager } from "../../index";
 
-// Mock LakebaseConnector
+// Mock LakebaseV1Connector
 const mockLakebaseHealthCheck = vi.fn();
 vi.mock("@/connectors", () => ({
-  LakebaseConnector: vi.fn().mockImplementation(() => ({
+  LakebaseV1Connector: vi.fn().mockImplementation(() => ({
     healthCheck: mockLakebaseHealthCheck,
     close: vi.fn().mockResolvedValue(undefined),
   })),

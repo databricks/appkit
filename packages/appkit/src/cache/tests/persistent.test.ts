@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { PersistentStorage } from "../storage";
 
-/** Mock LakebaseConnector for testing */
+/** Mock LakebaseV1Connector for testing */
 const createMockConnector = () => ({
   query: vi.fn(),
   healthCheck: vi.fn().mockResolvedValue(true),

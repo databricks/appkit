@@ -1,8 +1,8 @@
 import { ConfigurationError, ValidationError } from "../../errors";
-import type { LakebaseConnectionConfig } from "./types";
+import type { LakebaseV1ConnectionConfig } from "./types";
 
 export interface ParsedConnectionString {
-  connectionParams: LakebaseConnectionConfig;
+  connectionParams: LakebaseV1ConnectionConfig;
   originalConnectionString: string;
 }
 
@@ -40,7 +40,7 @@ export function parseConnectionString(
       (url.searchParams.get("sslmode") as "require" | "disable" | "prefer") ||
       "require";
 
-    const connectionParams: LakebaseConnectionConfig = {
+    const connectionParams: LakebaseV1ConnectionConfig = {
       host: url.hostname,
       database: dbName,
       port: url.port ? parseInt(url.port, 10) : 5432,
@@ -57,7 +57,7 @@ export function parseConnectionString(
     throw ValidationError.missingField("database");
   }
 
-  const connectionParams: LakebaseConnectionConfig = {
+  const connectionParams: LakebaseV1ConnectionConfig = {
     host: connectionStringOrHost,
     database,
     port: port || 5432,
@@ -71,7 +71,7 @@ export function parseConnectionString(
 }
 
 /** Parse connection configuration from environment variables */
-export function parseFromEnv(): LakebaseConnectionConfig {
+export function parseFromEnv(): LakebaseV1ConnectionConfig {
   const host = process.env.PGHOST;
   const database = process.env.PGDATABASE;
   const port = process.env.PGPORT ? parseInt(process.env.PGPORT, 10) : 5432;

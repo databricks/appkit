@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { CacheConfig, CacheStorage } from "shared";
-import { LakebaseConnector } from "@/connectors";
+import { LakebaseV1Connector } from "@/connectors";
 import { AppKitError, ExecutionError, InitializationError } from "../errors";
 import { createLogger } from "../logging/logger";
 import type { Counter, TelemetryProvider } from "../telemetry";
@@ -147,7 +147,7 @@ export class CacheManager {
     // try to use lakebase storage
     try {
       const workspaceClient = new WorkspaceClient({});
-      const connector = new LakebaseConnector({ workspaceClient });
+      const connector = new LakebaseV1Connector({ workspaceClient });
       const isHealthy = await connector.healthCheck();
 
       if (isHealthy) {

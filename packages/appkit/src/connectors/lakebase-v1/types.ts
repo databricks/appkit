@@ -1,8 +1,23 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { TelemetryOptions } from "shared";
 
-/** Configuration for LakebaseConnector */
-export interface LakebaseConfig {
+/**
+ * Configuration for LakebaseV1Connector
+ *
+ * @deprecated This connector is for Lakebase Provisioned only.
+ * For new projects, use Lakebase Autoscaling instead: https://docs.databricks.com/aws/en/oltp/projects/
+ *
+ * This connector is compatible with Lakebase Provisioned: https://docs.databricks.com/aws/en/oltp/instances/
+ *
+ * Lakebase Autoscaling offers:
+ * - Automatic compute scaling
+ * - Scale-to-zero for cost optimization
+ * - Database branching for development
+ * - Instant restore capabilities
+ *
+ * Use the new LakebaseConnector (coming in a future release) for Lakebase Autoscaling support.
+ */
+export interface LakebaseV1Config {
   /** Databricks workspace client */
   workspaceClient?: WorkspaceClient;
 
@@ -40,8 +55,13 @@ export interface LakebaseConfig {
   [key: string]: unknown;
 }
 
-/** Lakebase credentials for authentication */
-export interface LakebaseCredentials {
+/**
+ * Lakebase V1 credentials for authentication
+ *
+ * @deprecated This type is for Lakebase Provisioned only.
+ * For new projects, use Lakebase Autoscaling: https://docs.databricks.com/aws/en/oltp/projects/
+ */
+export interface LakebaseV1Credentials {
   /** Username */
   username: string;
   /** Password */
@@ -50,8 +70,13 @@ export interface LakebaseCredentials {
   expiresAt: number;
 }
 
-/** Internal connection configuration */
-export interface LakebaseConnectionConfig {
+/**
+ * Internal connection configuration for Lakebase V1
+ *
+ * @deprecated This type is for Lakebase Provisioned only.
+ * For new projects, use Lakebase Autoscaling: https://docs.databricks.com/aws/en/oltp/projects/
+ */
+export interface LakebaseV1ConnectionConfig {
   /** Database host */
   readonly host: string;
   /** Database name */

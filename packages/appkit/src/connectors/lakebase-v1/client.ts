@@ -18,37 +18,51 @@ import {
 } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { deepMerge } from "../../utils";
-import { lakebaseDefaults } from "./defaults";
+import { lakebaseV1Defaults } from "./defaults";
 import type {
-  LakebaseConfig,
-  LakebaseConnectionConfig,
-  LakebaseCredentials,
+  LakebaseV1Config,
+  LakebaseV1ConnectionConfig,
+  LakebaseV1Credentials,
 } from "./types";
 
-const logger = createLogger("connectors:lakebase");
+const logger = createLogger("connectors:lakebase-v1");
 
 /**
- * Enterprise-grade connector for Databricks Lakebase
+ * Enterprise-grade connector for Databricks Lakebase Provisioned
+ *
+ * @deprecated This connector is for Lakebase Provisioned only.
+ * For new projects, use Lakebase Autoscaling instead: https://docs.databricks.com/aws/en/oltp/projects/
+ *
+ * This connector is compatible with Lakebase Provisioned: https://docs.databricks.com/aws/en/oltp/instances/
+ *
+ * Lakebase Autoscaling offers:
+ * - Automatic compute scaling
+ * - Scale-to-zero for cost optimization
+ * - Database branching for development
+ * - Instant restore capabilities
+ *
+ * Use the new LakebaseConnector (coming in a future release) for Lakebase Autoscaling support.
+ *
  * @example Simplest - everything from env/context
  * ```typescript
- * const connector = new LakebaseConnector();
+ * const connector = new LakebaseV1Connector();
  * await connector.query('SELECT * FROM users');
  * ```
  *
  * @example With explicit connection string
  * ```typescript
- * const connector = new LakebaseConnector({
+ * const connector = new LakebaseV1Connector({
  *   connectionString: 'postgresql://...'
  * });
  * ```
  */
-export class LakebaseConnector {
-  private readonly name: string = "lakebase";
+export class LakebaseV1Connector {
+  private readonly name: string = "lakebase-v1";
   private readonly CACHE_BUFFER_MS = 2 * 60 * 1000;
-  private readonly config: LakebaseConfig;
-  private readonly connectionConfig: LakebaseConnectionConfig;
+  private readonly config: LakebaseV1Config;
+  private readonly connectionConfig: LakebaseV1ConnectionConfig;
   private pool: pg.Pool | null = null;
-  private credentials: LakebaseCredentials | null = null;
+  private credentials: LakebaseV1Credentials | null = null;
 
   // telemetry
   private readonly telemetry: TelemetryProvider;
@@ -57,8 +71,8 @@ export class LakebaseConnector {
     queryDuration: Histogram;
   };
 
-  constructor(userConfig?: Partial<LakebaseConfig>) {
-    this.config = deepMerge(lakebaseDefaults, userConfig);
+  constructor(userConfig?: Partial<LakebaseV1Config>) {
+    this.config = deepMerge(lakebaseV1Defaults, userConfig);
     this.connectionConfig = this.parseConnectionConfig();
 
     this.telemetry = TelemetryManager.getProvider(
@@ -68,13 +82,13 @@ export class LakebaseConnector {
     this.telemetryMetrics = {
       queryCount: this.telemetry
         .getMeter()
-        .createCounter("lakebase.query.count", {
+        .createCounter("lakebase.v1.query.count", {
           description: "Total number of queries executed",
           unit: "1",
         }),
       queryDuration: this.telemetry
         .getMeter()
-        .createHistogram("lakebase.query.duration", {
+        .createHistogram("lakebase.v1.query.duration", {
           description: "Duration of queries executed",
           unit: "ms",
         }),
@@ -107,10 +121,10 @@ export class LakebaseConnector {
     const startTime = Date.now();
 
     return this.telemetry.startActiveSpan(
-      "lakebase.query",
+      "lakebase.v1.query",
       {
         attributes: {
-          "db.system": "lakebase",
+          "db.system": "lakebase-v1",
           "db.statement": sql.substring(0, 500),
           "db.retry_count": retryCount,
         },
@@ -178,10 +192,10 @@ export class LakebaseConnector {
   ): Promise<T> {
     const startTime = Date.now();
     return this.telemetry.startActiveSpan(
-      "lakebase.transaction",
+      "lakebase.v1.transaction",
       {
         attributes: {
-          "db.system": "lakebase",
+          "db.system": "lakebase-v1",
           "db.retry_count": retryCount,
         },
       },
@@ -249,7 +263,7 @@ export class LakebaseConnector {
   /** Check if database connection is healthy */
   async healthCheck(): Promise<boolean> {
     return this.telemetry.startActiveSpan(
-      "lakebase.healthCheck",
+      "lakebase.v1.healthCheck",
       {},
       async (span) => {
         try {
@@ -491,7 +505,7 @@ export class LakebaseConnector {
   }
 
   /** Parse connection configuration from config or environment */
-  private parseConnectionConfig(): LakebaseConnectionConfig {
+  private parseConnectionConfig(): LakebaseV1ConnectionConfig {
     if (this.config.connectionString) {
       return this.parseConnectionString(this.config.connectionString);
     }
@@ -539,7 +553,7 @@ export class LakebaseConnector {
 
   private parseConnectionString(
     connectionString: string,
-  ): LakebaseConnectionConfig {
+  ): LakebaseV1ConnectionConfig {
     const url = new URL(connectionString);
     const appName = url.searchParams.get("appName");
     if (!appName) {

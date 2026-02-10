@@ -292,7 +292,7 @@ await createApp({
 });
 ```
 
-Storage auto-selects **Lakebase persistent cache when healthy**, otherwise falls back to in-memory.
+Storage auto-selects **Lakebase V1 (Provisioned) persistent cache when healthy**, otherwise falls back to in-memory. Support for Lakebase Autoscaling coming soon.
 
 ### Plugin-level caching
 
