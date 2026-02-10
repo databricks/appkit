@@ -25,4 +25,8 @@ export class Spinner {
     // clear the line and write the final text
     process.stdout.write(`\x1b[2K\r  ${finalText || this.text}\n`);
   }
+
+  printDetail(text: string) {
+    process.stdout.write(`\x1b[2m    ${text}\x1b[0m\n`);
+  }
 }
