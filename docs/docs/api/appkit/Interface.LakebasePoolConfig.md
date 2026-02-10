@@ -1,0 +1,87 @@
+# Interface: LakebasePoolConfig
+
+Configuration for creating a Lakebase connection pool
+
+Supports two authentication methods:
+1. OAuth token authentication - Provide workspaceClient + endpoint (automatic token rotation)
+2. Native Postgres password authentication - Provide password string or function
+
+Extends pg.PoolConfig to support all standard PostgreSQL pool options.
+
+## See
+
+https://docs.databricks.com/aws/en/oltp/projects/authentication
+
+## Extends
+
+- `PoolConfig`
+
+## Properties
+
+### endpoint?
+
+```ts
+optional endpoint: string;
+```
+
+Endpoint resource path for OAuth token generation.
+
+All segments are IDs assigned by Databricks (not names you create):
+- project-id: UUID format (e.g., `a1b2c3d4-e5f6-4789-a012-b3c4d5e6f789`)
+- branch-id: Identifier from Databricks (e.g., `main`, `dev`)
+- endpoint-id: Identifier from Databricks (e.g., `primary`, `analytics`)
+
+Format: `projects/{project-id}/branches/{branch-id}/endpoints/{endpoint-id}`
+
+Required for OAuth authentication (unless password is provided)
+Can also be set via LAKEBASE_ENDPOINT environment variable
+
+#### Example
+
+```ts
+"projects/6bef4151-4b5d-4147-b4d0-c2f4fd5b40db/branches/br-sparkling-tree-y17uj7fn/endpoints/ep-restless-pine-y1ldaht0"
+```
+
+***
+
+### sslMode?
+
+```ts
+optional sslMode: "require" | "disable" | "prefer";
+```
+
+SSL mode for the connection (convenience helper)
+Can also be set via PGSSLMODE environment variable
+
+#### Default
+
+```ts
+"require"
+```
+
+***
+
+### telemetry?
+
+```ts
+optional telemetry: TelemetryOptions;
+```
+
+Telemetry configuration
+
+- `true` or omitted: enable all telemetry (traces, metrics, logs) -- no-op when OTEL is not configured
+- `false`: disable all telemetry
+- `{ traces?, metrics?, logs? }`: fine-grained control
+
+***
+
+### workspaceClient?
+
+```ts
+optional workspaceClient: WorkspaceClient;
+```
+
+Databricks workspace client for OAuth authentication
+If not provided along with endpoint, will attempt to use ServiceContext
+
+Note: If password is provided, OAuth auth is not used

@@ -3,6 +3,12 @@
 Core library for building Databricks applications with type-safe SQL queries,
 plugin architecture, and React integration.
 
+## Enumerations
+
+| Enumeration | Description |
+| ------ | ------ |
+| [RequestedClaimsPermissionSet](Enumeration.RequestedClaimsPermissionSet.md) | Permission set for Unity Catalog table access |
+
 ## Classes
 
 | Class | Description |
@@ -24,7 +30,12 @@ plugin architecture, and React integration.
 | ------ | ------ |
 | [BasePluginConfig](Interface.BasePluginConfig.md) | Base configuration interface for AppKit plugins |
 | [CacheConfig](Interface.CacheConfig.md) | Configuration for caching |
+| [DatabaseCredential](Interface.DatabaseCredential.md) | Database credentials with OAuth token for Postgres connection |
+| [GenerateDatabaseCredentialRequest](Interface.GenerateDatabaseCredentialRequest.md) | Request parameters for generating database OAuth credentials |
 | [ITelemetry](Interface.ITelemetry.md) | Plugin-facing interface for OpenTelemetry instrumentation. Provides a thin abstraction over OpenTelemetry APIs for plugins. |
+| [LakebasePoolConfig](Interface.LakebasePoolConfig.md) | Configuration for creating a Lakebase connection pool |
+| [RequestedClaims](Interface.RequestedClaims.md) | Optional claims for fine-grained Unity Catalog table permissions When specified, the returned token will be scoped to only the requested tables |
+| [RequestedResource](Interface.RequestedResource.md) | Resource to request permissions for in Unity Catalog |
 | [StreamExecutionSettings](Interface.StreamExecutionSettings.md) | Configuration for streaming execution with default and user-scoped settings |
 | [TelemetryConfig](Interface.TelemetryConfig.md) | OpenTelemetry configuration for AppKit applications |
 
@@ -46,5 +57,11 @@ plugin architecture, and React integration.
 | ------ | ------ |
 | [appKitTypesPlugin](Function.appKitTypesPlugin.md) | Vite plugin to generate types for AppKit queries. Calls generateFromEntryPoint under the hood. |
 | [createApp](Function.createApp.md) | Bootstraps AppKit with the provided configuration. |
+| [createLakebasePool](Function.createLakebasePool.md) | Create a PostgreSQL connection pool with automatic OAuth token refresh for Lakebase. |
+| [generateDatabaseCredential](Function.generateDatabaseCredential.md) | Generate OAuth credentials for Postgres database connection using the proper Postgres API. |
 | [getExecutionContext](Function.getExecutionContext.md) | Get the current execution context. |
+| [getLakebaseOrmConfig](Function.getLakebaseOrmConfig.md) | Get Lakebase connection configuration for ORMs that don't accept pg.Pool directly. |
+| [getLakebasePgConfig](Function.getLakebasePgConfig.md) | Get Lakebase connection configuration for PostgreSQL clients. |
+| [~~getLakebasePoolConfig~~](Function.getLakebasePoolConfig.md) | - |
+| [getWorkspaceClient](Function.getWorkspaceClient.md) | Get workspace client from config or execution context |
 | [isSQLTypeMarker](Function.isSQLTypeMarker.md) | Type guard to check if a value is a SQL type marker |

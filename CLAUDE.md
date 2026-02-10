@@ -233,6 +233,39 @@ The AnalyticsPlugin provides SQL query execution:
 - Built-in caching with configurable TTL
 - Databricks SQL Warehouse connector for execution
 
+### Lakebase Autoscaling Connector
+
+**Location:** `packages/appkit/src/connectors/lakebase/`
+
+AppKit provides `createLakebasePool()` - a factory function that returns a standard `pg.Pool` configured with automatic OAuth token refresh for Databricks Lakebase (OLTP) databases.
+
+**Key Features:**
+- Returns standard `pg.Pool` (compatible with all ORMs)
+- Automatic OAuth token refresh (1-hour tokens, 2-minute buffer)
+- Token caching to minimize API calls
+- Battle-tested pattern (same as AWS RDS IAM authentication)
+
+**Quick Example:**
+```typescript
+import { createLakebasePool } from '@databricks/appkit';
+
+// Reads from PGHOST, PGDATABASE, LAKEBASE_ENDPOINT env vars
+const pool = createLakebasePool();
+
+// Standard pg.Pool API
+const result = await pool.query('SELECT * FROM users');
+```
+
+**ORM Integration:**
+Works with Drizzle, Prisma, TypeORM - see [Lakebase Integration Docs](docs/docs/integrations/lakebase.md) for examples.
+
+**Architecture:**
+- Connector files: `packages/appkit/src/connectors/lakebase/`
+  - `pool.ts` - Pool factory with OAuth token refresh
+  - `types.ts` - TypeScript interfaces (`LakebasePoolConfig`)
+  - `utils.ts` - Helper functions (`generateDatabaseCredential`)
+  - `auth-types.ts` - Lakebase v2 API types
+
 ### Frontend-Backend Interaction
 
 ```
