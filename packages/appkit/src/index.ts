@@ -14,6 +14,23 @@ export type {
 } from "shared";
 export { isSQLTypeMarker, sql } from "shared";
 export { CacheManager } from "./cache";
+export type {
+  DatabaseCredential,
+  GenerateDatabaseCredentialRequest,
+  LakebasePoolConfig,
+  RequestedClaims,
+  RequestedClaimsPermissionSet,
+  RequestedResource,
+} from "./connectors/lakebase";
+// Lakebase Autoscaling connector
+export {
+  createLakebasePool,
+  generateDatabaseCredential,
+  getLakebaseOrmConfig,
+  getLakebasePgConfig,
+  getLakebasePoolConfig,
+  getWorkspaceClient,
+} from "./connectors/lakebase";
 export { getExecutionContext } from "./context";
 export { createApp } from "./core";
 // Errors

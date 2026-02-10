@@ -7,8 +7,8 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
-          id: "api/appkit/Enumeration.ResourceType",
-          label: "ResourceType"
+          id: "api/appkit/Enumeration.RequestedClaimsPermissionSet",
+          label: "RequestedClaimsPermissionSet"
         }
       ]
     },
@@ -53,11 +53,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Class.ResourceRegistry",
-          label: "ResourceRegistry"
-        },
-        {
-          type: "doc",
           id: "api/appkit/Class.ServerError",
           label: "ServerError"
         },
@@ -89,28 +84,33 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.DatabaseCredential",
+          label: "DatabaseCredential"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.GenerateDatabaseCredentialRequest",
+          label: "GenerateDatabaseCredentialRequest"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.ITelemetry",
           label: "ITelemetry"
         },
         {
           type: "doc",
-          id: "api/appkit/Interface.PluginManifest",
-          label: "PluginManifest"
+          id: "api/appkit/Interface.LakebasePoolConfig",
+          label: "LakebasePoolConfig"
         },
         {
           type: "doc",
-          id: "api/appkit/Interface.ResourceEntry",
-          label: "ResourceEntry"
+          id: "api/appkit/Interface.RequestedClaims",
+          label: "RequestedClaims"
         },
         {
           type: "doc",
-          id: "api/appkit/Interface.ResourceFieldEntry",
-          label: "ResourceFieldEntry"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.ResourceRequirement",
-          label: "ResourceRequirement"
+          id: "api/appkit/Interface.RequestedResource",
+          label: "RequestedResource"
         },
         {
           type: "doc",
@@ -121,11 +121,6 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.TelemetryConfig",
           label: "TelemetryConfig"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.ValidationResult",
-          label: "ValidationResult"
         }
       ]
     },
@@ -135,18 +130,8 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
-          id: "api/appkit/TypeAlias.ConfigSchema",
-          label: "ConfigSchema"
-        },
-        {
-          type: "doc",
           id: "api/appkit/TypeAlias.IAppRouter",
           label: "IAppRouter"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/TypeAlias.ResourcePermission",
-          label: "ResourcePermission"
         }
       ]
     },
@@ -177,18 +162,39 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.createLakebasePool",
+          label: "createLakebasePool"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.generateDatabaseCredential",
+          label: "generateDatabaseCredential"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.getExecutionContext",
           label: "getExecutionContext"
         },
         {
           type: "doc",
-          id: "api/appkit/Function.getPluginManifest",
-          label: "getPluginManifest"
+          id: "api/appkit/Function.getLakebaseOrmConfig",
+          label: "getLakebaseOrmConfig"
         },
         {
           type: "doc",
-          id: "api/appkit/Function.getResourceRequirements",
-          label: "getResourceRequirements"
+          id: "api/appkit/Function.getLakebasePgConfig",
+          label: "getLakebasePgConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.getLakebasePoolConfig",
+          label: "getLakebasePoolConfig",
+          className: "typedoc-sidebar-item-deprecated"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.getWorkspaceClient",
+          label: "getWorkspaceClient"
         },
         {
           type: "doc",

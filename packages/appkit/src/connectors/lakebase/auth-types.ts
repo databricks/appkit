@@ -1,0 +1,98 @@
+/**
+ * Authentication types for Lakebase Postgres OAuth token generation
+ * @see https://docs.databricks.com/aws/en/oltp/projects/authentication
+ */
+
+/**
+ * Database credentials with OAuth token for Postgres connection
+ */
+export interface DatabaseCredential {
+  /** OAuth token to use as the password when connecting to Postgres */
+  token: string;
+
+  /**
+   * Token expiration time in UTC (ISO 8601 format)
+   * Tokens expire after 1 hour from generation
+   * @example "2026-02-06T17:07:00Z"
+   */
+  expire_time: string;
+}
+
+/**
+ * Permission set for Unity Catalog table access
+ */
+export enum RequestedClaimsPermissionSet {
+  /**
+   * Read-only access to specified UC tables
+   */
+  READ_ONLY = "READ_ONLY",
+}
+
+/**
+ * Resource to request permissions for in Unity Catalog
+ */
+export interface RequestedResource {
+  /**
+   * Unity Catalog table name to request access to
+   * @example "catalog.schema.table"
+   */
+  table_name?: string;
+
+  /**
+   * Generic resource name for non-table resources
+   */
+  unspecified_resource_name?: string;
+}
+
+/**
+ * Optional claims for fine-grained Unity Catalog table permissions
+ * When specified, the returned token will be scoped to only the requested tables
+ */
+export interface RequestedClaims {
+  /**
+   * Permission level to request
+   */
+  permission_set?: RequestedClaimsPermissionSet;
+
+  /**
+   * List of UC resources to request access to
+   */
+  resources?: RequestedResource[];
+}
+
+/**
+ * Request parameters for generating database OAuth credentials
+ */
+export interface GenerateDatabaseCredentialRequest {
+  /**
+   * Endpoint resource path with IDs assigned by Databricks.
+   *
+   * All segments are IDs from Databricks (not names you create):
+   * - project-id: UUID format (e.g., `a1b2c3d4-e5f6-4789-a012-b3c4d5e6f789`)
+   * - branch-id: Identifier from Databricks (e.g., `main`, `dev`)
+   * - endpoint-id: Identifier from Databricks (e.g., `primary`, `analytics`)
+   *
+   * Format: `projects/{project-id}/branches/{branch-id}/endpoints/{endpoint-id}`
+   *
+   * **Important:** Copy from Databricks Lakebase UI - do not construct manually.
+   *
+   * @example "projects/6bef4151-4b5d-4147-b4d0-c2f4fd5b40db/branches/br-sparkling-tree-y17uj7fn/endpoints/ep-restless-pine-y1ldaht0"
+   */
+  endpoint: string;
+
+  /**
+   * Optional claims for fine-grained UC table permissions.
+   * When specified, the token will only grant access to the specified tables.
+   *
+   * @example
+   * ```typescript
+   * {
+   *   claims: [{
+   *     permission_set: RequestedClaimsPermissionSet.READ_ONLY,
+   *     resources: [{ table_name: "catalog.schema.users" }]
+   *   }]
+   * }
+   * ```
+   */
+  claims?: RequestedClaims[];
+}
