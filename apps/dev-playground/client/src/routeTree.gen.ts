@@ -13,6 +13,7 @@ import { Route as TypeSafetyRouteRouteImport } from './routes/type-safety.route'
 import { Route as TelemetryRouteRouteImport } from './routes/telemetry.route'
 import { Route as SqlHelpersRouteRouteImport } from './routes/sql-helpers.route'
 import { Route as ReconnectRouteRouteImport } from './routes/reconnect.route'
+import { Route as LakebaseRouteRouteImport } from './routes/lakebase.route'
 import { Route as DataVisualizationRouteRouteImport } from './routes/data-visualization.route'
 import { Route as ArrowAnalyticsRouteRouteImport } from './routes/arrow-analytics.route'
 import { Route as AnalyticsRouteRouteImport } from './routes/analytics.route'
@@ -36,6 +37,11 @@ const SqlHelpersRouteRoute = SqlHelpersRouteRouteImport.update({
 const ReconnectRouteRoute = ReconnectRouteRouteImport.update({
   id: '/reconnect',
   path: '/reconnect',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LakebaseRouteRoute = LakebaseRouteRouteImport.update({
+  id: '/lakebase',
+  path: '/lakebase',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DataVisualizationRouteRoute = DataVisualizationRouteRouteImport.update({
@@ -64,6 +70,7 @@ export interface FileRoutesByFullPath {
   '/analytics': typeof AnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
+  '/lakebase': typeof LakebaseRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
@@ -74,6 +81,7 @@ export interface FileRoutesByTo {
   '/analytics': typeof AnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
+  '/lakebase': typeof LakebaseRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
@@ -85,6 +93,7 @@ export interface FileRoutesById {
   '/analytics': typeof AnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
+  '/lakebase': typeof LakebaseRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
@@ -97,6 +106,7 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/arrow-analytics'
     | '/data-visualization'
+    | '/lakebase'
     | '/reconnect'
     | '/sql-helpers'
     | '/telemetry'
@@ -107,6 +117,7 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/arrow-analytics'
     | '/data-visualization'
+    | '/lakebase'
     | '/reconnect'
     | '/sql-helpers'
     | '/telemetry'
@@ -117,6 +128,7 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/arrow-analytics'
     | '/data-visualization'
+    | '/lakebase'
     | '/reconnect'
     | '/sql-helpers'
     | '/telemetry'
@@ -128,6 +140,7 @@ export interface RootRouteChildren {
   AnalyticsRouteRoute: typeof AnalyticsRouteRoute
   ArrowAnalyticsRouteRoute: typeof ArrowAnalyticsRouteRoute
   DataVisualizationRouteRoute: typeof DataVisualizationRouteRoute
+  LakebaseRouteRoute: typeof LakebaseRouteRoute
   ReconnectRouteRoute: typeof ReconnectRouteRoute
   SqlHelpersRouteRoute: typeof SqlHelpersRouteRoute
   TelemetryRouteRoute: typeof TelemetryRouteRoute
@@ -162,6 +175,13 @@ declare module '@tanstack/react-router' {
       path: '/reconnect'
       fullPath: '/reconnect'
       preLoaderRoute: typeof ReconnectRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/lakebase': {
+      id: '/lakebase'
+      path: '/lakebase'
+      fullPath: '/lakebase'
+      preLoaderRoute: typeof LakebaseRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/data-visualization': {
@@ -200,6 +220,7 @@ const rootRouteChildren: RootRouteChildren = {
   AnalyticsRouteRoute: AnalyticsRouteRoute,
   ArrowAnalyticsRouteRoute: ArrowAnalyticsRouteRoute,
   DataVisualizationRouteRoute: DataVisualizationRouteRoute,
+  LakebaseRouteRoute: LakebaseRouteRoute,
   ReconnectRouteRoute: ReconnectRouteRoute,
   SqlHelpersRouteRoute: SqlHelpersRouteRoute,
   TelemetryRouteRoute: TelemetryRouteRoute,
