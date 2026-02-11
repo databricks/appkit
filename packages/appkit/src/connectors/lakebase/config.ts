@@ -141,12 +141,6 @@ export function getUsernameSync(config: Partial<LakebasePoolConfig>): string {
     return pgUser;
   }
 
-  // Priority 3: DATABRICKS_CLIENT_ID (service principal)
-  const clientId = process.env.DATABRICKS_CLIENT_ID;
-  if (clientId) {
-    return clientId;
-  }
-
   throw ConfigurationError.missingEnvVar(
     "PGUSER, DATABRICKS_CLIENT_ID, or config.user",
   );

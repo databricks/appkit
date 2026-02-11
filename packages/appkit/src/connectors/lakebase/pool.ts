@@ -1,4 +1,5 @@
 import pg from "pg";
+import { SpanKind, SpanStatusCode } from "@/telemetry";
 import { createLogger } from "../../logging/logger";
 import { getLakebasePgConfig } from "./pool-config";
 import { attachPoolMetrics, initTelemetry } from "./telemetry";
@@ -69,40 +70,72 @@ export function createLakebasePool(
   // Attach pool-level telemetry metrics (gauges, error counter, and error logging)
   attachPoolMetrics(pool, telemetry);
 
-  // Wrap pool.query to track query duration.
+  // Wrap pool.query to track query duration and create trace spans.
   // pg.Pool.query has 15+ overloads that are difficult to type-preserve,
   // so we use a loosely-typed wrapper and cast back.
+  // We use the tracer directly (not provider.startActiveSpan) because the
+  // provider wrapper is async-only, while pool.query supports both promise
+  // and callback paths.
   const origQuery = pool.query.bind(pool);
-  pool.query = function queryWithMetrics(
+  const tracer = telemetry.provider.getTracer();
+  pool.query = function queryWithTelemetry(
     ...args: unknown[]
   ): ReturnType<typeof pool.query> {
-    const start = Date.now();
     const firstArg = args[0];
     const sql =
       typeof firstArg === "string"
         ? firstArg
         : (firstArg as { text?: string } | undefined)?.text;
-    const attrs = {
+    const metricAttrs = {
       "db.statement": sql ? sql.substring(0, 100) : "unknown",
     };
 
-    const result = (
-      origQuery as (...a: unknown[]) => Promise<unknown> | undefined
-    )(...args);
+    return tracer.startActiveSpan(
+      "lakebase.query",
+      {
+        kind: SpanKind.CLIENT,
+        attributes: {
+          "db.system": "lakebase",
+          "db.statement": sql ? sql.substring(0, 500) : "unknown",
+        },
+      },
+      (span) => {
+        const start = Date.now();
 
-    // Promise-based query: record duration on completion
-    if (result && typeof result.finally === "function") {
-      return result.finally(() => {
-        telemetry.queryDuration.record(Date.now() - start, attrs);
-      }) as unknown as ReturnType<typeof pool.query>;
-    }
+        const result = (
+          origQuery as (...a: unknown[]) => Promise<unknown> | undefined
+        )(...args);
 
-    // Callback-based query (void return): duration is approximate
-    telemetry.queryDuration.record(Date.now() - start, attrs);
-    return result as ReturnType<typeof pool.query>;
+        // Promise-based query: record duration and end span on completion
+        if (result && typeof result.then === "function") {
+          return (result as Promise<{ rowCount?: number | null }>)
+            .then(
+              (res) => {
+                span.setAttribute("db.rows_affected", res?.rowCount ?? 0);
+                span.setStatus({ code: SpanStatusCode.OK });
+                return res;
+              },
+              (err: Error) => {
+                span.recordException(err);
+                span.setStatus({ code: SpanStatusCode.ERROR });
+                throw err;
+              },
+            )
+            .finally(() => {
+              telemetry.queryDuration.record(Date.now() - start, metricAttrs);
+              span.end();
+            }) as unknown as ReturnType<typeof pool.query>;
+        }
+
+        // Callback-based query (void return): duration is approximate
+        telemetry.queryDuration.record(Date.now() - start, metricAttrs);
+        span.end();
+        return result as ReturnType<typeof pool.query>;
+      },
+    ) as ReturnType<typeof pool.query>;
   } as typeof pool.query;
 
-  logger.info(
+  logger.debug(
     "Created Lakebase connection pool for %s@%s/%s",
     poolConfig.user,
     poolConfig.host,
