@@ -21,7 +21,7 @@ describe("Manifest Loader", () => {
             {
               type: ResourceType.SQL_WAREHOUSE,
               alias: "warehouse",
-              resource_key: "sql-warehouse",
+              resourceKey: "sql-warehouse",
               description: "Test warehouse",
               permission: "CAN_USE",
               fields: {
@@ -200,7 +200,7 @@ describe("Manifest Loader", () => {
             {
               type: ResourceType.SECRET,
               alias: "Secret",
-              resource_key: "secret",
+              resourceKey: "secret",
               description: "Optional secrets",
               permission: "READ",
               fields: {
@@ -244,7 +244,7 @@ describe("Manifest Loader", () => {
             {
               type: ResourceType.SQL_WAREHOUSE,
               alias: "warehouse",
-              resource_key: "warehouse",
+              resourceKey: "warehouse",
               description: "Test warehouse",
               permission: "CAN_USE",
               fields: { id: { env: "TEST_WAREHOUSE_ID" } },
@@ -280,7 +280,7 @@ describe("Manifest Loader", () => {
             {
               type: ResourceType.SECRET,
               alias: "secrets",
-              resource_key: "secrets",
+              resourceKey: "secrets",
               description: "Optional secrets",
               permission: "READ",
               fields: {
@@ -317,7 +317,7 @@ describe("Manifest Loader", () => {
             {
               type: ResourceType.SQL_WAREHOUSE,
               alias: "warehouse",
-              resource_key: "warehouse",
+              resourceKey: "warehouse",
               description: "Test warehouse",
               permission: "CAN_USE",
               fields: { id: { env: "TEST_WAREHOUSE_ID" } },
@@ -327,7 +327,7 @@ describe("Manifest Loader", () => {
             {
               type: ResourceType.SECRET,
               alias: "secrets",
-              resource_key: "secrets",
+              resourceKey: "secrets",
               description: "Optional secrets",
               permission: "READ",
               fields: {
@@ -361,7 +361,7 @@ describe("Manifest Loader", () => {
             {
               type: ResourceType.DATABASE,
               alias: "cache",
-              resource_key: "cache",
+              resourceKey: "cache",
               description: "Database for caching",
               permission: "CAN_CONNECT_AND_CREATE",
               fields: {

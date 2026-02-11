@@ -128,7 +128,7 @@ const EXCLUDED_FROM_PROXY = new Set([
  *       resources.push({
  *         type: ResourceType.DATABASE,
  *         alias: 'cache',
- *         resource_key: 'database',
+ *         resourceKey: 'database',
  *         description: 'Cache storage for query results',
  *         permission: 'CAN_CONNECT_AND_CREATE',
  *         fields: {

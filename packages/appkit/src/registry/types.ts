@@ -136,7 +136,7 @@ export interface ResourceRequirement {
   alias: string;
 
   /** Stable key for machine use (env naming, composite keys, app.yaml). Required. */
-  resource_key: string;
+  resourceKey: string;
 
   /** Human-readable description of why this resource is needed */
   description: string;

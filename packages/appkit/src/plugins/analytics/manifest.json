@@ -8,7 +8,7 @@
       {
         "type": "sql_warehouse",
         "alias": "SQL Warehouse",
-        "resource_key": "sql-warehouse",
+        "resourceKey": "sql-warehouse",
         "description": "SQL Warehouse for executing analytics queries",
         "permission": "CAN_USE",
         "fields": {

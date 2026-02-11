@@ -208,7 +208,7 @@
       "required": [
         "type",
         "alias",
-        "resource_key",
+        "resourceKey",
         "description",
         "permission",
         "fields"
@@ -223,7 +223,7 @@
           "description": "Unique alias for this resource within the plugin (UI/display)",
           "examples": ["SQL Warehouse", "Secret", "Vector search index"]
         },
-        "resource_key": {
+        "resourceKey": {
           "type": "string",
           "pattern": "^[a-z][a-zA-Z0-9_]*$",
           "description": "Stable key for machine use (env naming, composite keys, app.yaml).",

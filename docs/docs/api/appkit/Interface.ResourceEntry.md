@@ -100,17 +100,17 @@ Whether the resource has been resolved (all field env vars set)
 
 ***
 
-### resource\_key
+### resourceKey
 
 ```ts
-resource_key: string;
+resourceKey: string;
 ```
 
 Stable key for machine use (env naming, composite keys, app.yaml). Required.
 
 #### Inherited from
 
-[`ResourceRequirement`](Interface.ResourceRequirement.md).[`resource_key`](Interface.ResourceRequirement.md#resource_key)
+[`ResourceRequirement`](Interface.ResourceRequirement.md).[`resourceKey`](Interface.ResourceRequirement.md#resourcekey)
 
 ***
 

@@ -7,7 +7,7 @@ function getResourceRequirements(plugin: PluginConstructor): {
   fields: Record<string, ResourceFieldEntry>;
   permission: ResourcePermission;
   required: boolean;
-  resource_key: string;
+  resourceKey: string;
   type: ResourceType;
 }[];
 ```

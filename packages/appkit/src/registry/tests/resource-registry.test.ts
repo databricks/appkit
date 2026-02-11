@@ -17,7 +17,7 @@ describe("ResourceRegistry", () => {
       registry.register("analytics", {
         type: ResourceType.DATABASE,
         alias: "cache",
-        resource_key: "cache",
+        resourceKey: "cache",
         description: "Database for caching",
         permission: "CAN_CONNECT_AND_CREATE",
         required: true,
@@ -52,7 +52,7 @@ describe("ResourceRegistry", () => {
       registry.register("plugin-a", {
         type: ResourceType.SECRET,
         alias: "creds",
-        resource_key: "creds",
+        resourceKey: "creds",
         description: "Credentials",
         permission: "READ",
         required: true,
@@ -64,7 +64,7 @@ describe("ResourceRegistry", () => {
       registry.register("plugin-b", {
         type: ResourceType.SECRET,
         alias: "creds",
-        resource_key: "creds",
+        resourceKey: "creds",
         description: "Credentials",
         permission: "READ",
         required: false,
@@ -88,7 +88,7 @@ describe("ResourceRegistry", () => {
       registry.register("plugin-a", {
         type: ResourceType.SQL_WAREHOUSE,
         alias: "warehouse",
-        resource_key: "warehouse",
+        resourceKey: "warehouse",
         description: "Warehouse",
         permission: "CAN_USE",
         required: true,
@@ -99,7 +99,7 @@ describe("ResourceRegistry", () => {
       registry.register("plugin-b", {
         type: ResourceType.SQL_WAREHOUSE,
         alias: "warehouse",
-        resource_key: "warehouse",
+        resourceKey: "warehouse",
         description: "Warehouse",
         permission: "CAN_USE",
         required: false,
@@ -124,7 +124,7 @@ describe("ResourceRegistry", () => {
       registry.register("analytics", {
         type: ResourceType.DATABASE,
         alias: "cache",
-        resource_key: "cache",
+        resourceKey: "cache",
         description: "Cache database",
         permission: "CAN_CONNECT_AND_CREATE",
         required: true,
@@ -161,7 +161,7 @@ describe("ResourceRegistry", () => {
       registry.register("analytics", {
         type: ResourceType.DATABASE,
         alias: "cache",
-        resource_key: "cache",
+        resourceKey: "cache",
         description: "Cache database",
         permission: "CAN_CONNECT_AND_CREATE",
         required: true,
@@ -189,7 +189,7 @@ describe("ResourceRegistry", () => {
       registry.register("analytics", {
         type: ResourceType.DATABASE,
         alias: "cache",
-        resource_key: "cache",
+        resourceKey: "cache",
         description: "Cache database",
         permission: "CAN_CONNECT_AND_CREATE",
         required: true,
@@ -217,7 +217,7 @@ describe("ResourceRegistry", () => {
       registry.register("analytics", {
         type: ResourceType.SECRET,
         alias: "creds",
-        resource_key: "creds",
+        resourceKey: "creds",
         description: "Credentials",
         permission: "READ",
         required: true,
@@ -243,7 +243,7 @@ describe("ResourceRegistry", () => {
       registry.register("analytics", {
         type: ResourceType.SQL_WAREHOUSE,
         alias: "warehouse",
-        resource_key: "warehouse",
+        resourceKey: "warehouse",
         description: "Warehouse",
         permission: "CAN_USE",
         required: true,

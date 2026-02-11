@@ -60,10 +60,10 @@ Whether this resource is required (true) or optional (false)
 
 ***
 
-### resource\_key
+### resourceKey
 
 ```ts
-resource_key: string;
+resourceKey: string;
 ```
 
 Stable key for machine use (env naming, composite keys, app.yaml). Required.
