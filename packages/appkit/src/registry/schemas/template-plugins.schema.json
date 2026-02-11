@@ -60,6 +60,11 @@
           "description": "NPM package name that provides this plugin",
           "examples": ["@databricks/appkit", "@my-org/custom-plugin"]
         },
+        "template_mandatory": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, this plugin is mandatory for the template and cannot be deselected during CLI init. The user will only be prompted to configure its resources. When absent or false, the plugin is optional and the user can choose whether to include it."
+        },
         "resources": {
           "type": "object",
           "required": ["required", "optional"],

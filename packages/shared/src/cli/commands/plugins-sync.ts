@@ -42,6 +42,8 @@ interface PluginManifest {
  */
 interface TemplatePlugin extends Omit<PluginManifest, "config"> {
   package: string;
+  /** When true, this plugin is mandatory for the template and cannot be deselected during CLI init. */
+  template_mandatory?: boolean;
 }
 
 /**
@@ -174,7 +176,7 @@ function runPluginsSync(options: { write?: boolean; output?: string }) {
   if (options.write) {
     fs.writeFileSync(
       outputPath,
-      JSON.stringify(templateManifest, null, 2) + "\n",
+      `${JSON.stringify(templateManifest, null, 2)}\n`,
     );
     console.log(`\n✓ Wrote ${outputPath}`);
   } else {
