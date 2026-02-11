@@ -98,15 +98,6 @@ export function createTokenRefreshCallback(
 
           cachedToken = result.token;
           tokenExpiresAt = result.expiresAt;
-
-          const duration = Date.now() - startTime;
-          const expiresAt = new Date(result.expiresAt).toISOString();
-          logger.info(
-            "OAuth token refreshed successfully in %dms (expires at %s)",
-            duration,
-            expiresAt,
-          );
-
           return cachedToken;
         } catch (error) {
           logger.error("Failed to fetch OAuth token: %O", {

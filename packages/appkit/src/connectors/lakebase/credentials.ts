@@ -54,31 +54,14 @@ export async function generateDatabaseCredential(
 ): Promise<DatabaseCredential> {
   const apiPath = "/api/2.0/postgres/credentials";
 
-  // Get workspace ID from execution context or environment
-  let workspaceId: string | undefined;
   try {
-    const { getWorkspaceId } = await import("../../context");
-    workspaceId = await getWorkspaceId();
-  } catch {
-    workspaceId = process.env.DATABRICKS_WORKSPACE_ID;
-  }
-
-  try {
-    const headers = new Headers({
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    });
-
-    // Manually add X-Databricks-Org-Id header if workspace ID is available
-    // The SDK's automatic header addition doesn't work because config.workspaceId isn't set
-    if (workspaceId) {
-      headers.set("X-Databricks-Org-Id", workspaceId);
-    }
-
     const response = await workspaceClient.apiClient.request({
       path: apiPath,
       method: "POST",
-      headers,
+      headers: new Headers({
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      }),
       raw: false,
       payload: request,
     });
