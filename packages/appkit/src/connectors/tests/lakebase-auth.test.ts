@@ -1,11 +1,11 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import { ApiClient, Config } from "@databricks/sdk-experimental";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { generateDatabaseCredential } from "../lakebase/credentials";
 import {
   type DatabaseCredential,
   RequestedClaimsPermissionSet,
-} from "../lakebase/auth-types";
-import { generateDatabaseCredential } from "../lakebase/utils";
+} from "../lakebase/types";
 
 // Mock the @databricks/sdk-experimental module
 vi.mock("@databricks/sdk-experimental", () => {

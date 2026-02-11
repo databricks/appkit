@@ -2,9 +2,9 @@ import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import { SpanStatusCode } from "@/telemetry";
 import { createLogger } from "../../logging/logger";
 import { getWorkspaceClient } from "./config";
+import { generateDatabaseCredential } from "./credentials";
 import type { DriverTelemetry } from "./telemetry";
 import type { LakebasePoolConfig } from "./types";
-import { generateDatabaseCredential } from "./utils";
 
 const logger = createLogger("connectors:lakebase:token");
 

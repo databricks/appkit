@@ -28,7 +28,6 @@ export {
   generateDatabaseCredential,
   getLakebaseOrmConfig,
   getLakebasePgConfig,
-  getLakebasePoolConfig,
   getWorkspaceClient,
 } from "./connectors/lakebase";
 export { getExecutionContext } from "./context";

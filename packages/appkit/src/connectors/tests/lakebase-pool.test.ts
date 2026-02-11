@@ -33,8 +33,9 @@ vi.mock("pg", () => {
 });
 
 // Mock generateDatabaseCredential
-vi.mock("../lakebase/utils", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../lakebase/utils")>();
+vi.mock("../lakebase/credentials", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../lakebase/credentials")>();
   return {
     ...actual,
     generateDatabaseCredential: vi.fn(),
@@ -112,7 +113,7 @@ describe("createLakebasePool", () => {
     process.env.PGUSER = "test-user@example.com";
 
     // Setup mock for generateDatabaseCredential
-    const utils = await import("../lakebase/utils");
+    const utils = await import("../lakebase/credentials");
     mockGenerateCredential = utils.generateDatabaseCredential as any;
     mockGenerateCredential.mockResolvedValue({
       token: "test-oauth-token-12345",

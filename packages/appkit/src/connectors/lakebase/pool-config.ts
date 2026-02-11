@@ -3,7 +3,26 @@ import { getUsernameSync, parsePoolConfig } from "./config";
 import { type DriverTelemetry, initTelemetry } from "./telemetry";
 import { createTokenRefreshCallback } from "./token-refresh";
 import type { LakebasePoolConfig } from "./types";
-import { mapSslConfig } from "./utils";
+
+/**
+ * Map an SSL mode string to the corresponding `pg` SSL configuration.
+ *
+ * - `"require"` -- SSL enabled with certificate verification
+ * - `"prefer"`  -- SSL enabled without certificate verification (try SSL, accept any cert)
+ * - `"disable"` -- SSL disabled
+ */
+function mapSslConfig(
+  sslMode: "require" | "prefer" | "disable",
+): pg.PoolConfig["ssl"] {
+  switch (sslMode) {
+    case "require":
+      return { rejectUnauthorized: true };
+    case "prefer":
+      return { rejectUnauthorized: false };
+    case "disable":
+      return false;
+  }
+}
 
 /**
  * Get Lakebase connection configuration for PostgreSQL clients.
@@ -103,13 +122,4 @@ export function getLakebaseOrmConfig(config?: Partial<LakebasePoolConfig>) {
         : { rejectUnauthorized: ssl.rejectUnauthorized }
       : false,
   };
-}
-
-/**
- * @deprecated Use getLakebasePgConfig() instead. This function will be removed in a future version.
- */
-export function getLakebasePoolConfig(
-  config?: Partial<LakebasePoolConfig>,
-): pg.PoolConfig {
-  return getLakebasePgConfig(config);
 }
