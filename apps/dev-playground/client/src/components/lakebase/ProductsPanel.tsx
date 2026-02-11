@@ -6,7 +6,6 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-  Checkbox,
   Input,
 } from "@databricks/appkit-ui/react";
 import { Database, Loader2, Package } from "lucide-react";
@@ -28,7 +27,6 @@ interface CreateProductRequest {
   category: string;
   price: number;
   stock: number;
-  useObo?: boolean;
 }
 
 interface HealthStatus {
@@ -42,7 +40,6 @@ export function ProductsPanel() {
   const categoryId = useId();
   const priceId = useId();
   const stockId = useId();
-  const oboCheckboxId = useId();
 
   const {
     data: products,
@@ -84,7 +81,6 @@ export function ProductsPanel() {
   };
 
   const [formData, setFormData] = useState(generateRandomProduct());
-  const [useObo, setUseObo] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,7 +89,6 @@ export function ProductsPanel() {
       category: formData.category,
       price: Number(formData.price),
       stock: Number(formData.stock),
-      useObo,
     });
 
     if (result) {
@@ -215,21 +210,6 @@ export function ProductsPanel() {
                 />
               </div>
             </div>
-            <div className="flex items-center space-x-2 pt-2">
-              <Checkbox
-                id={oboCheckboxId}
-                checked={useObo}
-                onCheckedChange={(checked) => setUseObo(checked === true)}
-                disabled
-              />
-              <label
-                htmlFor={oboCheckboxId}
-                className="text-sm font-medium leading-none cursor-not-allowed opacity-70"
-                title="OBO authorization is not yet available for Lakebase (postgres scope not supported by the platform)"
-              >
-                Use on-behalf-of-user authorization (coming soon)
-              </label>
-            </div>
             <Button type="submit" disabled={creating} className="w-full">
               {creating ? (
                 <>
@@ -296,9 +276,6 @@ export function ProductsPanel() {
                     <th className="text-right py-2 px-4 text-sm font-medium text-muted-foreground">
                       Stock
                     </th>
-                    <th className="text-left py-2 px-4 text-sm font-medium text-muted-foreground">
-                      Created By
-                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -314,9 +291,6 @@ export function ProductsPanel() {
                       </td>
                       <td className="py-3 px-4 text-sm text-right">
                         {product.stock}
-                      </td>
-                      <td className="py-3 px-4 text-sm font-mono text-xs truncate max-w-[200px]">
-                        {product.created_by || "unknown"}
                       </td>
                     </tr>
                   ))}

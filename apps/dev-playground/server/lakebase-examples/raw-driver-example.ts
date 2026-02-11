@@ -1,4 +1,4 @@
-import { createLakebasePool, getOboConnection } from "@databricks/appkit";
+import { createLakebasePool } from "@databricks/appkit";
 import type { Pool } from "pg";
 import type { IAppRouter } from "shared";
 
@@ -13,7 +13,6 @@ let pool: Pool;
  * - Schema and table creation (idempotent)
  * - Basic CRUD operations
  * - Connection health checking
- * - On-behalf-of-user (OBO) authentication for user-specific operations
  */
 
 interface Product {
@@ -33,14 +32,13 @@ export async function setup() {
   // Create schema and table (idempotent)
   await pool.query(`
     CREATE SCHEMA IF NOT EXISTS raw_example;
-    
+
     CREATE TABLE IF NOT EXISTS raw_example.products (
       id SERIAL PRIMARY KEY,
       name VARCHAR(255) NOT NULL,
       category VARCHAR(100),
       price DECIMAL(10, 2),
       stock INTEGER DEFAULT 0,
-      created_by VARCHAR(255),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -74,54 +72,14 @@ export function registerRoutes(router: IAppRouter, basePath: string) {
   // POST /api/lakebase-examples/raw/products - Create new product
   router.post(`${basePath}/products`, async (req, res) => {
     try {
-      const { name, category, price, stock, useObo } = req.body;
+      const { name, category, price, stock } = req.body;
 
-      if (useObo) {
-        // User authorization path - execute as visiting user
-        const userToken = req.headers["x-forwarded-access-token"];
-        if (!userToken) {
-          return res.status(401).json({
-            error:
-              "User authorization requires x-forwarded-access-token header",
-          });
-        }
-
-        // Extract user email from Databricks Apps headers
-        const userEmail =
-          (req.headers["x-forwarded-email"] as string) ||
-          (req.headers["x-forwarded-preferred-username"] as string) ||
-          "unknown-user";
-
-        // Create OBO connection using user's token
-        const client = await getOboConnection({
-          userAccessToken: userToken as string,
-          endpoint: process.env.LAKEBASE_ENDPOINT ?? "",
-          host: process.env.PGHOST ?? "",
-          database: process.env.PGDATABASE ?? "",
-        });
-
-        try {
-          const result = await client.query<Product>(
-            `INSERT INTO raw_example.products (name, category, price, stock, created_by) 
-             VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-            [name, category, Number(price), Number(stock), userEmail],
-          );
-          res.json(result.rows[0]);
-        } finally {
-          await client.end();
-        }
-      } else {
-        // App authorization path - execute as service principal
-        const servicePrincipal =
-          process.env.DATABRICKS_CLIENT_ID || "app-service-principal";
-
-        const result = await pool.query<Product>(
-          `INSERT INTO raw_example.products (name, category, price, stock, created_by) 
-           VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-          [name, category, Number(price), Number(stock), servicePrincipal],
-        );
-        res.json(result.rows[0]);
-      }
+      const result = await pool.query<Product>(
+        `INSERT INTO raw_example.products (name, category, price, stock)
+           VALUES ($1, $2, $3, $4) RETURNING *`,
+        [name, category, Number(price), Number(stock)],
+      );
+      res.json(result.rows[0]);
     } catch (error: unknown) {
       const err = error as Error;
       res.status(500).json({
@@ -207,20 +165,11 @@ async function seedProducts(pool: Pool) {
     },
   ];
 
-  const servicePrincipal =
-    process.env.DATABRICKS_CLIENT_ID || "app-service-principal";
-
   for (const product of products) {
     await pool.query(
-      `INSERT INTO raw_example.products (name, category, price, stock, created_by) 
-       VALUES ($1, $2, $3, $4, $5)`,
-      [
-        product.name,
-        product.category,
-        product.price,
-        product.stock,
-        servicePrincipal,
-      ],
+      `INSERT INTO raw_example.products (name, category, price, stock)
+       VALUES ($1, $2, $3, $4)`,
+      [product.name, product.category, product.price, product.stock],
     );
   }
 }
