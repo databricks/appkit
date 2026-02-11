@@ -7,10 +7,16 @@
     "required": [
       {
         "type": "sql_warehouse",
-        "alias": "warehouse",
+        "alias": "SQL Warehouse",
+        "resourceKey": "sql-warehouse",
         "description": "SQL Warehouse for executing analytics queries",
         "permission": "CAN_USE",
-        "env": "DATABRICKS_WAREHOUSE_ID"
+        "fields": {
+          "id": {
+            "env": "DATABRICKS_WAREHOUSE_ID",
+            "description": "SQL Warehouse ID"
+          }
+        }
       }
     ],
     "optional": []

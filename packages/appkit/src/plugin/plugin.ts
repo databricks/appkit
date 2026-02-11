@@ -128,9 +128,13 @@ const EXCLUDED_FROM_PROXY = new Set([
  *       resources.push({
  *         type: ResourceType.DATABASE,
  *         alias: 'cache',
+ *         resourceKey: 'database',
  *         description: 'Cache storage for query results',
  *         permission: 'CAN_CONNECT_AND_CREATE',
- *         env: 'DATABRICKS_DATABASE_ID',
+ *         fields: {
+ *           instance_name: { env: 'DATABRICKS_CACHE_INSTANCE' },
+ *           database_name: { env: 'DATABRICKS_CACHE_DB' },
+ *         },
  *         required: true  // Mark as required at runtime
  *       });
  *     }

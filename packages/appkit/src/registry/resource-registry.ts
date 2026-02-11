@@ -147,19 +147,8 @@ export class ResourceRegistry {
       }
     }
 
-    // Handle env variable merging
-    let env = existing.env;
-    if (newResource.env && newResource.env !== existing.env) {
-      // If env vars differ, prefer existing but note the conflict
-      if (existing.env) {
-        // Keep existing env, could log a warning here
-        env = existing.env;
-      } else {
-        env = newResource.env;
-      }
-    } else if (newResource.env) {
-      env = newResource.env;
-    }
+    // Prefer existing fields when both have them (same type+alias)
+    const fields = existing.fields ?? newResource.fields;
 
     return {
       ...existing,
@@ -167,7 +156,7 @@ export class ResourceRegistry {
       permission,
       required,
       description,
-      env,
+      fields,
     };
   }
 
@@ -241,8 +230,8 @@ export class ResourceRegistry {
   /**
    * Validates all registered resources against the environment.
    *
-   * Checks each resource's environment variable to determine if it's resolved.
-   * Updates the `resolved` and `value` fields on each resource entry.
+   * Checks each resource's field environment variables to determine if it's resolved.
+   * Updates the `resolved` and `values` fields on each resource entry.
    *
    * Only required resources affect the `valid` status - optional resources
    * are checked but don't cause validation failure.
@@ -255,7 +244,7 @@ export class ResourceRegistry {
    * const result = registry.validate();
    *
    * if (!result.valid) {
-   *   console.error("Missing resources:", result.missing.map(r => r.env));
+   *   console.error("Missing resources:", result.missing.map(r => Object.values(r.fields).map(f => f.env)));
    * }
    * ```
    */
@@ -263,48 +252,43 @@ export class ResourceRegistry {
     const missing: ResourceEntry[] = [];
 
     for (const entry of this.resources.values()) {
-      if (entry.env) {
-        const value = process.env[entry.env];
-        if (value) {
-          entry.resolved = true;
-          entry.value = value;
-          logger.debug(
-            "Resource %s:%s resolved from %s",
-            entry.type,
-            entry.alias,
-            entry.env,
-          );
+      const values: Record<string, string> = {};
+      let allSet = true;
+      for (const [fieldName, fieldDef] of Object.entries(entry.fields)) {
+        const val = process.env[fieldDef.env];
+        if (val !== undefined && val !== "") {
+          values[fieldName] = val;
         } else {
-          entry.resolved = false;
-          entry.value = undefined;
-
-          // Only required resources affect validation
-          if (entry.required) {
-            missing.push(entry);
-            logger.debug(
-              "Required resource %s:%s missing (env: %s)",
-              entry.type,
-              entry.alias,
-              entry.env,
-            );
-          } else {
-            logger.debug(
-              "Optional resource %s:%s not configured (env: %s)",
-              entry.type,
-              entry.alias,
-              entry.env,
-            );
-          }
+          allSet = false;
         }
-      } else {
-        // Resources without env vars are considered resolved
-        // (they may be provided through other means like config)
+      }
+      if (allSet) {
         entry.resolved = true;
+        entry.values = values;
         logger.debug(
-          "Resource %s:%s has no env var, marking as resolved",
+          "Resource %s:%s resolved from fields",
           entry.type,
           entry.alias,
         );
+      } else {
+        entry.resolved = false;
+        entry.values = Object.keys(values).length > 0 ? values : undefined;
+        if (entry.required) {
+          missing.push(entry);
+          logger.debug(
+            "Required resource %s:%s missing (fields: %s)",
+            entry.type,
+            entry.alias,
+            Object.keys(entry.fields).join(", "),
+          );
+        } else {
+          logger.debug(
+            "Optional resource %s:%s not configured (fields: %s)",
+            entry.type,
+            entry.alias,
+            Object.keys(entry.fields).join(", "),
+          );
+        }
       }
     }
 
@@ -327,7 +311,8 @@ export class ResourceRegistry {
     }
 
     const lines = missing.map((entry) => {
-      const envHint = entry.env ? ` (set ${entry.env})` : "";
+      const envVars = Object.values(entry.fields).map((f) => f.env);
+      const envHint = ` (set ${envVars.join(", ")})`;
       return `  - ${entry.type}:${entry.alias} [${entry.plugin}]${envHint}`;
     });
 

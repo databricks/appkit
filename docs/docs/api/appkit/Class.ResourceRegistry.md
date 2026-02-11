@@ -163,8 +163,8 @@ validate(): ValidationResult;
 
 Validates all registered resources against the environment.
 
-Checks each resource's environment variable to determine if it's resolved.
-Updates the `resolved` and `value` fields on each resource entry.
+Checks each resource's field environment variables to determine if it's resolved.
+Updates the `resolved` and `values` fields on each resource entry.
 
 Only required resources affect the `valid` status - optional resources
 are checked but don't cause validation failure.
@@ -182,7 +182,7 @@ const registry = ResourceRegistry.getInstance();
 const result = registry.validate();
 
 if (!result.valid) {
-  console.error("Missing resources:", result.missing.map(r => r.env));
+  console.error("Missing resources:", result.missing.map(r => Object.values(r.fields).map(f => f.env)));
 }
 ```
 

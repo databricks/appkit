@@ -234,7 +234,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
               type: r.type,
               alias: r.alias,
               plugin: r.plugin,
-              env: r.env,
+              envVars: Object.values(r.fields).map((f) => f.env),
             })),
           },
         });

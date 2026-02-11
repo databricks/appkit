@@ -1,0 +1,179 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
+  "title": "AppKit Template Plugins Manifest",
+  "description": "Aggregated plugin manifest for AppKit templates. Read by Databricks CLI during init to discover available plugins and their resource requirements.",
+  "type": "object",
+  "required": ["version", "plugins"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Reference to the JSON Schema for validation"
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Schema version for the template plugins manifest"
+    },
+    "plugins": {
+      "type": "object",
+      "description": "Map of plugin name to plugin manifest with package source",
+      "additionalProperties": {
+        "$ref": "#/$defs/templatePlugin"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "templatePlugin": {
+      "type": "object",
+      "required": [
+        "name",
+        "displayName",
+        "description",
+        "package",
+        "resources"
+      ],
+      "description": "Plugin manifest with package source information",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Plugin identifier. Must be lowercase, start with a letter, and contain only letters, numbers, and hyphens.",
+          "examples": ["analytics", "server", "my-custom-plugin"]
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable display name for UI and CLI",
+          "examples": ["Analytics Plugin", "Server Plugin"]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Brief description of what the plugin does",
+          "examples": ["SQL query execution against Databricks SQL Warehouses"]
+        },
+        "package": {
+          "type": "string",
+          "minLength": 1,
+          "description": "NPM package name that provides this plugin",
+          "examples": ["@databricks/appkit", "@my-org/custom-plugin"]
+        },
+        "requiredByTemplate": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, this plugin is required by the template and cannot be deselected during CLI init. The user will only be prompted to configure its resources. When absent or false, the plugin is optional and the user can choose whether to include it."
+        },
+        "resources": {
+          "type": "object",
+          "required": ["required", "optional"],
+          "description": "Databricks resource requirements for this plugin",
+          "properties": {
+            "required": {
+              "type": "array",
+              "description": "Resources that must be available for the plugin to function",
+              "items": {
+                "$ref": "#/$defs/resourceRequirement"
+              }
+            },
+            "optional": {
+              "type": "array",
+              "description": "Resources that enhance functionality but are not mandatory",
+              "items": {
+                "$ref": "#/$defs/resourceRequirement"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "resourceType": {
+      "type": "string",
+      "enum": [
+        "secret",
+        "job",
+        "sql_warehouse",
+        "serving_endpoint",
+        "volume",
+        "vector_search_index",
+        "uc_function",
+        "uc_connection",
+        "database",
+        "genie_space",
+        "experiment",
+        "app"
+      ],
+      "description": "Type of Databricks resource"
+    },
+    "resourcePermission": {
+      "type": "string",
+      "description": "Permission level required for the resource. Valid values depend on resource type.",
+      "examples": ["CAN_USE", "CAN_MANAGE", "READ", "WRITE", "EXECUTE"]
+    },
+    "resourceFieldEntry": {
+      "type": "object",
+      "required": ["env"],
+      "properties": {
+        "env": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "Environment variable name for this field",
+          "examples": ["DATABRICKS_CACHE_INSTANCE", "SECRET_SCOPE"]
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description for this field"
+        }
+      },
+      "additionalProperties": false
+    },
+    "resourceRequirement": {
+      "type": "object",
+      "required": [
+        "type",
+        "alias",
+        "resourceKey",
+        "description",
+        "permission",
+        "fields"
+      ],
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/resourceType"
+        },
+        "alias": {
+          "type": "string",
+          "pattern": "^[a-z][a-zA-Z0-9_]*$",
+          "description": "Unique alias for this resource within the plugin (UI/display)",
+          "examples": ["SQL Warehouse", "Secret", "Vector search index"]
+        },
+        "resourceKey": {
+          "type": "string",
+          "pattern": "^[a-z][a-zA-Z0-9_]*$",
+          "description": "Stable key for machine use (env naming, composite keys, app.yaml).",
+          "examples": ["sql-warehouse", "database", "secret"]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable description of why this resource is needed"
+        },
+        "permission": {
+          "$ref": "#/$defs/resourcePermission"
+        },
+        "fields": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/resourceFieldEntry"
+          },
+          "minProperties": 1,
+          "description": "Map of field name to env and optional description. Single-value types use one key (e.g. id); multi-value (database, secret) use multiple (e.g. instance_name, database_name or scope, key)."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
