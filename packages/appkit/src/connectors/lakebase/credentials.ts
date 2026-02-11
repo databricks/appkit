@@ -1,36 +1,12 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
-import type pg from "pg";
 import { ValidationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import type {
   DatabaseCredential,
   GenerateDatabaseCredentialRequest,
-} from "./auth-types";
+} from "./types";
 
-const logger = createLogger("connectors:lakebase:utils");
-
-/**
- * Map an SSL mode string to the corresponding `pg` SSL configuration.
- *
- * - `"require"` -- SSL enabled with certificate verification
- * - `"prefer"`  -- SSL enabled without certificate verification (try SSL, accept any cert)
- * - `"disable"` -- SSL disabled
- *
- * @param sslMode - The SSL mode to map
- * @returns pg-compatible SSL config value
- */
-export function mapSslConfig(
-  sslMode: "require" | "prefer" | "disable",
-): pg.PoolConfig["ssl"] {
-  switch (sslMode) {
-    case "require":
-      return { rejectUnauthorized: true };
-    case "prefer":
-      return { rejectUnauthorized: false };
-    case "disable":
-      return false;
-  }
-}
+const logger = createLogger("connectors:lakebase:credentials");
 
 /**
  * Generate OAuth credentials for Postgres database connection using the proper Postgres API.

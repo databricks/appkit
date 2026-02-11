@@ -187,12 +187,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Function.getLakebasePoolConfig",
-          label: "getLakebasePoolConfig",
-          className: "typedoc-sidebar-item-deprecated"
-        },
-        {
-          type: "doc",
           id: "api/appkit/Function.getWorkspaceClient",
           label: "getWorkspaceClient"
         },

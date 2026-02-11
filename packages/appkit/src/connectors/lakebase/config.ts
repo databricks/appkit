@@ -1,8 +1,16 @@
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import type pg from "pg";
 import { ConfigurationError, ValidationError } from "../../errors";
-import { lakebaseDefaults } from "./defaults";
 import type { LakebasePoolConfig } from "./types";
+
+/** Default configuration values for the Lakebase connector */
+const defaults = {
+  port: 5432,
+  sslMode: "require" as const,
+  max: 10,
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 10_000,
+};
 
 const VALID_SSL_MODES = ["require", "disable", "prefer"] as const;
 type SslMode = (typeof VALID_SSL_MODES)[number];
@@ -49,7 +57,7 @@ export function parsePoolConfig(
   const portStr = process.env.PGPORT;
   const port =
     userConfig?.port ??
-    (portStr ? Number.parseInt(portStr, 10) : lakebaseDefaults.port);
+    (portStr ? Number.parseInt(portStr, 10) : defaults.port);
 
   if (Number.isNaN(port)) {
     throw ValidationError.invalidValue("port", portStr, "a number");
@@ -58,15 +66,14 @@ export function parsePoolConfig(
   // Get SSL mode (optional, default from defaults)
   const rawSslMode = userConfig?.sslMode ?? process.env.PGSSLMODE ?? undefined;
 
-  const sslMode = validateSslMode(rawSslMode) ?? lakebaseDefaults.sslMode;
+  const sslMode = validateSslMode(rawSslMode) ?? defaults.sslMode;
 
   // Pool options (with defaults)
-  const max = userConfig?.max ?? lakebaseDefaults.max;
+  const max = userConfig?.max ?? defaults.max;
   const idleTimeoutMillis =
-    userConfig?.idleTimeoutMillis ?? lakebaseDefaults.idleTimeoutMillis;
+    userConfig?.idleTimeoutMillis ?? defaults.idleTimeoutMillis;
   const connectionTimeoutMillis =
-    userConfig?.connectionTimeoutMillis ??
-    lakebaseDefaults.connectionTimeoutMillis;
+    userConfig?.connectionTimeoutMillis ?? defaults.connectionTimeoutMillis;
 
   return {
     endpoint,
