@@ -40,6 +40,8 @@
   },
   "dependencies": {
     "@ast-grep/napi": "^0.37.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
     "commander": "^12.1.0"
   }
 }

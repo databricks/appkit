@@ -167,6 +167,13 @@ export interface ResourceEntry extends ResourceRequirement {
 
   /** Resolved value per field name. Populated by validate() when all field env vars are set. */
   values?: Record<string, string>;
+
+  /**
+   * Per-plugin permission tracking.
+   * Maps plugin name to the permission it originally requested.
+   * Populated when multiple plugins share the same resource.
+   */
+  permissionSources?: Record<string, ResourcePermission>;
 }
 
 /**

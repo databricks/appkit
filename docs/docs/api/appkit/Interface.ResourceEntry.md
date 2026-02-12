@@ -66,6 +66,18 @@ Required permission level for the resource
 
 ***
 
+### permissionSources?
+
+```ts
+optional permissionSources: Record<string, ResourcePermission>;
+```
+
+Per-plugin permission tracking.
+Maps plugin name to the permission it originally requested.
+Populated when multiple plugins share the same resource.
+
+***
+
 ### plugin
 
 ```ts

@@ -54,7 +54,8 @@ enforceValidation(): ValidationResult;
 Validates all registered resources and enforces the result.
 
 - In production: throws a [ConfigurationError](Class.ConfigurationError.md) if any required resources are missing.
-- In development (`NODE_ENV=development`): logs a warning but continues.
+- In development (`NODE_ENV=development`): logs a warning but continues, unless
+  `APPKIT_STRICT_VALIDATION=true` is set, in which case throws like production.
 - When all resources are valid: logs a debug message with the count.
 
 #### Returns
@@ -65,7 +66,7 @@ ValidationResult with validity status, missing resources, and all resources
 
 #### Throws
 
-In production when required resources are missing
+In production when required resources are missing, or in dev when APPKIT_STRICT_VALIDATION=true
 
 ***
 
@@ -234,6 +235,29 @@ if (!result.valid) {
   console.error("Missing resources:", result.missing.map(r => Object.values(r.fields).map(f => f.env)));
 }
 ```
+
+***
+
+### formatDevWarningBanner()
+
+```ts
+static formatDevWarningBanner(missing: ResourceEntry[]): string;
+```
+
+Formats a highly visible warning banner for dev-mode missing resources.
+Uses box drawing to ensure the message is impossible to miss in scrolling logs.
+
+#### Parameters
+
+| Parameter | Type | Description |
+| ------ | ------ | ------ |
+| `missing` | [`ResourceEntry`](Interface.ResourceEntry.md)[] | Array of missing resource entries |
+
+#### Returns
+
+`string`
+
+Formatted banner string
 
 ***
 

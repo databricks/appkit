@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ResourceRegistry } from "../resource-registry";
 import { ResourceType } from "../types";
 
@@ -208,6 +208,191 @@ describe("ResourceRegistry", () => {
       const entry = registry.get("database", "cache");
       expect(entry?.resolved).toBe(false);
       expect(entry?.values).toEqual({ instance_name: "my-instance" });
+    });
+  });
+
+  describe("permission escalation tracking", () => {
+    it("should track permissionSources for a single plugin", () => {
+      const registry = ResourceRegistry.getInstance();
+      registry.register("plugin-a", {
+        type: ResourceType.SQL_WAREHOUSE,
+        alias: "warehouse",
+        resourceKey: "warehouse",
+        description: "Warehouse",
+        permission: "CAN_USE",
+        required: true,
+        fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } },
+      });
+
+      const entry = registry.get("sql_warehouse", "warehouse");
+      expect(entry?.permissionSources).toEqual({ "plugin-a": "CAN_USE" });
+    });
+
+    it("should track permissionSources when merging multiple plugins", () => {
+      const registry = ResourceRegistry.getInstance();
+      registry.register("plugin-a", {
+        type: ResourceType.SQL_WAREHOUSE,
+        alias: "warehouse",
+        resourceKey: "warehouse",
+        description: "Warehouse",
+        permission: "CAN_USE",
+        required: true,
+        fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } },
+      });
+      registry.register("plugin-b", {
+        type: ResourceType.SQL_WAREHOUSE,
+        alias: "warehouse",
+        resourceKey: "warehouse",
+        description: "Warehouse",
+        permission: "CAN_MANAGE",
+        required: true,
+        fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } },
+      });
+
+      const entry = registry.get("sql_warehouse", "warehouse");
+      expect(entry?.permission).toBe("CAN_MANAGE");
+      expect(entry?.permissionSources).toEqual({
+        "plugin-a": "CAN_USE",
+        "plugin-b": "CAN_MANAGE",
+      });
+    });
+
+    it("should warn when permission is escalated during merge", () => {
+      const registry = ResourceRegistry.getInstance();
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      registry.register("plugin-a", {
+        type: ResourceType.SQL_WAREHOUSE,
+        alias: "warehouse",
+        resourceKey: "warehouse",
+        description: "Warehouse",
+        permission: "CAN_USE",
+        required: true,
+        fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } },
+      });
+      registry.register("plugin-b", {
+        type: ResourceType.SQL_WAREHOUSE,
+        alias: "warehouse",
+        resourceKey: "warehouse",
+        description: "Warehouse",
+        permission: "CAN_MANAGE",
+        required: true,
+        fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } },
+      });
+
+      // The logger uses debug/console under the hood — verify final permission
+      const entry = registry.get("sql_warehouse", "warehouse");
+      expect(entry?.permission).toBe("CAN_MANAGE");
+
+      warnSpy.mockRestore();
+    });
+
+    it("should not escalate when permissions are identical", () => {
+      const registry = ResourceRegistry.getInstance();
+      registry.register("plugin-a", {
+        type: ResourceType.SQL_WAREHOUSE,
+        alias: "warehouse",
+        resourceKey: "warehouse",
+        description: "Warehouse",
+        permission: "CAN_USE",
+        required: true,
+        fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } },
+      });
+      registry.register("plugin-b", {
+        type: ResourceType.SQL_WAREHOUSE,
+        alias: "warehouse",
+        resourceKey: "warehouse",
+        description: "Warehouse",
+        permission: "CAN_USE",
+        required: false,
+        fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } },
+      });
+
+      const entry = registry.get("sql_warehouse", "warehouse");
+      expect(entry?.permission).toBe("CAN_USE");
+      expect(entry?.permissionSources).toEqual({
+        "plugin-a": "CAN_USE",
+        "plugin-b": "CAN_USE",
+      });
+    });
+  });
+
+  describe("enforceValidation with APPKIT_STRICT_VALIDATION", () => {
+    it("should throw in dev when APPKIT_STRICT_VALIDATION=true", () => {
+      const registry = ResourceRegistry.getInstance();
+      registry.register("analytics", {
+        type: ResourceType.SQL_WAREHOUSE,
+        alias: "warehouse",
+        resourceKey: "warehouse",
+        description: "Warehouse",
+        permission: "CAN_USE",
+        required: true,
+        fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } },
+      });
+      delete process.env.DATABRICKS_WAREHOUSE_ID;
+
+      const origNodeEnv = process.env.NODE_ENV;
+      const origStrict = process.env.APPKIT_STRICT_VALIDATION;
+      process.env.NODE_ENV = "development";
+      process.env.APPKIT_STRICT_VALIDATION = "true";
+      try {
+        expect(() => registry.enforceValidation()).toThrow();
+      } finally {
+        process.env.NODE_ENV = origNodeEnv;
+        process.env.APPKIT_STRICT_VALIDATION = origStrict ?? "";
+      }
+    });
+
+    it("should only warn in dev when APPKIT_STRICT_VALIDATION is not set", () => {
+      const registry = ResourceRegistry.getInstance();
+      registry.register("analytics", {
+        type: ResourceType.SQL_WAREHOUSE,
+        alias: "warehouse",
+        resourceKey: "warehouse",
+        description: "Warehouse",
+        permission: "CAN_USE",
+        required: true,
+        fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } },
+      });
+      delete process.env.DATABRICKS_WAREHOUSE_ID;
+
+      const origNodeEnv = process.env.NODE_ENV;
+      delete process.env.APPKIT_STRICT_VALIDATION;
+      process.env.NODE_ENV = "development";
+      try {
+        const result = registry.enforceValidation();
+        expect(result.valid).toBe(false);
+      } finally {
+        process.env.NODE_ENV = origNodeEnv;
+      }
+    });
+  });
+
+  describe("enforceValidation dev warning banner", () => {
+    it("should format a visible banner for dev mode", () => {
+      const banner = ResourceRegistry.formatDevWarningBanner([
+        {
+          type: ResourceType.SQL_WAREHOUSE,
+          alias: "warehouse",
+          resourceKey: "warehouse",
+          description: "Warehouse",
+          permission: "CAN_USE",
+          fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } },
+          required: true,
+          plugin: "analytics",
+          resolved: false,
+        },
+      ]);
+
+      expect(banner).toContain("MISSING REQUIRED RESOURCES");
+      expect(banner).toContain("would fail in production");
+      expect(banner).toContain("sql_warehouse:warehouse");
+      expect(banner).toContain("DATABRICKS_WAREHOUSE_ID");
+      expect(banner).toContain("analytics");
+      expect(banner).toContain(".env");
+      // Should have box borders
+      expect(banner).toContain("====");
+      expect(banner).toContain("|");
     });
   });
 

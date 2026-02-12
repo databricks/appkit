@@ -92,15 +92,34 @@ export interface PluginManifest {
 }
 
 /**
+ * Defines a single field for a resource.
+ * Each field maps to its own environment variable and optional description.
+ * Single-value types use one key (e.g. id); multi-value types (database, secret)
+ * use multiple (e.g. instance_name, database_name or scope, key).
+ */
+export interface ResourceFieldEntry {
+  /** Environment variable name for this field */
+  env: string;
+  /** Human-readable description for this field */
+  description?: string;
+}
+
+/**
  * Resource requirement declaration (imported from registry types).
  * Re-exported here to avoid circular dependencies.
  */
 export interface ResourceRequirement {
   type: string;
   alias: string;
+  /** Stable key for machine use (env naming, composite keys, app.yaml). */
+  resourceKey: string;
   description: string;
   permission: string;
-  env?: string;
+  /**
+   * Map of field name to env and optional description.
+   * Single-value types use one key (e.g. id); multi-value (database, secret) use multiple keys.
+   */
+  fields: Record<string, ResourceFieldEntry>;
   required: boolean;
 }
 

@@ -104,11 +104,12 @@ export class ResourceRegistry {
       const merged = this.mergeResources(existing, plugin, resource);
       this.resources.set(key, merged);
     } else {
-      // Create new resource entry
+      // Create new resource entry with permission source tracking
       const entry: ResourceEntry = {
         ...resource,
         plugin,
         resolved: false,
+        permissionSources: { [plugin]: resource.permission },
       };
       this.resources.set(key, entry);
     }
@@ -189,11 +190,30 @@ export class ResourceRegistry {
       plugins.push(newPlugin);
     }
 
-    // Use the most permissive permission
+    // Track per-plugin permission sources
+    const permissionSources: Record<string, ResourcePermission> = {
+      ...(existing.permissionSources ?? {}),
+      [newPlugin]: newResource.permission,
+    };
+
+    // Use the most permissive permission, but warn when escalating
     const permission = getMostPermissivePermission(
       existing.permission,
       newResource.permission,
     );
+
+    if (permission !== existing.permission) {
+      logger.warn(
+        'Resource %s:%s permission escalated from "%s" to "%s" due to plugin "%s" ' +
+          "(previously requested by: %s). Review plugin permissions to ensure least-privilege.",
+        existing.type,
+        existing.alias,
+        existing.permission,
+        permission,
+        newPlugin,
+        existing.plugin,
+      );
+    }
 
     // Mark as required if any plugin requires it
     const required = existing.required || newResource.required;
@@ -217,6 +237,7 @@ export class ResourceRegistry {
       ...existing,
       plugin: plugins.join(", "),
       permission,
+      permissionSources,
       required,
       description,
       fields,
@@ -366,27 +387,28 @@ export class ResourceRegistry {
    * Validates all registered resources and enforces the result.
    *
    * - In production: throws a {@link ConfigurationError} if any required resources are missing.
-   * - In development (`NODE_ENV=development`): logs a warning but continues.
+   * - In development (`NODE_ENV=development`): logs a warning but continues, unless
+   *   `APPKIT_STRICT_VALIDATION=true` is set, in which case throws like production.
    * - When all resources are valid: logs a debug message with the count.
    *
    * @returns ValidationResult with validity status, missing resources, and all resources
-   * @throws {ConfigurationError} In production when required resources are missing
+   * @throws {ConfigurationError} In production when required resources are missing, or in dev when APPKIT_STRICT_VALIDATION=true
    */
   public enforceValidation(): ValidationResult {
     const validation = this.validate();
     const isDevelopment = process.env.NODE_ENV === "development";
+    const strictValidation =
+      process.env.APPKIT_STRICT_VALIDATION === "true" ||
+      process.env.APPKIT_STRICT_VALIDATION === "1";
 
     if (!validation.valid) {
       const errorMessage = ResourceRegistry.formatMissingResources(
         validation.missing,
       );
 
-      if (isDevelopment) {
-        logger.warn(
-          "Missing resources detected (continuing in dev mode):\n%s",
-          errorMessage,
-        );
-      } else {
+      const shouldThrow = !isDevelopment || strictValidation;
+
+      if (shouldThrow) {
         throw new ConfigurationError(errorMessage, {
           context: {
             missingResources: validation.missing.map((r) => ({
@@ -398,6 +420,12 @@ export class ResourceRegistry {
           },
         });
       }
+
+      // Dev mode without strict: use a visually prominent box so the warning can't be missed
+      const banner = ResourceRegistry.formatDevWarningBanner(
+        validation.missing,
+      );
+      logger.warn("\n%s", banner);
     } else if (this.size() > 0) {
       logger.debug("All %d resources validated successfully", this.size());
     }
@@ -423,5 +451,39 @@ export class ResourceRegistry {
     });
 
     return `Missing required resources:\n${lines.join("\n")}`;
+  }
+
+  /**
+   * Formats a highly visible warning banner for dev-mode missing resources.
+   * Uses box drawing to ensure the message is impossible to miss in scrolling logs.
+   *
+   * @param missing - Array of missing resource entries
+   * @returns Formatted banner string
+   */
+  public static formatDevWarningBanner(missing: ResourceEntry[]): string {
+    const contentLines: string[] = [
+      "MISSING REQUIRED RESOURCES (dev mode — would fail in production)",
+      "",
+    ];
+
+    for (const entry of missing) {
+      const envVars = Object.values(entry.fields).map((f) => f.env);
+      contentLines.push(
+        `  ${entry.type}:${entry.alias}  (plugin: ${entry.plugin})`,
+      );
+      contentLines.push(`    Set: ${envVars.join(", ")}`);
+    }
+
+    contentLines.push("");
+    contentLines.push(
+      "Add these to your .env file or environment to suppress this warning.",
+    );
+
+    const maxLen = Math.max(...contentLines.map((l) => l.length));
+    const border = "=".repeat(maxLen + 4);
+
+    const boxed = contentLines.map((line) => `| ${line.padEnd(maxLen)} |`);
+
+    return [border, ...boxed, border].join("\n");
   }
 }

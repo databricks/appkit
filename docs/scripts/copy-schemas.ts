@@ -11,10 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const SCHEMAS_SOURCE = join(
-  __dirname,
-  "../../packages/appkit/src/registry/schemas",
-);
+const SCHEMAS_SOURCE = join(__dirname, "../../packages/shared/src/schemas");
 const SCHEMAS_DEST = join(__dirname, "../static/schemas");
 
 function copySchemas() {

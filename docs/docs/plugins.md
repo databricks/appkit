@@ -230,9 +230,13 @@ class MyPlugin extends Plugin {
         {
           type: "secret",
           alias: "apiKey",
+          resourceKey: "apiKey",
           description: "API key for external service",
           permission: "READ",
-          env: "MY_API_KEY"
+          fields: {
+            scope: { env: "MY_SECRET_SCOPE", description: "Secret scope" },
+            key: { env: "MY_API_KEY", description: "Secret key name" }
+          }
         }
       ],
       optional: []
@@ -285,11 +289,11 @@ class MyPlugin extends Plugin<MyPluginConfig> {
     description: "A plugin with optional caching",
     resources: {
       required: [
-        { type: "sql_warehouse", alias: "warehouse", description: "Query execution", permission: "CAN_USE" }
+        { type: "sql_warehouse", alias: "warehouse", resourceKey: "sqlWarehouse", description: "Query execution", permission: "CAN_USE", fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } } }
       ],
       optional: [
         // Listed as optional in manifest for static analysis
-        { type: "database", alias: "cache", description: "Query result caching (if enabled)", permission: "CAN_CONNECT_AND_CREATE" }
+        { type: "database", alias: "cache", resourceKey: "cache", description: "Query result caching (if enabled)", permission: "CAN_CONNECT_AND_CREATE", fields: { instance_name: { env: "DATABRICKS_CACHE_INSTANCE" }, database_name: { env: "DATABRICKS_CACHE_DB" } } }
       ]
     }
   };
@@ -302,9 +306,13 @@ class MyPlugin extends Plugin<MyPluginConfig> {
       resources.push({
         type: "database",
         alias: "cache",
+        resourceKey: "cache",
         description: "Query result caching",
         permission: "CAN_CONNECT_AND_CREATE",
-        env: "DATABRICKS_DATABASE_ID",
+        fields: {
+          instance_name: { env: "DATABRICKS_CACHE_INSTANCE" },
+          database_name: { env: "DATABRICKS_CACHE_DB" },
+        },
         required: true  // Mark as required at runtime
       });
     }
