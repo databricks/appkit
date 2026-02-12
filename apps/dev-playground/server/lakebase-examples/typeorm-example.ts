@@ -1,4 +1,4 @@
-import { getLakebaseOrmConfig } from "@databricks/appkit";
+import { createLakebasePool, getLakebaseOrmConfig } from "@databricks/appkit";
 import type { IAppRouter } from "shared";
 import {
   Column,
@@ -44,6 +44,12 @@ class Task {
 let dataSource: DataSource;
 
 export async function setup() {
+  // Create schema if not exists (TypeORM's synchronize doesn't create schemas)
+  // See https://github.com/typeorm/typeorm/issues/3192
+  const pool = createLakebasePool();
+  await pool.query("CREATE SCHEMA IF NOT EXISTS typeorm_example");
+  await pool.end();
+
   dataSource = new DataSource({
     type: "postgres",
     ...getLakebaseOrmConfig(),

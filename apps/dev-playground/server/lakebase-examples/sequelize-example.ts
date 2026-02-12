@@ -44,6 +44,7 @@ class Order
 let sequelize: Sequelize;
 
 export async function setup() {
+  // @ts-expect-error password property supports a function for Lakehouse OAuth tokens
   sequelize = new Sequelize({
     dialect: "postgres",
     ...getLakebaseOrmConfig(),
