@@ -1,4 +1,5 @@
 import type express from "express";
+import type { JSONSchema7 } from "json-schema";
 
 /** Base plugin interface. */
 export interface BasePlugin {
@@ -81,11 +82,7 @@ export interface PluginManifest {
     optional: Omit<ResourceRequirement, "required">[];
   };
   config?: {
-    schema: {
-      type: string;
-      properties?: Record<string, unknown>;
-      [key: string]: unknown;
-    };
+    schema: JSONSchema7;
   };
   author?: string;
   version?: string;

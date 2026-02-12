@@ -34,7 +34,6 @@ export { analytics, server } from "./plugins";
 // Registry types and utilities for plugin manifests
 export type {
   ConfigSchema,
-  ConfigSchemaProperty,
   PluginManifest,
   ResourceEntry,
   ResourceFieldEntry,

@@ -70,6 +70,7 @@
   },
   "devDependencies": {
     "@types/express": "^4.17.25",
+    "@types/json-schema": "^7.0.15",
     "@types/pg": "^8.15.6",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.1.1"

@@ -183,35 +183,15 @@ export interface ValidationResult {
   all: ResourceEntry[];
 }
 
-/**
- * Configuration schema definition for plugin config.
- * Uses JSON Schema format for validation and documentation.
- */
-export interface ConfigSchema {
-  type: "object" | "array" | "string" | "number" | "boolean";
-  properties?: Record<string, ConfigSchemaProperty>;
-  items?: ConfigSchema;
-  required?: string[];
-  additionalProperties?: boolean;
-  /** Allow additional JSON Schema properties */
-  [key: string]: unknown;
-}
+import type { JSONSchema7 } from "json-schema";
 
 /**
- * Individual property definition in a config schema.
+ * Configuration schema definition for plugin config.
+ * Re-exported from the standard JSON Schema Draft 7 types.
+ *
+ * @see {@link https://json-schema.org/draft-07/json-schema-release-notes | JSON Schema Draft 7}
  */
-export interface ConfigSchemaProperty {
-  type: "object" | "array" | "string" | "number" | "boolean";
-  description?: string;
-  default?: unknown;
-  enum?: unknown[];
-  properties?: Record<string, ConfigSchemaProperty>;
-  items?: ConfigSchemaProperty;
-  minimum?: number;
-  maximum?: number;
-  minLength?: number;
-  maxLength?: number;
-}
+export type ConfigSchema = JSONSchema7;
 
 /**
  * Plugin manifest that declares metadata and resource requirements.
