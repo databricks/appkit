@@ -31,8 +31,6 @@ plugin architecture, and React integration.
 | ------ | ------ |
 | [BasePluginConfig](Interface.BasePluginConfig.md) | Base configuration interface for AppKit plugins |
 | [CacheConfig](Interface.CacheConfig.md) | Configuration for caching |
-| [ConfigSchema](Interface.ConfigSchema.md) | Configuration schema definition for plugin config. Uses JSON Schema format for validation and documentation. |
-| [ConfigSchemaProperty](Interface.ConfigSchemaProperty.md) | Individual property definition in a config schema. |
 | [ITelemetry](Interface.ITelemetry.md) | Plugin-facing interface for OpenTelemetry instrumentation. Provides a thin abstraction over OpenTelemetry APIs for plugins. |
 | [PluginManifest](Interface.PluginManifest.md) | Plugin manifest that declares metadata and resource requirements. Attached to plugin classes as a static property. |
 | [ResourceEntry](Interface.ResourceEntry.md) | Internal representation of a resource in the registry. Extends ResourceRequirement with resolution state and plugin ownership. |
@@ -46,6 +44,7 @@ plugin architecture, and React integration.
 
 | Type Alias | Description |
 | ------ | ------ |
+| [ConfigSchema](TypeAlias.ConfigSchema.md) | Configuration schema definition for plugin config. Re-exported from the standard JSON Schema Draft 7 types. |
 | [IAppRouter](TypeAlias.IAppRouter.md) | Express router type for plugin route registration |
 | [ResourcePermission](TypeAlias.ResourcePermission.md) | Union of all possible permission levels across all resource types. |
 

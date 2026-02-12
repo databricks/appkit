@@ -20,7 +20,7 @@ const SUPPORTED_KINDS = new Set([
   "typealias",
   "function",
   "variable",
-  "enum",
+  "enumeration",
 ]);
 
 function flattenSidebarWithKind(sidebarConfig: any): any[] {

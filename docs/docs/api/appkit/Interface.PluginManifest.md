@@ -19,7 +19,7 @@ Optional metadata for community plugins
 
 ```ts
 optional config: {
-  schema: ConfigSchema;
+  schema: JSONSchema7;
 };
 ```
 
@@ -29,7 +29,7 @@ Defines the shape and validation rules for plugin config.
 #### schema
 
 ```ts
-schema: ConfigSchema;
+schema: JSONSchema7;
 ```
 
 ***

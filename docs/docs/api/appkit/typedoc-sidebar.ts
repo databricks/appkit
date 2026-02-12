@@ -89,16 +89,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Interface.ConfigSchema",
-          label: "ConfigSchema"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.ConfigSchemaProperty",
-          label: "ConfigSchemaProperty"
-        },
-        {
-          type: "doc",
           id: "api/appkit/Interface.ITelemetry",
           label: "ITelemetry"
         },
@@ -143,6 +133,11 @@ const typedocSidebar: SidebarsConfig = {
       type: "category",
       label: "Type Aliases",
       items: [
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.ConfigSchema",
+          label: "ConfigSchema"
+        },
         {
           type: "doc",
           id: "api/appkit/TypeAlias.IAppRouter",

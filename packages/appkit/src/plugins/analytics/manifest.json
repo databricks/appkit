@@ -29,15 +29,6 @@
           "type": "number",
           "default": 30000,
           "description": "Query execution timeout in milliseconds"
-        },
-        "queriesDir": {
-          "type": "string",
-          "description": "Directory containing SQL query files"
-        },
-        "cacheEnabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable query result caching"
         }
       }
     }
