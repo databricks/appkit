@@ -1,99 +1,135 @@
 import type { PluginConstructor } from "shared";
 import { ConfigurationError } from "../errors";
 import { createLogger } from "../logging/logger";
-import type { PluginManifest } from "./types";
+import type {
+  PluginManifest,
+  ResourcePermission,
+  ResourceRequirement,
+} from "./types";
+import { PERMISSIONS_BY_TYPE, ResourceType } from "./types";
 
 const logger = createLogger("manifest-loader");
 
+/** Loose resource from shared/manifest (string type and permission). */
+interface LooseResource {
+  type: string;
+  alias: string;
+  resourceKey: string;
+  description: string;
+  permission: string;
+  fields: Record<string, { env: string; description?: string }>;
+}
+
+function normalizeType(s: string): ResourceType {
+  const v = Object.values(ResourceType).find((x) => x === s);
+  if (v !== undefined) return v;
+  throw new ConfigurationError(
+    `Invalid resource type: "${s}". Valid: ${Object.values(ResourceType).join(", ")}`,
+  );
+}
+
+function normalizePermission(
+  type: ResourceType,
+  s: string,
+): ResourcePermission {
+  const allowed = PERMISSIONS_BY_TYPE[type];
+  if (allowed.includes(s as ResourcePermission)) return s as ResourcePermission;
+  throw new ConfigurationError(
+    `Invalid permission "${s}" for type ${type}. Valid: ${allowed.join(", ")}`,
+  );
+}
+
+function normalizeResource(r: LooseResource): ResourceRequirement {
+  const type = normalizeType(r.type);
+  const permission = normalizePermission(type, r.permission);
+  return {
+    ...r,
+    type,
+    permission,
+    required: false,
+  };
+}
+
 /**
  * Loads and validates the manifest from a plugin constructor.
- *
- * All plugins must have a static `manifest` property that declares their
- * metadata and resource requirements.
+ * Normalizes string type/permission to strict ResourceType/ResourcePermission.
  *
  * @param plugin - The plugin constructor class
- * @returns The validated plugin manifest
- * @throws {ConfigurationError} If the manifest is missing or invalid
- *
- * @example
- * ```typescript
- * import { AnalyticsPlugin } from '@databricks/appkit';
- * import { getPluginManifest } from './manifest-loader';
- *
- * const manifest = getPluginManifest(AnalyticsPlugin);
- * console.log('Required resources:', manifest.resources.required);
- * ```
+ * @returns The validated, normalized plugin manifest
+ * @throws {ConfigurationError} If the manifest is missing, invalid, or has invalid resource type/permission
  */
 export function getPluginManifest(plugin: PluginConstructor): PluginManifest {
   const pluginName = plugin.name || "unknown";
 
-  try {
-    // Check for static manifest property
-    if (!plugin.manifest) {
-      throw new ConfigurationError(
-        `Plugin ${pluginName} is missing a manifest. All plugins must declare a static manifest property.`,
-      );
-    }
-
-    // Validate manifest structure
-    const manifest = plugin.manifest;
-
-    if (!manifest.name || typeof manifest.name !== "string") {
-      throw new ConfigurationError(
-        `Plugin ${pluginName} manifest has missing or invalid 'name' field`,
-      );
-    }
-
-    if (!manifest.displayName || typeof manifest.displayName !== "string") {
-      throw new ConfigurationError(
-        `Plugin ${manifest.name} manifest has missing or invalid 'displayName' field`,
-      );
-    }
-
-    if (!manifest.description || typeof manifest.description !== "string") {
-      throw new ConfigurationError(
-        `Plugin ${manifest.name} manifest has missing or invalid 'description' field`,
-      );
-    }
-
-    if (!manifest.resources) {
-      throw new ConfigurationError(
-        `Plugin ${manifest.name} manifest is missing 'resources' field`,
-      );
-    }
-
-    if (!Array.isArray(manifest.resources.required)) {
-      throw new ConfigurationError(
-        `Plugin ${manifest.name} manifest has invalid 'resources.required' field (expected array)`,
-      );
-    }
-
-    if (
-      manifest.resources.optional &&
-      !Array.isArray(manifest.resources.optional)
-    ) {
-      throw new ConfigurationError(
-        `Plugin ${manifest.name} manifest has invalid 'resources.optional' field (expected array)`,
-      );
-    }
-
-    logger.debug(
-      "Loaded manifest for plugin %s: %d required resources, %d optional resources",
-      manifest.name,
-      manifest.resources.required.length,
-      manifest.resources.optional?.length || 0,
-    );
-
-    // Cast to appkit PluginManifest type (structurally compatible, just more specific types)
-    return manifest as unknown as PluginManifest;
-  } catch (error) {
-    if (error instanceof ConfigurationError) {
-      throw error;
-    }
+  if (!plugin.manifest) {
     throw new ConfigurationError(
-      `Error loading manifest from plugin ${pluginName}: ${error}`,
+      `Plugin ${pluginName} is missing a manifest. All plugins must declare a static manifest property.`,
     );
   }
+
+  const raw = plugin.manifest;
+
+  if (!raw.name || typeof raw.name !== "string") {
+    throw new ConfigurationError(
+      `Plugin ${pluginName} manifest has missing or invalid 'name' field`,
+    );
+  }
+
+  if (!raw.displayName || typeof raw.displayName !== "string") {
+    throw new ConfigurationError(
+      `Plugin ${raw.name} manifest has missing or invalid 'displayName' field`,
+    );
+  }
+
+  if (!raw.description || typeof raw.description !== "string") {
+    throw new ConfigurationError(
+      `Plugin ${raw.name} manifest has missing or invalid 'description' field`,
+    );
+  }
+
+  if (!raw.resources) {
+    throw new ConfigurationError(
+      `Plugin ${raw.name} manifest is missing 'resources' field`,
+    );
+  }
+
+  if (!Array.isArray(raw.resources.required)) {
+    throw new ConfigurationError(
+      `Plugin ${raw.name} manifest has invalid 'resources.required' field (expected array)`,
+    );
+  }
+
+  if (
+    raw.resources.optional !== undefined &&
+    !Array.isArray(raw.resources.optional)
+  ) {
+    throw new ConfigurationError(
+      `Plugin ${raw.name} manifest has invalid 'resources.optional' field (expected array)`,
+    );
+  }
+
+  const required = raw.resources.required.map((r) => {
+    const norm = normalizeResource(r as LooseResource);
+    const { required: _, ...rest } = norm;
+    return rest;
+  });
+  const optional = (raw.resources.optional || []).map((r) => {
+    const norm = normalizeResource(r as LooseResource);
+    const { required: _, ...rest } = norm;
+    return rest;
+  });
+
+  logger.debug(
+    "Loaded manifest for plugin %s: %d required resources, %d optional resources",
+    raw.name,
+    required.length,
+    optional.length,
+  );
+
+  return {
+    ...raw,
+    resources: { required, optional },
+  };
 }
 
 /**

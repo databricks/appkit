@@ -5,9 +5,7 @@ function getPluginManifest(plugin: PluginConstructor): PluginManifest;
 ```
 
 Loads and validates the manifest from a plugin constructor.
-
-All plugins must have a static `manifest` property that declares their
-metadata and resource requirements.
+Normalizes string type/permission to strict ResourceType/ResourcePermission.
 
 ## Parameters
 
@@ -19,18 +17,8 @@ metadata and resource requirements.
 
 [`PluginManifest`](Interface.PluginManifest.md)
 
-The validated plugin manifest
+The validated, normalized plugin manifest
 
 ## Throws
 
-If the manifest is missing or invalid
-
-## Example
-
-```typescript
-import { AnalyticsPlugin } from '@databricks/appkit';
-import { getPluginManifest } from './manifest-loader';
-
-const manifest = getPluginManifest(AnalyticsPlugin);
-console.log('Required resources:', manifest.resources.required);
-```
+If the manifest is missing, invalid, or has invalid resource type/permission

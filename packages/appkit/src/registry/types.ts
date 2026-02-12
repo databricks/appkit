@@ -114,6 +114,35 @@ export type ResourcePermission =
   | AppPermission;
 
 /**
+ * Permission hierarchy per resource type (weakest to strongest).
+ * Used to compare permissions when merging; higher index = more permissive.
+ * Unknown permissions are treated as less than any known permission.
+ */
+export const PERMISSION_HIERARCHY_BY_TYPE: Record<
+  ResourceType,
+  readonly ResourcePermission[]
+> = {
+  [ResourceType.SECRET]: ["READ", "WRITE", "MANAGE"],
+  [ResourceType.JOB]: ["CAN_VIEW", "CAN_MANAGE_RUN", "CAN_MANAGE"],
+  [ResourceType.SQL_WAREHOUSE]: ["CAN_USE", "CAN_MANAGE"],
+  [ResourceType.SERVING_ENDPOINT]: ["CAN_VIEW", "CAN_QUERY", "CAN_MANAGE"],
+  [ResourceType.VOLUME]: ["READ_VOLUME", "WRITE_VOLUME"],
+  [ResourceType.VECTOR_SEARCH_INDEX]: ["SELECT"],
+  [ResourceType.UC_FUNCTION]: ["EXECUTE"],
+  [ResourceType.UC_CONNECTION]: ["USE_CONNECTION"],
+  [ResourceType.DATABASE]: ["CAN_CONNECT_AND_CREATE"],
+  [ResourceType.GENIE_SPACE]: ["CAN_VIEW", "CAN_RUN", "CAN_EDIT", "CAN_MANAGE"],
+  [ResourceType.EXPERIMENT]: ["CAN_READ", "CAN_EDIT", "CAN_MANAGE"],
+  [ResourceType.APP]: ["CAN_USE"],
+} as const;
+
+/** Set of valid permissions per type (for validation). */
+export const PERMISSIONS_BY_TYPE: Record<
+  ResourceType,
+  readonly ResourcePermission[]
+> = PERMISSION_HIERARCHY_BY_TYPE;
+
+/**
  * Defines a single field for a resource. Each field has its own environment variable and optional description.
  * Single-value types use one key (e.g. id); multi-value types (database, secret) use multiple (e.g. instance_name, database_name or scope, key).
  */

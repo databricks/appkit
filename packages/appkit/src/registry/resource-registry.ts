@@ -1,9 +1,13 @@
 /**
- * Resource Registry Singleton
+ * Resource Registry
  *
  * Central registry that tracks all resource requirements across all plugins.
- * Provides global visibility into Databricks resources needed by the application
- * and handles deduplication when multiple plugins require the same resource.
+ * Provides visibility into Databricks resources needed by the application
+ * and handles deduplication when multiple plugins require the same resource
+ * (dedup key: type + resourceKey).
+ *
+ * Use `new ResourceRegistry()` for instance-scoped usage (e.g. createApp).
+ * getInstance() / resetInstance() remain for backward compatibility in tests.
  */
 
 import type { BasePluginConfig, PluginConstructor, PluginData } from "shared";
@@ -16,87 +20,54 @@ import type {
   ResourceRequirement,
   ValidationResult,
 } from "./types";
+import { PERMISSION_HIERARCHY_BY_TYPE, type ResourceType } from "./types";
 
 const logger = createLogger("resource-registry");
 
 /**
- * Permission hierarchy for merging logic.
- * Higher index = more permissive.
+ * Dedup key for registry: type + resourceKey (machine-stable).
+ * alias is for UI/display only.
  */
-const PERMISSION_HIERARCHY: ResourcePermission[] = [
-  "CAN_VIEW",
-  "READ",
-  "CAN_USE",
-  "WRITE",
-  "EXECUTE",
-  "CAN_MANAGE",
-];
+function getDedupKey(type: string, resourceKey: string): string {
+  return `${type}:${resourceKey}`;
+}
 
 /**
- * Returns the most permissive permission between two permissions.
+ * Returns the most permissive permission for a given resource type.
+ * Uses per-type hierarchy; unknown permissions are treated as least permissive.
  */
 function getMostPermissivePermission(
+  resourceType: ResourceType,
   p1: ResourcePermission,
   p2: ResourcePermission,
 ): ResourcePermission {
-  const index1 = PERMISSION_HIERARCHY.indexOf(p1);
-  const index2 = PERMISSION_HIERARCHY.indexOf(p2);
+  const hierarchy = PERMISSION_HIERARCHY_BY_TYPE[resourceType as ResourceType];
+  const index1 = hierarchy?.indexOf(p1) ?? -1;
+  const index2 = hierarchy?.indexOf(p2) ?? -1;
   return index1 > index2 ? p1 : p2;
 }
 
 /**
- * Generates a unique key for a resource based on type and alias.
- */
-function getResourceKey(type: string, alias: string): string {
-  return `${type}:${alias}`;
-}
-
-/**
  * Central registry for tracking plugin resource requirements.
- * Implements singleton pattern to ensure a single source of truth.
+ * Deduplication uses type + resourceKey (machine-stable); alias is for display only.
  */
 export class ResourceRegistry {
-  private static instance: ResourceRegistry | null = null;
   private resources: Map<string, ResourceEntry> = new Map();
 
   /**
-   * Private constructor to enforce singleton pattern.
-   */
-  private constructor() {}
-
-  /**
-   * Gets the singleton instance of the ResourceRegistry.
-   * Creates a new instance if one doesn't exist.
-   */
-  public static getInstance(): ResourceRegistry {
-    if (!ResourceRegistry.instance) {
-      ResourceRegistry.instance = new ResourceRegistry();
-    }
-    return ResourceRegistry.instance;
-  }
-
-  /**
-   * Resets the singleton instance.
-   * Primarily used for testing to ensure clean state between tests.
-   */
-  public static resetInstance(): void {
-    ResourceRegistry.instance = null;
-  }
-
-  /**
    * Registers a resource requirement for a plugin.
-   * If a resource with the same type+alias already exists, merges them:
+   * If a resource with the same type+resourceKey already exists, merges them:
    * - Combines plugin names (comma-separated)
-   * - Uses the most permissive permission
+   * - Uses the most permissive permission (per-type hierarchy)
    * - Marks as required if any plugin requires it
    * - Combines descriptions if they differ
-   * - Keeps the env variable (or merges if they differ)
+   * - Merges fields; warns when same field name uses different env vars
    *
    * @param plugin - Name of the plugin registering the resource
    * @param resource - Resource requirement specification
    */
   public register(plugin: string, resource: ResourceRequirement): void {
-    const key = getResourceKey(resource.type, resource.alias);
+    const key = getDedupKey(resource.type, resource.resourceKey);
     const existing = this.resources.get(key);
 
     if (existing) {
@@ -117,13 +88,10 @@ export class ResourceRegistry {
 
   /**
    * Collects and registers resource requirements from an array of plugins.
-   * For each plugin, loads its manifest to discover static resource declarations,
-   * then checks for runtime resource requirements via `getResourceRequirements()`.
-   *
-   * Plugins without manifests are silently skipped (allowed for legacy plugins
-   * or plugins that don't declare resources).
+   * For each plugin, loads its manifest (required) and runtime resource requirements.
    *
    * @param rawPlugins - Array of plugin data entries from createApp configuration
+   * @throws {ConfigurationError} If any plugin is missing a manifest or manifest is invalid
    */
   public collectResources(
     rawPlugins: PluginData<PluginConstructor, unknown, string>[],
@@ -132,46 +100,33 @@ export class ResourceRegistry {
       if (!pluginData?.plugin) continue;
 
       const pluginName = pluginData.name;
+      const manifest = getPluginManifest(pluginData.plugin);
 
-      try {
-        const manifest = getPluginManifest(pluginData.plugin);
-
-        // Register required resources
-        for (const resource of manifest.resources.required) {
-          this.register(pluginName, { ...resource, required: true });
-        }
-
-        // Register optional resources
-        for (const resource of manifest.resources.optional || []) {
-          this.register(pluginName, { ...resource, required: false });
-        }
-
-        // Check for runtime resource requirements
-        if (typeof pluginData.plugin.getResourceRequirements === "function") {
-          const runtimeResources = pluginData.plugin.getResourceRequirements(
-            pluginData.config as BasePluginConfig,
-          );
-          for (const resource of runtimeResources) {
-            // Cast from shared's ResourceRequirement to registry's ResourceRequirement
-            // The shared type has looser typing (string) vs registry (ResourceType enum)
-            this.register(pluginName, resource as ResourceRequirement);
-          }
-        }
-
-        logger.debug(
-          "Collected resources from plugin %s: %d total",
-          pluginName,
-          this.getByPlugin(pluginName).length,
-        );
-      } catch (error) {
-        // Plugin doesn't have a manifest - this is allowed for legacy plugins
-        // or plugins that don't declare resources
-        logger.debug(
-          "Plugin %s has no manifest or invalid manifest: %s",
-          pluginName,
-          error instanceof Error ? error.message : String(error),
-        );
+      // Register required resources
+      for (const resource of manifest.resources.required) {
+        this.register(pluginName, { ...resource, required: true });
       }
+
+      // Register optional resources
+      for (const resource of manifest.resources.optional || []) {
+        this.register(pluginName, { ...resource, required: false });
+      }
+
+      // Check for runtime resource requirements
+      if (typeof pluginData.plugin.getResourceRequirements === "function") {
+        const runtimeResources = pluginData.plugin.getResourceRequirements(
+          pluginData.config as BasePluginConfig,
+        );
+        for (const resource of runtimeResources) {
+          this.register(pluginName, resource as ResourceRequirement);
+        }
+      }
+
+      logger.debug(
+        "Collected resources from plugin %s: %d total",
+        pluginName,
+        this.getByPlugin(pluginName).length,
+      );
     }
   }
 
@@ -196,8 +151,9 @@ export class ResourceRegistry {
       [newPlugin]: newResource.permission,
     };
 
-    // Use the most permissive permission, but warn when escalating
+    // Use the most permissive permission for this resource type; warn when escalating
     const permission = getMostPermissivePermission(
+      existing.type as ResourceType,
       existing.permission,
       newResource.permission,
     );
@@ -207,7 +163,7 @@ export class ResourceRegistry {
         'Resource %s:%s permission escalated from "%s" to "%s" due to plugin "%s" ' +
           "(previously requested by: %s). Review plugin permissions to ensure least-privilege.",
         existing.type,
-        existing.alias,
+        existing.resourceKey,
         existing.permission,
         permission,
         newPlugin,
@@ -224,14 +180,35 @@ export class ResourceRegistry {
       newResource.description &&
       newResource.description !== existing.description
     ) {
-      // Check if the new description is already included
       if (!existing.description.includes(newResource.description)) {
         description = `${existing.description}; ${newResource.description}`;
       }
     }
 
-    // Prefer existing fields when both have them (same type+alias)
-    const fields = existing.fields ?? newResource.fields;
+    // Merge fields: union of field names; warn when same field name uses different env
+    const fields = { ...(existing.fields ?? {}) };
+    for (const [fieldName, newField] of Object.entries(
+      newResource.fields ?? {},
+    )) {
+      const existingField = fields[fieldName];
+      if (existingField) {
+        if (existingField.env !== newField.env) {
+          logger.warn(
+            'Resource %s:%s field "%s": conflicting env vars "%s" (from %s) vs "%s" (from %s). Using first.',
+            existing.type,
+            existing.resourceKey,
+            fieldName,
+            existingField.env,
+            existing.plugin,
+            newField.env,
+            newPlugin,
+          );
+        }
+        // keep existing
+      } else {
+        fields[fieldName] = newField;
+      }
+    }
 
     return {
       ...existing,
@@ -255,15 +232,14 @@ export class ResourceRegistry {
   }
 
   /**
-   * Gets a specific resource by type and alias.
+   * Gets a specific resource by type and resourceKey (dedup key).
    *
    * @param type - Resource type
-   * @param alias - Resource alias
+   * @param resourceKey - Stable machine key (not alias; alias is for display only)
    * @returns The resource entry if found, undefined otherwise
    */
-  public get(type: string, alias: string): ResourceEntry | undefined {
-    const key = getResourceKey(type, alias);
-    return this.resources.get(key);
+  public get(type: string, resourceKey: string): ResourceEntry | undefined {
+    return this.resources.get(getDedupKey(type, resourceKey));
   }
 
   /**

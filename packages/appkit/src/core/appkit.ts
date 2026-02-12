@@ -154,9 +154,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
     const rawPlugins = config.plugins as T;
 
-    const registry = ResourceRegistry.getInstance();
-
-    registry.clear();
+    const registry = new ResourceRegistry();
     registry.collectResources(rawPlugins);
     registry.enforceValidation();
 

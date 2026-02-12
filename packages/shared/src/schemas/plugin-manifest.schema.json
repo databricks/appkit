@@ -220,13 +220,13 @@
         "alias": {
           "type": "string",
           "pattern": "^[a-z][a-zA-Z0-9_]*$",
-          "description": "Unique alias for this resource within the plugin (UI/display)",
+          "description": "Human-readable label for UI/display only. Deduplication uses resourceKey, not alias.",
           "examples": ["SQL Warehouse", "Secret", "Vector search index"]
         },
         "resourceKey": {
           "type": "string",
           "pattern": "^[a-z][a-zA-Z0-9_]*$",
-          "description": "Stable key for machine use (env naming, composite keys, app.yaml).",
+          "description": "Stable key for machine use: deduplication, env naming, composite keys, app.yaml. Required for registry lookup.",
           "examples": ["sql-warehouse", "database", "secret"]
         },
         "description": {

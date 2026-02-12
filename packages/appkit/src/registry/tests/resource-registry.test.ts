@@ -1,19 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ResourceRegistry } from "../resource-registry";
 import { ResourceType } from "../types";
 
 describe("ResourceRegistry", () => {
-  beforeEach(() => {
-    ResourceRegistry.resetInstance();
-  });
-
-  afterEach(() => {
-    ResourceRegistry.resetInstance();
-  });
-
   describe("register and merge with fields", () => {
     it("should register a multi-field resource (database)", () => {
-      const registry = ResourceRegistry.getInstance();
+      const registry = new ResourceRegistry();
       registry.register("analytics", {
         type: ResourceType.DATABASE,
         alias: "cache",
@@ -48,7 +40,7 @@ describe("ResourceRegistry", () => {
     });
 
     it("should merge resources and prefer existing fields", () => {
-      const registry = ResourceRegistry.getInstance();
+      const registry = new ResourceRegistry();
       registry.register("plugin-a", {
         type: ResourceType.SECRET,
         alias: "creds",
@@ -84,7 +76,7 @@ describe("ResourceRegistry", () => {
     });
 
     it("should merge single-value resources (fields with one key)", () => {
-      const registry = ResourceRegistry.getInstance();
+      const registry = new ResourceRegistry();
       registry.register("plugin-a", {
         type: ResourceType.SQL_WAREHOUSE,
         alias: "warehouse",
@@ -120,7 +112,7 @@ describe("ResourceRegistry", () => {
     const CACHE_DB = "DATABRICKS_CACHE_DB";
 
     it("should resolve multi-field resource when all env vars are set", () => {
-      const registry = ResourceRegistry.getInstance();
+      const registry = new ResourceRegistry();
       registry.register("analytics", {
         type: ResourceType.DATABASE,
         alias: "cache",
@@ -157,7 +149,7 @@ describe("ResourceRegistry", () => {
     });
 
     it("should mark multi-field resource missing when any env var is unset", () => {
-      const registry = ResourceRegistry.getInstance();
+      const registry = new ResourceRegistry();
       registry.register("analytics", {
         type: ResourceType.DATABASE,
         alias: "cache",
@@ -185,7 +177,7 @@ describe("ResourceRegistry", () => {
     });
 
     it("should mark multi-field resource missing when only one env var is set", () => {
-      const registry = ResourceRegistry.getInstance();
+      const registry = new ResourceRegistry();
       registry.register("analytics", {
         type: ResourceType.DATABASE,
         alias: "cache",
@@ -213,7 +205,7 @@ describe("ResourceRegistry", () => {
 
   describe("permission escalation tracking", () => {
     it("should track permissionSources for a single plugin", () => {
-      const registry = ResourceRegistry.getInstance();
+      const registry = new ResourceRegistry();
       registry.register("plugin-a", {
         type: ResourceType.SQL_WAREHOUSE,
         alias: "warehouse",
@@ -229,7 +221,7 @@ describe("ResourceRegistry", () => {
     });
 
     it("should track permissionSources when merging multiple plugins", () => {
-      const registry = ResourceRegistry.getInstance();
+      const registry = new ResourceRegistry();
       registry.register("plugin-a", {
         type: ResourceType.SQL_WAREHOUSE,
         alias: "warehouse",
@@ -258,7 +250,7 @@ describe("ResourceRegistry", () => {
     });
 
     it("should warn when permission is escalated during merge", () => {
-      const registry = ResourceRegistry.getInstance();
+      const registry = new ResourceRegistry();
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       registry.register("plugin-a", {
@@ -288,7 +280,7 @@ describe("ResourceRegistry", () => {
     });
 
     it("should not escalate when permissions are identical", () => {
-      const registry = ResourceRegistry.getInstance();
+      const registry = new ResourceRegistry();
       registry.register("plugin-a", {
         type: ResourceType.SQL_WAREHOUSE,
         alias: "warehouse",
@@ -319,7 +311,7 @@ describe("ResourceRegistry", () => {
 
   describe("enforceValidation with APPKIT_STRICT_VALIDATION", () => {
     it("should throw in dev when APPKIT_STRICT_VALIDATION=true", () => {
-      const registry = ResourceRegistry.getInstance();
+      const registry = new ResourceRegistry();
       registry.register("analytics", {
         type: ResourceType.SQL_WAREHOUSE,
         alias: "warehouse",
@@ -344,7 +336,7 @@ describe("ResourceRegistry", () => {
     });
 
     it("should only warn in dev when APPKIT_STRICT_VALIDATION is not set", () => {
-      const registry = ResourceRegistry.getInstance();
+      const registry = new ResourceRegistry();
       registry.register("analytics", {
         type: ResourceType.SQL_WAREHOUSE,
         alias: "warehouse",
@@ -398,7 +390,7 @@ describe("ResourceRegistry", () => {
 
   describe("formatMissingResources with fields", () => {
     it("should list field env vars for multi-field missing resources", () => {
-      const registry = ResourceRegistry.getInstance();
+      const registry = new ResourceRegistry();
       registry.register("analytics", {
         type: ResourceType.SECRET,
         alias: "creds",
@@ -424,7 +416,7 @@ describe("ResourceRegistry", () => {
     });
 
     it("should list field env vars for single-value missing resources", () => {
-      const registry = ResourceRegistry.getInstance();
+      const registry = new ResourceRegistry();
       registry.register("analytics", {
         type: ResourceType.SQL_WAREHOUSE,
         alias: "warehouse",

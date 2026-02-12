@@ -1,7 +1,19 @@
 # Class: ResourceRegistry
 
 Central registry for tracking plugin resource requirements.
-Implements singleton pattern to ensure a single source of truth.
+Deduplication uses type + resourceKey (machine-stable); alias is for display only.
+
+## Constructors
+
+### Constructor
+
+```ts
+new ResourceRegistry(): ResourceRegistry;
+```
+
+#### Returns
+
+`ResourceRegistry`
 
 ## Methods
 
@@ -27,11 +39,7 @@ collectResources(rawPlugins: PluginData<PluginConstructor, unknown, string>[]): 
 ```
 
 Collects and registers resource requirements from an array of plugins.
-For each plugin, loads its manifest to discover static resource declarations,
-then checks for runtime resource requirements via `getResourceRequirements()`.
-
-Plugins without manifests are silently skipped (allowed for legacy plugins
-or plugins that don't declare resources).
+For each plugin, loads its manifest (required) and runtime resource requirements.
 
 #### Parameters
 
@@ -42,6 +50,10 @@ or plugins that don't declare resources).
 #### Returns
 
 `void`
+
+#### Throws
+
+If any plugin is missing a manifest or manifest is invalid
 
 ***
 
@@ -73,17 +85,17 @@ In production when required resources are missing, or in dev when APPKIT_STRICT_
 ### get()
 
 ```ts
-get(type: string, alias: string): ResourceEntry | undefined;
+get(type: string, resourceKey: string): ResourceEntry | undefined;
 ```
 
-Gets a specific resource by type and alias.
+Gets a specific resource by type and resourceKey (dedup key).
 
 #### Parameters
 
 | Parameter | Type | Description |
 | ------ | ------ | ------ |
 | `type` | `string` | Resource type |
-| `alias` | `string` | Resource alias |
+| `resourceKey` | `string` | Stable machine key (not alias; alias is for display only) |
 
 #### Returns
 
@@ -171,12 +183,12 @@ register(plugin: string, resource: ResourceRequirement): void;
 ```
 
 Registers a resource requirement for a plugin.
-If a resource with the same type+alias already exists, merges them:
+If a resource with the same type+resourceKey already exists, merges them:
 - Combines plugin names (comma-separated)
-- Uses the most permissive permission
+- Uses the most permissive permission (per-type hierarchy)
 - Marks as required if any plugin requires it
 - Combines descriptions if they differ
-- Keeps the env variable (or merges if they differ)
+- Merges fields; warns when same field name uses different env vars
 
 #### Parameters
 
@@ -280,33 +292,3 @@ Formats missing resources into a human-readable error message.
 `string`
 
 Formatted error message string
-
-***
-
-### getInstance()
-
-```ts
-static getInstance(): ResourceRegistry;
-```
-
-Gets the singleton instance of the ResourceRegistry.
-Creates a new instance if one doesn't exist.
-
-#### Returns
-
-`ResourceRegistry`
-
-***
-
-### resetInstance()
-
-```ts
-static resetInstance(): void;
-```
-
-Resets the singleton instance.
-Primarily used for testing to ensure clean state between tests.
-
-#### Returns
-
-`void`
