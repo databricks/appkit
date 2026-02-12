@@ -6,7 +6,10 @@
  * and handles deduplication when multiple plugins require the same resource.
  */
 
+import type { BasePluginConfig, PluginConstructor, PluginData } from "shared";
+import { ConfigurationError } from "../errors";
 import { createLogger } from "../logging/logger";
+import { getPluginManifest } from "./manifest-loader";
 import type {
   ResourceEntry,
   ResourcePermission,
@@ -108,6 +111,66 @@ export class ResourceRegistry {
         resolved: false,
       };
       this.resources.set(key, entry);
+    }
+  }
+
+  /**
+   * Collects and registers resource requirements from an array of plugins.
+   * For each plugin, loads its manifest to discover static resource declarations,
+   * then checks for runtime resource requirements via `getResourceRequirements()`.
+   *
+   * Plugins without manifests are silently skipped (allowed for legacy plugins
+   * or plugins that don't declare resources).
+   *
+   * @param rawPlugins - Array of plugin data entries from createApp configuration
+   */
+  public collectResources(
+    rawPlugins: PluginData<PluginConstructor, unknown, string>[],
+  ): void {
+    for (const pluginData of rawPlugins) {
+      if (!pluginData?.plugin) continue;
+
+      const pluginName = pluginData.name;
+
+      try {
+        const manifest = getPluginManifest(pluginData.plugin);
+
+        // Register required resources
+        for (const resource of manifest.resources.required) {
+          this.register(pluginName, { ...resource, required: true });
+        }
+
+        // Register optional resources
+        for (const resource of manifest.resources.optional || []) {
+          this.register(pluginName, { ...resource, required: false });
+        }
+
+        // Check for runtime resource requirements
+        if (typeof pluginData.plugin.getResourceRequirements === "function") {
+          const runtimeResources = pluginData.plugin.getResourceRequirements(
+            pluginData.config as BasePluginConfig,
+          );
+          for (const resource of runtimeResources) {
+            // Cast from shared's ResourceRequirement to registry's ResourceRequirement
+            // The shared type has looser typing (string) vs registry (ResourceType enum)
+            this.register(pluginName, resource as ResourceRequirement);
+          }
+        }
+
+        logger.debug(
+          "Collected resources from plugin %s: %d total",
+          pluginName,
+          this.getByPlugin(pluginName).length,
+        );
+      } catch (error) {
+        // Plugin doesn't have a manifest - this is allowed for legacy plugins
+        // or plugins that don't declare resources
+        logger.debug(
+          "Plugin %s has no manifest or invalid manifest: %s",
+          pluginName,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
     }
   }
 
@@ -297,6 +360,49 @@ export class ResourceRegistry {
       missing,
       all: this.getAll(),
     };
+  }
+
+  /**
+   * Validates all registered resources and enforces the result.
+   *
+   * - In production: throws a {@link ConfigurationError} if any required resources are missing.
+   * - In development (`NODE_ENV=development`): logs a warning but continues.
+   * - When all resources are valid: logs a debug message with the count.
+   *
+   * @returns ValidationResult with validity status, missing resources, and all resources
+   * @throws {ConfigurationError} In production when required resources are missing
+   */
+  public enforceValidation(): ValidationResult {
+    const validation = this.validate();
+    const isDevelopment = process.env.NODE_ENV === "development";
+
+    if (!validation.valid) {
+      const errorMessage = ResourceRegistry.formatMissingResources(
+        validation.missing,
+      );
+
+      if (isDevelopment) {
+        logger.warn(
+          "Missing resources detected (continuing in dev mode):\n%s",
+          errorMessage,
+        );
+      } else {
+        throw new ConfigurationError(errorMessage, {
+          context: {
+            missingResources: validation.missing.map((r) => ({
+              type: r.type,
+              alias: r.alias,
+              plugin: r.plugin,
+              envVars: Object.values(r.fields).map((f) => f.env),
+            })),
+          },
+        });
+      }
+    } else if (this.size() > 0) {
+      logger.debug("All %d resources validated successfully", this.size());
+    }
+
+    return validation;
   }
 
   /**

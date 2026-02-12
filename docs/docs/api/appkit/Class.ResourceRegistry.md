@@ -20,6 +20,55 @@ Useful for testing or when rebuilding the registry.
 
 ***
 
+### collectResources()
+
+```ts
+collectResources(rawPlugins: PluginData<PluginConstructor, unknown, string>[]): void;
+```
+
+Collects and registers resource requirements from an array of plugins.
+For each plugin, loads its manifest to discover static resource declarations,
+then checks for runtime resource requirements via `getResourceRequirements()`.
+
+Plugins without manifests are silently skipped (allowed for legacy plugins
+or plugins that don't declare resources).
+
+#### Parameters
+
+| Parameter | Type | Description |
+| ------ | ------ | ------ |
+| `rawPlugins` | `PluginData`\<`PluginConstructor`, `unknown`, `string`\>[] | Array of plugin data entries from createApp configuration |
+
+#### Returns
+
+`void`
+
+***
+
+### enforceValidation()
+
+```ts
+enforceValidation(): ValidationResult;
+```
+
+Validates all registered resources and enforces the result.
+
+- In production: throws a [ConfigurationError](Class.ConfigurationError.md) if any required resources are missing.
+- In development (`NODE_ENV=development`): logs a warning but continues.
+- When all resources are valid: logs a debug message with the count.
+
+#### Returns
+
+[`ValidationResult`](Interface.ValidationResult.md)
+
+ValidationResult with validity status, missing resources, and all resources
+
+#### Throws
+
+In production when required resources are missing
+
+***
+
 ### get()
 
 ```ts
