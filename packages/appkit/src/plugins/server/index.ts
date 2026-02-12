@@ -44,7 +44,6 @@ export class ServerPlugin extends Plugin {
   static manifest = serverManifest;
 
   public name = "server" as const;
-  protected envVars: string[] = [];
   private serverApplication: express.Application;
   private server: HTTPServer | null;
   private viteDevServer?: ViteDevServer;

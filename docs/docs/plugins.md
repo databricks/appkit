@@ -193,7 +193,7 @@ In local development (`NODE_ENV=development`), if `asUser(req)` is called withou
 Configure plugins when creating your AppKit instance:
 
 ```typescript
-import { createApp, server, analytics } from "@databricks/app-kit";
+import { createApp, server, analytics } from "@databricks/appkit";
 
 const AppKit = await createApp({
   plugins: [
@@ -219,7 +219,25 @@ import type express from "express";
 
 class MyPlugin extends Plugin {
   name = "myPlugin";
-  envVars = ["MY_API_KEY"];
+
+  // Define resource requirements in the static manifest
+  static manifest = {
+    name: "myPlugin",
+    displayName: "My Plugin",
+    description: "A custom plugin",
+    resources: {
+      required: [
+        {
+          type: "secret",
+          alias: "apiKey",
+          description: "API key for external service",
+          permission: "READ",
+          env: "MY_API_KEY"
+        }
+      ],
+      optional: []
+    }
+  };
 
   async setup() {
     // Initialize your plugin
@@ -247,10 +265,62 @@ export const myPlugin = toPlugin<typeof MyPlugin, Record<string, never>, "myPlug
 );
 ```
 
+### Config-dependent resources
+
+The manifest defines resources as either `required` (always needed) or `optional` (may be needed).
+For resources that become required based on plugin configuration, implement a static
+`getResourceRequirements(config)` method:
+
+```typescript
+interface MyPluginConfig extends BasePluginConfig {
+  enableCaching?: boolean;
+}
+
+class MyPlugin extends Plugin<MyPluginConfig> {
+  name = "myPlugin";
+
+  static manifest = {
+    name: "myPlugin",
+    displayName: "My Plugin",
+    description: "A plugin with optional caching",
+    resources: {
+      required: [
+        { type: "sql_warehouse", alias: "warehouse", description: "Query execution", permission: "CAN_USE" }
+      ],
+      optional: [
+        // Listed as optional in manifest for static analysis
+        { type: "database", alias: "cache", description: "Query result caching (if enabled)", permission: "CAN_CONNECT_AND_CREATE" }
+      ]
+    }
+  };
+
+  // Runtime: Convert optional resources to required based on config
+  static getResourceRequirements(config: MyPluginConfig) {
+    const resources = [];
+    if (config.enableCaching) {
+      // When caching is enabled, Database becomes required
+      resources.push({
+        type: "database",
+        alias: "cache",
+        description: "Query result caching",
+        permission: "CAN_CONNECT_AND_CREATE",
+        env: "DATABRICKS_DATABASE_ID",
+        required: true  // Mark as required at runtime
+      });
+    }
+    return resources;
+  }
+}
+```
+
+This pattern allows:
+- **Static tools** (CLI, docs) to show all possible resources
+- **Runtime validation** to enforce resources based on actual configuration
+
 ### Key extension points
 
 - **Route injection**: Implement `injectRoutes()` to add custom endpoints using [`IAppRouter`](api/appkit/TypeAlias.IAppRouter.md)
-- **Lifecycle hooks**: Override `setup()`, `shutdown()`, and `validateEnv()` methods
+- **Lifecycle hooks**: Override `setup()`, and `shutdown()` methods
 - **Shared services**:
   - **Cache management**: Access the cache service via `this.cache`. See [`CacheConfig`](api/appkit/Interface.CacheConfig.md) for configuration.
   - **Telemetry**: Instrument your plugin with traces and metrics via `this.telemetry`. See [`ITelemetry`](api/appkit/Interface.ITelemetry.md).

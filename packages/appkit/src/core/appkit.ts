@@ -10,6 +10,7 @@ import type {
 } from "shared";
 import { CacheManager } from "../cache";
 import { ServiceContext } from "../context";
+import { ResourceRegistry } from "../registry";
 import type { TelemetryConfig } from "../telemetry";
 import { TelemetryManager } from "../telemetry";
 
@@ -70,8 +71,6 @@ export class AppKit<TPlugins extends InputPluginMap> {
     const pluginInstance = new Plugin(baseConfig);
 
     this.#pluginInstances[name] = pluginInstance;
-
-    pluginInstance.validateEnv();
 
     this.#setupPromises.push(pluginInstance.setup());
 
@@ -154,6 +153,13 @@ export class AppKit<TPlugins extends InputPluginMap> {
     await ServiceContext.initialize(config?.client);
 
     const rawPlugins = config.plugins as T;
+
+    const registry = ResourceRegistry.getInstance();
+
+    registry.clear();
+    registry.collectResources(rawPlugins);
+    registry.enforceValidation();
+
     const preparedPlugins = AppKit.preparePlugins(rawPlugins);
     const mergedConfig = {
       plugins: preparedPlugins,

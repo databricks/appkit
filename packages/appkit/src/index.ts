@@ -37,6 +37,7 @@ export type {
   ConfigSchemaProperty,
   PluginManifest,
   ResourceEntry,
+  ResourceFieldEntry,
   ResourcePermission,
   ResourceRequirement,
   ValidationResult,
@@ -44,6 +45,7 @@ export type {
 export {
   getPluginManifest,
   getResourceRequirements,
+  ResourceRegistry,
   ResourceType,
 } from "./registry";
 // Telemetry (for advanced custom telemetry)

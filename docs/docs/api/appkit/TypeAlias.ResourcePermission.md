@@ -1,8 +1,19 @@
 # Type Alias: ResourcePermission
 
 ```ts
-type ResourcePermission = "CAN_USE" | "CAN_MANAGE" | "CAN_VIEW" | "READ" | "WRITE" | "EXECUTE";
+type ResourcePermission = 
+  | SecretPermission
+  | JobPermission
+  | SqlWarehousePermission
+  | ServingEndpointPermission
+  | VolumePermission
+  | VectorSearchIndexPermission
+  | UcFunctionPermission
+  | UcConnectionPermission
+  | DatabasePermission
+  | GenieSpacePermission
+  | ExperimentPermission
+  | AppPermission;
 ```
 
-Permission levels that can be required for a resource.
-Based on Databricks permission model.
+Union of all possible permission levels across all resource types.

@@ -53,6 +53,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Class.ResourceRegistry",
+          label: "ResourceRegistry"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Class.ServerError",
           label: "ServerError"
         },
@@ -106,6 +111,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.ResourceEntry",
           label: "ResourceEntry"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ResourceFieldEntry",
+          label: "ResourceFieldEntry"
         },
         {
           type: "doc",

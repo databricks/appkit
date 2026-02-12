@@ -1,8 +1,49 @@
 # Enumeration: ResourceType
 
-Supported Databricks resource types that plugins can depend on.
+Supported resource types that plugins can depend on.
+Each type has its own set of valid permissions.
 
 ## Enumeration Members
+
+### APP
+
+```ts
+APP: "app";
+```
+
+Databricks App dependency
+
+***
+
+### DATABASE
+
+```ts
+DATABASE: "database";
+```
+
+Database (Lakebase) for persistent storage
+
+***
+
+### EXPERIMENT
+
+```ts
+EXPERIMENT: "experiment";
+```
+
+MLflow Experiment for ML tracking
+
+***
+
+### GENIE\_SPACE
+
+```ts
+GENIE_SPACE: "genie_space";
+```
+
+Genie Space for AI assistant
+
+***
 
 ### JOB
 
@@ -14,20 +55,10 @@ Databricks Job for scheduled or triggered workflows
 
 ***
 
-### LAKEBASE
+### SECRET
 
 ```ts
-LAKEBASE: "lakebase";
-```
-
-Lakebase instance for persistent caching or data storage
-
-***
-
-### SECRET\_SCOPE
-
-```ts
-SECRET_SCOPE: "secret-scope";
+SECRET: "secret";
 ```
 
 Secret scope for secure credential storage
@@ -37,7 +68,7 @@ Secret scope for secure credential storage
 ### SERVING\_ENDPOINT
 
 ```ts
-SERVING_ENDPOINT: "serving-endpoint";
+SERVING_ENDPOINT: "serving_endpoint";
 ```
 
 Model serving endpoint for ML inference
@@ -47,27 +78,47 @@ Model serving endpoint for ML inference
 ### SQL\_WAREHOUSE
 
 ```ts
-SQL_WAREHOUSE: "sql-warehouse";
+SQL_WAREHOUSE: "sql_warehouse";
 ```
 
 Databricks SQL Warehouse for query execution
 
 ***
 
-### UNITY\_CATALOG
+### UC\_CONNECTION
 
 ```ts
-UNITY_CATALOG: "unity-catalog";
+UC_CONNECTION: "uc_connection";
 ```
 
-Unity Catalog for data governance and metadata
+Unity Catalog Connection for external data sources
+
+***
+
+### UC\_FUNCTION
+
+```ts
+UC_FUNCTION: "uc_function";
+```
+
+Unity Catalog Function
 
 ***
 
 ### VECTOR\_SEARCH\_INDEX
 
 ```ts
-VECTOR_SEARCH_INDEX: "vector-search-index";
+VECTOR_SEARCH_INDEX: "vector_search_index";
 ```
 
-Vector search index for similarity search
+Vector Search Index for similarity search
+
+***
+
+### VOLUME
+
+```ts
+VOLUME: "volume";
+```
+
+Unity Catalog Volume for file storage

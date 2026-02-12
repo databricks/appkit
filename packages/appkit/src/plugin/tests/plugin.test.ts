@@ -12,7 +12,6 @@ import { ServiceContext } from "../../context/service-context";
 import { StreamManager } from "../../stream";
 import type { ITelemetry, TelemetryProvider } from "../../telemetry";
 import { TelemetryManager } from "../../telemetry";
-import { validateEnv } from "../../utils";
 import type { InterceptorContext } from "../interceptors/types";
 import { Plugin } from "../plugin";
 
@@ -25,7 +24,6 @@ vi.mock("../../cache", () => ({
 }));
 vi.mock("../../stream");
 vi.mock("../../utils", () => ({
-  validateEnv: vi.fn(),
   deepMerge: vi.fn((a, b) => {
     if (!a) return b;
     if (!b) return a;
@@ -85,8 +83,6 @@ vi.mock("../interceptors/telemetry", () => ({
 
 // Test plugin implementations
 class TestPlugin extends Plugin<BasePluginConfig> {
-  envVars = ["TEST_ENV_VAR"];
-
   async customMethod(value: string): Promise<string> {
     return `processed-${value}`;
   }
@@ -174,7 +170,6 @@ describe("Plugin", () => {
     vi.mocked(TelemetryManager.getProvider).mockReturnValue(
       mockTelemetry as TelemetryProvider,
     );
-    vi.mocked(validateEnv).mockImplementation(() => {});
 
     vi.clearAllMocks();
   });
@@ -207,26 +202,6 @@ describe("Plugin", () => {
       expect(CacheManager.getInstanceSync).toHaveBeenCalledTimes(1);
       expect(AppManager).toHaveBeenCalledTimes(1);
       expect(StreamManager).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe("validateEnv", () => {
-    test("should call validateEnv with plugin envVars", () => {
-      const plugin = new TestPlugin(config);
-
-      plugin.validateEnv();
-
-      expect(validateEnv).toHaveBeenCalledWith(["TEST_ENV_VAR"]);
-    });
-
-    test("should propagate validation errors", () => {
-      vi.mocked(validateEnv).mockImplementation(() => {
-        throw new Error("Validation failed");
-      });
-
-      const plugin = new TestPlugin(config);
-
-      expect(() => plugin.validateEnv()).toThrow("Validation failed");
     });
   });
 

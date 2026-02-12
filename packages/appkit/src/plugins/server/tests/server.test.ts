@@ -91,7 +91,6 @@ vi.mock("../../../cache", () => ({
 }));
 
 vi.mock("../../../utils", () => ({
-  validateEnv: vi.fn(),
   deepMerge: vi.fn((a, b) => ({ ...a, ...b })),
 }));
 
@@ -143,13 +142,17 @@ vi.mock("dotenv", () => ({
   default: { config: vi.fn() },
 }));
 
-// Mock fs for findStaticPath
-vi.mock("node:fs", () => ({
-  default: {
-    existsSync: vi.fn().mockReturnValue(false),
-    readFileSync: vi.fn(),
-  },
-}));
+// Mock fs for findStaticPath and manifest loading
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    default: {
+      existsSync: vi.fn().mockReturnValue(false),
+      readFileSync: actual.readFileSync,
+    },
+  };
+});
 
 vi.mock("../utils", () => ({
   getRoutes: vi.fn().mockReturnValue([]),
