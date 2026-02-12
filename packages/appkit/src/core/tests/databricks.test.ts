@@ -3,6 +3,7 @@ import type { BasePlugin } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ServiceContext } from "../../context/service-context";
 import type { PluginManifest } from "../../registry/types";
+import { ResourceType } from "../../registry/types";
 import { AppKit, createApp } from "../appkit";
 
 // Generic test manifest for test plugins
@@ -485,6 +486,91 @@ describe("AppKit", () => {
       await expect(createApp({ plugins: pluginData })).rejects.toThrow(
         "Async setup failure",
       );
+    });
+  });
+
+  describe("createApp resource validation (collectResources + enforceValidation)", () => {
+    test("should throw in production when required resource env is missing", async () => {
+      const PluginWithRequiredResource = class extends CoreTestPlugin {
+        static manifest: PluginManifest = {
+          name: "withResource",
+          displayName: "With Resource",
+          description: "Plugin with required warehouse",
+          resources: {
+            required: [
+              {
+                type: ResourceType.SQL_WAREHOUSE,
+                alias: "wh",
+                resourceKey: "warehouse",
+                description: "Warehouse",
+                permission: "CAN_USE",
+                fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } },
+              },
+            ],
+            optional: [],
+          },
+        };
+      };
+
+      const prevNodeEnv = process.env.NODE_ENV;
+      const prevWh = process.env.DATABRICKS_WAREHOUSE_ID;
+      process.env.NODE_ENV = "production";
+      delete process.env.DATABRICKS_WAREHOUSE_ID;
+      try {
+        const pluginData = [
+          {
+            plugin: PluginWithRequiredResource,
+            config: {},
+            name: "withResource",
+          },
+        ];
+        await expect(createApp({ plugins: pluginData })).rejects.toThrow();
+      } finally {
+        process.env.NODE_ENV = prevNodeEnv;
+        if (prevWh !== undefined) process.env.DATABRICKS_WAREHOUSE_ID = prevWh;
+        else delete process.env.DATABRICKS_WAREHOUSE_ID;
+      }
+    });
+
+    test("should succeed when required resource env is set", async () => {
+      const PluginWithRequiredResource = class extends CoreTestPlugin {
+        static manifest: PluginManifest = {
+          name: "withResource",
+          displayName: "With Resource",
+          description: "Plugin with required warehouse",
+          resources: {
+            required: [
+              {
+                type: ResourceType.SQL_WAREHOUSE,
+                alias: "wh",
+                resourceKey: "warehouse",
+                description: "Warehouse",
+                permission: "CAN_USE",
+                fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } },
+              },
+            ],
+            optional: [],
+          },
+        };
+      };
+
+      const prevWh = process.env.DATABRICKS_WAREHOUSE_ID;
+      process.env.DATABRICKS_WAREHOUSE_ID = "wh-123";
+      try {
+        const pluginData = [
+          {
+            plugin: PluginWithRequiredResource,
+            config: {},
+            name: "withResource",
+          },
+        ];
+        const instance = await createApp({ plugins: pluginData });
+        expect(instance).toBeDefined();
+        expect((instance as any).withResource).toBeDefined();
+      } finally {
+        if (prevWh !== undefined) process.env.DATABRICKS_WAREHOUSE_ID = prevWh;
+        else delete process.env.DATABRICKS_WAREHOUSE_ID;
+      }
     });
   });
 

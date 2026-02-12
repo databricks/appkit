@@ -627,6 +627,9 @@ function runPluginsSync(options: { write?: boolean; output?: string }) {
   }
 }
 
+/** Exported for testing: path boundary check, AST parsing. */
+export { isWithinDirectory, parseImports, parsePluginUsages };
+
 export const pluginsSyncCommand = new Command("sync")
   .description(
     "Sync plugin manifests from installed packages into appkit.plugins.json",

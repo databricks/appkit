@@ -27,7 +27,7 @@ describe("Manifest Loader Integration", () => {
       expect(manifest?.displayName).toBe("Analytics Plugin");
     });
 
-    it("should require SQL Warehouse and list optional cache database", () => {
+    it("should require SQL Warehouse (no optional resources in manifest)", () => {
       const resources = getResourceRequirements(AnalyticsPlugin);
       expect(resources).toHaveLength(1);
 
