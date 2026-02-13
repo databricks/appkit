@@ -1,0 +1,283 @@
+import fs from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import {
+  cancel,
+  confirm,
+  intro,
+  isCancel,
+  multiselect,
+  outro,
+  select,
+  spinner,
+  text,
+} from "@clack/prompts";
+import { Command } from "commander";
+import {
+  humanizeResourceType,
+  RESOURCE_TYPE_OPTIONS,
+} from "../plugin-create/resource-defaults.js";
+import { resolveTargetDir, scaffoldPlugin } from "../plugin-create/scaffold.js";
+import type {
+  CreateAnswers,
+  Placement,
+  SelectedResource,
+} from "../plugin-create/types.js";
+
+const NAME_PATTERN = /^[a-z][a-z0-9-]*$/;
+const DEFAULT_VERSION = "1.0.0";
+
+async function runPluginCreate(): Promise<void> {
+  intro("Create a new AppKit plugin");
+
+  try {
+    const placement = await select<Placement>({
+      message: "Where should the plugin live?",
+      options: [
+        {
+          value: "in-repo",
+          label: "In this repository (e.g. plugins/my-plugin)",
+          hint: "folder path",
+        },
+        {
+          value: "isolated",
+          label: "New isolated package",
+          hint: "full package with package.json",
+        },
+      ],
+    });
+    if (isCancel(placement)) {
+      cancel("Cancelled.");
+      process.exit(0);
+    }
+
+    const placementPrompt =
+      placement === "in-repo"
+        ? "Folder path for the plugin (e.g. plugins/my-feature)"
+        : "Directory name for the new package (e.g. appkit-plugin-my-feature)";
+    const targetPath = await text({
+      message: placementPrompt,
+      placeholder:
+        placement === "in-repo"
+          ? "plugins/my-plugin"
+          : "appkit-plugin-my-feature",
+      validate(value) {
+        if (!value?.trim()) return "Path is required.";
+        return undefined;
+      },
+    });
+    if (isCancel(targetPath)) {
+      cancel("Cancelled.");
+      process.exit(0);
+    }
+
+    const name = await text({
+      message: "Plugin name (id)",
+      placeholder: "my-plugin",
+      validate(value) {
+        if (!value?.trim()) return "Name is required.";
+        if (!NAME_PATTERN.test(value as string)) {
+          return "Must be lowercase, start with a letter, and use only letters, numbers, and hyphens.";
+        }
+        return undefined;
+      },
+    });
+    if (isCancel(name)) {
+      cancel("Cancelled.");
+      process.exit(0);
+    }
+
+    const displayName = await text({
+      message: "Display name",
+      placeholder: "My Plugin",
+      initialValue: name
+        .split("-")
+        .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+        .join(" "),
+      validate(value) {
+        if (!value?.trim()) return "Display name is required.";
+        return undefined;
+      },
+    });
+    if (isCancel(displayName)) {
+      cancel("Cancelled.");
+      process.exit(0);
+    }
+
+    const description = await text({
+      message: "Short description",
+      placeholder: "What does this plugin do?",
+      validate(value) {
+        if (!value?.trim()) return "Description is required.";
+        return undefined;
+      },
+    });
+    if (isCancel(description)) {
+      cancel("Cancelled.");
+      process.exit(0);
+    }
+
+    const resourceTypes = await multiselect({
+      message: "Which Databricks resources does this plugin need?",
+      options: RESOURCE_TYPE_OPTIONS.map((o) => ({
+        value: o.value,
+        label: o.label,
+      })),
+      required: false,
+    });
+    if (isCancel(resourceTypes)) {
+      cancel("Cancelled.");
+      process.exit(0);
+    }
+
+    const resources: SelectedResource[] = [];
+    for (const type of resourceTypes as string[]) {
+      const required = await select<boolean>({
+        message: `${humanizeResourceType(type)} – required or optional?`,
+        options: [
+          {
+            value: true,
+            label: "Required",
+            hint: "plugin needs it to function",
+          },
+          { value: false, label: "Optional", hint: "enhances functionality" },
+        ],
+      });
+      if (isCancel(required)) {
+        cancel("Cancelled.");
+        process.exit(0);
+      }
+      const resourceDescription = await text({
+        message: `Short description for ${humanizeResourceType(type)}`,
+        placeholder: required ? "Required for …" : "Optional for …",
+      });
+      if (isCancel(resourceDescription)) {
+        cancel("Cancelled.");
+        process.exit(0);
+      }
+      resources.push({
+        type,
+        required: required as boolean,
+        description: (resourceDescription as string) || "",
+      });
+    }
+
+    let author: string | undefined;
+    const askAuthor = await confirm({
+      message: "Add author?",
+      initialValue: false,
+    });
+    if (!isCancel(askAuthor) && askAuthor) {
+      const a = await text({ message: "Author name or organization" });
+      if (!isCancel(a)) author = a as string;
+    }
+
+    const version = await text({
+      message: "Version",
+      placeholder: DEFAULT_VERSION,
+      initialValue: DEFAULT_VERSION,
+    });
+    if (isCancel(version)) {
+      cancel("Cancelled.");
+      process.exit(0);
+    }
+
+    let license: string | undefined;
+    const askLicense = await confirm({
+      message: "Add license?",
+      initialValue: false,
+    });
+    if (!isCancel(askLicense) && askLicense) {
+      const lic = await text({
+        message: "License (e.g. MIT, Apache-2.0)",
+        placeholder: "MIT",
+      });
+      if (!isCancel(lic)) license = lic as string;
+    }
+
+    const answers: CreateAnswers = {
+      placement,
+      targetPath: (targetPath as string).trim(),
+      name: (name as string).trim(),
+      displayName: (displayName as string).trim(),
+      description: (description as string).trim(),
+      resources,
+      author,
+      version: (version as string).trim() || DEFAULT_VERSION,
+      license,
+    };
+
+    const targetDir = resolveTargetDir(process.cwd(), answers);
+    const dirExists = fs.existsSync(targetDir);
+    const hasContent = dirExists && fs.readdirSync(targetDir).length > 0;
+    if (hasContent) {
+      const overwrite = await confirm({
+        message: `Directory ${answers.targetPath} already exists and is not empty. Overwrite?`,
+        initialValue: false,
+      });
+      if (isCancel(overwrite) || !overwrite) {
+        cancel("Cancelled.");
+        process.exit(0);
+      }
+    }
+
+    const proceed = await confirm({
+      message: "Create plugin with these options?",
+      initialValue: true,
+    });
+    if (isCancel(proceed) || !proceed) {
+      cancel("Cancelled.");
+      process.exit(0);
+    }
+
+    const s = spinner();
+    s.start("Writing files…");
+    try {
+      scaffoldPlugin(targetDir, answers, {
+        isolated: placement === "isolated",
+      });
+      s.stop("Files written.");
+    } catch (err) {
+      s.stop("Failed.");
+      throw err;
+    }
+
+    const relativePath = path.relative(process.cwd(), targetDir);
+    const importPath = relativePath.startsWith(".")
+      ? relativePath
+      : `./${relativePath}`;
+    const exportName = answers.name
+      .split("-")
+      .map((s, i) => (i === 0 ? s : s.charAt(0).toUpperCase() + s.slice(1)))
+      .join("");
+
+    outro("Plugin created successfully.");
+
+    console.log("\nNext steps:\n");
+    if (placement === "in-repo") {
+      console.log(`  1. Import and register in your server:`);
+      console.log(`     import { ${exportName} } from "${importPath}";`);
+      console.log(`     createApp({ plugins: [ ..., ${exportName}() ] });`);
+      console.log(
+        `  2. Run \`npx appkit plugin sync --write\` to update appkit.plugins.json.\n`,
+      );
+    } else {
+      console.log(`  1. cd into the new package and install dependencies:`);
+      console.log(`     cd ${answers.targetPath} && pnpm install`);
+      console.log(`  2. Build: pnpm build`);
+      console.log(
+        `  3. In your app: pnpm add ./${answers.targetPath} @databricks/appkit`,
+      );
+      console.log(
+        `  4. Import and register: import { ${exportName} } from "<package-name>";\n`,
+      );
+    }
+  } catch (err) {
+    console.error(err);
+    process.exit(1);
+  }
+}
+
+export const pluginCreateCommand = new Command("create")
+  .description("Scaffold a new AppKit plugin (interactive)")
+  .action(runPluginCreate);

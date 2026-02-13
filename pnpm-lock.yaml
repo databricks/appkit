@@ -319,7 +319,7 @@ importers:
         version: link:../shared
       vite:
         specifier: npm:rolldown-vite@7.1.14
-        version: rolldown-vite@7.1.14(@types/node@24.10.1)(esbuild@0.25.10)(jiti@2.6.1)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1)
+        version: rolldown-vite@7.1.14(@types/node@25.2.3)(esbuild@0.25.10)(jiti@2.6.1)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1)
       ws:
         specifier: ^8.18.3
         version: 8.18.3(bufferutil@4.0.9)
@@ -341,7 +341,7 @@ importers:
         version: 8.18.1
       '@vitejs/plugin-react':
         specifier: ^5.1.1
-        version: 5.1.1(rolldown-vite@7.1.14(@types/node@24.10.1)(esbuild@0.25.10)(jiti@2.6.1)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))
+        version: 5.1.1(rolldown-vite@7.1.14(@types/node@25.2.3)(esbuild@0.25.10)(jiti@2.6.1)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))
 
   packages/appkit-ui:
     dependencies:
@@ -530,6 +530,9 @@ importers:
       '@ast-grep/napi':
         specifier: ^0.37.0
         version: 0.37.0
+      '@clack/prompts':
+        specifier: ^1.0.1
+        version: 1.0.1
       ajv:
         specifier: ^8.17.1
         version: 8.17.1
@@ -549,6 +552,9 @@ importers:
       '@types/json-schema':
         specifier: ^7.0.15
         version: 7.0.15
+      '@types/node':
+        specifier: ^25.2.3
+        version: 25.2.3
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
@@ -1412,6 +1418,12 @@ packages:
 
   '@chevrotain/utils@11.0.3':
     resolution: {integrity: sha512-YslZMgtJUyuMbZ+aKvfF3x1f5liK4mWNxghFRv7jqRR9C3R3fAOGTTKvxXDa2Y1s9zSbcpuO0cAxDYsc9SrXoQ==}
+
+  '@clack/core@1.0.1':
+    resolution: {integrity: sha512-WKeyK3NOBwDOzagPR5H08rFk9D/WuN705yEbuZvKqlkmoLM2woKtXb10OO2k1NoSU4SFG947i2/SCYh+2u5e4g==}
+
+  '@clack/prompts@1.0.1':
+    resolution: {integrity: sha512-/42G73JkuYdyWZ6m8d/CJtBrGl1Hegyc7Fy78m5Ob+jF85TOUmLR5XLce/U3LxYAw0kJ8CT5aI99RIvPHcGp/Q==}
 
   '@colors/colors@1.5.0':
     resolution: {integrity: sha512-ooWCrlZP11i8GImSjTHYHLkvFDP48nS4+204nGb1RiX/WXYHmJA2III9/e2DWVabCESdW7hBAEzHRqUn9OUVvQ==}
@@ -4602,6 +4614,9 @@ packages:
 
   '@types/node@24.7.2':
     resolution: {integrity: sha512-/NbVmcGTP+lj5oa4yiYxxeBjRivKQ5Ns1eSZeB99ExsEQ6rX5XYU1Zy/gGxY/ilqtD4Etx9mKyrPxZRetiahhA==}
+
+  '@types/node@25.2.3':
+    resolution: {integrity: sha512-m0jEgYlYz+mDJZ2+F4v8D1AyQb+QzsNqRuI7xg1VQX/KlKS0qT9r1Mo16yo5F/MtifXFgaofIFsdFMox2SxIbQ==}
 
   '@types/normalize-package-data@2.4.4':
     resolution: {integrity: sha512-37i+OaWTh9qeK4LSHPsyRC7NahnGotNuZvjLSgcPzblpHB3rrCJxAOgI5gCdKm7coonsaX1Of0ILiTcnZjbfxA==}
@@ -12546,6 +12561,17 @@ snapshots:
 
   '@chevrotain/utils@11.0.3': {}
 
+  '@clack/core@1.0.1':
+    dependencies:
+      picocolors: 1.1.1
+      sisteransi: 1.0.5
+
+  '@clack/prompts@1.0.1':
+    dependencies:
+      '@clack/core': 1.0.1
+      picocolors: 1.1.1
+      sisteransi: 1.0.5
+
   '@colors/colors@1.5.0':
     optional: true
 
@@ -16553,6 +16579,10 @@ snapshots:
     dependencies:
       undici-types: 7.14.0
 
+  '@types/node@25.2.3':
+    dependencies:
+      undici-types: 7.16.0
+
   '@types/normalize-package-data@2.4.4': {}
 
   '@types/oracledb@6.5.2':
@@ -16814,7 +16844,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@vitejs/plugin-react@5.1.1(rolldown-vite@7.1.14(@types/node@24.10.1)(esbuild@0.25.10)(jiti@2.6.1)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))':
+  '@vitejs/plugin-react@5.1.1(rolldown-vite@7.1.14(@types/node@25.2.3)(esbuild@0.25.10)(jiti@2.6.1)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))':
     dependencies:
       '@babel/core': 7.28.5
       '@babel/plugin-transform-react-jsx-self': 7.27.1(@babel/core@7.28.5)
@@ -16822,7 +16852,7 @@ snapshots:
       '@rolldown/pluginutils': 1.0.0-beta.47
       '@types/babel__core': 7.20.5
       react-refresh: 0.18.0
-      vite: rolldown-vite@7.1.14(@types/node@24.10.1)(esbuild@0.25.10)(jiti@2.6.1)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1)
+      vite: rolldown-vite@7.1.14(@types/node@25.2.3)(esbuild@0.25.10)(jiti@2.6.1)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1)
     transitivePeerDependencies:
       - supports-color
 
@@ -22755,7 +22785,7 @@ snapshots:
       tsx: 4.20.6
       yaml: 2.8.1
 
-  rolldown-vite@7.1.14(@types/node@24.10.1)(esbuild@0.25.10)(jiti@2.6.1)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1):
+  rolldown-vite@7.1.14(@types/node@25.2.3)(esbuild@0.25.10)(jiti@2.6.1)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1):
     dependencies:
       '@oxc-project/runtime': 0.92.0
       fdir: 6.5.0(picomatch@4.0.3)
@@ -22765,7 +22795,7 @@ snapshots:
       rolldown: 1.0.0-beta.41
       tinyglobby: 0.2.15
     optionalDependencies:
-      '@types/node': 24.10.1
+      '@types/node': 25.2.3
       esbuild: 0.25.10
       fsevents: 2.3.3
       jiti: 2.6.1

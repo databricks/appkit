@@ -1,21 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { Lang, parse, type SgNode } from "@ast-grep/napi";
-import Ajv, { type ErrorObject } from "ajv";
-import addFormats from "ajv-formats";
 import { Command } from "commander";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// Resolve to package schemas: from dist/cli/commands -> dist/schemas, from src/cli/commands -> shared/schemas
-const PLUGIN_MANIFEST_SCHEMA_PATH = path.join(
-  __dirname,
-  "..",
-  "..",
-  "..",
-  "schemas",
-  "plugin-manifest.schema.json",
-);
+import {
+  formatValidationErrors,
+  validateManifest,
+} from "../plugin-validate/validate-manifest.js";
 
 /**
  * Field entry in a resource requirement (env var + optional description)
@@ -88,81 +78,21 @@ function isWithinDirectory(filePath: string, boundary: string): boolean {
   );
 }
 
-let pluginManifestValidator: ReturnType<Ajv["compile"]> | null = null;
-
-/**
- * Loads and compiles the plugin-manifest JSON schema (cached).
- * Returns the compiled validate function or null if the schema cannot be loaded.
- */
-function getPluginManifestValidator(): ReturnType<Ajv["compile"]> | null {
-  if (pluginManifestValidator) return pluginManifestValidator;
-  try {
-    const schemaRaw = fs.readFileSync(PLUGIN_MANIFEST_SCHEMA_PATH, "utf-8");
-    const schema = JSON.parse(schemaRaw) as object;
-    const ajv = new Ajv({ allErrors: true, strict: false });
-    addFormats(ajv);
-    pluginManifestValidator = ajv.compile(schema);
-    return pluginManifestValidator;
-  } catch (err) {
-    console.warn(
-      "Warning: Could not load plugin-manifest schema for validation:",
-      err instanceof Error ? err.message : err,
-    );
-    return null;
-  }
-}
-
 /**
  * Validates a parsed JSON object against the plugin-manifest JSON schema.
  * Returns the manifest if valid, or null and logs schema errors.
- *
- * @param obj - The parsed JSON object to validate
- * @param sourcePath - Path to the manifest file (for warning messages)
- * @returns A valid PluginManifest or null
  */
 function validateManifestWithSchema(
   obj: unknown,
   sourcePath: string,
 ): PluginManifest | null {
-  if (!obj || typeof obj !== "object") {
-    console.warn(`Warning: Manifest at ${sourcePath} is not a valid object`);
-    return null;
+  const result = validateManifest(obj, sourcePath);
+  if (result.valid && result.manifest) return result.manifest as PluginManifest;
+  if (result.errors?.length) {
+    console.warn(
+      `Warning: Manifest at ${sourcePath} failed schema validation:\n${formatValidationErrors(result.errors)}`,
+    );
   }
-
-  const validate = getPluginManifestValidator();
-  if (!validate) {
-    // Schema not available (e.g. dev without build); fall back to basic shape check
-    const m = obj as Record<string, unknown>;
-    if (
-      typeof m.name === "string" &&
-      m.name.length > 0 &&
-      typeof m.displayName === "string" &&
-      m.displayName.length > 0 &&
-      typeof m.description === "string" &&
-      m.description.length > 0 &&
-      m.resources &&
-      typeof m.resources === "object" &&
-      Array.isArray((m.resources as { required?: unknown }).required)
-    ) {
-      return obj as PluginManifest;
-    }
-    console.warn(`Warning: Manifest at ${sourcePath} has invalid structure`);
-    return null;
-  }
-
-  const valid = validate(obj);
-  if (valid) return obj as PluginManifest;
-
-  const errors: ErrorObject[] = validate.errors ?? [];
-  const message = errors
-    .map(
-      (e: ErrorObject) =>
-        `  ${e.instancePath || "/"} ${e.message}${e.params ? ` (${JSON.stringify(e.params)})` : ""}`,
-    )
-    .join("\n");
-  console.warn(
-    `Warning: Manifest at ${sourcePath} failed schema validation:\n${message}`,
-  );
   return null;
 }
 
@@ -484,7 +414,7 @@ function scanForPlugins(
 }
 
 /**
- * Run the plugins sync command.
+ * Run the plugin sync command.
  * Parses the server entry file to discover which packages to scan for plugin
  * manifests, then marks plugins that are actually used in the `plugins: [...]`
  * array as requiredByTemplate.
@@ -619,7 +549,7 @@ function runPluginsSync(options: { write?: boolean; output?: string }) {
     console.log(`\n✓ Wrote ${outputPath}`);
   } else {
     console.log("\nTo write the manifest, run:");
-    console.log("  npx appkit plugins sync --write\n");
+    console.log("  npx appkit plugin sync --write\n");
     console.log("Preview:");
     console.log("─".repeat(60));
     console.log(JSON.stringify(templateManifest, null, 2));
