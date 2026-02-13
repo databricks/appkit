@@ -1,16 +1,14 @@
 import { Command } from "commander";
+import { pluginCreateCommand } from "./plugin-create.js";
 import { pluginsSyncCommand } from "./plugins-sync.js";
 
 /**
  * Parent command for plugin management operations.
  * Subcommands:
  *   - sync: Aggregate plugin manifests into appkit.plugins.json
- *
- * Future subcommands may include:
- *   - add: Add a plugin to an existing project
- *   - remove: Remove a plugin from a project
- *   - list: List available plugins
+ *   - create: Scaffold a new plugin (interactive)
  */
-export const pluginsCommand = new Command("plugins")
+export const pluginCommand = new Command("plugin")
   .description("Plugin management commands")
-  .addCommand(pluginsSyncCommand);
+  .addCommand(pluginsSyncCommand)
+  .addCommand(pluginCreateCommand);

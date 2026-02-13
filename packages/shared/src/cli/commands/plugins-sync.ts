@@ -358,7 +358,7 @@ function scanForPlugins(
 }
 
 /**
- * Run the plugins sync command.
+ * Run the plugin sync command.
  * Parses the server entry file to discover which packages to scan for plugin
  * manifests, then marks plugins that are actually used in the `plugins: [...]`
  * array as requiredByTemplate.
@@ -485,7 +485,7 @@ function runPluginsSync(options: { write?: boolean; output?: string }) {
     console.log(`\n✓ Wrote ${outputPath}`);
   } else {
     console.log("\nTo write the manifest, run:");
-    console.log("  npx appkit plugins sync --write\n");
+    console.log("  npx appkit plugin sync --write\n");
     console.log("Preview:");
     console.log("─".repeat(60));
     console.log(JSON.stringify(templateManifest, null, 2));

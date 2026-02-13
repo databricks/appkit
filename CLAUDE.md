@@ -84,6 +84,14 @@ pnpm check:fix        # Auto-fix with Biome
 pnpm typecheck        # TypeScript type checking across all packages
 ```
 
+### AppKit CLI
+When using the published SDK or running from the monorepo (after `pnpm build`), the `appkit` CLI is available:
+
+```bash
+npx appkit plugin sync --write   # Sync plugin manifests into appkit.plugins.json
+npx appkit plugin create         # Scaffold a new plugin (interactive, uses @clack/prompts)
+```
+
 ### Deployment
 ```bash
 pnpm pack:sdk                      # Package SDK for deployment
