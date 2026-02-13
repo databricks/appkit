@@ -1,12 +1,11 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
-import { SpanStatusCode } from "@/telemetry";
-import { createLogger } from "../../logging/logger";
 import { getWorkspaceClient } from "./config";
 import { generateDatabaseCredential } from "./credentials";
-import type { DriverTelemetry } from "./telemetry";
+import { createLogger } from "./logger";
+import { type DriverTelemetry, SpanStatusCode } from "./telemetry";
 import type { LakebasePoolConfig } from "./types";
 
-const logger = createLogger("connectors:lakebase:token");
+const logger = createLogger("token");
 
 // 2-minute buffer before token expiration to prevent race conditions
 // Lakebase tokens expire after 1 hour, so we refresh when ~58 minutes remain

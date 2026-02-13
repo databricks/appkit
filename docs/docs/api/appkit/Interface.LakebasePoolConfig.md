@@ -69,9 +69,9 @@ optional telemetry: TelemetryOptions;
 
 Telemetry configuration
 
-- `true` or omitted: enable all telemetry (traces, metrics, logs) -- no-op when OTEL is not configured
+- `true` or omitted: enable all telemetry (traces, metrics) -- no-op when OTEL is not configured
 - `false`: disable all telemetry
-- `{ traces?, metrics?, logs? }`: fine-grained control
+- `{ traces?, metrics? }`: fine-grained control
 
 ***
 

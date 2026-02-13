@@ -1,12 +1,12 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
-import { ValidationError } from "../../errors";
-import { createLogger } from "../../logging/logger";
+import { ValidationError } from "./errors";
+import { createLogger } from "./logger";
 import type {
   DatabaseCredential,
   GenerateDatabaseCredentialRequest,
 } from "./types";
 
-const logger = createLogger("connectors:lakebase:credentials");
+const logger = createLogger("credentials");
 
 /**
  * Generate OAuth credentials for Postgres database connection using the proper Postgres API.

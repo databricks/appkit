@@ -8,7 +8,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = process.cwd();
-const PACKAGES = ["packages/appkit", "packages/appkit-ui"];
+const PACKAGES = ["packages/appkit", "packages/appkit-ui", "packages/lakebase"];
 
 // Get version from command line arg or root package.json
 const version =

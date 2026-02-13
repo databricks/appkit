@@ -19,7 +19,6 @@ export type {
   GenerateDatabaseCredentialRequest,
   LakebasePoolConfig,
   RequestedClaims,
-  RequestedClaimsPermissionSet,
   RequestedResource,
 } from "./connectors/lakebase";
 // Lakebase Autoscaling connector
@@ -29,6 +28,7 @@ export {
   getLakebaseOrmConfig,
   getLakebasePgConfig,
   getWorkspaceClient,
+  RequestedClaimsPermissionSet,
 } from "./connectors/lakebase";
 export { getExecutionContext } from "./context";
 export { createApp } from "./core";

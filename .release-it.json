@@ -20,8 +20,8 @@
   "npm": false,
   "hooks": {
     "after:bump": "tsx tools/sync-versions.ts ${version} && pnpm build:notice && git add NOTICE.md",
-    "before:release": "pnpm build && pnpm --filter=docs build && pnpm --filter=@databricks/appkit dist && pnpm --filter=@databricks/appkit-ui dist",
-    "after:release": "npm publish packages/appkit/tmp --access public --provenance && npm publish packages/appkit-ui/tmp --access public --provenance"
+    "before:release": "pnpm build && pnpm --filter=docs build && pnpm --filter=@databricks/appkit dist && pnpm --filter=@databricks/appkit-ui dist && pnpm --filter=@databricks/lakebase dist",
+    "after:release": "npm publish packages/appkit/tmp --access public --provenance && npm publish packages/appkit-ui/tmp --access public --provenance && npm publish packages/lakebase/tmp --access public --provenance"
   },
   "plugins": {
     "@release-it/conventional-changelog": {
@@ -31,7 +31,7 @@
       },
       "writerOpts": {
         "groupBy": "scope",
-        "commitGroupsSort": ["appkit", "appkit-ui"],
+        "commitGroupsSort": ["appkit", "appkit-ui", "lakebase"],
         "commitsSort": ["type", "subject"]
       },
       "infile": "CHANGELOG.md",

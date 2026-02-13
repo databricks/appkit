@@ -248,6 +248,9 @@ importers:
 
   packages/appkit:
     dependencies:
+      '@databricks/lakebase':
+        specifier: workspace:*
+        version: link:../lakebase
       '@databricks/sdk-experimental':
         specifier: ^0.16.0
         version: 0.16.0
@@ -502,6 +505,22 @@ importers:
       tw-animate-css:
         specifier: ^1.4.0
         version: 1.4.0
+
+  packages/lakebase:
+    dependencies:
+      '@databricks/sdk-experimental':
+        specifier: ^0.16.0
+        version: 0.16.0
+      '@opentelemetry/api':
+        specifier: ^1.0.0
+        version: 1.9.0
+      pg:
+        specifier: ^8.18.0
+        version: 8.18.0
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.16.0
+        version: 8.16.0
 
   packages/shared:
     dependencies:

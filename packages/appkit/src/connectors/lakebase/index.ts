@@ -1,15 +1,16 @@
-export { getWorkspaceClient } from "./config";
-export { generateDatabaseCredential } from "./credentials";
-export { createLakebasePool } from "./pool";
 export {
+  createLakebasePool,
+  createTokenRefreshCallback,
+  type DatabaseCredential,
+  type DriverTelemetry,
+  type GenerateDatabaseCredentialRequest,
+  generateDatabaseCredential,
   getLakebaseOrmConfig,
   getLakebasePgConfig,
-} from "./pool-config";
-export type {
-  DatabaseCredential,
-  GenerateDatabaseCredentialRequest,
-  LakebasePoolConfig,
-  RequestedClaims,
+  getWorkspaceClient,
+  type LakebasePoolConfig,
+  type RequestedClaims,
   RequestedClaimsPermissionSet,
-  RequestedResource,
-} from "./types";
+  type RequestedResource,
+  type TokenRefreshDeps,
+} from "@databricks/lakebase";

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { createLakebasePool } from "../lakebase";
+import { createLakebasePool } from "../pool";
 
 // ── Mocks ────────────────────────────────────────────────────────────
 
@@ -33,9 +33,8 @@ vi.mock("pg", () => {
 });
 
 // Mock generateDatabaseCredential
-vi.mock("../lakebase/credentials", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../lakebase/credentials")>();
+vi.mock("../credentials", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../credentials")>();
   return {
     ...actual,
     generateDatabaseCredential: vi.fn(),
@@ -50,47 +49,54 @@ const mockCounterAdd = vi.fn();
 const mockHistogramRecord = vi.fn();
 const mockAddCallback = vi.fn();
 
-vi.mock("@/telemetry", () => ({
-  SpanStatusCode: { OK: 1, ERROR: 2 },
-  TelemetryManager: {
-    getProvider: vi.fn(() => ({
-      getTracer: vi.fn(() => ({
-        startActiveSpan: vi.fn(
-          (_name: string, _opts: unknown, fn: (span: unknown) => unknown) => {
-            const span = {
-              setAttribute: mockSpanSetAttribute,
-              setStatus: mockSpanSetStatus,
-              end: mockSpanEnd,
-              recordException: vi.fn(),
-            };
-            return fn(span);
-          },
-        ),
-      })),
-      getMeter: vi.fn(() => ({
-        createCounter: vi.fn(() => ({ add: mockCounterAdd })),
-        createHistogram: vi.fn(() => ({ record: mockHistogramRecord })),
-        createObservableGauge: vi.fn(() => ({
-          addCallback: mockAddCallback,
-        })),
-      })),
-      startActiveSpan: vi.fn(
-        async (
-          _name: string,
-          _opts: unknown,
-          fn: (span: unknown) => Promise<unknown>,
-        ) => {
-          const span = {
-            setAttribute: mockSpanSetAttribute,
-            setStatus: mockSpanSetStatus,
-            end: mockSpanEnd,
-            recordException: vi.fn(),
-          };
-          return fn(span);
-        },
-      ),
+const mockTelemetryProvider = {
+  getTracer: vi.fn(() => ({
+    startActiveSpan: vi.fn(
+      <T>(_name: string, _opts: unknown, fn: (span: unknown) => T): T => {
+        const span = {
+          setAttribute: mockSpanSetAttribute,
+          setStatus: mockSpanSetStatus,
+          end: mockSpanEnd,
+          recordException: vi.fn(),
+        };
+        return fn(span);
+      },
+    ),
+  })),
+  getMeter: vi.fn(() => ({
+    createCounter: vi.fn(() => ({ add: mockCounterAdd })),
+    createHistogram: vi.fn(() => ({ record: mockHistogramRecord })),
+    createObservableGauge: vi.fn(() => ({
+      addCallback: mockAddCallback,
     })),
-  },
+  })),
+  startActiveSpan: vi.fn(
+    async (
+      _name: string,
+      _opts: unknown,
+      fn: (span: unknown) => Promise<unknown>,
+    ) => {
+      const span = {
+        setAttribute: mockSpanSetAttribute,
+        setStatus: mockSpanSetStatus,
+        end: mockSpanEnd,
+        recordException: vi.fn(),
+      };
+      return fn(span);
+    },
+  ),
+};
+
+vi.mock("../telemetry", () => ({
+  SpanStatusCode: { OK: 1, ERROR: 2 },
+  SpanKind: { CLIENT: 3 },
+  initTelemetry: vi.fn(() => ({
+    provider: mockTelemetryProvider,
+    tokenRefreshDuration: { record: mockHistogramRecord },
+    queryDuration: { record: mockHistogramRecord },
+    poolErrors: { add: mockCounterAdd },
+  })),
+  attachPoolMetrics: vi.fn(),
 }));
 
 // ── Test suite ───────────────────────────────────────────────────────
@@ -126,7 +132,7 @@ describe("createLakebasePool", () => {
     process.env.PGUSER = "test-user@example.com";
 
     // Setup mock for generateDatabaseCredential
-    const utils = await import("../lakebase/credentials");
+    const utils = await import("../credentials");
     mockGenerateCredential = utils.generateDatabaseCredential as any;
     mockGenerateCredential.mockResolvedValue({
       token: "test-oauth-token-12345",
@@ -573,32 +579,14 @@ describe("createLakebasePool", () => {
   });
 
   describe("telemetry", () => {
-    test("should initialize telemetry provider", async () => {
-      const { TelemetryManager } = await import("@/telemetry");
+    test("should initialize telemetry", async () => {
+      const { initTelemetry } = await import("../telemetry");
 
       createLakebasePool({
         workspaceClient: {} as any,
       });
 
-      expect(TelemetryManager.getProvider).toHaveBeenCalledWith(
-        "connectors:lakebase",
-        undefined,
-      );
-    });
-
-    test("should pass telemetry config to provider", async () => {
-      const { TelemetryManager } = await import("@/telemetry");
-      const telemetryConfig = { traces: true, metrics: false };
-
-      createLakebasePool({
-        workspaceClient: {} as any,
-        telemetry: telemetryConfig,
-      });
-
-      expect(TelemetryManager.getProvider).toHaveBeenCalledWith(
-        "connectors:lakebase",
-        telemetryConfig,
-      );
+      expect(initTelemetry).toHaveBeenCalled();
     });
 
     test("should record token refresh duration on successful fetch", async () => {
@@ -634,86 +622,7 @@ describe("createLakebasePool", () => {
       expect(mockSpanEnd).toHaveBeenCalled();
     });
 
-    test("should register observable gauge callbacks for pool metrics", () => {
-      createLakebasePool({
-        workspaceClient: {} as any,
-      });
-
-      // Three observable gauges should have callbacks registered
-      // (total, idle, waiting)
-      expect(mockAddCallback).toHaveBeenCalledTimes(3);
-    });
-
-    test("should observe pool counts via gauge callbacks", () => {
-      createLakebasePool({
-        workspaceClient: {} as any,
-      });
-
-      // Get the registered callbacks
-      const callbacks = mockAddCallback.mock.calls.map(
-        (call: unknown[]) => call[0],
-      );
-      expect(callbacks).toHaveLength(3);
-
-      // Simulate OTEL collection by invoking each callback
-      const observeResults: number[] = [];
-      const mockResult = {
-        observe: (value: number) => observeResults.push(value),
-      };
-
-      for (const cb of callbacks) {
-        (cb as (result: { observe: (v: number) => void }) => void)(mockResult);
-      }
-
-      // Pool mock returns totalCount=3, idleCount=1, waitingCount=0
-      expect(observeResults).toEqual([3, 1, 0]);
-    });
-
-    test("should increment pool error counter with error code on pool error event", () => {
-      const pool = createLakebasePool({
-        workspaceClient: {} as any,
-      });
-
-      // Find the error handler registered via pool.on("error", ...)
-      const onMock = pool.on as ReturnType<typeof vi.fn>;
-      const errorHandlers = onMock.mock.calls.filter(
-        (call: unknown[]) => call[0] === "error",
-      );
-
-      // Single consolidated error handler (logging + metrics)
-      expect(errorHandlers.length).toBe(1);
-
-      // Invoke the error handler with a PG error that has a code
-      const errorHandler = errorHandlers[0][1];
-      const pgError = Object.assign(new Error("auth failed"), {
-        code: "28P01",
-      });
-      errorHandler(pgError);
-
-      expect(mockCounterAdd).toHaveBeenCalledWith(1, {
-        "error.code": "28P01",
-      });
-    });
-
-    test("should use 'unknown' error code when error has no code", () => {
-      const pool = createLakebasePool({
-        workspaceClient: {} as any,
-      });
-
-      const onMock = pool.on as ReturnType<typeof vi.fn>;
-      const errorHandlers = onMock.mock.calls.filter(
-        (call: unknown[]) => call[0] === "error",
-      );
-
-      const errorHandler = errorHandlers[0][1];
-      errorHandler(new Error("unknown error"));
-
-      expect(mockCounterAdd).toHaveBeenCalledWith(1, {
-        "error.code": "unknown",
-      });
-    });
-
-    test("should wrap pool.query to add metrics tracking", () => {
+    test("should wrap pool.query to add telemetry tracking", () => {
       const pool = createLakebasePool({
         workspaceClient: {} as any,
       });

@@ -1,6 +1,15 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { PoolConfig } from "pg";
-import type { TelemetryOptions } from "shared";
+
+/**
+ * Telemetry configuration options
+ */
+export type TelemetryOptions =
+  | boolean
+  | {
+      traces?: boolean;
+      metrics?: boolean;
+    };
 
 /**
  * Configuration for creating a Lakebase connection pool
@@ -50,9 +59,9 @@ export interface LakebasePoolConfig extends PoolConfig {
   /**
    * Telemetry configuration
    *
-   * - `true` or omitted: enable all telemetry (traces, metrics, logs) -- no-op when OTEL is not configured
+   * - `true` or omitted: enable all telemetry (traces, metrics) -- no-op when OTEL is not configured
    * - `false`: disable all telemetry
-   * - `{ traces?, metrics?, logs? }`: fine-grained control
+   * - `{ traces?, metrics? }`: fine-grained control
    */
   telemetry?: TelemetryOptions;
 }

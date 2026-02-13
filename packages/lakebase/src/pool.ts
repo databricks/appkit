@@ -1,11 +1,15 @@
 import pg from "pg";
-import { SpanKind, SpanStatusCode } from "@/telemetry";
-import { createLogger } from "../../logging/logger";
+import { createLogger } from "./logger";
 import { getLakebasePgConfig } from "./pool-config";
-import { attachPoolMetrics, initTelemetry } from "./telemetry";
+import {
+  attachPoolMetrics,
+  initTelemetry,
+  SpanKind,
+  SpanStatusCode,
+} from "./telemetry";
 import type { LakebasePoolConfig } from "./types";
 
-const logger = createLogger("connectors:lakebase:pool");
+const logger = createLogger("pool");
 
 /**
  * Create a PostgreSQL connection pool with automatic OAuth token refresh for Lakebase.

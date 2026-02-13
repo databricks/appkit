@@ -4,7 +4,7 @@
 function getWorkspaceClient(config: Partial<LakebasePoolConfig>): Promise<WorkspaceClient>;
 ```
 
-Get workspace client from config or execution context
+Get workspace client from config or SDK default auth chain
 
 ## Parameters
 
