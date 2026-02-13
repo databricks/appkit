@@ -1,7 +1,7 @@
 {
   "name": "@databricks/lakebase",
   "type": "module",
-  "version": "0.5.3",
+  "version": "0.1.0",
   "description": "PostgreSQL driver for Databricks Lakebase with automatic OAuth token refresh",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -41,7 +41,10 @@
     "clean": "rm -rf dist tmp",
     "dist": "tsx ../../tools/dist.ts",
     "tarball": "rm -rf tmp && pnpm dist && npm pack ./tmp --pack-destination ./tmp",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "release": "release-it",
+    "release:dry": "release-it --dry-run",
+    "release:ci": "release-it --ci"
   },
   "dependencies": {
     "@databricks/sdk-experimental": "^0.16.0",
