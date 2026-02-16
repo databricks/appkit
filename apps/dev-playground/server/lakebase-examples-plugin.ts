@@ -51,7 +51,7 @@ export class LakebaseExamplesPlugin extends Plugin {
       return;
     }
 
-    // Register routes for each example under /api/lakebaseExamples/*
+    // Register routes for each example under /api/lakebase-examples/*
     rawExample.registerRoutes(router, "/raw");
     drizzleExample.registerRoutes(router, "/drizzle");
     typeormExample.registerRoutes(router, "/typeorm");
@@ -71,5 +71,5 @@ export class LakebaseExamplesPlugin extends Plugin {
 export const lakebaseExamples = toPlugin<
   typeof LakebaseExamplesPlugin,
   Record<string, never>,
-  "lakebaseExamples"
+  "lakebase-examples"
 >(LakebaseExamplesPlugin, "lakebaseExamples");
