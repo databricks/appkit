@@ -54,6 +54,19 @@ vi.mock("@/telemetry", () => ({
   SpanStatusCode: { OK: 1, ERROR: 2 },
   TelemetryManager: {
     getProvider: vi.fn(() => ({
+      getTracer: vi.fn(() => ({
+        startActiveSpan: vi.fn(
+          (_name: string, _opts: unknown, fn: (span: unknown) => unknown) => {
+            const span = {
+              setAttribute: mockSpanSetAttribute,
+              setStatus: mockSpanSetStatus,
+              end: mockSpanEnd,
+              recordException: vi.fn(),
+            };
+            return fn(span);
+          },
+        ),
+      })),
       getMeter: vi.fn(() => ({
         createCounter: vi.fn(() => ({ add: mockCounterAdd })),
         createHistogram: vi.fn(() => ({ record: mockHistogramRecord })),
@@ -707,7 +720,7 @@ describe("createLakebasePool", () => {
 
       // pool.query should be our wrapped function
       expect(typeof pool.query).toBe("function");
-      expect(pool.query.name).toBe("queryWithMetrics");
+      expect(pool.query.name).toBe("queryWithTelemetry");
     });
   });
 });
