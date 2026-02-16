@@ -12,6 +12,7 @@ export type {
   DatabaseCredential,
   GenerateDatabaseCredentialRequest,
   LakebasePoolConfig,
+  Logger,
   RequestedClaims,
   RequestedResource,
 } from "./types";

@@ -2,7 +2,7 @@ import type pg from "pg";
 import { getUsernameSync, parsePoolConfig } from "./config";
 import { type DriverTelemetry, initTelemetry } from "./telemetry";
 import { createTokenRefreshCallback } from "./token-refresh";
-import type { LakebasePoolConfig } from "./types";
+import type { LakebasePoolConfig, Logger } from "./types";
 
 /**
  * Map an SSL mode string to the corresponding `pg` SSL configuration.
@@ -36,11 +36,13 @@ function mapSslConfig(
  *
  * @param config - Optional configuration (reads from environment if not provided)
  * @param telemetry - Optional pre-initialized telemetry (created internally if not provided)
+ * @param logger - Optional logger (silent if not provided)
  * @returns PostgreSQL pool configuration with OAuth token refresh
  */
 export function getLakebasePgConfig(
   config?: Partial<LakebasePoolConfig>,
   telemetry?: DriverTelemetry,
+  logger?: Logger,
 ): pg.PoolConfig {
   const userConfig = config ?? {};
   const poolConfig = parsePoolConfig(userConfig);
@@ -56,7 +58,8 @@ export function getLakebasePgConfig(
     passwordConfig = createTokenRefreshCallback({
       userConfig,
       endpoint: poolConfig.endpoint,
-      telemetry: telemetry ?? initTelemetry(userConfig),
+      telemetry: telemetry ?? initTelemetry(),
+      logger,
     });
   }
 

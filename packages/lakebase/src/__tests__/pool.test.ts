@@ -49,33 +49,9 @@ const mockCounterAdd = vi.fn();
 const mockHistogramRecord = vi.fn();
 const mockAddCallback = vi.fn();
 
-const mockTelemetryProvider = {
-  getTracer: vi.fn(() => ({
-    startActiveSpan: vi.fn(
-      <T>(_name: string, _opts: unknown, fn: (span: unknown) => T): T => {
-        const span = {
-          setAttribute: mockSpanSetAttribute,
-          setStatus: mockSpanSetStatus,
-          end: mockSpanEnd,
-          recordException: vi.fn(),
-        };
-        return fn(span);
-      },
-    ),
-  })),
-  getMeter: vi.fn(() => ({
-    createCounter: vi.fn(() => ({ add: mockCounterAdd })),
-    createHistogram: vi.fn(() => ({ record: mockHistogramRecord })),
-    createObservableGauge: vi.fn(() => ({
-      addCallback: mockAddCallback,
-    })),
-  })),
+const mockTracer = {
   startActiveSpan: vi.fn(
-    async (
-      _name: string,
-      _opts: unknown,
-      fn: (span: unknown) => Promise<unknown>,
-    ) => {
+    <T>(_name: string, _opts: unknown, fn: (span: unknown) => T): T => {
       const span = {
         setAttribute: mockSpanSetAttribute,
         setStatus: mockSpanSetStatus,
@@ -87,11 +63,20 @@ const mockTelemetryProvider = {
   ),
 };
 
+const mockMeter = {
+  createCounter: vi.fn(() => ({ add: mockCounterAdd })),
+  createHistogram: vi.fn(() => ({ record: mockHistogramRecord })),
+  createObservableGauge: vi.fn(() => ({
+    addCallback: mockAddCallback,
+  })),
+};
+
 vi.mock("../telemetry", () => ({
   SpanStatusCode: { OK: 1, ERROR: 2 },
   SpanKind: { CLIENT: 3 },
   initTelemetry: vi.fn(() => ({
-    provider: mockTelemetryProvider,
+    tracer: mockTracer,
+    meter: mockMeter,
     tokenRefreshDuration: { record: mockHistogramRecord },
     queryDuration: { record: mockHistogramRecord },
     poolErrors: { add: mockCounterAdd },
@@ -630,6 +615,69 @@ describe("createLakebasePool", () => {
       // pool.query should be our wrapped function
       expect(typeof pool.query).toBe("function");
       expect(pool.query.name).toBe("queryWithTelemetry");
+    });
+  });
+
+  describe("logger injection", () => {
+    test("should operate silently without logger", () => {
+      const consoleSpy = vi.spyOn(console, "log");
+      const consoleDebugSpy = vi.spyOn(console, "debug");
+
+      const pool = createLakebasePool({
+        workspaceClient: {} as any,
+      });
+
+      expect(pool).toBeDefined();
+      expect(consoleSpy).not.toHaveBeenCalled();
+      expect(consoleDebugSpy).not.toHaveBeenCalled();
+
+      consoleSpy.mockRestore();
+      consoleDebugSpy.mockRestore();
+    });
+
+    test("should use injected logger", () => {
+      const mockLogger = {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      };
+
+      const pool = createLakebasePool({
+        workspaceClient: {} as any,
+        logger: mockLogger,
+      });
+
+      expect(pool).toBeDefined();
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        expect.stringContaining("Created Lakebase connection pool"),
+        expect.any(String),
+        expect.any(String),
+        expect.any(String),
+      );
+    });
+
+    test("should pass logger to error handlers", async () => {
+      const mockLogger = {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      };
+
+      const { attachPoolMetrics } = await import("../telemetry");
+
+      createLakebasePool({
+        workspaceClient: {} as any,
+        logger: mockLogger,
+      });
+
+      // Verify attachPoolMetrics was called with the logger
+      expect(attachPoolMetrics).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        mockLogger,
+      );
     });
   });
 });

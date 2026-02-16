@@ -1,11 +1,8 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import { getWorkspaceClient } from "./config";
 import { generateDatabaseCredential } from "./credentials";
-import { createLogger } from "./logger";
 import { type DriverTelemetry, SpanStatusCode } from "./telemetry";
-import type { LakebasePoolConfig } from "./types";
-
-const logger = createLogger("token");
+import type { LakebasePoolConfig, Logger } from "./types";
 
 // 2-minute buffer before token expiration to prevent race conditions
 // Lakebase tokens expire after 1 hour, so we refresh when ~58 minutes remain
@@ -15,6 +12,7 @@ export interface TokenRefreshDeps {
   userConfig: Partial<LakebasePoolConfig>;
   endpoint: string;
   telemetry: DriverTelemetry;
+  logger?: Logger;
 }
 
 /** Fetch a fresh OAuth token from Databricks */
@@ -53,7 +51,7 @@ export function createTokenRefreshCallback(
       try {
         workspaceClient = await getWorkspaceClient(deps.userConfig);
       } catch (error) {
-        logger.error("Failed to initialize workspace client: %O", error);
+        deps.logger?.error("Failed to initialize workspace client: %O", error);
         throw error;
       }
     }
@@ -63,7 +61,7 @@ export function createTokenRefreshCallback(
     if (hasValidToken) {
       // Return cached token if still valid (with buffer)
       const expiresIn = Math.round((tokenExpiresAt - now) / 1000 / 60);
-      logger.debug(
+      deps.logger?.debug(
         "Using cached OAuth token (expires in %d minutes at %s)",
         expiresIn,
         new Date(tokenExpiresAt).toISOString(),
@@ -78,7 +76,7 @@ export function createTokenRefreshCallback(
       refreshPromise = (async () => {
         const startTime = Date.now();
         try {
-          const result = await deps.telemetry.provider.startActiveSpan(
+          const result = await deps.telemetry.tracer.startActiveSpan(
             "lakebase.token.refresh",
             {
               attributes: { "lakebase.endpoint": deps.endpoint },
@@ -99,7 +97,7 @@ export function createTokenRefreshCallback(
           tokenExpiresAt = result.expiresAt;
           return cachedToken;
         } catch (error) {
-          logger.error("Failed to fetch OAuth token: %O", {
+          deps.logger?.error("Failed to fetch OAuth token: %O", {
             error,
             message: error instanceof Error ? error.message : String(error),
             endpoint: deps.endpoint,

@@ -73,18 +73,35 @@ See [Databricks authentication docs](https://docs.databricks.com/en/dev-tools/au
 
 ## Configuration
 
-| Option                    | Environment Variable               | Description                                                              | Default       |
-| ------------------------- | ---------------------------------- | ------------------------------------------------------------------------ | ------------- |
-| `host`                    | `PGHOST`                           | Lakebase host                                                            | _Required_    |
-| `database`                | `PGDATABASE`                       | Database name                                                            | _Required_    |
-| `endpoint`                | `LAKEBASE_ENDPOINT`                | Endpoint resource path                                                   | _Required_    |
-| `user`                    | `PGUSER` or `DATABRICKS_CLIENT_ID` | Username or service principal ID                                         | Auto-detected |
-| `port`                    | `PGPORT`                           | Port number                                                              | `5432`        |
-| `sslMode`                 | `PGSSLMODE`                        | SSL mode (`require`, `disable`, `prefer`)                                | `require`     |
-| `max`                     | -                                  | Max pool connections                                                     | `10`          |
-| `idleTimeoutMillis`       | -                                  | Idle connection timeout                                                  | `30000`       |
-| `connectionTimeoutMillis` | -                                  | Connection timeout                                                       | `10000`       |
-| `telemetry`               | -                                  | Enable/disable telemetry (requires `@opentelemetry/api` to be installed) | `true`        |
+| Option                    | Environment Variable               | Description                          | Default              |
+| ------------------------- | ---------------------------------- | ------------------------------------ | -------------------- |
+| `host`                    | `PGHOST`                           | Lakebase host                        | _Required_           |
+| `database`                | `PGDATABASE`                       | Database name                        | _Required_           |
+| `endpoint`                | `LAKEBASE_ENDPOINT`                | Endpoint resource path               | _Required_           |
+| `user`                    | `PGUSER` or `DATABRICKS_CLIENT_ID` | Username or service principal ID     | Auto-detected        |
+| `port`                    | `PGPORT`                           | Port number                          | `5432`               |
+| `sslMode`                 | `PGSSLMODE`                        | SSL mode                             | `require`            |
+| `max`                     | -                                  | Max pool connections                 | `10`                 |
+| `idleTimeoutMillis`       | -                                  | Idle connection timeout              | `30000`              |
+| `connectionTimeoutMillis` | -                                  | Connection timeout                   | `10000`              |
+| `logger`                  | -                                  | Optional logger instance             | `undefined` (silent) |
+
+## Logging
+
+By default, the driver operates silently (no logging). You can inject a custom logger for observability:
+
+```typescript
+const logger = {
+  debug: (msg: string, ...args: unknown[]) => console.debug(msg, ...args),
+  info: (msg: string, ...args: unknown[]) => console.log(msg, ...args),
+  warn: (msg: string, ...args: unknown[]) => console.warn(msg, ...args),
+  error: (msg: string, ...args: unknown[]) => console.error(msg, ...args),
+};
+
+const pool = createLakebasePool({ logger });
+```
+
+When used with AppKit, logging is automatically configured - see the [AppKit Integration](#appkit-integration) section.
 
 ## ORM Examples
 
@@ -146,17 +163,19 @@ const sequelize = new Sequelize({
 });
 ```
 
-## OpenTelemetry instrumentation (optional)
+## OpenTelemetry Integration
 
-The driver automatically instruments queries, token refresh operations, and connection pool metrics when [OpenTelemetry](https://opentelemetry.io/) is configured in your application.
+The driver automatically uses OpenTelemetry's global registry when available. If your application initializes OpenTelemetry providers, the driver will automatically instrument queries and metrics with no additional configuration needed.
 
-### Install OpenTelemetry
+### Setup
+
+Install OpenTelemetry in your application:
 
 ```bash
 npm install @opentelemetry/api @opentelemetry/sdk-node
 ```
 
-### Initialize OpenTelemetry
+Initialize OpenTelemetry in your application:
 
 ```typescript
 import { NodeSDK } from "@opentelemetry/sdk-node";
@@ -165,12 +184,14 @@ const sdk = new NodeSDK({
   // Your OTEL configuration
 });
 
-sdk.start();
+sdk.start(); // Registers global providers
 
-// Now create your pool - it will automatically be instrumented
+// Now create your pool - it automatically uses the global providers
 import { createLakebasePool } from "@databricks/lakebase";
 const pool = createLakebasePool();
 ```
+
+The driver calls `trace.getTracer('@databricks/lakebase')` and `metrics.getMeter('@databricks/lakebase')` internally. If no global providers are registered, operations are automatic no-ops.
 
 ### Metrics Exported
 
@@ -181,26 +202,20 @@ const pool = createLakebasePool();
 - `lakebase.pool.connections.waiting` - Clients waiting for connection (gauge)
 - `lakebase.pool.errors` - Pool errors by error code (counter)
 
-### Disable Telemetry
-
-If you want to disable telemetry, you can do so by setting the `telemetry` option to `false`.
-When the `@opentelemetry/api` package is not installed, telemetry will be disabled automatically.
-
-```typescript
-const pool = createLakebasePool({
-  telemetry: false,
-});
-```
-
-## Used in Databricks AppKit
+## AppKit Integration
 
 This driver is also available as part of [@databricks/appkit](https://www.npmjs.com/package/@databricks/appkit):
 
 ```typescript
 import { createLakebasePool } from "@databricks/appkit";
+
+const pool = createLakebasePool();
 ```
 
-Both imports are identical - AppKit re-exports this package.
+**Differences between standalone and AppKit:**
+
+- **Standalone** (`@databricks/lakebase`): Silent by default - no logger configured
+- **AppKit** (`@databricks/appkit`): Automatically injects AppKit's logger with scope `appkit:connectors:lakebase`.
 
 ## Learn more about Lakebase Autoscaling
 

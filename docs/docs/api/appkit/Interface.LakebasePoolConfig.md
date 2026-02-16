@@ -44,6 +44,26 @@ Can also be set via LAKEBASE_ENDPOINT environment variable
 
 ***
 
+### logger?
+
+```ts
+optional logger: Logger;
+```
+
+Optional logger instance for the driver.
+When not provided, the driver operates silently (no logging).
+
+#### Example
+
+```typescript
+import { createLogger } from '@databricks/appkit';
+const pool = createLakebasePool({
+  logger: createLogger('connectors:lakebase')
+});
+```
+
+***
+
 ### sslMode?
 
 ```ts

@@ -72,4 +72,4 @@ export const lakebaseExamples = toPlugin<
   typeof LakebaseExamplesPlugin,
   Record<string, never>,
   "lakebase-examples"
->(LakebaseExamplesPlugin, "lakebaseExamples");
+>(LakebaseExamplesPlugin, "lakebase-examples");
