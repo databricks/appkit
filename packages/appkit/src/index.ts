@@ -46,7 +46,7 @@ export {
 } from "./errors";
 // Plugin authoring
 export { Plugin, toPlugin } from "./plugin";
-export { analytics, server } from "./plugins";
+export { analytics, files, server } from "./plugins";
 // Registry types and utilities for plugin manifests
 export type {
   ConfigSchema,
