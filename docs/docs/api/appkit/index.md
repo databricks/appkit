@@ -59,6 +59,7 @@ plugin architecture, and React integration.
 
 | Variable | Description |
 | ------ | ------ |
+| [genie](Variable.genie.md) | - |
 | [sql](Variable.sql.md) | SQL helper namespace |
 
 ## Functions
