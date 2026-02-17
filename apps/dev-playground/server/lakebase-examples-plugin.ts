@@ -22,6 +22,16 @@ export class LakebaseExamplesPlugin extends Plugin {
   public name = "lakebase-examples";
   protected envVars: string[] = [];
 
+  static manifest = {
+    name: "lakebase-examples",
+    displayName: "Lakebase Examples Plugin",
+    description: "A plugin that provides lakebase examples",
+    resources: {
+      required: [],
+      optional: [],
+    },
+  };
+
   async setup() {
     // Check if Lakebase is configured
     if (!process.env.PGHOST || !process.env.LAKEBASE_ENDPOINT) {
