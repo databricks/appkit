@@ -13,6 +13,21 @@ export interface Logger {
 }
 
 /**
+ * Configuration for console-based logger.
+ * Specify which log levels should be enabled.
+ */
+export interface LoggerConfig {
+  /** Enable debug level logging */
+  debug?: boolean;
+  /** Enable info level logging */
+  info?: boolean;
+  /** Enable warning level logging */
+  warn?: boolean;
+  /** Enable error level logging */
+  error?: boolean;
+}
+
+/**
  * Telemetry configuration options
  */
 export type TelemetryOptions =
@@ -77,18 +92,29 @@ export interface LakebasePoolConfig extends PoolConfig {
   telemetry?: TelemetryOptions;
 
   /**
-   * Optional logger instance for the driver.
-   * When not provided, the driver operates silently (no logging).
+   * Optional logger configuration.
    *
-   * @example Using appkit logger
+   * Supports three modes:
+   * 1. Logger instance - Use your own logger implementation
+   * 2. LoggerConfig - Enable/disable specific log levels (uses console)
+   * 3. Undefined - Defaults to error logging only
+   *
+   * @example Using custom logger
    * ```typescript
    * import { createLogger } from '@databricks/appkit';
    * const pool = createLakebasePool({
    *   logger: createLogger('connectors:lakebase')
    * });
    * ```
+   *
+   * @example Using config-based logger
+   * ```typescript
+   * const pool = createLakebasePool({
+   *   logger: { debug: true, info: true, error: true }
+   * });
+   * ```
    */
-  logger?: Logger;
+  logger?: Logger | LoggerConfig;
 }
 
 // ---------------------------------------------------------------------------

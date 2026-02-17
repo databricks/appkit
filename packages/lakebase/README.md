@@ -73,22 +73,54 @@ See [Databricks authentication docs](https://docs.databricks.com/en/dev-tools/au
 
 ## Configuration
 
-| Option                    | Environment Variable               | Description                          | Default              |
-| ------------------------- | ---------------------------------- | ------------------------------------ | -------------------- |
-| `host`                    | `PGHOST`                           | Lakebase host                        | _Required_           |
-| `database`                | `PGDATABASE`                       | Database name                        | _Required_           |
-| `endpoint`                | `LAKEBASE_ENDPOINT`                | Endpoint resource path               | _Required_           |
-| `user`                    | `PGUSER` or `DATABRICKS_CLIENT_ID` | Username or service principal ID     | Auto-detected        |
-| `port`                    | `PGPORT`                           | Port number                          | `5432`               |
-| `sslMode`                 | `PGSSLMODE`                        | SSL mode                             | `require`            |
-| `max`                     | -                                  | Max pool connections                 | `10`                 |
-| `idleTimeoutMillis`       | -                                  | Idle connection timeout              | `30000`              |
-| `connectionTimeoutMillis` | -                                  | Connection timeout                   | `10000`              |
-| `logger`                  | -                                  | Optional logger instance             | `undefined` (silent) |
+| Option                    | Environment Variable               | Description                             | Default                 |
+| ------------------------- | ---------------------------------- | --------------------------------------- | ----------------------- |
+| `host`                    | `PGHOST`                           | Lakebase host                           | _Required_              |
+| `database`                | `PGDATABASE`                       | Database name                           | _Required_              |
+| `endpoint`                | `LAKEBASE_ENDPOINT`                | Endpoint resource path                  | _Required_              |
+| `user`                    | `PGUSER` or `DATABRICKS_CLIENT_ID` | Username or service principal ID        | Auto-detected           |
+| `port`                    | `PGPORT`                           | Port number                             | `5432`                  |
+| `sslMode`                 | `PGSSLMODE`                        | SSL mode                                | `require`               |
+| `max`                     | -                                  | Max pool connections                    | `10`                    |
+| `idleTimeoutMillis`       | -                                  | Idle connection timeout                 | `30000`                 |
+| `connectionTimeoutMillis` | -                                  | Connection timeout                      | `10000`                 |
+| `logger`                  | -                                  | Logger instance or config               | `{ error: true }`       |
 
 ## Logging
 
-By default, the driver operates silently (no logging). You can inject a custom logger for observability:
+By default, the driver logs errors only. You can configure logging in three ways:
+
+### 1. Config-Based Logger (Simple)
+
+Enable/disable specific log levels using boolean flags:
+
+```typescript
+import { createLakebasePool } from "@databricks/lakebase";
+
+// Development mode: enable debug and error logs
+const pool = createLakebasePool({
+  logger: { debug: true, error: true },
+});
+
+// Production mode: errors only (same as default)
+const pool = createLakebasePool({
+  logger: { error: true },
+});
+
+// Verbose mode: all logs enabled
+const pool = createLakebasePool({
+  logger: { debug: true, info: true, warn: true, error: true },
+});
+
+// Silent mode: all logs disabled
+const pool = createLakebasePool({
+  logger: { debug: false, info: false, warn: false, error: false },
+});
+```
+
+### 2. Custom Logger (Advanced)
+
+Inject your own logger implementation for custom formatting or integrations:
 
 ```typescript
 const logger = {
@@ -99,6 +131,16 @@ const logger = {
 };
 
 const pool = createLakebasePool({ logger });
+```
+
+### 3. Default Behavior
+
+If no logger is provided, the driver defaults to error-only logging:
+
+```typescript
+// These are equivalent:
+const pool1 = createLakebasePool();
+const pool2 = createLakebasePool({ logger: { error: true } });
 ```
 
 When used with AppKit, logging is automatically configured - see the [AppKit Integration](#appkit-integration) section.

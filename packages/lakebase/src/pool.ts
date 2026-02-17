@@ -1,4 +1,5 @@
 import pg from "pg";
+import { resolveLogger } from "./logger";
 import { getLakebasePgConfig } from "./pool-config";
 import {
   attachPoolMetrics,
@@ -58,7 +59,7 @@ export function createLakebasePool(
   config?: Partial<LakebasePoolConfig>,
 ): pg.Pool {
   const userConfig = config ?? {};
-  const logger = userConfig.logger;
+  const logger = resolveLogger(userConfig.logger);
 
   const telemetry = initTelemetry();
 

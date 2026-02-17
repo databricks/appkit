@@ -47,18 +47,28 @@ Can also be set via LAKEBASE_ENDPOINT environment variable
 ### logger?
 
 ```ts
-optional logger: Logger;
+optional logger: Logger | LoggerConfig;
 ```
 
-Optional logger instance for the driver.
-When not provided, the driver operates silently (no logging).
+Optional logger configuration.
 
-#### Example
+Supports three modes:
+1. Logger instance - Use your own logger implementation
+2. LoggerConfig - Enable/disable specific log levels (uses console)
+3. Undefined - Defaults to error logging only
+
+#### Examples
 
 ```typescript
 import { createLogger } from '@databricks/appkit';
 const pool = createLakebasePool({
   logger: createLogger('connectors:lakebase')
+});
+```
+
+```typescript
+const pool = createLakebasePool({
+  logger: { debug: true, info: true, error: true }
 });
 ```
 

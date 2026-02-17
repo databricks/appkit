@@ -619,23 +619,30 @@ describe("createLakebasePool", () => {
   });
 
   describe("logger injection", () => {
-    test("should operate silently without logger", () => {
-      const consoleSpy = vi.spyOn(console, "log");
+    test("should default to error-only logging when no logger provided", () => {
       const consoleDebugSpy = vi.spyOn(console, "debug");
+      const consoleInfoSpy = vi.spyOn(console, "info");
+      const consoleWarnSpy = vi.spyOn(console, "warn");
+      const consoleErrorSpy = vi.spyOn(console, "error");
 
       const pool = createLakebasePool({
         workspaceClient: {} as any,
       });
 
       expect(pool).toBeDefined();
-      expect(consoleSpy).not.toHaveBeenCalled();
+      // Default behavior: only errors are logged
       expect(consoleDebugSpy).not.toHaveBeenCalled();
+      expect(consoleInfoSpy).not.toHaveBeenCalled();
+      expect(consoleWarnSpy).not.toHaveBeenCalled();
+      // Error logging would happen on actual errors
 
-      consoleSpy.mockRestore();
       consoleDebugSpy.mockRestore();
+      consoleInfoSpy.mockRestore();
+      consoleWarnSpy.mockRestore();
+      consoleErrorSpy.mockRestore();
     });
 
-    test("should use injected logger", () => {
+    test("should use injected Logger instance", () => {
       const mockLogger = {
         debug: vi.fn(),
         info: vi.fn(),
@@ -657,26 +664,96 @@ describe("createLakebasePool", () => {
       );
     });
 
-    test("should pass logger to error handlers", async () => {
-      const mockLogger = {
-        debug: vi.fn(),
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-      };
+    test("should use LoggerConfig with selective levels", () => {
+      const consoleDebugSpy = vi.spyOn(console, "debug");
+      const consoleInfoSpy = vi.spyOn(console, "info");
+      const consoleWarnSpy = vi.spyOn(console, "warn");
+      const consoleErrorSpy = vi.spyOn(console, "error");
 
+      const pool = createLakebasePool({
+        workspaceClient: {} as any,
+        logger: { debug: true, info: false, warn: false, error: true },
+      });
+
+      expect(pool).toBeDefined();
+      // Debug should be logged
+      expect(consoleDebugSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Created Lakebase connection pool"),
+        expect.any(String),
+        expect.any(String),
+        expect.any(String),
+      );
+      // Info and warn should not be called
+      expect(consoleInfoSpy).not.toHaveBeenCalled();
+      expect(consoleWarnSpy).not.toHaveBeenCalled();
+
+      consoleDebugSpy.mockRestore();
+      consoleInfoSpy.mockRestore();
+      consoleWarnSpy.mockRestore();
+      consoleErrorSpy.mockRestore();
+    });
+
+    test("should use LoggerConfig with all levels enabled", () => {
+      const consoleDebugSpy = vi.spyOn(console, "debug");
+      const consoleInfoSpy = vi.spyOn(console, "info");
+      const consoleWarnSpy = vi.spyOn(console, "warn");
+      const consoleErrorSpy = vi.spyOn(console, "error");
+
+      const pool = createLakebasePool({
+        workspaceClient: {} as any,
+        logger: { debug: true, info: true, warn: true, error: true },
+      });
+
+      expect(pool).toBeDefined();
+      expect(consoleDebugSpy).toHaveBeenCalled();
+
+      consoleDebugSpy.mockRestore();
+      consoleInfoSpy.mockRestore();
+      consoleWarnSpy.mockRestore();
+      consoleErrorSpy.mockRestore();
+    });
+
+    test("should use LoggerConfig with all levels disabled", () => {
+      const consoleDebugSpy = vi.spyOn(console, "debug");
+      const consoleInfoSpy = vi.spyOn(console, "info");
+      const consoleWarnSpy = vi.spyOn(console, "warn");
+      const consoleErrorSpy = vi.spyOn(console, "error");
+
+      const pool = createLakebasePool({
+        workspaceClient: {} as any,
+        logger: { debug: false, info: false, warn: false, error: false },
+      });
+
+      expect(pool).toBeDefined();
+      expect(consoleDebugSpy).not.toHaveBeenCalled();
+      expect(consoleInfoSpy).not.toHaveBeenCalled();
+      expect(consoleWarnSpy).not.toHaveBeenCalled();
+      expect(consoleErrorSpy).not.toHaveBeenCalled();
+
+      consoleDebugSpy.mockRestore();
+      consoleInfoSpy.mockRestore();
+      consoleWarnSpy.mockRestore();
+      consoleErrorSpy.mockRestore();
+    });
+
+    test("should pass resolved logger to error handlers", async () => {
       const { attachPoolMetrics } = await import("../telemetry");
 
       createLakebasePool({
         workspaceClient: {} as any,
-        logger: mockLogger,
+        logger: { debug: true, error: true },
       });
 
-      // Verify attachPoolMetrics was called with the logger
+      // Verify attachPoolMetrics was called with a resolved logger
       expect(attachPoolMetrics).toHaveBeenCalledWith(
         expect.anything(),
         expect.anything(),
-        mockLogger,
+        expect.objectContaining({
+          debug: expect.any(Function),
+          info: expect.any(Function),
+          warn: expect.any(Function),
+          error: expect.any(Function),
+        }),
       );
     });
   });
