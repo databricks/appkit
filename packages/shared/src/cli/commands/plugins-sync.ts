@@ -158,8 +158,8 @@ function validateManifestWithSchema(
   const errors = validate.errors ?? [];
   const message = errors
     .map(
-      (e) =>
-        `  ${(e as any).instancePath || e.dataPath || "/"} ${e.message}${e.params ? ` (${JSON.stringify(e.params)})` : ""}`,
+      (e: any) =>
+        `  ${e.instancePath || e.dataPath || "/"} ${e.message}${e.params ? ` (${JSON.stringify(e.params)})` : ""}`,
     )
     .join("\n");
   console.warn(
