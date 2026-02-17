@@ -43,6 +43,10 @@ export default defineConfig([
         to: "dist/plugins/analytics/manifest.json",
       },
       {
+        from: "src/plugins/genie/manifest.json",
+        to: "dist/plugins/genie/manifest.json",
+      },
+      {
         from: "src/plugins/server/manifest.json",
         to: "dist/plugins/server/manifest.json",
       },
