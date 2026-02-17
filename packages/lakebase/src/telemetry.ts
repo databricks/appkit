@@ -1,35 +1,39 @@
-import type pg from "pg";
+import type { Counter, Histogram, Meter } from "@opentelemetry/api";
 import {
-  type Counter,
-  type Histogram,
-  TelemetryManager,
-  type TelemetryProvider,
-} from "@/telemetry";
-import { createLogger } from "../../logging/logger";
-import type { LakebasePoolConfig } from "./types";
+  metrics,
+  SpanKind,
+  SpanStatusCode,
+  type Tracer,
+  trace,
+} from "@opentelemetry/api";
+import type pg from "pg";
+import type { Logger } from "./types";
 
-const logger = createLogger("connectors:lakebase:pool");
+// Re-export OpenTelemetry types for backward compatibility
+export { SpanKind, SpanStatusCode };
+export type { Tracer };
 
-/** Telemetry instruments shared across the driver */
+/** Telemetry instruments for the driver */
 export interface DriverTelemetry {
-  provider: TelemetryProvider;
+  tracer: Tracer;
+  meter: Meter;
   tokenRefreshDuration: Histogram;
   queryDuration: Histogram;
   poolErrors: Counter;
 }
 
-/** Create telemetry provider and metric instruments */
-export function initTelemetry(
-  config: Partial<LakebasePoolConfig>,
-): DriverTelemetry {
-  const provider = TelemetryManager.getProvider(
-    "connectors:lakebase",
-    config.telemetry,
-  );
-  const meter = provider.getMeter();
+/**
+ * Initialize telemetry using OpenTelemetry's global registry.
+ * If OTel providers are not initialized, operations will be no-ops automatically.
+ */
+export function initTelemetry(): DriverTelemetry {
+  // Use global OTel registry - no injection needed!
+  const tracer = trace.getTracer("@databricks/lakebase");
+  const meter = metrics.getMeter("@databricks/lakebase");
 
   return {
-    provider,
+    tracer,
+    meter,
     tokenRefreshDuration: meter.createHistogram(
       "lakebase.token.refresh.duration",
       {
@@ -51,14 +55,18 @@ export function initTelemetry(
 /**
  * Attach pool-level metrics collection, error counting, and error logging.
  *
- * Uses observable gauges (pull model) for pool connection stats -- the OTEL SDK
- * reads pool counts at collection time, requiring no timers or cleanup.
+ * Uses observable gauges (pull model) for pool connection stats.
+ *
+ * @param pool - PostgreSQL connection pool
+ * @param telemetry - Telemetry instruments
+ * @param logger - Optional logger for error logging (silent if not provided)
  */
 export function attachPoolMetrics(
   pool: pg.Pool,
   telemetry: DriverTelemetry,
+  logger?: Logger,
 ): void {
-  const meter = telemetry.provider.getMeter();
+  const meter = telemetry.meter;
 
   const poolTotal = meter.createObservableGauge(
     "lakebase.pool.connections.total",
@@ -77,9 +85,8 @@ export function attachPoolMetrics(
   poolIdle.addCallback((result) => result.observe(pool.idleCount));
   poolWaiting.addCallback((result) => result.observe(pool.waitingCount));
 
-  // Single error handler for both logging and metrics
   pool.on("error", (error: Error & { code?: string }) => {
-    logger.error(
+    logger?.error(
       "Connection pool error: %s (code: %s)",
       error.message,
       error.code,

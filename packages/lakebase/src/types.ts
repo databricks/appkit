@@ -1,6 +1,26 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { PoolConfig } from "pg";
-import type { TelemetryOptions } from "shared";
+
+/**
+ * Optional logger interface for the Lakebase driver.
+ * When not provided, the driver operates silently (no logging).
+ */
+export interface Logger {
+  debug(message: string, ...args: unknown[]): void;
+  info(message: string, ...args: unknown[]): void;
+  warn(message: string, ...args: unknown[]): void;
+  error(message: string, ...args: unknown[]): void;
+}
+
+/**
+ * Telemetry configuration options
+ */
+export type TelemetryOptions =
+  | boolean
+  | {
+      traces?: boolean;
+      metrics?: boolean;
+    };
 
 /**
  * Configuration for creating a Lakebase connection pool
@@ -50,11 +70,25 @@ export interface LakebasePoolConfig extends PoolConfig {
   /**
    * Telemetry configuration
    *
-   * - `true` or omitted: enable all telemetry (traces, metrics, logs) -- no-op when OTEL is not configured
+   * - `true` or omitted: enable all telemetry (traces, metrics) -- no-op when OTEL is not configured
    * - `false`: disable all telemetry
-   * - `{ traces?, metrics?, logs? }`: fine-grained control
+   * - `{ traces?, metrics? }`: fine-grained control
    */
   telemetry?: TelemetryOptions;
+
+  /**
+   * Optional logger instance for the driver.
+   * When not provided, the driver operates silently (no logging).
+   *
+   * @example Using appkit logger
+   * ```typescript
+   * import { createLogger } from '@databricks/appkit';
+   * const pool = createLakebasePool({
+   *   logger: createLogger('connectors:lakebase')
+   * });
+   * ```
+   */
+  logger?: Logger;
 }
 
 // ---------------------------------------------------------------------------

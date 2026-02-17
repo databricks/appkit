@@ -1,12 +1,9 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
-import { ValidationError } from "../../errors";
-import { createLogger } from "../../logging/logger";
+import { ValidationError } from "./errors";
 import type {
   DatabaseCredential,
   GenerateDatabaseCredentialRequest,
 } from "./types";
-
-const logger = createLogger("connectors:lakebase:credentials");
 
 /**
  * Generate OAuth credentials for Postgres database connection using the proper Postgres API.
@@ -54,27 +51,18 @@ export async function generateDatabaseCredential(
 ): Promise<DatabaseCredential> {
   const apiPath = "/api/2.0/postgres/credentials";
 
-  try {
-    const response = await workspaceClient.apiClient.request({
-      path: apiPath,
-      method: "POST",
-      headers: new Headers({
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      }),
-      raw: false,
-      payload: request,
-    });
+  const response = await workspaceClient.apiClient.request({
+    path: apiPath,
+    method: "POST",
+    headers: new Headers({
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    }),
+    raw: false,
+    payload: request,
+  });
 
-    return validateCredentialResponse(response);
-  } catch (error) {
-    logger.error("Failed to generate database credential: %O", {
-      error,
-      message: error instanceof Error ? error.message : String(error),
-      endpoint: request.endpoint,
-    });
-    throw error;
-  }
+  return validateCredentialResponse(response);
 }
 
 /** Validate the API response has the expected shape */

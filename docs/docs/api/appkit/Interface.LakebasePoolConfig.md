@@ -44,6 +44,26 @@ Can also be set via LAKEBASE_ENDPOINT environment variable
 
 ***
 
+### logger?
+
+```ts
+optional logger: Logger;
+```
+
+Optional logger instance for the driver.
+When not provided, the driver operates silently (no logging).
+
+#### Example
+
+```typescript
+import { createLogger } from '@databricks/appkit';
+const pool = createLakebasePool({
+  logger: createLogger('connectors:lakebase')
+});
+```
+
+***
+
 ### sslMode?
 
 ```ts
@@ -69,9 +89,9 @@ optional telemetry: TelemetryOptions;
 
 Telemetry configuration
 
-- `true` or omitted: enable all telemetry (traces, metrics, logs) -- no-op when OTEL is not configured
+- `true` or omitted: enable all telemetry (traces, metrics) -- no-op when OTEL is not configured
 - `false`: disable all telemetry
-- `{ traces?, metrics?, logs? }`: fine-grained control
+- `{ traces?, metrics? }`: fine-grained control
 
 ***
 

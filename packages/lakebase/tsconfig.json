@@ -4,10 +4,7 @@
     "outDir": "dist",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"],
-      "@tools/*": ["../../tools/*"],
-      "shared": ["../../packages/shared/src"],
-      "@databricks/lakebase": ["../../packages/lakebase/src"]
+      "@/*": ["src/*"]
     }
   },
   "include": ["src/**/*"],

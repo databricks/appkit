@@ -1,11 +1,12 @@
 import pg from "pg";
-import { SpanKind, SpanStatusCode } from "@/telemetry";
-import { createLogger } from "../../logging/logger";
 import { getLakebasePgConfig } from "./pool-config";
-import { attachPoolMetrics, initTelemetry } from "./telemetry";
+import {
+  attachPoolMetrics,
+  initTelemetry,
+  SpanKind,
+  SpanStatusCode,
+} from "./telemetry";
 import type { LakebasePoolConfig } from "./types";
-
-const logger = createLogger("connectors:lakebase:pool");
 
 /**
  * Create a PostgreSQL connection pool with automatic OAuth token refresh for Lakebase.
@@ -57,27 +58,21 @@ export function createLakebasePool(
   config?: Partial<LakebasePoolConfig>,
 ): pg.Pool {
   const userConfig = config ?? {};
+  const logger = userConfig.logger;
 
-  // Initialize telemetry once and thread it through to avoid duplicate instruments
-  const telemetry = initTelemetry(userConfig);
+  const telemetry = initTelemetry();
 
-  // Get complete pool config (connection + pool settings)
-  const poolConfig = getLakebasePgConfig(userConfig, telemetry);
+  const poolConfig = getLakebasePgConfig(userConfig, telemetry, logger);
 
-  // Create standard pg.Pool with the config
   const pool = new pg.Pool(poolConfig);
 
-  // Attach pool-level telemetry metrics (gauges, error counter, and error logging)
-  attachPoolMetrics(pool, telemetry);
+  attachPoolMetrics(pool, telemetry, logger);
 
   // Wrap pool.query to track query duration and create trace spans.
   // pg.Pool.query has 15+ overloads that are difficult to type-preserve,
   // so we use a loosely-typed wrapper and cast back.
-  // We use the tracer directly (not provider.startActiveSpan) because the
-  // provider wrapper is async-only, while pool.query supports both promise
-  // and callback paths.
   const origQuery = pool.query.bind(pool);
-  const tracer = telemetry.provider.getTracer();
+  const tracer = telemetry.tracer;
   pool.query = function queryWithTelemetry(
     ...args: unknown[]
   ): ReturnType<typeof pool.query> {
@@ -135,7 +130,7 @@ export function createLakebasePool(
     ) as ReturnType<typeof pool.query>;
   } as typeof pool.query;
 
-  logger.debug(
+  logger?.debug(
     "Created Lakebase connection pool for %s@%s/%s",
     poolConfig.user,
     poolConfig.host,

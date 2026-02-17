@@ -1,6 +1,6 @@
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import type pg from "pg";
-import { ConfigurationError, ValidationError } from "../../errors";
+import { ConfigurationError, ValidationError } from "./errors";
 import type { LakebasePoolConfig } from "./types";
 
 /** Default configuration values for the Lakebase connector */
@@ -105,7 +105,7 @@ function validateSslMode(value: string | undefined): SslMode | undefined {
   return value as SslMode;
 }
 
-/** Get workspace client from config or execution context */
+/** Get workspace client from config or SDK default auth chain */
 export async function getWorkspaceClient(
   config: Partial<LakebasePoolConfig>,
 ): Promise<WorkspaceClient> {
@@ -114,15 +114,7 @@ export async function getWorkspaceClient(
     return config.workspaceClient;
   }
 
-  // Priority 2: ServiceContext (when running in AppKit plugin)
-  try {
-    const { getWorkspaceClient: getClient } = await import("../../context");
-    return getClient();
-  } catch (_error) {
-    // ServiceContext not available - fall through to environment variables
-  }
-
-  // Priority 3: Create with SDK default auth chain
+  // Priority 2: Create with SDK default auth chain
   // Use empty config to let SDK use .databrickscfg, DATABRICKS_HOST, DATABRICKS_TOKEN, etc.
   // NOTE: config.host is the PostgreSQL host (PGHOST), not the Databricks workspace host
   return new WorkspaceClient({});
