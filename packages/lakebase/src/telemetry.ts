@@ -9,7 +9,6 @@ import {
 import type pg from "pg";
 import type { Logger } from "./types";
 
-// Re-export OpenTelemetry types for backward compatibility
 export { SpanKind, SpanStatusCode };
 export type { Tracer };
 
@@ -24,10 +23,9 @@ export interface DriverTelemetry {
 
 /**
  * Initialize telemetry using OpenTelemetry's global registry.
- * If OTel providers are not initialized, operations will be no-ops automatically.
+ * If Otel providers are not initialized, operations will be no-ops automatically.
  */
 export function initTelemetry(): DriverTelemetry {
-  // Use global OTel registry - no injection needed!
   const tracer = trace.getTracer("@databricks/lakebase");
   const meter = metrics.getMeter("@databricks/lakebase");
 
