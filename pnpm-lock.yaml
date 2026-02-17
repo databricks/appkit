@@ -503,7 +503,7 @@ importers:
         specifier: ^0.16.0
         version: 0.16.0
       '@opentelemetry/api':
-        specifier: ^1.0.0
+        specifier: ^1.9.0
         version: 1.9.0
       pg:
         specifier: ^8.18.0
