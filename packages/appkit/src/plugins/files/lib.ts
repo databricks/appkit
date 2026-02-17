@@ -152,6 +152,12 @@ export class FilesClient {
     }
   }
 
+  async createDirectory(directoryPath: string): Promise<void> {
+    await this.client.files.createDirectory({
+      directory_path: this.resolvePath(directoryPath),
+    });
+  }
+
   async delete(filePath: string): Promise<void> {
     await this.client.files.delete({
       file_path: this.resolvePath(filePath),

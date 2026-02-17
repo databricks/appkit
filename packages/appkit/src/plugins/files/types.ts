@@ -1,9 +1,10 @@
-// import type { BasePluginConfig } from "shared";
 import type { files } from "@databricks/sdk-experimental";
+import type { BasePluginConfig } from "shared";
 
-// export interface IFilesConfig extends BasePluginConfig {
-//   timeout?: number;
-// }
+export interface IFilesConfig extends BasePluginConfig {
+  timeout?: number;
+  defaultVolume?: string;
+}
 
 // TODO: Add request/response types for file operations
 export type DirectoryEntry = files.DirectoryEntry;

@@ -172,6 +172,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.contentTypeFromPath",
+          label: "contentTypeFromPath"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.createApp",
           label: "createApp"
         },
