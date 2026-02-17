@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Lang, parse, type SgNode } from "@ast-grep/napi";
-import Ajv, { type ErrorObject } from "ajv";
+import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import { Command } from "commander";
 
@@ -88,19 +88,21 @@ function isWithinDirectory(filePath: string, boundary: string): boolean {
   );
 }
 
-let pluginManifestValidator: ReturnType<Ajv["compile"]> | null = null;
+type ValidateFunction = ReturnType<InstanceType<typeof Ajv>["compile"]>;
+
+let pluginManifestValidator: ValidateFunction | null = null;
 
 /**
  * Loads and compiles the plugin-manifest JSON schema (cached).
  * Returns the compiled validate function or null if the schema cannot be loaded.
  */
-function getPluginManifestValidator(): ReturnType<Ajv["compile"]> | null {
+function getPluginManifestValidator(): ValidateFunction | null {
   if (pluginManifestValidator) return pluginManifestValidator;
   try {
     const schemaRaw = fs.readFileSync(PLUGIN_MANIFEST_SCHEMA_PATH, "utf-8");
     const schema = JSON.parse(schemaRaw) as object;
-    const ajv = new Ajv({ allErrors: true, strict: false });
-    addFormats(ajv);
+    const ajv = new Ajv({ allErrors: true });
+    addFormats(ajv as any);
     pluginManifestValidator = ajv.compile(schema);
     return pluginManifestValidator;
   } catch (err) {
@@ -153,11 +155,11 @@ function validateManifestWithSchema(
   const valid = validate(obj);
   if (valid) return obj as PluginManifest;
 
-  const errors: ErrorObject[] = validate.errors ?? [];
+  const errors = validate.errors ?? [];
   const message = errors
     .map(
-      (e: ErrorObject) =>
-        `  ${e.instancePath || "/"} ${e.message}${e.params ? ` (${JSON.stringify(e.params)})` : ""}`,
+      (e) =>
+        `  ${(e as any).instancePath || e.dataPath || "/"} ${e.message}${e.params ? ` (${JSON.stringify(e.params)})` : ""}`,
     )
     .join("\n");
   console.warn(

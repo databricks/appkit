@@ -1,0 +1,43 @@
+{
+  "name": "genie",
+  "displayName": "Genie Plugin",
+  "description": "AI/BI Genie space integration for natural language data queries",
+  "resources": {
+    "required": [
+      {
+        "type": "genie_space",
+        "alias": "Genie Space",
+        "resourceKey": "genie-space",
+        "description": "Genie Space for AI-powered data queries. Space IDs configured via plugin config.",
+        "permission": "CAN_RUN",
+        "fields": {
+          "id": {
+            "env": "DATABRICKS_GENIE_SPACE_ID",
+            "description": "Default Genie Space ID"
+          }
+        }
+      }
+    ],
+    "optional": []
+  },
+  "config": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "spaces": {
+          "type": "object",
+          "description": "Map of alias names to Genie Space IDs",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "timeout": {
+          "type": "number",
+          "default": 120000,
+          "description": "Genie polling timeout in ms. Set to 0 for indefinite."
+        }
+      },
+      "required": ["spaces"]
+    }
+  }
+}
