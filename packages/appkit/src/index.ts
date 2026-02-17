@@ -47,6 +47,7 @@ export {
 // Plugin authoring
 export { Plugin, toPlugin } from "./plugin";
 export { analytics, files, server } from "./plugins";
+export { contentTypeFromPath } from "./plugins/files";
 // Registry types and utilities for plugin manifests
 export type {
   ConfigSchema,
