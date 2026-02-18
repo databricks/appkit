@@ -15,6 +15,7 @@ import { genieStreamDefaults } from "./defaults";
 import { genieManifest } from "./manifest";
 import type {
   GenieAttachmentResponse,
+  GenieConversationHistoryResponse,
   GenieMessageResponse,
   GenieSendMessageRequest,
   GenieStreamEvent,
@@ -86,6 +87,15 @@ export class GeniePlugin extends Plugin {
       path: "/:alias/messages",
       handler: async (req: express.Request, res: express.Response) => {
         await this.asUser(req)._handleSendMessage(req, res);
+      },
+    });
+
+    this.route(router, {
+      name: "getConversation",
+      method: "get",
+      path: "/:alias/conversations/:conversationId",
+      handler: async (req: express.Request, res: express.Response) => {
+        await this.asUser(req)._handleGetConversation(req, res);
       },
     });
   }
@@ -281,6 +291,170 @@ export class GeniePlugin extends Plugin {
     );
   }
 
+  private async _fetchAllMessages(
+    spaceId: string,
+    conversationId: string,
+  ): Promise<GenieMessage[]> {
+    const workspaceClient = getWorkspaceClient();
+    const allMessages: GenieMessage[] = [];
+    let pageToken: string | undefined;
+    const maxMessages = 200;
+
+    do {
+      const response = await workspaceClient.genie.listConversationMessages({
+        space_id: spaceId,
+        conversation_id: conversationId,
+        page_size: 100,
+        ...(pageToken ? { page_token: pageToken } : {}),
+      });
+
+      if (response.messages) {
+        allMessages.push(...response.messages);
+      }
+
+      pageToken = response.next_page_token;
+    } while (pageToken && allMessages.length < maxMessages);
+
+    return allMessages.slice(0, maxMessages);
+  }
+
+  async _handleGetConversation(
+    req: express.Request,
+    res: express.Response,
+  ): Promise<void> {
+    const { alias, conversationId } = req.params;
+    const spaceId = this.resolveSpaceId(alias);
+
+    if (!spaceId) {
+      res.status(404).json({ error: `Unknown space alias: ${alias}` });
+      return;
+    }
+
+    const includeQueryResults = req.query.includeQueryResults !== "false";
+
+    logger.debug(
+      "Fetching conversation %s from space %s (alias=%s, includeQueryResults=%s)",
+      conversationId,
+      spaceId,
+      alias,
+      includeQueryResults,
+    );
+
+    const self = this;
+
+    await this.executeStream<GenieStreamEvent>(
+      res,
+      async function* () {
+        try {
+          const messages = await self._fetchAllMessages(
+            spaceId,
+            conversationId,
+          );
+
+          const messageResponses: GenieMessageResponse[] = [];
+
+          for (const message of messages) {
+            const messageResponse = toMessageResponse(message);
+            messageResponses.push(messageResponse);
+
+            yield {
+              type: "message_result" as const,
+              message: messageResponse,
+            };
+          }
+
+          if (includeQueryResults) {
+            // Collect all query attachments across all messages
+            const queryAttachments: Array<{
+              messageId: string;
+              attachmentId: string;
+              statementId: string;
+            }> = [];
+
+            for (const msg of messageResponses) {
+              for (const att of msg.attachments ?? []) {
+                if (att.query?.statementId && att.attachmentId) {
+                  queryAttachments.push({
+                    messageId: msg.messageId,
+                    attachmentId: att.attachmentId,
+                    statementId: att.query.statementId,
+                  });
+                }
+              }
+            }
+
+            // Fetch all query results in parallel
+            const workspaceClient = getWorkspaceClient();
+            const results = await Promise.allSettled(
+              queryAttachments.map(async (att) => {
+                const queryResult =
+                  await workspaceClient.genie.getMessageAttachmentQueryResult({
+                    space_id: spaceId,
+                    conversation_id: conversationId,
+                    message_id: att.messageId,
+                    attachment_id: att.attachmentId,
+                  });
+                return {
+                  attachmentId: att.attachmentId,
+                  statementId: att.statementId,
+                  data: queryResult.statement_response,
+                };
+              }),
+            );
+
+            for (const result of results) {
+              if (result.status === "fulfilled") {
+                yield {
+                  type: "query_result" as const,
+                  attachmentId: result.value.attachmentId,
+                  statementId: result.value.statementId,
+                  data: result.value.data,
+                };
+              } else {
+                logger.error("Failed to fetch query result: %O", result.reason);
+                yield {
+                  type: "error" as const,
+                  error:
+                    result.reason instanceof Error
+                      ? result.reason.message
+                      : "Failed to fetch query result",
+                };
+              }
+            }
+          }
+        } catch (error) {
+          logger.error("Genie getConversation error: %O", error);
+          yield {
+            type: "error" as const,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Failed to fetch conversation",
+          };
+        }
+      },
+      genieStreamDefaults,
+    );
+  }
+
+  async getConversation(
+    alias: string,
+    conversationId: string,
+  ): Promise<GenieConversationHistoryResponse> {
+    const spaceId = this.resolveSpaceId(alias);
+    if (!spaceId) {
+      throw new Error(`Unknown space alias: ${alias}`);
+    }
+
+    const messages = await this._fetchAllMessages(spaceId, conversationId);
+
+    return {
+      conversationId,
+      spaceId,
+      messages: messages.map(toMessageResponse),
+    };
+  }
+
   async sendMessage(
     alias: string,
     content: string,
@@ -331,6 +505,7 @@ export class GeniePlugin extends Plugin {
   exports() {
     return {
       sendMessage: this.sendMessage,
+      getConversation: this.getConversation,
     };
   }
 }

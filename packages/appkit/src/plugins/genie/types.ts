@@ -41,6 +41,12 @@ export interface GenieMessageResponse {
   error?: string;
 }
 
+export interface GenieConversationHistoryResponse {
+  conversationId: string;
+  spaceId: string;
+  messages: GenieMessageResponse[];
+}
+
 export interface GenieAttachmentResponse {
   attachmentId?: string;
   query?: {

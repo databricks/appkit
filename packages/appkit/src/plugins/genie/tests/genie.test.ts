@@ -90,10 +90,13 @@ function createMockGenieService() {
     ]),
   );
 
+  const listConversationMessages = vi.fn();
+
   return {
     startConversation,
     createMessage,
     getMessageAttachmentQueryResult,
+    listConversationMessages,
     createWaiter,
   };
 }
@@ -158,7 +161,7 @@ describe("Genie Plugin", () => {
   });
 
   describe("injectRoutes", () => {
-    test("should register single POST route", () => {
+    test("should register POST and GET routes", () => {
       const plugin = new GeniePlugin(config);
       const { router } = createMockRouter();
 
@@ -167,6 +170,12 @@ describe("Genie Plugin", () => {
       expect(router.post).toHaveBeenCalledTimes(1);
       expect(router.post).toHaveBeenCalledWith(
         "/:alias/messages",
+        expect.any(Function),
+      );
+
+      expect(router.get).toHaveBeenCalledTimes(1);
+      expect(router.get).toHaveBeenCalledWith(
+        "/:alias/conversations/:conversationId",
         expect.any(Function),
       );
     });
@@ -480,6 +489,433 @@ describe("Genie Plugin", () => {
       expect(allWritten).toContain("error");
       expect(allWritten).toContain("Genie service unavailable");
 
+      expect(mockRes.end).toHaveBeenCalled();
+    });
+  });
+
+  describe("getConversation", () => {
+    function createConversationRequest(overrides: Record<string, any> = {}) {
+      return createMockRequest({
+        params: { alias: "myspace", conversationId: "conv-123" },
+        query: {},
+        headers: {
+          "x-forwarded-access-token": "user-token",
+          "x-forwarded-user": "user-1",
+        },
+        ...overrides,
+      });
+    }
+
+    function mockMessages(messages: any[]) {
+      mockGenieService.listConversationMessages.mockResolvedValue({
+        messages,
+        next_page_token: undefined,
+      });
+    }
+
+    test("should return 404 for unknown alias", async () => {
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler(
+        "GET",
+        "/:alias/conversations/:conversationId",
+      );
+      const mockReq = createConversationRequest({
+        params: { alias: "unknown", conversationId: "conv-123" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(404);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: "Unknown space alias: unknown",
+      });
+    });
+
+    test("should stream message_result events for each message", async () => {
+      mockMessages([
+        {
+          message_id: "msg-1",
+          conversation_id: "conv-123",
+          space_id: "test-space-id",
+          content: "What are the top customers?",
+          status: "COMPLETED",
+          attachments: [],
+        },
+        {
+          message_id: "msg-2",
+          conversation_id: "conv-123",
+          space_id: "test-space-id",
+          content: "Here are the results",
+          status: "COMPLETED",
+          attachments: [
+            {
+              attachment_id: "att-1",
+              query: {
+                title: "Top Customers",
+                query: "SELECT * FROM customers",
+                statement_id: "stmt-1",
+              },
+            },
+          ],
+        },
+      ]);
+
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler(
+        "GET",
+        "/:alias/conversations/:conversationId",
+      );
+      const mockReq = createConversationRequest();
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockGenieService.listConversationMessages).toHaveBeenCalledWith(
+        expect.objectContaining({
+          space_id: "test-space-id",
+          conversation_id: "conv-123",
+          page_size: 100,
+        }),
+      );
+
+      const writeCalls = mockRes.write.mock.calls.map((call: any[]) => call[0]);
+      const allWritten = writeCalls.join("");
+
+      // Should have two message_result events
+      const messageResultCount = (
+        allWritten.match(/"type":"message_result"/g) || []
+      ).length;
+      expect(messageResultCount).toBe(2);
+
+      // Should contain message content
+      expect(allWritten).toContain("What are the top customers?");
+      expect(allWritten).toContain("Here are the results");
+
+      expect(mockRes.end).toHaveBeenCalled();
+    });
+
+    test("should stream query_result events when includeQueryResults is true (default)", async () => {
+      mockMessages([
+        {
+          message_id: "msg-1",
+          conversation_id: "conv-123",
+          space_id: "test-space-id",
+          content: "Results",
+          status: "COMPLETED",
+          attachments: [
+            {
+              attachment_id: "att-1",
+              query: {
+                title: "Query 1",
+                query: "SELECT 1",
+                statement_id: "stmt-1",
+              },
+            },
+          ],
+        },
+      ]);
+
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler(
+        "GET",
+        "/:alias/conversations/:conversationId",
+      );
+      const mockReq = createConversationRequest();
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(
+        mockGenieService.getMessageAttachmentQueryResult,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          space_id: "test-space-id",
+          conversation_id: "conv-123",
+          message_id: "msg-1",
+          attachment_id: "att-1",
+        }),
+      );
+
+      const writeCalls = mockRes.write.mock.calls.map((call: any[]) => call[0]);
+      const allWritten = writeCalls.join("");
+
+      expect(allWritten).toContain("message_result");
+      expect(allWritten).toContain("query_result");
+      expect(mockRes.end).toHaveBeenCalled();
+    });
+
+    test("should NOT stream query_result events when includeQueryResults is false", async () => {
+      mockMessages([
+        {
+          message_id: "msg-1",
+          conversation_id: "conv-123",
+          space_id: "test-space-id",
+          content: "Results",
+          status: "COMPLETED",
+          attachments: [
+            {
+              attachment_id: "att-1",
+              query: {
+                title: "Query 1",
+                query: "SELECT 1",
+                statement_id: "stmt-1",
+              },
+            },
+          ],
+        },
+      ]);
+
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler(
+        "GET",
+        "/:alias/conversations/:conversationId",
+      );
+      const mockReq = createConversationRequest({
+        query: { includeQueryResults: "false" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(
+        mockGenieService.getMessageAttachmentQueryResult,
+      ).not.toHaveBeenCalled();
+
+      const writeCalls = mockRes.write.mock.calls.map((call: any[]) => call[0]);
+      const allWritten = writeCalls.join("");
+
+      expect(allWritten).toContain("message_result");
+      expect(allWritten).not.toContain("query_result");
+      expect(mockRes.end).toHaveBeenCalled();
+    });
+
+    test("should paginate through all messages", async () => {
+      mockGenieService.listConversationMessages
+        .mockResolvedValueOnce({
+          messages: [
+            {
+              message_id: "msg-1",
+              conversation_id: "conv-123",
+              space_id: "test-space-id",
+              content: "Page 1 message",
+              status: "COMPLETED",
+              attachments: [],
+            },
+          ],
+          next_page_token: "page-2-token",
+        })
+        .mockResolvedValueOnce({
+          messages: [
+            {
+              message_id: "msg-2",
+              conversation_id: "conv-123",
+              space_id: "test-space-id",
+              content: "Page 2 message",
+              status: "COMPLETED",
+              attachments: [],
+            },
+          ],
+          next_page_token: undefined,
+        });
+
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler(
+        "GET",
+        "/:alias/conversations/:conversationId",
+      );
+      const mockReq = createConversationRequest({
+        query: { includeQueryResults: "false" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockGenieService.listConversationMessages).toHaveBeenCalledTimes(
+        2,
+      );
+
+      // First call without page_token
+      expect(mockGenieService.listConversationMessages).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          space_id: "test-space-id",
+          conversation_id: "conv-123",
+          page_size: 100,
+        }),
+      );
+
+      // Second call with page_token
+      expect(mockGenieService.listConversationMessages).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          space_id: "test-space-id",
+          conversation_id: "conv-123",
+          page_size: 100,
+          page_token: "page-2-token",
+        }),
+      );
+
+      const writeCalls = mockRes.write.mock.calls.map((call: any[]) => call[0]);
+      const allWritten = writeCalls.join("");
+
+      expect(allWritten).toContain("Page 1 message");
+      expect(allWritten).toContain("Page 2 message");
+      expect(mockRes.end).toHaveBeenCalled();
+    });
+
+    test("should handle empty conversation", async () => {
+      mockMessages([]);
+
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler(
+        "GET",
+        "/:alias/conversations/:conversationId",
+      );
+      const mockReq = createConversationRequest();
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      const writeCalls = mockRes.write.mock.calls.map((call: any[]) => call[0]);
+      const allWritten = writeCalls.join("");
+
+      expect(allWritten).not.toContain("message_result");
+      expect(allWritten).not.toContain("query_result");
+      expect(mockRes.end).toHaveBeenCalled();
+    });
+
+    test("should yield error event on SDK failure", async () => {
+      mockGenieService.listConversationMessages.mockRejectedValue(
+        new Error("Conversation not found"),
+      );
+
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler(
+        "GET",
+        "/:alias/conversations/:conversationId",
+      );
+      const mockReq = createConversationRequest();
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      const writeCalls = mockRes.write.mock.calls.map((call: any[]) => call[0]);
+      const allWritten = writeCalls.join("");
+
+      expect(allWritten).toContain("error");
+      expect(allWritten).toContain("Conversation not found");
+      expect(mockRes.end).toHaveBeenCalled();
+    });
+
+    test("should fetch query results in parallel for multiple attachments across messages", async () => {
+      mockMessages([
+        {
+          message_id: "msg-1",
+          conversation_id: "conv-123",
+          space_id: "test-space-id",
+          content: "First query",
+          status: "COMPLETED",
+          attachments: [
+            {
+              attachment_id: "att-1",
+              query: {
+                title: "Query 1",
+                query: "SELECT 1",
+                statement_id: "stmt-1",
+              },
+            },
+          ],
+        },
+        {
+          message_id: "msg-2",
+          conversation_id: "conv-123",
+          space_id: "test-space-id",
+          content: "Second query",
+          status: "COMPLETED",
+          attachments: [
+            {
+              attachment_id: "att-2",
+              query: {
+                title: "Query 2",
+                query: "SELECT 2",
+                statement_id: "stmt-2",
+              },
+            },
+          ],
+        },
+      ]);
+
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler(
+        "GET",
+        "/:alias/conversations/:conversationId",
+      );
+      const mockReq = createConversationRequest();
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(
+        mockGenieService.getMessageAttachmentQueryResult,
+      ).toHaveBeenCalledTimes(2);
+
+      expect(
+        mockGenieService.getMessageAttachmentQueryResult,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message_id: "msg-1",
+          attachment_id: "att-1",
+        }),
+      );
+      expect(
+        mockGenieService.getMessageAttachmentQueryResult,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message_id: "msg-2",
+          attachment_id: "att-2",
+        }),
+      );
+
+      const writeCalls = mockRes.write.mock.calls.map((call: any[]) => call[0]);
+      const allWritten = writeCalls.join("");
+
+      const queryResultCount = (
+        allWritten.match(/"type":"query_result"/g) || []
+      ).length;
+      expect(queryResultCount).toBe(2);
       expect(mockRes.end).toHaveBeenCalled();
     });
   });
