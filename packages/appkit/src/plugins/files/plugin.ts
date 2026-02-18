@@ -161,6 +161,7 @@ export class FilesPlugin extends Plugin {
       name: "upload",
       method: "post",
       path: "/upload",
+      skipBodyParsing: true,
       handler: async (req: express.Request, res: express.Response) => {
         await this._handleUpload(req, res);
       },

@@ -51,6 +51,7 @@ const EXCLUDED_FROM_PROXY = new Set([
   "shutdown",
   "injectRoutes",
   "getEndpoints",
+  "getSkipBodyParsingPaths",
   "abortActiveOperations",
   // asUser itself - prevent chaining like .asUser().asUser()
   "asUser",
@@ -157,6 +158,9 @@ export abstract class Plugin<
   /** Registered endpoints for this plugin */
   private registeredEndpoints: PluginEndpointMap = {};
 
+  /** Paths that opt out of JSON body parsing (e.g. file upload routes) */
+  private skipBodyParsingPaths: Set<string> = new Set();
+
   /**
    * Plugin initialization phase.
    * - 'core': Initialized first (e.g., config plugins)
@@ -189,6 +193,10 @@ export abstract class Plugin<
 
   getEndpoints(): PluginEndpointMap {
     return this.registeredEndpoints;
+  }
+
+  getSkipBodyParsingPaths(): ReadonlySet<string> {
+    return this.skipBodyParsingPaths;
   }
 
   abortActiveOperations(): void {
@@ -372,7 +380,12 @@ export abstract class Plugin<
 
     router[method](path, handler);
 
-    this.registerEndpoint(name, `/api/${this.name}${path}`);
+    const fullPath = `/api/${this.name}${path}`;
+    this.registerEndpoint(name, fullPath);
+
+    if (config.skipBodyParsing) {
+      this.skipBodyParsingPaths.add(fullPath);
+    }
   }
 
   // build execution options by merging defaults, plugin config, and user overrides
