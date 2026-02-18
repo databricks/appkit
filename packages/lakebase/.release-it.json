@@ -21,8 +21,8 @@
   },
   "npm": false,
   "hooks": {
-    "before:release": "pnpm build && pnpm --filter=@databricks/lakebase dist",
-    "after:release": "npm publish packages/lakebase/tmp --access public --provenance"
+    "before:release": "pnpm build:package && pnpm dist",
+    "after:release": "npm publish tmp --access public --provenance"
   },
   "plugins": {
     "@release-it/conventional-changelog": {
