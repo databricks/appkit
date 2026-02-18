@@ -12,6 +12,13 @@ async function runGenerateTypes(
   options?: { noCache?: boolean },
 ) {
   try {
+    const resolvedWarehouseId =
+      warehouseId || process.env.DATABRICKS_WAREHOUSE_ID;
+
+    if (!resolvedWarehouseId) {
+      process.exit(0);
+    }
+
     // Try to import the type generator from @databricks/appkit
     const { generateFromEntryPoint } = await import(
       "@databricks/appkit/type-generator"
@@ -27,15 +34,6 @@ async function runGenerateTypes(
         `Warning: No queries found at ${queryFolder}. Skipping type generation.`,
       );
       return;
-    }
-
-    const resolvedWarehouseId =
-      warehouseId || process.env.DATABRICKS_WAREHOUSE_ID;
-    if (!resolvedWarehouseId) {
-      console.error(
-        "Error: DATABRICKS_WAREHOUSE_ID is not set. Please provide it as an argument or environment variable.",
-      );
-      process.exit(1);
     }
 
     await generateFromEntryPoint({

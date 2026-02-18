@@ -2,8 +2,9 @@
 
 Build Databricks Apps faster with our brand-new Node.js + React SDK. Built for humans and AI.
 
-> [!WARNING] PREVIEW - NOT FOR PRODUCTION USE
->
+> [!WARNING]  
+> PREVIEW - NOT FOR PRODUCTION USE
+
 > **This SDK is in preview and is subject to change without notice.**
 >
 > - ❌ **Do NOT use in production environments**
