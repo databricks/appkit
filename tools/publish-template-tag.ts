@@ -73,20 +73,17 @@ if (installExit !== 0) {
 }
 
 // 3. Git add, commit, tag, push
-if (
-  run("git", ["add", "template/package.json", "template/package-lock.json"]) !==
-  0
-) {
-  process.exit(1);
-}
-if (run("git", ["commit", "-m", `chore: sync template to v${version}`]) !== 0) {
-  process.exit(1);
-}
-if (run("git", ["tag", `template-v${version}`]) !== 0) {
-  process.exit(1);
-}
-if (run("git", ["push", "origin", "main", "--follow-tags"]) !== 0) {
-  process.exit(1);
+const commands: [string, string[]][] = [
+  ["git", ["add", "template/package.json", "template/package-lock.json"]],
+  ["git", ["commit", "-m", `chore: sync template to v${version}`]],
+  ["git", ["tag", `template-v${version}`]],
+  ["git", ["push", "origin", "main", "--follow-tags"]],
+];
+
+for (const [command, args] of commands) {
+  if (run(command, args) !== 0) {
+    process.exit(1);
+  }
 }
 
 console.log(`✓ template tag template-v${version} pushed`);
