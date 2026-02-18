@@ -1,4 +1,5 @@
 import { ApiError, WorkspaceClient } from "@databricks/sdk-experimental";
+import { createLogger } from "@/logging/logger";
 import { contentTypeFromPath } from "./helpers";
 import type {
   DirectoryEntry,
@@ -6,6 +7,8 @@ import type {
   FileMetadata,
   FilePreview,
 } from "./types";
+
+const logger = createLogger("files");
 
 export class FilesClient {
   private client: WorkspaceClient;
@@ -107,30 +110,16 @@ export class FilesClient {
     contents: ReadableStream | Buffer | string,
     options?: { overwrite?: boolean },
   ): Promise<void> {
+    const body = contents;
+
+    const resolvedPath = this.resolvePath(filePath);
+    const overwrite = options?.overwrite ?? true;
+
     // Workaround: The SDK's files.upload() has two bugs:
     // 1. It ignores the `contents` field (sets body to undefined)
     // 2. apiClient.request() checks `instanceof` against its own ReadableStream
     //    subclass, so standard ReadableStream instances get JSON.stringified to "{}"
     // Bypass both by calling the REST API directly with SDK-provided auth.
-    let body: Buffer | string;
-    if (typeof contents === "string") {
-      body = contents;
-    } else if (Buffer.isBuffer(contents)) {
-      body = contents;
-    } else {
-      // ReadableStream → Buffer
-      const reader = (contents as ReadableStream<Uint8Array>).getReader();
-      const chunks: Uint8Array[] = [];
-      let result = await reader.read();
-      while (!result.done) {
-        chunks.push(result.value);
-        result = await reader.read();
-      }
-      body = Buffer.concat(chunks);
-    }
-
-    const resolvedPath = this.resolvePath(filePath);
-    const overwrite = options?.overwrite ?? true;
     const url = new URL(
       `/api/2.0/fs/files${resolvedPath}`,
       this.client.config.host,
@@ -138,16 +127,19 @@ export class FilesClient {
     url.searchParams.set("overwrite", String(overwrite));
 
     const headers = new Headers({ "Content-Type": "application/octet-stream" });
+    const fetchOptions: RequestInit = { method: "PUT", headers, body };
+
+    if (body instanceof ReadableStream) {
+      fetchOptions.duplex = "half";
+    }
+
     await this.client.config.authenticate(headers);
 
-    const res = await fetch(url.toString(), {
-      method: "PUT",
-      headers,
-      body,
-    });
+    const res = await fetch(url.toString(), fetchOptions);
 
     if (!res.ok) {
       const text = await res.text();
+      logger.error(`Upload failed (${res.status}): ${text}`);
       throw new Error(`Upload failed (${res.status}): ${text}`);
     }
   }
@@ -164,7 +156,10 @@ export class FilesClient {
     });
   }
 
-  async preview(filePath: string): Promise<FilePreview> {
+  async preview(
+    filePath: string,
+    options?: { maxBytes?: number },
+  ): Promise<FilePreview> {
     const meta = await this.metadata(filePath);
     const isText =
       meta.contentType?.startsWith("text/") ||
@@ -187,7 +182,7 @@ export class FilesClient {
     const reader = response.contents.getReader();
     const decoder = new TextDecoder();
     let preview = "";
-    const maxBytes = 1024;
+    const maxBytes = options?.maxBytes ?? 1024;
 
     while (preview.length < maxBytes) {
       const { done, value } = await reader.read();
