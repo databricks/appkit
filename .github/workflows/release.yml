@@ -18,6 +18,11 @@ jobs:
       group: databricks-protected-runner-group
       labels: linux-ubuntu-latest
 
+    if: |
+      github.event_name != 'push'
+      || ((!startsWith(github.event.head_commit.message, 'chore: release v') || !contains(github.event.head_commit.message, ' [skip ci]'))
+      && (!startsWith(github.event.head_commit.message, 'chore: sync template to v') || !contains(github.event.head_commit.message, ' [skip ci]')))
+
     environment: release
 
     permissions:
