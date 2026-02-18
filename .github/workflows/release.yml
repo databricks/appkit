@@ -18,12 +18,10 @@ jobs:
       group: databricks-protected-runner-group
       labels: linux-ubuntu-latest
 
-    if: |
-      github.event_name != 'push'
-      || ((!startsWith(github.event.head_commit.message, 'chore: release v') || !contains(github.event.head_commit.message, ' [skip ci]'))
-      && (!startsWith(github.event.head_commit.message, 'chore: sync template to v') || !contains(github.event.head_commit.message, ' [skip ci]')))
-
     environment: release
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     permissions:
       contents: write
@@ -66,6 +64,19 @@ jobs:
             echo "dry_run=${{ inputs.dry-run }}" >> $GITHUB_OUTPUT
           fi
 
+      - name: Determine version
+        id: version
+        if: steps.mode.outputs.dry_run != 'true'
+        run: |
+          VERSION=$(pnpm exec release-it --release-version --ci)
+          LATEST=$(git tag -l 'v*' --sort=-version:refname | head -1 | sed 's/^v//')
+          if [ -n "$VERSION" ] && [ "$VERSION" != "$LATEST" ]; then
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "Next version: $VERSION (current: $LATEST)"
+          else
+            echo "No new version to release (next: $VERSION, current: $LATEST)"
+          fi
+
       - name: Release
         run: |
           if [ "${{ steps.mode.outputs.dry_run }}" == "true" ]; then
@@ -75,3 +86,42 @@ jobs:
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sync-template:
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+
+    needs: release
+    if: always() && needs.release.result == 'success' && needs.release.outputs.version != ''
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Sync template and push tag
+        run: pnpm exec tsx tools/publish-template-tag.ts ${{ needs.release.outputs.version }}

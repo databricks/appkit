@@ -1,9 +1,8 @@
 #!/usr/bin/env tsx
 /**
  * Syncs the template to the given version (with retry), then commits, tags
- * template-vX.X.X, and pushes. Used by the GitHub Action
- * (.github/workflows/sync-template-tag.yml) and for manual runs
- * (e.g. re-sync and re-tag after a failed Action).
+ * template-vX.X.X, and pushes. Used by the Release workflow (sync-template job
+ * in .github/workflows/release.yml) and for manual runs.
  */
 
 import { spawnSync } from "node:child_process";
