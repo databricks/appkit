@@ -315,7 +315,8 @@ export class GeniePlugin extends Plugin {
       pageToken = response.next_page_token;
     } while (pageToken && allMessages.length < maxMessages);
 
-    return allMessages.slice(0, maxMessages);
+    // Genie API returns newest-first; reverse to chronological order
+    return allMessages.slice(0, maxMessages).reverse();
   }
 
   async _handleGetConversation(

@@ -1,4 +1,4 @@
-import { analytics, createApp, server } from "@databricks/appkit";
+import { analytics, createApp, genie, server } from "@databricks/appkit";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
@@ -19,6 +19,9 @@ createApp({
     reconnect(),
     telemetryExamples(),
     analytics({}),
+    genie({
+      spaces: { demo: process.env.GENIE_SPACE_ID ?? "placeholder" },
+    }),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
 }).then((appkit) => {

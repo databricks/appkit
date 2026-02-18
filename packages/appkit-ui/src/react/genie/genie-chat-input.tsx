@@ -1,0 +1,74 @@
+import { type KeyboardEvent, useRef, useState } from "react";
+import { cn } from "../lib/utils";
+import { Button } from "../ui/button";
+
+export interface GenieChatInputProps {
+  onSend: (content: string) => void;
+  disabled?: boolean;
+  placeholder?: string;
+  className?: string;
+}
+
+export function GenieChatInput({
+  onSend,
+  disabled = false,
+  placeholder = "Ask a question...",
+  className,
+}: GenieChatInputProps) {
+  const [value, setValue] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleSubmit = () => {
+    const trimmed = value.trim();
+    if (!trimmed || disabled) return;
+    onSend(trimmed);
+    setValue("");
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+    }
+  };
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit();
+    }
+  };
+
+  const handleInput = () => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = "auto";
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+    }
+  };
+
+  return (
+    <div className={cn("flex gap-2 p-4 border-t shrink-0", className)}>
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={handleKeyDown}
+        onInput={handleInput}
+        placeholder={placeholder}
+        disabled={disabled}
+        rows={1}
+        className={cn(
+          "flex-1 resize-none rounded-md border border-input bg-background px-3 py-2",
+          "text-sm placeholder:text-muted-foreground",
+          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          "disabled:cursor-not-allowed disabled:opacity-50",
+        )}
+      />
+      <Button
+        onClick={handleSubmit}
+        disabled={disabled || !value.trim()}
+        size="default"
+        className="self-end"
+      >
+        Send
+      </Button>
+    </div>
+  );
+}
