@@ -345,6 +345,24 @@ BasePlugin.getEndpoints
 
 ***
 
+### getSkipBodyParsingPaths()
+
+```ts
+getSkipBodyParsingPaths(): ReadonlySet<string>;
+```
+
+#### Returns
+
+`ReadonlySet`\<`string`\>
+
+#### Implementation of
+
+```ts
+BasePlugin.getSkipBodyParsingPaths
+```
+
+***
+
 ### injectRoutes()
 
 ```ts
