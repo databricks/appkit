@@ -24,6 +24,23 @@ AppKit simplifies building data applications on Databricks by providing:
 - **Developer experience**: Remote hot reload, file-based queries, optimized for AI-assisted development
 - **Databricks native**: Seamless integration with SQL Warehouses, Unity Catalog, and other workspace resources
 
+## Plugins
+
+AppKit's power comes from its plugin system. Each plugin adds a focused capability to your app with minimal configuration.
+
+### Available now
+
+- **Analytics Plugin** — Query your Lakehouse data directly from your app. Define SQL queries as files, execute them against Databricks SQL Warehouses, and get automatic caching, parameterization, and on-behalf-of user execution out of the box. Perfect for building apps that surface insights from your Lakehouse.
+
+### Coming soon
+
+- **Genie Plugin** — Conversational AI interface powered by Databricks Genie
+- **Files Plugin** — Browse, upload, and manage files in Unity Catalog Volumes
+- **Lakebase Plugin** — OLTP database operations with automatic OAuth token management
+- ...and this is just the beginning.
+
+> Missing a plugin? [Open an issue](https://github.com/databricks/appkit/issues/new) and tell us what you need — community input directly shapes the roadmap.
+
 ## Getting started
 
 Follow the [Getting Started](https://databricks.github.io/appkit/docs/) guide to get started with AppKit.
