@@ -7,6 +7,8 @@
     "tagAnnotation": "Release v${version}",
     "requireBranch": "main",
     "requireCleanWorkingDir": true,
+    "requireCommits": true,
+    "commitsPath": "packages/appkit packages/appkit-ui packages/shared",
     "push": true,
     "pushArgs": ["--follow-tags"]
   },
@@ -36,7 +38,13 @@
         "commitsSort": ["type", "subject"]
       },
       "infile": "CHANGELOG.md",
-      "header": "# Changelog\n\nAll notable changes to this project will be documented in this file."
+      "header": "# Changelog\n\nAll notable changes to this project will be documented in this file.",
+      "gitRawCommitsOpts": {
+        "path": ["packages/appkit", "packages/appkit-ui", "packages/shared"]
+      },
+      "commitsOpts": {
+        "path": ["packages/appkit", "packages/appkit-ui", "packages/shared"]
+      }
     }
   }
 }
