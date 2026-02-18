@@ -72,14 +72,6 @@ function RootComponent() {
                     SQL Helpers
                   </Button>
                 </Link>
-                <Link to="/files" className="no-underline">
-                  <Button
-                    variant="ghost"
-                    className="text-foreground hover:text-secondary-foreground"
-                  >
-                    Files
-                  </Button>
-                </Link>
                 <ThemeSelector />
               </div>
             </nav>
