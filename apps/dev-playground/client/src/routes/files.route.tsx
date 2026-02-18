@@ -364,8 +364,7 @@ function FilesRoute() {
         </div>
 
         <div className="flex gap-6">
-          {/* File listing panel */}
-          <div className="flex-[2] min-w-0">
+          <div className="flex-2 min-w-0">
             <Card className="p-0 overflow-hidden">
               {!isAtRoot && (
                 <button
@@ -380,7 +379,7 @@ function FilesRoute() {
 
               {showNewDirInput && (
                 <div className="flex items-center gap-2 px-4 py-3 border-b bg-muted/30">
-                  <FolderPlus className="h-5 w-5 text-blue-500 flex-shrink-0" />
+                  <FolderPlus className="h-5 w-5 text-blue-500 shrink-0" />
                   <input
                     ref={newDirInputRef}
                     type="text"
@@ -472,18 +471,18 @@ function FilesRoute() {
                       }`}
                     >
                       {entry.is_directory ? (
-                        <FolderIcon className="h-5 w-5 text-blue-500 flex-shrink-0" />
+                        <FolderIcon className="h-5 w-5 text-blue-500 shrink-0" />
                       ) : (
-                        <FileIcon className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                        <FileIcon className="h-5 w-5 text-muted-foreground shrink-0" />
                       )}
                       <span className="flex-1 truncate text-sm text-foreground">
                         {entry.name ?? entryPath.split("/").pop()}
                       </span>
                       {entry.is_directory && (
-                        <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
                       )}
                       {!entry.is_directory && entry.file_size !== undefined && (
-                        <span className="text-xs text-muted-foreground flex-shrink-0">
+                        <span className="text-xs text-muted-foreground shrink-0">
                           {formatFileSize(entry.file_size)}
                         </span>
                       )}
