@@ -3,6 +3,7 @@
   "git": {
     "commitMessage": "chore(lakebase): release v${version} [skip ci]",
     "tagName": "lakebase-v${version}",
+    "tagMatch": "lakebase-v*",
     "tagAnnotation": "Release @databricks/lakebase v${version}",
     "requireBranch": "main",
     "requireCleanWorkingDir": true,
@@ -29,7 +30,9 @@
         "bumpStrict": true
       },
       "infile": "CHANGELOG.md",
-      "header": "# Changelog\n\nAll notable changes to @databricks/lakebase will be documented in this file."
+      "header": "# Changelog\n\nAll notable changes to @databricks/lakebase will be documented in this file.",
+      "gitRawCommitsOpts": { "path": "." },
+      "commitsOpts": { "path": "." }
     }
   }
 }

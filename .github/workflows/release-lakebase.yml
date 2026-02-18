@@ -1,6 +1,11 @@
 name: Release @databricks/lakebase
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'packages/lakebase/**'
   workflow_dispatch:
     inputs:
       dry-run:
@@ -52,7 +57,7 @@ jobs:
       - name: Release
         working-directory: packages/lakebase
         run: |
-          if [ "${{ inputs.dry-run }}" == "true" ]; then
+          if [ "${{ inputs.dry-run || false }}" == "true" ]; then
             pnpm release:dry
           else
             pnpm release:ci

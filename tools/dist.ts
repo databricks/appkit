@@ -12,12 +12,30 @@ fs.mkdirSync("tmp", { recursive: true });
 
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf-8"));
 
+const APPKIT_PACKAGE_NAME = "@databricks/appkit";
+
+// Packages that are workspace-local but published separately — replace workspace:* with real version.
+// "shared" is intentionally excluded: it is bundled directly into appkit/appkit-ui via noExternal.
+const WORKSPACE_PACKAGE_REPLACEMENTS = ["@databricks/lakebase"];
+
 delete pkg.dependencies.shared;
+
+for (const depName of WORKSPACE_PACKAGE_REPLACEMENTS) {
+  if (pkg.dependencies?.[depName] === "workspace:*") {
+    const pkgDirName = depName.split("/").pop() ?? depName;
+    const depPkgPath = path.join(
+      __dirname,
+      `../packages/${pkgDirName}/package.json`,
+    );
+    const depPkg = JSON.parse(fs.readFileSync(depPkgPath, "utf-8"));
+    pkg.dependencies[depName] = `^${depPkg.version}`;
+  }
+}
 
 pkg.exports = pkg.publishConfig.exports;
 delete pkg.publishConfig.exports;
 
-const isAppKitPackage = pkg.name?.startsWith("@databricks/appkit");
+const isAppKitPackage = pkg.name?.startsWith(APPKIT_PACKAGE_NAME);
 const sharedBin = path.join(__dirname, "../packages/shared/bin/appkit.js");
 const sharedPostinstall = path.join(
   __dirname,
@@ -68,38 +86,39 @@ if (isAppKitPackage) {
   }
 }
 
-// Copy documentation from docs/build into tmp/docs/
-const docsBuildPath = path.join(__dirname, "../docs/build");
+if (isAppKitPackage) {
+  // Copy documentation from docs/build into tmp/docs/
+  const docsBuildPath = path.join(__dirname, "../docs/build");
 
-// Copy all .md files and docs/ subdirectory from docs/build to tmp/docs
-fs.mkdirSync("tmp/docs", { recursive: true });
+  // Copy all .md files and docs/ subdirectory from docs/build to tmp/docs
+  fs.mkdirSync("tmp/docs", { recursive: true });
 
-// Copy all files and directories we want, preserving structure
-const itemsToCopy = fs.readdirSync(docsBuildPath);
-for (const item of itemsToCopy) {
-  const sourcePath = path.join(docsBuildPath, item);
-  const stat = fs.statSync(sourcePath);
+  // Copy all files and directories we want, preserving structure
+  const itemsToCopy = fs.readdirSync(docsBuildPath);
+  for (const item of itemsToCopy) {
+    const sourcePath = path.join(docsBuildPath, item);
+    const stat = fs.statSync(sourcePath);
 
-  // Copy .md files and docs directory
-  if (item.endsWith(".md") || item === "docs") {
-    const destPath = path.join("tmp/docs", item);
-    if (stat.isDirectory()) {
-      fs.cpSync(sourcePath, destPath, { recursive: true });
-    } else {
-      fs.copyFileSync(sourcePath, destPath);
+    // Copy .md files and docs directory
+    if (item.endsWith(".md") || item === "docs") {
+      const destPath = path.join("tmp/docs", item);
+      if (stat.isDirectory()) {
+        fs.cpSync(sourcePath, destPath, { recursive: true });
+      } else {
+        fs.copyFileSync(sourcePath, destPath);
+      }
     }
   }
-}
 
-// Process llms.txt (keep existing logic but update path replacement)
-const llmsSourcePath = path.join(docsBuildPath, "llms.txt");
-let llmsContent = fs.readFileSync(llmsSourcePath, "utf-8");
+  // Process llms.txt (keep existing logic but update path replacement)
+  const llmsSourcePath = path.join(docsBuildPath, "llms.txt");
+  let llmsContent = fs.readFileSync(llmsSourcePath, "utf-8");
 
-// Replace /appkit/ with ./docs/ to match new structure
-llmsContent = llmsContent.replace(/\/appkit\//g, "./docs/");
+  // Replace /appkit/ with ./docs/ to match new structure
+  llmsContent = llmsContent.replace(/\/appkit\//g, "./docs/");
 
-// Prepend AI agent guidance for navigating documentation
-const agentGuidance = `## For AI Agents/Assistants
+  // Prepend AI agent guidance for navigating documentation
+  const agentGuidance = `## For AI Agents/Assistants
 
 To view specific documentation files referenced below, use the appkit CLI:
 
@@ -119,14 +138,20 @@ The CLI will display the documentation content directly in the terminal.
 
 `;
 
-llmsContent = agentGuidance + llmsContent;
+  llmsContent = agentGuidance + llmsContent;
+  fs.writeFileSync("tmp/llms.txt", llmsContent);
+  // Copy llms.txt as CLAUDE.md (npm pack doesn't support symlinks)
+  fs.copyFileSync("tmp/llms.txt", "tmp/CLAUDE.md");
 
-fs.writeFileSync("tmp/llms.txt", llmsContent);
+  fs.copyFileSync(path.join(__dirname, "../NOTICE.md"), "tmp/NOTICE.md");
+}
 
-// Copy llms.txt as CLAUDE.md (npm pack doesn't support symlinks)
-fs.copyFileSync("tmp/llms.txt", "tmp/CLAUDE.md");
-
-fs.copyFileSync(path.join(__dirname, "../README.md"), "tmp/README.md");
+// Use the package's own README.md if present, otherwise fall back to the root one
+const localReadme = "README.md";
+const rootReadme = path.join(__dirname, "../README.md");
+fs.copyFileSync(
+  fs.existsSync(localReadme) ? localReadme : rootReadme,
+  "tmp/README.md",
+);
 fs.copyFileSync(path.join(__dirname, "../LICENSE"), "tmp/LICENSE");
 fs.copyFileSync(path.join(__dirname, "../DCO"), "tmp/DCO");
-fs.copyFileSync(path.join(__dirname, "../NOTICE.md"), "tmp/NOTICE.md");
