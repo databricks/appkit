@@ -320,7 +320,7 @@ describe("Files Plugin Integration", () => {
   });
 
   describe("Error Handling", () => {
-    test("SDK exceptions return 500 with error message", async () => {
+    test("SDK exceptions return 500 with generic error", async () => {
       mockFilesApi.getMetadata.mockRejectedValue(
         new Error("SDK connection failed"),
       );
@@ -332,7 +332,7 @@ describe("Files Plugin Integration", () => {
 
       expect(response.status).toBe(500);
       const data = (await response.json()) as { error: string; plugin: string };
-      expect(data.error).toBe("SDK connection failed");
+      expect(data.error).toBe("Metadata fetch failed");
       expect(data.plugin).toBe("files");
     });
 
@@ -341,13 +341,14 @@ describe("Files Plugin Integration", () => {
         new Error("Permission denied"),
       );
 
-      const response = await fetch(`${baseUrl}/api/files/list`, {
-        headers: authHeaders,
-      });
+      const response = await fetch(
+        `${baseUrl}/api/files/list?path=/Volumes/uncached/path`,
+        { headers: authHeaders },
+      );
 
       expect(response.status).toBe(500);
       const data = (await response.json()) as { error: string; plugin: string };
-      expect(data.error).toBe("Permission denied");
+      expect(data.error).toBe("List failed");
       expect(data.plugin).toBe("files");
     });
   });

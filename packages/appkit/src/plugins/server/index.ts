@@ -92,7 +92,18 @@ export class ServerPlugin extends Plugin {
    * @returns The express application.
    */
   async start(): Promise<express.Application> {
-    this.serverApplication.use(express.json());
+    this.serverApplication.use(
+      express.json({
+        type: (req) => {
+          // Skip JSON parsing for file upload routes so raw body
+          // data flows through to the handler (express.json default
+          // limit is 100KB which silently drops larger payloads).
+          if (req.url?.includes("/upload")) return false;
+          const ct = req.headers["content-type"] ?? "";
+          return ct.includes("json");
+        },
+      }),
+    );
 
     const endpoints = await this.extendRoutes();
 
