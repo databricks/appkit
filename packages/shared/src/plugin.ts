@@ -13,6 +13,8 @@ export interface BasePlugin {
 
   getEndpoints(): PluginEndpointMap;
 
+  getSkipBodyParsingPaths?(): ReadonlySet<string>;
+
   exports?(): unknown;
 }
 
@@ -203,6 +205,8 @@ export type RouteConfig = {
   method: HttpMethod;
   path: string;
   handler: (req: IAppRequest, res: IAppResponse) => Promise<void>;
+  /** When true, the server will skip JSON body parsing for this route (e.g. file uploads). */
+  skipBodyParsing?: boolean;
 };
 
 /** Map of endpoint names to their full paths for a plugin */

@@ -50,6 +50,7 @@ export class ServerPlugin extends Plugin {
   private remoteTunnelController?: RemoteTunnelController;
   protected declare config: ServerConfig;
   private serverExtensions: ((app: express.Application) => void)[] = [];
+  private rawBodyPaths: Set<string> = new Set();
   static phase: PluginPhase = "deferred";
 
   constructor(config: ServerConfig) {
@@ -95,10 +96,12 @@ export class ServerPlugin extends Plugin {
     this.serverApplication.use(
       express.json({
         type: (req) => {
-          // Skip JSON parsing for file upload routes so raw body
-          // data flows through to the handler (express.json default
-          // limit is 100KB which silently drops larger payloads).
-          if (req.url?.includes("/upload")) return false;
+          // Skip JSON parsing for routes that declared skipBodyParsing
+          // (e.g. file uploads where the raw body must flow through).
+          // rawBodyPaths is populated by extendRoutes() below; the type
+          // callback runs per-request so the set is already filled.
+          const urlPath = req.url?.split("?")[0];
+          if (urlPath && this.rawBodyPaths.has(urlPath)) return false;
           const ct = req.headers["content-type"] ?? "";
           return ct.includes("json");
         },
@@ -205,6 +208,16 @@ export class ServerPlugin extends Plugin {
 
         // Collect named endpoints from the plugin
         endpoints[plugin.name] = plugin.getEndpoints();
+
+        // Collect paths that should skip body parsing
+        if (
+          plugin.getSkipBodyParsingPaths &&
+          typeof plugin.getSkipBodyParsingPaths === "function"
+        ) {
+          for (const p of plugin.getSkipBodyParsingPaths()) {
+            this.rawBodyPaths.add(p);
+          }
+        }
       }
     }
 

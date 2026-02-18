@@ -552,6 +552,50 @@ describe("Plugin", () => {
     });
   });
 
+  describe("getSkipBodyParsingPaths", () => {
+    test("should return empty set by default", () => {
+      const plugin = new TestPlugin(config);
+
+      expect(plugin.getSkipBodyParsingPaths().size).toBe(0);
+    });
+
+    test("should include paths from routes with skipBodyParsing: true", () => {
+      const plugin = new TestPlugin({ ...config, name: "test" });
+      const mockRouter = {
+        post: vi.fn(),
+      } as any;
+
+      (plugin as any).route(mockRouter, {
+        name: "upload",
+        method: "post",
+        path: "/upload",
+        skipBodyParsing: true,
+        handler: vi.fn(),
+      });
+
+      const paths = plugin.getSkipBodyParsingPaths();
+      expect(paths.has("/api/test/upload")).toBe(true);
+      expect(paths.size).toBe(1);
+    });
+
+    test("should not include paths from routes without skipBodyParsing", () => {
+      const plugin = new TestPlugin({ ...config, name: "test" });
+      const mockRouter = {
+        post: vi.fn(),
+      } as any;
+
+      (plugin as any).route(mockRouter, {
+        name: "create",
+        method: "post",
+        path: "/create",
+        handler: vi.fn(),
+      });
+
+      const paths = plugin.getSkipBodyParsingPaths();
+      expect(paths.size).toBe(0);
+    });
+  });
+
   describe("static properties", () => {
     test("should have default phase of 'normal'", () => {
       expect(Plugin.phase).toBe("normal");
