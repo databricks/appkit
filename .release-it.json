@@ -12,7 +12,7 @@
   },
   "github": {
     "release": true,
-    "releaseName": "v${version}",
+    "releaseName": "AppKit v${version}",
     "autoGenerate": false,
     "draft": false,
     "preRelease": false,
