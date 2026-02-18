@@ -21,6 +21,7 @@
   },
   "npm": false,
   "hooks": {
+    "after:bump": "npm version ${version} --no-git-tag-version --allow-same-version",
     "before:release": "pnpm build:package && pnpm dist",
     "after:release": "npm publish ./tmp --access public --provenance"
   },
