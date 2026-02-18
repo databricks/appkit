@@ -8,6 +8,7 @@
     "requireBranch": "main",
     "requireCleanWorkingDir": true,
     "requireCommits": true,
+    "requireCommitsFail": false,
     "commitsPath": "packages/appkit packages/appkit-ui packages/shared",
     "push": true,
     "pushArgs": ["--follow-tags"]
