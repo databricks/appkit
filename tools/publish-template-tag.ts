@@ -76,7 +76,7 @@ if (installExit !== 0) {
 // 3. Git add, commit, tag, push
 const commands: [string, string[]][] = [
   ["git", ["add", "template/package.json", "template/package-lock.json"]],
-  ["git", ["commit", "-m", `chore: sync template to v${version} [skip ci]`]],
+  ["git", ["commit", "-m", `"chore: sync template to v${version} [skip ci]"`]],
   ["git", ["tag", `template-v${version}`]],
   ["git", ["push", "origin", "main", "--follow-tags"]],
 ];
