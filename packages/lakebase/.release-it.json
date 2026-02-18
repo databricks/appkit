@@ -5,6 +5,7 @@
     "tagName": "lakebase-v${version}",
     "tagMatch": "lakebase-v*",
     "tagAnnotation": "Release @databricks/lakebase v${version}",
+    "commitsPath": ".",
     "requireBranch": "main",
     "requireCleanWorkingDir": true,
     "push": true,
