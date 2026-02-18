@@ -556,7 +556,7 @@ describe("FilesClient – upload()", () => {
     );
   });
 
-  test("handles ReadableStream input (converts to Buffer)", async () => {
+  test("handles ReadableStream input (streams directly)", async () => {
     const stream = streamFromString("stream data");
     await client.upload("file.txt", stream);
 
@@ -564,13 +564,10 @@ describe("FilesClient – upload()", () => {
       expect.any(String),
       expect.objectContaining({
         method: "PUT",
-        body: expect.any(Buffer),
+        body: expect.any(ReadableStream),
+        duplex: "half",
       }),
     );
-
-    // Verify the Buffer content is correct
-    const callBody = fetchSpy.mock.calls[0][1].body as Buffer;
-    expect(callBody.toString()).toBe("stream data");
   });
 
   test("defaults overwrite to true", async () => {

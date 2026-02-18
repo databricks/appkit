@@ -86,7 +86,7 @@ describe("Files Plugin Integration", () => {
   let server: Server;
   let baseUrl: string;
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
-  const TEST_PORT = 9877;
+  const TEST_PORT = 9880;
 
   beforeAll(async () => {
     setupDatabricksEnv();

@@ -413,18 +413,22 @@ export class FilesPlugin extends Plugin {
 
     logger.debug(req, "Upload started: path=%s", path);
 
-    const body = await new Promise<Buffer>((resolve, reject) => {
-      const chunks: Buffer[] = [];
-      req.on("data", (chunk: Buffer) => chunks.push(chunk));
-      req.on("end", () => resolve(Buffer.concat(chunks)));
-      req.on("error", reject);
-    });
+    // const body = await new Promise<Buffer>((resolve, reject) => {
+    //   const chunks: Buffer[] = [];
+    //   req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    //   req.on("end", () => resolve(Buffer.concat(chunks)));
+    //   req.on("error", reject);
+    // });
+
+    const webStream: ReadableStream<Uint8Array> = Readable.toWeb(req);
 
     logger.debug(
       req,
       "Upload body received: path=%s, size=%d bytes",
       path,
-      body.length,
+      req.headers["content-length"]
+        ? parseInt(req.headers["content-length"], 10)
+        : 0,
     );
 
     const executor = this.asUser(req);
@@ -432,7 +436,7 @@ export class FilesPlugin extends Plugin {
       default: filesWriteDefaults,
     };
     const result = await executor.execute(async () => {
-      await executor.upload(path, body);
+      await executor.upload(path, webStream);
       return { success: true as const };
     }, settings);
 
@@ -441,7 +445,9 @@ export class FilesPlugin extends Plugin {
         req,
         "Upload failed: path=%s, size=%d bytes",
         path,
-        body.length,
+        req.headers["content-length"]
+          ? parseInt(req.headers["content-length"], 10)
+          : 0,
       );
       res.status(500).json({ error: "Upload failed", plugin: this.name });
       return;

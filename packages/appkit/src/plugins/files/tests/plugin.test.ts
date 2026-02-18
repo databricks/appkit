@@ -385,7 +385,8 @@ describe("FilesClient - Core Operations", () => {
         expect.any(String),
         expect.objectContaining({
           method: "PUT",
-          body: expect.any(Buffer),
+          body: expect.any(ReadableStream),
+          duplex: "half",
         }),
       );
     });

@@ -22,7 +22,10 @@ export const filesDownloadDefaults: PluginExecuteConfig = {
     initialDelay: 1000,
     attempts: 3,
   },
-  timeout: 60_000,
+  /**
+   * @info this timeout is for the stream to start, not for the full download.
+   */
+  timeout: 30_000,
 };
 
 export const filesWriteDefaults: PluginExecuteConfig = {
@@ -32,7 +35,7 @@ export const filesWriteDefaults: PluginExecuteConfig = {
   retry: {
     enabled: false,
   },
-  timeout: 120_000,
+  timeout: 600_000,
 };
 
 export const EXTENSION_CONTENT_TYPES: Record<string, string> = Object.freeze({
