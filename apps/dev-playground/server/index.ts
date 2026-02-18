@@ -1,4 +1,4 @@
-import { analytics, createApp, server } from "@databricks/appkit";
+import { analytics, createApp, files, server } from "@databricks/appkit";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
@@ -19,6 +19,7 @@ createApp({
     reconnect(),
     telemetryExamples(),
     analytics({}),
+    files({ defaultVolume: process.env.DATABRICKS_DEFAULT_VOLUME }),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
 }).then((appkit) => {

@@ -129,6 +129,24 @@ function IndexRoute() {
           <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
             <div className="flex flex-col h-full">
               <h3 className="text-2xl font-semibold text-foreground mb-3">
+                File Browser
+              </h3>
+              <p className="text-muted-foreground mb-6 flex-grow">
+                Browse, preview, and download files from Databricks Volumes
+                using the Files plugin and Unity Catalog Files API.
+              </p>
+              <Button
+                onClick={() => navigate({ to: "/files" })}
+                className="w-full"
+              >
+                Browse Files
+              </Button>
+            </div>
+          </Card>
+
+          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
+            <div className="flex flex-col h-full">
+              <h3 className="text-2xl font-semibold text-foreground mb-3">
                 SQL Helpers
               </h3>
               <p className="text-muted-foreground mb-6 flex-grow">
