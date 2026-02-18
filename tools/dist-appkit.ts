@@ -26,7 +26,7 @@ for (const depName of WORKSPACE_PACKAGE_REPLACEMENTS) {
       `../packages/${pkgDirName}/package.json`,
     );
     const depPkg = JSON.parse(fs.readFileSync(depPkgPath, "utf-8"));
-    pkg.dependencies[depName] = `^${depPkg.version}`;
+    pkg.dependencies[depName] = `${depPkg.version}`;
   }
 }
 
