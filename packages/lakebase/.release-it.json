@@ -22,7 +22,7 @@
   "npm": false,
   "hooks": {
     "before:release": "pnpm build:package && pnpm dist",
-    "after:release": "npm publish tmp --access public --provenance"
+    "after:release": "npm publish ./tmp --access public --provenance"
   },
   "plugins": {
     "@release-it/conventional-changelog": {
