@@ -37,7 +37,7 @@
     "build:watch": "tsdown --config tsdown.config.ts --watch",
     "clean:full": "rm -rf dist node_modules tmp",
     "clean": "rm -rf dist tmp",
-    "dist": "tsx ../../tools/dist.ts",
+    "dist": "tsx ../../tools/dist-appkit.ts",
     "tarball": "rm -rf tmp && pnpm dist && npm pack ./tmp --pack-destination ./tmp",
     "typecheck": "tsc --noEmit"
   },
