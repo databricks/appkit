@@ -59,7 +59,6 @@ plugin architecture, and React integration.
 | Function | Description |
 | ------ | ------ |
 | [appKitTypesPlugin](Function.appKitTypesPlugin.md) | Vite plugin to generate types for AppKit queries. Calls generateFromEntryPoint under the hood. |
-| [contentTypeFromPath](Function.contentTypeFromPath.md) | - |
 | [createApp](Function.createApp.md) | Bootstraps AppKit with the provided configuration. |
 | [getExecutionContext](Function.getExecutionContext.md) | Get the current execution context. |
 | [getPluginManifest](Function.getPluginManifest.md) | Loads and validates the manifest from a plugin constructor. Normalizes string type/permission to strict ResourceType/ResourcePermission. |
