@@ -1,12 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { context } from "@opentelemetry/api";
 import type { IAppResponse, StreamConfig } from "shared";
+import { createLogger } from "../logging/logger";
 import { EventRingBuffer } from "./buffers";
 import { streamDefaults } from "./defaults";
 import { SSEWriter } from "./sse-writer";
 import { StreamRegistry } from "./stream-registry";
 import { SSEErrorCode, type StreamEntry, type StreamOperation } from "./types";
 import { StreamValidator } from "./validator";
+
+const logger = createLogger("stream");
 
 // main entry point for Server-Sent events streaming
 export class StreamManager {
@@ -76,6 +79,12 @@ export class StreamManager {
     streamEntry: StreamEntry,
     options?: StreamConfig,
   ): Promise<void> {
+    logger.debug(
+      "Client reconnecting to stream: streamId=%s, clients=%d",
+      streamEntry.streamId,
+      streamEntry.clients.size,
+    );
+
     // handle reconnection - replay missed events
     const lastEventId = res.req?.headers["last-event-id"];
 
@@ -186,6 +195,8 @@ export class StreamManager {
       traceContext,
     };
     this.streamRegistry.add(streamEntry);
+
+    logger.debug("New stream created: streamId=%s", streamId);
 
     // track operation
     const streamOperation: StreamOperation = {

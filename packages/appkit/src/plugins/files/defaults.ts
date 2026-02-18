@@ -1,18 +1,39 @@
 import type { PluginExecuteConfig } from "shared";
 
-// // TODO: Tune defaults based on actual file operation characteristics
-// export const filesDefaults: PluginExecuteConfig = {
-//   cache: {
-//     enabled: false,
-//     ttl: 0,
-//   },
-//   retry: {
-//     enabled: true,
-//     initialDelay: 1000,
-//     attempts: 3,
-//   },
-//   timeout: 30000,
-// };
+export const filesReadDefaults: PluginExecuteConfig = {
+  cache: {
+    enabled: true,
+    ttl: 60_000,
+  },
+  retry: {
+    enabled: true,
+    initialDelay: 1000,
+    attempts: 3,
+  },
+  timeout: 30_000,
+};
+
+export const filesDownloadDefaults: PluginExecuteConfig = {
+  cache: {
+    enabled: false,
+  },
+  retry: {
+    enabled: true,
+    initialDelay: 1000,
+    attempts: 3,
+  },
+  timeout: 60_000,
+};
+
+export const filesWriteDefaults: PluginExecuteConfig = {
+  cache: {
+    enabled: false,
+  },
+  retry: {
+    enabled: false,
+  },
+  timeout: 120_000,
+};
 
 export const EXTENSION_CONTENT_TYPES: Record<string, string> = Object.freeze({
   ".png": "image/png",

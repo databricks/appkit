@@ -1,12 +1,20 @@
 import { Readable } from "node:stream";
 import type express from "express";
-import type { IAppRouter } from "shared";
-import { getWorkspaceClient } from "../../context";
+import type { IAppRouter, PluginExecutionSettings } from "shared";
+import { getCurrentUserId, getWorkspaceClient } from "../../context";
+import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
+import {
+  filesDownloadDefaults,
+  filesReadDefaults,
+  filesWriteDefaults,
+} from "./defaults";
 import { contentTypeFromPath } from "./helpers";
 import { FilesClient } from "./lib";
 import { filesManifest } from "./manifest";
 import type { DownloadResponse, IFilesConfig } from "./types";
+
+const logger = createLogger("files");
 
 export class FilesPlugin extends Plugin {
   name = "files";
@@ -179,75 +187,108 @@ export class FilesPlugin extends Plugin {
 
   // --- Private route handlers ---
 
+  private _readSettings(
+    cacheKey: (string | number | object)[],
+  ): PluginExecutionSettings {
+    return {
+      default: {
+        ...filesReadDefaults,
+        cache: { ...filesReadDefaults.cache, cacheKey },
+      },
+    };
+  }
+
+  /**
+   * Invalidate cached list entries for a directory after a write operation.
+   */
+  private _invalidateListCache(directoryPath: string): void {
+    const userKey = getCurrentUserId();
+    const listKey = this.cache.generateKey(
+      ["files:list", directoryPath],
+      userKey,
+    );
+    this.cache.delete(listKey);
+  }
+
   private async _handleList(
     req: express.Request,
     res: express.Response,
   ): Promise<void> {
-    try {
-      const path = req.query.path as string | undefined;
-      const entries = await this.asUser(req).list(path);
-      res.json(entries);
-    } catch (error) {
-      res.status(500).json({
-        error: error instanceof Error ? error.message : "List failed",
-        plugin: this.name,
-      });
+    const path = req.query.path as string | undefined;
+    const executor = this.asUser(req);
+
+    const result = await executor.execute(
+      async () => executor.list(path),
+      this._readSettings(["files:list", path ?? "__root__"]),
+    );
+
+    if (result === undefined) {
+      res.status(500).json({ error: "List failed", plugin: this.name });
+      return;
     }
+    res.json(result);
   }
 
   private async _handleRead(
     req: express.Request,
     res: express.Response,
   ): Promise<void> {
-    try {
-      const path = req.query.path as string;
-      if (!path) {
-        res.status(400).json({ error: "path is required", plugin: this.name });
-        return;
-      }
-      const content = await this.asUser(req).read(path);
-      res.type("text/plain").send(content);
-    } catch (error) {
-      res.status(500).json({
-        error: error instanceof Error ? error.message : "Read failed",
-        plugin: this.name,
-      });
+    const path = req.query.path as string;
+    if (!path) {
+      res.status(400).json({ error: "path is required", plugin: this.name });
+      return;
     }
+
+    const executor = this.asUser(req);
+    const result = await executor.execute(
+      async () => executor.read(path),
+      this._readSettings(["files:read", path]),
+    );
+
+    if (result === undefined) {
+      res.status(500).json({ error: "Read failed", plugin: this.name });
+      return;
+    }
+    res.type("text/plain").send(result);
   }
 
   private async _handleDownload(
     req: express.Request,
     res: express.Response,
   ): Promise<void> {
-    try {
-      const path = req.query.path as string;
-      if (!path) {
-        res.status(400).json({ error: "path is required", plugin: this.name });
-        return;
-      }
-      const response = await this.asUser(req).download(path);
-      const fileName = path.split("/").pop() ?? "download";
-      res.setHeader(
-        "Content-Disposition",
-        `attachment; filename="${fileName}"`,
+    const path = req.query.path as string;
+    if (!path) {
+      res.status(400).json({ error: "path is required", plugin: this.name });
+      return;
+    }
+
+    const executor = this.asUser(req);
+    const settings: PluginExecutionSettings = {
+      default: filesDownloadDefaults,
+    };
+    const response = await executor.execute(
+      async () => executor.download(path),
+      settings,
+    );
+
+    if (response === undefined) {
+      res.status(500).json({ error: "Download failed", plugin: this.name });
+      return;
+    }
+
+    const fileName = path.split("/").pop() ?? "download";
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.setHeader(
+      "Content-Type",
+      contentTypeFromPath(path) ?? "application/octet-stream",
+    );
+    if (response.contents) {
+      const nodeStream = Readable.fromWeb(
+        response.contents as import("node:stream/web").ReadableStream,
       );
-      res.setHeader(
-        "Content-Type",
-        contentTypeFromPath(path) ?? "application/octet-stream",
-      );
-      if (response.contents) {
-        const nodeStream = Readable.fromWeb(
-          response.contents as import("node:stream/web").ReadableStream,
-        );
-        nodeStream.pipe(res);
-      } else {
-        res.end();
-      }
-    } catch (error) {
-      res.status(500).json({
-        error: error instanceof Error ? error.message : "Download failed",
-        plugin: this.name,
-      });
+      nodeStream.pipe(res);
+    } else {
+      res.end();
     }
   }
 
@@ -255,30 +296,37 @@ export class FilesPlugin extends Plugin {
     req: express.Request,
     res: express.Response,
   ): Promise<void> {
-    try {
-      const path = req.query.path as string;
-      if (!path) {
-        res.status(400).json({ error: "path is required", plugin: this.name });
-        return;
-      }
-      const response = await this.asUser(req).download(path);
-      res.setHeader(
-        "Content-Type",
-        contentTypeFromPath(path) ?? "application/octet-stream",
+    const path = req.query.path as string;
+    if (!path) {
+      res.status(400).json({ error: "path is required", plugin: this.name });
+      return;
+    }
+
+    const executor = this.asUser(req);
+    const settings: PluginExecutionSettings = {
+      default: filesDownloadDefaults,
+    };
+    const response = await executor.execute(
+      async () => executor.download(path),
+      settings,
+    );
+
+    if (response === undefined) {
+      res.status(500).json({ error: "Raw fetch failed", plugin: this.name });
+      return;
+    }
+
+    res.setHeader(
+      "Content-Type",
+      contentTypeFromPath(path) ?? "application/octet-stream",
+    );
+    if (response.contents) {
+      const nodeStream = Readable.fromWeb(
+        response.contents as import("node:stream/web").ReadableStream,
       );
-      if (response.contents) {
-        const nodeStream = Readable.fromWeb(
-          response.contents as import("node:stream/web").ReadableStream,
-        );
-        nodeStream.pipe(res);
-      } else {
-        res.end();
-      }
-    } catch (error) {
-      res.status(500).json({
-        error: error instanceof Error ? error.message : "Raw fetch failed",
-        plugin: this.name,
-      });
+      nodeStream.pipe(res);
+    } else {
+      res.end();
     }
   }
 
@@ -286,133 +334,186 @@ export class FilesPlugin extends Plugin {
     req: express.Request,
     res: express.Response,
   ): Promise<void> {
-    try {
-      const path = req.query.path as string;
-      if (!path) {
-        res.status(400).json({ error: "path is required", plugin: this.name });
-        return;
-      }
-      const exists = await this.asUser(req).exists(path);
-      res.json({ exists });
-    } catch (error) {
-      res.status(500).json({
-        error: error instanceof Error ? error.message : "Exists check failed",
-        plugin: this.name,
-      });
+    const path = req.query.path as string;
+    if (!path) {
+      res.status(400).json({ error: "path is required", plugin: this.name });
+      return;
     }
+
+    const executor = this.asUser(req);
+    const result = await executor.execute(
+      async () => executor.exists(path),
+      this._readSettings(["files:exists", path]),
+    );
+
+    if (result === undefined) {
+      res.status(500).json({ error: "Exists check failed", plugin: this.name });
+      return;
+    }
+    res.json({ exists: result });
   }
 
   private async _handleMetadata(
     req: express.Request,
     res: express.Response,
   ): Promise<void> {
-    try {
-      const path = req.query.path as string;
-      if (!path) {
-        res.status(400).json({ error: "path is required", plugin: this.name });
-        return;
-      }
-      const metadata = await this.asUser(req).metadata(path);
-      res.json(metadata);
-    } catch (error) {
-      res.status(500).json({
-        error: error instanceof Error ? error.message : "Metadata fetch failed",
-        plugin: this.name,
-      });
+    const path = req.query.path as string;
+    if (!path) {
+      res.status(400).json({ error: "path is required", plugin: this.name });
+      return;
     }
+
+    const executor = this.asUser(req);
+    const result = await executor.execute(
+      async () => executor.metadata(path),
+      this._readSettings(["files:metadata", path]),
+    );
+
+    if (result === undefined) {
+      res
+        .status(500)
+        .json({ error: "Metadata fetch failed", plugin: this.name });
+      return;
+    }
+    res.json(result);
   }
 
   private async _handlePreview(
     req: express.Request,
     res: express.Response,
   ): Promise<void> {
-    try {
-      const path = req.query.path as string;
-      if (!path) {
-        res.status(400).json({ error: "path is required", plugin: this.name });
-        return;
-      }
-      const preview = await this.asUser(req).preview(path);
-      res.json(preview);
-    } catch (error) {
-      res.status(500).json({
-        error: error instanceof Error ? error.message : "Preview failed",
-        plugin: this.name,
-      });
+    const path = req.query.path as string;
+    if (!path) {
+      res.status(400).json({ error: "path is required", plugin: this.name });
+      return;
     }
+
+    const executor = this.asUser(req);
+    const result = await executor.execute(
+      async () => executor.preview(path),
+      this._readSettings(["files:preview", path]),
+    );
+
+    if (result === undefined) {
+      res.status(500).json({ error: "Preview failed", plugin: this.name });
+      return;
+    }
+    res.json(result);
   }
 
   private async _handleUpload(
     req: express.Request,
     res: express.Response,
   ): Promise<void> {
-    try {
-      const path = req.query.path as string;
-      if (!path) {
-        res.status(400).json({ error: "path is required", plugin: this.name });
-        return;
-      }
+    const path = req.query.path as string;
+    if (!path) {
+      res.status(400).json({ error: "path is required", plugin: this.name });
+      return;
+    }
+
+    logger.debug(req, "Upload started: path=%s", path);
+
+    const body = await new Promise<Buffer>((resolve, reject) => {
       const chunks: Buffer[] = [];
       req.on("data", (chunk: Buffer) => chunks.push(chunk));
-      req.on("end", async () => {
-        try {
-          const body = Buffer.concat(chunks);
-          await this.asUser(req).upload(path, body);
-          res.json({ success: true });
-        } catch (error) {
-          res.status(500).json({
-            error: error instanceof Error ? error.message : "Upload failed",
-            plugin: this.name,
-          });
-        }
-      });
-    } catch (error) {
-      res.status(500).json({
-        error: error instanceof Error ? error.message : "Upload failed",
-        plugin: this.name,
-      });
+      req.on("end", () => resolve(Buffer.concat(chunks)));
+      req.on("error", reject);
+    });
+
+    logger.debug(
+      req,
+      "Upload body received: path=%s, size=%d bytes",
+      path,
+      body.length,
+    );
+
+    const executor = this.asUser(req);
+    const settings: PluginExecutionSettings = {
+      default: filesWriteDefaults,
+    };
+    const result = await executor.execute(async () => {
+      await executor.upload(path, body);
+      return { success: true as const };
+    }, settings);
+
+    if (result === undefined) {
+      logger.error(
+        req,
+        "Upload failed: path=%s, size=%d bytes",
+        path,
+        body.length,
+      );
+      res.status(500).json({ error: "Upload failed", plugin: this.name });
+      return;
     }
+
+    const parentDir = path.substring(0, path.lastIndexOf("/")) || path;
+    this._invalidateListCache(parentDir);
+
+    logger.debug(req, "Upload complete: path=%s", path);
+    res.json(result);
   }
 
   private async _handleMkdir(
     req: express.Request,
     res: express.Response,
   ): Promise<void> {
-    try {
-      const dirPath = req.body?.path as string;
-      if (!dirPath) {
-        res.status(400).json({ error: "path is required", plugin: this.name });
-        return;
-      }
-      await this.asUser(req).createDirectory(dirPath);
-      res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({
-        error:
-          error instanceof Error ? error.message : "Create directory failed",
-        plugin: this.name,
-      });
+    const dirPath = req.body?.path as string;
+    if (!dirPath) {
+      res.status(400).json({ error: "path is required", plugin: this.name });
+      return;
     }
+
+    const executor = this.asUser(req);
+    const settings: PluginExecutionSettings = {
+      default: filesWriteDefaults,
+    };
+    const result = await executor.execute(async () => {
+      await executor.createDirectory(dirPath);
+      return { success: true as const };
+    }, settings);
+
+    if (result === undefined) {
+      res
+        .status(500)
+        .json({ error: "Create directory failed", plugin: this.name });
+      return;
+    }
+
+    const parentDir = dirPath.substring(0, dirPath.lastIndexOf("/")) || dirPath;
+    this._invalidateListCache(parentDir);
+
+    res.json(result);
   }
 
   private async _handleDelete(
     req: express.Request,
     res: express.Response,
   ): Promise<void> {
-    try {
-      const path = req.query.path as string;
-      if (!path) {
-        res.status(400).json({ error: "path is required", plugin: this.name });
-        return;
-      }
-      await this.asUser(req).delete(path);
-      res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({
-        error: error instanceof Error ? error.message : "Delete failed",
-        plugin: this.name,
-      });
+    const path = req.query.path as string;
+    if (!path) {
+      res.status(400).json({ error: "path is required", plugin: this.name });
+      return;
     }
+
+    const executor = this.asUser(req);
+    const settings: PluginExecutionSettings = {
+      default: filesWriteDefaults,
+    };
+    const result = await executor.execute(async () => {
+      await executor.delete(path);
+      return { success: true as const };
+    }, settings);
+
+    if (result === undefined) {
+      res.status(500).json({ error: "Delete failed", plugin: this.name });
+      return;
+    }
+
+    const parentDir = path.substring(0, path.lastIndexOf("/")) || path;
+    this._invalidateListCache(parentDir);
+
+    res.json(result);
   }
 
   async shutdown(): Promise<void> {
