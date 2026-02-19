@@ -13,10 +13,8 @@ import { ServiceContext } from "../../../context/service-context";
 import { createApp } from "../../../core";
 import { server as serverPlugin } from "../../server";
 import { files } from "../index";
+import { streamFromString } from "./utils";
 
-// ---------------------------------------------------------------------------
-// Hoisted mocks
-// ---------------------------------------------------------------------------
 const { mockFilesApi, mockSdkClient, MockApiError } = vi.hoisted(() => {
   const mockFilesApi = {
     listDirectoryContents: vi.fn(),
@@ -50,7 +48,6 @@ const { mockFilesApi, mockSdkClient, MockApiError } = vi.hoisted(() => {
   return { mockFilesApi, mockSdkClient, MockApiError };
 });
 
-// Mock SDK so `ApiError` instanceof checks work in FilesClient.exists()
 vi.mock("@databricks/sdk-experimental", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@databricks/sdk-experimental")>();
@@ -60,28 +57,11 @@ vi.mock("@databricks/sdk-experimental", async (importOriginal) => {
   };
 });
 
-// ---------------------------------------------------------------------------
-// Helper: create a ReadableStream from a string
-// ---------------------------------------------------------------------------
-function streamFromString(text: string): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder();
-  return new ReadableStream({
-    start(controller) {
-      controller.enqueue(encoder.encode(text));
-      controller.close();
-    },
-  });
-}
-
-// Headers to simulate authenticated user requests (required by asUser)
 const authHeaders = {
   "x-forwarded-access-token": "test-token",
   "x-forwarded-user": "test-user",
 };
 
-// ---------------------------------------------------------------------------
-// Integration tests
-// ---------------------------------------------------------------------------
 describe("Files Plugin Integration", () => {
   let server: Server;
   let baseUrl: string;
@@ -108,7 +88,6 @@ describe("Files Plugin Integration", () => {
       ],
     });
 
-    // Routes are now auto-registered by the files plugin via injectRoutes
     await appkit.server.start();
     server = appkit.server.getServer();
     baseUrl = `http://127.0.0.1:${TEST_PORT}`;
