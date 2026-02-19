@@ -4,7 +4,21 @@
   "displayName": "Files Plugin",
   "description": "File operations against Databricks Volumes and Unity Catalog",
   "resources": {
-    "required": [],
+    "required": [
+      {
+        "type": "volume",
+        "alias": "volume",
+        "resourceKey": "volume",
+        "description": "Unity Catalog Volume for file storage",
+        "permission": "WRITE_VOLUME",
+        "fields": {
+          "path": {
+            "env": "DATABRICKS_VOLUME_PATH",
+            "description": "Volume path (e.g. /Volumes/catalog/schema/volume_name)"
+          }
+        }
+      }
+    ],
     "optional": []
   },
   "config": {
