@@ -1,6 +1,7 @@
 import { Readable } from "node:stream";
 import type express from "express";
 import type { IAppRouter, PluginExecutionSettings } from "shared";
+import { contentTypeFromPath, FilesConnector } from "../../connectors/files";
 import { getCurrentUserId, getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
@@ -9,8 +10,6 @@ import {
   filesReadDefaults,
   filesWriteDefaults,
 } from "./defaults";
-import { contentTypeFromPath } from "./helpers";
-import { FilesClient } from "./lib";
 import { filesManifest } from "./manifest";
 import type { DownloadResponse, IFilesConfig } from "./types";
 
@@ -23,43 +22,36 @@ export class FilesPlugin extends Plugin {
   protected static description = "Files plugin for Databricks file operations";
   protected declare config: IFilesConfig;
 
+  private filesConnector: FilesConnector;
+
   constructor(config: IFilesConfig) {
     super(config);
     this.config = config;
-  }
-
-  /**
-   * Create a FilesClient scoped to the current execution context.
-   * Must be called per-request so `asUser()` context is respected.
-   */
-  private getFilesClient(): FilesClient {
-    const client = getWorkspaceClient();
-    return new FilesClient({
-      defaultVolume: this.config.defaultVolume,
-      client,
+    this.filesConnector = new FilesConnector({
+      defaultVolume: config.defaultVolume,
+      timeout: config.timeout,
+      telemetry: config.telemetry,
     });
   }
 
-  // --- Public methods (proxied by asUser) ---
-
   async list(directoryPath?: string) {
-    return this.getFilesClient().list(directoryPath);
+    return this.filesConnector.list(getWorkspaceClient(), directoryPath);
   }
 
   async read(filePath: string) {
-    return this.getFilesClient().read(filePath);
+    return this.filesConnector.read(getWorkspaceClient(), filePath);
   }
 
   async download(filePath: string): Promise<DownloadResponse> {
-    return this.getFilesClient().download(filePath);
+    return this.filesConnector.download(getWorkspaceClient(), filePath);
   }
 
   async exists(filePath: string) {
-    return this.getFilesClient().exists(filePath);
+    return this.filesConnector.exists(getWorkspaceClient(), filePath);
   }
 
   async metadata(filePath: string) {
-    return this.getFilesClient().metadata(filePath);
+    return this.filesConnector.metadata(getWorkspaceClient(), filePath);
   }
 
   async upload(
@@ -67,22 +59,28 @@ export class FilesPlugin extends Plugin {
     contents: ReadableStream | Buffer | string,
     options?: { overwrite?: boolean },
   ) {
-    return this.getFilesClient().upload(filePath, contents, options);
+    return this.filesConnector.upload(
+      getWorkspaceClient(),
+      filePath,
+      contents,
+      options,
+    );
   }
 
   async createDirectory(directoryPath: string) {
-    return this.getFilesClient().createDirectory(directoryPath);
+    return this.filesConnector.createDirectory(
+      getWorkspaceClient(),
+      directoryPath,
+    );
   }
 
   async delete(filePath: string) {
-    return this.getFilesClient().delete(filePath);
+    return this.filesConnector.delete(getWorkspaceClient(), filePath);
   }
 
   async preview(filePath: string) {
-    return this.getFilesClient().preview(filePath);
+    return this.filesConnector.preview(getWorkspaceClient(), filePath);
   }
-
-  // --- Routes ---
 
   injectRoutes(router: IAppRouter) {
     this.route(router, {
@@ -185,8 +183,6 @@ export class FilesPlugin extends Plugin {
       },
     });
   }
-
-  // --- Private route handlers ---
 
   private _readSettings(
     cacheKey: (string | number | object)[],
@@ -413,13 +409,6 @@ export class FilesPlugin extends Plugin {
     }
 
     logger.debug(req, "Upload started: path=%s", path);
-
-    // const body = await new Promise<Buffer>((resolve, reject) => {
-    //   const chunks: Buffer[] = [];
-    //   req.on("data", (chunk: Buffer) => chunks.push(chunk));
-    //   req.on("end", () => resolve(Buffer.concat(chunks)));
-    //   req.on("error", reject);
-    // });
 
     const webStream: ReadableStream<Uint8Array> = Readable.toWeb(req);
 
