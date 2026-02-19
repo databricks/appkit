@@ -4,6 +4,7 @@ import type { BasePluginConfig } from "shared";
 export interface IFilesConfig extends BasePluginConfig {
   timeout?: number;
   defaultVolume?: string;
+  customContentTypes?: Record<string, string>;
 }
 
 // TODO: Add request/response types for file operations

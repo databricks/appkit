@@ -31,6 +31,7 @@ export class FilesPlugin extends Plugin {
       defaultVolume: config.defaultVolume,
       timeout: config.timeout,
       telemetry: config.telemetry,
+      customContentTypes: config.customContentTypes,
     });
   }
 
@@ -277,7 +278,7 @@ export class FilesPlugin extends Plugin {
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     res.setHeader(
       "Content-Type",
-      contentTypeFromPath(path) ?? "application/octet-stream",
+      contentTypeFromPath(path, undefined, this.config.customContentTypes),
     );
     if (response.contents) {
       const nodeStream = Readable.fromWeb(
@@ -315,7 +316,7 @@ export class FilesPlugin extends Plugin {
 
     res.setHeader(
       "Content-Type",
-      contentTypeFromPath(path) ?? "application/octet-stream",
+      contentTypeFromPath(path, undefined, this.config.customContentTypes),
     );
     if (response.contents) {
       const nodeStream = Readable.fromWeb(

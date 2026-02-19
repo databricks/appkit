@@ -16,7 +16,7 @@ import {
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
-import { contentTypeFromPath } from "./defaults";
+import { contentTypeFromPath, isTextContentType } from "./defaults";
 
 const logger = createLogger("connectors:files");
 
@@ -24,11 +24,13 @@ export interface FilesConnectorConfig {
   defaultVolume?: string;
   timeout?: number;
   telemetry?: TelemetryOptions;
+  customContentTypes?: Record<string, string>;
 }
 
 export class FilesConnector {
   private readonly name = "files";
   private defaultVolume: string | undefined;
+  private readonly customContentTypes: Record<string, string> | undefined;
 
   private readonly telemetry: TelemetryProvider;
   private readonly telemetryMetrics: {
@@ -38,6 +40,7 @@ export class FilesConnector {
 
   constructor(config: FilesConnectorConfig) {
     this.defaultVolume = config.defaultVolume;
+    this.customContentTypes = config.customContentTypes;
 
     this.telemetry = TelemetryManager.getProvider(this.name, config.telemetry);
     this.telemetryMetrics = {
@@ -72,6 +75,7 @@ export class FilesConnector {
     return new FilesConnector({
       defaultVolume: volumePath,
       telemetry: false,
+      customContentTypes: this.customContentTypes,
     });
   }
 
@@ -211,7 +215,11 @@ export class FilesConnector {
         });
         return {
           contentLength: response["content-length"],
-          contentType: contentTypeFromPath(filePath, response["content-type"]),
+          contentType: contentTypeFromPath(
+            filePath,
+            response["content-type"],
+            this.customContentTypes,
+          ),
           lastModified: response["last-modified"],
         };
       },
@@ -299,11 +307,7 @@ export class FilesConnector {
       { "files.path": this.resolvePath(filePath) },
       async () => {
         const meta = await this.metadata(client, filePath);
-        const isText =
-          meta.contentType?.startsWith("text/") ||
-          meta.contentType === "application/json" ||
-          meta.contentType === "application/xml" ||
-          false;
+        const isText = isTextContentType(meta.contentType);
         const isImage = meta.contentType?.startsWith("image/") || false;
 
         if (!isText) {

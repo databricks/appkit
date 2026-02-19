@@ -1,1 +1,4 @@
-export { contentTypeFromPath } from "../../connectors/files/defaults";
+export {
+  contentTypeFromPath,
+  isTextContentType,
+} from "../../connectors/files/defaults";

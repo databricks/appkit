@@ -69,7 +69,9 @@ describe("Files Plugin Integration", () => {
   const TEST_PORT = 9880;
 
   beforeAll(async () => {
-    setupDatabricksEnv();
+    setupDatabricksEnv({
+      DATABRICKS_VOLUME_PATH: "/Volumes/catalog/schema/vol",
+    });
     ServiceContext.reset();
 
     serviceContextMock = await mockServiceContext({
@@ -94,6 +96,7 @@ describe("Files Plugin Integration", () => {
   });
 
   afterAll(async () => {
+    delete process.env.DATABRICKS_VOLUME_PATH;
     serviceContextMock?.restore();
     if (server) {
       await new Promise<void>((resolve, reject) => {
