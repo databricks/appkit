@@ -220,6 +220,7 @@ export class FilesConnector {
             response["content-type"],
             this.customContentTypes,
           ),
+          contentType: contentTypeFromPath(filePath, response["content-type"]),
           lastModified: response["last-modified"],
         };
       },
@@ -307,7 +308,11 @@ export class FilesConnector {
       { "files.path": this.resolvePath(filePath) },
       async () => {
         const meta = await this.metadata(client, filePath);
-        const isText = isTextContentType(meta.contentType);
+        const isText =
+          meta.contentType?.startsWith("text/") ||
+          meta.contentType === "application/json" ||
+          meta.contentType === "application/xml" ||
+          false;
         const isImage = meta.contentType?.startsWith("image/") || false;
 
         if (!isText) {

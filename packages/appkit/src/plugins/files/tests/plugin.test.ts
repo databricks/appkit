@@ -1,7 +1,6 @@
 import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ServiceContext } from "../../../context/service-context";
-import { FilesClient } from "../lib";
 import { FilesPlugin, files } from "../plugin";
 import { streamFromString } from "./utils";
 

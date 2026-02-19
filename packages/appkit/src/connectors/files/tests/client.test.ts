@@ -1,7 +1,29 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
+import { createMockTelemetry } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { FilesClient } from "../lib";
-import { streamFromChunks, streamFromString } from "./utils";
+import { FilesConnector } from "../client";
+
+function streamFromString(text: string): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(text));
+      controller.close();
+    },
+  });
+}
+
+function streamFromChunks(chunks: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+      controller.close();
+    },
+  });
+}
 
 const { mockFilesApi, mockConfig, mockClient, MockApiError } = vi.hoisted(
   () => {
@@ -42,20 +64,29 @@ vi.mock("@databricks/sdk-experimental", () => ({
   ApiError: MockApiError,
 }));
 
-describe("FilesClient", () => {
+const mockTelemetry = createMockTelemetry();
+
+vi.mock("../../../telemetry", () => ({
+  TelemetryManager: {
+    getProvider: vi.fn(() => mockTelemetry),
+  },
+  SpanKind: { CLIENT: 2 },
+  SpanStatusCode: { OK: 1, ERROR: 2 },
+}));
+
+describe("FilesConnector", () => {
   describe("Path Resolution", () => {
     beforeEach(() => {
       vi.clearAllMocks();
     });
 
     test("absolute paths are returned as-is", () => {
-      const client = new FilesClient({
+      const connector = new FilesConnector({
         defaultVolume: "/Volumes/catalog/schema/vol",
-        client: mockClient,
       });
 
       mockFilesApi.download.mockResolvedValue({ contents: null });
-      client.download("/Volumes/other/path/file.txt");
+      connector.download(mockClient, "/Volumes/other/path/file.txt");
 
       expect(mockFilesApi.download).toHaveBeenCalledWith({
         file_path: "/Volumes/other/path/file.txt",
@@ -63,13 +94,12 @@ describe("FilesClient", () => {
     });
 
     test("relative paths prepend defaultVolume", () => {
-      const client = new FilesClient({
+      const connector = new FilesConnector({
         defaultVolume: "/Volumes/catalog/schema/vol",
-        client: mockClient,
       });
 
       mockFilesApi.download.mockResolvedValue({ contents: null });
-      client.download("subdir/file.txt");
+      connector.download(mockClient, "subdir/file.txt");
 
       expect(mockFilesApi.download).toHaveBeenCalledWith({
         file_path: "/Volumes/catalog/schema/vol/subdir/file.txt",
@@ -77,39 +107,37 @@ describe("FilesClient", () => {
     });
 
     test("relative path without defaultVolume throws error", async () => {
-      const client = new FilesClient({ client: mockClient as any });
+      const connector = new FilesConnector({});
 
-      await expect(client.download("file.txt")).rejects.toThrow(
+      await expect(connector.download(mockClient, "file.txt")).rejects.toThrow(
         "Cannot resolve relative path: no default volume set.",
       );
     });
 
-    test("volume() creates new client scoped to a different volume", () => {
-      const client = new FilesClient({
+    test("volume() creates new connector scoped to a different volume", () => {
+      const connector = new FilesConnector({
         defaultVolume: "/Volumes/catalog/schema/vol1",
-        client: mockClient as any,
       });
 
-      const scoped = client.volume("/Volumes/catalog/schema/vol2");
+      const scoped = connector.volume("/Volumes/catalog/schema/vol2");
 
       mockFilesApi.download.mockResolvedValue({ contents: null });
-      scoped.download("file.txt");
+      scoped.download(mockClient, "file.txt");
 
       expect(mockFilesApi.download).toHaveBeenCalledWith({
         file_path: "/Volumes/catalog/schema/vol2/file.txt",
       });
     });
 
-    test("volume() does not affect the original client", () => {
-      const client = new FilesClient({
+    test("volume() does not affect the original connector", () => {
+      const connector = new FilesConnector({
         defaultVolume: "/Volumes/catalog/schema/vol1",
-        client: mockClient,
       });
 
-      client.volume("/Volumes/catalog/schema/vol2");
+      connector.volume("/Volumes/catalog/schema/vol2");
 
       mockFilesApi.download.mockResolvedValue({ contents: null });
-      client.download("file.txt");
+      connector.download(mockClient, "file.txt");
 
       expect(mockFilesApi.download).toHaveBeenCalledWith({
         file_path: "/Volumes/catalog/schema/vol1/file.txt",
@@ -117,22 +145,21 @@ describe("FilesClient", () => {
     });
 
     test("constructor without defaultVolume omits it", async () => {
-      const client = new FilesClient({ client: mockClient as any });
+      const connector = new FilesConnector({});
 
-      await expect(client.list()).rejects.toThrow(
+      await expect(connector.list(mockClient)).rejects.toThrow(
         "No directory path provided and no default volume set.",
       );
     });
   });
 
   describe("list()", () => {
-    let client: FilesClient;
+    let connector: FilesConnector;
 
     beforeEach(() => {
       vi.clearAllMocks();
-      client = new FilesClient({
+      connector = new FilesConnector({
         defaultVolume: "/Volumes/catalog/schema/vol",
-        client: mockClient as any,
       });
     });
 
@@ -158,7 +185,7 @@ describe("FilesClient", () => {
         })(),
       );
 
-      const result = await client.list();
+      const result = await connector.list(mockClient);
 
       expect(result).toEqual(entries);
       expect(mockFilesApi.listDirectoryContents).toHaveBeenCalledWith({
@@ -171,7 +198,7 @@ describe("FilesClient", () => {
         (async function* () {})(),
       );
 
-      await client.list();
+      await connector.list(mockClient);
 
       expect(mockFilesApi.listDirectoryContents).toHaveBeenCalledWith({
         directory_path: "/Volumes/catalog/schema/vol",
@@ -179,9 +206,9 @@ describe("FilesClient", () => {
     });
 
     test("throws when no path and no defaultVolume", async () => {
-      const noVolumeClient = new FilesClient({ client: mockClient as any });
+      const noVolumeConnector = new FilesConnector({});
 
-      await expect(noVolumeClient.list()).rejects.toThrow(
+      await expect(noVolumeConnector.list(mockClient)).rejects.toThrow(
         "No directory path provided and no default volume set.",
       );
     });
@@ -191,7 +218,7 @@ describe("FilesClient", () => {
         (async function* () {})(),
       );
 
-      await client.list("/Volumes/other/path");
+      await connector.list(mockClient, "/Volumes/other/path");
 
       expect(mockFilesApi.listDirectoryContents).toHaveBeenCalledWith({
         directory_path: "/Volumes/other/path",
@@ -203,7 +230,7 @@ describe("FilesClient", () => {
         (async function* () {})(),
       );
 
-      await client.list("subdir");
+      await connector.list(mockClient, "subdir");
 
       expect(mockFilesApi.listDirectoryContents).toHaveBeenCalledWith({
         directory_path: "/Volumes/catalog/schema/vol/subdir",
@@ -215,20 +242,19 @@ describe("FilesClient", () => {
         (async function* () {})(),
       );
 
-      const result = await client.list();
+      const result = await connector.list(mockClient);
 
       expect(result).toEqual([]);
     });
   });
 
   describe("read()", () => {
-    let client: FilesClient;
+    let connector: FilesConnector;
 
     beforeEach(() => {
       vi.clearAllMocks();
-      client = new FilesClient({
+      connector = new FilesConnector({
         defaultVolume: "/Volumes/catalog/schema/vol",
-        client: mockClient as any,
       });
     });
 
@@ -238,7 +264,7 @@ describe("FilesClient", () => {
         contents: streamFromString(content),
       });
 
-      const result = await client.read("/file.txt");
+      const result = await connector.read(mockClient, "/file.txt");
 
       expect(result).toBe(content);
     });
@@ -246,7 +272,7 @@ describe("FilesClient", () => {
     test("returns empty string when contents is null", async () => {
       mockFilesApi.download.mockResolvedValue({ contents: null });
 
-      const result = await client.read("/empty.txt");
+      const result = await connector.read(mockClient, "/empty.txt");
 
       expect(result).toBe("");
     });
@@ -256,7 +282,7 @@ describe("FilesClient", () => {
         contents: streamFromChunks(["Hello, ", "world", "!"]),
       });
 
-      const result = await client.read("/chunked.txt");
+      const result = await connector.read(mockClient, "/chunked.txt");
 
       expect(result).toBe("Hello, world!");
     });
@@ -267,20 +293,19 @@ describe("FilesClient", () => {
         contents: streamFromString(content),
       });
 
-      const result = await client.read("/unicode.txt");
+      const result = await connector.read(mockClient, "/unicode.txt");
 
       expect(result).toBe(content);
     });
   });
 
   describe("download()", () => {
-    let client: FilesClient;
+    let connector: FilesConnector;
 
     beforeEach(() => {
       vi.clearAllMocks();
-      client = new FilesClient({
+      connector = new FilesConnector({
         defaultVolume: "/Volumes/catalog/schema/vol",
-        client: mockClient as any,
       });
     });
 
@@ -288,7 +313,7 @@ describe("FilesClient", () => {
       const response = { contents: streamFromString("data") };
       mockFilesApi.download.mockResolvedValue(response);
 
-      const result = await client.download("file.txt");
+      const result = await connector.download(mockClient, "file.txt");
 
       expect(mockFilesApi.download).toHaveBeenCalledWith({
         file_path: "/Volumes/catalog/schema/vol/file.txt",
@@ -300,7 +325,7 @@ describe("FilesClient", () => {
       const response = { contents: null };
       mockFilesApi.download.mockResolvedValue(response);
 
-      await client.download("/Volumes/other/file.txt");
+      await connector.download(mockClient, "/Volumes/other/file.txt");
 
       expect(mockFilesApi.download).toHaveBeenCalledWith({
         file_path: "/Volumes/other/file.txt",
@@ -309,13 +334,12 @@ describe("FilesClient", () => {
   });
 
   describe("exists()", () => {
-    let client: FilesClient;
+    let connector: FilesConnector;
 
     beforeEach(() => {
       vi.clearAllMocks();
-      client = new FilesClient({
+      connector = new FilesConnector({
         defaultVolume: "/Volumes/catalog/schema/vol",
-        client: mockClient as any,
       });
     });
 
@@ -326,7 +350,7 @@ describe("FilesClient", () => {
         "last-modified": "2025-01-01",
       });
 
-      const result = await client.exists("/file.txt");
+      const result = await connector.exists(mockClient, "/file.txt");
 
       expect(result).toBe(true);
     });
@@ -336,7 +360,7 @@ describe("FilesClient", () => {
         new MockApiError("Not found", 404),
       );
 
-      const result = await client.exists("/missing.txt");
+      const result = await connector.exists(mockClient, "/missing.txt");
 
       expect(result).toBe(false);
     });
@@ -346,26 +370,27 @@ describe("FilesClient", () => {
         new MockApiError("Server error", 500),
       );
 
-      await expect(client.exists("/file.txt")).rejects.toThrow("Server error");
+      await expect(connector.exists(mockClient, "/file.txt")).rejects.toThrow(
+        "Server error",
+      );
     });
 
     test("rethrows generic errors", async () => {
       mockFilesApi.getMetadata.mockRejectedValue(new Error("Network failure"));
 
-      await expect(client.exists("/file.txt")).rejects.toThrow(
+      await expect(connector.exists(mockClient, "/file.txt")).rejects.toThrow(
         "Network failure",
       );
     });
   });
 
   describe("metadata()", () => {
-    let client: FilesClient;
+    let connector: FilesConnector;
 
     beforeEach(() => {
       vi.clearAllMocks();
-      client = new FilesClient({
+      connector = new FilesConnector({
         defaultVolume: "/Volumes/catalog/schema/vol",
-        client: mockClient as any,
       });
     });
 
@@ -376,7 +401,7 @@ describe("FilesClient", () => {
         "last-modified": "2025-06-15T10:00:00Z",
       });
 
-      const result = await client.metadata("/data.json");
+      const result = await connector.metadata(mockClient, "/data.json");
 
       expect(result).toEqual({
         contentLength: 1234,
@@ -392,7 +417,7 @@ describe("FilesClient", () => {
         "last-modified": "2025-01-01",
       });
 
-      const result = await client.metadata("/image.png");
+      const result = await connector.metadata(mockClient, "/image.png");
 
       expect(result.contentType).toBe("image/png");
     });
@@ -404,7 +429,7 @@ describe("FilesClient", () => {
         "last-modified": "2025-01-01",
       });
 
-      const result = await client.metadata("/data.csv");
+      const result = await connector.metadata(mockClient, "/data.csv");
 
       expect(result.contentType).toBe("text/csv");
     });
@@ -416,7 +441,7 @@ describe("FilesClient", () => {
         "last-modified": "2025-01-01",
       });
 
-      await client.metadata("notes.txt");
+      await connector.metadata(mockClient, "notes.txt");
 
       expect(mockFilesApi.getMetadata).toHaveBeenCalledWith({
         file_path: "/Volumes/catalog/schema/vol/notes.txt",
@@ -425,14 +450,13 @@ describe("FilesClient", () => {
   });
 
   describe("upload()", () => {
-    let client: FilesClient;
+    let connector: FilesConnector;
     let fetchSpy: ReturnType<typeof vi.fn>;
 
     beforeEach(() => {
       vi.clearAllMocks();
-      client = new FilesClient({
+      connector = new FilesConnector({
         defaultVolume: "/Volumes/catalog/schema/vol",
-        client: mockClient as any,
       });
       mockConfig.authenticate.mockResolvedValue(undefined);
       fetchSpy = vi.fn().mockResolvedValue({ ok: true });
@@ -444,7 +468,7 @@ describe("FilesClient", () => {
     });
 
     test("handles string input", async () => {
-      await client.upload("file.txt", "hello world");
+      await connector.upload(mockClient, "file.txt", "hello world");
 
       expect(fetchSpy).toHaveBeenCalledWith(
         expect.stringContaining(
@@ -459,7 +483,7 @@ describe("FilesClient", () => {
 
     test("handles Buffer input", async () => {
       const buf = Buffer.from("buffer data");
-      await client.upload("file.bin", buf);
+      await connector.upload(mockClient, "file.bin", buf);
 
       expect(fetchSpy).toHaveBeenCalledWith(
         expect.any(String),
@@ -472,7 +496,7 @@ describe("FilesClient", () => {
 
     test("handles ReadableStream input (streams directly)", async () => {
       const stream = streamFromString("stream data");
-      await client.upload("file.txt", stream);
+      await connector.upload(mockClient, "file.txt", stream);
 
       expect(fetchSpy).toHaveBeenCalledWith(
         expect.any(String),
@@ -485,27 +509,29 @@ describe("FilesClient", () => {
     });
 
     test("defaults overwrite to true", async () => {
-      await client.upload("file.txt", "data");
+      await connector.upload(mockClient, "file.txt", "data");
 
       const url = fetchSpy.mock.calls[0][0] as string;
       expect(url).toContain("overwrite=true");
     });
 
     test("sets overwrite=false when specified", async () => {
-      await client.upload("file.txt", "data", { overwrite: false });
+      await connector.upload(mockClient, "file.txt", "data", {
+        overwrite: false,
+      });
 
       const url = fetchSpy.mock.calls[0][0] as string;
       expect(url).toContain("overwrite=false");
     });
 
     test("calls config.authenticate on the headers", async () => {
-      await client.upload("file.txt", "data");
+      await connector.upload(mockClient, "file.txt", "data");
 
       expect(mockConfig.authenticate).toHaveBeenCalledWith(expect.any(Headers));
     });
 
     test("builds URL from client.config.host", async () => {
-      await client.upload("file.txt", "data");
+      await connector.upload(mockClient, "file.txt", "data");
 
       const url = fetchSpy.mock.calls[0][0] as string;
       expect(url).toMatch(
@@ -520,13 +546,13 @@ describe("FilesClient", () => {
         text: () => Promise.resolve("Forbidden"),
       });
 
-      await expect(client.upload("file.txt", "data")).rejects.toThrow(
-        "Upload failed (403): Forbidden",
-      );
+      await expect(
+        connector.upload(mockClient, "file.txt", "data"),
+      ).rejects.toThrow("Upload failed (403): Forbidden");
     });
 
     test("resolves absolute paths directly", async () => {
-      await client.upload("/Volumes/other/vol/file.txt", "data");
+      await connector.upload(mockClient, "/Volumes/other/vol/file.txt", "data");
 
       const url = fetchSpy.mock.calls[0][0] as string;
       expect(url).toContain("/api/2.0/fs/files/Volumes/other/vol/file.txt");
@@ -534,20 +560,19 @@ describe("FilesClient", () => {
   });
 
   describe("createDirectory()", () => {
-    let client: FilesClient;
+    let connector: FilesConnector;
 
     beforeEach(() => {
       vi.clearAllMocks();
-      client = new FilesClient({
+      connector = new FilesConnector({
         defaultVolume: "/Volumes/catalog/schema/vol",
-        client: mockClient as any,
       });
     });
 
     test("calls client.files.createDirectory with resolved path", async () => {
       mockFilesApi.createDirectory.mockResolvedValue(undefined);
 
-      await client.createDirectory("new-dir");
+      await connector.createDirectory(mockClient, "new-dir");
 
       expect(mockFilesApi.createDirectory).toHaveBeenCalledWith({
         directory_path: "/Volumes/catalog/schema/vol/new-dir",
@@ -557,7 +582,10 @@ describe("FilesClient", () => {
     test("uses absolute path when provided", async () => {
       mockFilesApi.createDirectory.mockResolvedValue(undefined);
 
-      await client.createDirectory("/Volumes/other/path/new-dir");
+      await connector.createDirectory(
+        mockClient,
+        "/Volumes/other/path/new-dir",
+      );
 
       expect(mockFilesApi.createDirectory).toHaveBeenCalledWith({
         directory_path: "/Volumes/other/path/new-dir",
@@ -566,20 +594,19 @@ describe("FilesClient", () => {
   });
 
   describe("delete()", () => {
-    let client: FilesClient;
+    let connector: FilesConnector;
 
     beforeEach(() => {
       vi.clearAllMocks();
-      client = new FilesClient({
+      connector = new FilesConnector({
         defaultVolume: "/Volumes/catalog/schema/vol",
-        client: mockClient as any,
       });
     });
 
     test("calls client.files.delete with resolved path", async () => {
       mockFilesApi.delete.mockResolvedValue(undefined);
 
-      await client.delete("file.txt");
+      await connector.delete(mockClient, "file.txt");
 
       expect(mockFilesApi.delete).toHaveBeenCalledWith({
         file_path: "/Volumes/catalog/schema/vol/file.txt",
@@ -589,7 +616,7 @@ describe("FilesClient", () => {
     test("uses absolute path when provided", async () => {
       mockFilesApi.delete.mockResolvedValue(undefined);
 
-      await client.delete("/Volumes/other/file.txt");
+      await connector.delete(mockClient, "/Volumes/other/file.txt");
 
       expect(mockFilesApi.delete).toHaveBeenCalledWith({
         file_path: "/Volumes/other/file.txt",
@@ -598,13 +625,12 @@ describe("FilesClient", () => {
   });
 
   describe("preview()", () => {
-    let client: FilesClient;
+    let connector: FilesConnector;
 
     beforeEach(() => {
       vi.clearAllMocks();
-      client = new FilesClient({
+      connector = new FilesConnector({
         defaultVolume: "/Volumes/catalog/schema/vol",
-        client: mockClient as any,
       });
     });
 
@@ -620,7 +646,7 @@ describe("FilesClient", () => {
         contents: streamFromString(longText),
       });
 
-      const result = await client.preview("/file.txt");
+      const result = await connector.preview(mockClient, "/file.txt");
 
       expect(result.isText).toBe(true);
       expect(result.isImage).toBe(false);
@@ -638,7 +664,7 @@ describe("FilesClient", () => {
         contents: streamFromString("<h1>Hello</h1>"),
       });
 
-      const result = await client.preview("/page.html");
+      const result = await connector.preview(mockClient, "/page.html");
 
       expect(result.isText).toBe(true);
       expect(result.textPreview).toBe("<h1>Hello</h1>");
@@ -654,7 +680,7 @@ describe("FilesClient", () => {
         contents: streamFromString('{"key":"value"}'),
       });
 
-      const result = await client.preview("/data.json");
+      const result = await connector.preview(mockClient, "/data.json");
 
       expect(result.isText).toBe(true);
       expect(result.textPreview).toBe('{"key":"value"}');
@@ -670,7 +696,7 @@ describe("FilesClient", () => {
         contents: streamFromString("<root/>"),
       });
 
-      const result = await client.preview("/data.xml");
+      const result = await connector.preview(mockClient, "/data.xml");
 
       expect(result.isText).toBe(true);
       expect(result.textPreview).toBe("<root/>");
@@ -683,7 +709,7 @@ describe("FilesClient", () => {
         "last-modified": "2025-01-01",
       });
 
-      const result = await client.preview("/image.png");
+      const result = await connector.preview(mockClient, "/image.png");
 
       expect(result.isImage).toBe(true);
       expect(result.isText).toBe(false);
@@ -697,7 +723,7 @@ describe("FilesClient", () => {
         "last-modified": "2025-01-01",
       });
 
-      const result = await client.preview("/doc.pdf");
+      const result = await connector.preview(mockClient, "/doc.pdf");
 
       expect(result.isText).toBe(false);
       expect(result.isImage).toBe(false);
@@ -714,7 +740,7 @@ describe("FilesClient", () => {
         contents: null,
       });
 
-      const result = await client.preview("/empty.txt");
+      const result = await connector.preview(mockClient, "/empty.txt");
 
       expect(result.isText).toBe(true);
       expect(result.isImage).toBe(false);
@@ -731,7 +757,7 @@ describe("FilesClient", () => {
         contents: streamFromString("hello"),
       });
 
-      const result = await client.preview("/notes.txt");
+      const result = await connector.preview(mockClient, "/notes.txt");
 
       expect(result.contentLength).toBe(42);
       expect(result.contentType).toBe("text/plain");
@@ -750,7 +776,7 @@ describe("FilesClient", () => {
         contents: streamFromString(content),
       });
 
-      const result = await client.preview("/short.txt");
+      const result = await connector.preview(mockClient, "/short.txt");
 
       expect(result.textPreview).toBe(content);
     });
