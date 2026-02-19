@@ -16,13 +16,9 @@ import { Command } from "commander";
 import {
   humanizeResourceType,
   RESOURCE_TYPE_OPTIONS,
-} from "../plugin-create/resource-defaults.js";
-import { resolveTargetDir, scaffoldPlugin } from "../plugin-create/scaffold.js";
-import type {
-  CreateAnswers,
-  Placement,
-  SelectedResource,
-} from "../plugin-create/types.js";
+} from "./resource-defaults";
+import { resolveTargetDir, scaffoldPlugin } from "./scaffold";
+import type { CreateAnswers, Placement, SelectedResource } from "./types";
 
 const NAME_PATTERN = /^[a-z][a-z0-9-]*$/;
 const DEFAULT_VERSION = "1.0.0";

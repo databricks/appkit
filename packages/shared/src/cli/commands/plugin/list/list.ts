@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { Command } from "commander";
-import { validateManifest } from "../plugin-validate/validate-manifest.js";
+import { validateManifest } from "../validate/validate-manifest";
 
 interface PluginRow {
   name: string;

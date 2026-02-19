@@ -1,9 +1,9 @@
 import { Command } from "commander";
-import { pluginAddResourceCommand } from "./plugin-add-resource.js";
-import { pluginCreateCommand } from "./plugin-create.js";
-import { pluginListCommand } from "./plugin-list.js";
-import { pluginValidateCommand } from "./plugin-validate.js";
-import { pluginsSyncCommand } from "./plugins-sync.js";
+import { pluginAddResourceCommand } from "./add-resource/add-resource";
+import { pluginCreateCommand } from "./create/create";
+import { pluginListCommand } from "./list/list";
+import { pluginsSyncCommand } from "./sync/sync";
+import { pluginValidateCommand } from "./validate/validate";
 
 /**
  * Parent command for plugin management operations.

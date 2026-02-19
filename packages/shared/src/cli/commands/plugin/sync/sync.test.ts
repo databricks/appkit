@@ -1,11 +1,7 @@
 import path from "node:path";
 import { Lang, parse } from "@ast-grep/napi";
 import { describe, expect, it } from "vitest";
-import {
-  isWithinDirectory,
-  parseImports,
-  parsePluginUsages,
-} from "./plugins-sync";
+import { isWithinDirectory, parseImports, parsePluginUsages } from "./sync";
 
 describe("plugins-sync", () => {
   describe("isWithinDirectory", () => {

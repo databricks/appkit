@@ -9,8 +9,8 @@ import {
   humanizeResourceType,
   RESOURCE_TYPE_OPTIONS,
   resourceKeyFromType,
-} from "../plugin-create/resource-defaults.js";
-import { validateManifest } from "../plugin-validate/validate-manifest.js";
+} from "../create/resource-defaults";
+import { validateManifest } from "../validate/validate-manifest";
 
 interface ManifestWithResources {
   $schema?: string;

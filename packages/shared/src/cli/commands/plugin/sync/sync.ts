@@ -5,7 +5,7 @@ import { Command } from "commander";
 import {
   formatValidationErrors,
   validateManifest,
-} from "../plugin-validate/validate-manifest.js";
+} from "../validate/validate-manifest";
 
 /**
  * Field entry in a resource requirement (env var + optional description)
@@ -90,7 +90,7 @@ function validateManifestWithSchema(
   if (result.valid && result.manifest) return result.manifest as PluginManifest;
   if (result.errors?.length) {
     console.warn(
-      `Warning: Manifest at ${sourcePath} failed schema validation:\n${formatValidationErrors(result.errors)}`,
+      `Warning: Manifest at ${sourcePath} failed schema validation:\n${formatValidationErrors(result.errors, obj)}`,
     );
   }
   return null;
@@ -106,7 +106,7 @@ const KNOWN_PLUGIN_PACKAGES = ["@databricks/appkit"];
  * Candidate paths for the server entry file, relative to cwd.
  * Checked in order; the first that exists is used.
  */
-const SERVER_FILE_CANDIDATES = ["server/server.ts"];
+const SERVER_FILE_CANDIDATES = ["server/server.ts", "server/index.ts"];
 
 /**
  * Find the server entry file by checking candidate paths in order.
@@ -414,12 +414,49 @@ function scanForPlugins(
 }
 
 /**
+ * Write (or preview) the template plugins manifest to disk.
+ */
+function writeManifest(
+  outputPath: string,
+  { plugins }: { plugins: TemplatePluginsManifest["plugins"] },
+  options: { write?: boolean; silent?: boolean },
+) {
+  const templateManifest: TemplatePluginsManifest = {
+    $schema:
+      "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
+    version: "1.0",
+    plugins,
+  };
+
+  if (options.write) {
+    fs.writeFileSync(
+      outputPath,
+      `${JSON.stringify(templateManifest, null, 2)}\n`,
+    );
+    if (!options.silent) {
+      console.log(`\n✓ Wrote ${outputPath}`);
+    }
+  } else if (!options.silent) {
+    console.log("\nTo write the manifest, run:");
+    console.log("  npx appkit plugin sync --write\n");
+    console.log("Preview:");
+    console.log("─".repeat(60));
+    console.log(JSON.stringify(templateManifest, null, 2));
+    console.log("─".repeat(60));
+  }
+}
+
+/**
  * Run the plugin sync command.
  * Parses the server entry file to discover which packages to scan for plugin
  * manifests, then marks plugins that are actually used in the `plugins: [...]`
  * array as requiredByTemplate.
  */
-function runPluginsSync(options: { write?: boolean; output?: string }) {
+function runPluginsSync(options: {
+  write?: boolean;
+  output?: string;
+  silent?: boolean;
+}) {
   const cwd = process.cwd();
   const outputPath = path.resolve(cwd, options.output || "appkit.plugins.json");
 
@@ -431,7 +468,9 @@ function runPluginsSync(options: { write?: boolean; output?: string }) {
     process.exit(1);
   }
 
-  console.log("Scanning for AppKit plugins...\n");
+  if (!options.silent) {
+    console.log("Scanning for AppKit plugins...\n");
+  }
 
   // Step 1: Parse server file to discover imports and plugin usages
   const serverFile = findServerFile(cwd);
@@ -439,8 +478,10 @@ function runPluginsSync(options: { write?: boolean; output?: string }) {
   let pluginUsages = new Set<string>();
 
   if (serverFile) {
-    const relativePath = path.relative(cwd, serverFile);
-    console.log(`Server entry file: ${relativePath}`);
+    if (!options.silent) {
+      const relativePath = path.relative(cwd, serverFile);
+      console.log(`Server entry file: ${relativePath}`);
+    }
 
     const content = fs.readFileSync(serverFile, "utf-8");
     const lang = serverFile.endsWith(".tsx") ? Lang.Tsx : Lang.TypeScript;
@@ -449,7 +490,7 @@ function runPluginsSync(options: { write?: boolean; output?: string }) {
 
     serverImports = parseImports(root);
     pluginUsages = parsePluginUsages(root);
-  } else {
+  } else if (!options.silent) {
     console.log(
       "No server entry file found. Checked:",
       SERVER_FILE_CANDIDATES.join(", "),
@@ -481,6 +522,10 @@ function runPluginsSync(options: { write?: boolean; output?: string }) {
   const pluginCount = Object.keys(plugins).length;
 
   if (pluginCount === 0) {
+    if (options.silent) {
+      writeManifest(outputPath, { plugins: {} }, options);
+      return;
+    }
     console.log("No plugins found.");
     console.log("\nMake sure you have plugin packages installed:");
     for (const pkg of npmPackages) {
@@ -522,39 +567,21 @@ function runPluginsSync(options: { write?: boolean; output?: string }) {
     }
   }
 
-  console.log(`\nFound ${pluginCount} plugin(s):`);
-  for (const [name, manifest] of Object.entries(plugins)) {
-    const resourceCount =
-      manifest.resources.required.length + manifest.resources.optional.length;
-    const resourceInfo =
-      resourceCount > 0 ? ` [${resourceCount} resource(s)]` : "";
-    const mandatoryTag = manifest.requiredByTemplate ? " (mandatory)" : "";
-    console.log(
-      `  ${manifest.requiredByTemplate ? "●" : "○"} ${manifest.displayName} (${name}) from ${manifest.package}${resourceInfo}${mandatoryTag}`,
-    );
+  if (!options.silent) {
+    console.log(`\nFound ${pluginCount} plugin(s):`);
+    for (const [name, manifest] of Object.entries(plugins)) {
+      const resourceCount =
+        manifest.resources.required.length + manifest.resources.optional.length;
+      const resourceInfo =
+        resourceCount > 0 ? ` [${resourceCount} resource(s)]` : "";
+      const mandatoryTag = manifest.requiredByTemplate ? " (mandatory)" : "";
+      console.log(
+        `  ${manifest.requiredByTemplate ? "●" : "○"} ${manifest.displayName} (${name}) from ${manifest.package}${resourceInfo}${mandatoryTag}`,
+      );
+    }
   }
 
-  const templateManifest: TemplatePluginsManifest = {
-    $schema:
-      "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
-    version: "1.0",
-    plugins,
-  };
-
-  if (options.write) {
-    fs.writeFileSync(
-      outputPath,
-      `${JSON.stringify(templateManifest, null, 2)}\n`,
-    );
-    console.log(`\n✓ Wrote ${outputPath}`);
-  } else {
-    console.log("\nTo write the manifest, run:");
-    console.log("  npx appkit plugin sync --write\n");
-    console.log("Preview:");
-    console.log("─".repeat(60));
-    console.log(JSON.stringify(templateManifest, null, 2));
-    console.log("─".repeat(60));
-  }
+  writeManifest(outputPath, { plugins }, options);
 }
 
 /** Exported for testing: path boundary check, AST parsing. */
@@ -568,5 +595,9 @@ export const pluginsSyncCommand = new Command("sync")
   .option(
     "-o, --output <path>",
     "Output file path (default: ./appkit.plugins.json)",
+  )
+  .option(
+    "-s, --silent",
+    "Suppress output and never exit with error (for use in predev/prebuild hooks)",
   )
   .action(runPluginsSync);

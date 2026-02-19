@@ -3,9 +3,11 @@ import path from "node:path";
 import process from "node:process";
 import { Command } from "commander";
 import {
+  detectSchemaType,
   formatValidationErrors,
   validateManifest,
-} from "../plugin-validate/validate-manifest.js";
+  validateTemplateManifest,
+} from "./validate-manifest";
 
 function resolveManifestPaths(paths: string[], cwd: string): string[] {
   const out: string[] = [];
@@ -17,11 +19,21 @@ function resolveManifestPaths(paths: string[], cwd: string): string[] {
     }
     const stat = fs.statSync(resolved);
     if (stat.isDirectory()) {
-      const manifestPath = path.join(resolved, "manifest.json");
-      if (fs.existsSync(manifestPath)) {
-        out.push(manifestPath);
-      } else {
-        console.error(`No manifest.json in directory: ${p}`);
+      const pluginManifest = path.join(resolved, "manifest.json");
+      const templateManifest = path.join(resolved, "appkit.plugins.json");
+      let found = false;
+      if (fs.existsSync(pluginManifest)) {
+        out.push(pluginManifest);
+        found = true;
+      }
+      if (fs.existsSync(templateManifest)) {
+        out.push(templateManifest);
+        found = true;
+      }
+      if (!found) {
+        console.error(
+          `No manifest.json or appkit.plugins.json in directory: ${p}`,
+        );
       }
     } else {
       out.push(resolved);
@@ -53,14 +65,19 @@ function runPluginValidate(paths: string[]): void {
       continue;
     }
 
-    const result = validateManifest(obj, manifestPath);
+    const schemaType = detectSchemaType(obj);
+    const result =
+      schemaType === "template-plugins"
+        ? validateTemplateManifest(obj, manifestPath)
+        : validateManifest(obj, manifestPath);
+
     const relativePath = path.relative(cwd, manifestPath);
     if (result.valid) {
       console.log(`✓ ${relativePath}`);
     } else {
       console.error(`✗ ${relativePath}`);
       if (result.errors?.length) {
-        console.error(formatValidationErrors(result.errors));
+        console.error(formatValidationErrors(result.errors, obj));
       }
       hasFailure = true;
     }
@@ -70,9 +87,11 @@ function runPluginValidate(paths: string[]): void {
 }
 
 export const pluginValidateCommand = new Command("validate")
-  .description("Validate plugin manifest(s) against the JSON schema")
+  .description(
+    "Validate plugin manifest(s) or template manifests against their JSON schema",
+  )
   .argument(
     "[paths...]",
-    "Paths to manifest.json or plugin directories (default: .)",
+    "Paths to manifest.json, appkit.plugins.json, or plugin directories (default: .)",
   )
   .action(runPluginValidate);

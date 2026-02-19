@@ -7,7 +7,7 @@ import { Command } from "commander";
 import { docsCommand } from "./commands/docs.js";
 import { generateTypesCommand } from "./commands/generate-types.js";
 import { lintCommand } from "./commands/lint.js";
-import { pluginCommand } from "./commands/plugins.js";
+import { pluginCommand } from "./commands/plugin/index.js";
 import { setupCommand } from "./commands/setup.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

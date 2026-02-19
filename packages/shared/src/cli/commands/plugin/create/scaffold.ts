@@ -6,8 +6,8 @@ import {
   humanizeResourceType,
   MANIFEST_SCHEMA_ID,
   resourceKeyFromType,
-} from "./resource-defaults.js";
-import type { CreateAnswers } from "./types.js";
+} from "./resource-defaults";
+import type { CreateAnswers } from "./types";
 
 /** Convert kebab-name to PascalCase (e.g. my-plugin -> MyPlugin). */
 function toPascalCase(name: string): string {
