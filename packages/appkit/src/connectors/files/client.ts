@@ -16,7 +16,7 @@ import {
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
-import { contentTypeFromPath } from "./defaults";
+import { contentTypeFromPath, isTextContentType } from "./defaults";
 
 const logger = createLogger("connectors:files");
 
@@ -308,11 +308,7 @@ export class FilesConnector {
       { "files.path": this.resolvePath(filePath) },
       async () => {
         const meta = await this.metadata(client, filePath);
-        const isText =
-          meta.contentType?.startsWith("text/") ||
-          meta.contentType === "application/json" ||
-          meta.contentType === "application/xml" ||
-          false;
+        const isText = isTextContentType(meta.contentType);
         const isImage = meta.contentType?.startsWith("image/") || false;
 
         if (!isText) {
