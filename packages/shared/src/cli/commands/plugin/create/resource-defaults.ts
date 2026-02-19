@@ -27,21 +27,30 @@ export const RESOURCE_TYPE_OPTIONS: ResourceTypeOption[] = [
   { value: "app", label: "App" },
 ];
 
-/** Default (first) permission per resource type for scaffolding. */
-export const DEFAULT_PERMISSION_BY_TYPE: Record<string, string> = {
-  secret: "READ",
-  job: "CAN_VIEW",
-  sql_warehouse: "CAN_USE",
-  serving_endpoint: "CAN_QUERY",
-  volume: "READ_VOLUME",
-  vector_search_index: "SELECT",
-  uc_function: "EXECUTE",
-  uc_connection: "USE_CONNECTION",
-  database: "CAN_CONNECT_AND_CREATE",
-  genie_space: "CAN_VIEW",
-  experiment: "CAN_READ",
-  app: "CAN_USE",
+/** All valid permissions per resource type, aligned with the schema if/then rules. */
+export const PERMISSIONS_BY_TYPE: Record<string, string[]> = {
+  secret: ["READ", "WRITE", "MANAGE"],
+  job: ["CAN_VIEW", "CAN_MANAGE_RUN", "CAN_MANAGE"],
+  sql_warehouse: ["CAN_USE", "CAN_MANAGE"],
+  serving_endpoint: ["CAN_QUERY", "CAN_VIEW", "CAN_MANAGE"],
+  volume: ["READ_VOLUME", "WRITE_VOLUME"],
+  vector_search_index: ["SELECT"],
+  uc_function: ["EXECUTE"],
+  uc_connection: ["USE_CONNECTION"],
+  database: ["CAN_CONNECT_AND_CREATE"],
+  genie_space: ["CAN_VIEW", "CAN_RUN", "CAN_EDIT", "CAN_MANAGE"],
+  experiment: ["CAN_READ", "CAN_EDIT", "CAN_MANAGE"],
+  app: ["CAN_USE"],
 };
+
+/** Default (first) permission per resource type for scaffolding. */
+export const DEFAULT_PERMISSION_BY_TYPE: Record<string, string> =
+  Object.fromEntries(
+    Object.entries(PERMISSIONS_BY_TYPE).map(([type, perms]) => [
+      type,
+      perms[0],
+    ]),
+  );
 
 /** Default fields per resource type: field key -> { env, description }. */
 export const DEFAULT_FIELDS_BY_TYPE: Record<
