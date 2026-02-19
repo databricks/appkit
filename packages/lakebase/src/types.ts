@@ -60,17 +60,16 @@ export interface LakebasePoolConfig extends PoolConfig {
   /**
    * Endpoint resource path for OAuth token generation.
    *
-   * All segments are IDs assigned by Databricks (not names you create):
-   * - project-id: UUID format (e.g., `a1b2c3d4-e5f6-4789-a012-b3c4d5e6f789`)
-   * - branch-id: Identifier from Databricks (e.g., `main`, `dev`)
-   * - endpoint-id: Identifier from Databricks (e.g., `primary`, `analytics`)
-   *
-   * Format: `projects/{project-id}/branches/{branch-id}/endpoints/{endpoint-id}`
+   * Retrieve the value using the Databricks CLI:
+   * ```
+   * databricks postgres list-endpoints projects/{project-id}/branches/{branch-id}
+   * ```
+   * Use the `name` field from the output.
    *
    * Required for OAuth authentication (unless password is provided)
    * Can also be set via LAKEBASE_ENDPOINT environment variable
    *
-   * @example "projects/6bef4151-4b5d-4147-b4d0-c2f4fd5b40db/branches/br-sparkling-tree-y17uj7fn/endpoints/ep-restless-pine-y1ldaht0"
+   * @example "projects/{project-id}/branches/{branch-id}/endpoints/{endpoint-identifier}"
    */
   endpoint?: string;
 
@@ -184,18 +183,13 @@ export interface RequestedClaims {
  */
 export interface GenerateDatabaseCredentialRequest {
   /**
-   * Endpoint resource path with IDs assigned by Databricks.
+   * Endpoint resource path. Retrieve using the Databricks CLI:
+   * ```
+   * databricks postgres list-endpoints projects/{project-id}/branches/{branch-id}
+   * ```
+   * Use the `name` field from the output.
    *
-   * All segments are IDs from Databricks (not names you create):
-   * - project-id: UUID format (e.g., `a1b2c3d4-e5f6-4789-a012-b3c4d5e6f789`)
-   * - branch-id: Identifier from Databricks (e.g., `main`, `dev`)
-   * - endpoint-id: Identifier from Databricks (e.g., `primary`, `analytics`)
-   *
-   * Format: `projects/{project-id}/branches/{branch-id}/endpoints/{endpoint-id}`
-   *
-   * **Important:** Copy from Databricks Lakebase UI - do not construct manually.
-   *
-   * @example "projects/6bef4151-4b5d-4147-b4d0-c2f4fd5b40db/branches/br-sparkling-tree-y17uj7fn/endpoints/ep-restless-pine-y1ldaht0"
+   * @example "projects/{project-id}/branches/{branch-id}/endpoints/{endpoint-identifier}"
    */
   endpoint: string;
 

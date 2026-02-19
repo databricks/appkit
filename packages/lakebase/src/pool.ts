@@ -30,10 +30,10 @@ import type { LakebasePoolConfig } from "./types";
  *
  * @example With explicit configuration
  * ```typescript
- * // Format: projects/{project-id}/branches/{branch-id}/endpoints/{endpoint-id}
- * // Note: Use actual IDs from Databricks (project-id is a UUID)
+ * // Use the `name` field from the Databricks CLI output:
+ * // `databricks postgres list-endpoints projects/{project-id}/branches/{branch-id}`
  * const pool = createLakebasePool({
- *   endpoint: 'projects/6bef4151-4b5d-4147-b4d0-c2f4fd5b40db/branches/br-sparkling-tree-y17uj7fn/endpoints/ep-restless-pine-y1ldaht0',
+ *   endpoint: 'projects/{project-id}/branches/{branch-id}/endpoints/{endpoint-identifier}',
  *   host: 'ep-abc.databricks.com',
  *   database: 'databricks_postgres',
  *   user: 'service-principal-id'

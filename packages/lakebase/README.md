@@ -31,9 +31,23 @@ Set the following environment variables:
 ```bash
 export PGHOST=your-lakebase-host.databricks.com
 export PGDATABASE=your_database_name
-export LAKEBASE_ENDPOINT=projects/{project-id}/branches/{branch-id}/endpoints/{endpoint-id}
-export PGUSER=your-service-principal-id
+export LAKEBASE_ENDPOINT=projects/6bef4151-4b5d-4147-b4d0-c2f4fd5b40db/branches/br-broad-pine-y12n6gnv/endpoints/ep-summer-frost-y131l3vx
+export PGUSER=your_user # optionally, defaults to DATABRICKS_CLIENT_ID
 export PGSSLMODE=require
+```
+
+To find your `LAKEBASE_ENDPOINT`, run the Databricks CLI and use the `name` field from the output:
+
+```bash
+databricks postgres list-endpoints projects/{project-id}/branches/{branch-id}
+```
+
+You can obtain the Project ID and Branch ID from the Lakebase Autoscaling UI, like the "Branch Overview" page. (Project list -> Project dashboard -> Branch overview). When using the driver as a part of Databricks Apps, the `LAKEBASE_ENDPOINT` is automatically injected using `fromValue`:
+
+```yaml
+env:
+  - name: LAKEBASE_ENDPOINT
+    valueFrom: database # Lakebase Autoscaling database resource name
 ```
 
 Then use the driver:
@@ -52,11 +66,11 @@ console.log(result.rows);
 import { createLakebasePool } from "@databricks/lakebase";
 
 const pool = createLakebasePool({
-  host: "your-lakebase-host.databricks.com",
-  database: "your_database_name",
+  host: "your-lakebase-host.databricks.com", // defaults to PGHOST environment variable
+  database: "your_database_name", // defaults to PGDATABASE environment variable
   endpoint:
-    "projects/{project-id}/branches/{branch-id}/endpoints/{endpoint-id}",
-  user: "service-principal-id", // Optional, defaults to DATABRICKS_CLIENT_ID
+    "projects/6bef4151-4b5d-4147-b4d0-c2f4fd5b40db/branches/br-broad-pine-y12n6gnv/endpoints/ep-summer-frost-y131l3vx", // defaults to LAKEBASE_ENDPOINT environment variable
+  user: "user_id", // Optional, defaults to PGUSER or DATABRICKS_CLIENT_ID
   max: 10, // Connection pool size
 });
 ```
@@ -66,10 +80,10 @@ const pool = createLakebasePool({
 The driver supports Databricks authentication via:
 
 1. **Default auth chain** (`.databrickscfg`, environment variables)
-2. **Service principal** (`DATABRICKS_CLIENT_ID` + `DATABRICKS_CLIENT_SECRET`)
-3. **OAuth tokens** (via Databricks SDK)
+2. **OAuth tokens** (via Databricks SDK)
+3. **Native Postgres password authentication**
 
-See [Databricks authentication docs](https://docs.databricks.com/en/dev-tools/auth/index.html) for configuration.
+See [Databricks authentication docs](https://docs.databricks.com/en/dev-tools/auth/index.html) or [Lakebase Autoscaling authentication docs](https://docs.databricks.com/aws/en/oltp/projects/authentication#overview) for more information.
 
 ## Configuration
 
