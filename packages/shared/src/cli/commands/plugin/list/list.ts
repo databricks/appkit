@@ -13,8 +13,15 @@ interface PluginRow {
 }
 
 function listFromManifestFile(manifestPath: string): PluginRow[] {
-  const raw = fs.readFileSync(manifestPath, "utf-8");
-  const data = JSON.parse(raw) as {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(manifestPath, "utf-8");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to read manifest file ${manifestPath}: ${msg}`);
+  }
+
+  let data: {
     plugins?: Record<
       string,
       {
@@ -25,6 +32,13 @@ function listFromManifestFile(manifestPath: string): PluginRow[] {
       }
     >;
   };
+  try {
+    data = JSON.parse(raw) as typeof data;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to parse manifest file ${manifestPath}: ${msg}`);
+  }
+
   const plugins = data.plugins ?? {};
   return Object.values(plugins).map((p) => ({
     name: p.name,
@@ -53,7 +67,7 @@ function listFromDirectory(dirPath: string, cwd: string): PluginRow[] {
     try {
       const raw = fs.readFileSync(manifestPath, "utf-8");
       const obj = JSON.parse(raw);
-      const result = validateManifest(obj, manifestPath);
+      const result = validateManifest(obj);
       const manifest = result.valid ? result.manifest : null;
       if (!manifest) continue;
       const relPath = path.relative(cwd, path.dirname(manifestPath));
@@ -131,7 +145,12 @@ function runPluginList(options: {
       console.error(`Manifest not found: ${manifestPath}`);
       process.exit(1);
     }
-    rows = listFromManifestFile(manifestPath);
+    try {
+      rows = listFromManifestFile(manifestPath);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
   }
 
   if (options.json) {

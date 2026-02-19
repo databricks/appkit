@@ -168,6 +168,29 @@
       "enum": ["CAN_USE"],
       "description": "Permission for Databricks App resources"
     },
+    "resourcePermission": {
+      "type": "string",
+      "description": "Any valid resource permission value. Individual resource types further restrict which values are allowed.",
+      "enum": [
+        "CAN_CONNECT_AND_CREATE",
+        "CAN_EDIT",
+        "CAN_MANAGE",
+        "CAN_MANAGE_RUN",
+        "CAN_QUERY",
+        "CAN_READ",
+        "CAN_RUN",
+        "CAN_USE",
+        "CAN_VIEW",
+        "EXECUTE",
+        "MANAGE",
+        "READ",
+        "READ_VOLUME",
+        "SELECT",
+        "USE_CONNECTION",
+        "WRITE",
+        "WRITE_VOLUME"
+      ]
+    },
     "resourceFieldEntry": {
       "type": "object",
       "required": ["env"],
@@ -217,8 +240,7 @@
           "description": "Human-readable description of why this resource is needed"
         },
         "permission": {
-          "type": "string",
-          "description": "Permission level required for the resource. Valid values depend on resource type."
+          "$ref": "#/$defs/resourcePermission"
         },
         "fields": {
           "type": "object",

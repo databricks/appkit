@@ -68,8 +68,8 @@ function runPluginValidate(paths: string[]): void {
     const schemaType = detectSchemaType(obj);
     const result =
       schemaType === "template-plugins"
-        ? validateTemplateManifest(obj, manifestPath)
-        : validateManifest(obj, manifestPath);
+        ? validateTemplateManifest(obj)
+        : validateManifest(obj);
 
     const relativePath = path.relative(cwd, manifestPath);
     if (result.valid) {

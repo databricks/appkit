@@ -72,9 +72,37 @@ export function resolveTargetDir(cwd: string, answers: CreateAnswers): string {
   return path.resolve(cwd, answers.targetPath);
 }
 
+/** Track files written during scaffolding for rollback on failure. */
+function writeTracked(
+  filePath: string,
+  content: string,
+  written: string[],
+): void {
+  fs.writeFileSync(filePath, content);
+  written.push(filePath);
+}
+
+/** Remove files written during a failed scaffold attempt. */
+function rollback(written: string[], targetDir: string): void {
+  for (const filePath of written.reverse()) {
+    try {
+      fs.unlinkSync(filePath);
+    } catch {
+      // best-effort cleanup
+    }
+  }
+  try {
+    const remaining = fs.readdirSync(targetDir);
+    if (remaining.length === 0) fs.rmdirSync(targetDir);
+  } catch {
+    // directory may not be empty or may have been removed already
+  }
+}
+
 /**
  * Scaffold plugin files into targetDir. Pure: no interactive I/O.
  * Writes manifest.json, manifest.ts, {name}.ts, index.ts; for isolated also package.json, tsconfig.json, README.md.
+ * On failure, rolls back any files already written.
  */
 export function scaffoldPlugin(
   targetDir: string,
@@ -83,18 +111,20 @@ export function scaffoldPlugin(
 ): void {
   fs.mkdirSync(targetDir, { recursive: true });
 
-  const manifest = buildManifest(answers);
-  const className = toPascalCase(answers.name);
-  const exportName = toCamelCase(answers.name);
+  const written: string[] = [];
 
-  // manifest.json
-  fs.writeFileSync(
-    path.join(targetDir, "manifest.json"),
-    `${JSON.stringify(manifest, null, 2)}\n`,
-  );
+  try {
+    const manifest = buildManifest(answers);
+    const className = toPascalCase(answers.name);
+    const exportName = toCamelCase(answers.name);
 
-  // manifest.ts
-  const manifestTs = `import { readFileSync } from "node:fs";
+    writeTracked(
+      path.join(targetDir, "manifest.json"),
+      `${JSON.stringify(manifest, null, 2)}\n`,
+      written,
+    );
+
+    const manifestTs = `import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PluginManifest } from "@databricks/appkit";
@@ -106,10 +136,9 @@ export const manifest = JSON.parse(
 ) as PluginManifest;
 `;
 
-  fs.writeFileSync(path.join(targetDir, "manifest.ts"), manifestTs);
+    writeTracked(path.join(targetDir, "manifest.ts"), manifestTs, written);
 
-  // Main plugin class file
-  const pluginTs = `import { Plugin, toPlugin, type IAppRouter } from "@databricks/appkit";
+    const pluginTs = `import { Plugin, toPlugin, type IAppRouter } from "@databricks/appkit";
 import { manifest } from "./manifest.js";
 
 export class ${className} extends Plugin {
@@ -137,65 +166,66 @@ export const ${exportName} = toPlugin<
 >(${className}, "${answers.name}");
 `;
 
-  fs.writeFileSync(path.join(targetDir, `${answers.name}.ts`), pluginTs);
+    writeTracked(path.join(targetDir, `${answers.name}.ts`), pluginTs, written);
 
-  // index.ts
-  const indexTs = `export { ${className}, ${exportName}, manifest } from "./${answers.name}.js";
+    const indexTs = `export { ${className}, ${exportName}, manifest } from "./${answers.name}.js";
 `;
 
-  fs.writeFileSync(path.join(targetDir, "index.ts"), indexTs);
+    writeTracked(path.join(targetDir, "index.ts"), indexTs, written);
 
-  if (options.isolated) {
-    const packageName =
-      answers.name.includes("/") || answers.name.startsWith("@")
-        ? answers.name
-        : `appkit-plugin-${answers.name}`;
+    if (options.isolated) {
+      const packageName =
+        answers.name.includes("/") || answers.name.startsWith("@")
+          ? answers.name
+          : `appkit-plugin-${answers.name}`;
 
-    const packageJson = {
-      name: packageName,
-      version: answers.version || "1.0.0",
-      type: "module",
-      main: "./dist/index.js",
-      types: "./dist/index.d.ts",
-      files: ["dist"],
-      scripts: {
-        build: "tsc",
-        typecheck: "tsc --noEmit",
-      },
-      peerDependencies: {
-        "@databricks/appkit": ">=0.5.0",
-      },
-      devDependencies: {
-        typescript: "^5.0.0",
-      },
-    };
+      const packageJson = {
+        name: packageName,
+        version: answers.version || "1.0.0",
+        type: "module",
+        main: "./dist/index.js",
+        types: "./dist/index.d.ts",
+        files: ["dist"],
+        scripts: {
+          build: "tsc",
+          typecheck: "tsc --noEmit",
+        },
+        peerDependencies: {
+          "@databricks/appkit": ">=0.5.0",
+        },
+        devDependencies: {
+          typescript: "^5.0.0",
+        },
+      };
 
-    fs.writeFileSync(
-      path.join(targetDir, "package.json"),
-      `${JSON.stringify(packageJson, null, 2)}\n`,
-    );
+      writeTracked(
+        path.join(targetDir, "package.json"),
+        `${JSON.stringify(packageJson, null, 2)}\n`,
+        written,
+      );
 
-    const tsconfigJson = {
-      compilerOptions: {
-        target: "ES2022",
-        module: "NodeNext",
-        moduleResolution: "NodeNext",
-        outDir: "dist",
-        rootDir: ".",
-        declaration: true,
-        strict: true,
-        skipLibCheck: true,
-      },
-      include: ["*.ts"],
-      exclude: ["node_modules", "dist"],
-    };
+      const tsconfigJson = {
+        compilerOptions: {
+          target: "ES2022",
+          module: "NodeNext",
+          moduleResolution: "NodeNext",
+          outDir: "dist",
+          rootDir: ".",
+          declaration: true,
+          strict: true,
+          skipLibCheck: true,
+        },
+        include: ["*.ts"],
+        exclude: ["node_modules", "dist"],
+      };
 
-    fs.writeFileSync(
-      path.join(targetDir, "tsconfig.json"),
-      `${JSON.stringify(tsconfigJson, null, 2)}\n`,
-    );
+      writeTracked(
+        path.join(targetDir, "tsconfig.json"),
+        `${JSON.stringify(tsconfigJson, null, 2)}\n`,
+        written,
+      );
 
-    const readme = `# ${answers.displayName}
+      const readme = `# ${answers.displayName}
 
 ${answers.description}
 
@@ -222,6 +252,10 @@ createApp({
 \`\`\`
 `;
 
-    fs.writeFileSync(path.join(targetDir, "README.md"), readme);
+      writeTracked(path.join(targetDir, "README.md"), readme, written);
+    }
+  } catch (err) {
+    rollback(written, targetDir);
+    throw err;
   }
 }

@@ -10,17 +10,11 @@ import {
   RESOURCE_TYPE_OPTIONS,
   resourceKeyFromType,
 } from "../create/resource-defaults";
+import type { PluginManifest } from "../manifest-types";
 import { validateManifest } from "../validate/validate-manifest";
 
-interface ManifestWithResources {
-  $schema?: string;
-  name: string;
-  displayName: string;
-  description: string;
-  resources: {
-    required: unknown[];
-    optional: unknown[];
-  };
+/** Extended manifest type that preserves extra JSON fields (e.g. $schema, author, version) for round-trip writes. */
+interface ManifestWithExtras extends PluginManifest {
   [key: string]: unknown;
 }
 
@@ -37,18 +31,18 @@ async function runPluginAddResource(options: { path?: string }): Promise<void> {
   }
 
   let raw: string;
-  let manifest: ManifestWithResources;
+  let manifest: ManifestWithExtras;
   try {
     raw = fs.readFileSync(manifestPath, "utf-8");
     const parsed = JSON.parse(raw) as unknown;
-    const result = validateManifest(parsed, manifestPath);
+    const result = validateManifest(parsed);
     if (!result.valid || !result.manifest) {
       console.error(
         "Invalid manifest. Run `appkit plugin validate` for details.",
       );
       process.exit(1);
     }
-    manifest = parsed as ManifestWithResources;
+    manifest = parsed as ManifestWithExtras;
   } catch (err) {
     console.error(
       "Failed to read or parse manifest.json:",

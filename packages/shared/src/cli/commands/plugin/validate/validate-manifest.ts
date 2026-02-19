@@ -3,6 +3,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Ajv, { type ErrorObject } from "ajv";
 import addFormats from "ajv-formats";
+import type { PluginManifest } from "../manifest-types";
+
+export type { PluginManifest };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCHEMAS_DIR = path.join(__dirname, "..", "..", "..", "..", "schemas");
@@ -35,27 +38,24 @@ export function detectSchemaType(obj: unknown): SchemaType {
   return SCHEMA_ID_MAP[schemaUrl] ?? "unknown";
 }
 
-export interface PluginManifestForValidate {
-  name: string;
-  displayName: string;
-  description: string;
-  resources: {
-    required: unknown[];
-    optional: unknown[];
-  };
-  config?: { schema: unknown };
-}
-
 export interface ValidateResult {
   valid: boolean;
-  manifest?: PluginManifestForValidate;
+  manifest?: PluginManifest;
   errors?: ErrorObject[];
 }
+
+let schemaLoadWarned = false;
 
 function loadSchema(schemaPath: string): object | null {
   try {
     return JSON.parse(fs.readFileSync(schemaPath, "utf-8")) as object;
-  } catch {
+  } catch (err) {
+    if (!schemaLoadWarned) {
+      schemaLoadWarned = true;
+      console.warn(
+        `Warning: Could not load JSON schema at ${schemaPath}: ${err instanceof Error ? err.message : err}. Falling back to basic validation.`,
+      );
+    }
     return null;
   }
 }
@@ -98,10 +98,7 @@ function getTemplateValidator(): ReturnType<Ajv["compile"]> | null {
  * Validate a manifest object against the plugin-manifest JSON schema.
  * Returns validation result with optional errors for CLI output.
  */
-export function validateManifest(
-  obj: unknown,
-  _sourcePath: string,
-): ValidateResult {
+export function validateManifest(obj: unknown): ValidateResult {
   if (!obj || typeof obj !== "object") {
     return {
       valid: false,
@@ -127,8 +124,7 @@ export function validateManifest(
       m.resources &&
       typeof m.resources === "object" &&
       Array.isArray((m.resources as { required?: unknown }).required);
-    if (basicValid)
-      return { valid: true, manifest: obj as PluginManifestForValidate };
+    if (basicValid) return { valid: true, manifest: obj as PluginManifest };
     return {
       valid: false,
       errors: [
@@ -141,7 +137,7 @@ export function validateManifest(
   }
 
   const valid = validate(obj);
-  if (valid) return { valid: true, manifest: obj as PluginManifestForValidate };
+  if (valid) return { valid: true, manifest: obj as PluginManifest };
   return { valid: false, errors: validate.errors ?? [] };
 }
 
@@ -149,10 +145,7 @@ export function validateManifest(
  * Validate a template-plugins manifest (appkit.plugins.json) against its schema.
  * Registers the plugin-manifest schema first so external $refs resolve.
  */
-export function validateTemplateManifest(
-  obj: unknown,
-  _sourcePath: string,
-): ValidateResult {
+export function validateTemplateManifest(obj: unknown): ValidateResult {
   if (!obj || typeof obj !== "object") {
     return {
       valid: false,

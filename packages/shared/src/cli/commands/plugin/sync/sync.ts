@@ -2,63 +2,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { Lang, parse, type SgNode } from "@ast-grep/napi";
 import { Command } from "commander";
+import type {
+  PluginManifest,
+  TemplatePlugin,
+  TemplatePluginsManifest,
+} from "../manifest-types";
 import {
   formatValidationErrors,
   validateManifest,
 } from "../validate/validate-manifest";
-
-/**
- * Field entry in a resource requirement (env var + optional description)
- */
-interface ResourceFieldEntry {
-  env: string;
-  description?: string;
-}
-
-/**
- * Resource requirement as defined in plugin manifests.
- * Uses fields (single key e.g. id, or multiple e.g. instance_name/database_name, scope/key).
- */
-interface ResourceRequirement {
-  type: string;
-  alias: string;
-  resourceKey: string;
-  description: string;
-  permission: string;
-  fields: Record<string, ResourceFieldEntry>;
-}
-
-/**
- * Plugin manifest structure (from SDK plugin manifest.json files)
- */
-interface PluginManifest {
-  name: string;
-  displayName: string;
-  description: string;
-  resources: {
-    required: ResourceRequirement[];
-    optional: ResourceRequirement[];
-  };
-  config?: { schema: unknown };
-}
-
-/**
- * Plugin entry in the template manifest (includes package source)
- */
-interface TemplatePlugin extends Omit<PluginManifest, "config"> {
-  package: string;
-  /** When true, this plugin is required by the template and cannot be deselected during CLI init. */
-  requiredByTemplate?: boolean;
-}
-
-/**
- * Template plugins manifest structure
- */
-interface TemplatePluginsManifest {
-  $schema: string;
-  version: string;
-  plugins: Record<string, TemplatePlugin>;
-}
 
 /**
  * Checks whether a resolved file path is within a given directory boundary.
@@ -86,8 +38,8 @@ function validateManifestWithSchema(
   obj: unknown,
   sourcePath: string,
 ): PluginManifest | null {
-  const result = validateManifest(obj, sourcePath);
-  if (result.valid && result.manifest) return result.manifest as PluginManifest;
+  const result = validateManifest(obj);
+  if (result.valid && result.manifest) return result.manifest;
   if (result.errors?.length) {
     console.warn(
       `Warning: Manifest at ${sourcePath} failed schema validation:\n${formatValidationErrors(result.errors, obj)}`,
