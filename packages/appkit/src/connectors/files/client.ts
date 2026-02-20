@@ -220,7 +220,6 @@ export class FilesConnector {
             response["content-type"],
             this.customContentTypes,
           ),
-          contentType: contentTypeFromPath(filePath, response["content-type"]),
           lastModified: response["last-modified"],
         };
       },

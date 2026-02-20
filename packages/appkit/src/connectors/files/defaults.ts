@@ -30,12 +30,34 @@ export const EXTENSION_CONTENT_TYPES: Record<string, string> = Object.freeze({
 
 const TEXT_KEYWORDS = ["json", "xml", "yaml", "sql", "javascript"] as const;
 
+/**
+ * Determine whether a content type represents text.
+ *
+ * Returns `true` for any `text/*` type and for known structured-text types
+ * such as JSON, XML, YAML, SQL, and JavaScript.
+ *
+ * @param contentType - MIME content type string to check.
+ * @returns `true` if the content type is text-based.
+ */
 export function isTextContentType(contentType: string | undefined): boolean {
   if (!contentType) return false;
   if (contentType.startsWith("text/")) return true;
   return TEXT_KEYWORDS.some((kw) => contentType.includes(kw));
 }
 
+/**
+ * Resolve the MIME content type for a file path.
+ *
+ * Resolution order:
+ * 1. Custom type map (if the extension matches a key in `customTypes`).
+ * 2. Built-in extension map ({@link EXTENSION_CONTENT_TYPES}).
+ * 3. The `reported` type from the server, or `application/octet-stream` as a fallback.
+ *
+ * @param filePath - File path used to extract the extension.
+ * @param reported - Content type reported by the server (used as fallback).
+ * @param customTypes - Optional map of extensions to MIME types that takes priority.
+ * @returns The resolved MIME content type string.
+ */
 export function contentTypeFromPath(
   filePath: string,
   reported?: string,
