@@ -59,7 +59,10 @@ export class FilesConnector {
     };
   }
 
-  private resolvePath(filePath: string): string {
+  resolvePath(filePath: string): string {
+    if (filePath.includes("..")) {
+      throw new Error('Path traversal ("../") is not allowed.');
+    }
     if (filePath.startsWith("/")) {
       return filePath;
     }
@@ -300,7 +303,7 @@ export class FilesConnector {
   async preview(
     client: WorkspaceClient,
     filePath: string,
-    options?: { maxBytes?: number },
+    options?: { maxChars?: number },
   ): Promise<FilePreview> {
     return this.traced(
       "preview",
@@ -324,9 +327,9 @@ export class FilesConnector {
         const reader = response.contents.getReader();
         const decoder = new TextDecoder();
         let preview = "";
-        const maxBytes = options?.maxBytes ?? 1024;
+        const maxChars = options?.maxChars ?? 1024;
 
-        while (preview.length < maxBytes) {
+        while (preview.length < maxChars) {
           const { done, value } = await reader.read();
           if (done) break;
           preview += decoder.decode(value, { stream: true });
@@ -334,8 +337,8 @@ export class FilesConnector {
         preview += decoder.decode();
         await reader.cancel();
 
-        if (preview.length > maxBytes) {
-          preview = preview.slice(0, maxBytes);
+        if (preview.length > maxChars) {
+          preview = preview.slice(0, maxChars);
         }
 
         return { ...meta, textPreview: preview, isText: true, isImage: false };

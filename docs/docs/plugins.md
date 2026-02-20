@@ -192,7 +192,7 @@ All routes are mounted under `/api/files`. File paths are passed via the `path` 
 | `GET`  | `/api/files/preview?path=`  | Get a file preview with text excerpt.                |
 | `POST` | `/api/files/upload?path=`   | Upload a file (stream the request body).             |
 | `POST` | `/api/files/mkdir`          | Create a directory (`{ path }` in body).             |
-| `POST` | `/api/files/delete?path=`   | Delete a file or directory.                          |
+| `POST` | `/api/files/delete`         | Delete a file or directory (`{ path }` in body).     |
 
 #### Execution defaults
 
@@ -289,7 +289,7 @@ const app = await createApp({
 ```ts
 // Inside a custom plugin route handler:
 const userFiles = this.asUser(req);
-const entries = await userFiles.files.list();
+const entries = await userFiles.list();
 ```
 
 ### Execution context and `asUser(req)`

@@ -251,6 +251,10 @@ export class FilesPlugin extends Plugin {
     };
   }
 
+  private _resolvePath(path: string): string {
+    return this.filesConnector.resolvePath(path);
+  }
+
   /**
    * Invalidate cached list entries for a directory after a write operation.
    */
@@ -272,7 +276,10 @@ export class FilesPlugin extends Plugin {
 
     const result = await executor.execute(
       async () => executor.list(path),
-      this._readSettings(["files:list", path ?? "__root__"]),
+      this._readSettings([
+        "files:list",
+        path ? this._resolvePath(path) : "__root__",
+      ]),
     );
 
     if (result === undefined) {
@@ -295,7 +302,7 @@ export class FilesPlugin extends Plugin {
     const executor = this.asUser(req);
     const result = await executor.execute(
       async () => executor.read(path),
-      this._readSettings(["files:read", path]),
+      this._readSettings(["files:read", this._resolvePath(path)]),
     );
 
     if (result === undefined) {
@@ -396,7 +403,7 @@ export class FilesPlugin extends Plugin {
     const executor = this.asUser(req);
     const result = await executor.execute(
       async () => executor.exists(path),
-      this._readSettings(["files:exists", path]),
+      this._readSettings(["files:exists", this._resolvePath(path)]),
     );
 
     if (result === undefined) {
@@ -419,7 +426,7 @@ export class FilesPlugin extends Plugin {
     const executor = this.asUser(req);
     const result = await executor.execute(
       async () => executor.metadata(path),
-      this._readSettings(["files:metadata", path]),
+      this._readSettings(["files:metadata", this._resolvePath(path)]),
     );
 
     if (result === undefined) {
@@ -444,7 +451,7 @@ export class FilesPlugin extends Plugin {
     const executor = this.asUser(req);
     const result = await executor.execute(
       async () => executor.preview(path),
-      this._readSettings(["files:preview", path]),
+      this._readSettings(["files:preview", this._resolvePath(path)]),
     );
 
     if (result === undefined) {
@@ -500,7 +507,7 @@ export class FilesPlugin extends Plugin {
     }
 
     const parentDir = path.substring(0, path.lastIndexOf("/")) || path;
-    this._invalidateListCache(parentDir);
+    this._invalidateListCache(this._resolvePath(parentDir));
 
     logger.debug(req, "Upload complete: path=%s", path);
     res.json(result);
@@ -533,7 +540,7 @@ export class FilesPlugin extends Plugin {
     }
 
     const parentDir = dirPath.substring(0, dirPath.lastIndexOf("/")) || dirPath;
-    this._invalidateListCache(parentDir);
+    this._invalidateListCache(this._resolvePath(parentDir));
 
     res.json(result);
   }
@@ -542,7 +549,7 @@ export class FilesPlugin extends Plugin {
     req: express.Request,
     res: express.Response,
   ): Promise<void> {
-    const path = req.query.path as string;
+    const path = req.body?.path as string;
     if (!path) {
       res.status(400).json({ error: "path is required", plugin: this.name });
       return;
@@ -563,7 +570,7 @@ export class FilesPlugin extends Plugin {
     }
 
     const parentDir = path.substring(0, path.lastIndexOf("/")) || path;
-    this._invalidateListCache(parentDir);
+    this._invalidateListCache(this._resolvePath(parentDir));
 
     res.json(result);
   }
@@ -600,9 +607,6 @@ export class FilesPlugin extends Plugin {
   }
 }
 
-/**
- *
- */
 /**
  * Files plugin for Databricks Unity Catalog volume operations.
  *
