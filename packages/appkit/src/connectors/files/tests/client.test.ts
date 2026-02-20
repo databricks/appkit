@@ -671,7 +671,7 @@ describe("FilesConnector", () => {
       expect(result.isText).toBe(true);
       expect(result.isImage).toBe(false);
       expect(result.textPreview).not.toBeNull();
-      expect(result.textPreview!.length).toBeLessThanOrEqual(1024);
+      expect(result.textPreview?.length).toBeLessThanOrEqual(1024);
     });
 
     test("text/html files are treated as text", async () => {

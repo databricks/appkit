@@ -2,48 +2,46 @@ import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ServiceContext } from "../../../context/service-context";
 import { FilesPlugin, files } from "../plugin";
-import { streamFromString } from "./utils";
 
-const { mockFilesApi, mockClient, MockApiError, mockCacheInstance } =
-  vi.hoisted(() => {
-    const mockFilesApi = {
-      listDirectoryContents: vi.fn(),
-      download: vi.fn(),
-      getMetadata: vi.fn(),
-      upload: vi.fn(),
-      createDirectory: vi.fn(),
-      delete: vi.fn(),
-    };
+const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
+  const mockFilesApi = {
+    listDirectoryContents: vi.fn(),
+    download: vi.fn(),
+    getMetadata: vi.fn(),
+    upload: vi.fn(),
+    createDirectory: vi.fn(),
+    delete: vi.fn(),
+  };
 
-    const mockClient = {
-      files: mockFilesApi,
-      config: {
-        host: "https://test.databricks.com",
-        authenticate: vi.fn(),
-      },
-    };
+  const mockClient = {
+    files: mockFilesApi,
+    config: {
+      host: "https://test.databricks.com",
+      authenticate: vi.fn(),
+    },
+  };
 
-    class MockApiError extends Error {
-      statusCode: number;
-      constructor(message: string, statusCode: number) {
-        super(message);
-        this.name = "ApiError";
-        this.statusCode = statusCode;
-      }
+  class MockApiError extends Error {
+    statusCode: number;
+    constructor(message: string, statusCode: number) {
+      super(message);
+      this.name = "ApiError";
+      this.statusCode = statusCode;
     }
+  }
 
-    const mockCacheInstance = {
-      get: vi.fn(),
-      set: vi.fn(),
-      delete: vi.fn(),
-      getOrExecute: vi.fn(async (_key: unknown[], fn: () => Promise<unknown>) =>
-        fn(),
-      ),
-      generateKey: vi.fn(),
-    };
+  const mockCacheInstance = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    getOrExecute: vi.fn(async (_key: unknown[], fn: () => Promise<unknown>) =>
+      fn(),
+    ),
+    generateKey: vi.fn(),
+  };
 
-    return { mockFilesApi, mockClient, MockApiError, mockCacheInstance };
-  });
+  return { mockFilesApi, mockClient, MockApiError, mockCacheInstance };
+});
 
 vi.mock("@databricks/sdk-experimental", () => ({
   WorkspaceClient: vi.fn(() => mockClient),
