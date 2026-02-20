@@ -14,6 +14,22 @@ export type {
 } from "shared";
 export { isSQLTypeMarker, sql } from "shared";
 export { CacheManager } from "./cache";
+export type {
+  DatabaseCredential,
+  GenerateDatabaseCredentialRequest,
+  LakebasePoolConfig,
+  RequestedClaims,
+  RequestedResource,
+} from "./connectors/lakebase";
+// Lakebase Autoscaling connector
+export {
+  createLakebasePool,
+  generateDatabaseCredential,
+  getLakebaseOrmConfig,
+  getLakebasePgConfig,
+  getWorkspaceClient,
+  RequestedClaimsPermissionSet,
+} from "./connectors/lakebase";
 export { getExecutionContext } from "./context";
 export { createApp } from "./core";
 // Errors
@@ -58,5 +74,6 @@ export {
   SpanStatusCode,
   type TelemetryConfig,
 } from "./telemetry";
+
 // Vite plugin and type generation
 export { appKitTypesPlugin } from "./type-generator/vite-plugin";

@@ -1,7 +1,11 @@
 import { Readable } from "node:stream";
 import type express from "express";
 import type { IAppRouter, PluginExecutionSettings } from "shared";
-import { contentTypeFromPath, FilesConnector } from "../../connectors/files";
+import {
+  contentTypeFromPath,
+  FilesConnector,
+  isSafeInlineContentType,
+} from "../../connectors/files";
 import { getCurrentUserId, getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
@@ -18,6 +22,7 @@ const logger = createLogger("files");
 export class FilesPlugin extends Plugin {
   name = "files";
 
+  /** Plugin manifest declaring metadata and resource requirements. */
   static manifest = filesManifest;
   protected static description = "Files plugin for Databricks file operations";
   protected declare config: IFilesConfig;
@@ -35,26 +40,64 @@ export class FilesPlugin extends Plugin {
     });
   }
 
+  /**
+   * List entries in a directory.
+   *
+   * @param directoryPath - Absolute or relative path. Defaults to the configured `defaultVolume` root.
+   * @returns Array of directory entries.
+   */
   async list(directoryPath?: string) {
     return this.filesConnector.list(getWorkspaceClient(), directoryPath);
   }
 
+  /**
+   * Read a file and return its contents as a string.
+   *
+   * @param filePath - Absolute or relative path to the file.
+   * @returns The file contents as a UTF-8 string.
+   */
   async read(filePath: string) {
     return this.filesConnector.read(getWorkspaceClient(), filePath);
   }
 
+  /**
+   * Download a file as a readable stream.
+   *
+   * @param filePath - Absolute or relative path to the file.
+   * @returns A response containing a readable stream of the file contents.
+   */
   async download(filePath: string): Promise<DownloadResponse> {
     return this.filesConnector.download(getWorkspaceClient(), filePath);
   }
 
+  /**
+   * Check whether a file exists.
+   *
+   * @param filePath - Absolute or relative path to the file.
+   * @returns `true` if the file exists, `false` otherwise.
+   */
   async exists(filePath: string) {
     return this.filesConnector.exists(getWorkspaceClient(), filePath);
   }
 
+  /**
+   * Retrieve metadata (size, content type, last modified) for a file.
+   *
+   * @param filePath - Absolute or relative path to the file.
+   * @returns File metadata including content length, type, and last modified date.
+   */
   async metadata(filePath: string) {
     return this.filesConnector.metadata(getWorkspaceClient(), filePath);
   }
 
+  /**
+   * Upload a file to a Unity Catalog volume.
+   *
+   * @param filePath - Absolute or relative destination path.
+   * @param contents - File body as a readable stream, Buffer, or string.
+   * @param options - Upload options.
+   * @param options.overwrite - When `true`, overwrite an existing file at the same path.
+   */
   async upload(
     filePath: string,
     contents: ReadableStream | Buffer | string,
@@ -68,6 +111,11 @@ export class FilesPlugin extends Plugin {
     );
   }
 
+  /**
+   * Create a directory in a Unity Catalog volume.
+   *
+   * @param directoryPath - Absolute or relative path for the new directory.
+   */
   async createDirectory(directoryPath: string) {
     return this.filesConnector.createDirectory(
       getWorkspaceClient(),
@@ -75,10 +123,21 @@ export class FilesPlugin extends Plugin {
     );
   }
 
+  /**
+   * Delete a file or directory from a Unity Catalog volume.
+   *
+   * @param filePath - Absolute or relative path to the file or directory.
+   */
   async delete(filePath: string) {
     return this.filesConnector.delete(getWorkspaceClient(), filePath);
   }
 
+  /**
+   * Get a preview of a file including metadata and a text excerpt.
+   *
+   * @param filePath - Absolute or relative path to the file.
+   * @returns Preview with metadata, text content hint, and format flags.
+   */
   async preview(filePath: string) {
     return this.filesConnector.preview(getWorkspaceClient(), filePath);
   }
@@ -196,6 +255,10 @@ export class FilesPlugin extends Plugin {
     };
   }
 
+  private _resolvePath(path: string): string {
+    return this.filesConnector.resolvePath(path);
+  }
+
   /**
    * Invalidate cached list entries for a directory after a write operation.
    */
@@ -217,7 +280,10 @@ export class FilesPlugin extends Plugin {
 
     const result = await executor.execute(
       async () => executor.list(path),
-      this._readSettings(["files:list", path ?? "__root__"]),
+      this._readSettings([
+        "files:list",
+        path ? this._resolvePath(path) : "__root__",
+      ]),
     );
 
     if (result === undefined) {
@@ -240,7 +306,7 @@ export class FilesPlugin extends Plugin {
     const executor = this.asUser(req);
     const result = await executor.execute(
       async () => executor.read(path),
-      this._readSettings(["files:read", path]),
+      this._readSettings(["files:read", this._resolvePath(path)]),
     );
 
     if (result === undefined) {
@@ -280,6 +346,7 @@ export class FilesPlugin extends Plugin {
       "Content-Type",
       contentTypeFromPath(path, undefined, this.config.customContentTypes),
     );
+    res.setHeader("X-Content-Type-Options", "nosniff");
     if (response.contents) {
       const nodeStream = Readable.fromWeb(
         response.contents as import("node:stream/web").ReadableStream,
@@ -314,10 +381,24 @@ export class FilesPlugin extends Plugin {
       return;
     }
 
-    res.setHeader(
-      "Content-Type",
-      contentTypeFromPath(path, undefined, this.config.customContentTypes),
+    const resolvedType = contentTypeFromPath(
+      path,
+      undefined,
+      this.config.customContentTypes,
     );
+
+    res.setHeader("Content-Type", resolvedType);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Security-Policy", "sandbox");
+
+    if (!isSafeInlineContentType(resolvedType)) {
+      const fileName = path.split("/").pop() ?? "download";
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${fileName}"`,
+      );
+    }
+
     if (response.contents) {
       const nodeStream = Readable.fromWeb(
         response.contents as import("node:stream/web").ReadableStream,
@@ -341,7 +422,7 @@ export class FilesPlugin extends Plugin {
     const executor = this.asUser(req);
     const result = await executor.execute(
       async () => executor.exists(path),
-      this._readSettings(["files:exists", path]),
+      this._readSettings(["files:exists", this._resolvePath(path)]),
     );
 
     if (result === undefined) {
@@ -364,7 +445,7 @@ export class FilesPlugin extends Plugin {
     const executor = this.asUser(req);
     const result = await executor.execute(
       async () => executor.metadata(path),
-      this._readSettings(["files:metadata", path]),
+      this._readSettings(["files:metadata", this._resolvePath(path)]),
     );
 
     if (result === undefined) {
@@ -389,7 +470,7 @@ export class FilesPlugin extends Plugin {
     const executor = this.asUser(req);
     const result = await executor.execute(
       async () => executor.preview(path),
-      this._readSettings(["files:preview", path]),
+      this._readSettings(["files:preview", this._resolvePath(path)]),
     );
 
     if (result === undefined) {
@@ -445,7 +526,7 @@ export class FilesPlugin extends Plugin {
     }
 
     const parentDir = path.substring(0, path.lastIndexOf("/")) || path;
-    this._invalidateListCache(parentDir);
+    this._invalidateListCache(this._resolvePath(parentDir));
 
     logger.debug(req, "Upload complete: path=%s", path);
     res.json(result);
@@ -478,7 +559,7 @@ export class FilesPlugin extends Plugin {
     }
 
     const parentDir = dirPath.substring(0, dirPath.lastIndexOf("/")) || dirPath;
-    this._invalidateListCache(parentDir);
+    this._invalidateListCache(this._resolvePath(parentDir));
 
     res.json(result);
   }
@@ -487,7 +568,7 @@ export class FilesPlugin extends Plugin {
     req: express.Request,
     res: express.Response,
   ): Promise<void> {
-    const path = req.query.path as string;
+    const path = req.body?.path as string;
     if (!path) {
       res.status(400).json({ error: "path is required", plugin: this.name });
       return;
@@ -508,7 +589,7 @@ export class FilesPlugin extends Plugin {
     }
 
     const parentDir = path.substring(0, path.lastIndexOf("/")) || path;
-    this._invalidateListCache(parentDir);
+    this._invalidateListCache(this._resolvePath(parentDir));
 
     res.json(result);
   }
@@ -517,20 +598,54 @@ export class FilesPlugin extends Plugin {
     this.streamManager.abortAll();
   }
 
+  /**
+   * Returns the programmatic API for the Files plugin.
+   * Note: `asUser()` is automatically added by AppKit.
+   */
   exports() {
     return {
+      /** List entries in a directory. */
       list: this.list,
+      /** Read a file as a string. */
       read: this.read,
+      /** Download a file as a readable stream. */
       download: this.download,
+      /** Check whether a file exists. */
       exists: this.exists,
+      /** Retrieve file metadata. */
       metadata: this.metadata,
+      /** Upload a file. */
       upload: this.upload,
+      /** Create a directory. */
       createDirectory: this.createDirectory,
+      /** Delete a file or directory. */
       delete: this.delete,
+      /** Get a file preview with text excerpt. */
       preview: this.preview,
     };
   }
 }
+
+/**
+ * Files plugin for Databricks Unity Catalog volume operations.
+ *
+ * Provides HTTP routes and a programmatic API for listing, reading,
+ * downloading, uploading, deleting, and previewing files with built-in
+ * caching, retry, and timeout handling via the execution interceptor pipeline.
+ *
+ * Routes are mounted at `/api/files/*`.
+ *
+ * @example
+ * ```typescript
+ * import { createApp, files } from "@databricks/appkit";
+ *
+ * const app = await createApp({
+ *   plugins: [
+ *     files({ defaultVolume: "/Volumes/catalog/schema/vol" }),
+ *   ],
+ * });
+ * ```
+ */
 
 /**
  * @internal

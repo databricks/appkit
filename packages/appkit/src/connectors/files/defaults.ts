@@ -30,10 +30,62 @@ export const EXTENSION_CONTENT_TYPES: Record<string, string> = Object.freeze({
 
 const TEXT_KEYWORDS = ["json", "xml", "yaml", "sql", "javascript"] as const;
 
+/**
+ * Determine whether a content type represents text.
+ *
+ * Returns `true` for any `text/*` type and for known structured-text types
+ * such as JSON, XML, YAML, SQL, and JavaScript.
+ *
+ * @param contentType - MIME content type string to check.
+ * @returns `true` if the content type is text-based.
+ */
 export function isTextContentType(contentType: string | undefined): boolean {
   if (!contentType) return false;
   if (contentType.startsWith("text/")) return true;
   return TEXT_KEYWORDS.some((kw) => contentType.includes(kw));
+}
+
+/**
+ * Resolve the MIME content type for a file path.
+ *
+ * Resolution order:
+ * 1. Custom type map (if the extension matches a key in `customTypes`).
+ * 2. Built-in extension map ({@link EXTENSION_CONTENT_TYPES}).
+ * 3. The `reported` type from the server, or `application/octet-stream` as a fallback.
+ *
+ * @param filePath - File path used to extract the extension.
+ * @param reported - Content type reported by the server (used as fallback).
+ * @param customTypes - Optional map of extensions to MIME types that takes priority.
+ * @returns The resolved MIME content type string.
+ */
+/**
+ * MIME types that are safe to serve inline (i.e. browsers cannot execute
+ * scripts from them). Any type **not** in this set should be forced to
+ * download via `Content-Disposition: attachment` when served by the `/raw`
+ * endpoint to prevent stored-XSS attacks.
+ */
+export const SAFE_INLINE_CONTENT_TYPES: ReadonlySet<string> = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/bmp",
+  "image/vnd.microsoft.icon",
+  "text/plain",
+  "text/csv",
+  "text/markdown",
+  "application/json",
+  "application/pdf",
+]);
+
+/**
+ * Check whether a content type is safe to serve inline.
+ *
+ * @param contentType - MIME content type string.
+ * @returns `true` if the type is in the safe-inline allowlist.
+ */
+export function isSafeInlineContentType(contentType: string): boolean {
+  return SAFE_INLINE_CONTENT_TYPES.has(contentType);
 }
 
 export function contentTypeFromPath(

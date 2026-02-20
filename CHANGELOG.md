@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.4](https://github.com/databricks/appkit/compare/v0.7.3...v0.7.4) (2026-02-18)
+
+* typegen command ([#119](https://github.com/databricks/appkit/issues/119)) ([8c3735c](https://github.com/databricks/appkit/commit/8c3735c6b27c5e5cbacb81363ccaf4f6acbfd185))
+
+## [0.7.3](https://github.com/databricks/appkit/compare/v0.7.2...v0.7.3) (2026-02-18)
+
+* release `@databricks/lakebase` correctly, fix `appkit` dependency ([#111](https://github.com/databricks/appkit/issues/111)) ([5b6856a](https://github.com/databricks/appkit/commit/5b6856a6b42680a671cfc3e99eab3bef72803fd1))
+
+## [0.7.2](https://github.com/databricks/appkit/compare/v0.7.1...v0.7.2) (2026-02-18)
+
+* template sync ([#109](https://github.com/databricks/appkit/issues/109)) ([f250016](https://github.com/databricks/appkit/commit/f250016b28e24e3ce56d09a0a3d95088a689a943))
+
+## [0.7.1](https://github.com/databricks/appkit/compare/v0.7.0...v0.7.1) (2026-02-18)
+
+* sync template versions on release ([#105](https://github.com/databricks/appkit/issues/105)) ([4cbe826](https://github.com/databricks/appkit/commit/4cbe8266e80e4b4cfe4b4e0594c2633dcba7123a))
+
+## [0.7.0](https://github.com/databricks/appkit/compare/v0.6.0...v0.7.0) (2026-02-17)
+
+* introduce Lakebase Autoscaling driver ([#98](https://github.com/databricks/appkit/issues/98)) ([27b1848](https://github.com/databricks/appkit/commit/27b184886b2ab15c73f3d46f5ff9e9c6d8806c71))
+
 ## [0.6.0](https://github.com/databricks/appkit/compare/v0.5.4...v0.6.0) (2026-02-16)
 
 ### appkit

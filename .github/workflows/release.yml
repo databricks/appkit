@@ -20,6 +20,9 @@ jobs:
 
     environment: release
 
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
     permissions:
       contents: write
       id-token: write
@@ -61,6 +64,18 @@ jobs:
             echo "dry_run=${{ inputs.dry-run }}" >> $GITHUB_OUTPUT
           fi
 
+      - name: Determine version
+        id: version
+        if: steps.mode.outputs.dry_run != 'true'
+        run: |
+          VERSION=$(pnpm exec release-it --release-version --ci 2>/dev/null) || true
+          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "Next version: $VERSION"
+          else
+            echo "No releasable version detected"
+          fi
+
       - name: Release
         run: |
           if [ "${{ steps.mode.outputs.dry_run }}" == "true" ]; then
@@ -70,3 +85,43 @@ jobs:
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sync-template:
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+
+    needs: release
+    # in case a dry run is performed, the version is not set so we need to check for it.
+    if: needs.release.outputs.version != ''
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Sync template and push tag
+        run: pnpm exec tsx tools/publish-template-tag.ts ${{ needs.release.outputs.version }}

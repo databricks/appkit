@@ -45,6 +45,14 @@ export default defineConfig({
       {
         plugins: [tsconfigPaths()],
         test: {
+          name: "lakebase",
+          root: "./packages/lakebase",
+          environment: "node",
+        },
+      },
+      {
+        plugins: [tsconfigPaths()],
+        test: {
           name: "shared",
           root: "./packages/shared",
           environment: "node",

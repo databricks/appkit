@@ -1,26 +1,25 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { PersistentStorage } from "../storage";
 
-/** Mock LakebaseV1Connector for testing */
-const createMockConnector = () => ({
+/** Mock pg.Pool for testing */
+const createMockPool = () => ({
   query: vi.fn(),
-  healthCheck: vi.fn().mockResolvedValue(true),
-  close: vi.fn().mockResolvedValue(undefined),
+  end: vi.fn().mockResolvedValue(undefined),
 });
 
 describe("PersistentStorage", () => {
   let storage: PersistentStorage;
-  let mockConnector: ReturnType<typeof createMockConnector>;
+  let mockPool: ReturnType<typeof createMockPool>;
 
   beforeEach(() => {
-    mockConnector = createMockConnector();
+    mockPool = createMockPool();
 
     // Default: migrations succeed
-    mockConnector.query.mockResolvedValue({ rows: [] });
+    mockPool.query.mockResolvedValue({ rows: [] });
 
     storage = new PersistentStorage(
       { maxBytes: 1024 * 1024 }, // 1MB
-      mockConnector as any,
+      mockPool as any,
     );
   });
 
@@ -29,12 +28,12 @@ describe("PersistentStorage", () => {
       await storage.initialize();
 
       // Should create table
-      expect(mockConnector.query).toHaveBeenCalledWith(
+      expect(mockPool.query).toHaveBeenCalledWith(
         expect.stringContaining("CREATE TABLE IF NOT EXISTS"),
       );
 
       // Should create unique index on key_hash
-      expect(mockConnector.query).toHaveBeenCalledWith(
+      expect(mockPool.query).toHaveBeenCalledWith(
         expect.stringContaining("CREATE UNIQUE INDEX IF NOT EXISTS"),
       );
     });
@@ -44,7 +43,7 @@ describe("PersistentStorage", () => {
       await storage.initialize();
 
       // CREATE TABLE should only be called once (first initialization)
-      const createTableCalls = mockConnector.query.mock.calls.filter((call) =>
+      const createTableCalls = mockPool.query.mock.calls.filter((call) =>
         call[0].includes("CREATE TABLE"),
       );
       expect(createTableCalls.length).toBe(1);
@@ -55,7 +54,7 @@ describe("PersistentStorage", () => {
         .spyOn(console, "error")
         .mockImplementation(() => {});
 
-      mockConnector.query.mockRejectedValue(new Error("migration failed"));
+      mockPool.query.mockRejectedValue(new Error("migration failed"));
 
       await expect(storage.initialize()).rejects.toThrow(
         "Error in running migrations for persistent storage",
@@ -68,7 +67,7 @@ describe("PersistentStorage", () => {
   describe("get", () => {
     beforeEach(async () => {
       await storage.initialize();
-      mockConnector.query.mockClear();
+      mockPool.query.mockClear();
     });
 
     test("should return cached entry", async () => {
@@ -78,7 +77,7 @@ describe("PersistentStorage", () => {
         "utf-8",
       );
 
-      mockConnector.query.mockResolvedValueOnce({
+      mockPool.query.mockResolvedValueOnce({
         rows: [{ value: valueBuffer, expiry: String(expiry) }],
       });
 
@@ -88,14 +87,14 @@ describe("PersistentStorage", () => {
         value: { data: "test" },
         expiry,
       });
-      expect(mockConnector.query).toHaveBeenCalledWith(
+      expect(mockPool.query).toHaveBeenCalledWith(
         expect.stringContaining("SELECT value, expiry"),
         [expect.any(BigInt)], // key_hash is bigint
       );
     });
 
     test("should return null for non-existent key", async () => {
-      mockConnector.query.mockResolvedValueOnce({ rows: [] });
+      mockPool.query.mockResolvedValueOnce({ rows: [] });
 
       const result = await storage.get("non-existent");
 
@@ -109,7 +108,7 @@ describe("PersistentStorage", () => {
         "utf-8",
       );
 
-      mockConnector.query
+      mockPool.query
         .mockResolvedValueOnce({
           rows: [{ value: valueBuffer, expiry: String(expiry) }],
         })
@@ -120,7 +119,7 @@ describe("PersistentStorage", () => {
       // Wait for fire-and-forget update
       await new Promise((resolve) => setTimeout(resolve, 10));
 
-      expect(mockConnector.query).toHaveBeenCalledWith(
+      expect(mockPool.query).toHaveBeenCalledWith(
         expect.stringContaining("UPDATE"),
         [expect.any(BigInt)], // key_hash
       );
@@ -130,7 +129,7 @@ describe("PersistentStorage", () => {
   describe("set", () => {
     beforeEach(async () => {
       await storage.initialize();
-      mockConnector.query.mockClear();
+      mockPool.query.mockClear();
     });
 
     test("should insert new entry", async () => {
@@ -138,14 +137,14 @@ describe("PersistentStorage", () => {
       const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.5);
 
       // INSERT succeeds
-      mockConnector.query.mockResolvedValueOnce({ rows: [] });
+      mockPool.query.mockResolvedValueOnce({ rows: [] });
 
       await storage.set("test-key", {
         value: { data: "test" },
         expiry: Date.now() + 10000,
       });
 
-      expect(mockConnector.query).toHaveBeenCalledWith(
+      expect(mockPool.query).toHaveBeenCalledWith(
         expect.stringContaining("INSERT INTO"),
         expect.arrayContaining([
           expect.any(BigInt), // key_hash
@@ -164,17 +163,17 @@ describe("PersistentStorage", () => {
       const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.05);
 
       // totalBytes() returns maxBytes (triggers eviction)
-      mockConnector.query.mockResolvedValueOnce({
+      mockPool.query.mockResolvedValueOnce({
         rows: [{ total: String(1024 * 1024) }], // 1MB (at limit)
       });
       // cleanupExpired returns 0
-      mockConnector.query.mockResolvedValueOnce({
+      mockPool.query.mockResolvedValueOnce({
         rows: [{ count: "0" }],
       });
       // eviction DELETE succeeds
-      mockConnector.query.mockResolvedValueOnce({ rows: [] });
+      mockPool.query.mockResolvedValueOnce({ rows: [] });
       // INSERT succeeds
-      mockConnector.query.mockResolvedValueOnce({ rows: [] });
+      mockPool.query.mockResolvedValueOnce({ rows: [] });
 
       await storage.set("new-key", {
         value: { data: "new" },
@@ -182,7 +181,7 @@ describe("PersistentStorage", () => {
       });
 
       // Should have called DELETE for LRU eviction
-      expect(mockConnector.query).toHaveBeenCalledWith(
+      expect(mockPool.query).toHaveBeenCalledWith(
         expect.stringContaining("DELETE FROM"),
         expect.any(Array),
       );
@@ -195,7 +194,7 @@ describe("PersistentStorage", () => {
       const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.5);
 
       // INSERT succeeds
-      mockConnector.query.mockResolvedValueOnce({ rows: [] });
+      mockPool.query.mockResolvedValueOnce({ rows: [] });
 
       const value = { nested: { array: [1, 2, 3] } };
       await storage.set("test-key", {
@@ -203,7 +202,7 @@ describe("PersistentStorage", () => {
         expiry: Date.now() + 10000,
       });
 
-      const insertCall = mockConnector.query.mock.calls.find((call) =>
+      const insertCall = mockPool.query.mock.calls.find((call) =>
         call[0].includes("INSERT"),
       );
 
@@ -219,15 +218,15 @@ describe("PersistentStorage", () => {
   describe("delete", () => {
     beforeEach(async () => {
       await storage.initialize();
-      mockConnector.query.mockClear();
+      mockPool.query.mockClear();
     });
 
     test("should delete entry by key_hash", async () => {
-      mockConnector.query.mockResolvedValueOnce({ rows: [] });
+      mockPool.query.mockResolvedValueOnce({ rows: [] });
 
       await storage.delete("test-key");
 
-      expect(mockConnector.query).toHaveBeenCalledWith(
+      expect(mockPool.query).toHaveBeenCalledWith(
         expect.stringContaining("DELETE FROM"),
         [expect.any(BigInt)], // key_hash
       );
@@ -237,15 +236,15 @@ describe("PersistentStorage", () => {
   describe("clear", () => {
     beforeEach(async () => {
       await storage.initialize();
-      mockConnector.query.mockClear();
+      mockPool.query.mockClear();
     });
 
     test("should truncate table", async () => {
-      mockConnector.query.mockResolvedValueOnce({ rows: [] });
+      mockPool.query.mockResolvedValueOnce({ rows: [] });
 
       await storage.clear();
 
-      expect(mockConnector.query).toHaveBeenCalledWith(
+      expect(mockPool.query).toHaveBeenCalledWith(
         expect.stringContaining("TRUNCATE TABLE"),
       );
     });
@@ -254,25 +253,25 @@ describe("PersistentStorage", () => {
   describe("has", () => {
     beforeEach(async () => {
       await storage.initialize();
-      mockConnector.query.mockClear();
+      mockPool.query.mockClear();
     });
 
     test("should return true when key exists", async () => {
-      mockConnector.query.mockResolvedValueOnce({
+      mockPool.query.mockResolvedValueOnce({
         rows: [{ exists: true }],
       });
 
       const result = await storage.has("test-key");
 
       expect(result).toBe(true);
-      expect(mockConnector.query).toHaveBeenCalledWith(
+      expect(mockPool.query).toHaveBeenCalledWith(
         expect.stringContaining("SELECT EXISTS"),
         [expect.any(BigInt)], // key_hash
       );
     });
 
     test("should return false when key does not exist", async () => {
-      mockConnector.query.mockResolvedValueOnce({
+      mockPool.query.mockResolvedValueOnce({
         rows: [{ exists: false }],
       });
 
@@ -282,7 +281,7 @@ describe("PersistentStorage", () => {
     });
 
     test("should return false when query returns no rows", async () => {
-      mockConnector.query.mockResolvedValueOnce({ rows: [] });
+      mockPool.query.mockResolvedValueOnce({ rows: [] });
 
       const result = await storage.has("test-key");
 
@@ -293,11 +292,11 @@ describe("PersistentStorage", () => {
   describe("size", () => {
     beforeEach(async () => {
       await storage.initialize();
-      mockConnector.query.mockClear();
+      mockPool.query.mockClear();
     });
 
     test("should return count of entries", async () => {
-      mockConnector.query.mockResolvedValueOnce({
+      mockPool.query.mockResolvedValueOnce({
         rows: [{ count: "42" }],
       });
 
@@ -307,7 +306,7 @@ describe("PersistentStorage", () => {
     });
 
     test("should return 0 when empty", async () => {
-      mockConnector.query.mockResolvedValueOnce({
+      mockPool.query.mockResolvedValueOnce({
         rows: [{ count: "0" }],
       });
 
@@ -317,7 +316,7 @@ describe("PersistentStorage", () => {
     });
 
     test("should return 0 when no rows", async () => {
-      mockConnector.query.mockResolvedValueOnce({ rows: [] });
+      mockPool.query.mockResolvedValueOnce({ rows: [] });
 
       const result = await storage.size();
 
@@ -328,11 +327,11 @@ describe("PersistentStorage", () => {
   describe("totalBytes", () => {
     beforeEach(async () => {
       await storage.initialize();
-      mockConnector.query.mockClear();
+      mockPool.query.mockClear();
     });
 
     test("should return sum of byte_size", async () => {
-      mockConnector.query.mockResolvedValueOnce({
+      mockPool.query.mockResolvedValueOnce({
         rows: [{ total: "1048576" }], // 1MB
       });
 
@@ -342,7 +341,7 @@ describe("PersistentStorage", () => {
     });
 
     test("should return 0 when empty", async () => {
-      mockConnector.query.mockResolvedValueOnce({
+      mockPool.query.mockResolvedValueOnce({
         rows: [{ total: "0" }],
       });
 
@@ -355,25 +354,25 @@ describe("PersistentStorage", () => {
   describe("cleanupExpired", () => {
     beforeEach(async () => {
       await storage.initialize();
-      mockConnector.query.mockClear();
+      mockPool.query.mockClear();
     });
 
     test("should delete expired entries", async () => {
-      mockConnector.query.mockResolvedValueOnce({
+      mockPool.query.mockResolvedValueOnce({
         rows: [{ count: "5" }],
       });
 
       const deleted = await storage.cleanupExpired();
 
       expect(deleted).toBe(5);
-      expect(mockConnector.query).toHaveBeenCalledWith(
+      expect(mockPool.query).toHaveBeenCalledWith(
         expect.stringContaining("DELETE FROM"),
         expect.arrayContaining([expect.any(Number)]),
       );
     });
 
     test("should return 0 when no expired entries", async () => {
-      mockConnector.query.mockResolvedValueOnce({
+      mockPool.query.mockResolvedValueOnce({
         rows: [{ count: "0" }],
       });
 
@@ -388,27 +387,27 @@ describe("PersistentStorage", () => {
       expect(storage.isPersistent()).toBe(true);
     });
 
-    test("should delegate healthCheck to connector", async () => {
-      mockConnector.healthCheck.mockResolvedValueOnce(true);
+    test("should implement healthCheck using pool query", async () => {
+      mockPool.query.mockResolvedValueOnce({ rows: [{ "?column?": 1 }] });
 
       const result = await storage.healthCheck();
 
       expect(result).toBe(true);
-      expect(mockConnector.healthCheck).toHaveBeenCalled();
+      expect(mockPool.query).toHaveBeenCalledWith("SELECT 1");
     });
 
     test("should return false on healthCheck error", async () => {
-      mockConnector.healthCheck.mockRejectedValueOnce(new Error("failed"));
+      mockPool.query.mockRejectedValueOnce(new Error("Connection failed"));
 
       const result = await storage.healthCheck();
 
       expect(result).toBe(false);
     });
 
-    test("should close connector on close", async () => {
+    test("should close pool on close", async () => {
       await storage.close();
 
-      expect(mockConnector.close).toHaveBeenCalled();
+      expect(mockPool.end).toHaveBeenCalled();
     });
   });
 
@@ -416,15 +415,15 @@ describe("PersistentStorage", () => {
     test("should auto-initialize on get if not initialized", async () => {
       const uninitializedStorage = new PersistentStorage(
         { maxBytes: 1024 * 1024 },
-        mockConnector as any,
+        mockPool as any,
       );
 
-      mockConnector.query.mockResolvedValue({ rows: [] });
+      mockPool.query.mockResolvedValue({ rows: [] });
 
       await uninitializedStorage.get("test-key");
 
       // Should have run migrations
-      expect(mockConnector.query).toHaveBeenCalledWith(
+      expect(mockPool.query).toHaveBeenCalledWith(
         expect.stringContaining("CREATE TABLE"),
       );
     });
@@ -432,10 +431,10 @@ describe("PersistentStorage", () => {
     test("should auto-initialize on set if not initialized", async () => {
       const uninitializedStorage = new PersistentStorage(
         { maxBytes: 1024 * 1024 },
-        mockConnector as any,
+        mockPool as any,
       );
 
-      mockConnector.query.mockResolvedValue({ rows: [] });
+      mockPool.query.mockResolvedValue({ rows: [] });
 
       await uninitializedStorage.set("test-key", {
         value: "test",
@@ -443,7 +442,7 @@ describe("PersistentStorage", () => {
       });
 
       // Should have run migrations
-      expect(mockConnector.query).toHaveBeenCalledWith(
+      expect(mockPool.query).toHaveBeenCalledWith(
         expect.stringContaining("CREATE TABLE"),
       );
     });

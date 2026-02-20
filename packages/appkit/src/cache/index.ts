@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { CacheConfig, CacheStorage } from "shared";
-import { LakebaseV1Connector } from "@/connectors";
+import { createLakebasePool } from "@/connectors/lakebase";
 import { AppKitError, ExecutionError, InitializationError } from "../errors";
 import { createLogger } from "../logging/logger";
 import type { Counter, TelemetryProvider } from "../telemetry";
@@ -147,14 +147,17 @@ export class CacheManager {
     // try to use lakebase storage
     try {
       const workspaceClient = new WorkspaceClient({});
-      const connector = new LakebaseV1Connector({ workspaceClient });
-      const isHealthy = await connector.healthCheck();
+      const pool = createLakebasePool({ workspaceClient });
+      const persistentStorage = new PersistentStorage(config, pool);
 
+      const isHealthy = await persistentStorage.healthCheck();
       if (isHealthy) {
-        const persistentStorage = new PersistentStorage(config, connector);
         await persistentStorage.initialize();
         return new CacheManager(persistentStorage, config);
       }
+
+      // Health check failed, close the pool and fallback
+      await pool.end();
     } catch {
       // lakebase unavailable, continue with in-memory storage
     }

@@ -144,6 +144,26 @@ describe("FilesConnector", () => {
       });
     });
 
+    test("paths containing '..' are rejected", async () => {
+      const connector = new FilesConnector({
+        defaultVolume: "/Volumes/catalog/schema/vol",
+      });
+
+      await expect(
+        connector.download(mockClient, "../../../etc/passwd"),
+      ).rejects.toThrow('Path traversal ("../") is not allowed.');
+    });
+
+    test("absolute paths containing '..' are rejected", async () => {
+      const connector = new FilesConnector({
+        defaultVolume: "/Volumes/catalog/schema/vol",
+      });
+
+      await expect(
+        connector.download(mockClient, "/Volumes/catalog/../other/file.txt"),
+      ).rejects.toThrow('Path traversal ("../") is not allowed.');
+    });
+
     test("constructor without defaultVolume omits it", async () => {
       const connector = new FilesConnector({});
 
@@ -634,7 +654,7 @@ describe("FilesConnector", () => {
       });
     });
 
-    test("text files return truncated preview (max 1024 bytes)", async () => {
+    test("text files return truncated preview (max 1024 chars)", async () => {
       const longText = "A".repeat(2000);
 
       mockFilesApi.getMetadata.mockResolvedValue({
@@ -651,7 +671,7 @@ describe("FilesConnector", () => {
       expect(result.isText).toBe(true);
       expect(result.isImage).toBe(false);
       expect(result.textPreview).not.toBeNull();
-      expect(result.textPreview!.length).toBeLessThanOrEqual(1024);
+      expect(result.textPreview?.length).toBeLessThanOrEqual(1024);
     });
 
     test("text/html files are treated as text", async () => {
