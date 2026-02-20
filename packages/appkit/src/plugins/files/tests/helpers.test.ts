@@ -1,5 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { contentTypeFromPath, isTextContentType } from "../helpers";
+import {
+  contentTypeFromPath,
+  isTextContentType,
+  parentDirectory,
+  sanitizeFilename,
+} from "../helpers";
 
 describe("contentTypeFromPath", () => {
   test("works without reported type", () => {
@@ -117,5 +122,62 @@ describe("isTextContentType", () => {
   test("returns false for image types", () => {
     expect(isTextContentType("image/png")).toBe(false);
     expect(isTextContentType("image/jpeg")).toBe(false);
+  });
+});
+
+describe("parentDirectory", () => {
+  test("extracts parent from nested path", () => {
+    expect(parentDirectory("/Volumes/catalog/schema/vol/file.txt")).toBe(
+      "/Volumes/catalog/schema/vol",
+    );
+  });
+
+  test("extracts parent from two-segment path", () => {
+    expect(parentDirectory("/dir/file.txt")).toBe("/dir");
+  });
+
+  test("returns root for root-level file", () => {
+    expect(parentDirectory("/file.txt")).toBe("/");
+  });
+
+  test("returns empty string for relative path without slash", () => {
+    expect(parentDirectory("file.txt")).toBe("");
+  });
+
+  test("strips trailing slash before computing parent", () => {
+    expect(parentDirectory("/dir/subdir/")).toBe("/dir");
+  });
+
+  test("handles root path with trailing slash", () => {
+    expect(parentDirectory("/")).toBe("/");
+  });
+
+  test("handles relative nested path", () => {
+    expect(parentDirectory("subdir/file.txt")).toBe("subdir");
+  });
+});
+
+describe("sanitizeFilename", () => {
+  test("passes through clean filenames unchanged", () => {
+    expect(sanitizeFilename("report.pdf")).toBe("report.pdf");
+    expect(sanitizeFilename("my-file_v2.txt")).toBe("my-file_v2.txt");
+  });
+
+  test("escapes double quotes", () => {
+    expect(sanitizeFilename('file"name.txt')).toBe('file\\"name.txt');
+  });
+
+  test("escapes backslashes", () => {
+    expect(sanitizeFilename("file\\name.txt")).toBe("file\\\\name.txt");
+  });
+
+  test("strips carriage returns and newlines", () => {
+    expect(sanitizeFilename("file\r\nname.txt")).toBe("filename.txt");
+    expect(sanitizeFilename("file\rname.txt")).toBe("filename.txt");
+    expect(sanitizeFilename("file\nname.txt")).toBe("filename.txt");
+  });
+
+  test("handles combined special characters", () => {
+    expect(sanitizeFilename('a"b\\c\r\nd.txt')).toBe('a\\"b\\\\cd.txt');
   });
 });

@@ -70,7 +70,7 @@ describe("Files Plugin Integration", () => {
 
   beforeAll(async () => {
     setupDatabricksEnv({
-      DATABRICKS_VOLUME_PATH: "/Volumes/catalog/schema/vol",
+      DATABRICKS_DEFAULT_VOLUME: "/Volumes/catalog/schema/vol",
     });
     ServiceContext.reset();
 
@@ -96,7 +96,7 @@ describe("Files Plugin Integration", () => {
   });
 
   afterAll(async () => {
-    delete process.env.DATABRICKS_VOLUME_PATH;
+    delete process.env.DATABRICKS_DEFAULT_VOLUME;
     serviceContextMock?.restore();
     if (server) {
       await new Promise<void>((resolve, reject) => {

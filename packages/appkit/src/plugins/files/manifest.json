@@ -13,7 +13,7 @@
         "permission": "WRITE_VOLUME",
         "fields": {
           "path": {
-            "env": "DATABRICKS_VOLUME_PATH",
+            "env": "DATABRICKS_DEFAULT_VOLUME",
             "description": "Volume path (e.g. /Volumes/catalog/schema/volume_name)"
           }
         }

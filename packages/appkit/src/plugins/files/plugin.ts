@@ -14,6 +14,7 @@ import {
   filesReadDefaults,
   filesWriteDefaults,
 } from "./defaults";
+import { parentDirectory, sanitizeFilename } from "./helpers";
 import { filesManifest } from "./manifest";
 import type { DownloadResponse, IFilesConfig } from "./types";
 
@@ -340,7 +341,7 @@ export class FilesPlugin extends Plugin {
       return;
     }
 
-    const fileName = path.split("/").pop() ?? "download";
+    const fileName = sanitizeFilename(path.split("/").pop() ?? "download");
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     res.setHeader(
       "Content-Type",
@@ -392,7 +393,7 @@ export class FilesPlugin extends Plugin {
     res.setHeader("Content-Security-Policy", "sandbox");
 
     if (!isSafeInlineContentType(resolvedType)) {
-      const fileName = path.split("/").pop() ?? "download";
+      const fileName = sanitizeFilename(path.split("/").pop() ?? "download");
       res.setHeader(
         "Content-Disposition",
         `attachment; filename="${fileName}"`,
@@ -525,8 +526,7 @@ export class FilesPlugin extends Plugin {
       return;
     }
 
-    const parentDir = path.substring(0, path.lastIndexOf("/")) || path;
-    this._invalidateListCache(this._resolvePath(parentDir));
+    this._invalidateListCache(this._resolvePath(parentDirectory(path)));
 
     logger.debug(req, "Upload complete: path=%s", path);
     res.json(result);
@@ -558,8 +558,7 @@ export class FilesPlugin extends Plugin {
       return;
     }
 
-    const parentDir = dirPath.substring(0, dirPath.lastIndexOf("/")) || dirPath;
-    this._invalidateListCache(this._resolvePath(parentDir));
+    this._invalidateListCache(this._resolvePath(parentDirectory(dirPath)));
 
     res.json(result);
   }
@@ -588,8 +587,7 @@ export class FilesPlugin extends Plugin {
       return;
     }
 
-    const parentDir = path.substring(0, path.lastIndexOf("/")) || path;
-    this._invalidateListCache(this._resolvePath(parentDir));
+    this._invalidateListCache(this._resolvePath(parentDirectory(path)));
 
     res.json(result);
   }
