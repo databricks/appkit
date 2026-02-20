@@ -5,7 +5,8 @@
   "version": "0.0.2",
   "packageManager": "pnpm@10.21.0",
   "scripts": {
-    "build": "pnpm -r --filter=!docs build:package",
+    "build": "pnpm -r --filter=!docs build:package && pnpm sync:template",
+    "sync:template": "node packages/shared/bin/appkit.js plugin sync --write --silent --plugins-dir packages/appkit/src/plugins --output template/appkit.plugins.json --require-plugins server",
     "build:watch": "pnpm -r --filter=!dev-playground --filter=!docs build:watch",
     "check:fix": "biome check --write .",
     "check": "biome check .",

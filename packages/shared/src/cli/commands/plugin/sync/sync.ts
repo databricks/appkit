@@ -366,6 +366,54 @@ function scanForPlugins(
 }
 
 /**
+ * Scan a directory for plugin manifests in direct subdirectories.
+ * Each subdirectory is expected to contain a manifest.json file.
+ * Used with --plugins-dir to discover plugins from source instead of node_modules.
+ *
+ * @param dir - Absolute path to the directory containing plugin subdirectories
+ * @param packageName - Package name to assign to discovered plugins
+ * @returns Map of plugin name to template plugin entry
+ */
+function scanPluginsDir(
+  dir: string,
+  packageName: string,
+): TemplatePluginsManifest["plugins"] {
+  const plugins: TemplatePluginsManifest["plugins"] = {};
+
+  if (!fs.existsSync(dir)) return plugins;
+
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    const manifestPath = path.join(dir, entry.name, "manifest.json");
+    if (!fs.existsSync(manifestPath)) continue;
+
+    try {
+      const content = fs.readFileSync(manifestPath, "utf-8");
+      const parsed = JSON.parse(content);
+      const manifest = validateManifestWithSchema(parsed, manifestPath);
+      if (manifest) {
+        plugins[manifest.name] = {
+          name: manifest.name,
+          displayName: manifest.displayName,
+          description: manifest.description,
+          package: packageName,
+          resources: manifest.resources,
+        };
+      }
+    } catch (error) {
+      console.warn(
+        `Warning: Failed to parse manifest at ${manifestPath}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
+  return plugins;
+}
+
+/**
  * Write (or preview) the template plugins manifest to disk.
  */
 function writeManifest(
@@ -408,6 +456,9 @@ function runPluginsSync(options: {
   write?: boolean;
   output?: string;
   silent?: boolean;
+  requirePlugins?: string;
+  pluginsDir?: string;
+  packageName?: string;
 }) {
   const cwd = process.cwd();
   const outputPath = path.resolve(cwd, options.output || "appkit.plugins.json");
@@ -457,12 +508,23 @@ function runPluginsSync(options: {
     (i) => i.source.startsWith(".") || i.source.startsWith("/"),
   );
 
-  // Step 3: Scan npm packages for plugin manifests
-  const npmPackages = new Set([
-    ...KNOWN_PLUGIN_PACKAGES,
-    ...npmImports.map((i) => i.source),
-  ]);
-  const plugins = scanForPlugins(cwd, npmPackages);
+  // Step 3: Scan for plugin manifests (--plugins-dir or node_modules)
+  const plugins: TemplatePluginsManifest["plugins"] = {};
+
+  if (options.pluginsDir) {
+    const resolvedDir = path.resolve(cwd, options.pluginsDir);
+    const pkgName = options.packageName ?? "@databricks/appkit";
+    if (!options.silent) {
+      console.log(`Scanning plugins directory: ${options.pluginsDir}`);
+    }
+    Object.assign(plugins, scanPluginsDir(resolvedDir, pkgName));
+  } else {
+    const npmPackages = new Set([
+      ...KNOWN_PLUGIN_PACKAGES,
+      ...npmImports.map((i) => i.source),
+    ]);
+    Object.assign(plugins, scanForPlugins(cwd, npmPackages));
+  }
 
   // Step 4: Discover local plugin manifests from relative imports
   if (serverFile && localImports.length > 0) {
@@ -479,9 +541,10 @@ function runPluginsSync(options: {
       return;
     }
     console.log("No plugins found.");
-    console.log("\nMake sure you have plugin packages installed:");
-    for (const pkg of npmPackages) {
-      console.log(`  - ${pkg}`);
+    if (options.pluginsDir) {
+      console.log(`\nNo manifest.json files found in: ${options.pluginsDir}`);
+    } else {
+      console.log("\nMake sure you have plugin packages installed.");
     }
     process.exit(1);
   }
@@ -519,6 +582,23 @@ function runPluginsSync(options: {
     }
   }
 
+  // Step 6: Apply explicit --require-plugins overrides
+  if (options.requirePlugins) {
+    const explicitNames = options.requirePlugins
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    for (const name of explicitNames) {
+      if (plugins[name]) {
+        plugins[name].requiredByTemplate = true;
+      } else if (!options.silent) {
+        console.warn(
+          `Warning: --require-plugins referenced "${name}" but no such plugin was discovered`,
+        );
+      }
+    }
+  }
+
   if (!options.silent) {
     console.log(`\nFound ${pluginCount} plugin(s):`);
     for (const [name, manifest] of Object.entries(plugins)) {
@@ -551,5 +631,17 @@ export const pluginsSyncCommand = new Command("sync")
   .option(
     "-s, --silent",
     "Suppress output and never exit with error (for use in predev/prebuild hooks)",
+  )
+  .option(
+    "--require-plugins <names>",
+    "Comma-separated plugin names to mark as requiredByTemplate (e.g. server,analytics)",
+  )
+  .option(
+    "--plugins-dir <path>",
+    "Scan this directory for plugin subdirectories with manifest.json (instead of node_modules)",
+  )
+  .option(
+    "--package-name <name>",
+    "Package name to assign to plugins found via --plugins-dir (default: @databricks/appkit)",
   )
   .action(runPluginsSync);

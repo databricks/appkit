@@ -31,11 +31,11 @@
       "displayName": "Server Plugin",
       "description": "HTTP server with Express, static file serving, and Vite dev mode support",
       "package": "@databricks/appkit",
-      "requiredByTemplate": true,
       "resources": {
         "required": [],
         "optional": []
-      }
+      },
+      "requiredByTemplate": true
     }
   }
 }
