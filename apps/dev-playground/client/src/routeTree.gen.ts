@@ -13,11 +13,7 @@ import { Route as TypeSafetyRouteRouteImport } from './routes/type-safety.route'
 import { Route as TelemetryRouteRouteImport } from './routes/telemetry.route'
 import { Route as SqlHelpersRouteRouteImport } from './routes/sql-helpers.route'
 import { Route as ReconnectRouteRouteImport } from './routes/reconnect.route'
-<<<<<<< HEAD
 import { Route as LakebaseRouteRouteImport } from './routes/lakebase.route'
-import { Route as FilesRouteRouteImport } from './routes/files.route'
-=======
->>>>>>> aa76021 (chore: remove dev-playground files integration)
 import { Route as DataVisualizationRouteRouteImport } from './routes/data-visualization.route'
 import { Route as ArrowAnalyticsRouteRouteImport } from './routes/arrow-analytics.route'
 import { Route as AnalyticsRouteRouteImport } from './routes/analytics.route'
@@ -43,19 +39,11 @@ const ReconnectRouteRoute = ReconnectRouteRouteImport.update({
   path: '/reconnect',
   getParentRoute: () => rootRouteImport,
 } as any)
-<<<<<<< HEAD
 const LakebaseRouteRoute = LakebaseRouteRouteImport.update({
   id: '/lakebase',
   path: '/lakebase',
   getParentRoute: () => rootRouteImport,
 } as any)
-const FilesRouteRoute = FilesRouteRouteImport.update({
-  id: '/files',
-  path: '/files',
-  getParentRoute: () => rootRouteImport,
-} as any)
-=======
->>>>>>> aa76021 (chore: remove dev-playground files integration)
 const DataVisualizationRouteRoute = DataVisualizationRouteRouteImport.update({
   id: '/data-visualization',
   path: '/data-visualization',
@@ -82,11 +70,7 @@ export interface FileRoutesByFullPath {
   '/analytics': typeof AnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
-<<<<<<< HEAD
-  '/files': typeof FilesRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
-=======
->>>>>>> aa76021 (chore: remove dev-playground files integration)
   '/reconnect': typeof ReconnectRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
@@ -97,11 +81,7 @@ export interface FileRoutesByTo {
   '/analytics': typeof AnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
-<<<<<<< HEAD
-  '/files': typeof FilesRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
-=======
->>>>>>> aa76021 (chore: remove dev-playground files integration)
   '/reconnect': typeof ReconnectRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
@@ -113,11 +93,7 @@ export interface FileRoutesById {
   '/analytics': typeof AnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
-<<<<<<< HEAD
-  '/files': typeof FilesRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
-=======
->>>>>>> aa76021 (chore: remove dev-playground files integration)
   '/reconnect': typeof ReconnectRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
@@ -130,11 +106,7 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/arrow-analytics'
     | '/data-visualization'
-<<<<<<< HEAD
-    | '/files'
     | '/lakebase'
-=======
->>>>>>> aa76021 (chore: remove dev-playground files integration)
     | '/reconnect'
     | '/sql-helpers'
     | '/telemetry'
@@ -145,11 +117,7 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/arrow-analytics'
     | '/data-visualization'
-<<<<<<< HEAD
-    | '/files'
     | '/lakebase'
-=======
->>>>>>> aa76021 (chore: remove dev-playground files integration)
     | '/reconnect'
     | '/sql-helpers'
     | '/telemetry'
@@ -160,11 +128,7 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/arrow-analytics'
     | '/data-visualization'
-<<<<<<< HEAD
-    | '/files'
     | '/lakebase'
-=======
->>>>>>> aa76021 (chore: remove dev-playground files integration)
     | '/reconnect'
     | '/sql-helpers'
     | '/telemetry'
@@ -176,11 +140,7 @@ export interface RootRouteChildren {
   AnalyticsRouteRoute: typeof AnalyticsRouteRoute
   ArrowAnalyticsRouteRoute: typeof ArrowAnalyticsRouteRoute
   DataVisualizationRouteRoute: typeof DataVisualizationRouteRoute
-<<<<<<< HEAD
-  FilesRouteRoute: typeof FilesRouteRoute
   LakebaseRouteRoute: typeof LakebaseRouteRoute
-=======
->>>>>>> aa76021 (chore: remove dev-playground files integration)
   ReconnectRouteRoute: typeof ReconnectRouteRoute
   SqlHelpersRouteRoute: typeof SqlHelpersRouteRoute
   TelemetryRouteRoute: typeof TelemetryRouteRoute
@@ -217,7 +177,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ReconnectRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
-<<<<<<< HEAD
     '/lakebase': {
       id: '/lakebase'
       path: '/lakebase'
@@ -225,15 +184,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LakebaseRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/files': {
-      id: '/files'
-      path: '/files'
-      fullPath: '/files'
-      preLoaderRoute: typeof FilesRouteRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-=======
->>>>>>> aa76021 (chore: remove dev-playground files integration)
     '/data-visualization': {
       id: '/data-visualization'
       path: '/data-visualization'
@@ -270,11 +220,7 @@ const rootRouteChildren: RootRouteChildren = {
   AnalyticsRouteRoute: AnalyticsRouteRoute,
   ArrowAnalyticsRouteRoute: ArrowAnalyticsRouteRoute,
   DataVisualizationRouteRoute: DataVisualizationRouteRoute,
-<<<<<<< HEAD
-  FilesRouteRoute: FilesRouteRoute,
   LakebaseRouteRoute: LakebaseRouteRoute,
-=======
->>>>>>> aa76021 (chore: remove dev-playground files integration)
   ReconnectRouteRoute: ReconnectRouteRoute,
   SqlHelpersRouteRoute: SqlHelpersRouteRoute,
   TelemetryRouteRoute: TelemetryRouteRoute,
