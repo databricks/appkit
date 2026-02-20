@@ -58,6 +58,36 @@ export function isTextContentType(contentType: string | undefined): boolean {
  * @param customTypes - Optional map of extensions to MIME types that takes priority.
  * @returns The resolved MIME content type string.
  */
+/**
+ * MIME types that are safe to serve inline (i.e. browsers cannot execute
+ * scripts from them). Any type **not** in this set should be forced to
+ * download via `Content-Disposition: attachment` when served by the `/raw`
+ * endpoint to prevent stored-XSS attacks.
+ */
+export const SAFE_INLINE_CONTENT_TYPES: ReadonlySet<string> = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/bmp",
+  "image/vnd.microsoft.icon",
+  "text/plain",
+  "text/csv",
+  "text/markdown",
+  "application/json",
+  "application/pdf",
+]);
+
+/**
+ * Check whether a content type is safe to serve inline.
+ *
+ * @param contentType - MIME content type string.
+ * @returns `true` if the type is in the safe-inline allowlist.
+ */
+export function isSafeInlineContentType(contentType: string): boolean {
+  return SAFE_INLINE_CONTENT_TYPES.has(contentType);
+}
+
 export function contentTypeFromPath(
   filePath: string,
   reported?: string,

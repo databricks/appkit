@@ -301,6 +301,116 @@ describe("Files Plugin Integration", () => {
     });
   });
 
+  describe("Raw Endpoint Security Headers", () => {
+    test("safe type (image/png) sets security headers without Content-Disposition", async () => {
+      mockFilesApi.download.mockResolvedValue({
+        contents: streamFromString("PNG data"),
+      });
+
+      const response = await fetch(
+        `${baseUrl}/api/files/raw?path=/Volumes/catalog/schema/vol/image.png`,
+        { headers: authHeaders, redirect: "manual" },
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("image/png");
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(response.headers.get("content-security-policy")).toBe("sandbox");
+      expect(response.headers.get("content-disposition")).toBeNull();
+    });
+
+    test("dangerous type (text/html) forces download via Content-Disposition", async () => {
+      mockFilesApi.download.mockResolvedValue({
+        contents: streamFromString("<script>alert('xss')</script>"),
+      });
+
+      const response = await fetch(
+        `${baseUrl}/api/files/raw?path=/Volumes/catalog/schema/vol/malicious.html`,
+        { headers: authHeaders, redirect: "manual" },
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("text/html");
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(response.headers.get("content-security-policy")).toBe("sandbox");
+      expect(response.headers.get("content-disposition")).toBe(
+        'attachment; filename="malicious.html"',
+      );
+    });
+
+    test("SVG (image/svg+xml) is treated as dangerous", async () => {
+      mockFilesApi.download.mockResolvedValue({
+        contents: streamFromString("<svg onload='alert(1)'></svg>"),
+      });
+
+      const response = await fetch(
+        `${baseUrl}/api/files/raw?path=/Volumes/catalog/schema/vol/icon.svg`,
+        { headers: authHeaders, redirect: "manual" },
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("image/svg+xml");
+      expect(response.headers.get("content-security-policy")).toBe("sandbox");
+      expect(response.headers.get("content-disposition")).toBe(
+        'attachment; filename="icon.svg"',
+      );
+    });
+
+    test("JavaScript (text/javascript) is treated as dangerous", async () => {
+      mockFilesApi.download.mockResolvedValue({
+        contents: streamFromString("alert('xss')"),
+      });
+
+      const response = await fetch(
+        `${baseUrl}/api/files/raw?path=/Volumes/catalog/schema/vol/script.js`,
+        { headers: authHeaders, redirect: "manual" },
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("text/javascript");
+      expect(response.headers.get("content-security-policy")).toBe("sandbox");
+      expect(response.headers.get("content-disposition")).toBe(
+        'attachment; filename="script.js"',
+      );
+    });
+
+    test("safe type (application/json) is served inline", async () => {
+      mockFilesApi.download.mockResolvedValue({
+        contents: streamFromString('{"key":"value"}'),
+      });
+
+      const response = await fetch(
+        `${baseUrl}/api/files/raw?path=/Volumes/catalog/schema/vol/data.json`,
+        { headers: authHeaders, redirect: "manual" },
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("application/json");
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(response.headers.get("content-security-policy")).toBe("sandbox");
+      expect(response.headers.get("content-disposition")).toBeNull();
+    });
+  });
+
+  describe("Download Endpoint Security Headers", () => {
+    test("sets X-Content-Type-Options: nosniff", async () => {
+      mockFilesApi.download.mockResolvedValue({
+        contents: streamFromString("file data"),
+      });
+
+      const response = await fetch(
+        `${baseUrl}/api/files/download?path=/Volumes/catalog/schema/vol/file.txt`,
+        { headers: authHeaders, redirect: "manual" },
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(response.headers.get("content-disposition")).toBe(
+        'attachment; filename="file.txt"',
+      );
+    });
+  });
+
   describe("Error Handling", () => {
     test("SDK exceptions return 500 with generic error", async () => {
       mockFilesApi.getMetadata.mockRejectedValue(

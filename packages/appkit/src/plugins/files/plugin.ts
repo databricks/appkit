@@ -1,7 +1,11 @@
 import { Readable } from "node:stream";
 import type express from "express";
 import type { IAppRouter, PluginExecutionSettings } from "shared";
-import { contentTypeFromPath, FilesConnector } from "../../connectors/files";
+import {
+  contentTypeFromPath,
+  FilesConnector,
+  isSafeInlineContentType,
+} from "../../connectors/files";
 import { getCurrentUserId, getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
@@ -342,6 +346,7 @@ export class FilesPlugin extends Plugin {
       "Content-Type",
       contentTypeFromPath(path, undefined, this.config.customContentTypes),
     );
+    res.setHeader("X-Content-Type-Options", "nosniff");
     if (response.contents) {
       const nodeStream = Readable.fromWeb(
         response.contents as import("node:stream/web").ReadableStream,
@@ -376,10 +381,24 @@ export class FilesPlugin extends Plugin {
       return;
     }
 
-    res.setHeader(
-      "Content-Type",
-      contentTypeFromPath(path, undefined, this.config.customContentTypes),
+    const resolvedType = contentTypeFromPath(
+      path,
+      undefined,
+      this.config.customContentTypes,
     );
+
+    res.setHeader("Content-Type", resolvedType);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Security-Policy", "sandbox");
+
+    if (!isSafeInlineContentType(resolvedType)) {
+      const fileName = path.split("/").pop() ?? "download";
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${fileName}"`,
+      );
+    }
+
     if (response.contents) {
       const nodeStream = Readable.fromWeb(
         response.contents as import("node:stream/web").ReadableStream,
