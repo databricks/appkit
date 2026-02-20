@@ -9,18 +9,13 @@ function contentTypeFromPath(
 
 Resolve the MIME content type for a file path.
 
-Resolution order:
-1. Custom type map (if the extension matches a key in `customTypes`).
-2. Built-in extension map (EXTENSION\_CONTENT\_TYPES).
-3. The `reported` type from the server, or `application/octet-stream` as a fallback.
-
 ## Parameters
 
 | Parameter | Type | Description |
 | ------ | ------ | ------ |
-| `filePath` | `string` | File path used to extract the extension. |
-| `reported?` | `string` | Content type reported by the server (used as fallback). |
-| `customTypes?` | `Record`\<`string`, `string`\> | Optional map of extensions to MIME types that takes priority. |
+| `filePath` | `string` | Path to the file (only the extension is inspected). |
+| `reported?` | `string` | Optional MIME type reported by the caller; used as fallback when the extension is unknown. |
+| `customTypes?` | `Record`\<`string`, `string`\> | Optional map of extension → MIME type overrides (e.g. `{ ".csv": "text/csv" }`). |
 
 ## Returns
 

@@ -88,6 +88,14 @@ export function isSafeInlineContentType(contentType: string): boolean {
   return SAFE_INLINE_CONTENT_TYPES.has(contentType);
 }
 
+/**
+ * Resolve the MIME content type for a file path.
+ *
+ * @param filePath - Path to the file (only the extension is inspected).
+ * @param reported - Optional MIME type reported by the caller; used as fallback when the extension is unknown.
+ * @param customTypes - Optional map of extension → MIME type overrides (e.g. `{ ".csv": "text/csv" }`).
+ * @returns The resolved MIME content type string.
+ */
 export function contentTypeFromPath(
   filePath: string,
   reported?: string,
