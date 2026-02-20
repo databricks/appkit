@@ -225,7 +225,8 @@ export function formatValidationErrors(
   for (const e of errors) {
     const key = e.instancePath || "/";
     if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key)!.push(e);
+    const list = grouped.get(key);
+    if (list) list.push(e);
   }
 
   const lines: string[] = [];

@@ -101,7 +101,7 @@ When using the published SDK or running from the monorepo (after `pnpm build`), 
 ```bash
 npx appkit plugin sync --write    # Sync plugin manifests into appkit.plugins.json
 npx appkit plugin create         # Scaffold a new plugin (interactive, uses @clack/prompts)
-npx appkit plugin validate      # Validate manifest(s) against the JSON schema
+npx appkit plugin validate       # Validate manifest(s) against the JSON schema
 npx appkit plugin list           # List plugins (from appkit.plugins.json or --dir)
 npx appkit plugin add-resource   # Add a resource requirement to a plugin (interactive)
 ```

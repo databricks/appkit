@@ -169,7 +169,7 @@ async function runPluginAddResource(options: { path?: string }): Promise<void> {
 
 export const pluginAddResourceCommand = new Command("add-resource")
   .description(
-    "Add a resource requirement to an existing plugin manifest (interactive)",
+    "Add a resource requirement to an existing plugin manifest (interactive). Overwrites manifest.json in place.",
   )
   .option(
     "-p, --path <dir>",

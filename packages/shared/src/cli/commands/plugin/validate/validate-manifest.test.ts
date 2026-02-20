@@ -104,7 +104,7 @@ describe("validate-manifest", () => {
       const result = validateManifest({ name: "test" });
       expect(result.valid).toBe(false);
       expect(result.errors).toBeDefined();
-      expect(result.errors!.length).toBeGreaterThan(0);
+      expect((result.errors ?? []).length).toBeGreaterThan(0);
     });
 
     it("rejects manifest with invalid name pattern", () => {

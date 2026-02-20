@@ -4,7 +4,7 @@ import process from "node:process";
 import { Command } from "commander";
 import { validateManifest } from "../validate/validate-manifest";
 
-interface PluginRow {
+export interface PluginRow {
   name: string;
   displayName: string;
   package: string;
@@ -12,7 +12,7 @@ interface PluginRow {
   optional: number;
 }
 
-function listFromManifestFile(manifestPath: string): PluginRow[] {
+export function listFromManifestFile(manifestPath: string): PluginRow[] {
   let raw: string;
   try {
     raw = fs.readFileSync(manifestPath, "utf-8");
@@ -53,7 +53,7 @@ function listFromManifestFile(manifestPath: string): PluginRow[] {
   }));
 }
 
-function listFromDirectory(dirPath: string, cwd: string): PluginRow[] {
+export function listFromDirectory(dirPath: string, cwd: string): PluginRow[] {
   const resolved = path.resolve(cwd, dirPath);
   if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
     return [];

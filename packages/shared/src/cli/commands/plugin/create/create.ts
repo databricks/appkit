@@ -59,6 +59,12 @@ async function runPluginCreate(): Promise<void> {
           : "appkit-plugin-my-feature",
       validate(value) {
         if (!value?.trim()) return "Path is required.";
+        if (
+          placement === "in-repo" &&
+          (path.isAbsolute(value) || value.trim().startsWith(".."))
+        ) {
+          return "Use a relative path under the current directory (e.g. plugins/my-plugin).";
+        }
         return undefined;
       },
     });
