@@ -46,19 +46,6 @@ export function isTextContentType(contentType: string | undefined): boolean {
 }
 
 /**
- * Resolve the MIME content type for a file path.
- *
- * Resolution order:
- * 1. Custom type map (if the extension matches a key in `customTypes`).
- * 2. Built-in extension map ({@link EXTENSION_CONTENT_TYPES}).
- * 3. The `reported` type from the server, or `application/octet-stream` as a fallback.
- *
- * @param filePath - File path used to extract the extension.
- * @param reported - Content type reported by the server (used as fallback).
- * @param customTypes - Optional map of extensions to MIME types that takes priority.
- * @returns The resolved MIME content type string.
- */
-/**
  * MIME types that are safe to serve inline (i.e. browsers cannot execute
  * scripts from them). Any type **not** in this set should be forced to
  * download via `Content-Disposition: attachment` when served by the `/raw`
