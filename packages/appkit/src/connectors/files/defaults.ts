@@ -88,7 +88,8 @@ export function contentTypeFromPath(
   reported?: string,
   customTypes?: Record<string, string>,
 ): string {
-  const ext = filePath.slice(filePath.lastIndexOf(".")).toLowerCase();
+  const dotIndex = filePath.lastIndexOf(".");
+  const ext = dotIndex > 0 ? filePath.slice(dotIndex).toLowerCase() : "";
   const fromCustom = customTypes?.[ext];
 
   if (fromCustom) {

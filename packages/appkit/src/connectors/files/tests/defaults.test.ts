@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  contentTypeFromPath,
   isSafeInlineContentType,
   SAFE_INLINE_CONTENT_TYPES,
 } from "../defaults";
@@ -50,5 +51,32 @@ describe("isSafeInlineContentType", () => {
     for (const type of safeTypes) {
       expect(SAFE_INLINE_CONTENT_TYPES.has(type)).toBe(true);
     }
+  });
+});
+
+describe("contentTypeFromPath", () => {
+  test("returns octet-stream for files without an extension", () => {
+    expect(contentTypeFromPath("Makefile")).toBe("application/octet-stream");
+    expect(contentTypeFromPath("/path/to/Makefile")).toBe(
+      "application/octet-stream",
+    );
+  });
+
+  test("falls back to reported type for files without an extension", () => {
+    expect(contentTypeFromPath("LICENSE", "text/plain")).toBe("text/plain");
+  });
+
+  test("returns octet-stream for dotfiles without a real extension", () => {
+    expect(contentTypeFromPath(".gitignore")).toBe("application/octet-stream");
+    expect(contentTypeFromPath(".env")).toBe("application/octet-stream");
+  });
+
+  test("resolves dotfiles that have an extension", () => {
+    expect(contentTypeFromPath(".eslintrc.json")).toBe("application/json");
+    expect(contentTypeFromPath(".config.yaml")).toBe("application/x-yaml");
+  });
+
+  test("returns octet-stream for empty string", () => {
+    expect(contentTypeFromPath("")).toBe("application/octet-stream");
   });
 });
