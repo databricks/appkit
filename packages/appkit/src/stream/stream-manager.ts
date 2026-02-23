@@ -9,8 +9,6 @@ import { StreamRegistry } from "./stream-registry";
 import { SSEErrorCode, type StreamEntry, type StreamOperation } from "./types";
 import { StreamValidator } from "./validator";
 
-const logger = createLogger("stream");
-
 // main entry point for Server-Sent events streaming
 export class StreamManager {
   private activeOperations: Set<StreamOperation>;
@@ -79,12 +77,6 @@ export class StreamManager {
     streamEntry: StreamEntry,
     options?: StreamConfig,
   ): Promise<void> {
-    logger.debug(
-      "Client reconnecting to stream: streamId=%s, clients=%d",
-      streamEntry.streamId,
-      streamEntry.clients.size,
-    );
-
     // handle reconnection - replay missed events
     const lastEventId = res.req?.headers["last-event-id"];
 
@@ -195,8 +187,6 @@ export class StreamManager {
       traceContext,
     };
     this.streamRegistry.add(streamEntry);
-
-    logger.debug("New stream created: streamId=%s", streamId);
 
     // track operation
     const streamOperation: StreamOperation = {

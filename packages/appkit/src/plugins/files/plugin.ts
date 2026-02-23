@@ -625,27 +625,6 @@ export class FilesPlugin extends Plugin {
 }
 
 /**
- * Files plugin for Databricks Unity Catalog volume operations.
- *
- * Provides HTTP routes and a programmatic API for listing, reading,
- * downloading, uploading, deleting, and previewing files with built-in
- * caching, retry, and timeout handling via the execution interceptor pipeline.
- *
- * Routes are mounted at `/api/files/*`.
- *
- * @example
- * ```typescript
- * import { createApp, files } from "@databricks/appkit";
- *
- * const app = await createApp({
- *   plugins: [
- *     files({ defaultVolume: "/Volumes/catalog/schema/vol" }),
- *   ],
- * });
- * ```
- */
-
-/**
  * @internal
  */
 export const files = toPlugin<typeof FilesPlugin, IFilesConfig, "files">(
