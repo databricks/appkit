@@ -49,7 +49,7 @@ export function createTokenRefreshCallback(
     // Lazily initialize workspace client on first password fetch
     if (!workspaceClient) {
       try {
-        workspaceClient = await getWorkspaceClient(deps.userConfig);
+        workspaceClient = getWorkspaceClient(deps.userConfig);
       } catch (error) {
         deps.logger?.error("Failed to initialize workspace client: %O", error);
         throw error;

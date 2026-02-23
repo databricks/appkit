@@ -32,6 +32,7 @@ export {
   generateDatabaseCredential,
   getLakebaseOrmConfig,
   getLakebasePgConfig,
+  getUsernameWithApiLookup,
   getWorkspaceClient,
   type LakebasePoolConfig,
   type Logger,

@@ -42,13 +42,7 @@ To find your `LAKEBASE_ENDPOINT`, run the Databricks CLI and use the `name` fiel
 databricks postgres list-endpoints projects/{project-id}/branches/{branch-id}
 ```
 
-You can obtain the Project ID and Branch ID from the Lakebase Autoscaling UI, like the "Branch Overview" page. (Project list -> Project dashboard -> Branch overview). When using the driver as a part of Databricks Apps, the `LAKEBASE_ENDPOINT` is automatically injected using `fromValue`:
-
-```yaml
-env:
-  - name: LAKEBASE_ENDPOINT
-    valueFrom: database # Lakebase Autoscaling database resource name
-```
+You can obtain the Project ID and Branch ID from the Lakebase Autoscaling UI, like the "Branch Overview" page. (Project list -> Project dashboard -> Branch overview). 
 
 Then use the driver:
 
@@ -85,6 +79,35 @@ The driver supports Databricks authentication via:
 
 See [Databricks authentication docs](https://docs.databricks.com/en/dev-tools/auth/index.html) or [Lakebase Autoscaling authentication docs](https://docs.databricks.com/aws/en/oltp/projects/authentication#overview) for more information.
 
+## PostgreSQL Username Resolution
+
+The driver resolves the PostgreSQL username (`user` configuration option) using the following priority order:
+
+1. `config.user` — explicit value passed to `createLakebasePool`
+2. `PGUSER` environment variable
+3. `DATABRICKS_CLIENT_ID` environment variable (service principals using OAuth M2M)
+
+If none of these are set, the driver throws a `ConfigurationError`.
+
+### Automatic resolution via Workspace API
+
+For human users authenticating with a PAT token or browser OAuth via `~/.databrickscfg`, none of the above are typically set. Use `getUsernameWithApiLookup` to automatically fetch the username from the Databricks workspace before creating the pool:
+
+```typescript
+import { createLakebasePool, getUsernameWithApiLookup } from "@databricks/lakebase";
+
+// Tries config/env vars first, then falls back to currentUser.me() API call
+const user = await getUsernameWithApiLookup();
+
+const pool = createLakebasePool({ user });
+```
+
+`getUsernameWithApiLookup` extends the sync resolution above with a fourth step:
+
+4. `currentUser.me()` — fetches the current user's identity from the Databricks workspace API (works with PAT tokens and browser OAuth in `~/.databrickscfg`)
+
+> **Note:** `getUsernameWithApiLookup` makes a network call to the Databricks workspace API when the sync resolution steps (config, `PGUSER`, `DATABRICKS_CLIENT_ID`) all fail. Call it once during initialization, not on every request.
+
 ## Configuration
 
 | Option                    | Environment Variable               | Description                             | Default                 |
@@ -92,7 +115,7 @@ See [Databricks authentication docs](https://docs.databricks.com/en/dev-tools/au
 | `host`                    | `PGHOST`                           | Lakebase host                           | _Required_              |
 | `database`                | `PGDATABASE`                       | Database name                           | _Required_              |
 | `endpoint`                | `LAKEBASE_ENDPOINT`                | Endpoint resource path                  | _Required_              |
-| `user`                    | `PGUSER` or `DATABRICKS_CLIENT_ID` | Username or service principal ID        | Auto-detected           |
+| `user`                    | `PGUSER` or `DATABRICKS_CLIENT_ID` | Username or service principal ID        | See [Username Resolution](#username-resolution)|
 | `port`                    | `PGPORT`                           | Port number                             | `5432`                  |
 | `sslMode`                 | `PGSSLMODE`                        | SSL mode                                | `require`               |
 | `max`                     | -                                  | Max pool connections                    | `10`                    |

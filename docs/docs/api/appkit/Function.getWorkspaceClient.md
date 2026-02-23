@@ -1,7 +1,7 @@
 # Function: getWorkspaceClient()
 
 ```ts
-function getWorkspaceClient(config: Partial<LakebasePoolConfig>): Promise<WorkspaceClient>;
+function getWorkspaceClient(config: Partial<LakebasePoolConfig>): WorkspaceClient;
 ```
 
 Get workspace client from config or SDK default auth chain
@@ -14,4 +14,4 @@ Get workspace client from config or SDK default auth chain
 
 ## Returns
 
-`Promise`\<`WorkspaceClient`\>
+`WorkspaceClient`

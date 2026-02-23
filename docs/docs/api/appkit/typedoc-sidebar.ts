@@ -247,6 +247,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.getUsernameWithApiLookup",
+          label: "getUsernameWithApiLookup"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.getWorkspaceClient",
           label: "getWorkspaceClient"
         },

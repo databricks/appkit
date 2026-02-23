@@ -209,7 +209,7 @@ describe("createLakebasePool", () => {
         createLakebasePool({
           workspaceClient: {} as any,
         }),
-      ).toThrow("PGUSER, DATABRICKS_CLIENT_ID, or config.user");
+      ).toThrow("config.user, PGUSER or DATABRICKS_CLIENT_ID");
     });
 
     test("should use DATABRICKS_CLIENT_ID as fallback for user", () => {

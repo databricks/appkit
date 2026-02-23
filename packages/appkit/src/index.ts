@@ -27,6 +27,7 @@ export {
   generateDatabaseCredential,
   getLakebaseOrmConfig,
   getLakebasePgConfig,
+  getUsernameWithApiLookup,
   getWorkspaceClient,
   RequestedClaimsPermissionSet,
 } from "./connectors/lakebase";

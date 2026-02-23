@@ -268,7 +268,7 @@ const result = await pool.query('SELECT * FROM users');
 ```
 
 **ORM Integration:**
-Works with Drizzle, Prisma, TypeORM - see [Lakebase Integration Docs](docs/docs/integrations/lakebase.md) for examples.
+Works with Drizzle, Prisma, TypeORM - see the [`@databricks/lakebase` README](https://github.com/databricks/appkit/blob/main/packages/lakebase/README.md) for examples.
 
 **Architecture:**
 - Connector files: `packages/appkit/src/connectors/lakebase/`
