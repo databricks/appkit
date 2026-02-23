@@ -1,6 +1,6 @@
 {
-  "name": "{{.project_name}}",
-  "short_name": "{{.project_name}}",
+  "name": "{{.projectName}}",
+  "short_name": "{{.projectName}}",
   "icons": [
     {
       "src": "/favicon-192x192.png",
