@@ -45,8 +45,8 @@ type NewActivityLog = typeof activityLogs.$inferInsert;
 let db: ReturnType<typeof drizzle>;
 let pool: Pool;
 
-export async function setup() {
-  pool = createLakebasePool();
+export async function setup(user?: string) {
+  pool = createLakebasePool({ user });
   db = drizzle(pool);
 
   // For production apps, use: npx drizzle-kit push or drizzle-kit generate + migrate

@@ -143,19 +143,94 @@ The analytics plugin exposes these endpoints (mounted under `/api/analytics`):
 - `format: "JSON"` (default) returns JSON rows
 - `format: "ARROW"` returns an Arrow "statement_id" payload over SSE, then the client fetches binary Arrow from `/api/analytics/arrow-result/:jobId`
 
-### Execution context and `asUser(req)`
+### Lakebase plugin
+
+Provides a PostgreSQL connection pool for Databricks Lakebase Autoscaling with automatic OAuth token refresh.
+
+**Key features:**
+- Standard `pg.Pool` compatible with any PostgreSQL library or ORM
+- Automatic OAuth token refresh (1-hour tokens, 2-minute refresh buffer)
+- Token caching to minimize API calls
+- Built-in OpenTelemetry instrumentation (query duration, pool connections, token refresh)
+
+#### Basic usage
+
+```ts
+import { createApp, lakebase, server } from "@databricks/appkit";
+
+await createApp({
+  plugins: [server(), lakebase()],
+});
+```
+
+#### Environment variables
+
+The three required environment variables:
+
+| Variable | Description |
+|---|---|
+| `PGHOST` | Lakebase host |
+| `PGDATABASE` | Database name |
+| `LAKEBASE_ENDPOINT` | Endpoint resource path (e.g. `projects/.../branches/.../endpoints/...`) |
+
+Ensure that those environment variables are set both for local development (`.env` file) and for deployment (`app.yaml` file).
+
+For the full configuration reference (SSL, pool size, timeouts, logging, ORM examples), see the [`@databricks/lakebase` README](https://github.com/databricks/appkit/blob/main/packages/lakebase/README.md).
+
+#### Accessing the pool
+
+After initialization, access Lakebase through the `AppKit.lakebase` object:
+
+```ts
+const AppKit = await createApp({
+  plugins: [server(), lakebase()],
+});
+
+// Direct query (parameterized)
+const result = await AppKit.lakebase.query(
+  "SELECT * FROM orders WHERE user_id = $1",
+  [userId],
+);
+
+// Raw pg.Pool (for ORMs or advanced usage)
+const pool = AppKit.lakebase.pool;
+
+// ORM-ready config objects
+const ormConfig = AppKit.lakebase.getOrmConfig();  // { host, port, database, ... }
+const pgConfig = AppKit.lakebase.getPgConfig();    // pg.PoolConfig
+```
+
+#### Configuration options
+
+Pass a `pool` object to override any defaults:
+
+```ts
+await createApp({
+  plugins: [
+    lakebase({
+      pool: {
+        max: 10,                      // Max pool connections (default: 10)
+        connectionTimeoutMillis: 5000, // Connection timeout ms (default: 10000)
+        idleTimeoutMillis: 30000,      // Idle connection timeout ms (default: 30000)
+      },
+    }),
+  ],
+});
+```
+
+## Execution context and `asUser(req)`
 
 AppKit manages Databricks authentication via two contexts:
 
 - **ServiceContext** (singleton): Initialized at app startup with service principal credentials
 - **ExecutionContext**: Determined at runtime - either service principal or user context
 
-#### Headers for user context
+### Headers for user context
 
 - `x-forwarded-user`: required in production; identifies the user
 - `x-forwarded-access-token`: required for user token passthrough
 
-#### Using `asUser(req)` for user-scoped operations
+### Using `asUser(req)` for user-scoped operations
 
 The `asUser(req)` pattern allows plugins to execute operations using the requesting user's credentials:
 
@@ -174,7 +249,7 @@ router.post("/system/data", async (req, res) => {
 });
 ```
 
-#### Context helper functions
+### Context helper functions
 
 Exported from `@databricks/appkit`:
 
@@ -184,7 +259,7 @@ Exported from `@databricks/appkit`:
 - `getWorkspaceId()`: `Promise<string>` (from `DATABRICKS_WORKSPACE_ID` or fetched)
 - `isInUserContext()`: Returns `true` if currently executing in user context
 
-#### Development mode behavior
+### Development mode behavior
 
 In local development (`NODE_ENV=development`), if `asUser(req)` is called without a user token, it logs a warning and falls back to the service principal.
 

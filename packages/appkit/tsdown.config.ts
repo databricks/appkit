@@ -43,6 +43,10 @@ export default defineConfig([
         to: "dist/plugins/analytics/manifest.json",
       },
       {
+        from: "src/plugins/lakebase/manifest.json",
+        to: "dist/plugins/lakebase/manifest.json",
+      },
+      {
         from: "src/plugins/server/manifest.json",
         to: "dist/plugins/server/manifest.json",
       },
