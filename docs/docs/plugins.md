@@ -205,16 +205,16 @@ const AppKit = await createApp({
 
 For complete configuration options, see [`createApp`](api/appkit/Function.createApp.md).
 
-## Plugin CLI
+## Plugin management
 
-AppKit includes a CLI for managing plugins. All commands are available under `npx appkit plugin`.
+AppKit includes a CLI for managing plugins. All commands are available under `npx @databricks/appkit plugin`.
 
 ### Create a plugin
 
 Scaffold a new plugin interactively:
 
 ```bash
-npx appkit plugin create
+npx @databricks/appkit plugin create
 ```
 
 The wizard walks you through:
@@ -230,7 +230,7 @@ The command generates a complete plugin scaffold with `manifest.json`, TypeScrip
 Scan your project for plugins and generate `appkit.plugins.json`:
 
 ```bash
-npx appkit plugin sync --write
+npx @databricks/appkit plugin sync --write
 ```
 
 This discovers plugin manifests from installed packages and local imports, then writes a consolidated manifest used by deployment tooling. Plugins referenced in your `createApp({ plugins: [...] })` call are automatically marked as required.
@@ -253,10 +253,10 @@ Check plugin manifests against the JSON schema:
 
 ```bash
 # Validate manifest.json in the current directory
-npx appkit plugin validate
+npx @databricks/appkit plugin validate
 
 # Validate specific files or directories
-npx appkit plugin validate plugins/my-plugin appkit.plugins.json
+npx @databricks/appkit plugin validate plugins/my-plugin appkit.plugins.json
 ```
 
 The validator auto-detects whether a file is a plugin manifest or a template manifest (from `$schema`) and reports errors with humanized paths and expected values.
@@ -267,13 +267,13 @@ View registered plugins from `appkit.plugins.json` or scan a directory:
 
 ```bash
 # From appkit.plugins.json (default)
-npx appkit plugin list
+npx @databricks/appkit plugin list
 
 # Scan a directory for plugin folders
-npx appkit plugin list --dir plugins/
+npx @databricks/appkit plugin list --dir plugins/
 
 # JSON output for scripting
-npx appkit plugin list --json
+npx @databricks/appkit plugin list --json
 ```
 
 ### Add a resource to a plugin
@@ -281,10 +281,10 @@ npx appkit plugin list --json
 Interactively add a new resource requirement to an existing plugin manifest:
 
 ```bash
-npx appkit plugin add-resource
+npx @databricks/appkit plugin add-resource
 
 # Or specify the plugin directory
-npx appkit plugin add-resource --path plugins/my-plugin
+npx @databricks/appkit plugin add-resource --path plugins/my-plugin
 ```
 
 ## Creating custom plugins
@@ -292,7 +292,7 @@ npx appkit plugin add-resource --path plugins/my-plugin
 If you need custom API routes or background logic, implement an AppKit plugin. The fastest way is to use the CLI:
 
 ```bash
-npx appkit plugin create
+npx @databricks/appkit plugin create
 ```
 
 For a deeper understanding of the plugin structure, read on.

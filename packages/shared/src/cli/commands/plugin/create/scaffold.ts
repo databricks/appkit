@@ -1,12 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import {
-  DEFAULT_PERMISSION_BY_TYPE,
-  getDefaultFieldsForType,
-  humanizeResourceType,
-  MANIFEST_SCHEMA_ID,
-  resourceKeyFromType,
-} from "./resource-defaults";
+import { humanizeResourceType, MANIFEST_SCHEMA_ID } from "./resource-defaults";
 import type { CreateAnswers } from "./types";
 
 /** Convert kebab-name to PascalCase (e.g. my-plugin -> MyPlugin). */
@@ -29,17 +23,14 @@ function buildManifestResources(answers: CreateAnswers) {
   const optional: unknown[] = [];
 
   for (const r of answers.resources) {
-    const permission = DEFAULT_PERMISSION_BY_TYPE[r.type] ?? "CAN_VIEW";
-    const fields = getDefaultFieldsForType(r.type);
     const alias = humanizeResourceType(r.type);
-    const resourceKey = resourceKeyFromType(r.type);
     const entry = {
       type: r.type,
       alias,
-      resourceKey,
+      resourceKey: r.resourceKey,
       description: r.description || `Required for ${alias} functionality.`,
-      permission,
-      fields,
+      permission: r.permission,
+      fields: r.fields,
     };
     if (r.required) {
       required.push(entry);
@@ -62,7 +53,7 @@ function buildManifest(answers: CreateAnswers): Record<string, unknown> {
     resources: { required, optional },
   };
   if (answers.author) manifest.author = answers.author;
-  if (answers.version) manifest.version = answers.version;
+  manifest.version = answers.version || "0.1.0";
   if (answers.license) manifest.license = answers.license;
   return manifest;
 }
@@ -181,7 +172,7 @@ export const ${exportName} = toPlugin<
 
       const packageJson = {
         name: packageName,
-        version: answers.version || "1.0.0",
+        version: answers.version || "0.1.0",
         type: "module",
         main: "./dist/index.js",
         types: "./dist/index.d.ts",

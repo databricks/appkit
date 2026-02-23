@@ -24,7 +24,7 @@ const BASE_ANSWERS: CreateAnswers = {
   displayName: "My Plugin",
   description: "A test plugin",
   resources: [],
-  version: "1.0.0",
+  version: "0.1.0",
 };
 
 describe("scaffold", () => {
@@ -83,6 +83,7 @@ describe("scaffold", () => {
       expect(manifest.name).toBe("my-plugin");
       expect(manifest.displayName).toBe("My Plugin");
       expect(manifest.description).toBe("A test plugin");
+      expect(manifest.version).toBe("0.1.0");
       expect(manifest.resources).toEqual({ required: [], optional: [] });
       expect(manifest.$schema).toContain("plugin-manifest.schema.json");
     });
@@ -130,8 +131,26 @@ describe("scaffold", () => {
             type: "sql_warehouse",
             required: true,
             description: "Needed for queries",
+            resourceKey: "sql-warehouse",
+            permission: "CAN_USE",
+            fields: {
+              id: {
+                env: "DATABRICKS_WAREHOUSE_ID",
+                description: "SQL Warehouse ID",
+              },
+            },
           },
-          { type: "secret", required: false, description: "Optional creds" },
+          {
+            type: "secret",
+            required: false,
+            description: "Optional creds",
+            resourceKey: "secret",
+            permission: "READ",
+            fields: {
+              scope: { env: "SECRET_SCOPE", description: "Secret scope name" },
+              key: { env: "SECRET_KEY", description: "Secret key" },
+            },
+          },
         ],
       };
 
@@ -143,7 +162,10 @@ describe("scaffold", () => {
       expect(manifest.resources.required).toHaveLength(1);
       expect(manifest.resources.optional).toHaveLength(1);
       expect(manifest.resources.required[0].type).toBe("sql_warehouse");
+      expect(manifest.resources.required[0].resourceKey).toBe("sql-warehouse");
+      expect(manifest.resources.required[0].permission).toBe("CAN_USE");
       expect(manifest.resources.optional[0].type).toBe("secret");
+      expect(manifest.resources.optional[0].resourceKey).toBe("secret");
     });
 
     it("includes optional author, version, license", () => {
@@ -193,7 +215,7 @@ describe("scaffold", () => {
         fs.readFileSync(path.join(targetDir, "package.json"), "utf-8"),
       );
       expect(pkg.name).toBe("appkit-plugin-my-plugin");
-      expect(pkg.version).toBe("1.0.0");
+      expect(pkg.version).toBe("0.1.0");
       expect(pkg.type).toBe("module");
       expect(pkg.peerDependencies["@databricks/appkit"]).toBeDefined();
     });

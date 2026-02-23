@@ -4,11 +4,14 @@
 
 export type Placement = "in-repo" | "isolated";
 
-/** A resource selected by the user (type + required/optional + description). */
+/** A resource selected by the user (full spec from prompts, shared with add-resource). */
 export interface SelectedResource {
   type: string;
   required: boolean;
   description: string;
+  resourceKey: string;
+  permission: string;
+  fields: Record<string, { env: string; description?: string }>;
 }
 
 /** Collected answers from prompts. */

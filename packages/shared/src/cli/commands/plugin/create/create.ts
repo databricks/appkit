@@ -13,15 +13,13 @@ import {
   text,
 } from "@clack/prompts";
 import { Command } from "commander";
-import {
-  humanizeResourceType,
-  RESOURCE_TYPE_OPTIONS,
-} from "./resource-defaults";
+import { promptOneResource } from "./prompt-resource";
+import { RESOURCE_TYPE_OPTIONS } from "./resource-defaults";
 import { resolveTargetDir, scaffoldPlugin } from "./scaffold";
-import type { CreateAnswers, Placement, SelectedResource } from "./types";
+import type { CreateAnswers, Placement } from "./types";
 
 const NAME_PATTERN = /^[a-z][a-z0-9-]*$/;
-const DEFAULT_VERSION = "1.0.0";
+const DEFAULT_VERSION = "0.1.0";
 
 async function runPluginCreate(): Promise<void> {
   intro("Create a new AppKit plugin");
@@ -132,69 +130,21 @@ async function runPluginCreate(): Promise<void> {
       process.exit(0);
     }
 
-    const resources: SelectedResource[] = [];
+    const resources: CreateAnswers["resources"] = [];
     for (const type of resourceTypes as string[]) {
-      const required = await select<boolean>({
-        message: `${humanizeResourceType(type)} – required or optional?`,
-        options: [
-          {
-            value: true,
-            label: "Required",
-            hint: "plugin needs it to function",
-          },
-          { value: false, label: "Optional", hint: "enhances functionality" },
-        ],
-      });
-      if (isCancel(required)) {
-        cancel("Cancelled.");
-        process.exit(0);
-      }
-      const resourceDescription = await text({
-        message: `Short description for ${humanizeResourceType(type)}`,
-        placeholder: required ? "Required for …" : "Optional for …",
-      });
-      if (isCancel(resourceDescription)) {
+      const spec = await promptOneResource({ type });
+      if (!spec) {
         cancel("Cancelled.");
         process.exit(0);
       }
       resources.push({
-        type,
-        required: required as boolean,
-        description: (resourceDescription as string) || "",
+        type: spec.type,
+        required: spec.required,
+        description: spec.description,
+        resourceKey: spec.resourceKey,
+        permission: spec.permission,
+        fields: spec.fields,
       });
-    }
-
-    let author: string | undefined;
-    const askAuthor = await confirm({
-      message: "Add author?",
-      initialValue: false,
-    });
-    if (!isCancel(askAuthor) && askAuthor) {
-      const a = await text({ message: "Author name or organization" });
-      if (!isCancel(a)) author = a as string;
-    }
-
-    const version = await text({
-      message: "Version",
-      placeholder: DEFAULT_VERSION,
-      initialValue: DEFAULT_VERSION,
-    });
-    if (isCancel(version)) {
-      cancel("Cancelled.");
-      process.exit(0);
-    }
-
-    let license: string | undefined;
-    const askLicense = await confirm({
-      message: "Add license?",
-      initialValue: false,
-    });
-    if (!isCancel(askLicense) && askLicense) {
-      const lic = await text({
-        message: "License (e.g. MIT, Apache-2.0)",
-        placeholder: "MIT",
-      });
-      if (!isCancel(lic)) license = lic as string;
     }
 
     const answers: CreateAnswers = {
@@ -204,9 +154,7 @@ async function runPluginCreate(): Promise<void> {
       displayName: (displayName as string).trim(),
       description: (description as string).trim(),
       resources,
-      author,
-      version: (version as string).trim() || DEFAULT_VERSION,
-      license,
+      version: DEFAULT_VERSION,
     };
 
     const targetDir = resolveTargetDir(process.cwd(), answers);
@@ -221,15 +169,6 @@ async function runPluginCreate(): Promise<void> {
         cancel("Cancelled.");
         process.exit(0);
       }
-    }
-
-    const proceed = await confirm({
-      message: "Create plugin with these options?",
-      initialValue: true,
-    });
-    if (isCancel(proceed) || !proceed) {
-      cancel("Cancelled.");
-      process.exit(0);
     }
 
     const s = spinner();
