@@ -104,5 +104,5 @@ data?.forEach(row => {
 
 ## See also
 
-- [Plugins](../plugins.md) - Analytics plugin configuration
+- [Plugins](../plugins/index.md) - Analytics plugin configuration
 - [API Reference](/docs/api/appkit-ui) - Complete UI components API documentation
