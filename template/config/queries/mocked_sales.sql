@@ -1,3 +1,4 @@
+{{if .plugins.analytics -}}
 WITH mock_data AS (
   SELECT 'January' AS month, 1 AS month_num, 65000 AS revenue, 45000 AS expenses, 850 AS customers
   UNION ALL SELECT 'February', 2, 72000, 48000, 920
@@ -16,3 +17,4 @@ SELECT *
 FROM mock_data
 WHERE month_num <= :max_month_num
 ORDER BY month_num;
+{{- end}}

@@ -1,35 +1,35 @@
 bundle:
-  name: {{.project_name}}
-{{if .variables}}
+  name: {{.projectName}}
+{{- if .bundle.variables}}
 
 variables:
-{{.variables}}
+{{.bundle.variables}}
 {{- end}}
 
 resources:
   apps:
     app:
-      name: "{{.project_name}}"
-      description: "{{.app_description}}"
+      name: "{{.projectName}}"
+      description: "{{.appDescription}}"
       source_code_path: ./
 
       # Uncomment to enable on behalf of user API scopes. Available scopes: sql, dashboards.genie, files.files
       # user_api_scopes:
       #   - sql
-{{if .resources}}
+{{- if .bundle.resources}}
 
       # The resources which this app has access to.
       resources:
-{{.resources}}
+{{.bundle.resources}}
 {{- end}}
 
 targets:
   default:
     default: true
     workspace:
-      host: {{.workspace_host}}
-{{if .target_variables}}
+      host: {{.workspaceHost}}
+{{- if .bundle.targetVariables}}
 
     variables:
-{{.target_variables}}
+{{.bundle.targetVariables}}
 {{- end}}
