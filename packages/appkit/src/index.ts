@@ -45,7 +45,7 @@ export {
   ValidationError,
 } from "./errors";
 // Plugin authoring
-export { Plugin, toPlugin } from "./plugin";
+export { Plugin, type ToPlugin, toPlugin } from "./plugin";
 export { analytics, server } from "./plugins";
 // Registry types and utilities for plugin manifests
 export type {
