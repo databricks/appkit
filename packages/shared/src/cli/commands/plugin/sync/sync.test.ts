@@ -88,6 +88,15 @@ describe("plugin sync", () => {
       expect(imports[0].source).toBe("./plugins/my-plugin");
     });
 
+    it("extracts relative imports with file extension (.js)", () => {
+      const imports = parseCode(
+        `import { myPlugin } from "./my-plugin/my-plugin.js";`,
+      );
+      expect(imports).toHaveLength(1);
+      expect(imports[0].name).toBe("myPlugin");
+      expect(imports[0].source).toBe("./my-plugin/my-plugin.js");
+    });
+
     it("handles double-quoted specifiers", () => {
       const imports = parseCode(`import { foo } from "@databricks/appkit";`);
       expect(imports[0].source).toBe("@databricks/appkit");

@@ -210,6 +210,14 @@ function resolveLocalManifest(
     return null;
   }
 
+  // Case 0: Import path already includes an extension and resolves to a file
+  // e.g. ./my-plugin/my-plugin.js → ./my-plugin/manifest.json
+  if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
+    const dir = path.dirname(resolved);
+    const manifestPath = path.join(dir, "manifest.json");
+    if (fs.existsSync(manifestPath)) return manifestPath;
+  }
+
   // Case 1: Import path is a directory with manifest.json
   // e.g. ./plugins/my-plugin → ./plugins/my-plugin/manifest.json
   if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
@@ -219,9 +227,13 @@ function resolveLocalManifest(
 
   // Case 2: Import path + extension resolves to a file
   // e.g. ./plugins/my-plugin → ./plugins/my-plugin.ts
-  // Look for manifest.json in the same directory
+  // If resolved already has an extension (e.g. .js), try base path + each ext
+  // so that ./my-plugin/my-plugin.js finds ./my-plugin/my-plugin.ts on disk
+  const basePath = path.extname(resolved).match(/^\.(js|ts|tsx|jsx)$/)
+    ? resolved.slice(0, -path.extname(resolved).length)
+    : resolved;
   for (const ext of RESOLVE_EXTENSIONS) {
-    const filePath = `${resolved}${ext}`;
+    const filePath = `${basePath}${ext}`;
     if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
       const dir = path.dirname(filePath);
       const manifestPath = path.join(dir, "manifest.json");
@@ -561,14 +573,23 @@ function runPluginsSync(options: {
     let plugin: TemplatePlugin | undefined;
 
     if (isLocal) {
-      // Resolve the import source to an absolute path from the server file directory
-      const resolvedImportDir = path.resolve(serverFileDir, imp.source);
+      // Resolve the import source to the plugin directory for comparison.
+      // When the path is a file (or has an extension but file is .ts on disk),
+      // use its directory so ./my-plugin/my-plugin.js matches plugin at ./my-plugin
+      const resolvedImportPath = path.resolve(serverFileDir, imp.source);
+      const exists = fs.existsSync(resolvedImportPath);
+      const resolvedImportDir =
+        exists && fs.statSync(resolvedImportPath).isFile()
+          ? path.dirname(resolvedImportPath)
+          : exists && fs.statSync(resolvedImportPath).isDirectory()
+            ? resolvedImportPath
+            : path.dirname(resolvedImportPath);
+      // Match by directory only: one manifest per dir, and manifest.name may be
+      // kebab-case (e.g. "my-plugin") while the import is camelCase (myPlugin)
       plugin = Object.values(plugins).find((p) => {
         if (!p.package.startsWith(".")) return false;
         const resolvedPluginDir = path.resolve(cwd, p.package);
-        return (
-          resolvedPluginDir === resolvedImportDir && p.name === imp.originalName
-        );
+        return resolvedPluginDir === resolvedImportDir;
       });
     } else {
       // npm import: direct string comparison
