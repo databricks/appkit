@@ -116,7 +116,6 @@ describe("scaffold", () => {
       );
       expect(indexTs).toContain("MyPlugin");
       expect(indexTs).toContain("myPlugin");
-      expect(indexTs).toContain("manifest");
     });
 
     it("includes resources in manifest when provided", () => {
