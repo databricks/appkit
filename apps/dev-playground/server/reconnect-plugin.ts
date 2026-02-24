@@ -14,6 +14,7 @@ interface ReconnectStreamResponse {
 }
 
 export class ReconnectPlugin extends Plugin {
+  static override readonly name = "reconnect";
   public name = "reconnect";
 
   static manifest = {
@@ -84,8 +85,4 @@ export class ReconnectPlugin extends Plugin {
   }
 }
 
-export const reconnect = toPlugin<
-  typeof ReconnectPlugin,
-  Record<string, never>,
-  "reconnect"
->(ReconnectPlugin, "reconnect");
+export const reconnect = toPlugin(ReconnectPlugin);

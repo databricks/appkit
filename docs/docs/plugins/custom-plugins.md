@@ -21,9 +21,9 @@ import { Plugin, toPlugin } from "@databricks/appkit";
 import type express from "express";
 
 class MyPlugin extends Plugin {
+  static override readonly name = "myPlugin";
   name = "myPlugin";
 
-  // Define resource requirements in the static manifest
   static manifest = {
     name: "myPlugin",
     displayName: "My Plugin",
@@ -59,17 +59,13 @@ class MyPlugin extends Plugin {
   }
 
   exports() {
-    // an object with the methods from this plugin to expose
     return {
       myCustomMethod: this.myCustomMethod
     }
   }
 }
 
-export const myPlugin = toPlugin<typeof MyPlugin, Record<string, never>, "myPlugin">(
-  MyPlugin,
-  "myPlugin",
-);
+export const myPlugin = toPlugin(MyPlugin);
 ```
 
 ## Config-dependent resources
@@ -84,6 +80,7 @@ interface MyPluginConfig extends BasePluginConfig {
 }
 
 class MyPlugin extends Plugin<MyPluginConfig> {
+  static override readonly name = "myPlugin";
   name = "myPlugin";
 
   static manifest = {

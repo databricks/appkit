@@ -100,7 +100,8 @@ describe("scaffold", () => {
         "utf-8",
       );
       expect(pluginTs).toContain("class MyPlugin");
-      expect(pluginTs).toContain("export const myPlugin = toPlugin");
+      expect(pluginTs).toContain('static override readonly name = "my-plugin"');
+      expect(pluginTs).toContain("export const myPlugin = toPlugin(MyPlugin)");
       expect(pluginTs).toContain('import manifest from "./manifest.json"');
       expect(pluginTs).toContain("manifest as PluginManifest");
     });
@@ -118,6 +119,7 @@ describe("scaffold", () => {
       );
       expect(indexTs).toContain("MyPlugin");
       expect(indexTs).toContain("myPlugin");
+      expect(indexTs).toContain("manifest");
     });
 
     it("includes resources in manifest when provided", () => {

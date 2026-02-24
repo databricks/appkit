@@ -18,6 +18,7 @@ import type {
 const logger = createLogger("genie");
 
 export class GeniePlugin extends Plugin {
+  static override readonly name = "genie";
   name = "genie";
 
   static manifest = manifest as PluginManifest;
@@ -231,7 +232,4 @@ export class GeniePlugin extends Plugin {
 /**
  * @internal
  */
-export const genie = toPlugin<typeof GeniePlugin, IGenieConfig, "genie">(
-  GeniePlugin,
-  "genie",
-);
+export const genie = toPlugin(GeniePlugin);

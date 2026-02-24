@@ -98,6 +98,7 @@ describe("ServerPlugin with custom plugin", () => {
 
     // Create a simple test plugin
     class TestPlugin extends Plugin {
+      static override readonly name = "test-plugin";
       static manifest = {
         name: "test-plugin",
         displayName: "Test Plugin",
@@ -117,10 +118,7 @@ describe("ServerPlugin with custom plugin", () => {
       }
     }
 
-    const testPlugin = toPlugin<typeof TestPlugin, any, "test-plugin">(
-      TestPlugin,
-      "test-plugin",
-    );
+    const testPlugin = toPlugin(TestPlugin);
 
     const app = await createApp({
       plugins: [

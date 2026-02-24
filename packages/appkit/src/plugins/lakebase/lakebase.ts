@@ -31,6 +31,7 @@ const logger = createLogger("lakebase");
  * ```
  */
 export class LakebasePlugin extends Plugin {
+  static override readonly name = "lakebase";
   name = "lakebase";
 
   /** Plugin manifest declaring metadata and resource requirements */
@@ -118,8 +119,4 @@ export class LakebasePlugin extends Plugin {
 /**
  * @internal
  */
-export const lakebase = toPlugin<
-  typeof LakebasePlugin,
-  ILakebaseConfig,
-  "lakebase"
->(LakebasePlugin, "lakebase");
+export const lakebase = toPlugin(LakebasePlugin);

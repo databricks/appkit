@@ -16,6 +16,7 @@ import {
 import type { Request, Response, Router } from "express";
 
 class TelemetryExamples extends Plugin {
+  static override readonly name = "telemetry-examples";
   public name = "telemetry-examples" as const;
 
   static manifest = {
@@ -522,8 +523,4 @@ class TelemetryExamples extends Plugin {
   }
 }
 
-export const telemetryExamples = toPlugin<
-  typeof TelemetryExamples,
-  BasePluginConfig,
-  "telemetryExamples"
->(TelemetryExamples, "telemetryExamples");
+export const telemetryExamples = toPlugin(TelemetryExamples);

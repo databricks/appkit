@@ -44,6 +44,7 @@ export class ServerPlugin extends Plugin {
   /** Plugin manifest declaring metadata and resource requirements */
   static manifest = manifest as PluginManifest;
 
+  static override readonly name = "server";
   public name = "server" as const;
   private serverApplication: express.Application;
   private server: HTTPServer | null;
@@ -355,10 +356,7 @@ const EXCLUDED_PLUGINS = [ServerPlugin.name];
 /**
  * @internal
  */
-export const server = toPlugin<typeof ServerPlugin, ServerConfig, "server">(
-  ServerPlugin,
-  "server",
-);
+export const server = toPlugin(ServerPlugin);
 
 // Export manifest and types
 export type { ServerConfig } from "./types";

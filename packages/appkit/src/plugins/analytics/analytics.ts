@@ -27,6 +27,7 @@ import type {
 const logger = createLogger("analytics");
 
 export class AnalyticsPlugin extends Plugin {
+  static override readonly name = "analytics";
   name = "analytics";
 
   /** Plugin manifest declaring metadata and resource requirements */
@@ -286,8 +287,4 @@ export class AnalyticsPlugin extends Plugin {
 /**
  * @internal
  */
-export const analytics = toPlugin<
-  typeof AnalyticsPlugin,
-  IAnalyticsConfig,
-  "analytics"
->(AnalyticsPlugin, "analytics");
+export const analytics = toPlugin(AnalyticsPlugin);

@@ -124,6 +124,7 @@ export function scaffoldPlugin(
 import manifest from "./manifest.json";
 
 export class ${className} extends Plugin {
+  static override readonly name = "${answers.name}";
   name = "${answers.name}";
 
   static manifest = manifest as PluginManifest;
@@ -141,11 +142,7 @@ export class ${className} extends Plugin {
   }
 }
 
-export const ${exportName} = toPlugin<
-  typeof ${className},
-  Record<string, never>,
-  "${answers.name}"
->(${className}, "${answers.name}");
+export const ${exportName} = toPlugin(${className});
 `;
 
     writeTracked(path.join(targetDir, `${answers.name}.ts`), pluginTs, written);

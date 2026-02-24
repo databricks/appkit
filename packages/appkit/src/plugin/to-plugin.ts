@@ -1,15 +1,19 @@
-import type { PluginData, ToPlugin } from "shared";
+import type { PluginConstructor, PluginData, ToPlugin } from "shared";
 
 /**
+ * Wraps a plugin class so it can be passed to createApp with optional config.
+ * Infers config type from the constructor and plugin name from the static `name` property.
+ *
  * @internal
  */
-export function toPlugin<T, U, N extends string>(
+export function toPlugin<T extends PluginConstructor & { name: string }>(
   plugin: T,
-  name: N,
-): ToPlugin<T, U, N> {
-  return (config: U = {} as U): PluginData<T, U, N> => ({
+): ToPlugin<T, ConstructorParameters<T>[0], T["name"]> {
+  type Config = ConstructorParameters<T>[0];
+  type Name = T["name"];
+  return (config: Config = {} as Config): PluginData<T, Config, Name> => ({
     plugin: plugin as T,
-    config: config as U,
-    name,
+    config: config as Config,
+    name: plugin.name as Name,
   });
 }

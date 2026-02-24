@@ -19,6 +19,7 @@ import * as typeormExample from "./lakebase-examples/typeorm-example";
  */
 
 export class LakebaseExamplesPlugin extends Plugin {
+  static override readonly name = "lakebase-examples";
   public name = "lakebase-examples";
   protected envVars: string[] = [];
 
@@ -80,8 +81,4 @@ export class LakebaseExamplesPlugin extends Plugin {
   }
 }
 
-export const lakebaseExamples = toPlugin<
-  typeof LakebaseExamplesPlugin,
-  Record<string, never>,
-  "lakebase-examples"
->(LakebaseExamplesPlugin, "lakebase-examples");
+export const lakebaseExamples = toPlugin(LakebaseExamplesPlugin);
