@@ -110,23 +110,23 @@
     },
     "secretPermission": {
       "type": "string",
-      "enum": ["MANAGE", "READ", "WRITE"],
-      "description": "Permission for secret resources"
+      "enum": ["READ", "WRITE", "MANAGE"],
+      "description": "Permission for secret resources (order: weakest to strongest)"
     },
     "jobPermission": {
       "type": "string",
-      "enum": ["CAN_MANAGE", "CAN_MANAGE_RUN", "CAN_VIEW"],
-      "description": "Permission for job resources"
+      "enum": ["CAN_VIEW", "CAN_MANAGE_RUN", "CAN_MANAGE"],
+      "description": "Permission for job resources (order: weakest to strongest)"
     },
     "sqlWarehousePermission": {
       "type": "string",
-      "enum": ["CAN_MANAGE", "CAN_USE"],
-      "description": "Permission for SQL warehouse resources"
+      "enum": ["CAN_USE", "CAN_MANAGE"],
+      "description": "Permission for SQL warehouse resources (order: weakest to strongest)"
     },
     "servingEndpointPermission": {
       "type": "string",
-      "enum": ["CAN_MANAGE", "CAN_QUERY", "CAN_VIEW"],
-      "description": "Permission for serving endpoint resources"
+      "enum": ["CAN_VIEW", "CAN_QUERY", "CAN_MANAGE"],
+      "description": "Permission for serving endpoint resources (order: weakest to strongest)"
     },
     "volumePermission": {
       "type": "string",
@@ -155,13 +155,13 @@
     },
     "genieSpacePermission": {
       "type": "string",
-      "enum": ["CAN_EDIT", "CAN_VIEW", "CAN_RUN", "CAN_MANAGE"],
-      "description": "Permission for Genie Space resources"
+      "enum": ["CAN_VIEW", "CAN_RUN", "CAN_EDIT", "CAN_MANAGE"],
+      "description": "Permission for Genie Space resources (order: weakest to strongest)"
     },
     "experimentPermission": {
       "type": "string",
       "enum": ["CAN_READ", "CAN_EDIT", "CAN_MANAGE"],
-      "description": "Permission for MLflow experiment resources"
+      "description": "Permission for MLflow experiment resources (order: weakest to strongest)"
     },
     "appPermission": {
       "type": "string",

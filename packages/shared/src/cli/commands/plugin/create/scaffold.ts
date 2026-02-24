@@ -159,7 +159,7 @@ export const ${exportName} = toPlugin<
 
     writeTracked(path.join(targetDir, `${answers.name}.ts`), pluginTs, written);
 
-    const indexTs = `export { ${className}, ${exportName}, manifest } from "./${answers.name}.js";
+    const indexTs = `export { ${className}, ${exportName} } from "./${answers.name}.js";
 `;
 
     writeTracked(path.join(targetDir, "index.ts"), indexTs, written);
