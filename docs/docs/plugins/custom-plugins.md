@@ -1,10 +1,16 @@
 ---
-sidebar_position: 6
+sidebar_position: 7
 ---
 
 # Creating custom plugins
 
-If you need custom API routes or background logic, implement an AppKit plugin.
+If you need custom API routes or background logic, implement an AppKit plugin. The fastest way is to use the CLI:
+
+```bash
+npx @databricks/appkit plugin create
+```
+
+For a deeper understanding of the plugin structure, read on.
 
 ## Basic plugin example
 
