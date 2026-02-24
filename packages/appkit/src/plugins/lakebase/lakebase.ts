@@ -63,7 +63,6 @@ export class LakebasePlugin extends Plugin {
    * @param text - SQL query string, using `$1`, `$2`, ... placeholders
    * @param values - Parameter values corresponding to placeholders
    * @returns Query result with typed rows
-   * @throws If the pool has not been initialized (i.e. `setup()` was not called)
    *
    * @example
    * ```ts
@@ -77,10 +76,8 @@ export class LakebasePlugin extends Plugin {
     text: string,
     values?: unknown[],
   ): Promise<pg.QueryResult<T>> {
-    if (!this.pool) {
-      throw new Error("Lakebase pool not initialized. Was setup() called?");
-    }
-    return this.pool.query<T>(text, values);
+    // biome-ignore lint/style/noNonNullAssertion: pool is guaranteed non-null after setup(), which AppKit always awaits before exposing the plugin API
+    return this.pool!.query<T>(text, values);
   }
 
   /**
@@ -107,13 +104,9 @@ export class LakebasePlugin extends Plugin {
    * - `getPgConfig()` — Returns a `pg.PoolConfig` object for manual pool construction
    */
   exports() {
-    const pool = this.pool;
-    if (!pool) {
-      throw new Error("Lakebase pool not initialized. Was setup() called?");
-    }
-
     return {
-      pool: pool,
+      // biome-ignore lint/style/noNonNullAssertion: pool is guaranteed non-null after setup(), which AppKit always awaits before exposing the plugin API
+      pool: this.pool!,
       query: this.query.bind(this),
       getOrmConfig: () => getLakebaseOrmConfig(this.config.pool),
       getPgConfig: () => getLakebasePgConfig(this.config.pool),
