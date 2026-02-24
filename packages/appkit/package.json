@@ -33,7 +33,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build:package": "tsdown --config tsdown.config.ts",
+    "build:package": "pnpm exec tsx ../../tools/generate-registry-types.ts && tsdown --config tsdown.config.ts",
     "build:watch": "tsdown --config tsdown.config.ts --watch",
     "clean:full": "rm -rf dist node_modules tmp",
     "clean": "rm -rf dist tmp",

@@ -1,47 +1,26 @@
 /**
  * Resource type and permission defaults for plugin scaffolding.
- * Aligned with plugin-manifest.schema.json $defs.
+ * Values are derived from plugin-manifest.schema.json via schema-resources.
  */
+
+import {
+  getResourceTypeOptions,
+  getResourceTypePermissions,
+  type ResourceTypeOption,
+} from "../schema-resources";
 
 export const MANIFEST_SCHEMA_ID =
   "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json";
 
-export interface ResourceTypeOption {
-  value: string;
-  label: string;
-}
+export type { ResourceTypeOption };
 
 /** Resource types from schema resourceType enum (value, human label). */
-export const RESOURCE_TYPE_OPTIONS: ResourceTypeOption[] = [
-  { value: "secret", label: "Secret" },
-  { value: "job", label: "Job" },
-  { value: "sql_warehouse", label: "SQL Warehouse" },
-  { value: "serving_endpoint", label: "Serving Endpoint" },
-  { value: "volume", label: "Volume" },
-  { value: "vector_search_index", label: "Vector Search Index" },
-  { value: "uc_function", label: "UC Function" },
-  { value: "uc_connection", label: "UC Connection" },
-  { value: "database", label: "Database" },
-  { value: "genie_space", label: "Genie Space" },
-  { value: "experiment", label: "Experiment" },
-  { value: "app", label: "App" },
-];
+export const RESOURCE_TYPE_OPTIONS: ResourceTypeOption[] =
+  getResourceTypeOptions();
 
-/** All valid permissions per resource type, aligned with the schema if/then rules. */
-export const PERMISSIONS_BY_TYPE: Record<string, string[]> = {
-  secret: ["READ", "WRITE", "MANAGE"],
-  job: ["CAN_VIEW", "CAN_MANAGE_RUN", "CAN_MANAGE"],
-  sql_warehouse: ["CAN_USE", "CAN_MANAGE"],
-  serving_endpoint: ["CAN_QUERY", "CAN_VIEW", "CAN_MANAGE"],
-  volume: ["READ_VOLUME", "WRITE_VOLUME"],
-  vector_search_index: ["SELECT"],
-  uc_function: ["EXECUTE"],
-  uc_connection: ["USE_CONNECTION"],
-  database: ["CAN_CONNECT_AND_CREATE"],
-  genie_space: ["CAN_VIEW", "CAN_RUN", "CAN_EDIT", "CAN_MANAGE"],
-  experiment: ["CAN_READ", "CAN_EDIT", "CAN_MANAGE"],
-  app: ["CAN_USE"],
-};
+/** All valid permissions per resource type, from schema allOf/if-then rules. */
+export const PERMISSIONS_BY_TYPE: Record<string, string[]> =
+  getResourceTypePermissions();
 
 /** Default (first) permission per resource type for scaffolding. */
 export const DEFAULT_PERMISSION_BY_TYPE: Record<string, string> =
