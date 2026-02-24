@@ -1,0 +1,64 @@
+{
+  "name": "multi-genie",
+  "displayName": "Multi-Genie Plugin",
+  "description": "Supervisor agent that routes questions across multiple Genie spaces using an LLM",
+  "resources": {
+    "required": [
+      {
+        "type": "genie_space",
+        "alias": "Genie Spaces",
+        "resourceKey": "multi-genie-spaces",
+        "description": "Multiple Genie Spaces for cross-domain AI queries. Space IDs configured via plugin config.",
+        "permission": "CAN_RUN",
+        "fields": {
+          "id": {
+            "env": "DATABRICKS_GENIE_SPACE_ID",
+            "description": "Default Genie Space ID"
+          }
+        }
+      }
+    ],
+    "optional": []
+  },
+  "config": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "genieSpaces": {
+          "type": "object",
+          "description": "Map of alias names to Genie Space IDs",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "genieSpaceDescriptions": {
+          "type": "object",
+          "description": "Human-readable descriptions per alias for the agent prompt",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "endpoint": {
+          "type": "string",
+          "description": "Serving endpoint URL (OpenAI-compatible chat completions)"
+        },
+        "model": {
+          "type": "string",
+          "default": "default",
+          "description": "Model name for the serving endpoint"
+        },
+        "timeout": {
+          "type": "number",
+          "default": 120000,
+          "description": "Genie polling timeout in ms per space query"
+        },
+        "maxIterations": {
+          "type": "number",
+          "default": 5,
+          "description": "Max agent tool-call iterations"
+        }
+      },
+      "required": ["genieSpaces", "endpoint"]
+    }
+  }
+}

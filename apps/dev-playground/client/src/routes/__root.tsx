@@ -80,6 +80,14 @@ function RootComponent() {
                     Genie
                   </Button>
                 </Link>
+                <Link to="/multi-genie" className="no-underline">
+                  <Button
+                    variant="ghost"
+                    className="text-foreground hover:text-secondary-foreground"
+                  >
+                    Multi-Genie
+                  </Button>
+                </Link>
                 <ThemeSelector />
               </div>
             </nav>

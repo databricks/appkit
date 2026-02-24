@@ -1,4 +1,10 @@
-import { analytics, createApp, genie, server } from "@databricks/appkit";
+import {
+  analytics,
+  createApp,
+  genie,
+  multiGenie,
+  server,
+} from "@databricks/appkit";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
@@ -21,6 +27,20 @@ createApp({
     analytics({}),
     genie({
       spaces: { demo: process.env.GENIE_SPACE_ID ?? "placeholder" },
+    }),
+    multiGenie({
+      genieSpaces: {
+        nyctaxi: process.env.NYC_GENIE_SPACE_ID ?? "placeholder",
+        bakehouse: process.env.BAKEHOUSE_GENIE_SPACE_ID ?? "placeholder",
+      },
+      genieSpaceDescriptions: {
+        nyctaxi:
+          "NYC taxi trip data including trip counts, fares, and locations",
+        bakehouse: "Bakehouse sales and product data",
+      },
+      endpoint: process.env.MULTI_GENIE_ENDPOINT ?? "placeholder",
+      model: process.env.MULTI_GENIE_MODEL,
+      endpointToken: process.env.MULTI_GENIE_ENDPOINT_TOKEN,
     }),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),

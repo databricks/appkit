@@ -30,7 +30,7 @@ export {
 } from "./errors";
 // Plugin authoring
 export { Plugin, toPlugin } from "./plugin";
-export { analytics, genie, server } from "./plugins";
+export { analytics, genie, multiGenie, server } from "./plugins";
 // Registry types and utilities for plugin manifests
 export type {
   ConfigSchema,
