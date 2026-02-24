@@ -177,6 +177,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.ResourcePermission",
           label: "ResourcePermission"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.ToPlugin",
+          label: "ToPlugin"
         }
       ]
     },
