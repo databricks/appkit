@@ -407,10 +407,6 @@ Executes a parameterized SQL query against the Lakebase pool.
 
 Query result with typed rows
 
-###### Throws
-
-If the pool has not been initialized (i.e. `setup()` was not called)
-
 ###### Example
 
 ```ts
@@ -490,10 +486,6 @@ Executes a parameterized SQL query against the Lakebase pool.
 `Promise`\<`QueryResult`\<`T`\>\>
 
 Query result with typed rows
-
-#### Throws
-
-If the pool has not been initialized (i.e. `setup()` was not called)
 
 #### Example
 
