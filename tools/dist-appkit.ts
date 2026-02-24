@@ -73,6 +73,26 @@ if (fs.existsSync(sharedBin)) {
     fs.mkdirSync(tmpCliDist, { recursive: true });
     fs.cpSync(sharedCliDist, tmpCliDist, { recursive: true });
   }
+
+  // Copy JSON schemas so CLI (e.g. plugin validate/sync) can load them at runtime.
+  // Place in both dist/schemas and dist/cli/schemas so resolution works whether
+  // the running module's __dirname is under dist/ or dist/cli/ (e.g. after bundling).
+  const sharedDistSchemas = path.join(
+    __dirname,
+    "../packages/shared/dist/schemas",
+  );
+  const sharedSrcSchemas = path.join(
+    __dirname,
+    "../packages/shared/src/schemas",
+  );
+  const sharedSchemas = fs.existsSync(sharedDistSchemas)
+    ? sharedDistSchemas
+    : sharedSrcSchemas;
+  if (fs.existsSync(sharedSchemas)) {
+    const dest = "tmp/dist/schemas";
+    fs.mkdirSync(dest, { recursive: true });
+    fs.cpSync(sharedSchemas, dest, { recursive: true });
+  }
 }
 if (fs.existsSync(sharedPostinstall)) {
   fs.mkdirSync("tmp/scripts", { recursive: true });
