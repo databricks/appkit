@@ -574,6 +574,62 @@ describe("AppKit", () => {
     });
   });
 
+  describe("createApp derives ServiceContext options from registry", () => {
+    test("should call ServiceContext.initialize with warehouseId: false when no plugin requires sql_warehouse", async () => {
+      const contextModule = await import("../../context/service-context");
+      const initSpy = vi.spyOn(contextModule.ServiceContext, "initialize");
+      const pluginData = [
+        { plugin: CoreTestPlugin, config: {}, name: "coreTest" },
+      ];
+      await createApp({ plugins: pluginData });
+      expect(initSpy).toHaveBeenCalledWith({ warehouseId: false }, undefined);
+      initSpy.mockRestore();
+    });
+
+    test("should call ServiceContext.initialize with warehouseId: true when a plugin requires sql_warehouse", async () => {
+      const PluginWithRequiredResource = class extends CoreTestPlugin {
+        static manifest: PluginManifest = {
+          name: "withResource",
+          displayName: "With Resource",
+          description: "Plugin with required warehouse",
+          resources: {
+            required: [
+              {
+                type: ResourceType.SQL_WAREHOUSE,
+                alias: "wh",
+                resourceKey: "warehouse",
+                description: "Warehouse",
+                permission: "CAN_USE",
+                fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } },
+              },
+            ],
+            optional: [],
+          },
+        };
+      };
+      const prevWh = process.env.DATABRICKS_WAREHOUSE_ID;
+      process.env.DATABRICKS_WAREHOUSE_ID = "wh-123";
+      try {
+        const contextModule = await import("../../context/service-context");
+        const initSpy = vi.spyOn(contextModule.ServiceContext, "initialize");
+        await createApp({
+          plugins: [
+            {
+              plugin: PluginWithRequiredResource,
+              config: {},
+              name: "withResource",
+            },
+          ],
+        });
+        expect(initSpy).toHaveBeenCalledWith({ warehouseId: true }, undefined);
+        initSpy.mockRestore();
+      } finally {
+        if (prevWh !== undefined) process.env.DATABRICKS_WAREHOUSE_ID = prevWh;
+        else delete process.env.DATABRICKS_WAREHOUSE_ID;
+      }
+    });
+  });
+
   describe("SDK context binding", () => {
     test("should bind SDK methods to plugin instance", async () => {
       class ContextTestPlugin implements BasePlugin {
