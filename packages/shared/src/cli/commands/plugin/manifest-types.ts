@@ -27,6 +27,7 @@ export interface PluginManifest {
     optional: ResourceRequirement[];
   };
   config?: { schema: unknown };
+  onSetupMessage?: string;
 }
 
 export interface TemplatePlugin extends Omit<PluginManifest, "config"> {

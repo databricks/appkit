@@ -34,7 +34,8 @@
       "resources": {
         "required": [],
         "optional": []
-      }
+      },
+      "onSetupMessage": "Configure environment variables before running or deploying the app.\nSee: https://databricks.github.io/appkit/docs/plugins/lakebase"
     },
     "server": {
       "name": "server",

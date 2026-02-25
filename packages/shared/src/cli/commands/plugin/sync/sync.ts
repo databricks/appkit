@@ -278,6 +278,9 @@ function discoverLocalPlugins(
         description: manifest.description,
         package: `./${relativePath}`,
         resources: manifest.resources,
+        ...(manifest.onSetupMessage && {
+          onSetupMessage: manifest.onSetupMessage,
+        }),
       };
     } catch (error) {
       console.warn(
@@ -358,6 +361,9 @@ function scanForPlugins(
         description: manifest.description,
         package: packageName,
         resources: manifest.resources,
+        ...(manifest.onSetupMessage && {
+          onSetupMessage: manifest.onSetupMessage,
+        }),
       };
     }
   }
@@ -400,6 +406,9 @@ function scanPluginsDir(
           description: manifest.description,
           package: packageName,
           resources: manifest.resources,
+          ...(manifest.onSetupMessage && {
+            onSetupMessage: manifest.onSetupMessage,
+          }),
         };
       }
     } catch (error) {
