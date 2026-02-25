@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'packages/lakebase/**'
   workflow_dispatch:
     inputs:
       dry-run:
@@ -11,6 +13,10 @@ on:
         required: false
         type: boolean
         default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:

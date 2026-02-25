@@ -77,7 +77,7 @@ if (installExit !== 0) {
 const commands: [string, string[]][] = [
   ["git", ["add", "template/package.json", "template/package-lock.json"]],
   ["git", ["commit", "-m", `"chore: sync template to v${version} [skip ci]"`]],
-  ["git", ["tag", `template-v${version}`]],
+  ["git", ["tag", "-a", `template-v${version}`, "-m", `Template v${version}`]],
   ["git", ["push", "origin", "main", "--follow-tags"]],
 ];
 
