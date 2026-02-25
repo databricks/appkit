@@ -85,13 +85,25 @@ const config: Config = {
             ...args
           }) {
             const sidebarItems = await defaultSidebarItemsGenerator(args);
-            // exclude API reference - this category is handled manually in sidebars.ts
-            return sidebarItems.filter(
-              (item) =>
-                item.type !== "category" ||
-                item.link?.type !== "doc" ||
-                item.link.id !== "api/index",
-            );
+
+            return sidebarItems.filter((item) => {
+              // Exclude API reference category - handled manually in sidebars.ts
+              if (
+                item.type === "category" &&
+                item.link?.type === "doc" &&
+                item.link.id === "api/index"
+              ) {
+                return false;
+              }
+
+              // Exclude api/appkit-ui/index - automatically used as category link in sidebars.ts
+              // Explicit dirName in sidebars.ts bypasses automatic exclusion
+              if (item.type === "doc" && item.id === "api/appkit-ui/index") {
+                return false;
+              }
+
+              return true;
+            });
           },
         },
         theme: {

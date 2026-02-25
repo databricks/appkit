@@ -26,7 +26,7 @@
   --api-kind-typealias-color: #ec4899;
   --api-kind-function-color: #10b981;
   --api-kind-variable-color: #f59e0b;
-  --api-kind-enum-color: #6366f1;
+  --api-kind-enumeration-color: #6366f1;
 }
 
 [data-theme="light"] {
@@ -62,7 +62,7 @@
 .api-kind-typealias .menu__link::before,
 .api-kind-function .menu__link::before,
 .api-kind-variable .menu__link::before,
-.api-kind-enum .menu__link::before,
+.api-kind-enumeration .menu__link::before,
 .api-kind-other .menu__link::before {
   display: inline-block;
   width: 1.5em;
@@ -109,9 +109,9 @@
   content: "V";
 }
 
-.api-kind-enum .menu__link::before {
-  border-color: var(--api-kind-enum-color);
-  color: var(--api-kind-enum-color);
+.api-kind-enumeration .menu__link::before {
+  border-color: var(--api-kind-enumeration-color);
+  color: var(--api-kind-enumeration-color);
   content: "E";
 }
 

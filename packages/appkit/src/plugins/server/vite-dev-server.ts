@@ -58,11 +58,17 @@ export class ViteDevServer extends BaseServer {
     );
 
     const userConfig = loadedConfig?.config ?? {};
+    const viteClientPort = process.env.VITE_CLIENT_PORT;
+    const serverHmr = viteClientPort
+      ? { hmr: { clientPort: viteClientPort } }
+      : {};
+
     const coreConfig = {
       configFile: false,
       root: clientRoot,
       server: {
         middlewareMode: true,
+        ...serverHmr,
         watch: {
           useFsEvents: true,
           ignored: ["**/node_modules/**", "!**/node_modules/@databricks/**"],

@@ -312,3 +312,85 @@ export async function runWithRequestContext<T>(
     mocks.restore();
   }
 }
+
+/**
+ * Parses SSE response. Format: "event: result\ndata: {...}\n\n"
+ */
+export async function parseSSEResponse(response: Response): Promise<any> {
+  const text = await response.text();
+  const lines = text.split("\n");
+
+  let eventType: string | null = null;
+  let dataLine: string | null = null;
+
+  for (const line of lines) {
+    if (line.startsWith("event: ")) {
+      eventType = line.substring(7).trim();
+    } else if (line.startsWith("data: ")) {
+      dataLine = line.substring(6);
+    }
+  }
+
+  if (!dataLine) {
+    throw new Error(`No data found in SSE response: ${text}`);
+  }
+
+  const parsed = JSON.parse(dataLine);
+  return {
+    eventType,
+    ...parsed,
+  };
+}
+
+export function createConfigurableMockWorkspaceClient() {
+  const executeStatement = vi.fn();
+  const getStatement = vi.fn();
+
+  const client = {
+    statementExecution: {
+      executeStatement,
+      getStatement,
+    },
+  };
+
+  return {
+    client,
+    mocks: {
+      executeStatement,
+      getStatement,
+    },
+  };
+}
+
+export function createSuccessfulSQLResponse(
+  data: any[][],
+  columns: Array<{ name: string; type_name?: string }>,
+) {
+  return {
+    status: { state: "SUCCEEDED" },
+    statement_id: `stmt-${Date.now()}`,
+    result: {
+      data_array: data,
+    },
+    manifest: {
+      schema: {
+        columns: columns.map((col) => ({
+          name: col.name,
+          type_name: col.type_name ?? "STRING",
+        })),
+      },
+    },
+  };
+}
+
+export function createFailedSQLResponse(errorMessage: string) {
+  return {
+    status: {
+      state: "FAILED",
+      error: {
+        message: errorMessage,
+      },
+    },
+    statement_id: `stmt-${Date.now()}`,
+  };
+}

@@ -1,12 +1,11 @@
 import type express from "express";
+import type { JSONSchema7 } from "json-schema";
 
 /** Base plugin interface. */
 export interface BasePlugin {
   name: string;
 
   abortActiveOperations?(): void;
-
-  validateEnv(): void;
 
   setup(): Promise<void>;
 
@@ -46,6 +45,10 @@ export interface PluginConfig {
 
 export type PluginPhase = "core" | "normal" | "deferred";
 
+/**
+ * Plugin constructor with required manifest declaration.
+ * All plugins must declare a manifest with their metadata and resource requirements.
+ */
 export type PluginConstructor<
   C = BasePluginConfig,
   I extends BasePlugin = BasePlugin,
@@ -54,7 +57,71 @@ export type PluginConstructor<
 ) => I) & {
   DEFAULT_CONFIG?: Record<string, unknown>;
   phase?: PluginPhase;
+  /**
+   * Static manifest declaring plugin metadata and resource requirements.
+   * Required for all plugins.
+   */
+  manifest: PluginManifest;
+  /**
+   * Optional runtime resource requirements based on config.
+   * Use this when resource requirements depend on plugin configuration.
+   */
+  getResourceRequirements?(config: C): ResourceRequirement[];
 };
+
+/**
+ * Manifest declaration for plugins (imported from registry types).
+ * Re-exported here to avoid circular dependencies.
+ */
+export interface PluginManifest {
+  name: string;
+  displayName: string;
+  description: string;
+  resources: {
+    required: Omit<ResourceRequirement, "required">[];
+    optional: Omit<ResourceRequirement, "required">[];
+  };
+  config?: {
+    schema: JSONSchema7;
+  };
+  author?: string;
+  version?: string;
+  repository?: string;
+  keywords?: string[];
+  license?: string;
+}
+
+/**
+ * Defines a single field for a resource.
+ * Each field maps to its own environment variable and optional description.
+ * Single-value types use one key (e.g. id); multi-value types (database, secret)
+ * use multiple (e.g. instance_name, database_name or scope, key).
+ */
+export interface ResourceFieldEntry {
+  /** Environment variable name for this field */
+  env: string;
+  /** Human-readable description for this field */
+  description?: string;
+}
+
+/**
+ * Resource requirement declaration (imported from registry types).
+ * Re-exported here to avoid circular dependencies.
+ */
+export interface ResourceRequirement {
+  type: string;
+  alias: string;
+  /** Stable key for machine use (env naming, composite keys, app.yaml). */
+  resourceKey: string;
+  description: string;
+  permission: string;
+  /**
+   * Map of field name to env and optional description.
+   * Single-value types use one key (e.g. id); multi-value (database, secret) use multiple keys.
+   */
+  fields: Record<string, ResourceFieldEntry>;
+  required: boolean;
+}
 
 export type ConfigFor<T> = T extends { DEFAULT_CONFIG: infer D }
   ? D

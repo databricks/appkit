@@ -6,9 +6,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Databricks AppKit is a modular TypeScript SDK for building Databricks applications with a plugin-based architecture. This is a **pnpm monorepo** using **Turbo** for build orchestration.
 
-**AI/Code Assistant Resources:**
-- See [llms.txt](./llms.txt) for full SDK usage guidance and anti-patterns
-- See [llms-compact.txt](./llms-compact.txt) for quick usage patterns
+## API documentation
+View AppKit API reference (docs only, NOT for scaffolding):
+
+```bash
+# ONLY for viewing documentation - do NOT use for init/scaffold
+npx @databricks/appkit docs <path>
+```
+
+**IMPORTANT**: ALWAYS run `npx @databricks/appkit docs` (no path) FIRST to see available pages. DO NOT guess paths - use the index to find correct paths.
+
+Examples of known paths:
+- Root index: `npx @databricks/appkit docs`
+- API reference: `npx @databricks/appkit docs ./docs/docs/api.md`
+- Component docs: `npx @databricks/appkit docs ./docs/docs/api/appkit-ui/components/Sidebar.md`
 
 ## Repository Structure
 
@@ -82,6 +93,17 @@ pnpm format:check     # Check formatting
 pnpm check            # Run Biome check (lint + format)
 pnpm check:fix        # Auto-fix with Biome
 pnpm typecheck        # TypeScript type checking across all packages
+```
+
+### AppKit CLI
+When using the published SDK or running from the monorepo (after `pnpm build`), the `appkit` CLI is available:
+
+```bash
+npx appkit plugin sync --write    # Sync plugin manifests into appkit.plugins.json
+npx appkit plugin create         # Scaffold a new plugin (interactive, uses @clack/prompts)
+npx appkit plugin validate       # Validate manifest(s) against the JSON schema
+npx appkit plugin list           # List plugins (from appkit.plugins.json or --dir)
+npx appkit plugin add-resource   # Add a resource requirement to a plugin (interactive)
 ```
 
 ### Deployment
@@ -161,48 +183,7 @@ pnpm release:ci
 
 ### Plugin System
 
-AppKit uses a **phase-based plugin architecture** with three initialization phases:
-
-1. **core** - Initialized first (e.g., config plugins)
-2. **normal** - Initialized second (most plugins)
-3. **deferred** - Initialized third, receives other plugin instances (e.g., ServerPlugin)
-
-**Creating a Plugin:**
-```typescript
-import { Plugin, toPlugin } from '@databricks/appkit';
-
-class MyPlugin extends Plugin {
-  name: string = "myPlugin";
-
-  // Validate required environment variables
-  validateEnv() {
-    // Check process.env for required vars
-  }
-
-  // Async initialization
-  async setup() {
-    // Initialize resources
-  }
-
-  // Register HTTP routes (optional)
-  injectRoutes(router: express.Router) {
-    // Routes are automatically scoped to /api/{plugin-name}
-    router.get("/endpoint", async (req, res) => {
-      // Use this.execute() for interceptor support
-      const result = await this.execute(() => fetchData(), {
-        cache: { ttl: 60000 },
-        retry: { maxRetries: 3 }
-      });
-      res.json(result);
-    });
-  }
-}
-
-export const myPlugin = toPlugin<typeof MyPlugin, MyPluginConfig, "myPlugin">(
-  MyPlugin,
-  "myPlugin"
-);
-```
+For full props API, see: `npx @databricks/appkit docs ./docs/docs/plugins.md`.
 
 ### Execution Interceptor Pattern
 
@@ -262,6 +243,39 @@ The AnalyticsPlugin provides SQL query execution:
 - POST `/api/analytics/query/:query_key` - Execute query with parameters
 - Built-in caching with configurable TTL
 - Databricks SQL Warehouse connector for execution
+
+### Lakebase Autoscaling Connector
+
+**Location:** `packages/appkit/src/connectors/lakebase/`
+
+AppKit provides `createLakebasePool()` - a factory function that returns a standard `pg.Pool` configured with automatic OAuth token refresh for Databricks Lakebase (OLTP) databases.
+
+**Key Features:**
+- Returns standard `pg.Pool` (compatible with all ORMs)
+- Automatic OAuth token refresh (1-hour tokens, 2-minute buffer)
+- Token caching to minimize API calls
+- Battle-tested pattern (same as AWS RDS IAM authentication)
+
+**Quick Example:**
+```typescript
+import { createLakebasePool } from '@databricks/appkit';
+
+// Reads from PGHOST, PGDATABASE, LAKEBASE_ENDPOINT env vars
+const pool = createLakebasePool();
+
+// Standard pg.Pool API
+const result = await pool.query('SELECT * FROM users');
+```
+
+**ORM Integration:**
+Works with Drizzle, Prisma, TypeORM - see the [`@databricks/lakebase` README](https://github.com/databricks/appkit/blob/main/packages/lakebase/README.md) for examples.
+
+**Architecture:**
+- Connector files: `packages/appkit/src/connectors/lakebase/`
+  - `pool.ts` - Pool factory with OAuth token refresh
+  - `types.ts` - TypeScript interfaces (`LakebasePoolConfig`)
+  - `utils.ts` - Helper functions (`generateDatabaseCredential`)
+  - `auth-types.ts` - Lakebase v2 API types
 
 ### Frontend-Backend Interaction
 

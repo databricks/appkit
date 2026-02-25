@@ -1,9 +1,9 @@
 bundle:
   name: {{.project_name}}
-{{if .bundle_variables}}
+{{if .variables}}
 
 variables:
-{{.bundle_variables}}
+{{.variables}}
 {{- end}}
 
 resources:
@@ -16,19 +16,18 @@ resources:
       # Uncomment to enable on behalf of user API scopes. Available scopes: sql, dashboards.genie, files.files
       # user_api_scopes:
       #   - sql
-{{if .bundle_resources}}
+{{if .resources}}
 
       # The resources which this app has access to.
       resources:
-{{.bundle_resources}}
+{{.resources}}
 {{- end}}
 
 targets:
   default:
-    # mode: production
     default: true
     workspace:
-      host: {{workspace_host}}
+      host: {{.workspace_host}}
 {{if .target_variables}}
 
     variables:

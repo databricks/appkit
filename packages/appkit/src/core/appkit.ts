@@ -1,3 +1,4 @@
+import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type {
   BasePlugin,
   CacheConfig,
@@ -9,6 +10,7 @@ import type {
 } from "shared";
 import { CacheManager } from "../cache";
 import { ServiceContext } from "../context";
+import { ResourceRegistry } from "../registry";
 import type { TelemetryConfig } from "../telemetry";
 import { TelemetryManager } from "../telemetry";
 
@@ -69,8 +71,6 @@ export class AppKit<TPlugins extends InputPluginMap> {
     const pluginInstance = new Plugin(baseConfig);
 
     this.#pluginInstances[name] = pluginInstance;
-
-    pluginInstance.validateEnv();
 
     this.#setupPromises.push(pluginInstance.setup());
 
@@ -141,6 +141,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
       plugins?: T;
       telemetry?: TelemetryConfig;
       cache?: CacheConfig;
+      client?: WorkspaceClient;
     } = {},
   ): Promise<PluginMap<T>> {
     // Initialize core services
@@ -149,9 +150,14 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
     // Initialize ServiceContext for Databricks client management
     // This provides the service principal client and shared resources
-    await ServiceContext.initialize();
+    await ServiceContext.initialize(config?.client);
 
     const rawPlugins = config.plugins as T;
+
+    const registry = new ResourceRegistry();
+    registry.collectResources(rawPlugins);
+    registry.enforceValidation();
+
     const preparedPlugins = AppKit.preparePlugins(rawPlugins);
     const mergedConfig = {
       plugins: preparedPlugins,
@@ -188,6 +194,7 @@ export async function createApp<
     plugins?: T;
     telemetry?: TelemetryConfig;
     cache?: CacheConfig;
+    client?: WorkspaceClient;
   } = {},
 ): Promise<PluginMap<T>> {
   return AppKit._createApp(config);

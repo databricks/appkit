@@ -106,9 +106,7 @@ function TelemetryRoute() {
     <div className="min-h-screen bg-background">
       <div className="max-w-6xl mx-auto px-6 py-12">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Telemetry Demo
-          </h1>
+          <h1 className="text-3xl font-bold mb-2">Telemetry Demo</h1>
           <p className="text-base text-gray-500">
             Demonstrates how the SDK's auto-instrumentation integrates with
             custom application telemetry. This example showcases HTTP and cache

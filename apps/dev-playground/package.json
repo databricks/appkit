@@ -14,7 +14,10 @@
     "preview": "vite preview",
     "check": "tsc",
     "clean": "rm -rf build && cd client && rm -rf dist",
-    "clean:full": "rm -rf build node_modules && cd client && rm -rf dist node_modules"
+    "clean:full": "rm -rf build node_modules && cd client && rm -rf dist node_modules",
+    "test:integration": "playwright test",
+    "test:integration:ui": "playwright test --ui",
+    "test:integration:headed": "playwright test --headed"
   },
   "keywords": [],
   "author": "",
@@ -22,9 +25,14 @@
   "description": "",
   "dependencies": {
     "@databricks/appkit": "workspace:*",
+    "drizzle-orm": "^0.45.1",
+    "reflect-metadata": "^0.2.0",
+    "sequelize": "^6.37.7",
+    "typeorm": "^0.3.20",
     "zod": "^4.1.13"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.1",
     "@types/node": "^20.0.0",
     "@types/react-syntax-highlighter": "^15.5.13",
     "@vitejs/plugin-react": "^5.0.4",

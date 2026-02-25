@@ -14,6 +14,23 @@ export type {
 } from "shared";
 export { isSQLTypeMarker, sql } from "shared";
 export { CacheManager } from "./cache";
+export type {
+  DatabaseCredential,
+  GenerateDatabaseCredentialRequest,
+  LakebasePoolConfig,
+  RequestedClaims,
+  RequestedResource,
+} from "./connectors/lakebase";
+// Lakebase Autoscaling connector
+export {
+  createLakebasePool,
+  generateDatabaseCredential,
+  getLakebaseOrmConfig,
+  getLakebasePgConfig,
+  getUsernameWithApiLookup,
+  getWorkspaceClient,
+  RequestedClaimsPermissionSet,
+} from "./connectors/lakebase";
 export { getExecutionContext } from "./context";
 export { createApp } from "./core";
 // Errors
@@ -29,8 +46,24 @@ export {
   ValidationError,
 } from "./errors";
 // Plugin authoring
-export { Plugin, toPlugin } from "./plugin";
+export { Plugin, type ToPlugin, toPlugin } from "./plugin";
 export { analytics, server } from "./plugins";
+// Registry types and utilities for plugin manifests
+export type {
+  ConfigSchema,
+  PluginManifest,
+  ResourceEntry,
+  ResourceFieldEntry,
+  ResourcePermission,
+  ResourceRequirement,
+  ValidationResult,
+} from "./registry";
+export {
+  getPluginManifest,
+  getResourceRequirements,
+  ResourceRegistry,
+  ResourceType,
+} from "./registry";
 // Telemetry (for advanced custom telemetry)
 export {
   type Counter,

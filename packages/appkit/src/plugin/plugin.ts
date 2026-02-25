@@ -27,7 +27,7 @@ import {
   normalizeTelemetryOptions,
   TelemetryManager,
 } from "../telemetry";
-import { deepMerge, validateEnv } from "../utils";
+import { deepMerge } from "../utils";
 import { DevFileReader } from "./dev-reader";
 import { CacheInterceptor } from "./interceptors/cache";
 import { RetryInterceptor } from "./interceptors/retry";
@@ -49,7 +49,6 @@ const EXCLUDED_FROM_PROXY = new Set([
   // Lifecycle methods
   "setup",
   "shutdown",
-  "validateEnv",
   "injectRoutes",
   "getEndpoints",
   "abortActiveOperations",
@@ -59,7 +58,91 @@ const EXCLUDED_FROM_PROXY = new Set([
   "constructor",
 ]);
 
-/** Base abstract class for creating AppKit plugins */
+/**
+ * Base abstract class for creating AppKit plugins.
+ *
+ * All plugins must declare a static `manifest` property with their metadata
+ * and resource requirements. The manifest defines:
+ * - `required` resources: Always needed for the plugin to function
+ * - `optional` resources: May be needed depending on plugin configuration
+ *
+ * ## Static vs Runtime Resource Requirements
+ *
+ * The manifest is static and doesn't know the plugin's runtime configuration.
+ * For resources that become required based on config options, plugins can
+ * implement a static `getResourceRequirements(config)` method.
+ *
+ * At runtime, this method is called with the actual config to determine
+ * which "optional" resources should be treated as "required".
+ *
+ * @example Basic plugin with static requirements
+ * ```typescript
+ * import { Plugin, toPlugin, PluginManifest, ResourceType } from '@databricks/appkit';
+ *
+ * const myManifest: PluginManifest = {
+ *   name: 'myPlugin',
+ *   displayName: 'My Plugin',
+ *   description: 'Does something awesome',
+ *   resources: {
+ *     required: [
+ *       { type: ResourceType.SQL_WAREHOUSE, alias: 'warehouse', ... }
+ *     ],
+ *     optional: []
+ *   }
+ * };
+ *
+ * class MyPlugin extends Plugin<MyConfig> {
+ *   static manifest = myManifest;
+ *   name = 'myPlugin';
+ * }
+ * ```
+ *
+ * @example Plugin with config-dependent resources
+ * ```typescript
+ * interface MyConfig extends BasePluginConfig {
+ *   enableCaching?: boolean;
+ * }
+ *
+ * const myManifest: PluginManifest = {
+ *   name: 'myPlugin',
+ *   resources: {
+ *     required: [
+ *       { type: ResourceType.SQL_WAREHOUSE, alias: 'warehouse', ... }
+ *     ],
+ *     optional: [
+ *       // Database is optional in the static manifest
+ *       { type: ResourceType.DATABASE, alias: 'cache', description: 'Required if caching enabled', ... }
+ *     ]
+ *   }
+ * };
+ *
+ * class MyPlugin extends Plugin<MyConfig> {
+ *   static manifest = myManifest;
+ *   name = 'myPlugin';
+ *
+ *   // Runtime method: converts optional resources to required based on config
+ *   static getResourceRequirements(config: MyConfig) {
+ *     const resources = [];
+ *     if (config.enableCaching) {
+ *       // When caching is enabled, Database becomes required
+ *       resources.push({
+ *         type: ResourceType.DATABASE,
+ *         alias: 'cache',
+ *         resourceKey: 'database',
+ *         description: 'Cache storage for query results',
+ *         permission: 'CAN_CONNECT_AND_CREATE',
+ *         fields: {
+ *           instance_name: { env: 'DATABRICKS_CACHE_INSTANCE' },
+ *           database_name: { env: 'DATABRICKS_CACHE_DB' },
+ *         },
+ *         required: true  // Mark as required at runtime
+ *       });
+ *     }
+ *     return resources;
+ *   }
+ * }
+ * ```
+ */
 export abstract class Plugin<
   TConfig extends BasePluginConfig = BasePluginConfig,
 > implements BasePlugin
@@ -70,12 +153,21 @@ export abstract class Plugin<
   protected devFileReader: DevFileReader;
   protected streamManager: StreamManager;
   protected telemetry: ITelemetry;
-  protected abstract envVars: string[];
 
   /** Registered endpoints for this plugin */
   private registeredEndpoints: PluginEndpointMap = {};
 
+  /**
+   * Plugin initialization phase.
+   * - 'core': Initialized first (e.g., config plugins)
+   * - 'normal': Initialized second (most plugins)
+   * - 'deferred': Initialized last (e.g., server plugin)
+   */
   static phase: PluginPhase = "normal";
+
+  /**
+   * Plugin name identifier.
+   */
   name: string;
 
   constructor(protected config: TConfig) {
@@ -87,10 +179,6 @@ export abstract class Plugin<
     this.devFileReader = DevFileReader.getInstance();
 
     this.isReady = true;
-  }
-
-  validateEnv() {
-    validateEnv(this.envVars);
   }
 
   injectRoutes(_: express.Router) {

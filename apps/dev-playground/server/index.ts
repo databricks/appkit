@@ -1,6 +1,19 @@
+import "reflect-metadata";
 import { analytics, createApp, server } from "@databricks/appkit";
+import { WorkspaceClient } from "@databricks/sdk-experimental";
+import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
+
+function createMockClient() {
+  const client = new WorkspaceClient({
+    host: "http://localhost",
+    token: "e2e",
+    authType: "pat",
+  });
+  client.currentUser.me = async () => ({ id: "e2e-test-user" });
+  return client;
+}
 
 createApp({
   plugins: [
@@ -8,7 +21,9 @@ createApp({
     reconnect(),
     telemetryExamples(),
     analytics({}),
+    lakebaseExamples(),
   ],
+  ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
 }).then((appkit) => {
   appkit.server
     .extend((app) => {

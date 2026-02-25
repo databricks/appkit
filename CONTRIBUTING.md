@@ -26,6 +26,12 @@ This project needs some dependencies in order to run, make sure to have them all
 
 Make sure to have node installed using [nvm](https://github.com/nvm-sh/nvm)
 
+> **Note:** This project requires Node.js version 24. If you use nvm, you can install it using:
+> ```bash
+> nvm install 24
+> nvm use 24
+> ```
+
 ### pnpm
 
 Run the following command
@@ -53,6 +59,13 @@ The following command will compile all the packages and app in watch mode.
 ```bash
 pnpm dev
 ```
+
+> **Note:** To avoid port collisions with the `clean-app` example, you should create a `.env` file in `apps/dev-playground` and set another port for this app:
+>
+> ```
+> DATABRICKS_APP_PORT=8001
+> ```
+
 
 ## Running the project in production mode
 
@@ -99,3 +112,24 @@ pnpm docs:serve  # Serve built docs
 ```
 
 See [docs/README.md](./docs/README.md) for more details.
+
+## Adding or changing a resource type
+
+Resource types and their permissions are defined once in the plugin-manifest schema; the CLI (create, add-resource, validate) and the appkit registry types are derived from it.
+
+To add or change a resource type:
+
+1. **Edit the schema** – `packages/shared/src/schemas/plugin-manifest.schema.json`:
+   - Add the value to `$defs.resourceType.enum`.
+   - Add a permission definition (e.g. `$defs.myResourcePermission`) with an `enum` array; list permissions **weakest to strongest** (this order is used for merge/escalation).
+   - In `$defs.resourceRequirement.allOf`, add a branch with `if.properties.type.const` set to the new type and `then.properties.permission.$ref` pointing at that permission def (e.g. `#/$defs/myResourcePermission`).
+
+2. **Regenerate registry types** – from the repo root:
+   ```bash
+   pnpm exec tsx tools/generate-registry-types.ts
+   ```
+   This updates `packages/appkit/src/registry/types.generated.ts`. The appkit build runs this automatically before compiling.
+
+3. **Optional:** Add default fields for the new type in `packages/shared/src/cli/commands/plugin/create/resource-defaults.ts` (`DEFAULT_FIELDS_BY_TYPE`) so the plugin create/add-resource prompts suggest env vars.
+
+For more context and alternative approaches, see [Registry types from schema](./docs/docs/development/registry-types-from-schema.md).

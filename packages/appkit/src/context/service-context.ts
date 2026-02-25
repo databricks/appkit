@@ -57,8 +57,13 @@ export class ServiceContext {
   /**
    * Initialize the service context. Should be called once at app startup.
    * Safe to call multiple times - will return the same instance.
+   *
+   * @param client - Optional pre-configured WorkspaceClient to use instead
+   *   of creating one from environment credentials.
    */
-  static async initialize(): Promise<ServiceContextState> {
+  static async initialize(
+    client?: WorkspaceClient,
+  ): Promise<ServiceContextState> {
     if (ServiceContext.instance) {
       return ServiceContext.instance;
     }
@@ -67,7 +72,7 @@ export class ServiceContext {
       return ServiceContext.initPromise;
     }
 
-    ServiceContext.initPromise = ServiceContext.createContext();
+    ServiceContext.initPromise = ServiceContext.createContext(client);
     ServiceContext.instance = await ServiceContext.initPromise;
     return ServiceContext.instance;
   }
@@ -147,19 +152,21 @@ export class ServiceContext {
     return getClientOptions();
   }
 
-  private static async createContext(): Promise<ServiceContextState> {
-    const client = new WorkspaceClient({}, getClientOptions());
+  private static async createContext(
+    client?: WorkspaceClient,
+  ): Promise<ServiceContextState> {
+    const wsClient = client ?? new WorkspaceClient({}, getClientOptions());
 
-    const warehouseId = ServiceContext.getWarehouseId(client);
-    const workspaceId = ServiceContext.getWorkspaceId(client);
-    const currentUser = await client.currentUser.me();
+    const warehouseId = ServiceContext.getWarehouseId(wsClient);
+    const workspaceId = ServiceContext.getWorkspaceId(wsClient);
+    const currentUser = await wsClient.currentUser.me();
 
     if (!currentUser.id) {
       throw ConfigurationError.resourceNotFound("Service user ID");
     }
 
     return {
-      client,
+      client: wsClient,
       serviceUserId: currentUser.id,
       warehouseId,
       workspaceId,

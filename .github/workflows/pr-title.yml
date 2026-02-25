@@ -1,0 +1,24 @@
+name: PR Title
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+    branches:
+      - main
+
+permissions:
+  pull-requests: read
+
+jobs:
+  check-title:
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+
+    name: Conventional Commit Title
+    steps:
+      - name: Validate PR title
+        uses: ytanikin/pr-conventional-commits@1.5.1
+        with:
+          task_types: '["feat","fix","docs","test","ci","refactor","perf","chore","revert","style","build"]'
+          add_label: 'false'

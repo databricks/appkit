@@ -1,0 +1,36 @@
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "name": "analytics",
+  "displayName": "Analytics Plugin",
+  "description": "SQL query execution against Databricks SQL Warehouses",
+  "resources": {
+    "required": [
+      {
+        "type": "sql_warehouse",
+        "alias": "SQL Warehouse",
+        "resourceKey": "sql-warehouse",
+        "description": "SQL Warehouse for executing analytics queries",
+        "permission": "CAN_USE",
+        "fields": {
+          "id": {
+            "env": "DATABRICKS_WAREHOUSE_ID",
+            "description": "SQL Warehouse ID"
+          }
+        }
+      }
+    ],
+    "optional": []
+  },
+  "config": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "timeout": {
+          "type": "number",
+          "default": 30000,
+          "description": "Query execution timeout in milliseconds"
+        }
+      }
+    }
+  }
+}

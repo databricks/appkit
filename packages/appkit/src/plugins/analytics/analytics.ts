@@ -15,6 +15,7 @@ import {
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import { queryDefaults } from "./defaults";
+import { analyticsManifest } from "./manifest";
 import { QueryProcessor } from "./query";
 import type {
   AnalyticsQueryResponse,
@@ -26,7 +27,9 @@ const logger = createLogger("analytics");
 
 export class AnalyticsPlugin extends Plugin {
   name = "analytics";
-  protected envVars: string[] = [];
+
+  /** Plugin manifest declaring metadata and resource requirements */
+  static manifest = analyticsManifest;
 
   protected static description = "Analytics plugin for data analysis";
   protected declare config: IAnalyticsConfig;
