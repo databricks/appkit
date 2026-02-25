@@ -143,6 +143,101 @@ The analytics plugin exposes these endpoints (mounted under `/api/analytics`):
 - `format: "JSON"` (default) returns JSON rows
 - `format: "ARROW"` returns an Arrow "statement_id" payload over SSE, then the client fetches binary Arrow from `/api/analytics/arrow-result/:jobId`
 
+### Genie plugin
+
+Integrates with [Databricks AI/BI Genie](https://docs.databricks.com/en/genie/index.html) spaces for natural language data queries. All requests execute as the calling user via `asUser(req)`.
+
+**Key features:**
+- Natural language to SQL via Genie spaces
+- SSE streaming with real-time status updates
+- Conversation history retrieval
+- Automatic query result fetching for attachments
+- Alias-based space mapping
+
+#### Basic usage
+
+```ts
+import { createApp, genie, server } from "@databricks/appkit";
+
+await createApp({
+  plugins: [
+    server(),
+    genie({
+      spaces: {
+        sales: "01efg33456...",    // alias → Genie Space ID
+        marketing: "01ehij789...",
+      },
+    }),
+  ],
+});
+```
+
+#### Configuration options
+
+```ts
+genie({
+  spaces: {                    // Required: alias → Space ID mapping
+    sales: "01efg33456...",
+  },
+  timeout: 120_000,            // Optional: polling timeout in ms (default: 120000, 0 = indefinite)
+})
+```
+
+#### HTTP endpoints
+
+The genie plugin exposes these endpoints (mounted under `/api/genie`):
+
+- **`POST /api/genie/:alias/messages`** — Send a message to a Genie space (SSE stream)
+- **`GET /api/genie/:alias/conversations/:conversationId`** — Retrieve conversation history (SSE stream)
+
+#### Sending a message
+
+`POST /api/genie/:alias/messages`
+
+Request body:
+
+```json
+{
+  "content": "What were total sales last quarter?",
+  "conversationId": "optional-existing-conversation-id"
+}
+```
+
+Omit `conversationId` to start a new conversation. The response is an SSE stream with these event types:
+
+| Event type | Description |
+|---|---|
+| `message_start` | Initial event with `conversationId`, `messageId`, and `spaceId` |
+| `status` | Progress updates (e.g. `EXECUTING_QUERY`, `COMPLETED`) |
+| `message_result` | Final message with content and attachments |
+| `query_result` | Query result data for each SQL attachment |
+| `error` | Error description if something failed |
+
+#### Retrieving conversation history
+
+`GET /api/genie/:alias/conversations/:conversationId`
+
+Query parameters:
+- `includeQueryResults` — Set to `"false"` to skip fetching query results (default: `true`)
+
+Returns an SSE stream of `message_result` events for each message in the conversation, followed by `query_result` events for any SQL attachments.
+
+#### Programmatic usage
+
+```ts
+const appkit = await createApp({
+  plugins: [server(), genie({ spaces: { sales: "01efg..." } })],
+});
+
+// Send a message
+const response = await appkit.genie.sendMessage("sales", "Show revenue by region");
+console.log(response.content);
+console.log(response.attachments); // SQL results, suggested questions, etc.
+
+// Get conversation history
+const history = await appkit.genie.getConversation("sales", response.conversationId);
+```
+
 ### Execution context and `asUser(req)`
 
 AppKit manages Databricks authentication via two contexts:

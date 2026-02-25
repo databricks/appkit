@@ -508,6 +508,9 @@ export class GeniePlugin extends Plugin {
   }
 }
 
+/**
+ * @internal
+ */
 export const genie = toPlugin<typeof GeniePlugin, IGenieConfig, "genie">(
   GeniePlugin,
   "genie",
