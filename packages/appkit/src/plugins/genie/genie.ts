@@ -1,15 +1,13 @@
+import { Time, TimeUnits } from "@databricks/sdk-experimental";
 import type {
   GenieMessage,
   GenieStartConversationResponse,
 } from "@databricks/sdk-experimental/dist/apis/dashboards";
-import Time, {
-  TimeUnits,
-} from "@databricks/sdk-experimental/dist/retries/Time";
 import type { Waiter } from "@databricks/sdk-experimental/dist/wait";
 import type express from "express";
 import type { IAppRouter, StreamExecutionSettings } from "shared";
 import { getWorkspaceClient } from "../../context";
-import { createLogger } from "../../logging/logger";
+import { createLogger } from "../../logging";
 import { Plugin, toPlugin } from "../../plugin";
 import { genieStreamDefaults } from "./defaults";
 import { genieManifest } from "./manifest";
