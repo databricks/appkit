@@ -45,8 +45,6 @@ export interface PluginConfig {
 
 export type PluginPhase = "core" | "normal" | "deferred";
 
-export type ServiceContextResource = "warehouseId";
-
 /**
  * Plugin constructor with required manifest declaration.
  * All plugins must declare a manifest with their metadata and resource requirements.
@@ -69,12 +67,6 @@ export type PluginConstructor<
    * Use this when resource requirements depend on plugin configuration.
    */
   getResourceRequirements?(config: C): ResourceRequirement[];
-  /**
-   * Shared resources this plugin requires from ServiceContext (e.g. warehouseId).
-   * Used to gate resource resolution at startup — resources are only resolved
-   * when at least one plugin declares them.
-   */
-  requiredResources?: ServiceContextResource[];
 };
 
 /**

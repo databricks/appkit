@@ -4,7 +4,6 @@ import {
   WorkspaceClient,
 } from "@databricks/sdk-experimental";
 import { coerce } from "semver";
-import type { ServiceContextResource } from "shared";
 import {
   name as productName,
   version as productVersion,
@@ -59,11 +58,12 @@ export class ServiceContext {
    * Initialize the service context. Should be called once at app startup.
    * Safe to call multiple times - will return the same instance.
    *
+   * @param options - Which shared resources to resolve (derived from plugin manifests).
    * @param client - Optional pre-configured WorkspaceClient to use instead
    *   of creating one from environment credentials.
    */
   static async initialize(
-    requiredResources: ServiceContextResource[] = [],
+    options?: { warehouseId?: boolean },
     client?: WorkspaceClient,
   ): Promise<ServiceContextState> {
     if (ServiceContext.instance) {
@@ -74,10 +74,7 @@ export class ServiceContext {
       return ServiceContext.initPromise;
     }
 
-    ServiceContext.initPromise = ServiceContext.createContext(
-      requiredResources,
-      client,
-    );
+    ServiceContext.initPromise = ServiceContext.createContext(options, client);
     ServiceContext.instance = await ServiceContext.initPromise;
     return ServiceContext.instance;
   }
@@ -158,12 +155,12 @@ export class ServiceContext {
   }
 
   private static async createContext(
-    requiredResources: ServiceContextResource[] = [],
+    options?: { warehouseId?: boolean },
     client?: WorkspaceClient,
   ): Promise<ServiceContextState> {
     const wsClient = client ?? new WorkspaceClient({}, getClientOptions());
 
-    const warehouseId = requiredResources.includes("warehouseId")
+    const warehouseId = options?.warehouseId
       ? ServiceContext.getWarehouseId(wsClient)
       : undefined;
 

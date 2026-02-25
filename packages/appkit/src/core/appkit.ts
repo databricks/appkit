@@ -7,11 +7,10 @@ import type {
   PluginConstructor,
   PluginData,
   PluginMap,
-  ServiceContextResource,
 } from "shared";
 import { CacheManager } from "../cache";
 import { ServiceContext } from "../context";
-import { ResourceRegistry } from "../registry";
+import { ResourceRegistry, ResourceType } from "../registry";
 import type { TelemetryConfig } from "../telemetry";
 import { TelemetryManager } from "../telemetry";
 
@@ -151,14 +150,20 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
     const rawPlugins = config.plugins as T;
 
-    // Collect required ServiceContext resources from all plugins
-    // so we only resolve resources that plugins actually need
-    const requiredResources = AppKit.collectRequiredResources(rawPlugins);
-    await ServiceContext.initialize(requiredResources, config?.client);
-
-    // Validate manifest-declared resource env vars
+    // Collect manifest resources via registry
     const registry = new ResourceRegistry();
     registry.collectResources(rawPlugins);
+
+    // Derive ServiceContext needs from what manifests declared
+    const needsWarehouse = registry
+      .getRequired()
+      .some((r) => r.type === ResourceType.SQL_WAREHOUSE);
+    await ServiceContext.initialize(
+      { warehouseId: needsWarehouse },
+      config?.client,
+    );
+
+    // Validate env vars
     registry.enforceValidation();
 
     const preparedPlugins = AppKit.preparePlugins(rawPlugins);
@@ -184,18 +189,6 @@ export class AppKit<TPlugins extends InputPluginMap> {
       };
     }
     return result;
-  }
-
-  private static collectRequiredResources(
-    plugins: PluginData<PluginConstructor, unknown, string>[],
-  ): ServiceContextResource[] {
-    const resources = new Set<ServiceContextResource>();
-    for (const { plugin } of plugins) {
-      for (const req of plugin.requiredResources ?? []) {
-        resources.add(req);
-      }
-    }
-    return [...resources];
   }
 }
 
