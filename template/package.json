@@ -20,6 +20,10 @@
     "test:e2e:ui": "playwright test --ui",
     "test:smoke": "playwright install chromium && playwright test tests/smoke.spec.ts",
     "clean": "rm -rf client/dist dist build node_modules .smoke-test test-results playwright-report",
+    "postinstall": "npm run typegen",
+    "prebuild": "npm run sync && npm run typegen",
+    "predev": "npm run sync && npm run typegen",
+    "sync": "appkit plugin sync --write --silent",
     "typegen": "appkit generate-types",
     "setup": "appkit setup --write"
   },
@@ -28,8 +32,8 @@
   "license": "Unlicensed",
   "description": "{{.app_description}}",
   "dependencies": {
-    "@databricks/appkit": "0.5.2",
-    "@databricks/appkit-ui": "0.5.2",
+    "@databricks/appkit": "0.10.1",
+    "@databricks/appkit-ui": "0.10.1",
     "@databricks/sdk-experimental": "^0.14.2",
     "clsx": "^2.1.1",
     "embla-carousel-react": "^8.6.0",

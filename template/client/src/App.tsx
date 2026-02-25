@@ -1,3 +1,15 @@
+/**
+ * ⚠️ BEFORE MODIFYING THIS FILE:
+ *
+ * 1. Create SQL files in config/queries/
+ * 2. Run `npm run typegen` to generate query types
+ * 3. Check appKitTypes.d.ts for available types
+ *
+ * Common Mistakes:
+ * - DataTable does NOT accept `data` or `columns` props
+ * - Charts use `xKey` and `yKey`, NOT `seriesKey`/`nameKey`/`valueKey`
+ * - useAnalyticsQuery has no `enabled` option - use conditional rendering
+ */
 import {
   useAnalyticsQuery,
   AreaChart,

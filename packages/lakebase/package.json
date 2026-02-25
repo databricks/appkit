@@ -1,0 +1,65 @@
+{
+  "name": "@databricks/lakebase",
+  "type": "module",
+  "version": "0.2.0",
+  "description": "PostgreSQL driver for Databricks Lakebase with automatic OAuth token refresh",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "packageManager": "pnpm@10.21.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/databricks/appkit.git",
+    "directory": "packages/lakebase"
+  },
+  "keywords": [
+    "databricks",
+    "lakebase",
+    "postgres",
+    "postgresql",
+    "driver",
+    "oauth",
+    "oltp"
+  ],
+  "license": "Apache-2.0",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "DCO"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build:package": "tsdown --config tsdown.config.ts",
+    "build:watch": "tsdown --config tsdown.config.ts --watch",
+    "clean:full": "rm -rf dist node_modules tmp",
+    "clean": "rm -rf dist tmp",
+    "dist": "tsx ../../tools/dist-lakebase.ts",
+    "tarball": "rm -rf tmp && pnpm dist && npm pack ./tmp --pack-destination ./tmp",
+    "typecheck": "tsc --noEmit",
+    "release": "release-it",
+    "release:dry": "release-it --dry-run",
+    "release:ci": "release-it --ci"
+  },
+  "dependencies": {
+    "@databricks/sdk-experimental": "^0.16.0",
+    "pg": "^8.18.0",
+    "@opentelemetry/api": "^1.9.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.16.0"
+  },
+  "module": "./dist/index.js",
+  "publishConfig": {
+    "exports": {
+      ".": "./dist/index.js",
+      "./package.json": "./package.json"
+    }
+  }
+}

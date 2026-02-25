@@ -39,8 +39,9 @@ export class ServerPlugin extends Plugin {
     port: Number(process.env.DATABRICKS_APP_PORT) || 8000,
   };
 
-  public name = "server" as const;
   protected envVars: string[] = [];
+
+  public name = "server" as const;
   private serverApplication: express.Application;
   private server: HTTPServer | null;
   private viteDevServer?: ViteDevServer;
@@ -355,3 +356,5 @@ export const server = toPlugin<typeof ServerPlugin, ServerConfig, "server">(
   ServerPlugin,
   "server",
 );
+
+export type { ServerConfig } from "./types";

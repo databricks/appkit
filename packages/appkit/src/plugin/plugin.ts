@@ -50,10 +50,10 @@ const EXCLUDED_FROM_PROXY = new Set([
   // Lifecycle methods
   "setup",
   "shutdown",
-  "validateEnv",
   "injectRoutes",
   "getEndpoints",
   "abortActiveOperations",
+  "validateEnv",
   // asUser itself - prevent chaining like .asUser().asUser()
   "asUser",
   // Internal methods
@@ -76,6 +76,12 @@ export abstract class Plugin<
   /** Registered endpoints for this plugin */
   private registeredEndpoints: PluginEndpointMap = {};
 
+  /**
+   * Plugin initialization phase.
+   * - 'core': Initialized first (e.g., config plugins)
+   * - 'normal': Initialized second (most plugins)
+   * - 'deferred': Initialized last (e.g., server plugin)
+   */
   static phase: PluginPhase = "normal";
   static requiredResources: ServiceContextResource[] = [];
   name: string;

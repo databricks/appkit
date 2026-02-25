@@ -168,10 +168,14 @@ export async function generateQueriesFromDescribe(
       })) as DatabricksStatementExecutionResponse;
 
       if (result.status.state === "FAILED") {
+        const sqlError =
+          result.status.error?.message || "Query execution failed";
         spinner.stop(`✗ ${queryName} - failed`);
+        spinner.printDetail(`SQL Error: ${sqlError}`);
+        spinner.printDetail(`Query: ${cleanedSql.slice(0, 200)}`);
         failedQueries.push({
           name: queryName,
-          error: "Query execution failed",
+          error: sqlError,
         });
         continue;
       }

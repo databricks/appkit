@@ -7,6 +7,7 @@ This Software contains code from the following open source projects:
 | Name             | Installed version | License | Code                                                 |
 | :--------------- | :---------------- | :----------- | :--------------------------------------------------- |
 | [@ast-grep/napi](https://www.npmjs.com/package/@ast-grep/napi) | 0.37.0 | MIT | https://ast-grep.github.io |
+| [@clack/prompts](https://www.npmjs.com/package/@clack/prompts) | 1.0.1 | MIT | https://github.com/bombshell-dev/clack/tree/main/packages/prompts#readme |
 | [@hookform/resolvers](https://www.npmjs.com/package/@hookform/resolvers) | 5.2.2 | MIT | https://react-hook-form.com |
 | [@opentelemetry/api](https://www.npmjs.com/package/@opentelemetry/api) | 1.9.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/api |
 | [@opentelemetry/api-logs](https://www.npmjs.com/package/@opentelemetry/api-logs) | 0.208.0 | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js/tree/main/experimental/packages/api-logs |
@@ -51,6 +52,8 @@ This Software contains code from the following open source projects:
 | [@tanstack/react-table](https://www.npmjs.com/package/@tanstack/react-table) | 8.21.3 | MIT | https://tanstack.com/table |
 | [@tanstack/react-virtual](https://www.npmjs.com/package/@tanstack/react-virtual) | 3.13.12 | MIT | https://tanstack.com/virtual |
 | [@types/semver](https://www.npmjs.com/package/@types/semver) | 7.7.1 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/semver |
+| [ajv](https://www.npmjs.com/package/ajv) | 6.12.6, 8.17.1 | MIT | https://ajv.js.org |
+| [ajv-formats](https://www.npmjs.com/package/ajv-formats) | 2.1.1, 3.0.1 | MIT | https://github.com/ajv-validator/ajv-formats#readme |
 | [apache-arrow](https://www.npmjs.com/package/apache-arrow) | 21.1.0 | Apache-2.0 | https://arrow.apache.org/js/ |
 | [class-variance-authority](https://www.npmjs.com/package/class-variance-authority) | 0.7.1 | Apache-2.0 | https://github.com/joe-bell/cva#readme |
 | [clsx](https://www.npmjs.com/package/clsx) | 2.1.1 | MIT | https://github.com/lukeed/clsx#readme |
@@ -65,7 +68,7 @@ This Software contains code from the following open source projects:
 | [lucide-react](https://www.npmjs.com/package/lucide-react) | 0.554.0 | ISC | https://lucide.dev |
 | [next-themes](https://www.npmjs.com/package/next-themes) | 0.4.6 | MIT | https://github.com/pacocoursey/next-themes#readme |
 | [obug](https://www.npmjs.com/package/obug) | 2.1.1 | MIT | https://github.com/sxzz/obug#readme |
-| [pg](https://www.npmjs.com/package/pg) | 8.16.3 | MIT | https://github.com/brianc/node-postgres |
+| [pg](https://www.npmjs.com/package/pg) | 8.18.0 | MIT | https://github.com/brianc/node-postgres |
 | [react-day-picker](https://www.npmjs.com/package/react-day-picker) | 9.12.0 | MIT | https://daypicker.dev |
 | [react-hook-form](https://www.npmjs.com/package/react-hook-form) | 7.68.0 | MIT | https://react-hook-form.com |
 | [react-resizable-panels](https://www.npmjs.com/package/react-resizable-panels) | 3.0.6 | MIT | https://github.com/bvaughn/react-resizable-panels#readme |

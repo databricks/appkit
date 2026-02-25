@@ -6,7 +6,10 @@
  */
 export interface DatabricksStatementExecutionResponse {
   statement_id: string;
-  status: { state: string };
+  status: {
+    state: string;
+    error?: { error_code?: string; message?: string };
+  };
   result?: {
     data_array?: (string | null)[][];
   };
