@@ -40,6 +40,7 @@ export class ServerPlugin extends Plugin {
     port: Number(process.env.DATABRICKS_APP_PORT) || 8000,
   };
 
+  /** Plugin manifest declaring metadata and resource requirements */
   static manifest = serverManifest;
 
   public name = "server" as const;
@@ -358,5 +359,6 @@ export const server = toPlugin<typeof ServerPlugin, ServerConfig, "server">(
   "server",
 );
 
+// Export manifest and types
 export { serverManifest } from "./manifest";
 export type { ServerConfig } from "./types";
