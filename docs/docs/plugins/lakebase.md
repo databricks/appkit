@@ -4,6 +4,10 @@ sidebar_position: 4
 
 # Lakebase plugin
 
+:::info
+Currently, the Lakebase plugin currently requires a one-time manual setup to connect your Databricks App with your Lakebase database. An automated setup process is planned for an upcoming future release.
+:::
+
 Provides a PostgreSQL connection pool for Databricks Lakebase Autoscaling with automatic OAuth token refresh.
 
 **Key features:**
