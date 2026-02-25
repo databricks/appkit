@@ -5,142 +5,52 @@
  * which enables plugins to declare their Databricks resource requirements
  * in a machine-readable format.
  *
- * Resource types are exposed as first-class citizens with their specific
- * permissions, making it simple for users to declare dependencies.
- * Internal tooling handles conversion to Databricks app.yaml format.
+ * Resource types and permissions are generated from plugin-manifest.schema.json
+ * (see types.generated.ts). Hand-written interfaces below define the registry API.
  */
 
-/**
- * Supported resource types that plugins can depend on.
- * Each type has its own set of valid permissions.
- */
-export enum ResourceType {
-  /** Secret scope for secure credential storage */
-  SECRET = "secret",
+// Re-export generated registry types (enum + const must be value exports for runtime)
+import {
+  type AppPermission,
+  type DatabasePermission,
+  type ExperimentPermission,
+  type GenieSpacePermission,
+  type JobPermission,
+  PERMISSION_HIERARCHY_BY_TYPE,
+  PERMISSIONS_BY_TYPE,
+  type ResourcePermission,
+  ResourceType,
+  type SecretPermission,
+  type ServingEndpointPermission,
+  type SqlWarehousePermission,
+  type UcConnectionPermission,
+  type UcFunctionPermission,
+  type VectorSearchIndexPermission,
+  type VolumePermission,
+} from "./types.generated";
 
-  /** Databricks Job for scheduled or triggered workflows */
-  JOB = "job",
-
-  /** Databricks SQL Warehouse for query execution */
-  SQL_WAREHOUSE = "sql_warehouse",
-
-  /** Model serving endpoint for ML inference */
-  SERVING_ENDPOINT = "serving_endpoint",
-
-  /** Unity Catalog Volume for file storage */
-  VOLUME = "volume",
-
-  /** Vector Search Index for similarity search */
-  VECTOR_SEARCH_INDEX = "vector_search_index",
-
-  /** Unity Catalog Function */
-  UC_FUNCTION = "uc_function",
-
-  /** Unity Catalog Connection for external data sources */
-  UC_CONNECTION = "uc_connection",
-
-  /** Database (Lakebase) for persistent storage */
-  DATABASE = "database",
-
-  /** Genie Space for AI assistant */
-  GENIE_SPACE = "genie_space",
-
-  /** MLflow Experiment for ML tracking */
-  EXPERIMENT = "experiment",
-
-  /** Databricks App dependency */
-  APP = "app",
-}
+export {
+  PERMISSION_HIERARCHY_BY_TYPE,
+  PERMISSIONS_BY_TYPE,
+  ResourceType,
+  type AppPermission,
+  type DatabasePermission,
+  type ExperimentPermission,
+  type GenieSpacePermission,
+  type JobPermission,
+  type ResourcePermission,
+  type SecretPermission,
+  type ServingEndpointPermission,
+  type SqlWarehousePermission,
+  type UcConnectionPermission,
+  type UcFunctionPermission,
+  type VectorSearchIndexPermission,
+  type VolumePermission,
+};
 
 // ============================================================================
-// Permissions per resource type
+// Hand-written interfaces (not in JSON schema)
 // ============================================================================
-
-/** Permissions for SECRET resources */
-export type SecretPermission = "MANAGE" | "READ" | "WRITE";
-
-/** Permissions for JOB resources */
-export type JobPermission = "CAN_MANAGE" | "CAN_MANAGE_RUN" | "CAN_VIEW";
-
-/** Permissions for SQL_WAREHOUSE resources */
-export type SqlWarehousePermission = "CAN_MANAGE" | "CAN_USE";
-
-/** Permissions for SERVING_ENDPOINT resources */
-export type ServingEndpointPermission = "CAN_MANAGE" | "CAN_QUERY" | "CAN_VIEW";
-
-/** Permissions for VOLUME resources */
-export type VolumePermission = "READ_VOLUME" | "WRITE_VOLUME";
-
-/** Permissions for VECTOR_SEARCH_INDEX resources */
-export type VectorSearchIndexPermission = "SELECT";
-
-/** Permissions for UC_FUNCTION resources */
-export type UcFunctionPermission = "EXECUTE";
-
-/** Permissions for UC_CONNECTION resources */
-export type UcConnectionPermission = "USE_CONNECTION";
-
-/** Permissions for DATABASE resources */
-export type DatabasePermission = "CAN_CONNECT_AND_CREATE";
-
-/** Permissions for GENIE_SPACE resources */
-export type GenieSpacePermission =
-  | "CAN_EDIT"
-  | "CAN_VIEW"
-  | "CAN_RUN"
-  | "CAN_MANAGE";
-
-/** Permissions for EXPERIMENT resources */
-export type ExperimentPermission = "CAN_READ" | "CAN_EDIT" | "CAN_MANAGE";
-
-/** Permissions for APP resources */
-export type AppPermission = "CAN_USE";
-
-/**
- * Union of all possible permission levels across all resource types.
- */
-export type ResourcePermission =
-  | SecretPermission
-  | JobPermission
-  | SqlWarehousePermission
-  | ServingEndpointPermission
-  | VolumePermission
-  | VectorSearchIndexPermission
-  | UcFunctionPermission
-  | UcConnectionPermission
-  | DatabasePermission
-  | GenieSpacePermission
-  | ExperimentPermission
-  | AppPermission;
-
-/**
- * Permission hierarchy per resource type (weakest to strongest).
- * Used to compare permissions when merging; higher index = more permissive.
- * Unknown permissions are treated as less than any known permission.
- */
-export const PERMISSION_HIERARCHY_BY_TYPE: Record<
-  ResourceType,
-  readonly ResourcePermission[]
-> = {
-  [ResourceType.SECRET]: ["READ", "WRITE", "MANAGE"],
-  [ResourceType.JOB]: ["CAN_VIEW", "CAN_MANAGE_RUN", "CAN_MANAGE"],
-  [ResourceType.SQL_WAREHOUSE]: ["CAN_USE", "CAN_MANAGE"],
-  [ResourceType.SERVING_ENDPOINT]: ["CAN_VIEW", "CAN_QUERY", "CAN_MANAGE"],
-  [ResourceType.VOLUME]: ["READ_VOLUME", "WRITE_VOLUME"],
-  [ResourceType.VECTOR_SEARCH_INDEX]: ["SELECT"],
-  [ResourceType.UC_FUNCTION]: ["EXECUTE"],
-  [ResourceType.UC_CONNECTION]: ["USE_CONNECTION"],
-  [ResourceType.DATABASE]: ["CAN_CONNECT_AND_CREATE"],
-  [ResourceType.GENIE_SPACE]: ["CAN_VIEW", "CAN_RUN", "CAN_EDIT", "CAN_MANAGE"],
-  [ResourceType.EXPERIMENT]: ["CAN_READ", "CAN_EDIT", "CAN_MANAGE"],
-  [ResourceType.APP]: ["CAN_USE"],
-} as const;
-
-/** Set of valid permissions per type (for validation). */
-export const PERMISSIONS_BY_TYPE: Record<
-  ResourceType,
-  readonly ResourcePermission[]
-> = PERMISSION_HIERARCHY_BY_TYPE;
 
 /**
  * Defines a single field for a resource. Each field has its own environment variable and optional description.

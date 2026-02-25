@@ -18,6 +18,7 @@ type PackageJson = {
 export const PUBLISHED_PACKAGES = [
   "packages/appkit",
   "packages/appkit-ui",
+  "packages/lakebase",
   "packages/shared",
 ];
 

@@ -110,23 +110,23 @@
     },
     "secretPermission": {
       "type": "string",
-      "enum": ["MANAGE", "READ", "WRITE"],
-      "description": "Permission for secret resources"
+      "enum": ["READ", "WRITE", "MANAGE"],
+      "description": "Permission for secret resources (order: weakest to strongest)"
     },
     "jobPermission": {
       "type": "string",
-      "enum": ["CAN_MANAGE", "CAN_MANAGE_RUN", "CAN_VIEW"],
-      "description": "Permission for job resources"
+      "enum": ["CAN_VIEW", "CAN_MANAGE_RUN", "CAN_MANAGE"],
+      "description": "Permission for job resources (order: weakest to strongest)"
     },
     "sqlWarehousePermission": {
       "type": "string",
-      "enum": ["CAN_MANAGE", "CAN_USE"],
-      "description": "Permission for SQL warehouse resources"
+      "enum": ["CAN_USE", "CAN_MANAGE"],
+      "description": "Permission for SQL warehouse resources (order: weakest to strongest)"
     },
     "servingEndpointPermission": {
       "type": "string",
-      "enum": ["CAN_MANAGE", "CAN_QUERY", "CAN_VIEW"],
-      "description": "Permission for serving endpoint resources"
+      "enum": ["CAN_VIEW", "CAN_QUERY", "CAN_MANAGE"],
+      "description": "Permission for serving endpoint resources (order: weakest to strongest)"
     },
     "volumePermission": {
       "type": "string",
@@ -155,36 +155,18 @@
     },
     "genieSpacePermission": {
       "type": "string",
-      "enum": ["CAN_EDIT", "CAN_VIEW", "CAN_RUN", "CAN_MANAGE"],
-      "description": "Permission for Genie Space resources"
+      "enum": ["CAN_VIEW", "CAN_RUN", "CAN_EDIT", "CAN_MANAGE"],
+      "description": "Permission for Genie Space resources (order: weakest to strongest)"
     },
     "experimentPermission": {
       "type": "string",
       "enum": ["CAN_READ", "CAN_EDIT", "CAN_MANAGE"],
-      "description": "Permission for MLflow experiment resources"
+      "description": "Permission for MLflow experiment resources (order: weakest to strongest)"
     },
     "appPermission": {
       "type": "string",
       "enum": ["CAN_USE"],
       "description": "Permission for Databricks App resources"
-    },
-    "resourcePermission": {
-      "type": "string",
-      "description": "Permission level required for the resource. Valid values depend on resource type.",
-      "oneOf": [
-        { "$ref": "#/$defs/secretPermission" },
-        { "$ref": "#/$defs/jobPermission" },
-        { "$ref": "#/$defs/sqlWarehousePermission" },
-        { "$ref": "#/$defs/servingEndpointPermission" },
-        { "$ref": "#/$defs/volumePermission" },
-        { "$ref": "#/$defs/vectorSearchIndexPermission" },
-        { "$ref": "#/$defs/ucFunctionPermission" },
-        { "$ref": "#/$defs/ucConnectionPermission" },
-        { "$ref": "#/$defs/databasePermission" },
-        { "$ref": "#/$defs/genieSpacePermission" },
-        { "$ref": "#/$defs/experimentPermission" },
-        { "$ref": "#/$defs/appPermission" }
-      ]
     },
     "resourceFieldEntry": {
       "type": "object",
@@ -219,13 +201,13 @@
         },
         "alias": {
           "type": "string",
-          "pattern": "^[a-z][a-zA-Z0-9_]*$",
+          "minLength": 1,
           "description": "Human-readable label for UI/display only. Deduplication uses resourceKey, not alias.",
           "examples": ["SQL Warehouse", "Secret", "Vector search index"]
         },
         "resourceKey": {
           "type": "string",
-          "pattern": "^[a-z][a-zA-Z0-9_]*$",
+          "pattern": "^[a-z][a-z0-9-]*$",
           "description": "Stable key for machine use: deduplication, env naming, composite keys, app.yaml. Required for registry lookup.",
           "examples": ["sql-warehouse", "database", "secret"]
         },
@@ -235,7 +217,8 @@
           "description": "Human-readable description of why this resource is needed"
         },
         "permission": {
-          "$ref": "#/$defs/resourcePermission"
+          "type": "string",
+          "description": "Required permission level. Validated per resource type by the allOf/if-then rules below."
         },
         "fields": {
           "type": "object",
@@ -246,7 +229,137 @@
           "description": "Map of field name to env and optional description. Single-value types use one key (e.g. id); multi-value (database, secret) use multiple (e.g. instance_name, database_name or scope, key)."
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": { "type": { "const": "secret" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": { "$ref": "#/$defs/secretPermission" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "job" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": { "permission": { "$ref": "#/$defs/jobPermission" } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "sql_warehouse" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": { "$ref": "#/$defs/sqlWarehousePermission" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "serving_endpoint" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": { "$ref": "#/$defs/servingEndpointPermission" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "volume" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": { "$ref": "#/$defs/volumePermission" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "vector_search_index" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": { "$ref": "#/$defs/vectorSearchIndexPermission" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "uc_function" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": { "$ref": "#/$defs/ucFunctionPermission" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "uc_connection" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": { "$ref": "#/$defs/ucConnectionPermission" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "database" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": { "$ref": "#/$defs/databasePermission" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "genie_space" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": { "$ref": "#/$defs/genieSpacePermission" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "experiment" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": { "$ref": "#/$defs/experimentPermission" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "app" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": { "permission": { "$ref": "#/$defs/appPermission" } }
+          }
+        }
+      ]
     },
     "configSchemaProperty": {
       "type": "object",

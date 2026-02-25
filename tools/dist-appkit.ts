@@ -12,33 +12,46 @@ fs.mkdirSync("tmp", { recursive: true });
 
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf-8"));
 
+// Packages that are workspace-local but published separately — replace workspace:* with real version.
+// "shared" is intentionally excluded: it is bundled directly into appkit/appkit-ui via noExternal.
+const WORKSPACE_PACKAGE_REPLACEMENTS = ["@databricks/lakebase"];
+
 delete pkg.dependencies.shared;
+
+for (const depName of WORKSPACE_PACKAGE_REPLACEMENTS) {
+  if (pkg.dependencies?.[depName] === "workspace:*") {
+    const pkgDirName = depName.split("/").pop() ?? depName;
+    const depPkgPath = path.join(
+      __dirname,
+      `../packages/${pkgDirName}/package.json`,
+    );
+    const depPkg = JSON.parse(fs.readFileSync(depPkgPath, "utf-8"));
+    pkg.dependencies[depName] = `${depPkg.version}`;
+  }
+}
 
 pkg.exports = pkg.publishConfig.exports;
 delete pkg.publishConfig.exports;
 
-const isAppKitPackage = pkg.name?.startsWith("@databricks/appkit");
 const sharedBin = path.join(__dirname, "../packages/shared/bin/appkit.js");
 const sharedPostinstall = path.join(
   __dirname,
   "../packages/shared/scripts/postinstall.js",
 );
 
-// Add appkit bin and postinstall for @databricks/appkit* packages
-if (isAppKitPackage) {
-  if (fs.existsSync(sharedBin)) {
-    pkg.bin = pkg.bin || {};
-    pkg.bin.appkit = "./bin/appkit.js";
-  }
-  if (fs.existsSync(sharedPostinstall)) {
-    pkg.scripts = pkg.scripts || {};
-    pkg.scripts.postinstall = "node scripts/postinstall.js";
-  }
-
-  // Add CLI dependencies from shared package (required for bin commands to work)
-  pkg.dependencies = pkg.dependencies || {};
-  Object.assign(pkg.dependencies, CLI_DEPENDENCIES);
+// Add appkit bin and postinstall
+if (fs.existsSync(sharedBin)) {
+  pkg.bin = pkg.bin || {};
+  pkg.bin.appkit = "./bin/appkit.js";
 }
+if (fs.existsSync(sharedPostinstall)) {
+  pkg.scripts = pkg.scripts || {};
+  pkg.scripts.postinstall = "node scripts/postinstall.js";
+}
+
+// Add CLI dependencies from shared package (required for bin commands to work)
+pkg.dependencies = pkg.dependencies || {};
+Object.assign(pkg.dependencies, CLI_DEPENDENCIES);
 
 fs.writeFileSync("tmp/package.json", JSON.stringify(pkg, null, 2));
 
@@ -49,23 +62,41 @@ if (fs.existsSync("bin")) {
 }
 
 // Copy bin and scripts from shared package
-if (isAppKitPackage) {
-  if (fs.existsSync(sharedBin)) {
-    fs.mkdirSync("tmp/bin", { recursive: true });
-    fs.copyFileSync(sharedBin, "tmp/bin/appkit.js");
+if (fs.existsSync(sharedBin)) {
+  fs.mkdirSync("tmp/bin", { recursive: true });
+  fs.copyFileSync(sharedBin, "tmp/bin/appkit.js");
 
-    // Copy CLI code from shared/dist/cli to tmp/dist/cli
-    const sharedCliDist = path.join(__dirname, "../packages/shared/dist/cli");
-    if (fs.existsSync(sharedCliDist)) {
-      const tmpCliDist = "tmp/dist/cli";
-      fs.mkdirSync(tmpCliDist, { recursive: true });
-      fs.cpSync(sharedCliDist, tmpCliDist, { recursive: true });
-    }
+  // Copy CLI code from shared/dist/cli to tmp/dist/cli
+  const sharedCliDist = path.join(__dirname, "../packages/shared/dist/cli");
+  if (fs.existsSync(sharedCliDist)) {
+    const tmpCliDist = "tmp/dist/cli";
+    fs.mkdirSync(tmpCliDist, { recursive: true });
+    fs.cpSync(sharedCliDist, tmpCliDist, { recursive: true });
   }
-  if (fs.existsSync(sharedPostinstall)) {
-    fs.mkdirSync("tmp/scripts", { recursive: true });
-    fs.copyFileSync(sharedPostinstall, "tmp/scripts/postinstall.js");
+
+  // Copy JSON schemas so CLI (e.g. plugin validate/sync) can load them at runtime.
+  // Place in both dist/schemas and dist/cli/schemas so resolution works whether
+  // the running module's __dirname is under dist/ or dist/cli/ (e.g. after bundling).
+  const sharedDistSchemas = path.join(
+    __dirname,
+    "../packages/shared/dist/schemas",
+  );
+  const sharedSrcSchemas = path.join(
+    __dirname,
+    "../packages/shared/src/schemas",
+  );
+  const sharedSchemas = fs.existsSync(sharedDistSchemas)
+    ? sharedDistSchemas
+    : sharedSrcSchemas;
+  if (fs.existsSync(sharedSchemas)) {
+    const dest = "tmp/dist/schemas";
+    fs.mkdirSync(dest, { recursive: true });
+    fs.cpSync(sharedSchemas, dest, { recursive: true });
   }
+}
+if (fs.existsSync(sharedPostinstall)) {
+  fs.mkdirSync("tmp/scripts", { recursive: true });
+  fs.copyFileSync(sharedPostinstall, "tmp/scripts/postinstall.js");
 }
 
 // Copy documentation from docs/build into tmp/docs/
@@ -120,9 +151,7 @@ The CLI will display the documentation content directly in the terminal.
 `;
 
 llmsContent = agentGuidance + llmsContent;
-
 fs.writeFileSync("tmp/llms.txt", llmsContent);
-
 // Copy llms.txt as CLAUDE.md (npm pack doesn't support symlinks)
 fs.copyFileSync("tmp/llms.txt", "tmp/CLAUDE.md");
 
