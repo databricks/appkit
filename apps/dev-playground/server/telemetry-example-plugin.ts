@@ -17,7 +17,16 @@ import type { Request, Response, Router } from "express";
 
 class TelemetryExamples extends Plugin {
   public name = "telemetry-examples" as const;
-  protected envVars: string[] = [];
+
+  static manifest = {
+    name: "telemetry-examples",
+    displayName: "Telemetry Examples Plugin",
+    description: "A plugin that provides telemetry examples",
+    resources: {
+      required: [],
+      optional: [],
+    },
+  };
 
   private requestCounter: Counter;
   private durationHistogram: Histogram;

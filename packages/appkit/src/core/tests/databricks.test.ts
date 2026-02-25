@@ -2,11 +2,23 @@ import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 import type { BasePlugin } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ServiceContext } from "../../context/service-context";
+import type { PluginManifest } from "../../registry/types";
+import { ResourceType } from "../../registry/types";
 import { AppKit, createApp } from "../appkit";
 
-// Mock environment validation
+// Generic test manifest for test plugins
+const createTestManifest = (name: string): PluginManifest => ({
+  name,
+  displayName: `${name} Test Plugin`,
+  description: `Test plugin for ${name}`,
+  resources: {
+    required: [],
+    optional: [],
+  },
+});
+
+// Mock utilities
 vi.mock("../utils", () => ({
-  validateEnv: vi.fn(),
   deepMerge: vi.fn((a, b) => ({ ...a, ...b })),
 }));
 
@@ -32,17 +44,13 @@ vi.mock("@databricks-apps/cache", () => ({
 class CoreTestPlugin implements BasePlugin {
   static DEFAULT_CONFIG = { coreDefault: "core-value" };
   static phase = "core" as const;
+  static manifest = createTestManifest("coreTest");
   name = "coreTest";
   setupCalled = false;
-  validateEnvCalled = false;
   injectedConfig: any;
 
   constructor(config: any) {
     this.injectedConfig = config;
-  }
-
-  validateEnv() {
-    this.validateEnvCalled = true;
   }
 
   async setup() {
@@ -59,7 +67,6 @@ class CoreTestPlugin implements BasePlugin {
     return {
       // Expose internal state for testing
       setupCalled: this.setupCalled,
-      validateEnvCalled: this.validateEnvCalled,
       injectedConfig: this.injectedConfig,
     };
   }
@@ -68,17 +75,13 @@ class CoreTestPlugin implements BasePlugin {
 class NormalTestPlugin implements BasePlugin {
   static DEFAULT_CONFIG = { normalDefault: "normal-value" };
   static phase = "normal" as const;
+  static manifest = createTestManifest("normalTest");
   name = "normalTest";
   setupCalled = false;
-  validateEnvCalled = false;
   injectedConfig: any;
 
   constructor(config: any) {
     this.injectedConfig = config;
-  }
-
-  validateEnv() {
-    this.validateEnvCalled = true;
   }
 
   async setup() {
@@ -94,7 +97,6 @@ class NormalTestPlugin implements BasePlugin {
   exports() {
     return {
       setupCalled: this.setupCalled,
-      validateEnvCalled: this.validateEnvCalled,
       injectedConfig: this.injectedConfig,
     };
   }
@@ -103,19 +105,15 @@ class NormalTestPlugin implements BasePlugin {
 class DeferredTestPlugin implements BasePlugin {
   static DEFAULT_CONFIG = { deferredDefault: "deferred-value" };
   static phase = "deferred" as const;
+  static manifest = createTestManifest("deferredTest");
   name = "deferredTest";
   setupCalled = false;
-  validateEnvCalled = false;
   injectedConfig: any;
   injectedPlugins: any;
 
   constructor(config: any) {
     this.injectedConfig = config;
     this.injectedPlugins = config.plugins;
-  }
-
-  validateEnv() {
-    this.validateEnvCalled = true;
   }
 
   async setup() {
@@ -131,7 +129,6 @@ class DeferredTestPlugin implements BasePlugin {
   exports() {
     return {
       setupCalled: this.setupCalled,
-      validateEnvCalled: this.validateEnvCalled,
       injectedConfig: this.injectedConfig,
       injectedPlugins: this.injectedPlugins,
     };
@@ -140,6 +137,7 @@ class DeferredTestPlugin implements BasePlugin {
 
 class SlowSetupPlugin implements BasePlugin {
   static DEFAULT_CONFIG = {};
+  static manifest = createTestManifest("slowSetup");
   name = "slowSetup";
   setupDelay: number;
   setupCalled = false;
@@ -147,8 +145,6 @@ class SlowSetupPlugin implements BasePlugin {
   constructor(config: any) {
     this.setupDelay = config.setupDelay || 100;
   }
-
-  validateEnv() {}
 
   async setup() {
     await new Promise((resolve) => setTimeout(resolve, this.setupDelay));
@@ -170,11 +166,8 @@ class SlowSetupPlugin implements BasePlugin {
 
 class FailingPlugin implements BasePlugin {
   static DEFAULT_CONFIG = {};
+  static manifest = createTestManifest("failing");
   name = "failing";
-
-  validateEnv() {
-    throw new Error("Environment validation failed");
-  }
 
   async setup() {
     throw new Error("Setup failed");
@@ -228,7 +221,6 @@ describe("AppKit", () => {
       expect(instance.coreTest).toBeDefined();
       // instance.coreTest returns the SDK, not the plugin instance
       expect(instance.coreTest.setupCalled).toBe(true);
-      expect(instance.coreTest.validateEnvCalled).toBe(true);
     });
 
     test("should merge default and custom plugin configs", async () => {
@@ -336,34 +328,8 @@ describe("AppKit", () => {
       expect(instance.slow2.setupCalled).toBe(true);
     });
 
-    test("should validate environment for all plugins", async () => {
-      const pluginData = [
-        { plugin: CoreTestPlugin, config: {}, name: "coreTest" },
-        { plugin: NormalTestPlugin, config: {}, name: "normalTest" },
-      ];
-
-      const instance = (await createApp({ plugins: pluginData })) as any;
-
-      expect(instance.coreTest.validateEnvCalled).toBe(true);
-      expect(instance.normalTest.validateEnvCalled).toBe(true);
-    });
-
-    test("should throw error if plugin environment validation fails", async () => {
-      const pluginData = [
-        { plugin: FailingPlugin, config: {}, name: "failing" },
-      ];
-
-      await expect(createApp({ plugins: pluginData })).rejects.toThrow(
-        "Environment validation failed",
-      );
-    });
-
     test("should throw error if plugin setup fails", async () => {
-      const FailingSetupPlugin = class extends FailingPlugin {
-        validateEnv() {
-          // Don't throw in validateEnv for this test
-        }
-      };
+      const FailingSetupPlugin = class extends FailingPlugin {};
 
       const pluginData = [
         { plugin: FailingSetupPlugin, config: {}, name: "failing" },
@@ -523,14 +489,99 @@ describe("AppKit", () => {
     });
   });
 
+  describe("createApp resource validation (collectResources + enforceValidation)", () => {
+    test("should throw in production when required resource env is missing", async () => {
+      const PluginWithRequiredResource = class extends CoreTestPlugin {
+        static manifest: PluginManifest = {
+          name: "withResource",
+          displayName: "With Resource",
+          description: "Plugin with required warehouse",
+          resources: {
+            required: [
+              {
+                type: ResourceType.SQL_WAREHOUSE,
+                alias: "wh",
+                resourceKey: "warehouse",
+                description: "Warehouse",
+                permission: "CAN_USE",
+                fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } },
+              },
+            ],
+            optional: [],
+          },
+        };
+      };
+
+      const prevNodeEnv = process.env.NODE_ENV;
+      const prevWh = process.env.DATABRICKS_WAREHOUSE_ID;
+      process.env.NODE_ENV = "production";
+      delete process.env.DATABRICKS_WAREHOUSE_ID;
+      try {
+        const pluginData = [
+          {
+            plugin: PluginWithRequiredResource,
+            config: {},
+            name: "withResource",
+          },
+        ];
+        await expect(createApp({ plugins: pluginData })).rejects.toThrow();
+      } finally {
+        process.env.NODE_ENV = prevNodeEnv;
+        if (prevWh !== undefined) process.env.DATABRICKS_WAREHOUSE_ID = prevWh;
+        else delete process.env.DATABRICKS_WAREHOUSE_ID;
+      }
+    });
+
+    test("should succeed when required resource env is set", async () => {
+      const PluginWithRequiredResource = class extends CoreTestPlugin {
+        static manifest: PluginManifest = {
+          name: "withResource",
+          displayName: "With Resource",
+          description: "Plugin with required warehouse",
+          resources: {
+            required: [
+              {
+                type: ResourceType.SQL_WAREHOUSE,
+                alias: "wh",
+                resourceKey: "warehouse",
+                description: "Warehouse",
+                permission: "CAN_USE",
+                fields: { id: { env: "DATABRICKS_WAREHOUSE_ID" } },
+              },
+            ],
+            optional: [],
+          },
+        };
+      };
+
+      const prevWh = process.env.DATABRICKS_WAREHOUSE_ID;
+      process.env.DATABRICKS_WAREHOUSE_ID = "wh-123";
+      try {
+        const pluginData = [
+          {
+            plugin: PluginWithRequiredResource,
+            config: {},
+            name: "withResource",
+          },
+        ];
+        const instance = await createApp({ plugins: pluginData });
+        expect(instance).toBeDefined();
+        expect((instance as any).withResource).toBeDefined();
+      } finally {
+        if (prevWh !== undefined) process.env.DATABRICKS_WAREHOUSE_ID = prevWh;
+        else delete process.env.DATABRICKS_WAREHOUSE_ID;
+      }
+    });
+  });
+
   describe("SDK context binding", () => {
     test("should bind SDK methods to plugin instance", async () => {
       class ContextTestPlugin implements BasePlugin {
         static DEFAULT_CONFIG = {};
+        static manifest = createTestManifest("contextTest");
         name = "contextTest";
         private counter = 0;
 
-        validateEnv() {}
         async setup() {}
         injectRoutes() {}
         getEndpoints() {
@@ -567,10 +618,10 @@ describe("AppKit", () => {
     test("should maintain context when SDK method is passed as callback", async () => {
       class CallbackTestPlugin implements BasePlugin {
         static DEFAULT_CONFIG = {};
+        static manifest = createTestManifest("callbackTest");
         name = "callbackTest";
         private values: number[] = [];
 
-        validateEnv() {}
         async setup() {}
         injectRoutes() {}
         getEndpoints() {

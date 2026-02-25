@@ -8,6 +8,7 @@ import { ServerError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import { instrumentations } from "../../telemetry";
+import { serverManifest } from "./manifest";
 import { RemoteTunnelController } from "./remote-tunnel/remote-tunnel-controller";
 import { StaticServer } from "./static-server";
 import type { ServerConfig } from "./types";
@@ -39,7 +40,7 @@ export class ServerPlugin extends Plugin {
     port: Number(process.env.DATABRICKS_APP_PORT) || 8000,
   };
 
-  protected envVars: string[] = [];
+  static manifest = serverManifest;
 
   public name = "server" as const;
   private serverApplication: express.Application;
@@ -357,4 +358,5 @@ export const server = toPlugin<typeof ServerPlugin, ServerConfig, "server">(
   "server",
 );
 
+export { serverManifest } from "./manifest";
 export type { ServerConfig } from "./types";

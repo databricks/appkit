@@ -11,6 +11,7 @@ import type {
 } from "shared";
 import { CacheManager } from "../cache";
 import { ServiceContext } from "../context";
+import { ResourceRegistry } from "../registry";
 import type { TelemetryConfig } from "../telemetry";
 import { TelemetryManager } from "../telemetry";
 
@@ -71,8 +72,6 @@ export class AppKit<TPlugins extends InputPluginMap> {
     const pluginInstance = new Plugin(baseConfig);
 
     this.#pluginInstances[name] = pluginInstance;
-
-    pluginInstance.validateEnv();
 
     this.#setupPromises.push(pluginInstance.setup());
 
@@ -150,13 +149,18 @@ export class AppKit<TPlugins extends InputPluginMap> {
     TelemetryManager.initialize(config?.telemetry);
     await CacheManager.getInstance(config?.cache);
 
-    // Collect required resources from all plugins before initializing context
     const rawPlugins = config.plugins as T;
-    const requiredResources = AppKit.collectRequiredResources(rawPlugins);
 
-    // Initialize ServiceContext for Databricks client management
-    // Only resolves resources that plugins actually need
+    // Collect required ServiceContext resources from all plugins
+    // so we only resolve resources that plugins actually need
+    const requiredResources = AppKit.collectRequiredResources(rawPlugins);
     await ServiceContext.initialize(requiredResources, config?.client);
+
+    // Validate manifest-declared resource env vars
+    const registry = new ResourceRegistry();
+    registry.collectResources(rawPlugins);
+    registry.enforceValidation();
+
     const preparedPlugins = AppKit.preparePlugins(rawPlugins);
     const mergedConfig = {
       plugins: preparedPlugins,

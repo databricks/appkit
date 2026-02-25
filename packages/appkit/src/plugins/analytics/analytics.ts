@@ -16,6 +16,7 @@ import {
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import { queryDefaults } from "./defaults";
+import { analyticsManifest } from "./manifest";
 import { QueryProcessor } from "./query";
 import type {
   AnalyticsQueryResponse,
@@ -27,8 +28,8 @@ const logger = createLogger("analytics");
 
 export class AnalyticsPlugin extends Plugin {
   static requiredResources: ServiceContextResource[] = ["warehouseId"];
+  static manifest = analyticsManifest;
   name = "analytics";
-  protected envVars: string[] = [];
 
   protected static description = "Analytics plugin for data analysis";
   protected declare config: IAnalyticsConfig;
