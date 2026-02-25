@@ -10,6 +10,7 @@
     "build:watch": "pnpm -r --filter=!dev-playground --filter=!docs build:watch",
     "check:fix": "biome check --write .",
     "check": "biome check .",
+    "generate:app-templates": "tsx tools/generate-app-templates.ts",
     "check:licenses": "tsx tools/check-licenses.ts",
     "build:notice": "tsx tools/build-notice.ts > NOTICE.md",
     "deploy:playground": "pnpm pack:sdk && tsx tools/playground/deploy-playground.ts",

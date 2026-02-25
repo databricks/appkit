@@ -98,6 +98,20 @@ export DATABRICKS_APP_NAME=your-app-name # The name of the app to deploy. If not
 export DATABRICKS_WORKSPACE_DIR=your-workspace-dir # The source workspace directory to deploy the app from. It will be used to construct the absolute path: /Workspace/Users/{your-username}/{workspace-dir}
 ```
 
+## Generating App templates
+
+To generate app templates, run the following command:
+
+```bash
+pnpm generate:app-templates
+```
+
+By default, the command will generate app templates in the `../app-templates` directory, assuming that you have the [`app-templates`](https://github.com/databricks/app-templates) repository cloned in the same parent directory as this one.
+
+You can override the output directory by setting the `APP_TEMPLATES_OUTPUT_DIR` environment variable.
+
+By default, the command will use the `databricks` CLI to generate the app templates. You can override the CLI by setting the `DATABRICKS_CLI` environment variable to provide a different binary name or path.
+
 ## Contributing to AppKit documentation
 
 The `docs/` directory contains the AppKit documentation site, built with Docusaurus.

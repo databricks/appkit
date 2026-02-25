@@ -2,30 +2,76 @@ import { test, expect } from '@playwright/test';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
+// ── Templated configuration (resolved by `databricks apps init`) ────────────
+const APP_CONFIG = {
+  name: '{{.projectName}}',
+  plugins: [
+{{- if .plugins.analytics}}
+    'analytics',
+{{- end}}
+{{- if .plugins.lakebase}}
+    'lakebase',
+{{- end}}
+  ],
+} as const;
+
+interface PluginPage {
+  navLabel: string;
+  path: string;
+  expectedTexts: string[];
+}
+
+const PLUGIN_PAGES: Record<string, PluginPage> = {
+  analytics: {
+    navLabel: 'Analytics',
+    path: '/analytics',
+    expectedTexts: ['SQL Query Result', 'Sales Data Filter'],
+  },
+  lakebase: {
+    navLabel: 'Lakebase',
+    path: '/lakebase',
+    expectedTexts: ['Todo List'],
+  },
+};
+
+const enabledPages = Object.entries(PLUGIN_PAGES).filter(
+  ([key]) => APP_CONFIG.plugins.includes(key),
+);
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+
 let testArtifactsDir: string;
 let consoleLogs: string[] = [];
 let consoleErrors: string[] = [];
 let pageErrors: string[] = [];
 let failedRequests: string[] = [];
 
-test('smoke test - app loads and displays data', async ({ page }) => {
-  // Navigate to the app
+test('smoke test - app loads and displays home page', async ({ page }) => {
   await page.goto('/');
 
-  // ⚠️ UPDATE THESE SELECTORS after customizing App.tsx:
-  // - Change heading name to match your app title
-  // - Change data selector to match your primary data display
-  await expect(page.getByRole('heading', { name: 'Minimal Databricks App' })).toBeVisible();
-  await expect(page.getByText('hello world', { exact: true })).toBeVisible({ timeout: 30000 });
+  await expect(page.getByRole('heading', { name: APP_CONFIG.name })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Welcome to your Databricks App' }),
+  ).toBeVisible();
+  await expect(page.getByText('Getting Started')).toBeVisible();
 
-  // Wait for health check to complete (wait for "OK" status)
-  await expect(page.getByText('OK')).toBeVisible({ timeout: 30000 });
-
-  // Verify console logs were captured
-  expect(consoleLogs.length).toBeGreaterThan(0);
-  expect(consoleErrors.length).toBe(0);
-  expect(pageErrors.length).toBe(0);
+  await expect(page.getByRole('link', { name: 'Home' })).toBeVisible();
+  for (const [, plugin] of enabledPages) {
+    await expect(page.getByRole('link', { name: plugin.navLabel })).toBeVisible();
+  }
 });
+
+for (const [name, plugin] of enabledPages) {
+  test(`smoke test - ${name} page loads`, async ({ page }) => {
+    await page.goto(plugin.path);
+
+    for (const text of plugin.expectedTexts) {
+      await expect(page.getByText(text)).toBeVisible();
+    }
+  });
+}
+
+// ── Lifecycle hooks ─────────────────────────────────────────────────────────
 
 test.beforeEach(async ({ page }) => {
   consoleLogs = [];

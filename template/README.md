@@ -1,6 +1,15 @@
-# Minimal Databricks App
+# {{.projectName}}
 
-A minimal Databricks App powered by Databricks AppKit, featuring React, TypeScript, and Tailwind CSS.
+A Databricks App powered by [AppKit](https://databricks.github.io/appkit/), featuring React, TypeScript, and Tailwind CSS.
+
+**Enabled plugins:**
+{{- if .plugins.analytics}}
+- **Analytics** -- SQL query execution against Databricks SQL Warehouses
+{{- end}}
+{{- if .plugins.lakebase}}
+- **Lakebase** -- Fully managed Postgres database for transactional (OLTP) workloads on Databricks
+{{- end}}
+- **Server** -- Express HTTP server with static file serving and Vite dev mode
 
 ## Prerequisites
 
@@ -15,7 +24,7 @@ A minimal Databricks App powered by Databricks AppKit, featuring React, TypeScri
 For local development, configure your environment variables by creating a `.env` file:
 
 ```bash
-cp env.example .env
+cp .env.example .env
 ```
 
 Edit `.env` and set the environment variables you need:
@@ -25,6 +34,12 @@ DATABRICKS_HOST=https://your-workspace.cloud.databricks.com
 DATABRICKS_APP_PORT=8000
 # ... other environment variables, depending on the plugins you use
 ```
+{{- if .plugins.lakebase}}
+
+#### Lakebase Configuration
+
+The Lakebase plugin requires additional environment variables for PostgreSQL connectivity. To learn how to configure the Lakebase plugin, see the [Lakebase plugin documentation](https://databricks.github.io/appkit/docs/plugins/lakebase).
+{{- end}}
 
 ### CLI Authentication
 
@@ -57,7 +72,7 @@ client_secret = prod-client-secret
 Deploy using a specific profile:
 
 ```bash
-databricks bundle deploy -t prod --profile production
+databricks bundle deploy --profile production
 ```
 
 **Note:** Personal Access Tokens (PATs) are legacy authentication. OAuth is strongly recommended for better security.
@@ -90,7 +105,7 @@ npm run build
 
 This creates:
 
-- `dist/server/` - Compiled server code
+- `dist/server.js` - Compiled server bundle
 - `client/dist/` - Bundled client assets
 
 ### Production
@@ -126,12 +141,18 @@ Update `databricks.yml` with your workspace settings:
 
 ```yaml
 targets:
-  dev:
+  default:
     workspace:
       host: https://your-workspace.cloud.databricks.com
+{{- if .plugins.analytics}}
     variables:
-      warehouse_id: your-warehouse-id
+      sql_warehouse_id: your-warehouse-id
+{{- end}}
 ```
+{{- if .plugins.analytics}}
+
+Make sure to set the `sql_warehouse_id` variable to your Databricks SQL Warehouse ID.
+{{- end}}
 
 ### 2. Validate Bundle
 
@@ -141,10 +162,10 @@ databricks bundle validate
 
 ### 3. Deploy
 
-Deploy to the development target:
+Deploy to the default target:
 
 ```bash
-databricks bundle deploy -t dev
+databricks bundle deploy
 ```
 
 ### 4. Run
@@ -174,6 +195,10 @@ databricks bundle deploy -t prod
   * server.ts      # Server entry point
   * routes/        # Routes
 * shared/          # Shared types
+{{- if .plugins.analytics}}
+* config/          # Configuration
+  * queries/       # SQL query files
+{{- end}}
 * databricks.yml   # Bundle configuration
 * app.yaml         # App configuration
 * .env.example     # Environment variables example

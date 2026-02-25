@@ -8,7 +8,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'html',
   use: {
-    baseURL: `http://localhost:${process.env.PORT || 8000}`,
+    baseURL: `http://localhost:${process.env.DATABRICKS_APP_PORT || process.env.PORT || 8000}`,
     trace: 'on-first-retry',
   },
   projects: [
@@ -19,7 +19,7 @@ export default defineConfig({
   ],
   webServer: {
     command: 'npm run dev',
-    url: `http://localhost:${process.env.PORT || 8000}`,
+    url: `http://localhost:${process.env.DATABRICKS_APP_PORT || process.env.PORT || 8000}`,
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,
   },
