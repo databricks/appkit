@@ -10,9 +10,9 @@ import { getCurrentUserId, getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import {
-  filesDownloadDefaults,
-  filesReadDefaults,
-  filesWriteDefaults,
+  FILES_DOWNLOAD_DEFAULTS,
+  FILES_READ_DEFAULTS,
+  FILES_WRITE_DEFAULTS,
 } from "./defaults";
 import { parentDirectory, sanitizeFilename } from "./helpers";
 import { filesManifest } from "./manifest";
@@ -250,8 +250,8 @@ export class FilesPlugin extends Plugin {
   ): PluginExecutionSettings {
     return {
       default: {
-        ...filesReadDefaults,
-        cache: { ...filesReadDefaults.cache, cacheKey },
+        ...FILES_READ_DEFAULTS,
+        cache: { ...FILES_READ_DEFAULTS.cache, cacheKey },
       },
     };
   }
@@ -329,7 +329,7 @@ export class FilesPlugin extends Plugin {
 
     const executor = this.asUser(req);
     const settings: PluginExecutionSettings = {
-      default: filesDownloadDefaults,
+      default: FILES_DOWNLOAD_DEFAULTS,
     };
     const response = await executor.execute(
       async () => executor.download(path),
@@ -370,7 +370,7 @@ export class FilesPlugin extends Plugin {
 
     const executor = this.asUser(req);
     const settings: PluginExecutionSettings = {
-      default: filesDownloadDefaults,
+      default: FILES_DOWNLOAD_DEFAULTS,
     };
     const response = await executor.execute(
       async () => executor.download(path),
@@ -506,7 +506,7 @@ export class FilesPlugin extends Plugin {
 
     const executor = this.asUser(req);
     const settings: PluginExecutionSettings = {
-      default: filesWriteDefaults,
+      default: FILES_WRITE_DEFAULTS,
     };
     const result = await executor.execute(async () => {
       await executor.upload(path, webStream);
@@ -544,7 +544,7 @@ export class FilesPlugin extends Plugin {
 
     const executor = this.asUser(req);
     const settings: PluginExecutionSettings = {
-      default: filesWriteDefaults,
+      default: FILES_WRITE_DEFAULTS,
     };
     const result = await executor.execute(async () => {
       await executor.createDirectory(dirPath);
@@ -575,7 +575,7 @@ export class FilesPlugin extends Plugin {
 
     const executor = this.asUser(req);
     const settings: PluginExecutionSettings = {
-      default: filesWriteDefaults,
+      default: FILES_WRITE_DEFAULTS,
     };
     const result = await executor.execute(async () => {
       await executor.delete(path);

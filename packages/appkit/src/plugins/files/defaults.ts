@@ -6,7 +6,7 @@ import type { PluginExecuteConfig } from "shared";
  * Retry 3x with 1s backoff
  * Timeout 30s
  **/
-export const filesReadDefaults: PluginExecuteConfig = {
+export const FILES_READ_DEFAULTS: PluginExecuteConfig = {
   cache: {
     enabled: true,
     ttl: 60_000,
@@ -25,7 +25,7 @@ export const filesReadDefaults: PluginExecuteConfig = {
  * Retry 3x with 1s backoff
  * Timeout 30s (stream start only)
  **/
-export const filesDownloadDefaults: PluginExecuteConfig = {
+export const FILES_DOWNLOAD_DEFAULTS: PluginExecuteConfig = {
   cache: {
     enabled: false,
   },
@@ -46,7 +46,7 @@ export const filesDownloadDefaults: PluginExecuteConfig = {
  * No retry
  * Timeout 600s.
  **/
-export const filesWriteDefaults: PluginExecuteConfig = {
+export const FILES_WRITE_DEFAULTS: PluginExecuteConfig = {
   cache: {
     enabled: false,
   },
