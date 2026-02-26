@@ -104,6 +104,7 @@ describe("FilesPlugin", () => {
   test("injectRoutes registers GET and POST routes", () => {
     const plugin = new FilesPlugin({ defaultVolume: "/Volumes/test" });
     const mockRouter = {
+      use: vi.fn(),
       get: vi.fn(),
       post: vi.fn(),
       put: vi.fn(),
