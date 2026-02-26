@@ -11,6 +11,7 @@ import { createLogger } from "../../logging";
 import { Plugin, toPlugin } from "../../plugin";
 import { genieStreamDefaults } from "./defaults";
 import { genieManifest } from "./manifest";
+import { pollWaiter } from "./poll-waiter";
 import type {
   GenieAttachmentResponse,
   GenieConversationHistoryResponse,
@@ -155,71 +156,31 @@ export class GeniePlugin extends Plugin {
         const workspaceClient = getWorkspaceClient();
 
         try {
-          // Status events queue bridging onProgress → generator
-          const statusQueue: string[] = [];
-          let notifyGenerator: () => void = () => {};
-          let waiterDone = false;
+          // Step 1: API call → get waiter + IDs
+          let messageWaiter: CreateMessageWaiter;
+          let resultConversationId: string;
+          let resultMessageId: string;
 
-          const onProgress = async (message: GenieMessage): Promise<void> => {
-            if (message.status) {
-              statusQueue.push(message.status);
-              notifyGenerator();
-            }
-          };
-
-          let resultConversationId = "";
-          let resultMessageId = "";
-          let completedMessage: GenieMessage =
-            undefined as unknown as GenieMessage;
-          let waiterError: Error | null = null;
-
-          // Launch Genie API call
-          const waiterPromise = (async () => {
-            let messageWaiter: CreateMessageWaiter;
-
-            if (conversationId) {
-              messageWaiter = await workspaceClient.genie.createMessage({
+          if (conversationId) {
+            messageWaiter = await workspaceClient.genie.createMessage({
+              space_id: spaceId,
+              conversation_id: conversationId,
+              content,
+            });
+            resultConversationId = conversationId;
+            resultMessageId = messageWaiter.message_id ?? "";
+          } else {
+            const startWaiter: StartConversationWaiter =
+              await workspaceClient.genie.startConversation({
                 space_id: spaceId,
-                conversation_id: conversationId,
                 content,
               });
-              resultConversationId = conversationId;
-            } else {
-              const startWaiter: StartConversationWaiter =
-                await workspaceClient.genie.startConversation({
-                  space_id: spaceId,
-                  content,
-                });
-              resultConversationId = startWaiter.conversation_id;
-              resultMessageId = startWaiter.message_id;
-              messageWaiter = startWaiter as unknown as CreateMessageWaiter;
-            }
-
-            const result = await messageWaiter.wait({ onProgress });
-            completedMessage = result;
-            resultMessageId = result.message_id;
-            return result;
-          })()
-            .catch((err: Error) => {
-              waiterError = err;
-            })
-            .finally(() => {
-              waiterDone = true;
-              notifyGenerator();
-            });
-
-          // Wait for first status or waiter completion to get IDs
-          await new Promise<void>((resolve) => {
-            notifyGenerator = resolve;
-            if (waiterDone) resolve();
-          });
-
-          // If the API call failed before anything started, yield error and exit
-          if (waiterError) {
-            throw waiterError;
+            resultConversationId = startWaiter.conversation_id;
+            resultMessageId = startWaiter.message_id;
+            messageWaiter = startWaiter as unknown as CreateMessageWaiter;
           }
 
-          // Yield message_start
+          // Step 2: Yield message_start immediately — IDs are available from API response
           yield {
             type: "message_start" as const,
             conversationId: resultConversationId,
@@ -227,30 +188,20 @@ export class GeniePlugin extends Plugin {
             spaceId,
           };
 
-          // Drain status events
-          while (!waiterDone || statusQueue.length > 0) {
-            while (statusQueue.length > 0) {
-              const status = statusQueue.shift();
-              if (status) {
-                yield { type: "status" as const, status };
+          // Step 3: Poll for status updates and completion
+          let completedMessage!: GenieMessage;
+          for await (const event of pollWaiter(messageWaiter)) {
+            if (event.type === "progress") {
+              if (event.value.status) {
+                yield { type: "status" as const, status: event.value.status };
               }
-            }
-
-            if (!waiterDone) {
-              await new Promise<void>((resolve) => {
-                notifyGenerator = resolve;
-                if (waiterDone) resolve();
-              });
+            } else {
+              completedMessage = event.value;
+              resultMessageId = event.value.message_id;
             }
           }
 
-          // Check if waiter failed during polling
-          await waiterPromise;
-          if (waiterError) {
-            throw waiterError;
-          }
-
-          // Build cleaned message response
+          // Step 4: Build cleaned message response
           const messageResponse = toMessageResponse(completedMessage);
 
           yield {
@@ -258,7 +209,7 @@ export class GeniePlugin extends Plugin {
             message: messageResponse,
           };
 
-          // Fetch query results for each query attachment
+          // Step 5: Fetch query results for each query attachment
           const attachments = messageResponse.attachments ?? [];
           for (const att of attachments) {
             if (att.query?.statementId && att.attachmentId) {
