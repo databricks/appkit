@@ -53,11 +53,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Class.LakebasePlugin",
-          label: "LakebasePlugin"
-        },
-        {
-          type: "doc",
           id: "api/appkit/Class.Plugin",
           label: "Plugin"
         },
@@ -70,11 +65,6 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Class.ServerError",
           label: "ServerError"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Class.ServerPlugin",
-          label: "ServerPlugin"
         },
         {
           type: "doc",

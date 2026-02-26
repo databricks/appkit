@@ -84,11 +84,6 @@ class MyPlugin extends Plugin<MyConfig> {
 }
 ```
 
-## Extended by
-
-- [`LakebasePlugin`](Class.LakebasePlugin.md)
-- [`ServerPlugin`](Class.ServerPlugin.md)
-
 ## Type Parameters
 
 | Type Parameter | Default type |
