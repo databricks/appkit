@@ -71,7 +71,15 @@ export class GeniePlugin extends Plugin {
 
   constructor(config: IGenieConfig) {
     super(config);
-    this.config = config;
+    this.config = {
+      ...config,
+      spaces: config.spaces ?? this.defaultSpaces(),
+    };
+  }
+
+  private defaultSpaces(): Record<string, string> {
+    const spaceId = process.env.DATABRICKS_GENIE_SPACE_ID;
+    return spaceId ? { default: spaceId } : {};
   }
 
   private resolveSpaceId(alias: string): string | null {

@@ -921,6 +921,67 @@ describe("Genie Plugin", () => {
     });
   });
 
+  describe("default spaces from DATABRICKS_GENIE_SPACE_ID", () => {
+    test("should use env var as default space when spaces is omitted", async () => {
+      process.env.DATABRICKS_GENIE_SPACE_ID = "env-space-id";
+
+      const plugin = new GeniePlugin({ timeout: 5000 });
+      const { router, getHandler } = createMockRouter();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/:alias/messages");
+      const mockReq = createMockRequest({
+        params: { alias: "default" },
+        body: { content: "test question" },
+        headers: {
+          "x-forwarded-access-token": "user-token",
+          "x-forwarded-user": "user-1",
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).not.toHaveBeenCalledWith(404);
+      expect(mockGenieService.startConversation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          space_id: "env-space-id",
+          content: "test question",
+        }),
+      );
+
+      delete process.env.DATABRICKS_GENIE_SPACE_ID;
+    });
+
+    test("should 404 for any alias when spaces is omitted and env var is unset", async () => {
+      delete process.env.DATABRICKS_GENIE_SPACE_ID;
+
+      const plugin = new GeniePlugin({ timeout: 5000 });
+      const { router, getHandler } = createMockRouter();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/:alias/messages");
+      const mockReq = createMockRequest({
+        params: { alias: "default" },
+        body: { content: "test question" },
+        headers: {
+          "x-forwarded-access-token": "user-token",
+          "x-forwarded-user": "user-1",
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(404);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: "Unknown space alias: default",
+      });
+    });
+  });
+
   describe("SSE reconnection streamId", () => {
     let executeStreamSpy: ReturnType<typeof vi.spyOn>;
 
