@@ -241,7 +241,7 @@ A proxied plugin instance that executes as the user
 
 #### Throws
 
-Error if user token is not available in request headers
+AuthenticationError if user token is not available in request headers
 
 ***
 
@@ -403,6 +403,34 @@ protected registerEndpoint(name: string, path: string): void;
 #### Returns
 
 `void`
+
+***
+
+### resolveUserContext()
+
+```ts
+protected resolveUserContext(req: Request): UserContext | null;
+```
+
+Resolve the user context from a request without creating a proxy.
+Returns the raw UserContext for use with runInUserContext(),
+or null in development mode when no user token is available.
+
+#### Parameters
+
+| Parameter | Type | Description |
+| ------ | ------ | ------ |
+| `req` | `Request` | The Express request containing the user token in headers |
+
+#### Returns
+
+`UserContext` \| `null`
+
+UserContext or null (dev-mode service-principal fallback)
+
+#### Throws
+
+AuthenticationError if user token is missing in production
 
 ***
 
