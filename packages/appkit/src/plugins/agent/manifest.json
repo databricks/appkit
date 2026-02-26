@@ -1,0 +1,38 @@
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "name": "agent",
+  "displayName": "Agent Plugin",
+  "description": "LangChain/LangGraph AI agent with streaming and MCP tool support",
+  "resources": {
+    "required": [
+      {
+        "type": "serving_endpoint",
+        "alias": "Model Endpoint",
+        "resourceKey": "agent-model-endpoint",
+        "description": "Databricks model serving endpoint for the agent LLM",
+        "permission": "CAN_QUERY",
+        "fields": {
+          "name": {
+            "env": "DATABRICKS_AGENT_SERVING_ENDPOINT_NAME",
+            "description": "Model serving endpoint name"
+          }
+        }
+      }
+    ],
+    "optional": [
+      {
+        "type": "experiment",
+        "alias": "MLflow Experiment",
+        "resourceKey": "agent-mlflow-experiment",
+        "description": "MLflow experiment for tracing agent invocations (required when traceDestination.type is 'mlflow' and no experimentId is provided in config)",
+        "permission": "CAN_READ",
+        "fields": {
+          "id": {
+            "env": "MLFLOW_EXPERIMENT_ID",
+            "description": "MLflow experiment ID"
+          }
+        }
+      }
+    ]
+  }
+}

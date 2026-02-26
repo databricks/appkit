@@ -1,5 +1,11 @@
 import "reflect-metadata";
-import { analytics, createApp, server } from "@databricks/appkit";
+import {
+  agent,
+  analytics,
+  chatUI,
+  createApp,
+  server,
+} from "@databricks/appkit";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
@@ -15,6 +21,18 @@ function createMockClient() {
   return client;
 }
 
+// Example: agent + chat UI (disabled by default; set ENABLE_AGENT_EXAMPLE=true to activate)
+const agentPlugins =
+  process.env.ENABLE_AGENT_EXAMPLE === "true"
+    ? [
+        agent({
+          // model: 'databricks-claude-sonnet-4-5',  // or set DATABRICKS_AGENT_SERVING_ENDPOINT_NAME
+          systemPrompt: "You are a helpful Databricks data assistant.",
+        }),
+        chatUI({ enablePersistence: false }),
+      ]
+    : [];
+
 createApp({
   plugins: [
     server({ autoStart: false }),
@@ -22,6 +40,7 @@ createApp({
     telemetryExamples(),
     analytics({}),
     lakebaseExamples(),
+    ...agentPlugins,
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
 }).then((appkit) => {

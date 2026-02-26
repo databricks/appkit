@@ -185,6 +185,15 @@ export abstract class Plugin<
     return;
   }
 
+  /**
+   * Inject routes directly onto the root Express application (e.g. /invocations).
+   * Called by ServerPlugin after all plugin routers are mounted at /api/{name}.
+   *
+   * Use this for endpoints that must live at the app root rather than under /api/,
+   * such as the Databricks model serving `/invocations` convention.
+   */
+  injectAppRoutes?(_app: express.Application): void {}
+
   async setup() {}
 
   getEndpoints(): PluginEndpointMap {

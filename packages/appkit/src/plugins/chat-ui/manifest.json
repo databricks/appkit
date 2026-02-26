@@ -1,0 +1,28 @@
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "name": "chatUI",
+  "displayName": "Chat UI Plugin",
+  "description": "Full-stack chat UI with streaming, history, and Databricks header auth",
+  "resources": {
+    "required": [],
+    "optional": [
+      {
+        "type": "database",
+        "alias": "Chat History DB",
+        "resourceKey": "chat-history-database",
+        "description": "Lakebase PostgreSQL database for persistent chat history (required when enablePersistence is true)",
+        "permission": "CAN_CONNECT_AND_CREATE",
+        "fields": {
+          "instance_name": {
+            "env": "DATABRICKS_CHATDB_INSTANCE",
+            "description": "Lakebase instance name"
+          },
+          "database_name": {
+            "env": "DATABRICKS_CHATDB_NAME",
+            "description": "Lakebase database name"
+          }
+        }
+      }
+    ]
+  }
+}

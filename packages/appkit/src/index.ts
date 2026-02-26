@@ -46,7 +46,9 @@ export {
 } from "./errors";
 // Plugin authoring
 export { Plugin, toPlugin } from "./plugin";
-export { analytics, server } from "./plugins";
+export { agent, analytics, chatUI, server } from "./plugins";
+export type { AgentTraceDestination, IAgentConfig } from "./plugins/agent";
+export type { IChatUIConfig } from "./plugins/chat-ui";
 // Registry types and utilities for plugin manifests
 export type {
   ConfigSchema,

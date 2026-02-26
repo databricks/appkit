@@ -197,6 +197,15 @@ export class ServerPlugin extends Plugin {
       }
     }
 
+    // Allow plugins to inject routes directly at the app root (e.g. /invocations)
+    for (const plugin of Object.values(this.config.plugins)) {
+      if (EXCLUDED_PLUGINS.includes(plugin.name)) continue;
+
+      if (typeof plugin.injectAppRoutes === "function") {
+        plugin.injectAppRoutes(this.serverApplication);
+      }
+    }
+
     return endpoints;
   }
 
