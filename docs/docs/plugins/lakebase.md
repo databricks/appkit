@@ -59,33 +59,34 @@ Click the **Connect** button on your Lakebase branch and copy the `PGHOST` and `
 
 ### 5. Grant access to the service principal
 
-Navigate to the **SQL Editor** tab on your Lakebase branch. Run the following SQL against the `databricks_postgres` database, replacing `<DATABRICKS_CLIENT_ID>` with the value from step 1 everywhere it appears:
+Navigate to the **SQL Editor** tab on your Lakebase branch. Run the following SQL against the `databricks_postgres` database, replacing the service principal ID in the `DECLARE` block with the `DATABRICKS_CLIENT_ID` value from step 1:
 
 ```sql
--- 1. Create the extension and role
 CREATE EXTENSION IF NOT EXISTS databricks_auth;
-SELECT databricks_create_role('<DATABRICKS_CLIENT_ID>', 'SERVICE_PRINCIPAL');
 
--- 2. Basic connection & usage
-GRANT CONNECT ON DATABASE "databricks_postgres" TO "<DATABRICKS_CLIENT_ID>";
-GRANT ALL ON SCHEMA public TO "<DATABRICKS_CLIENT_ID>";
+DO $$
+DECLARE
+  sp TEXT := 'your-service-principal-id';  -- Replace with DATABRICKS_CLIENT_ID from Step 1
+BEGIN
+  -- Create service principal role
+  PERFORM databricks_create_role(sp, 'SERVICE_PRINCIPAL');
 
--- 3. Grant on existing objects
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "<DATABRICKS_CLIENT_ID>";
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "<DATABRICKS_CLIENT_ID>";
-GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO "<DATABRICKS_CLIENT_ID>";
-GRANT ALL PRIVILEGES ON ALL PROCEDURES IN SCHEMA public TO "<DATABRICKS_CLIENT_ID>";
+  -- Connection and schema access
+  EXECUTE format('GRANT CONNECT ON DATABASE "databricks_postgres" TO %I', sp);
+  EXECUTE format('GRANT ALL ON SCHEMA public TO %I', sp);
 
--- 4. Grant on future objects
--- NOTE: This applies to objects created by the user running this script.
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
-  GRANT ALL ON TABLES TO "<DATABRICKS_CLIENT_ID>";
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
-  GRANT ALL ON SEQUENCES TO "<DATABRICKS_CLIENT_ID>";
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
-  GRANT ALL ON FUNCTIONS TO "<DATABRICKS_CLIENT_ID>";
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
-  GRANT ALL ON ROUTINES TO "<DATABRICKS_CLIENT_ID>";
+  -- Privileges on existing objects
+  EXECUTE format('GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO %I', sp);
+  EXECUTE format('GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO %I', sp);
+  EXECUTE format('GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO %I', sp);
+  EXECUTE format('GRANT ALL PRIVILEGES ON ALL PROCEDURES IN SCHEMA public TO %I', sp);
+
+  -- Default privileges on future objects you create
+  EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO %I', sp);
+  EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO %I', sp);
+  EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO %I', sp);
+  EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON ROUTINES TO %I', sp);
+END $$;
 ```
 
 ![SQL Editor](./assets/lakebase-setup/step-5.png)
