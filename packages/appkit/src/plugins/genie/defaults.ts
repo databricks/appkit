@@ -13,4 +13,7 @@ export const genieStreamDefaults: StreamExecutionSettings = {
     },
     timeout: 120_000,
   },
+  stream: {
+    bufferSize: 100,
+  },
 };

@@ -133,6 +133,12 @@ export class GeniePlugin extends Plugin {
         // timeout: 0 means indefinite (no TimeoutInterceptor)
         timeout,
       },
+      stream: {
+        ...genieStreamDefaults.stream,
+        streamId: conversationId
+          ? `genie:send:${spaceId}:${conversationId}`
+          : `genie:send:${spaceId}:new-${Date.now()}`,
+      },
     };
 
     await this.executeStream<GenieStreamEvent>(
@@ -340,6 +346,14 @@ export class GeniePlugin extends Plugin {
 
     const self = this;
 
+    const streamSettings: StreamExecutionSettings = {
+      ...genieStreamDefaults,
+      stream: {
+        ...genieStreamDefaults.stream,
+        streamId: `genie:conversation:${spaceId}:${conversationId}`,
+      },
+    };
+
     await this.executeStream<GenieStreamEvent>(
       res,
       async function* () {
@@ -431,7 +445,7 @@ export class GeniePlugin extends Plugin {
           };
         }
       },
-      genieStreamDefaults,
+      streamSettings,
     );
   }
 

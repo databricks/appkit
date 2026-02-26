@@ -7,6 +7,7 @@ import {
 } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ServiceContext } from "../../../context/service-context";
+import { Plugin } from "../../../plugin";
 import { GeniePlugin, genie } from "../genie";
 import type { IGenieConfig } from "../types";
 
@@ -917,6 +918,120 @@ describe("Genie Plugin", () => {
       ).length;
       expect(queryResultCount).toBe(2);
       expect(mockRes.end).toHaveBeenCalled();
+    });
+  });
+
+  describe("SSE reconnection streamId", () => {
+    let executeStreamSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      executeStreamSpy = vi.spyOn(Plugin.prototype as any, "executeStream");
+      executeStreamSpy.mockResolvedValue(undefined);
+    });
+
+    afterEach(() => {
+      executeStreamSpy.mockRestore();
+    });
+
+    test("sendMessage with conversationId should use deterministic streamId", async () => {
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/:alias/messages");
+      const mockReq = createMockRequest({
+        params: { alias: "myspace" },
+        body: {
+          content: "follow-up question",
+          conversationId: "conv-42",
+        },
+        headers: {
+          "x-forwarded-access-token": "user-token",
+          "x-forwarded-user": "user-1",
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(executeStreamSpy).toHaveBeenCalledWith(
+        mockRes,
+        expect.any(Function),
+        expect.objectContaining({
+          stream: expect.objectContaining({
+            streamId: "genie:send:test-space-id:conv-42",
+            bufferSize: 100,
+          }),
+        }),
+      );
+    });
+
+    test("sendMessage without conversationId should use timestamped streamId", async () => {
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/:alias/messages");
+      const mockReq = createMockRequest({
+        params: { alias: "myspace" },
+        body: { content: "new question" },
+        headers: {
+          "x-forwarded-access-token": "user-token",
+          "x-forwarded-user": "user-1",
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(executeStreamSpy).toHaveBeenCalledWith(
+        mockRes,
+        expect.any(Function),
+        expect.objectContaining({
+          stream: expect.objectContaining({
+            streamId: expect.stringMatching(
+              /^genie:send:test-space-id:new-\d+$/,
+            ),
+            bufferSize: 100,
+          }),
+        }),
+      );
+    });
+
+    test("getConversation should use deterministic streamId", async () => {
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler(
+        "GET",
+        "/:alias/conversations/:conversationId",
+      );
+      const mockReq = createMockRequest({
+        params: { alias: "myspace", conversationId: "conv-99" },
+        query: {},
+        headers: {
+          "x-forwarded-access-token": "user-token",
+          "x-forwarded-user": "user-1",
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(executeStreamSpy).toHaveBeenCalledWith(
+        mockRes,
+        expect.any(Function),
+        expect.objectContaining({
+          stream: expect.objectContaining({
+            streamId: "genie:conversation:test-space-id:conv-99",
+            bufferSize: 100,
+          }),
+        }),
+      );
     });
   });
 });
