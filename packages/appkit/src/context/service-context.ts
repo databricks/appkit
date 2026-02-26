@@ -24,7 +24,7 @@ export interface ServiceContextState {
   client: WorkspaceClient;
   /** The service principal's user ID */
   serviceUserId: string;
-  /** Promise that resolves to the warehouse ID (only present when a plugin requires it) */
+  /** Promise that resolves to the warehouse ID (only present when a plugin requires `SQL_WAREHOUSE` resource) */
   warehouseId?: Promise<string>;
   /** Promise that resolves to the workspace ID */
   workspaceId: Promise<string>;

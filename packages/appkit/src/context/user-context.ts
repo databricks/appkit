@@ -11,7 +11,7 @@ export interface UserContext {
   userId: string;
   /** The user's name (from request headers) */
   userName?: string;
-  /** Promise that resolves to the warehouse ID (inherited from service context, only present when a plugin requires it) */
+  /** Promise that resolves to the warehouse ID (inherited from service context, only present when a plugin requires `SQL_WAREHOUSE` resource) */
   warehouseId?: Promise<string>;
   /** Promise that resolves to the workspace ID (inherited from service context) */
   workspaceId: Promise<string>;
