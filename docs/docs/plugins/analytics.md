@@ -57,9 +57,7 @@ WHERE workspace_id = :workspaceId
 The analytics plugin exposes these endpoints (mounted under `/api/analytics`):
 
 - `POST /api/analytics/query/:query_key`
-- `POST /api/analytics/users/me/query/:query_key`
 - `GET /api/analytics/arrow-result/:jobId`
-- `GET /api/analytics/users/me/arrow-result/:jobId`
 
 ## Format options
 
