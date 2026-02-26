@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { context } from "@opentelemetry/api";
 import type { IAppResponse, StreamConfig } from "shared";
-import { createLogger } from "../logging/logger";
 import { EventRingBuffer } from "./buffers";
 import { streamDefaults } from "./defaults";
 import { SSEWriter } from "./sse-writer";
