@@ -28,6 +28,7 @@ export interface PluginManifest {
   };
   config?: { schema: unknown };
   onSetupMessage?: string;
+  hidden?: boolean;
 }
 
 export interface TemplatePlugin extends Omit<PluginManifest, "config"> {

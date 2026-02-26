@@ -54,6 +54,16 @@ Human-readable display name for UI/CLI
 
 ***
 
+### hidden?
+
+```ts
+optional hidden: boolean;
+```
+
+When true, excluded from the template plugins manifest during sync.
+
+***
+
 ### keywords?
 
 ```ts

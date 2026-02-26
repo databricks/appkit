@@ -90,6 +90,11 @@
     "onSetupMessage": {
       "type": "string",
       "description": "Message displayed to the user after project initialization. Use this to inform about manual setup steps (e.g. environment variables, resource provisioning)."
+    },
+    "hidden": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, this plugin is excluded from the template plugins manifest (appkit.plugins.json) during sync. Use for internal or infrastructure plugins that should not be offered during project initialization."
     }
   },
   "additionalProperties": false,

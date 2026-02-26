@@ -173,6 +173,11 @@ export interface PluginManifest {
   };
 
   /**
+   * When true, excluded from the template plugins manifest during sync.
+   */
+  hidden?: boolean;
+
+  /**
    * Optional metadata for community plugins
    */
   author?: string;

@@ -268,7 +268,7 @@ function discoverLocalPlugins(
       const content = fs.readFileSync(manifestPath, "utf-8");
       const parsed = JSON.parse(content);
       const manifest = validateManifestWithSchema(parsed, manifestPath);
-      if (!manifest) continue;
+      if (!manifest || manifest.hidden) continue;
 
       const relativePath = path.relative(cwd, path.dirname(manifestPath));
 
@@ -354,7 +354,7 @@ function scanForPlugins(
 
     const manifests = discoverPluginManifests(packagePath);
     for (const manifest of manifests) {
-      // Convert to template plugin format (exclude config schema)
+      if (manifest.hidden) continue;
       plugins[manifest.name] = {
         name: manifest.name,
         displayName: manifest.displayName,
@@ -399,7 +399,7 @@ function scanPluginsDir(
       const content = fs.readFileSync(manifestPath, "utf-8");
       const parsed = JSON.parse(content);
       const manifest = validateManifestWithSchema(parsed, manifestPath);
-      if (manifest) {
+      if (manifest && !manifest.hidden) {
         plugins[manifest.name] = {
           name: manifest.name,
           displayName: manifest.displayName,
