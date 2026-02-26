@@ -3,15 +3,19 @@
   "git": {
     "commitMessage": "chore: release v${version} [skip ci]",
     "tagName": "v${version}",
+    "tagMatch": "v*",
     "tagAnnotation": "Release v${version}",
     "requireBranch": "main",
     "requireCleanWorkingDir": true,
+    "requireCommits": true,
+    "requireCommitsFail": false,
+    "commitsPath": "packages/appkit packages/appkit-ui packages/shared",
     "push": true,
     "pushArgs": ["--follow-tags"]
   },
   "github": {
     "release": true,
-    "releaseName": "v${version}",
+    "releaseName": "AppKit v${version}",
     "autoGenerate": false,
     "draft": false,
     "preRelease": false,
@@ -35,7 +39,13 @@
         "commitsSort": ["type", "subject"]
       },
       "infile": "CHANGELOG.md",
-      "header": "# Changelog\n\nAll notable changes to this project will be documented in this file."
+      "header": "# Changelog\n\nAll notable changes to this project will be documented in this file.",
+      "gitRawCommitsOpts": {
+        "path": ["packages/appkit", "packages/appkit-ui", "packages/shared"]
+      },
+      "commitsOpts": {
+        "path": ["packages/appkit", "packages/appkit-ui", "packages/shared"]
+      }
     }
   }
 }

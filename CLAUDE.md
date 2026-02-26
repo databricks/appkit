@@ -95,6 +95,17 @@ pnpm check:fix        # Auto-fix with Biome
 pnpm typecheck        # TypeScript type checking across all packages
 ```
 
+### AppKit CLI
+When using the published SDK or running from the monorepo (after `pnpm build`), the `appkit` CLI is available:
+
+```bash
+npx appkit plugin sync --write    # Sync plugin manifests into appkit.plugins.json
+npx appkit plugin create         # Scaffold a new plugin (interactive, uses @clack/prompts)
+npx appkit plugin validate       # Validate manifest(s) against the JSON schema
+npx appkit plugin list           # List plugins (from appkit.plugins.json or --dir)
+npx appkit plugin add-resource   # Add a resource requirement to a plugin (interactive)
+```
+
 ### Deployment
 ```bash
 pnpm pack:sdk                      # Package SDK for deployment
@@ -232,6 +243,39 @@ The AnalyticsPlugin provides SQL query execution:
 - POST `/api/analytics/query/:query_key` - Execute query with parameters
 - Built-in caching with configurable TTL
 - Databricks SQL Warehouse connector for execution
+
+### Lakebase Autoscaling Connector
+
+**Location:** `packages/appkit/src/connectors/lakebase/`
+
+AppKit provides `createLakebasePool()` - a factory function that returns a standard `pg.Pool` configured with automatic OAuth token refresh for Databricks Lakebase (OLTP) databases.
+
+**Key Features:**
+- Returns standard `pg.Pool` (compatible with all ORMs)
+- Automatic OAuth token refresh (1-hour tokens, 2-minute buffer)
+- Token caching to minimize API calls
+- Battle-tested pattern (same as AWS RDS IAM authentication)
+
+**Quick Example:**
+```typescript
+import { createLakebasePool } from '@databricks/appkit';
+
+// Reads from PGHOST, PGDATABASE, LAKEBASE_ENDPOINT env vars
+const pool = createLakebasePool();
+
+// Standard pg.Pool API
+const result = await pool.query('SELECT * FROM users');
+```
+
+**ORM Integration:**
+Works with Drizzle, Prisma, TypeORM - see the [`@databricks/lakebase` README](https://github.com/databricks/appkit/blob/main/packages/lakebase/README.md) for examples.
+
+**Architecture:**
+- Connector files: `packages/appkit/src/connectors/lakebase/`
+  - `pool.ts` - Pool factory with OAuth token refresh
+  - `types.ts` - TypeScript interfaces (`LakebasePoolConfig`)
+  - `utils.ts` - Helper functions (`generateDatabaseCredential`)
+  - `auth-types.ts` - Lakebase v2 API types
 
 ### Frontend-Backend Interaction
 

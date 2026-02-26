@@ -232,4 +232,4 @@ Then create `config/queries/` and add your `.sql` files.
 
 - [Local development](./local-development.mdx) - Running the dev server
 - [Configuration](../configuration.mdx) - Environment variables
-- [Plugins](../plugins.md) - Plugin configuration
+- [Plugins](../plugins/index.md) - Plugin configuration

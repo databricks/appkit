@@ -25,6 +25,10 @@
   "description": "",
   "dependencies": {
     "@databricks/appkit": "workspace:*",
+    "drizzle-orm": "^0.45.1",
+    "reflect-metadata": "^0.2.0",
+    "sequelize": "^6.37.7",
+    "typeorm": "^0.3.20",
     "zod": "^4.1.13"
   },
   "devDependencies": {

@@ -112,3 +112,24 @@ pnpm docs:serve  # Serve built docs
 ```
 
 See [docs/README.md](./docs/README.md) for more details.
+
+## Adding or changing a resource type
+
+Resource types and their permissions are defined once in the plugin-manifest schema; the CLI (create, add-resource, validate) and the appkit registry types are derived from it.
+
+To add or change a resource type:
+
+1. **Edit the schema** – `packages/shared/src/schemas/plugin-manifest.schema.json`:
+   - Add the value to `$defs.resourceType.enum`.
+   - Add a permission definition (e.g. `$defs.myResourcePermission`) with an `enum` array; list permissions **weakest to strongest** (this order is used for merge/escalation).
+   - In `$defs.resourceRequirement.allOf`, add a branch with `if.properties.type.const` set to the new type and `then.properties.permission.$ref` pointing at that permission def (e.g. `#/$defs/myResourcePermission`).
+
+2. **Regenerate registry types** – from the repo root:
+   ```bash
+   pnpm exec tsx tools/generate-registry-types.ts
+   ```
+   This updates `packages/appkit/src/registry/types.generated.ts`. The appkit build runs this automatically before compiling.
+
+3. **Optional:** Add default fields for the new type in `packages/shared/src/cli/commands/plugin/create/resource-defaults.ts` (`DEFAULT_FIELDS_BY_TYPE`) so the plugin create/add-resource prompts suggest env vars.
+
+For more context and alternative approaches, see [Registry types from schema](./docs/docs/development/registry-types-from-schema.md).

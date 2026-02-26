@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
+import type pg from "pg";
 import type { CacheConfig, CacheEntry, CacheStorage } from "shared";
-import type { LakebaseV1Connector } from "../../connectors";
 import { InitializationError, ValidationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { lakebaseStorageDefaults } from "./defaults";
@@ -12,7 +12,8 @@ const logger = createLogger("cache:persistent");
  * to manage memory usage and ensure efficient cache operations.
  *
  * @example
- * const persistentStorage = new PersistentStorage(config, connector);
+ * const pool = createLakebasePool({ workspaceClient });
+ * const persistentStorage = new PersistentStorage(config, pool);
  * await persistentStorage.initialize();
  * await persistentStorage.get("my-key");
  * await persistentStorage.set("my-key", "my-value");
@@ -22,7 +23,7 @@ const logger = createLogger("cache:persistent");
  *
  */
 export class PersistentStorage implements CacheStorage {
-  private readonly connector: LakebaseV1Connector;
+  private readonly pool: pg.Pool;
   private readonly tableName: string;
   private readonly maxBytes: number;
   private readonly maxEntryBytes: number;
@@ -30,8 +31,8 @@ export class PersistentStorage implements CacheStorage {
   private readonly evictionCheckProbability: number;
   private initialized: boolean;
 
-  constructor(config: CacheConfig, connector: LakebaseV1Connector) {
-    this.connector = connector;
+  constructor(config: CacheConfig, pool: pg.Pool) {
+    this.pool = pool;
     this.maxBytes = config.maxBytes ?? lakebaseStorageDefaults.maxBytes;
     this.maxEntryBytes =
       config.maxEntryBytes ?? lakebaseStorageDefaults.maxEntryBytes;
@@ -66,7 +67,7 @@ export class PersistentStorage implements CacheStorage {
 
     const keyHash = this.hashKey(key);
 
-    const result = await this.connector.query<{
+    const result = await this.pool.query<{
       value: Buffer;
       expiry: string;
     }>(`SELECT value, expiry FROM ${this.tableName} WHERE key_hash = $1`, [
@@ -78,7 +79,7 @@ export class PersistentStorage implements CacheStorage {
     const entry = result.rows[0];
 
     // fire-and-forget update
-    this.connector
+    this.pool
       .query(
         `UPDATE ${this.tableName} SET last_accessed = NOW() WHERE key_hash = $1`,
         [keyHash],
@@ -123,7 +124,7 @@ export class PersistentStorage implements CacheStorage {
       }
     }
 
-    await this.connector.query(
+    await this.pool.query(
       `INSERT INTO ${this.tableName} (key_hash, key, value, byte_size, expiry, created_at, last_accessed)
       VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
       ON CONFLICT (key_hash)
@@ -141,16 +142,15 @@ export class PersistentStorage implements CacheStorage {
   async delete(key: string): Promise<void> {
     await this.ensureInitialized();
     const keyHash = this.hashKey(key);
-    await this.connector.query(
-      `DELETE FROM ${this.tableName} WHERE key_hash = $1`,
-      [keyHash],
-    );
+    await this.pool.query(`DELETE FROM ${this.tableName} WHERE key_hash = $1`, [
+      keyHash,
+    ]);
   }
 
   /** Clear the persistent storage */
   async clear(): Promise<void> {
     await this.ensureInitialized();
-    await this.connector.query(`TRUNCATE TABLE ${this.tableName}`);
+    await this.pool.query(`TRUNCATE TABLE ${this.tableName}`);
   }
 
   /**
@@ -162,7 +162,7 @@ export class PersistentStorage implements CacheStorage {
     await this.ensureInitialized();
     const keyHash = this.hashKey(key);
 
-    const result = await this.connector.query<{ exists: boolean }>(
+    const result = await this.pool.query<{ exists: boolean }>(
       `SELECT EXISTS(SELECT 1 FROM ${this.tableName} WHERE key_hash = $1) as exists`,
       [keyHash],
     );
@@ -177,7 +177,7 @@ export class PersistentStorage implements CacheStorage {
   async size(): Promise<number> {
     await this.ensureInitialized();
 
-    const result = await this.connector.query<{ count: string }>(
+    const result = await this.pool.query<{ count: string }>(
       `SELECT COUNT(*) as count FROM ${this.tableName}`,
     );
     return parseInt(result.rows[0]?.count ?? "0", 10);
@@ -187,7 +187,7 @@ export class PersistentStorage implements CacheStorage {
   async totalBytes(): Promise<number> {
     await this.ensureInitialized();
 
-    const result = await this.connector.query<{ total: string }>(
+    const result = await this.pool.query<{ total: string }>(
       `SELECT COALESCE(SUM(byte_size), 0) as total FROM ${this.tableName}`,
     );
     return parseInt(result.rows[0]?.total ?? "0", 10);
@@ -207,7 +207,8 @@ export class PersistentStorage implements CacheStorage {
    */
   async healthCheck(): Promise<boolean> {
     try {
-      return await this.connector.healthCheck();
+      await this.pool.query("SELECT 1");
+      return true;
     } catch {
       return false;
     }
@@ -215,7 +216,7 @@ export class PersistentStorage implements CacheStorage {
 
   /** Close the persistent storage */
   async close(): Promise<void> {
-    await this.connector.close();
+    await this.pool.end();
   }
 
   /**
@@ -224,7 +225,7 @@ export class PersistentStorage implements CacheStorage {
    */
   async cleanupExpired(): Promise<number> {
     await this.ensureInitialized();
-    const result = await this.connector.query<{ count: string }>(
+    const result = await this.pool.query<{ count: string }>(
       `WITH deleted as (DELETE FROM ${this.tableName} WHERE expiry < $1 RETURNING *) SELECT COUNT(*) as count FROM deleted`,
       [Date.now()],
     );
@@ -241,7 +242,7 @@ export class PersistentStorage implements CacheStorage {
       }
     }
 
-    await this.connector.query(
+    await this.pool.query(
       `DELETE FROM ${this.tableName} WHERE key_hash IN
       (SELECT key_hash FROM ${this.tableName} ORDER BY last_accessed ASC LIMIT $1)`,
       [this.evictionBatchSize],
@@ -275,7 +276,7 @@ export class PersistentStorage implements CacheStorage {
   /** Run migrations for the persistent storage */
   private async runMigrations(): Promise<void> {
     try {
-      await this.connector.query(`
+      await this.pool.query(`
             CREATE TABLE IF NOT EXISTS ${this.tableName} (
                 id BIGSERIAL PRIMARY KEY,
                 key_hash BIGINT NOT NULL,
@@ -289,22 +290,22 @@ export class PersistentStorage implements CacheStorage {
             `);
 
       // unique index on key_hash for fast lookups
-      await this.connector.query(
+      await this.pool.query(
         `CREATE UNIQUE INDEX IF NOT EXISTS idx_${this.tableName}_key_hash ON ${this.tableName} (key_hash);`,
       );
 
       // index on expiry for cleanup queries
-      await this.connector.query(
+      await this.pool.query(
         `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_expiry ON ${this.tableName} (expiry); `,
       );
 
       // index on last_accessed for LRU eviction
-      await this.connector.query(
+      await this.pool.query(
         `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_last_accessed ON ${this.tableName} (last_accessed); `,
       );
 
       // index on byte_size for monitoring
-      await this.connector.query(
+      await this.pool.query(
         `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_byte_size ON ${this.tableName} (byte_size); `,
       );
     } catch (error) {

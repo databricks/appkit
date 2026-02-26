@@ -1,74 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { Lang, parse, type SgNode } from "@ast-grep/napi";
-import Ajv from "ajv";
-import addFormats from "ajv-formats";
 import { Command } from "commander";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// Resolve to package schemas: from dist/cli/commands -> dist/schemas, from src/cli/commands -> shared/schemas
-const PLUGIN_MANIFEST_SCHEMA_PATH = path.join(
-  __dirname,
-  "..",
-  "..",
-  "..",
-  "schemas",
-  "plugin-manifest.schema.json",
-);
-
-/**
- * Field entry in a resource requirement (env var + optional description)
- */
-interface ResourceFieldEntry {
-  env: string;
-  description?: string;
-}
-
-/**
- * Resource requirement as defined in plugin manifests.
- * Uses fields (single key e.g. id, or multiple e.g. instance_name/database_name, scope/key).
- */
-interface ResourceRequirement {
-  type: string;
-  alias: string;
-  resourceKey: string;
-  description: string;
-  permission: string;
-  fields: Record<string, ResourceFieldEntry>;
-}
-
-/**
- * Plugin manifest structure (from SDK plugin manifest.json files)
- */
-interface PluginManifest {
-  name: string;
-  displayName: string;
-  description: string;
-  resources: {
-    required: ResourceRequirement[];
-    optional: ResourceRequirement[];
-  };
-  config?: { schema: unknown };
-}
-
-/**
- * Plugin entry in the template manifest (includes package source)
- */
-interface TemplatePlugin extends Omit<PluginManifest, "config"> {
-  package: string;
-  /** When true, this plugin is required by the template and cannot be deselected during CLI init. */
-  requiredByTemplate?: boolean;
-}
-
-/**
- * Template plugins manifest structure
- */
-interface TemplatePluginsManifest {
-  $schema: string;
-  version: string;
-  plugins: Record<string, TemplatePlugin>;
-}
+import type {
+  PluginManifest,
+  TemplatePlugin,
+  TemplatePluginsManifest,
+} from "../manifest-types";
+import {
+  formatValidationErrors,
+  validateManifest,
+} from "../validate/validate-manifest";
 
 /**
  * Checks whether a resolved file path is within a given directory boundary.
@@ -88,83 +30,21 @@ function isWithinDirectory(filePath: string, boundary: string): boolean {
   );
 }
 
-type ValidateFunction = ReturnType<InstanceType<typeof Ajv>["compile"]>;
-
-let pluginManifestValidator: ValidateFunction | null = null;
-
-/**
- * Loads and compiles the plugin-manifest JSON schema (cached).
- * Returns the compiled validate function or null if the schema cannot be loaded.
- */
-function getPluginManifestValidator(): ValidateFunction | null {
-  if (pluginManifestValidator) return pluginManifestValidator;
-  try {
-    const schemaRaw = fs.readFileSync(PLUGIN_MANIFEST_SCHEMA_PATH, "utf-8");
-    const schema = JSON.parse(schemaRaw) as object;
-    const ajv = new Ajv({ allErrors: true });
-    addFormats(ajv as any);
-    pluginManifestValidator = ajv.compile(schema);
-    return pluginManifestValidator;
-  } catch (err) {
-    console.warn(
-      "Warning: Could not load plugin-manifest schema for validation:",
-      err instanceof Error ? err.message : err,
-    );
-    return null;
-  }
-}
-
 /**
  * Validates a parsed JSON object against the plugin-manifest JSON schema.
  * Returns the manifest if valid, or null and logs schema errors.
- *
- * @param obj - The parsed JSON object to validate
- * @param sourcePath - Path to the manifest file (for warning messages)
- * @returns A valid PluginManifest or null
  */
 function validateManifestWithSchema(
   obj: unknown,
   sourcePath: string,
 ): PluginManifest | null {
-  if (!obj || typeof obj !== "object") {
-    console.warn(`Warning: Manifest at ${sourcePath} is not a valid object`);
-    return null;
+  const result = validateManifest(obj);
+  if (result.valid && result.manifest) return result.manifest;
+  if (result.errors?.length) {
+    console.warn(
+      `Warning: Manifest at ${sourcePath} failed schema validation:\n${formatValidationErrors(result.errors, obj)}`,
+    );
   }
-
-  const validate = getPluginManifestValidator();
-  if (!validate) {
-    // Schema not available (e.g. dev without build); fall back to basic shape check
-    const m = obj as Record<string, unknown>;
-    if (
-      typeof m.name === "string" &&
-      m.name.length > 0 &&
-      typeof m.displayName === "string" &&
-      m.displayName.length > 0 &&
-      typeof m.description === "string" &&
-      m.description.length > 0 &&
-      m.resources &&
-      typeof m.resources === "object" &&
-      Array.isArray((m.resources as { required?: unknown }).required)
-    ) {
-      return obj as PluginManifest;
-    }
-    console.warn(`Warning: Manifest at ${sourcePath} has invalid structure`);
-    return null;
-  }
-
-  const valid = validate(obj);
-  if (valid) return obj as PluginManifest;
-
-  const errors = validate.errors ?? [];
-  const message = errors
-    .map(
-      (e: any) =>
-        `  ${e.instancePath || e.dataPath || "/"} ${e.message}${e.params ? ` (${JSON.stringify(e.params)})` : ""}`,
-    )
-    .join("\n");
-  console.warn(
-    `Warning: Manifest at ${sourcePath} failed schema validation:\n${message}`,
-  );
   return null;
 }
 
@@ -178,7 +58,7 @@ const KNOWN_PLUGIN_PACKAGES = ["@databricks/appkit"];
  * Candidate paths for the server entry file, relative to cwd.
  * Checked in order; the first that exists is used.
  */
-const SERVER_FILE_CANDIDATES = ["server/server.ts"];
+const SERVER_FILE_CANDIDATES = ["server/server.ts", "server/index.ts"];
 
 /**
  * Find the server entry file by checking candidate paths in order.
@@ -398,6 +278,9 @@ function discoverLocalPlugins(
         description: manifest.description,
         package: `./${relativePath}`,
         resources: manifest.resources,
+        ...(manifest.onSetupMessage && {
+          onSetupMessage: manifest.onSetupMessage,
+        }),
       };
     } catch (error) {
       console.warn(
@@ -478,6 +361,9 @@ function scanForPlugins(
         description: manifest.description,
         package: packageName,
         resources: manifest.resources,
+        ...(manifest.onSetupMessage && {
+          onSetupMessage: manifest.onSetupMessage,
+        }),
       };
     }
   }
@@ -486,12 +372,103 @@ function scanForPlugins(
 }
 
 /**
- * Run the plugins sync command.
+ * Scan a directory for plugin manifests in direct subdirectories.
+ * Each subdirectory is expected to contain a manifest.json file.
+ * Used with --plugins-dir to discover plugins from source instead of node_modules.
+ *
+ * @param dir - Absolute path to the directory containing plugin subdirectories
+ * @param packageName - Package name to assign to discovered plugins
+ * @returns Map of plugin name to template plugin entry
+ */
+function scanPluginsDir(
+  dir: string,
+  packageName: string,
+): TemplatePluginsManifest["plugins"] {
+  const plugins: TemplatePluginsManifest["plugins"] = {};
+
+  if (!fs.existsSync(dir)) return plugins;
+
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    const manifestPath = path.join(dir, entry.name, "manifest.json");
+    if (!fs.existsSync(manifestPath)) continue;
+
+    try {
+      const content = fs.readFileSync(manifestPath, "utf-8");
+      const parsed = JSON.parse(content);
+      const manifest = validateManifestWithSchema(parsed, manifestPath);
+      if (manifest) {
+        plugins[manifest.name] = {
+          name: manifest.name,
+          displayName: manifest.displayName,
+          description: manifest.description,
+          package: packageName,
+          resources: manifest.resources,
+          ...(manifest.onSetupMessage && {
+            onSetupMessage: manifest.onSetupMessage,
+          }),
+        };
+      }
+    } catch (error) {
+      console.warn(
+        `Warning: Failed to parse manifest at ${manifestPath}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
+  return plugins;
+}
+
+/**
+ * Write (or preview) the template plugins manifest to disk.
+ */
+function writeManifest(
+  outputPath: string,
+  { plugins }: { plugins: TemplatePluginsManifest["plugins"] },
+  options: { write?: boolean; silent?: boolean },
+) {
+  const templateManifest: TemplatePluginsManifest = {
+    $schema:
+      "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
+    version: "1.0",
+    plugins,
+  };
+
+  if (options.write) {
+    fs.writeFileSync(
+      outputPath,
+      `${JSON.stringify(templateManifest, null, 2)}\n`,
+    );
+    if (!options.silent) {
+      console.log(`\n✓ Wrote ${outputPath}`);
+    }
+  } else if (!options.silent) {
+    console.log("\nTo write the manifest, run:");
+    console.log("  npx appkit plugin sync --write\n");
+    console.log("Preview:");
+    console.log("─".repeat(60));
+    console.log(JSON.stringify(templateManifest, null, 2));
+    console.log("─".repeat(60));
+  }
+}
+
+/**
+ * Run the plugin sync command.
  * Parses the server entry file to discover which packages to scan for plugin
  * manifests, then marks plugins that are actually used in the `plugins: [...]`
  * array as requiredByTemplate.
  */
-function runPluginsSync(options: { write?: boolean; output?: string }) {
+function runPluginsSync(options: {
+  write?: boolean;
+  output?: string;
+  silent?: boolean;
+  requirePlugins?: string;
+  pluginsDir?: string;
+  packageName?: string;
+}) {
   const cwd = process.cwd();
   const outputPath = path.resolve(cwd, options.output || "appkit.plugins.json");
 
@@ -503,7 +480,9 @@ function runPluginsSync(options: { write?: boolean; output?: string }) {
     process.exit(1);
   }
 
-  console.log("Scanning for AppKit plugins...\n");
+  if (!options.silent) {
+    console.log("Scanning for AppKit plugins...\n");
+  }
 
   // Step 1: Parse server file to discover imports and plugin usages
   const serverFile = findServerFile(cwd);
@@ -511,8 +490,10 @@ function runPluginsSync(options: { write?: boolean; output?: string }) {
   let pluginUsages = new Set<string>();
 
   if (serverFile) {
-    const relativePath = path.relative(cwd, serverFile);
-    console.log(`Server entry file: ${relativePath}`);
+    if (!options.silent) {
+      const relativePath = path.relative(cwd, serverFile);
+      console.log(`Server entry file: ${relativePath}`);
+    }
 
     const content = fs.readFileSync(serverFile, "utf-8");
     const lang = serverFile.endsWith(".tsx") ? Lang.Tsx : Lang.TypeScript;
@@ -521,7 +502,7 @@ function runPluginsSync(options: { write?: boolean; output?: string }) {
 
     serverImports = parseImports(root);
     pluginUsages = parsePluginUsages(root);
-  } else {
+  } else if (!options.silent) {
     console.log(
       "No server entry file found. Checked:",
       SERVER_FILE_CANDIDATES.join(", "),
@@ -536,12 +517,23 @@ function runPluginsSync(options: { write?: boolean; output?: string }) {
     (i) => i.source.startsWith(".") || i.source.startsWith("/"),
   );
 
-  // Step 3: Scan npm packages for plugin manifests
-  const npmPackages = new Set([
-    ...KNOWN_PLUGIN_PACKAGES,
-    ...npmImports.map((i) => i.source),
-  ]);
-  const plugins = scanForPlugins(cwd, npmPackages);
+  // Step 3: Scan for plugin manifests (--plugins-dir or node_modules)
+  const plugins: TemplatePluginsManifest["plugins"] = {};
+
+  if (options.pluginsDir) {
+    const resolvedDir = path.resolve(cwd, options.pluginsDir);
+    const pkgName = options.packageName ?? "@databricks/appkit";
+    if (!options.silent) {
+      console.log(`Scanning plugins directory: ${options.pluginsDir}`);
+    }
+    Object.assign(plugins, scanPluginsDir(resolvedDir, pkgName));
+  } else {
+    const npmPackages = new Set([
+      ...KNOWN_PLUGIN_PACKAGES,
+      ...npmImports.map((i) => i.source),
+    ]);
+    Object.assign(plugins, scanForPlugins(cwd, npmPackages));
+  }
 
   // Step 4: Discover local plugin manifests from relative imports
   if (serverFile && localImports.length > 0) {
@@ -553,10 +545,15 @@ function runPluginsSync(options: { write?: boolean; output?: string }) {
   const pluginCount = Object.keys(plugins).length;
 
   if (pluginCount === 0) {
+    if (options.silent) {
+      writeManifest(outputPath, { plugins: {} }, options);
+      return;
+    }
     console.log("No plugins found.");
-    console.log("\nMake sure you have plugin packages installed:");
-    for (const pkg of npmPackages) {
-      console.log(`  - ${pkg}`);
+    if (options.pluginsDir) {
+      console.log(`\nNo manifest.json files found in: ${options.pluginsDir}`);
+    } else {
+      console.log("\nMake sure you have plugin packages installed.");
     }
     process.exit(1);
   }
@@ -594,39 +591,38 @@ function runPluginsSync(options: { write?: boolean; output?: string }) {
     }
   }
 
-  console.log(`\nFound ${pluginCount} plugin(s):`);
-  for (const [name, manifest] of Object.entries(plugins)) {
-    const resourceCount =
-      manifest.resources.required.length + manifest.resources.optional.length;
-    const resourceInfo =
-      resourceCount > 0 ? ` [${resourceCount} resource(s)]` : "";
-    const mandatoryTag = manifest.requiredByTemplate ? " (mandatory)" : "";
-    console.log(
-      `  ${manifest.requiredByTemplate ? "●" : "○"} ${manifest.displayName} (${name}) from ${manifest.package}${resourceInfo}${mandatoryTag}`,
-    );
+  // Step 6: Apply explicit --require-plugins overrides
+  if (options.requirePlugins) {
+    const explicitNames = options.requirePlugins
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    for (const name of explicitNames) {
+      if (plugins[name]) {
+        plugins[name].requiredByTemplate = true;
+      } else if (!options.silent) {
+        console.warn(
+          `Warning: --require-plugins referenced "${name}" but no such plugin was discovered`,
+        );
+      }
+    }
   }
 
-  const templateManifest: TemplatePluginsManifest = {
-    $schema:
-      "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
-    version: "1.0",
-    plugins,
-  };
-
-  if (options.write) {
-    fs.writeFileSync(
-      outputPath,
-      `${JSON.stringify(templateManifest, null, 2)}\n`,
-    );
-    console.log(`\n✓ Wrote ${outputPath}`);
-  } else {
-    console.log("\nTo write the manifest, run:");
-    console.log("  npx appkit plugins sync --write\n");
-    console.log("Preview:");
-    console.log("─".repeat(60));
-    console.log(JSON.stringify(templateManifest, null, 2));
-    console.log("─".repeat(60));
+  if (!options.silent) {
+    console.log(`\nFound ${pluginCount} plugin(s):`);
+    for (const [name, manifest] of Object.entries(plugins)) {
+      const resourceCount =
+        manifest.resources.required.length + manifest.resources.optional.length;
+      const resourceInfo =
+        resourceCount > 0 ? ` [${resourceCount} resource(s)]` : "";
+      const mandatoryTag = manifest.requiredByTemplate ? " (mandatory)" : "";
+      console.log(
+        `  ${manifest.requiredByTemplate ? "●" : "○"} ${manifest.displayName} (${name}) from ${manifest.package}${resourceInfo}${mandatoryTag}`,
+      );
+    }
   }
+
+  writeManifest(outputPath, { plugins }, options);
 }
 
 /** Exported for testing: path boundary check, AST parsing. */
@@ -640,5 +636,21 @@ export const pluginsSyncCommand = new Command("sync")
   .option(
     "-o, --output <path>",
     "Output file path (default: ./appkit.plugins.json)",
+  )
+  .option(
+    "-s, --silent",
+    "Suppress output and never exit with error (for use in predev/prebuild hooks)",
+  )
+  .option(
+    "--require-plugins <names>",
+    "Comma-separated plugin names to mark as requiredByTemplate (e.g. server,analytics)",
+  )
+  .option(
+    "--plugins-dir <path>",
+    "Scan this directory for plugin subdirectories with manifest.json (instead of node_modules)",
+  )
+  .option(
+    "--package-name <name>",
+    "Package name to assign to plugins found via --plugins-dir (default: @databricks/appkit)",
   )
   .action(runPluginsSync);

@@ -1,5 +1,7 @@
+import "reflect-metadata";
 import { analytics, createApp, genie, server } from "@databricks/appkit";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
+import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
 
@@ -22,6 +24,7 @@ createApp({
     genie({
       spaces: { demo: process.env.DATABRICKS_GENIE_SPACE_ID ?? "placeholder" },
     }),
+    lakebaseExamples(),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
 }).then((appkit) => {

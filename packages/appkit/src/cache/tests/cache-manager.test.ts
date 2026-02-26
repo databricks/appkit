@@ -2,18 +2,19 @@ import type { CacheStorage } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { CacheManager } from "../../index";
 
-// Mock LakebaseV1Connector
-const mockLakebaseHealthCheck = vi.fn();
-vi.mock("@/connectors", () => ({
-  LakebaseV1Connector: vi.fn().mockImplementation(() => ({
-    healthCheck: mockLakebaseHealthCheck,
-    close: vi.fn().mockResolvedValue(undefined),
+// Mock createLakebasePool
+const mockPoolQuery = vi.fn();
+const mockPoolEnd = vi.fn();
+vi.mock("@/connectors/lakebase", () => ({
+  createLakebasePool: vi.fn().mockImplementation(() => ({
+    query: mockPoolQuery,
+    end: mockPoolEnd.mockResolvedValue(undefined),
   })),
 }));
 
 // Mock PersistentStorage
 vi.mock("../storage/persistent", () => ({
-  PersistentStorage: vi.fn().mockImplementation(() => {
+  PersistentStorage: vi.fn().mockImplementation((_config: any, pool: any) => {
     const cache = new Map<string, { value: unknown; expiry: number }>();
     return {
       initialize: vi.fn().mockResolvedValue(undefined),
@@ -32,8 +33,16 @@ vi.mock("../storage/persistent", () => ({
       has: vi.fn().mockImplementation(async (key: string) => cache.has(key)),
       size: vi.fn().mockImplementation(async () => cache.size),
       isPersistent: vi.fn().mockReturnValue(true),
-      healthCheck: vi.fn().mockResolvedValue(true),
-      close: vi.fn().mockResolvedValue(undefined),
+      healthCheck: vi.fn().mockImplementation(async () => {
+        // Simulate real healthCheck: calls pool.query('SELECT 1')
+        try {
+          await pool.query("SELECT 1");
+          return true;
+        } catch {
+          return false;
+        }
+      }),
+      close: vi.fn().mockImplementation(async () => pool.end()),
       cleanupExpired: vi.fn().mockResolvedValue(0),
     };
   }),
@@ -87,7 +96,7 @@ describe("CacheManager", () => {
     (CacheManager as any).instance = null;
     (CacheManager as any).initPromise = null;
     // Default: Lakebase unavailable (most tests pass explicit storage)
-    mockLakebaseHealthCheck.mockResolvedValue(false);
+    mockPoolQuery.mockRejectedValue(new Error("Connection failed"));
   });
 
   afterEach(() => {
@@ -621,8 +630,11 @@ describe("CacheManager", () => {
       (CacheManager as any).instance = null;
       (CacheManager as any).initPromise = null;
 
-      // Make Lakebase healthy
-      mockLakebaseHealthCheck.mockResolvedValue(true);
+      // Make pool.query succeed for healthCheck ('SELECT 1')
+      mockPoolQuery.mockResolvedValue({
+        rows: [{ "?column?": 1 }],
+        rowCount: 1,
+      });
 
       const cache = await CacheManager.getInstance({});
 
@@ -636,8 +648,8 @@ describe("CacheManager", () => {
       (CacheManager as any).instance = null;
       (CacheManager as any).initPromise = null;
 
-      // Lakebase unhealthy (default in beforeEach)
-      mockLakebaseHealthCheck.mockResolvedValue(false);
+      // Lakebase unhealthy (pool.query fails, default in beforeEach)
+      mockPoolQuery.mockRejectedValue(new Error("Connection failed"));
 
       const cache = await CacheManager.getInstance({});
 
@@ -656,8 +668,8 @@ describe("CacheManager", () => {
       (CacheManager as any).instance = null;
       (CacheManager as any).initPromise = null;
 
-      // Lakebase unhealthy
-      mockLakebaseHealthCheck.mockResolvedValue(false);
+      // Lakebase unhealthy (pool.query fails)
+      mockPoolQuery.mockRejectedValue(new Error("Connection failed"));
 
       const cache = await CacheManager.getInstance({
         strictPersistence: true,
@@ -677,8 +689,8 @@ describe("CacheManager", () => {
       (CacheManager as any).instance = null;
       (CacheManager as any).initPromise = null;
 
-      // Lakebase unhealthy
-      mockLakebaseHealthCheck.mockResolvedValue(false);
+      // Lakebase unhealthy - pool.query('SELECT 1') fails
+      mockPoolQuery.mockRejectedValue(new Error("Health check failed"));
 
       const cache = await CacheManager.getInstance({});
 
@@ -693,9 +705,7 @@ describe("CacheManager", () => {
       (CacheManager as any).initPromise = null;
 
       // Lakebase throws
-      mockLakebaseHealthCheck.mockRejectedValue(
-        new Error("Connection refused"),
-      );
+      mockPoolQuery.mockRejectedValue(new Error("Connection refused"));
 
       const cache = await CacheManager.getInstance({});
 

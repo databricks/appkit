@@ -7,6 +7,11 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
+          id: "api/appkit/Enumeration.RequestedClaimsPermissionSet",
+          label: "RequestedClaimsPermissionSet"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Enumeration.ResourceType",
           label: "ResourceType"
         }
@@ -89,13 +94,38 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.DatabaseCredential",
+          label: "DatabaseCredential"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.GenerateDatabaseCredentialRequest",
+          label: "GenerateDatabaseCredentialRequest"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.ITelemetry",
           label: "ITelemetry"
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.LakebasePoolConfig",
+          label: "LakebasePoolConfig"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.PluginManifest",
           label: "PluginManifest"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.RequestedClaims",
+          label: "RequestedClaims"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.RequestedResource",
+          label: "RequestedResource"
         },
         {
           type: "doc",
@@ -147,6 +177,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.ResourcePermission",
           label: "ResourcePermission"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.ToPlugin",
+          label: "ToPlugin"
         }
       ]
     },
@@ -154,11 +189,6 @@ const typedocSidebar: SidebarsConfig = {
       type: "category",
       label: "Variables",
       items: [
-        {
-          type: "doc",
-          id: "api/appkit/Variable.genie",
-          label: "genie"
-        },
         {
           type: "doc",
           id: "api/appkit/Variable.sql",
@@ -182,8 +212,28 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.createLakebasePool",
+          label: "createLakebasePool"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.generateDatabaseCredential",
+          label: "generateDatabaseCredential"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.getExecutionContext",
           label: "getExecutionContext"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.getLakebaseOrmConfig",
+          label: "getLakebaseOrmConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.getLakebasePgConfig",
+          label: "getLakebasePgConfig"
         },
         {
           type: "doc",
@@ -194,6 +244,16 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.getResourceRequirements",
           label: "getResourceRequirements"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.getUsernameWithApiLookup",
+          label: "getUsernameWithApiLookup"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.getWorkspaceClient",
+          label: "getWorkspaceClient"
         },
         {
           type: "doc",

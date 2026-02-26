@@ -1,0 +1,11 @@
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "name": "lakebase",
+  "displayName": "Lakebase",
+  "description": "SQL query execution against Databricks Lakebase Autoscaling",
+  "onSetupMessage": "Configure environment variables before running or deploying the app.\nSee: https://databricks.github.io/appkit/docs/plugins/lakebase",
+  "resources": {
+    "required": [],
+    "optional": []
+  }
+}

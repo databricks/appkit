@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-
+import "dotenv/config";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,7 +7,7 @@ import { Command } from "commander";
 import { docsCommand } from "./commands/docs.js";
 import { generateTypesCommand } from "./commands/generate-types.js";
 import { lintCommand } from "./commands/lint.js";
-import { pluginsCommand } from "./commands/plugins.js";
+import { pluginCommand } from "./commands/plugin/index.js";
 import { setupCommand } from "./commands/setup.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -25,6 +25,6 @@ cmd.addCommand(setupCommand);
 cmd.addCommand(generateTypesCommand);
 cmd.addCommand(lintCommand);
 cmd.addCommand(docsCommand);
-cmd.addCommand(pluginsCommand);
+cmd.addCommand(pluginCommand);
 
 cmd.parse();

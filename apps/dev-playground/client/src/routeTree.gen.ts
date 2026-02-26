@@ -13,7 +13,11 @@ import { Route as TypeSafetyRouteRouteImport } from './routes/type-safety.route'
 import { Route as TelemetryRouteRouteImport } from './routes/telemetry.route'
 import { Route as SqlHelpersRouteRouteImport } from './routes/sql-helpers.route'
 import { Route as ReconnectRouteRouteImport } from './routes/reconnect.route'
+
 import { Route as GenieRouteRouteImport } from './routes/genie.route'
+
+import { Route as LakebaseRouteRouteImport } from './routes/lakebase.route'
+
 import { Route as DataVisualizationRouteRouteImport } from './routes/data-visualization.route'
 import { Route as ArrowAnalyticsRouteRouteImport } from './routes/arrow-analytics.route'
 import { Route as AnalyticsRouteRouteImport } from './routes/analytics.route'
@@ -39,9 +43,15 @@ const ReconnectRouteRoute = ReconnectRouteRouteImport.update({
   path: '/reconnect',
   getParentRoute: () => rootRouteImport,
 } as any)
+
 const GenieRouteRoute = GenieRouteRouteImport.update({
   id: '/genie',
   path: '/genie',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LakebaseRouteRoute = LakebaseRouteRouteImport.update({
+  id: '/lakebase',
+  path: '/lakebase',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DataVisualizationRouteRoute = DataVisualizationRouteRouteImport.update({
@@ -70,7 +80,11 @@ export interface FileRoutesByFullPath {
   '/analytics': typeof AnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
+
   '/genie': typeof GenieRouteRoute
+
+  '/lakebase': typeof LakebaseRouteRoute
+
   '/reconnect': typeof ReconnectRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
@@ -81,7 +95,11 @@ export interface FileRoutesByTo {
   '/analytics': typeof AnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
+
   '/genie': typeof GenieRouteRoute
+
+  '/lakebase': typeof LakebaseRouteRoute
+
   '/reconnect': typeof ReconnectRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
@@ -93,7 +111,11 @@ export interface FileRoutesById {
   '/analytics': typeof AnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
+
   '/genie': typeof GenieRouteRoute
+
+  '/lakebase': typeof LakebaseRouteRoute
+
   '/reconnect': typeof ReconnectRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
@@ -106,7 +128,11 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/arrow-analytics'
     | '/data-visualization'
+
     | '/genie'
+
+    | '/lakebase'
+
     | '/reconnect'
     | '/sql-helpers'
     | '/telemetry'
@@ -117,7 +143,11 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/arrow-analytics'
     | '/data-visualization'
+
     | '/genie'
+
+    | '/lakebase'
+
     | '/reconnect'
     | '/sql-helpers'
     | '/telemetry'
@@ -128,7 +158,11 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/arrow-analytics'
     | '/data-visualization'
+
     | '/genie'
+
+    | '/lakebase'
+
     | '/reconnect'
     | '/sql-helpers'
     | '/telemetry'
@@ -140,7 +174,11 @@ export interface RootRouteChildren {
   AnalyticsRouteRoute: typeof AnalyticsRouteRoute
   ArrowAnalyticsRouteRoute: typeof ArrowAnalyticsRouteRoute
   DataVisualizationRouteRoute: typeof DataVisualizationRouteRoute
+
   GenieRouteRoute: typeof GenieRouteRoute
+
+  LakebaseRouteRoute: typeof LakebaseRouteRoute
+
   ReconnectRouteRoute: typeof ReconnectRouteRoute
   SqlHelpersRouteRoute: typeof SqlHelpersRouteRoute
   TelemetryRouteRoute: typeof TelemetryRouteRoute
@@ -177,11 +215,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ReconnectRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+
     '/genie': {
       id: '/genie'
       path: '/genie'
       fullPath: '/genie'
       preLoaderRoute: typeof GenieRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/lakebase': {
+      id: '/lakebase'
+      path: '/lakebase'
+      fullPath: '/lakebase'
+      preLoaderRoute: typeof LakebaseRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/data-visualization': {
@@ -220,7 +266,11 @@ const rootRouteChildren: RootRouteChildren = {
   AnalyticsRouteRoute: AnalyticsRouteRoute,
   ArrowAnalyticsRouteRoute: ArrowAnalyticsRouteRoute,
   DataVisualizationRouteRoute: DataVisualizationRouteRoute,
+
   GenieRouteRoute: GenieRouteRoute,
+
+  LakebaseRouteRoute: LakebaseRouteRoute,
+
   ReconnectRouteRoute: ReconnectRouteRoute,
   SqlHelpersRouteRoute: SqlHelpersRouteRoute,
   TelemetryRouteRoute: TelemetryRouteRoute,
