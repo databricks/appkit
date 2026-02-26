@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11.0](https://github.com/databricks/appkit/compare/v0.10.1...v0.11.0) (2026-02-26)
+
+### appkit
+
+* **appkit:** introduce Lakebase plugin ([#126](https://github.com/databricks/appkit/issues/126)) ([f4bb729](https://github.com/databricks/appkit/commit/f4bb72916e1de4e824e49b6762d3860fa2d293b3))
+
 ## [0.10.1](https://github.com/databricks/appkit/compare/v0.10.0...v0.10.1) (2026-02-25)
 
 * generate types command ([#137](https://github.com/databricks/appkit/issues/137)) ([af8ebbf](https://github.com/databricks/appkit/commit/af8ebbf4d729483797c61addf041961f6ccf6586))

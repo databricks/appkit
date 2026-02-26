@@ -1,4 +1,4 @@
-import { Plugin, toPlugin } from "@databricks/appkit";
+import { getUsernameWithApiLookup, Plugin, toPlugin } from "@databricks/appkit";
 import type { IAppRouter } from "shared";
 import * as drizzleExample from "./lakebase-examples/drizzle-example";
 import * as rawExample from "./lakebase-examples/raw-driver-example";
@@ -42,12 +42,14 @@ export class LakebaseExamplesPlugin extends Plugin {
     }
 
     try {
+      const user = await getUsernameWithApiLookup();
+
       // Initialize all four examples in parallel
       await Promise.all([
-        rawExample.setup(),
-        drizzleExample.setup(),
-        typeormExample.setup(),
-        sequelizeExample.setup(),
+        rawExample.setup(user),
+        drizzleExample.setup(user),
+        typeormExample.setup(user),
+        sequelizeExample.setup(user),
       ]);
     } catch (error) {
       console.error("Failed to initialize Lakebase examples:", error);

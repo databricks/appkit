@@ -47,7 +47,7 @@ The backend SDK that provides the plugin architecture and core functionality. It
 - Cache management and streaming capabilities
 - Type generation for SQL queries
 
-See the [Plugins](./plugins.md) and [API reference](./api/appkit/) documentation for detailed information.
+See the [Plugins](./plugins/index.md) and [API reference](./api/appkit/) documentation for detailed information.
 
 ### @databricks/appkit-ui
 
@@ -87,7 +87,7 @@ Integration with Databricks services:
 
 ## See also
 
-- [Plugins](./plugins.md): Deep dive into the plugin system
+- [Plugins](./plugins/index.md): Deep dive into the plugin system
 - [API reference](./api/): Complete API documentation
 - [Development](./development/): Explore development workflows
 - [Core Principles](./core-principles.md): Learn about AppKit's design philosophy

@@ -86,6 +86,10 @@
       "type": "string",
       "description": "SPDX license identifier",
       "examples": ["Apache-2.0", "MIT"]
+    },
+    "onSetupMessage": {
+      "type": "string",
+      "description": "Message displayed to the user after project initialization. Use this to inform about manual setup steps (e.g. environment variables, resource provisioning)."
     }
   },
   "additionalProperties": false,

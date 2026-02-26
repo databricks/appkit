@@ -84,6 +84,7 @@ export interface PluginManifest {
   config?: {
     schema: JSONSchema7;
   };
+  onSetupMessage?: string;
   author?: string;
   version?: string;
   repository?: string;

@@ -43,11 +43,11 @@ class Order
 
 let sequelize: Sequelize;
 
-export async function setup() {
+export async function setup(user?: string) {
   // @ts-expect-error password property supports a function for Lakehouse OAuth tokens
   sequelize = new Sequelize({
     dialect: "postgres",
-    ...getLakebaseOrmConfig(),
+    ...getLakebaseOrmConfig({ user }),
     logging: false,
   });
 

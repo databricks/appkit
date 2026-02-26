@@ -65,6 +65,10 @@
           "default": false,
           "description": "When true, this plugin is required by the template and cannot be deselected during CLI init. The user will only be prompted to configure its resources. When absent or false, the plugin is optional and the user can choose whether to include it."
         },
+        "onSetupMessage": {
+          "type": "string",
+          "description": "Message displayed to the user after project initialization. Use this to inform about manual setup steps (e.g. environment variables, resource provisioning)."
+        },
         "resources": {
           "type": "object",
           "required": ["required", "optional"],

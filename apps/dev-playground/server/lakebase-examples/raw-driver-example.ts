@@ -25,9 +25,9 @@ interface Product {
   created_at: Date;
 }
 
-export async function setup() {
+export async function setup(user?: string) {
   // Create pool with automatic OAuth token refresh
-  pool = createLakebasePool();
+  pool = createLakebasePool({ user });
 
   // Create schema and table (idempotent)
   await pool.query(`
