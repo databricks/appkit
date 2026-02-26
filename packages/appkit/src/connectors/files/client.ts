@@ -246,10 +246,10 @@ export class FilesConnector {
       // 2. apiClient.request() checks `instanceof` against its own ReadableStream
       //    subclass, so standard ReadableStream instances get JSON.stringified to "{}"
       // Bypass both by calling the REST API directly with SDK-provided auth.
-      const url = new URL(
-        `/api/2.0/fs/files${resolvedPath}`,
-        client.config.host,
-      );
+      const host = client.config.host.startsWith("http")
+        ? client.config.host
+        : `https://${client.config.host}`;
+      const url = new URL(`/api/2.0/fs/files${resolvedPath}`, host);
       url.searchParams.set("overwrite", String(overwrite));
 
       const headers = new Headers({

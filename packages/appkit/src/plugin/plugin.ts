@@ -1,3 +1,4 @@
+import { ApiError } from "@databricks/sdk-experimental";
 import type express from "express";
 import type {
   BasePlugin,
@@ -371,8 +372,14 @@ export abstract class Plugin<
 
     try {
       return await this._executeWithInterceptors(fn, interceptors, context);
-    } catch (_error) {
-      // production-safe, don't crash sdk
+    } catch (error) {
+      if (
+        error instanceof ApiError &&
+        (error.statusCode === 401 || error.statusCode === 403)
+      ) {
+        throw error;
+      }
+      logger.error("execute() failed for plugin %s: %O", this.name, error);
       return undefined;
     }
   }

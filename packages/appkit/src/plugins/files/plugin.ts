@@ -1,4 +1,5 @@
 import { Readable } from "node:stream";
+import { ApiError } from "@databricks/sdk-experimental";
 import type express from "express";
 import type { IAppRouter, PluginExecutionSettings } from "shared";
 import {
@@ -174,7 +175,11 @@ export class FilesPlugin extends Plugin {
             });
             return;
           }
-          throw err;
+          logger.error("OBO gateway error: %O", err);
+          res.status(500).json({
+            error: "Internal server error resolving user context.",
+            plugin: this.name,
+          });
         }
       },
     );
@@ -307,25 +312,49 @@ export class FilesPlugin extends Plugin {
     this.cache.delete(listKey);
   }
 
+  private _handleApiError(
+    res: express.Response,
+    error: unknown,
+    fallbackMessage: string,
+  ): void {
+    if (error instanceof ApiError) {
+      const status =
+        error.statusCode === 401 || error.statusCode === 403
+          ? error.statusCode
+          : 500;
+      res.status(status).json({
+        error: error.message,
+        statusCode: error.statusCode,
+        plugin: this.name,
+      });
+      return;
+    }
+    res.status(500).json({ error: fallbackMessage, plugin: this.name });
+  }
+
   private async _handleList(
     req: express.Request,
     res: express.Response,
   ): Promise<void> {
     const path = req.query.path as string | undefined;
 
-    const result = await this.execute(
-      async () => this.list(path),
-      this._readSettings([
-        "files:list",
-        path ? this._resolvePath(path) : "__root__",
-      ]),
-    );
+    try {
+      const result = await this.execute(
+        async () => this.list(path),
+        this._readSettings([
+          "files:list",
+          path ? this._resolvePath(path) : "__root__",
+        ]),
+      );
 
-    if (result === undefined) {
-      res.status(500).json({ error: "List failed", plugin: this.name });
-      return;
+      if (result === undefined) {
+        res.status(500).json({ error: "List failed", plugin: this.name });
+        return;
+      }
+      res.json(result);
+    } catch (error) {
+      this._handleApiError(res, error, "List failed");
     }
-    res.json(result);
   }
 
   private async _handleRead(
@@ -338,16 +367,20 @@ export class FilesPlugin extends Plugin {
       return;
     }
 
-    const result = await this.execute(
-      async () => this.read(path),
-      this._readSettings(["files:read", this._resolvePath(path)]),
-    );
+    try {
+      const result = await this.execute(
+        async () => this.read(path),
+        this._readSettings(["files:read", this._resolvePath(path)]),
+      );
 
-    if (result === undefined) {
-      res.status(500).json({ error: "Read failed", plugin: this.name });
-      return;
+      if (result === undefined) {
+        res.status(500).json({ error: "Read failed", plugin: this.name });
+        return;
+      }
+      res.type("text/plain").send(result);
+    } catch (error) {
+      this._handleApiError(res, error, "Read failed");
     }
-    res.type("text/plain").send(result);
   }
 
   private async _handleDownload(
@@ -360,33 +393,40 @@ export class FilesPlugin extends Plugin {
       return;
     }
 
-    const settings: PluginExecutionSettings = {
-      default: FILES_DOWNLOAD_DEFAULTS,
-    };
-    const response = await this.execute(
-      async () => this.download(path),
-      settings,
-    );
-
-    if (response === undefined) {
-      res.status(500).json({ error: "Download failed", plugin: this.name });
-      return;
-    }
-
-    const fileName = sanitizeFilename(path.split("/").pop() ?? "download");
-    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-    res.setHeader(
-      "Content-Type",
-      contentTypeFromPath(path, undefined, this.config.customContentTypes),
-    );
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    if (response.contents) {
-      const nodeStream = Readable.fromWeb(
-        response.contents as import("node:stream/web").ReadableStream,
+    try {
+      const settings: PluginExecutionSettings = {
+        default: FILES_DOWNLOAD_DEFAULTS,
+      };
+      const response = await this.execute(
+        async () => this.download(path),
+        settings,
       );
-      nodeStream.pipe(res);
-    } else {
-      res.end();
+
+      if (response === undefined) {
+        res.status(500).json({ error: "Download failed", plugin: this.name });
+        return;
+      }
+
+      const fileName = sanitizeFilename(path.split("/").pop() ?? "download");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${fileName}"`,
+      );
+      res.setHeader(
+        "Content-Type",
+        contentTypeFromPath(path, undefined, this.config.customContentTypes),
+      );
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      if (response.contents) {
+        const nodeStream = Readable.fromWeb(
+          response.contents as import("node:stream/web").ReadableStream,
+        );
+        nodeStream.pipe(res);
+      } else {
+        res.end();
+      }
+    } catch (error) {
+      this._handleApiError(res, error, "Download failed");
     }
   }
 
@@ -400,44 +440,48 @@ export class FilesPlugin extends Plugin {
       return;
     }
 
-    const settings: PluginExecutionSettings = {
-      default: FILES_DOWNLOAD_DEFAULTS,
-    };
-    const response = await this.execute(
-      async () => this.download(path),
-      settings,
-    );
-
-    if (response === undefined) {
-      res.status(500).json({ error: "Raw fetch failed", plugin: this.name });
-      return;
-    }
-
-    const resolvedType = contentTypeFromPath(
-      path,
-      undefined,
-      this.config.customContentTypes,
-    );
-
-    res.setHeader("Content-Type", resolvedType);
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("Content-Security-Policy", "sandbox");
-
-    if (!isSafeInlineContentType(resolvedType)) {
-      const fileName = sanitizeFilename(path.split("/").pop() ?? "download");
-      res.setHeader(
-        "Content-Disposition",
-        `attachment; filename="${fileName}"`,
+    try {
+      const settings: PluginExecutionSettings = {
+        default: FILES_DOWNLOAD_DEFAULTS,
+      };
+      const response = await this.execute(
+        async () => this.download(path),
+        settings,
       );
-    }
 
-    if (response.contents) {
-      const nodeStream = Readable.fromWeb(
-        response.contents as import("node:stream/web").ReadableStream,
+      if (response === undefined) {
+        res.status(500).json({ error: "Raw fetch failed", plugin: this.name });
+        return;
+      }
+
+      const resolvedType = contentTypeFromPath(
+        path,
+        undefined,
+        this.config.customContentTypes,
       );
-      nodeStream.pipe(res);
-    } else {
-      res.end();
+
+      res.setHeader("Content-Type", resolvedType);
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Security-Policy", "sandbox");
+
+      if (!isSafeInlineContentType(resolvedType)) {
+        const fileName = sanitizeFilename(path.split("/").pop() ?? "download");
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${fileName}"`,
+        );
+      }
+
+      if (response.contents) {
+        const nodeStream = Readable.fromWeb(
+          response.contents as import("node:stream/web").ReadableStream,
+        );
+        nodeStream.pipe(res);
+      } else {
+        res.end();
+      }
+    } catch (error) {
+      this._handleApiError(res, error, "Raw fetch failed");
     }
   }
 
@@ -451,16 +495,22 @@ export class FilesPlugin extends Plugin {
       return;
     }
 
-    const result = await this.execute(
-      async () => this.exists(path),
-      this._readSettings(["files:exists", this._resolvePath(path)]),
-    );
+    try {
+      const result = await this.execute(
+        async () => this.exists(path),
+        this._readSettings(["files:exists", this._resolvePath(path)]),
+      );
 
-    if (result === undefined) {
-      res.status(500).json({ error: "Exists check failed", plugin: this.name });
-      return;
+      if (result === undefined) {
+        res
+          .status(500)
+          .json({ error: "Exists check failed", plugin: this.name });
+        return;
+      }
+      res.json({ exists: result });
+    } catch (error) {
+      this._handleApiError(res, error, "Exists check failed");
     }
-    res.json({ exists: result });
   }
 
   private async _handleMetadata(
@@ -473,18 +523,22 @@ export class FilesPlugin extends Plugin {
       return;
     }
 
-    const result = await this.execute(
-      async () => this.metadata(path),
-      this._readSettings(["files:metadata", this._resolvePath(path)]),
-    );
+    try {
+      const result = await this.execute(
+        async () => this.metadata(path),
+        this._readSettings(["files:metadata", this._resolvePath(path)]),
+      );
 
-    if (result === undefined) {
-      res
-        .status(500)
-        .json({ error: "Metadata fetch failed", plugin: this.name });
-      return;
+      if (result === undefined) {
+        res
+          .status(500)
+          .json({ error: "Metadata fetch failed", plugin: this.name });
+        return;
+      }
+      res.json(result);
+    } catch (error) {
+      this._handleApiError(res, error, "Metadata fetch failed");
     }
-    res.json(result);
   }
 
   private async _handlePreview(
@@ -497,16 +551,20 @@ export class FilesPlugin extends Plugin {
       return;
     }
 
-    const result = await this.execute(
-      async () => this.preview(path),
-      this._readSettings(["files:preview", this._resolvePath(path)]),
-    );
+    try {
+      const result = await this.execute(
+        async () => this.preview(path),
+        this._readSettings(["files:preview", this._resolvePath(path)]),
+      );
 
-    if (result === undefined) {
-      res.status(500).json({ error: "Preview failed", plugin: this.name });
-      return;
+      if (result === undefined) {
+        res.status(500).json({ error: "Preview failed", plugin: this.name });
+        return;
+      }
+      res.json(result);
+    } catch (error) {
+      this._handleApiError(res, error, "Preview failed");
     }
-    res.json(result);
   }
 
   private async _handleUpload(
@@ -532,31 +590,35 @@ export class FilesPlugin extends Plugin {
         : 0,
     );
 
-    const settings: PluginExecutionSettings = {
-      default: FILES_WRITE_DEFAULTS,
-    };
-    const result = await this.execute(async () => {
-      await this.upload(path, webStream);
-      return { success: true as const };
-    }, settings);
+    try {
+      const settings: PluginExecutionSettings = {
+        default: FILES_WRITE_DEFAULTS,
+      };
+      const result = await this.execute(async () => {
+        await this.upload(path, webStream);
+        return { success: true as const };
+      }, settings);
 
-    if (result === undefined) {
-      logger.error(
-        req,
-        "Upload failed: path=%s, size=%d bytes",
-        path,
-        req.headers["content-length"]
-          ? parseInt(req.headers["content-length"], 10)
-          : 0,
-      );
-      res.status(500).json({ error: "Upload failed", plugin: this.name });
-      return;
+      if (result === undefined) {
+        logger.error(
+          req,
+          "Upload failed: path=%s, size=%d bytes",
+          path,
+          req.headers["content-length"]
+            ? parseInt(req.headers["content-length"], 10)
+            : 0,
+        );
+        res.status(500).json({ error: "Upload failed", plugin: this.name });
+        return;
+      }
+
+      this._invalidateListCache(this._resolvePath(parentDirectory(path)));
+
+      logger.debug(req, "Upload complete: path=%s", path);
+      res.json(result);
+    } catch (error) {
+      this._handleApiError(res, error, "Upload failed");
     }
-
-    this._invalidateListCache(this._resolvePath(parentDirectory(path)));
-
-    logger.debug(req, "Upload complete: path=%s", path);
-    res.json(result);
   }
 
   private async _handleMkdir(
@@ -569,24 +631,28 @@ export class FilesPlugin extends Plugin {
       return;
     }
 
-    const settings: PluginExecutionSettings = {
-      default: FILES_WRITE_DEFAULTS,
-    };
-    const result = await this.execute(async () => {
-      await this.createDirectory(dirPath);
-      return { success: true as const };
-    }, settings);
+    try {
+      const settings: PluginExecutionSettings = {
+        default: FILES_WRITE_DEFAULTS,
+      };
+      const result = await this.execute(async () => {
+        await this.createDirectory(dirPath);
+        return { success: true as const };
+      }, settings);
 
-    if (result === undefined) {
-      res
-        .status(500)
-        .json({ error: "Create directory failed", plugin: this.name });
-      return;
+      if (result === undefined) {
+        res
+          .status(500)
+          .json({ error: "Create directory failed", plugin: this.name });
+        return;
+      }
+
+      this._invalidateListCache(this._resolvePath(parentDirectory(dirPath)));
+
+      res.json(result);
+    } catch (error) {
+      this._handleApiError(res, error, "Create directory failed");
     }
-
-    this._invalidateListCache(this._resolvePath(parentDirectory(dirPath)));
-
-    res.json(result);
   }
 
   private async _handleDelete(
@@ -599,22 +665,26 @@ export class FilesPlugin extends Plugin {
       return;
     }
 
-    const settings: PluginExecutionSettings = {
-      default: FILES_WRITE_DEFAULTS,
-    };
-    const result = await this.execute(async () => {
-      await this.delete(path);
-      return { success: true as const };
-    }, settings);
+    try {
+      const settings: PluginExecutionSettings = {
+        default: FILES_WRITE_DEFAULTS,
+      };
+      const result = await this.execute(async () => {
+        await this.delete(path);
+        return { success: true as const };
+      }, settings);
 
-    if (result === undefined) {
-      res.status(500).json({ error: "Delete failed", plugin: this.name });
-      return;
+      if (result === undefined) {
+        res.status(500).json({ error: "Delete failed", plugin: this.name });
+        return;
+      }
+
+      this._invalidateListCache(this._resolvePath(parentDirectory(path)));
+
+      res.json(result);
+    } catch (error) {
+      this._handleApiError(res, error, "Delete failed");
     }
-
-    this._invalidateListCache(this._resolvePath(parentDirectory(path)));
-
-    res.json(result);
   }
 
   async shutdown(): Promise<void> {
