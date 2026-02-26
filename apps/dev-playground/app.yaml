@@ -1,3 +1,5 @@
 env:
   - name: DATABRICKS_WAREHOUSE_ID
     valueFrom: sql-warehouse
+  - name: DATABRICKS_DEFAULT_VOLUME
+    valueFrom: volume
