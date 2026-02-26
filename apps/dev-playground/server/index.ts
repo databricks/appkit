@@ -20,7 +20,7 @@ createApp({
     telemetryExamples(),
     analytics({}),
     genie({
-      spaces: { demo: process.env.GENIE_SPACE_ID ?? "placeholder" },
+      spaces: { demo: process.env.DATABRICKS_GENIE_SPACE_ID ?? "placeholder" },
     }),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),

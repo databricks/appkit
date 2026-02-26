@@ -91,7 +91,7 @@ export function GenieChatMessage({
             {queryAttachments.map((att) => (
               <Card
                 key={att.attachmentId ?? "query"}
-                className="px-4 py-3 text-xs overflow-hidden"
+                className="px-4 py-3 text-xs overflow-hidden shadow-none"
               >
                 <details>
                   <summary className="cursor-pointer select-none font-medium">
@@ -104,7 +104,7 @@ export function GenieChatMessage({
                       </span>
                     )}
                     {att.query?.query && (
-                      <pre className="mt-1 p-2 rounded bg-background text-[11px] overflow-x-auto">
+                      <pre className="mt-1 p-2 rounded bg-background text-[11px] whitespace-pre-wrap break-all">
                         {att.query.query}
                       </pre>
                     )}

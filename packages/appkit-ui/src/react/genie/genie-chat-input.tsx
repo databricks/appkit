@@ -35,11 +35,16 @@ export function GenieChatInput({
     }
   };
 
+  const MAX_HEIGHT = 200;
+
   const handleInput = () => {
     const textarea = textareaRef.current;
     if (textarea) {
       textarea.style.height = "auto";
-      textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+      const clamped = Math.min(textarea.scrollHeight, MAX_HEIGHT);
+      textarea.style.height = `${clamped}px`;
+      textarea.style.overflowY =
+        textarea.scrollHeight > MAX_HEIGHT ? "auto" : "hidden";
     }
   };
 
@@ -55,7 +60,7 @@ export function GenieChatInput({
         disabled={disabled}
         rows={1}
         className={cn(
-          "flex-1 resize-none rounded-md border border-input bg-background px-3 py-2",
+          "flex-1 resize-none overflow-hidden rounded-md border border-input bg-background px-3 py-2",
           "text-sm placeholder:text-muted-foreground",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
           "disabled:cursor-not-allowed disabled:opacity-50",

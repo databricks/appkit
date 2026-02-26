@@ -18,6 +18,19 @@ export function GenieChat({
 
   return (
     <div className={cn("flex flex-col h-full overflow-hidden", className)}>
+      {messages.length > 0 && (
+        <div className="shrink-0 flex justify-end px-4 pt-3 pb-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={reset}
+            className="text-xs text-muted-foreground"
+          >
+            New conversation
+          </Button>
+        </div>
+      )}
+
       <GenieChatMessageList messages={messages} status={status} />
 
       {error && (
@@ -31,19 +44,6 @@ export function GenieChat({
         disabled={status === "streaming" || status === "loading-history"}
         placeholder={placeholder}
       />
-
-      {messages.length > 0 && (
-        <div className="shrink-0 px-4 pb-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={reset}
-            className="text-xs text-muted-foreground"
-          >
-            New conversation
-          </Button>
-        </div>
-      )}
     </div>
   );
 }

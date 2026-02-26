@@ -65,9 +65,12 @@ export function GenieChatMessageList({
           </div>
         )}
 
-        {messages.map((msg) => (
-          <GenieChatMessage key={msg.id} message={msg} />
-        ))}
+        {messages.map((msg) => {
+          if (msg.role === "assistant" && msg.id === "" && !msg.content) {
+            return null;
+          }
+          return <GenieChatMessage key={msg.id} message={msg} />;
+        })}
 
         {status === "streaming" && messages.length > 0 && (
           <StreamingIndicator messages={messages} />
