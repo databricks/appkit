@@ -22,6 +22,7 @@ import DialogExample from "../../../../packages/appkit-ui/src/react/ui/examples/
 import DonutExample from "../../../../packages/appkit-ui/src/react/charts/pie/examples/donut.example";
 import DrawerExample from "../../../../packages/appkit-ui/src/react/ui/examples/drawer.example";
 import DropdownMenuExample from "../../../../packages/appkit-ui/src/react/ui/examples/dropdown-menu.example";
+import GenieChatExample from "../../../../packages/appkit-ui/src/react/genie/genie-chat.example";
 import HeatmapExample from "../../../../packages/appkit-ui/src/react/charts/heatmap/examples/heatmap.example";
 import HoverCardExample from "../../../../packages/appkit-ui/src/react/ui/examples/hover-card.example";
 import InputOtpExample from "../../../../packages/appkit-ui/src/react/ui/examples/input-otp.example";
@@ -1022,6 +1023,19 @@ export default function DropdownMenuExample() {
       </DropdownMenuContent>
     </DropdownMenu>
   )
+}
+`,
+  },
+  "genie-chat": {
+    Component: GenieChatExample,
+    source: `import { GenieChat } from "@databricks/appkit-ui/react";
+
+export default function GenieChatExample() {
+  return (
+    <div style={{ height: 500, border: "1px solid #e2e8f0", borderRadius: 8 }}>
+      <GenieChat alias="my-space" />
+    </div>
+  );
 }
 `,
   },

@@ -79,12 +79,12 @@ export interface UseGenieChatReturn {
 }
 
 export interface GenieChatProps {
-  /** Genie space alias */
+  /** Genie space alias (must match a key registered with the genie plugin on the server) */
   alias: string;
-  /** Base API path. Default: "/api/genie" */
+  /** Base API path */
   basePath?: string;
-  /** Placeholder text for the input. Default: "Ask a question..." */
+  /** Placeholder text for the input */
   placeholder?: string;
-  /** Custom className for the root container */
+  /** Additional CSS class for the root container */
   className?: string;
 }

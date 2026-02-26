@@ -3,12 +3,17 @@ import { cn } from "../lib/utils";
 import { Button } from "../ui/button";
 
 export interface GenieChatInputProps {
+  /** Callback fired when the user submits a message */
   onSend: (content: string) => void;
+  /** Disable the input and send button */
   disabled?: boolean;
+  /** Placeholder text shown in the textarea */
   placeholder?: string;
+  /** Additional CSS class for the container */
   className?: string;
 }
 
+/** Auto-expanding textarea input with a send button for chat messages. Submits on Enter (Shift+Enter for newline). */
 export function GenieChatInput({
   onSend,
   disabled = false,

@@ -24,7 +24,9 @@ const markdownStyles = cn(
 );
 
 export interface GenieChatMessageProps {
+  /** The message object to render */
   message: GenieMessageItem;
+  /** Additional CSS class */
   className?: string;
 }
 
@@ -32,6 +34,7 @@ function isQueryAttachment(att: GenieAttachmentResponse): boolean {
   return !!(att.query?.title || att.query?.query);
 }
 
+/** Renders a single Genie message bubble with optional expandable SQL query attachments. */
 export function GenieChatMessage({
   message,
   className,

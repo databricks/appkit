@@ -1,0 +1,48 @@
+# GenieChat
+
+Full-featured chat interface for a single Databricks AI/BI Genie space. Handles message streaming, conversation history, and auto-reconnection via SSE.
+
+
+## Example
+
+```tsx
+import { GenieChat } from "@databricks/appkit-ui/react";
+
+export default function GenieChatExample() {
+  return (
+    <div style={{ height: 500, border: "1px solid #e2e8f0", borderRadius: 8 }}>
+      <GenieChat alias="my-space" />
+    </div>
+  );
+}
+
+```
+
+
+## GenieChat
+
+Full-featured chat interface for a single Databricks AI/BI Genie space. Handles message streaming, conversation history, and auto-reconnection via SSE.
+
+
+**Source:** [`packages/appkit-ui/src/react/genie/genie-chat.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/genie/genie-chat.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `alias` | `string` | ✓ | - | Genie space alias (must match a key registered with the genie plugin on the server) |
+| `basePath` | `string` |  | - | Base API path |
+| `placeholder` | `string` |  | - | Placeholder text for the input |
+| `className` | `string` |  | - | Additional CSS class for the root container |
+
+
+
+### Usage
+
+```tsx
+import { GenieChat } from '@databricks/appkit-ui';
+
+<GenieChat /* props */ />
+```
+

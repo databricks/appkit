@@ -1,0 +1,32 @@
+# GenieChatInput
+
+Auto-expanding textarea input with a send button for chat messages. Submits on Enter (Shift+Enter for newline).
+
+
+## GenieChatInput
+
+Auto-expanding textarea input with a send button for chat messages. Submits on Enter (Shift+Enter for newline).
+
+
+**Source:** [`packages/appkit-ui/src/react/genie/genie-chat-input.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/genie/genie-chat-input.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `onSend` | `(content: string) => void` | ✓ | - | Callback fired when the user submits a message |
+| `disabled` | `boolean` |  | `false` | Disable the input and send button |
+| `placeholder` | `string` |  | `Ask a question...` | Placeholder text shown in the textarea |
+| `className` | `string` |  | - | Additional CSS class for the container |
+
+
+
+### Usage
+
+```tsx
+import { GenieChatInput } from '@databricks/appkit-ui';
+
+<GenieChatInput /* props */ />
+```
+

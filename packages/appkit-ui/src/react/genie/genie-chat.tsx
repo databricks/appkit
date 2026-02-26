@@ -5,6 +5,7 @@ import { GenieChatMessageList } from "./genie-chat-message-list";
 import type { GenieChatProps } from "./types";
 import { useGenieChat } from "./use-genie-chat";
 
+/** Full-featured chat interface for a single Databricks AI/BI Genie space. Handles message streaming, conversation history, and auto-reconnection via SSE. */
 export function GenieChat({
   alias,
   basePath,
