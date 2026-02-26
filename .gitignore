@@ -9,6 +9,3 @@ coverage
 *.tsbuildinfo
 
 .turbo
-
-# AI generated plans from developer loop
-docs/plans
