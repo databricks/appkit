@@ -224,8 +224,8 @@ export abstract class Plugin<
    * @throws AuthenticationError if user token is missing in production
    */
   protected resolveUserContext(req: express.Request): UserContext | null {
-    const token = req.headers["x-forwarded-access-token"] as string;
-    const userId = req.headers["x-forwarded-user"] as string;
+    const token = req.header("x-forwarded-access-token");
+    const userId = req.header("x-forwarded-user");
     const isDev = process.env.NODE_ENV === "development";
 
     if (!token && isDev) {

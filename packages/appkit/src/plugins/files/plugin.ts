@@ -170,7 +170,9 @@ export class FilesPlugin extends Plugin {
         } catch (err) {
           if (err instanceof AuthenticationError) {
             res.status(401).json({
-              error: err.message || "User token missing. Login to access this resource.",
+              error:
+                err.message ||
+                "User token missing. Login to access this resource.",
               plugin: this.name,
             });
             return;

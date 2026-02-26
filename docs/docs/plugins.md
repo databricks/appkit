@@ -395,7 +395,7 @@ injectRoutes(router: IAppRouter) {
 
 Exported from `@databricks/appkit`:
 
-- `resolveUserContext(req)`: Returns raw `UserContext` from request headers, or `null` in dev mode. Throws `AuthenticationError` in production if token is missing
+- `this.resolveUserContext(req)` _(protected, available in plugin subclasses)_: Returns raw `UserContext` from request headers, or `null` in dev mode. Throws `AuthenticationError` in production if token is missing
 - `getCurrentUserId()`: Returns user ID in user context, service user ID otherwise
 - `getWorkspaceClient()`: Returns the appropriate WorkspaceClient for current context
 - `getWarehouseId()`: `Promise<string>` (from `DATABRICKS_WAREHOUSE_ID` or auto-selected in dev)
