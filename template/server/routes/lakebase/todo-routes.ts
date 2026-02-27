@@ -1,10 +1,14 @@
 {{if .plugins.lakebase -}}
 import { z } from 'zod';
-import type { LakebasePlugin, ServerPlugin } from '@databricks/appkit';
+import { Application } from 'express';
 
 interface AppKitWithLakebase {
-  lakebase: ReturnType<LakebasePlugin['exports']>;
-  server: ReturnType<ServerPlugin['exports']>;
+  lakebase: {
+    query(text: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }>;
+  };
+  server: {
+    extend(fn: (app: Application) => void): void;
+  };
 }
 
 const CREATE_TABLE_SQL = `
