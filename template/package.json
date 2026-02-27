@@ -4,7 +4,7 @@
   "main": "build/index.js",
   "type": "module",
   "scripts": {
-    "start": "NODE_ENV=production node --env-file-if-exists=./.env ./dist/server/server.js",
+    "start": "NODE_ENV=production node --env-file-if-exists=./.env ./dist/server.mjs",
     "dev": "NODE_ENV=development tsx watch --tsconfig ./tsconfig.server.json --env-file-if-exists=./.env ./server/server.ts",
     "build:client": "tsc -b tsconfig.client.json && vite build --config client/vite.config.ts",
     "build:server": "tsdown -c tsdown.server.config.ts",
@@ -71,6 +71,7 @@
     "prettier": "^3.6.2",
     "sharp": "^0.34.5",
     "tailwindcss": "^4.0.14",
+    "tsdown": "^0.20.3",
     "tsx": "^4.20.6",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.48.0",
