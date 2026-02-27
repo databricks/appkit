@@ -57,7 +57,7 @@ vi.mock("@databricks/sdk-experimental", async (importOriginal) => {
   };
 });
 
-const authHeaders = {
+const MOCK_AUTH_HEADERS = {
   "x-forwarded-access-token": "test-token",
   "x-forwarded-user": "test-user",
 };
@@ -119,7 +119,7 @@ describe("Files Plugin Integration", () => {
 
   describe("List Directory", () => {
     test("GET /api/files/list returns directory entries", async () => {
-      const entries = [
+      const MOCKED_ENTRIES = [
         {
           name: "file1.txt",
           path: "/Volumes/catalog/schema/vol/file1.txt",
@@ -134,19 +134,19 @@ describe("Files Plugin Integration", () => {
 
       mockFilesApi.listDirectoryContents.mockReturnValue(
         (async function* () {
-          for (const entry of entries) {
+          for (const entry of MOCKED_ENTRIES) {
             yield entry;
           }
         })(),
       );
 
       const response = await fetch(`${baseUrl}/api/files/list`, {
-        headers: authHeaders,
+        headers: MOCK_AUTH_HEADERS,
       });
 
       expect(response.status).toBe(200);
       const data = await response.json();
-      expect(data).toEqual(entries);
+      expect(data).toEqual(MOCKED_ENTRIES);
     });
 
     test("GET /api/files/list?path=/abs/path uses provided path", async () => {
@@ -156,7 +156,7 @@ describe("Files Plugin Integration", () => {
 
       const response = await fetch(
         `${baseUrl}/api/files/list?path=/Volumes/other/path`,
-        { headers: authHeaders },
+        { headers: MOCK_AUTH_HEADERS },
       );
 
       expect(response.status).toBe(200);
@@ -174,7 +174,7 @@ describe("Files Plugin Integration", () => {
 
       const response = await fetch(
         `${baseUrl}/api/files/read?path=/Volumes/catalog/schema/vol/file.txt`,
-        { headers: authHeaders },
+        { headers: MOCK_AUTH_HEADERS },
       );
 
       expect(response.status).toBe(200);
@@ -184,7 +184,7 @@ describe("Files Plugin Integration", () => {
 
     test("GET /api/files/read without path returns 400", async () => {
       const response = await fetch(`${baseUrl}/api/files/read`, {
-        headers: authHeaders,
+        headers: MOCK_AUTH_HEADERS,
       });
 
       expect(response.status).toBe(400);
@@ -203,7 +203,7 @@ describe("Files Plugin Integration", () => {
 
       const response = await fetch(
         `${baseUrl}/api/files/exists?path=/Volumes/catalog/schema/vol/file.txt`,
-        { headers: authHeaders },
+        { headers: MOCK_AUTH_HEADERS },
       );
 
       expect(response.status).toBe(200);
@@ -218,7 +218,7 @@ describe("Files Plugin Integration", () => {
 
       const response = await fetch(
         `${baseUrl}/api/files/exists?path=/Volumes/missing.txt`,
-        { headers: authHeaders },
+        { headers: MOCK_AUTH_HEADERS },
       );
 
       expect(response.status).toBe(200);
@@ -237,7 +237,7 @@ describe("Files Plugin Integration", () => {
 
       const response = await fetch(
         `${baseUrl}/api/files/metadata?path=/Volumes/catalog/schema/vol/file.json`,
-        { headers: authHeaders },
+        { headers: MOCK_AUTH_HEADERS },
       );
 
       expect(response.status).toBe(200);
@@ -263,7 +263,7 @@ describe("Files Plugin Integration", () => {
 
       const response = await fetch(
         `${baseUrl}/api/files/preview?path=/Volumes/catalog/schema/vol/file.txt`,
-        { headers: authHeaders },
+        { headers: MOCK_AUTH_HEADERS },
       );
 
       expect(response.status).toBe(200);
@@ -286,7 +286,7 @@ describe("Files Plugin Integration", () => {
 
       const response = await fetch(
         `${baseUrl}/api/files/preview?path=/Volumes/catalog/schema/vol/image.png`,
-        { headers: authHeaders },
+        { headers: MOCK_AUTH_HEADERS },
       );
 
       expect(response.status).toBe(200);
@@ -309,7 +309,7 @@ describe("Files Plugin Integration", () => {
 
       const response = await fetch(
         `${baseUrl}/api/files/raw?path=/Volumes/catalog/schema/vol/image.png`,
-        { headers: authHeaders, redirect: "manual" },
+        { headers: MOCK_AUTH_HEADERS, redirect: "manual" },
       );
 
       expect(response.status).toBe(200);
@@ -326,7 +326,7 @@ describe("Files Plugin Integration", () => {
 
       const response = await fetch(
         `${baseUrl}/api/files/raw?path=/Volumes/catalog/schema/vol/malicious.html`,
-        { headers: authHeaders, redirect: "manual" },
+        { headers: MOCK_AUTH_HEADERS, redirect: "manual" },
       );
 
       expect(response.status).toBe(200);
@@ -345,7 +345,7 @@ describe("Files Plugin Integration", () => {
 
       const response = await fetch(
         `${baseUrl}/api/files/raw?path=/Volumes/catalog/schema/vol/icon.svg`,
-        { headers: authHeaders, redirect: "manual" },
+        { headers: MOCK_AUTH_HEADERS, redirect: "manual" },
       );
 
       expect(response.status).toBe(200);
@@ -363,7 +363,7 @@ describe("Files Plugin Integration", () => {
 
       const response = await fetch(
         `${baseUrl}/api/files/raw?path=/Volumes/catalog/schema/vol/script.js`,
-        { headers: authHeaders, redirect: "manual" },
+        { headers: MOCK_AUTH_HEADERS, redirect: "manual" },
       );
 
       expect(response.status).toBe(200);
@@ -381,7 +381,7 @@ describe("Files Plugin Integration", () => {
 
       const response = await fetch(
         `${baseUrl}/api/files/raw?path=/Volumes/catalog/schema/vol/data.json`,
-        { headers: authHeaders, redirect: "manual" },
+        { headers: MOCK_AUTH_HEADERS, redirect: "manual" },
       );
 
       expect(response.status).toBe(200);
@@ -400,7 +400,7 @@ describe("Files Plugin Integration", () => {
 
       const response = await fetch(
         `${baseUrl}/api/files/download?path=/Volumes/catalog/schema/vol/file.txt`,
-        { headers: authHeaders, redirect: "manual" },
+        { headers: MOCK_AUTH_HEADERS, redirect: "manual" },
       );
 
       expect(response.status).toBe(200);
@@ -408,6 +408,80 @@ describe("Files Plugin Integration", () => {
       expect(response.headers.get("content-disposition")).toBe(
         'attachment; filename="file.txt"',
       );
+    });
+  });
+
+  describe("OBO Gateway", () => {
+    test("production: rejects requests without user token with 401", async () => {
+      // NODE_ENV defaults to "test" in vitest (not "development"),
+      // so resolveUserContext should throw AuthenticationError
+      const response = await fetch(`${baseUrl}/api/files/list`);
+
+      expect(response.status).toBe(401);
+      const data = (await response.json()) as { error: string; plugin: string };
+      expect(data.plugin).toBe("files");
+      expect(data.error).toMatch(/token/i);
+    });
+
+    test("production: allows requests with valid user token (OBO)", async () => {
+      mockFilesApi.listDirectoryContents.mockReturnValue(
+        (async function* () {
+          yield {
+            name: "file.txt",
+            path: "/Volumes/catalog/schema/vol/file.txt",
+            is_directory: false,
+          };
+        })(),
+      );
+
+      const response = await fetch(`${baseUrl}/api/files/list`, {
+        headers: MOCK_AUTH_HEADERS,
+      });
+
+      expect(response.status).toBe(200);
+    });
+
+    test("development: falls back to service principal when no user token", async () => {
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = "development";
+
+      try {
+        mockFilesApi.listDirectoryContents.mockReturnValue(
+          (async function* () {
+            yield {
+              name: "dev-file.txt",
+              path: "/Volumes/catalog/schema/vol/dev-file.txt",
+              is_directory: false,
+            };
+          })(),
+        );
+
+        const response = await fetch(`${baseUrl}/api/files/list`);
+
+        expect(response.status).toBe(200);
+        const data = await response.json();
+        expect(data).toEqual([
+          {
+            name: "dev-file.txt",
+            path: "/Volumes/catalog/schema/vol/dev-file.txt",
+            is_directory: false,
+          },
+        ]);
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+      }
+    });
+
+    test("production: rejects write operations without user token", async () => {
+      const response = await fetch(`${baseUrl}/api/files/mkdir`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: "/Volumes/catalog/schema/vol/newdir" }),
+      });
+
+      expect(response.status).toBe(401);
+      const data = (await response.json()) as { error: string; plugin: string };
+      expect(data.plugin).toBe("files");
     });
   });
 
@@ -419,7 +493,7 @@ describe("Files Plugin Integration", () => {
 
       const response = await fetch(
         `${baseUrl}/api/files/metadata?path=/Volumes/catalog/schema/vol/file.txt`,
-        { headers: authHeaders },
+        { headers: MOCK_AUTH_HEADERS },
       );
 
       expect(response.status).toBe(500);
@@ -435,7 +509,7 @@ describe("Files Plugin Integration", () => {
 
       const response = await fetch(
         `${baseUrl}/api/files/list?path=/Volumes/uncached/path`,
-        { headers: authHeaders },
+        { headers: MOCK_AUTH_HEADERS },
       );
 
       expect(response.status).toBe(500);
