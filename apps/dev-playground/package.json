@@ -37,7 +37,7 @@
     "@types/react-syntax-highlighter": "^15.5.13",
     "@vitejs/plugin-react": "^5.0.4",
     "dotenv": "^16.0.0",
-    "tsdown": "^0.15.7",
+    "tsdown": "^0.20.3",
     "tsx": "^4.20.6",
     "vite": "npm:rolldown-vite@7.1.14"
   },

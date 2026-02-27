@@ -56,7 +56,7 @@ describe("scaffold", () => {
   });
 
   describe("scaffoldPlugin (in-repo)", () => {
-    it("creates core files: manifest.json, manifest.ts, plugin.ts, index.ts", () => {
+    it("creates core files: manifest.json, plugin.ts, index.ts (no manifest.ts)", () => {
       const tmp = makeTempDir();
       tempDirs.push(tmp);
       const targetDir = path.join(tmp, "my-plugin");
@@ -64,7 +64,7 @@ describe("scaffold", () => {
       scaffoldPlugin(targetDir, BASE_ANSWERS, { isolated: false });
 
       expect(fs.existsSync(path.join(targetDir, "manifest.json"))).toBe(true);
-      expect(fs.existsSync(path.join(targetDir, "manifest.ts"))).toBe(true);
+      expect(fs.existsSync(path.join(targetDir, "manifest.ts"))).toBe(false);
       expect(fs.existsSync(path.join(targetDir, "my-plugin.ts"))).toBe(true);
       expect(fs.existsSync(path.join(targetDir, "index.ts"))).toBe(true);
       expect(fs.existsSync(path.join(targetDir, "package.json"))).toBe(false);
@@ -88,7 +88,7 @@ describe("scaffold", () => {
       expect(manifest.$schema).toContain("plugin-manifest.schema.json");
     });
 
-    it("generates plugin class with PascalCase name", () => {
+    it("generates plugin class with PascalCase name and direct manifest.json import", () => {
       const tmp = makeTempDir();
       tempDirs.push(tmp);
       const targetDir = path.join(tmp, "test");
@@ -101,6 +101,8 @@ describe("scaffold", () => {
       );
       expect(pluginTs).toContain("class MyPlugin");
       expect(pluginTs).toContain("export const myPlugin = toPlugin");
+      expect(pluginTs).toContain('import manifest from "./manifest.json"');
+      expect(pluginTs).toContain("manifest as PluginManifest");
     });
 
     it("generates index.ts with correct exports", () => {
@@ -240,7 +242,6 @@ describe("scaffold", () => {
       ).toThrow();
 
       expect(fs.existsSync(path.join(targetDir, "manifest.json"))).toBe(false);
-      expect(fs.existsSync(path.join(targetDir, "manifest.ts"))).toBe(false);
     });
   });
 });

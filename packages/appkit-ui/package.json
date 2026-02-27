@@ -2,6 +2,7 @@
   "name": "@databricks/appkit-ui",
   "type": "module",
   "version": "0.15.0",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/databricks/appkit.git"
@@ -14,6 +15,7 @@
     "docs",
     "docs.md",
     "CLAUDE.md",
+    "LICENSE",
     "llms.txt",
     "README.md",
     "DCO",

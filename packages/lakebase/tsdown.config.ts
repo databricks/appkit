@@ -11,12 +11,15 @@ export default defineConfig([
     platform: "node",
     minify: false,
     dts: {
-      resolve: true,
+      resolver: "oxc",
     },
     sourcemap: false,
     clean: false,
     unbundle: true,
     noExternal: [],
+    outExtensions: () => ({
+      js: ".js",
+    }),
     external: (id) => {
       // Bundle all internal modules
       if (id.startsWith("@/")) return false;

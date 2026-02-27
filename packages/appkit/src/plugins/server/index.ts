@@ -7,8 +7,9 @@ import type { PluginPhase } from "shared";
 import { ServerError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
+import type { PluginManifest } from "../../registry";
 import { instrumentations } from "../../telemetry";
-import { serverManifest } from "./manifest";
+import manifest from "./manifest.json";
 import { RemoteTunnelController } from "./remote-tunnel/remote-tunnel-controller";
 import { StaticServer } from "./static-server";
 import type { ServerConfig } from "./types";
@@ -41,7 +42,7 @@ export class ServerPlugin extends Plugin {
   };
 
   /** Plugin manifest declaring metadata and resource requirements */
-  static manifest = serverManifest;
+  static manifest = manifest as PluginManifest;
 
   public name = "server" as const;
   private serverApplication: express.Application;
@@ -360,5 +361,4 @@ export const server = toPlugin<typeof ServerPlugin, ServerConfig, "server">(
 );
 
 // Export manifest and types
-export { serverManifest } from "./manifest";
 export type { ServerConfig } from "./types";

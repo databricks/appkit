@@ -1,4 +1,4 @@
-import type pg from "pg";
+import type { Pool, QueryResult, QueryResultRow } from "pg";
 import {
   createLakebasePool,
   getLakebaseOrmConfig,
@@ -7,7 +7,8 @@ import {
 } from "../../connectors/lakebase";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
-import { lakebaseManifest } from "./manifest";
+import type { PluginManifest } from "../../registry";
+import manifest from "./manifest.json";
 import type { ILakebaseConfig } from "./types";
 
 const logger = createLogger("lakebase");
@@ -33,10 +34,10 @@ export class LakebasePlugin extends Plugin {
   name = "lakebase";
 
   /** Plugin manifest declaring metadata and resource requirements */
-  static manifest = lakebaseManifest;
+  static manifest = manifest as PluginManifest;
 
   protected declare config: ILakebaseConfig;
-  private pool: pg.Pool | null = null;
+  private pool: Pool | null = null;
 
   constructor(config: ILakebaseConfig) {
     super(config);
@@ -72,10 +73,10 @@ export class LakebasePlugin extends Plugin {
    * );
    * ```
    */
-  async query<T extends pg.QueryResultRow = any>(
+  async query<T extends QueryResultRow = any>(
     text: string,
     values?: unknown[],
-  ): Promise<pg.QueryResult<T>> {
+  ): Promise<QueryResult<T>> {
     // biome-ignore lint/style/noNonNullAssertion: pool is guaranteed non-null after setup(), which AppKit always awaits before exposing the plugin API
     return this.pool!.query<T>(text, values);
   }

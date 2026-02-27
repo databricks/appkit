@@ -1,4 +1,4 @@
-import type pg from "pg";
+import type { PoolConfig } from "pg";
 import { getUsernameSync, parsePoolConfig } from "./config";
 import { type DriverTelemetry, initTelemetry } from "./telemetry";
 import { createTokenRefreshCallback } from "./token-refresh";
@@ -13,7 +13,7 @@ import type { LakebasePoolConfig, Logger } from "./types";
  */
 function mapSslConfig(
   sslMode: "require" | "prefer" | "disable",
-): pg.PoolConfig["ssl"] {
+): PoolConfig["ssl"] {
   switch (sslMode) {
     case "require":
       return { rejectUnauthorized: true };
@@ -43,7 +43,7 @@ export function getLakebasePgConfig(
   config?: Partial<LakebasePoolConfig>,
   telemetry?: DriverTelemetry,
   logger?: Logger,
-): pg.PoolConfig {
+): PoolConfig {
   const userConfig = config ?? {};
   const poolConfig = parsePoolConfig(userConfig);
   const username = getUsernameSync(userConfig);

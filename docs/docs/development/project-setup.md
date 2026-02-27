@@ -63,7 +63,7 @@ The AppKit `server()` plugin automatically serves:
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^5.1.1",
-    "tsdown": "^0.15.7",
+    "tsdown": "^0.20.3",
     "tsx": "^4.19.0",
     "typescript": "~5.6.0",
     "vite": "^7.2.4"

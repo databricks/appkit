@@ -29,8 +29,6 @@
     "@types/ws": "^8.18.1",
     "dependency-tree": "^11.2.0"
   },
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "publishConfig": {
     "exports": {

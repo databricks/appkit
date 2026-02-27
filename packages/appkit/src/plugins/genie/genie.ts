@@ -5,8 +5,9 @@ import { GenieConnector } from "../../connectors";
 import { getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging";
 import { Plugin, toPlugin } from "../../plugin";
+import type { PluginManifest } from "../../registry";
 import { genieStreamDefaults } from "./defaults";
-import { genieManifest } from "./manifest";
+import manifest from "./manifest.json";
 import type {
   GenieConversationHistoryResponse,
   GenieSendMessageRequest,
@@ -19,7 +20,7 @@ const logger = createLogger("genie");
 export class GeniePlugin extends Plugin {
   name = "genie";
 
-  static manifest = genieManifest;
+  static manifest = manifest as PluginManifest;
 
   protected static description =
     "AI/BI Genie space integration for natural language data queries";

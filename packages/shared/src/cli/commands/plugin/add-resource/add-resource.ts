@@ -5,6 +5,7 @@ import { cancel, intro, outro } from "@clack/prompts";
 import { Command } from "commander";
 import { promptOneResource } from "../create/prompt-resource";
 import { humanizeResourceType } from "../create/resource-defaults";
+import { resolveManifestInDir } from "../manifest-resolve";
 import type { PluginManifest } from "../manifest-types";
 import { validateManifest } from "../validate/validate-manifest";
 
@@ -18,12 +19,23 @@ async function runPluginAddResource(options: { path?: string }): Promise<void> {
 
   const cwd = process.cwd();
   const pluginDir = path.resolve(cwd, options.path ?? ".");
-  const manifestPath = path.join(pluginDir, "manifest.json");
+  const resolved = resolveManifestInDir(pluginDir, { allowJsManifest: true });
 
-  if (!fs.existsSync(manifestPath)) {
-    console.error(`manifest.json not found at ${manifestPath}`);
+  if (!resolved) {
+    console.error(
+      `No manifest found in ${pluginDir}. This command requires manifest.json (manifest.js cannot be edited in place).`,
+    );
     process.exit(1);
   }
+
+  if (resolved.type !== "json") {
+    console.error(
+      `Editable manifest not found. add-resource only supports plugin directories that contain manifest.json (found ${path.basename(resolved.path)}).`,
+    );
+    process.exit(1);
+  }
+
+  const manifestPath = resolved.path;
 
   let manifest: ManifestWithExtras;
   try {
@@ -81,7 +93,7 @@ export const pluginAddResourceCommand = new Command("add-resource")
   )
   .option(
     "-p, --path <dir>",
-    "Plugin directory containing manifest.json (default: .)",
+    "Plugin directory containing manifest.json, which will be edited in place (default: .)",
   )
   .action((opts) =>
     runPluginAddResource(opts).catch((err) => {

@@ -2,11 +2,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { Lang, parse, type SgNode } from "@ast-grep/napi";
 import { Command } from "commander";
+import {
+  loadManifestFromFile,
+  type ResolvedManifest,
+  resolveManifestInDir,
+} from "../manifest-resolve";
 import type {
   PluginManifest,
   TemplatePlugin,
   TemplatePluginsManifest,
 } from "../manifest-types";
+import { shouldAllowJsManifestForPackage } from "../trusted-js-manifest";
 import {
   formatValidationErrors,
   validateManifest,
@@ -48,6 +54,40 @@ function validateManifestWithSchema(
   return null;
 }
 
+/** Safety limit for recursive directory scanning to prevent runaway traversal. */
+const MAX_SCAN_DEPTH = 5;
+
+/**
+ * Load and validate a resolved manifest, returning a TemplatePlugin entry or null.
+ * Centralises the resolve → load → validate → build-entry pipeline used by
+ * multiple discovery functions.
+ */
+async function loadPluginEntry(
+  resolved: ResolvedManifest,
+  pkg: string,
+  allowJsManifest: boolean,
+): Promise<[string, TemplatePlugin] | null> {
+  const parsed = await loadManifestFromFile(resolved.path, resolved.type, {
+    allowJsManifest,
+  });
+  const manifest = validateManifestWithSchema(parsed, resolved.path);
+  if (!manifest || manifest.hidden) return null;
+
+  return [
+    manifest.name,
+    {
+      name: manifest.name,
+      displayName: manifest.displayName,
+      description: manifest.description,
+      package: pkg,
+      resources: manifest.resources,
+      ...(manifest.onSetupMessage && {
+        onSetupMessage: manifest.onSetupMessage,
+      }),
+    },
+  ];
+}
+
 /**
  * Known packages that may contain AppKit plugins.
  * Always scanned for manifests, even if not imported in the server file.
@@ -59,6 +99,13 @@ const KNOWN_PLUGIN_PACKAGES = ["@databricks/appkit"];
  * Checked in order; the first that exists is used.
  */
 const SERVER_FILE_CANDIDATES = ["server/server.ts", "server/index.ts"];
+
+/**
+ * Conventional directories to scan for local plugin manifests when
+ * --local-plugins-dir is not set. Checked in order; each that exists is scanned.
+ * Plugins found here are added to the manifest even if not imported in the server.
+ */
+const CONVENTIONAL_LOCAL_PLUGIN_DIRS = ["plugins", "server"];
 
 /**
  * Find the server entry file by checking candidate paths in order.
@@ -182,23 +229,25 @@ function parsePluginUsages(root: SgNode): Set<string> {
 const RESOLVE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx"];
 
 /**
- * Resolve a relative import source to the plugin directory containing a manifest.json.
- * Follows the convention that plugins live in their own directory with a manifest.json.
+ * Resolve a relative import source to the plugin directory containing a manifest
+ * (manifest.json or manifest.js). Follows the convention that plugins live in
+ * their own directory with a manifest file.
  *
  * Resolution strategy:
- * 1. If the import path is a directory, look for manifest.json directly in it
- * 2. If the import path + extension is a file, look for manifest.json in its parent directory
- * 3. If the import path is a directory with an index file, look for manifest.json in that directory
+ * 1. If the import path is a directory, look for manifest.json/js in it
+ * 2. If the import path + extension is a file, look for manifest in its parent directory
+ * 3. If the import path is a directory with an index file, look for manifest in that directory
  *
  * @param importSource - The relative import specifier (e.g. "./plugins/my-plugin")
  * @param serverFileDir - Absolute path to the directory containing the server file
- * @returns Absolute path to manifest.json, or null if not found
+ * @returns Resolved manifest file path and type, or null if not found
  */
 function resolveLocalManifest(
   importSource: string,
   serverFileDir: string,
+  allowJsManifest: boolean,
   projectRoot?: string,
-): string | null {
+): ResolvedManifest | null {
   const resolved = path.resolve(serverFileDir, importSource);
 
   // Security: Reject paths that escape the project root
@@ -210,34 +259,26 @@ function resolveLocalManifest(
     return null;
   }
 
-  // Case 1: Import path is a directory with manifest.json
-  // e.g. ./plugins/my-plugin → ./plugins/my-plugin/manifest.json
+  // Case 1: Import path is a directory
   if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
-    const manifestPath = path.join(resolved, "manifest.json");
-    if (fs.existsSync(manifestPath)) return manifestPath;
+    return resolveManifestInDir(resolved, { allowJsManifest });
   }
 
-  // Case 2: Import path + extension resolves to a file
-  // e.g. ./plugins/my-plugin → ./plugins/my-plugin.ts
-  // Look for manifest.json in the same directory
+  // Case 2: Import path + extension resolves to a file — manifest in parent dir
   for (const ext of RESOLVE_EXTENSIONS) {
     const filePath = `${resolved}${ext}`;
     if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
       const dir = path.dirname(filePath);
-      const manifestPath = path.join(dir, "manifest.json");
-      if (fs.existsSync(manifestPath)) return manifestPath;
-      break;
+      if (!isWithinDirectory(dir, boundary)) return null;
+      return resolveManifestInDir(dir, { allowJsManifest });
     }
   }
 
   // Case 3: Import path is a directory with an index file
-  // e.g. ./plugins/my-plugin → ./plugins/my-plugin/index.ts
   for (const ext of RESOLVE_EXTENSIONS) {
     const indexPath = path.join(resolved, `index${ext}`);
     if (fs.existsSync(indexPath)) {
-      const manifestPath = path.join(resolved, "manifest.json");
-      if (fs.existsSync(manifestPath)) return manifestPath;
-      break;
+      return resolveManifestInDir(resolved, { allowJsManifest });
     }
   }
 
@@ -246,45 +287,41 @@ function resolveLocalManifest(
 
 /**
  * Discover plugin manifests from local (relative) imports in the server file.
- * Resolves each relative import to a directory and looks for manifest.json.
+ * Resolves each relative import to a directory and loads manifest.json or manifest.js.
  *
  * @param relativeImports - Parsed imports with relative sources (starting with . or /)
  * @param serverFileDir - Absolute path to the directory containing the server file
  * @param cwd - Current working directory (for computing relative paths in output)
  * @returns Map of plugin name to template plugin entry for local plugins
  */
-function discoverLocalPlugins(
+async function discoverLocalPlugins(
   relativeImports: ParsedImport[],
   serverFileDir: string,
   cwd: string,
-): TemplatePluginsManifest["plugins"] {
+  allowJsManifest: boolean,
+): Promise<TemplatePluginsManifest["plugins"]> {
   const plugins: TemplatePluginsManifest["plugins"] = {};
 
   for (const imp of relativeImports) {
-    const manifestPath = resolveLocalManifest(imp.source, serverFileDir, cwd);
-    if (!manifestPath) continue;
+    const resolved = resolveLocalManifest(
+      imp.source,
+      serverFileDir,
+      allowJsManifest,
+      cwd,
+    );
+    if (!resolved) continue;
 
     try {
-      const content = fs.readFileSync(manifestPath, "utf-8");
-      const parsed = JSON.parse(content);
-      const manifest = validateManifestWithSchema(parsed, manifestPath);
-      if (!manifest || manifest.hidden) continue;
-
-      const relativePath = path.relative(cwd, path.dirname(manifestPath));
-
-      plugins[manifest.name] = {
-        name: manifest.name,
-        displayName: manifest.displayName,
-        description: manifest.description,
-        package: `./${relativePath}`,
-        resources: manifest.resources,
-        ...(manifest.onSetupMessage && {
-          onSetupMessage: manifest.onSetupMessage,
-        }),
-      };
+      const relativePath = path.relative(cwd, path.dirname(resolved.path));
+      const entry = await loadPluginEntry(
+        resolved,
+        `./${relativePath}`,
+        allowJsManifest,
+      );
+      if (entry) plugins[entry[0]] = entry[1];
     } catch (error) {
       console.warn(
-        `Warning: Failed to parse manifest at ${manifestPath}:`,
+        `Warning: Failed to load manifest at ${resolved.path}:`,
         error instanceof Error ? error.message : error,
       );
     }
@@ -295,12 +332,15 @@ function discoverLocalPlugins(
 
 /**
  * Discover plugin manifests from a package's dist folder.
- * Looks for manifest.json files in dist/plugins/{plugin-name}/ directories.
+ * Looks for manifest.json or manifest.js in dist/plugins/{plugin-name}/ directories.
  *
  * @param packagePath - Path to the package in node_modules
  * @returns Array of plugin manifests found in the package
  */
-function discoverPluginManifests(packagePath: string): PluginManifest[] {
+async function discoverPluginManifests(
+  packagePath: string,
+  allowJsManifest: boolean,
+): Promise<PluginManifest[]> {
   const pluginsDir = path.join(packagePath, "dist", "plugins");
   const manifests: PluginManifest[] = [];
 
@@ -310,23 +350,25 @@ function discoverPluginManifests(packagePath: string): PluginManifest[] {
 
   const entries = fs.readdirSync(pluginsDir, { withFileTypes: true });
   for (const entry of entries) {
-    if (entry.isDirectory()) {
-      const manifestPath = path.join(pluginsDir, entry.name, "manifest.json");
-      if (fs.existsSync(manifestPath)) {
-        try {
-          const content = fs.readFileSync(manifestPath, "utf-8");
-          const parsed = JSON.parse(content);
-          const manifest = validateManifestWithSchema(parsed, manifestPath);
-          if (manifest) {
-            manifests.push(manifest);
-          }
-        } catch (error) {
-          console.warn(
-            `Warning: Failed to parse manifest at ${manifestPath}:`,
-            error instanceof Error ? error.message : error,
-          );
-        }
+    if (!entry.isDirectory()) continue;
+    const resolved = resolveManifestInDir(path.join(pluginsDir, entry.name), {
+      allowJsManifest,
+    });
+    if (!resolved) continue;
+
+    try {
+      const parsed = await loadManifestFromFile(resolved.path, resolved.type, {
+        allowJsManifest,
+      });
+      const manifest = validateManifestWithSchema(parsed, resolved.path);
+      if (manifest) {
+        manifests.push(manifest);
       }
+    } catch (error) {
+      console.warn(
+        `Warning: Failed to load manifest at ${resolved.path}:`,
+        error instanceof Error ? error.message : error,
+      );
     }
   }
 
@@ -340,10 +382,11 @@ function discoverPluginManifests(packagePath: string): PluginManifest[] {
  * @param packages - Set of npm package names to scan for plugin manifests
  * @returns Map of plugin name to template plugin entry
  */
-function scanForPlugins(
+async function scanForPlugins(
   cwd: string,
   packages: Iterable<string>,
-): TemplatePluginsManifest["plugins"] {
+  allowJsManifest: boolean,
+): Promise<TemplatePluginsManifest["plugins"]> {
   const plugins: TemplatePluginsManifest["plugins"] = {};
 
   for (const packageName of packages) {
@@ -352,7 +395,13 @@ function scanForPlugins(
       continue;
     }
 
-    const manifests = discoverPluginManifests(packagePath);
+    const allowJsForPackage =
+      allowJsManifest || shouldAllowJsManifestForPackage(packageName);
+
+    const manifests = await discoverPluginManifests(
+      packagePath,
+      allowJsForPackage,
+    );
     for (const manifest of manifests) {
       if (manifest.hidden) continue;
       plugins[manifest.name] = {
@@ -364,7 +413,7 @@ function scanForPlugins(
         ...(manifest.onSetupMessage && {
           onSetupMessage: manifest.onSetupMessage,
         }),
-      };
+      } satisfies TemplatePlugin;
     }
   }
 
@@ -372,18 +421,70 @@ function scanForPlugins(
 }
 
 /**
- * Scan a directory for plugin manifests in direct subdirectories.
- * Each subdirectory is expected to contain a manifest.json file.
+ * Recursively scan a directory for plugin manifests. Any directory that
+ * contains manifest.json or manifest.js is treated as a plugin root; we do
+ * not descend into that directory's children. Used for local plugins discovery
+ * so nested paths like server/plugins/category/my-plugin are found.
+ */
+async function scanPluginsDirRecursive(
+  dir: string,
+  cwd: string,
+  allowJsManifest: boolean,
+  depth = 0,
+): Promise<TemplatePluginsManifest["plugins"]> {
+  const plugins: TemplatePluginsManifest["plugins"] = {};
+  if (!fs.existsSync(dir) || depth >= MAX_SCAN_DEPTH) return plugins;
+
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    const pluginDir = path.join(dir, entry.name);
+    const resolved = resolveManifestInDir(pluginDir, { allowJsManifest });
+
+    if (resolved) {
+      const pkg = `./${path.relative(cwd, pluginDir)}`;
+      try {
+        const pluginEntry = await loadPluginEntry(
+          resolved,
+          pkg,
+          allowJsManifest,
+        );
+        if (pluginEntry) plugins[pluginEntry[0]] = pluginEntry[1];
+      } catch (error) {
+        console.warn(
+          `Warning: Failed to load manifest at ${resolved.path}:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+      continue;
+    }
+
+    Object.assign(
+      plugins,
+      await scanPluginsDirRecursive(pluginDir, cwd, allowJsManifest, depth + 1),
+    );
+  }
+
+  return plugins;
+}
+
+/**
+ * Scan a directory for plugin manifests in direct subdirectories only.
+ * Each subdirectory may contain manifest.json or manifest.js.
  * Used with --plugins-dir to discover plugins from source instead of node_modules.
  *
  * @param dir - Absolute path to the directory containing plugin subdirectories
- * @param packageName - Package name to assign to discovered plugins
+ * @param packageName - Package name to assign to discovered plugins (used when cwd is not set)
+ * @param cwd - When set, each plugin's package is set to ./<path from cwd to plugin subdir>, e.g. ./server/my-plugin
  * @returns Map of plugin name to template plugin entry
  */
-function scanPluginsDir(
+async function scanPluginsDir(
   dir: string,
   packageName: string,
-): TemplatePluginsManifest["plugins"] {
+  allowJsManifest: boolean,
+  cwd?: string,
+): Promise<TemplatePluginsManifest["plugins"]> {
   const plugins: TemplatePluginsManifest["plugins"] = {};
 
   if (!fs.existsSync(dir)) return plugins;
@@ -392,28 +493,19 @@ function scanPluginsDir(
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
 
-    const manifestPath = path.join(dir, entry.name, "manifest.json");
-    if (!fs.existsSync(manifestPath)) continue;
+    const pluginDir = path.join(dir, entry.name);
+    const resolved = resolveManifestInDir(pluginDir, { allowJsManifest });
+    if (!resolved) continue;
+
+    const pkg =
+      cwd !== undefined ? `./${path.relative(cwd, pluginDir)}` : packageName;
 
     try {
-      const content = fs.readFileSync(manifestPath, "utf-8");
-      const parsed = JSON.parse(content);
-      const manifest = validateManifestWithSchema(parsed, manifestPath);
-      if (manifest && !manifest.hidden) {
-        plugins[manifest.name] = {
-          name: manifest.name,
-          displayName: manifest.displayName,
-          description: manifest.description,
-          package: packageName,
-          resources: manifest.resources,
-          ...(manifest.onSetupMessage && {
-            onSetupMessage: manifest.onSetupMessage,
-          }),
-        };
-      }
+      const pluginEntry = await loadPluginEntry(resolved, pkg, allowJsManifest);
+      if (pluginEntry) plugins[pluginEntry[0]] = pluginEntry[1];
     } catch (error) {
       console.warn(
-        `Warning: Failed to parse manifest at ${manifestPath}:`,
+        `Warning: Failed to load manifest at ${resolved.path}:`,
         error instanceof Error ? error.message : error,
       );
     }
@@ -461,15 +553,18 @@ function writeManifest(
  * manifests, then marks plugins that are actually used in the `plugins: [...]`
  * array as requiredByTemplate.
  */
-function runPluginsSync(options: {
+async function runPluginsSync(options: {
   write?: boolean;
   output?: string;
   silent?: boolean;
   requirePlugins?: string;
   pluginsDir?: string;
   packageName?: string;
-}) {
+  localPluginsDir?: string;
+  allowJsManifest?: boolean;
+}): Promise<void> {
   const cwd = process.cwd();
+  const allowJsManifest = Boolean(options.allowJsManifest);
   const outputPath = path.resolve(cwd, options.output || "appkit.plugins.json");
 
   // Security: Reject output paths that escape the project root
@@ -482,6 +577,11 @@ function runPluginsSync(options: {
 
   if (!options.silent) {
     console.log("Scanning for AppKit plugins...\n");
+    if (allowJsManifest) {
+      console.warn(
+        "Warning: --allow-js-manifest executes manifest.js/manifest.cjs files. Only use with trusted code.",
+      );
+    }
   }
 
   // Step 1: Parse server file to discover imports and plugin usages
@@ -526,20 +626,54 @@ function runPluginsSync(options: {
     if (!options.silent) {
       console.log(`Scanning plugins directory: ${options.pluginsDir}`);
     }
-    Object.assign(plugins, scanPluginsDir(resolvedDir, pkgName));
+    Object.assign(
+      plugins,
+      await scanPluginsDir(resolvedDir, pkgName, allowJsManifest),
+    );
   } else {
     const npmPackages = new Set([
       ...KNOWN_PLUGIN_PACKAGES,
       ...npmImports.map((i) => i.source),
     ]);
-    Object.assign(plugins, scanForPlugins(cwd, npmPackages));
+    Object.assign(
+      plugins,
+      await scanForPlugins(cwd, npmPackages, allowJsManifest),
+    );
   }
 
   // Step 4: Discover local plugin manifests from relative imports
   if (serverFile && localImports.length > 0) {
     const serverFileDir = path.dirname(serverFile);
-    const localPlugins = discoverLocalPlugins(localImports, serverFileDir, cwd);
+    const localPlugins = await discoverLocalPlugins(
+      localImports,
+      serverFileDir,
+      cwd,
+      allowJsManifest,
+    );
     Object.assign(plugins, localPlugins);
+  }
+
+  // Step 4b: Discover local plugins from conventional directory (or --local-plugins-dir).
+  // These are included even when not imported in the server.
+  const localDirsToScan: string[] = options.localPluginsDir
+    ? [options.localPluginsDir]
+    : CONVENTIONAL_LOCAL_PLUGIN_DIRS.filter((d) =>
+        fs.existsSync(path.join(cwd, d)),
+      );
+  for (const dir of localDirsToScan) {
+    const resolvedDir = path.resolve(cwd, dir);
+    if (!fs.existsSync(resolvedDir)) continue;
+    if (!options.silent) {
+      console.log(`Scanning local plugins directory: ${dir}`);
+    }
+    const discovered = await scanPluginsDirRecursive(
+      resolvedDir,
+      cwd,
+      allowJsManifest,
+    );
+    for (const [name, entry] of Object.entries(discovered)) {
+      if (!plugins[name]) plugins[name] = entry;
+    }
   }
 
   const pluginCount = Object.keys(plugins).length;
@@ -551,7 +685,9 @@ function runPluginsSync(options: {
     }
     console.log("No plugins found.");
     if (options.pluginsDir) {
-      console.log(`\nNo manifest.json files found in: ${options.pluginsDir}`);
+      console.log(
+        `\nNo manifest (${allowJsManifest ? "manifest.json or manifest.js" : "manifest.json"}) found in: ${options.pluginsDir}`,
+      );
     } else {
       console.log("\nMake sure you have plugin packages installed.");
     }
@@ -625,8 +761,13 @@ function runPluginsSync(options: {
   writeManifest(outputPath, { plugins }, options);
 }
 
-/** Exported for testing: path boundary check, AST parsing. */
-export { isWithinDirectory, parseImports, parsePluginUsages };
+/** Exported for testing: path boundary check, AST parsing, trust checks. */
+export {
+  isWithinDirectory,
+  parseImports,
+  parsePluginUsages,
+  shouldAllowJsManifestForPackage,
+};
 
 export const pluginsSyncCommand = new Command("sync")
   .description(
@@ -653,4 +794,17 @@ export const pluginsSyncCommand = new Command("sync")
     "--package-name <name>",
     "Package name to assign to plugins found via --plugins-dir (default: @databricks/appkit)",
   )
-  .action(runPluginsSync);
+  .option(
+    "--local-plugins-dir <path>",
+    "Also scan this directory for local plugin manifests (default: plugins, server)",
+  )
+  .option(
+    "--allow-js-manifest",
+    "Allow reading manifest.js/manifest.cjs (executes code; use only with trusted plugins)",
+  )
+  .action((opts) =>
+    runPluginsSync(opts).catch((err) => {
+      console.error(err);
+      process.exit(1);
+    }),
+  );

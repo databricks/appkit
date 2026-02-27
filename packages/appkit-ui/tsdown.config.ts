@@ -9,12 +9,13 @@ export default defineConfig([
     platform: "browser",
     minify: false,
     dts: {
-      resolve: true,
+      resolver: "oxc",
     },
     copy: [
       {
         from: "src/react/styles/globals.css",
-        to: "dist/styles.css",
+        to: "dist",
+        rename: "styles.css",
       },
     ],
     clean: false,

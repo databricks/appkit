@@ -11,11 +11,14 @@ export default defineConfig([
     platform: "node",
     minify: false,
     dts: {
-      resolve: true,
+      resolver: "oxc",
     },
     sourcemap: false,
     clean: false,
     unbundle: true,
+    outExtensions: () => ({
+      js: ".js",
+    }),
     noExternal: ["shared"],
     external: (id) => {
       // Bundle "shared" workspace package and @/ path aliases
@@ -36,23 +39,6 @@ export default defineConfig([
       {
         from: "src/plugins/server/remote-tunnel/denied.html",
         to: "dist/plugins/server/remote-tunnel/denied.html",
-      },
-      // Plugin manifest JSON files (source of truth for static analysis)
-      {
-        from: "src/plugins/analytics/manifest.json",
-        to: "dist/plugins/analytics/manifest.json",
-      },
-      {
-        from: "src/plugins/genie/manifest.json",
-        to: "dist/plugins/genie/manifest.json",
-      },
-      {
-        from: "src/plugins/lakebase/manifest.json",
-        to: "dist/plugins/lakebase/manifest.json",
-      },
-      {
-        from: "src/plugins/server/manifest.json",
-        to: "dist/plugins/server/manifest.json",
       },
     ],
   },

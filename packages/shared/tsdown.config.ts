@@ -15,17 +15,20 @@ export default defineConfig({
   skipNodeModulesBundle: true,
   external: [/^@databricks\//],
   tsconfig: "./tsconfig.json",
+  outExtensions: () => ({
+    js: ".js",
+  }),
   exports: {
     devExports: "development",
   },
   copy: [
     {
       from: "src/schemas/plugin-manifest.schema.json",
-      to: "dist/schemas/plugin-manifest.schema.json",
+      to: "dist/schemas",
     },
     {
       from: "src/schemas/template-plugins.schema.json",
-      to: "dist/schemas/template-plugins.schema.json",
+      to: "dist/schemas",
     },
   ],
 });

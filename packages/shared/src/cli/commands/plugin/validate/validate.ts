@@ -3,14 +3,23 @@ import path from "node:path";
 import process from "node:process";
 import { Command } from "commander";
 import {
+  loadManifestFromFile,
+  type ResolvedManifest,
+  resolveManifestInDir,
+} from "../manifest-resolve";
+import {
   detectSchemaType,
   formatValidationErrors,
   validateManifest,
   validateTemplateManifest,
 } from "./validate-manifest";
 
-function resolveManifestPaths(paths: string[], cwd: string): string[] {
-  const out: string[] = [];
+function resolveManifestPaths(
+  paths: string[],
+  cwd: string,
+  allowJsManifest: boolean,
+): ResolvedManifest[] {
+  const out: ResolvedManifest[] = [];
   for (const p of paths) {
     const resolved = path.resolve(cwd, p);
     if (!fs.existsSync(resolved)) {
@@ -19,33 +28,54 @@ function resolveManifestPaths(paths: string[], cwd: string): string[] {
     }
     const stat = fs.statSync(resolved);
     if (stat.isDirectory()) {
-      const pluginManifest = path.join(resolved, "manifest.json");
-      const templateManifest = path.join(resolved, "appkit.plugins.json");
       let found = false;
-      if (fs.existsSync(pluginManifest)) {
-        out.push(pluginManifest);
+      const pluginResolved = resolveManifestInDir(resolved, {
+        allowJsManifest,
+      });
+      if (pluginResolved) {
+        out.push(pluginResolved);
         found = true;
       }
+      const templateManifest = path.join(resolved, "appkit.plugins.json");
       if (fs.existsSync(templateManifest)) {
-        out.push(templateManifest);
+        out.push({ path: templateManifest, type: "json" });
         found = true;
       }
       if (!found) {
         console.error(
-          `No manifest.json or appkit.plugins.json in directory: ${p}`,
+          `No ${allowJsManifest ? "manifest.json, manifest.js, or" : "manifest.json or"} appkit.plugins.json in directory: ${p}`,
         );
       }
     } else {
-      out.push(resolved);
+      const ext = path.extname(resolved).toLowerCase();
+      if (!allowJsManifest && (ext === ".js" || ext === ".cjs")) {
+        console.error(
+          `JS manifest provided but disabled by default: ${p}. Re-run with --allow-js-manifest to opt in.`,
+        );
+        continue;
+      }
+      out.push({
+        path: resolved,
+        type: ext === ".js" || ext === ".cjs" ? "js" : "json",
+      });
     }
   }
   return out;
 }
 
-function runPluginValidate(paths: string[]): void {
+async function runPluginValidate(
+  paths: string[],
+  options: { allowJsManifest?: boolean },
+): Promise<void> {
   const cwd = process.cwd();
+  const allowJsManifest = Boolean(options.allowJsManifest);
+  if (allowJsManifest) {
+    console.warn(
+      "Warning: --allow-js-manifest executes manifest.js/manifest.cjs files. Only use with trusted code.",
+    );
+  }
   const toValidate = paths.length > 0 ? paths : ["."];
-  const manifestPaths = resolveManifestPaths(toValidate, cwd);
+  const manifestPaths = resolveManifestPaths(toValidate, cwd, allowJsManifest);
 
   if (manifestPaths.length === 0) {
     console.error("No manifest files to validate.");
@@ -53,11 +83,10 @@ function runPluginValidate(paths: string[]): void {
   }
 
   let hasFailure = false;
-  for (const manifestPath of manifestPaths) {
+  for (const { path: manifestPath, type } of manifestPaths) {
     let obj: unknown;
     try {
-      const raw = fs.readFileSync(manifestPath, "utf-8");
-      obj = JSON.parse(raw);
+      obj = await loadManifestFromFile(manifestPath, type, { allowJsManifest });
     } catch (err) {
       console.error(`✗ ${manifestPath}`);
       console.error(`  ${err instanceof Error ? err.message : String(err)}`);
@@ -92,6 +121,15 @@ export const pluginValidateCommand = new Command("validate")
   )
   .argument(
     "[paths...]",
-    "Paths to manifest.json, appkit.plugins.json, or plugin directories (default: .)",
+    "Paths to manifest.json or appkit.plugins.json (or plugin directories); use --allow-js-manifest to include manifest.js",
   )
-  .action(runPluginValidate);
+  .option(
+    "--allow-js-manifest",
+    "Allow reading manifest.js/manifest.cjs (executes code; use only with trusted plugins)",
+  )
+  .action((paths: string[], opts: { allowJsManifest?: boolean }) =>
+    runPluginValidate(paths, opts).catch((err) => {
+      console.error(err);
+      process.exit(1);
+    }),
+  );

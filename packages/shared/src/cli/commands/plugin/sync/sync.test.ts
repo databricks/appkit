@@ -1,7 +1,12 @@
 import path from "node:path";
 import { Lang, parse } from "@ast-grep/napi";
 import { describe, expect, it } from "vitest";
-import { isWithinDirectory, parseImports, parsePluginUsages } from "./sync";
+import {
+  isWithinDirectory,
+  parseImports,
+  parsePluginUsages,
+  shouldAllowJsManifestForPackage,
+} from "./sync";
 
 describe("plugin sync", () => {
   describe("isWithinDirectory", () => {
@@ -161,6 +166,20 @@ describe("plugin sync", () => {
         });
       `);
       expect(Array.from(used)).toEqual(["server"]);
+    });
+  });
+
+  describe("shouldAllowJsManifestForPackage", () => {
+    it("allows trusted Databricks package scopes", () => {
+      expect(shouldAllowJsManifestForPackage("@databricks/appkit")).toBe(true);
+      expect(shouldAllowJsManifestForPackage("@databricks/custom-plugin")).toBe(
+        true,
+      );
+    });
+
+    it("rejects untrusted package scopes by default", () => {
+      expect(shouldAllowJsManifestForPackage("my-plugin")).toBe(false);
+      expect(shouldAllowJsManifestForPackage("@acme/plugin")).toBe(false);
     });
   });
 });

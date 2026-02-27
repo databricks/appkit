@@ -92,7 +92,7 @@ function rollback(written: string[], targetDir: string): void {
 
 /**
  * Scaffold plugin files into targetDir. Pure: no interactive I/O.
- * Writes manifest.json, manifest.ts, {name}.ts, index.ts; for isolated also package.json, tsconfig.json, README.md.
+ * Writes manifest.json, {name}.ts, index.ts; for isolated also package.json, tsconfig.json, README.md.
  * On failure, rolls back any files already written.
  */
 export function scaffoldPlugin(
@@ -115,27 +115,18 @@ export function scaffoldPlugin(
       written,
     );
 
-    const manifestTs = `import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import type { PluginManifest } from "@databricks/appkit";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-export const manifest = JSON.parse(
-  readFileSync(join(__dirname, "manifest.json"), "utf-8"),
-) as PluginManifest;
-`;
-
-    writeTracked(path.join(targetDir, "manifest.ts"), manifestTs, written);
-
-    const pluginTs = `import { Plugin, toPlugin, type IAppRouter } from "@databricks/appkit";
-import { manifest } from "./manifest.js";
+    const pluginTs = `import {
+  Plugin,
+  toPlugin,
+  type IAppRouter,
+  type PluginManifest,
+} from "@databricks/appkit";
+import manifest from "./manifest.json";
 
 export class ${className} extends Plugin {
   name = "${answers.name}";
 
-  static manifest = manifest;
+  static manifest = manifest as PluginManifest;
 
   injectRoutes(router: IAppRouter): void {
     // Add your routes here, e.g.:
@@ -159,7 +150,7 @@ export const ${exportName} = toPlugin<
 
     writeTracked(path.join(targetDir, `${answers.name}.ts`), pluginTs, written);
 
-    const indexTs = `export { ${className}, ${exportName} } from "./${answers.name}.js";
+    const indexTs = `export { ${className}, ${exportName} } from "./${answers.name}";
 `;
 
     writeTracked(path.join(targetDir, "index.ts"), indexTs, written);

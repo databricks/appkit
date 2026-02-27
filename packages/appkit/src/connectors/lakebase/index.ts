@@ -2,7 +2,7 @@ import {
   createLakebasePool as createLakebasePoolBase,
   type LakebasePoolConfig,
 } from "@databricks/lakebase";
-import type pg from "pg";
+import type { Pool } from "pg";
 import { createLogger } from "@/logging/logger";
 
 /**
@@ -12,9 +12,7 @@ import { createLogger } from "@/logging/logger";
  * @param config - Lakebase pool configuration
  * @returns PostgreSQL pool with appkit integration
  */
-export function createLakebasePool(
-  config?: Partial<LakebasePoolConfig>,
-): pg.Pool {
+export function createLakebasePool(config?: Partial<LakebasePoolConfig>): Pool {
   const logger = createLogger("connectors:lakebase");
 
   return createLakebasePoolBase({

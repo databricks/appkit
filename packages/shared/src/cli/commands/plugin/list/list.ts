@@ -2,7 +2,15 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { Command } from "commander";
+import {
+  loadManifestFromFile,
+  resolveManifestInDir,
+} from "../manifest-resolve";
+import { shouldAllowJsManifestForDir } from "../trusted-js-manifest";
 import { validateManifest } from "../validate/validate-manifest";
+
+/** Safety limit for recursive directory scanning to prevent runaway traversal. */
+const MAX_SCAN_DEPTH = 5;
 
 export interface PluginRow {
   name: string;
@@ -53,40 +61,87 @@ export function listFromManifestFile(manifestPath: string): PluginRow[] {
   }));
 }
 
-export function listFromDirectory(dirPath: string, cwd: string): PluginRow[] {
+async function collectPluginsRecursive(
+  dir: string,
+  cwd: string,
+  rows: PluginRow[],
+  allowJsManifest: boolean,
+  depth = 0,
+): Promise<void> {
+  if (
+    !fs.existsSync(dir) ||
+    !fs.statSync(dir).isDirectory() ||
+    depth >= MAX_SCAN_DEPTH
+  )
+    return;
+
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    const childPath = path.join(dir, entry.name);
+    const allowJsForChild =
+      allowJsManifest || shouldAllowJsManifestForDir(childPath);
+    const resolvedManifest = resolveManifestInDir(childPath, {
+      allowJsManifest: allowJsForChild,
+    });
+
+    if (resolvedManifest) {
+      try {
+        const obj = await loadManifestFromFile(
+          resolvedManifest.path,
+          resolvedManifest.type,
+          { allowJsManifest: allowJsForChild },
+        );
+        const result = validateManifest(obj);
+        const manifest = result.valid ? result.manifest : null;
+        if (manifest) {
+          const relPath = path.relative(
+            cwd,
+            path.dirname(resolvedManifest.path),
+          );
+          const packagePath = relPath.startsWith(".")
+            ? relPath
+            : `./${relPath}`;
+          rows.push({
+            name: manifest.name,
+            displayName: manifest.displayName ?? manifest.name,
+            package: packagePath,
+            required: Array.isArray(manifest.resources?.required)
+              ? manifest.resources.required.length
+              : 0,
+            optional: Array.isArray(manifest.resources?.optional)
+              ? manifest.resources.optional.length
+              : 0,
+          });
+        }
+      } catch {
+        // skip invalid manifests
+      }
+      continue;
+    }
+
+    await collectPluginsRecursive(
+      childPath,
+      cwd,
+      rows,
+      allowJsManifest,
+      depth + 1,
+    );
+  }
+}
+
+export async function listFromDirectory(
+  dirPath: string,
+  cwd: string,
+  allowJsManifest = false,
+): Promise<PluginRow[]> {
   const resolved = path.resolve(cwd, dirPath);
   if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
     return [];
   }
-  const entries = fs.readdirSync(resolved, { withFileTypes: true });
   const rows: PluginRow[] = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const manifestPath = path.join(resolved, entry.name, "manifest.json");
-    if (!fs.existsSync(manifestPath)) continue;
-    try {
-      const raw = fs.readFileSync(manifestPath, "utf-8");
-      const obj = JSON.parse(raw);
-      const result = validateManifest(obj);
-      const manifest = result.valid ? result.manifest : null;
-      if (!manifest) continue;
-      const relPath = path.relative(cwd, path.dirname(manifestPath));
-      const packagePath = relPath.startsWith(".") ? relPath : `./${relPath}`;
-      rows.push({
-        name: manifest.name,
-        displayName: manifest.displayName ?? manifest.name,
-        package: packagePath,
-        required: Array.isArray(manifest.resources?.required)
-          ? manifest.resources.required.length
-          : 0,
-        optional: Array.isArray(manifest.resources?.optional)
-          ? manifest.resources.optional.length
-          : 0,
-      });
-    } catch {
-      // skip invalid manifests
-    }
-  }
+  await collectPluginsRecursive(resolved, cwd, rows, allowJsManifest);
   return rows;
 }
 
@@ -120,19 +175,26 @@ function printTable(rows: PluginRow[]): void {
   }
 }
 
-function runPluginList(options: {
+async function runPluginList(options: {
   manifest?: string;
   dir?: string;
   json?: boolean;
-}): void {
+  allowJsManifest?: boolean;
+}): Promise<void> {
   const cwd = process.cwd();
+  const allowJsManifest = Boolean(options.allowJsManifest);
+  if (allowJsManifest) {
+    console.warn(
+      "Warning: --allow-js-manifest executes manifest.js/manifest.cjs files. Only use with trusted code.",
+    );
+  }
   let rows: PluginRow[];
 
   if (options.dir !== undefined) {
-    rows = listFromDirectory(options.dir, cwd);
+    rows = await listFromDirectory(options.dir, cwd, allowJsManifest);
     if (rows.length === 0 && options.dir) {
       console.error(
-        `No plugin directories with manifest.json found in ${options.dir}`,
+        `No plugin directories with ${allowJsManifest ? "manifest.json or manifest.js" : "manifest.json"} found in ${options.dir}`,
       );
       process.exit(1);
     }
@@ -169,7 +231,16 @@ export const pluginListCommand = new Command("list")
   )
   .option(
     "-d, --dir <path>",
-    "Scan directory for plugin folders (each with manifest.json)",
+    "Scan directory recursively for plugin folders (manifest.json by default)",
+  )
+  .option(
+    "--allow-js-manifest",
+    "Allow reading manifest.js/manifest.cjs (executes code; use only with trusted plugins)",
   )
   .option("--json", "Output as JSON")
-  .action(runPluginList);
+  .action((opts) =>
+    runPluginList(opts).catch((err) => {
+      console.error(err);
+      process.exit(1);
+    }),
+  );

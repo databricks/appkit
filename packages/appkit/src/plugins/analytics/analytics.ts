@@ -14,8 +14,9 @@ import {
 } from "../../context";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
+import type { PluginManifest } from "../../registry";
 import { queryDefaults } from "./defaults";
-import { analyticsManifest } from "./manifest";
+import manifest from "./manifest.json";
 import { QueryProcessor } from "./query";
 import type {
   AnalyticsQueryResponse,
@@ -29,7 +30,7 @@ export class AnalyticsPlugin extends Plugin {
   name = "analytics";
 
   /** Plugin manifest declaring metadata and resource requirements */
-  static manifest = analyticsManifest;
+  static manifest = manifest as PluginManifest;
 
   protected static description = "Analytics plugin for data analysis";
   protected declare config: IAnalyticsConfig;

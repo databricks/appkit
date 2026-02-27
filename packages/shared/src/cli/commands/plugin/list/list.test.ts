@@ -122,7 +122,7 @@ describe("list", () => {
   });
 
   describe("listFromDirectory", () => {
-    it("returns plugin rows from subdirectories with manifest.json", () => {
+    it("returns plugin rows from subdirectories with manifest.json", async () => {
       const tmp = makeTempDir("list-dir");
       tempDirs.push(tmp);
       const pluginDir = path.join(tmp, "my-feature");
@@ -132,7 +132,7 @@ describe("list", () => {
         JSON.stringify(PLUGIN_MANIFEST_JSON, null, 2),
       );
 
-      const rows = listFromDirectory(tmp, path.dirname(tmp));
+      const rows = await listFromDirectory(tmp, path.dirname(tmp));
 
       expect(rows).toHaveLength(1);
       expect(rows[0].name).toBe("my-feature");
@@ -142,21 +142,21 @@ describe("list", () => {
       expect(rows[0].optional).toBe(0);
     });
 
-    it("returns empty array when directory does not exist", () => {
-      const rows = listFromDirectory("/nonexistent/dir", "/");
+    it("returns empty array when directory does not exist", async () => {
+      const rows = await listFromDirectory("/nonexistent/dir", "/");
       expect(rows).toEqual([]);
     });
 
-    it("returns empty array when directory has no plugin subdirs with manifest.json", () => {
+    it("returns empty array when directory has no plugin subdirs with manifest", async () => {
       const tmp = makeTempDir("list-dir-empty");
       tempDirs.push(tmp);
       fs.mkdirSync(path.join(tmp, "empty-subdir"), { recursive: true });
 
-      const rows = listFromDirectory(tmp, path.dirname(tmp));
+      const rows = await listFromDirectory(tmp, path.dirname(tmp));
       expect(rows).toEqual([]);
     });
 
-    it("skips subdirs without manifest.json", () => {
+    it("skips subdirs without manifest.json", async () => {
       const tmp = makeTempDir("list-dir-skip");
       tempDirs.push(tmp);
       const withManifest = path.join(tmp, "with-manifest");
@@ -167,9 +167,79 @@ describe("list", () => {
       );
       fs.mkdirSync(path.join(tmp, "no-manifest"), { recursive: true });
 
-      const rows = listFromDirectory(tmp, path.dirname(tmp));
+      const rows = await listFromDirectory(tmp, path.dirname(tmp));
       expect(rows).toHaveLength(1);
       expect(rows[0].name).toBe("my-feature");
+    });
+
+    it("does not load JS-only manifests by default", async () => {
+      const tmp = makeTempDir("list-dir-js-disabled");
+      tempDirs.push(tmp);
+      const jsOnlyDir = path.join(tmp, "js-only");
+      fs.mkdirSync(jsOnlyDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(jsOnlyDir, "manifest.js"),
+        `export default ${JSON.stringify(PLUGIN_MANIFEST_JSON)}`,
+      );
+
+      const rows = await listFromDirectory(tmp, path.dirname(tmp));
+      expect(rows).toEqual([]);
+    });
+
+    it("loads JS-only manifests when explicitly enabled", async () => {
+      const tmp = makeTempDir("list-dir-js-enabled");
+      tempDirs.push(tmp);
+      const jsOnlyDir = path.join(tmp, "js-only");
+      fs.mkdirSync(jsOnlyDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(jsOnlyDir, "manifest.js"),
+        `export default ${JSON.stringify(PLUGIN_MANIFEST_JSON)}`,
+      );
+
+      const rows = await listFromDirectory(tmp, path.dirname(tmp), true);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].name).toBe("my-feature");
+    });
+
+    it("loads JS manifests from trusted node_modules packages by default", async () => {
+      const tmp = makeTempDir("list-dir-trusted-node-modules");
+      tempDirs.push(tmp);
+      const pluginDir = path.join(
+        tmp,
+        "node_modules",
+        "@databricks",
+        "appkit",
+        "my-feature",
+      );
+      fs.mkdirSync(pluginDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(pluginDir, "manifest.js"),
+        `export default ${JSON.stringify(PLUGIN_MANIFEST_JSON)}`,
+      );
+
+      const rows = await listFromDirectory(tmp, tmp);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].name).toBe("my-feature");
+    });
+
+    it("does not load JS manifests from untrusted node_modules packages by default", async () => {
+      const tmp = makeTempDir("list-dir-untrusted-node-modules");
+      tempDirs.push(tmp);
+      const pluginDir = path.join(
+        tmp,
+        "node_modules",
+        "@acme",
+        "plugin",
+        "my-feature",
+      );
+      fs.mkdirSync(pluginDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(pluginDir, "manifest.js"),
+        `export default ${JSON.stringify(PLUGIN_MANIFEST_JSON)}`,
+      );
+
+      const rows = await listFromDirectory(tmp, tmp);
+      expect(rows).toEqual([]);
     });
   });
 });

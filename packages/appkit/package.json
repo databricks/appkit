@@ -5,6 +5,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "packageManager": "pnpm@10.21.0",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/databricks/appkit.git"
@@ -16,6 +17,7 @@
     "docs",
     "docs.md",
     "CLAUDE.md",
+    "LICENSE",
     "llms.txt",
     "README.md",
     "DCO",
