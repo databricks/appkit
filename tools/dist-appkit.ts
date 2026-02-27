@@ -103,13 +103,13 @@ if (fs.existsSync(sharedPostinstall)) {
 const docsBuildPath = path.join(__dirname, "../docs/build");
 
 function copyMdFilesRecursive(src: string, dest: string) {
-  fs.mkdirSync(dest, { recursive: true });
   for (const entry of fs.readdirSync(src)) {
     const srcPath = path.join(src, entry);
     const destPath = path.join(dest, entry);
     if (fs.statSync(srcPath).isDirectory()) {
       copyMdFilesRecursive(srcPath, destPath);
     } else if (entry.endsWith(".md")) {
+      fs.mkdirSync(dest, { recursive: true });
       fs.copyFileSync(srcPath, destPath);
     }
   }
@@ -130,13 +130,18 @@ for (const item of itemsToCopy) {
   }
 }
 
-// Replace Docusaurus URL paths with local relative paths.
-// Step 1: /appkit/docs/... -> ./docs/... (strips baseUrl + docs route, avoids mid-path "api/appkit/")
-// Step 2: remaining /appkit/... at markdown link positions -> ./... (e.g., /appkit/docs.md -> ./docs.md)
+// Replace Docusaurus URL paths with local relative paths in markdown links.
 function replaceDocPaths(content: string): string {
-  content = content.replace(/(?<=\()\/appkit\/docs\//g, "./docs/");
-  content = content.replace(/(?<=\()\/appkit\/docs\.md/g, "./docs.md"); // special case for root "Getting started" path ("/")
-  return content;
+  // Matches /appkit/docs/ or /appkit/docs.md after "(" (markdown link position),
+  // captures the "docs/" or "docs.md" portion and rewrites to "./$1".
+  return content.replace(/(?<=\()\/appkit\/(docs(?:\/|\.md))/g, "./$1");
+}
+
+function processDocFile(filePath: string) {
+  fs.writeFileSync(
+    filePath,
+    replaceDocPaths(fs.readFileSync(filePath, "utf-8")),
+  );
 }
 
 function processDocsLinks(dir: string) {
@@ -145,10 +150,7 @@ function processDocsLinks(dir: string) {
     if (fs.statSync(fullPath).isDirectory()) {
       processDocsLinks(fullPath);
     } else if (entry.endsWith(".md")) {
-      fs.writeFileSync(
-        fullPath,
-        replaceDocPaths(fs.readFileSync(fullPath, "utf-8")),
-      );
+      processDocFile(fullPath);
     }
   }
 }
@@ -157,11 +159,7 @@ function processDocsLinks(dir: string) {
 processDocsLinks("tmp/docs");
 for (const entry of fs.readdirSync("tmp")) {
   if (entry.endsWith(".md")) {
-    const fullPath = path.join("tmp", entry);
-    fs.writeFileSync(
-      fullPath,
-      replaceDocPaths(fs.readFileSync(fullPath, "utf-8")),
-    );
+    processDocFile(path.join("tmp", entry));
   }
 }
 
