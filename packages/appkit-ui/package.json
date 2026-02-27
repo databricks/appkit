@@ -12,6 +12,7 @@
     "bin",
     "scripts",
     "docs",
+    "docs.md",
     "CLAUDE.md",
     "llms.txt",
     "README.md",

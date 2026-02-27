@@ -41,11 +41,10 @@ function runDocs(docPath?: string) {
   normalizedPath = normalizedPath.replace(/^\.\//, "");
   normalizedPath = normalizedPath.replace(/^\//, "");
 
-  // Remove /appkit/docs/ or docs/ prefix since files are in packageRoot/docs/
-  normalizedPath = normalizedPath.replace(/^appkit\/docs\//, "");
-  normalizedPath = normalizedPath.replace(/^docs\//, "");
+  // Strip appkit/ baseUrl prefix if present (paths resolve relative to packageRoot)
+  normalizedPath = normalizedPath.replace(/^appkit\//, "");
 
-  const fullPath = path.join(packageRoot, "docs", normalizedPath);
+  const fullPath = path.join(packageRoot, normalizedPath);
 
   if (!fs.existsSync(fullPath)) {
     console.error(`Error: Documentation file not found: ${docPath}`);
@@ -61,6 +60,6 @@ export const docsCommand = new Command("docs")
   .description("Display embedded documentation")
   .argument(
     "[path]",
-    "Path to specific documentation file (e.g., /appkit/docs/api/appkit-ui/components/Sidebar.md)",
+    "Path to specific documentation file (e.g., ./docs/api/appkit-ui/components/Sidebar.md)",
   )
   .action(runDocs);

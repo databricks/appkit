@@ -61,8 +61,9 @@ npx @databricks/appkit docs <path>
 
 Examples of known paths:
 - Root index: `npx @databricks/appkit docs`
-- API reference: `npx @databricks/appkit docs ./docs/docs/api.md`
-- Component docs: `npx @databricks/appkit docs ./docs/docs/api/appkit-ui/components/Sidebar.md`
+- Getting started: `npx @databricks/appkit docs ./docs.md`
+- API reference: `npx @databricks/appkit docs ./docs/api.md`
+- Component docs: `npx @databricks/appkit docs ./docs/api/appkit-ui/components/Sidebar.md`
 
 ## LLM checklist (before finalizing code)
 
