@@ -175,13 +175,13 @@ const config: Config = {
             },
             {
               id: "appkit-api",
-              name: "@databricks/appkit API reference",
+              name: "appkit API reference [collapsed]",
               position: 100,
               routes: [{ route: "/appkit/docs/api/appkit/**" }],
             },
             {
               id: "appkit-ui-api",
-              name: "@databricks/appkit-ui API reference",
+              name: "appkit-ui API reference [collapsed]",
               position: 101,
               routes: [{ route: "/appkit/docs/api/appkit-ui/**" }],
             },

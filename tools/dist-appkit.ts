@@ -170,19 +170,16 @@ let llmsContent = replaceDocPaths(fs.readFileSync(llmsSourcePath, "utf-8"));
 // Prepend AI agent guidance for navigating documentation
 const agentGuidance = `## For AI Agents/Assistants
 
-The paths in the markdown links below (e.g. \`./docs.md\`, \`./docs/api.md\`) can be passed directly as the \`<path>\` argument to view that page:
+The section names and doc paths below can be passed as the \`<query>\` argument:
 
 \`\`\`bash
-npx @databricks/appkit docs <path>
+npx @databricks/appkit docs <query>
 \`\`\`
 
-Examples:
-- View main documentation: \`npx @databricks/appkit docs\`
-- View Getting Started: \`npx @databricks/appkit docs ./docs.md\`
-- View API reference: \`npx @databricks/appkit docs ./docs/api.md\`
-- View component docs: \`npx @databricks/appkit docs ./docs/api/appkit-ui/components/Sidebar.md\`
-
-The CLI will display the documentation content directly in the terminal.
+- View documentation index: \`npx @databricks/appkit docs\`
+- View a section: \`npx @databricks/appkit docs plugins\`
+- Full index (all API entries): \`npx @databricks/appkit docs --full\`
+- View specific doc: \`npx @databricks/appkit docs ./docs/plugins/analytics.md\`
 
 ---
 
