@@ -3,6 +3,13 @@
 Collapsible navigation sidebar with mobile support
 
 
+## Example
+
+import { DocExample } from "@site/src/components/DocExample";
+
+<DocExample name="sidebar" />
+
+
 ## Sidebar
 
 Collapsible navigation sidebar with mobile support
@@ -573,7 +580,7 @@ Hook to access sidebar state and controls
 
 ### Props
 
-This component extends standard HTML element attributes.
+This hook takes no parameters.
 
 
 
@@ -582,6 +589,8 @@ This component extends standard HTML element attributes.
 ```tsx
 import { useSidebar } from '@databricks/appkit-ui';
 
-<useSidebar /* props */ />
+function MyComponent() {
+  const sidebar = useSidebar();
+}
 ```
 

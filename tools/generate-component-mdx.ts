@@ -148,18 +148,26 @@ function sanitizeDescriptionFull(text: string): string {
   return applySanitizationReplacements(text);
 }
 
+function isHook(name: string): boolean {
+  return name.startsWith("use");
+}
+
 function buildPropsSection(
   props: ComponentDoc["props"],
   headingLevel = 2,
+  hook = false,
 ): string {
   const entries = Object.entries(props);
   const headingPrefix = "#".repeat(headingLevel);
 
   if (entries.length === 0) {
+    const fallback = hook
+      ? "This hook takes no parameters."
+      : "This component extends standard HTML element attributes.";
     return `
 ${headingPrefix} Props
 
-This component extends standard HTML element attributes.
+${fallback}
 `;
   }
 
@@ -189,6 +197,21 @@ ${rows}
 function buildUsageSection(displayName: string, headingLevel = 2): string {
   const headingPrefix = "#".repeat(headingLevel);
   const actualName = stripDocSuffix(displayName);
+
+  if (isHook(actualName)) {
+    return `
+${headingPrefix} Usage
+
+\`\`\`tsx
+import { ${actualName} } from '${PACKAGE_NAMES.APPKIT_UI}';
+
+function MyComponent() {
+  const ${actualName.slice(3).charAt(0).toLowerCase()}${actualName.slice(4)} = ${actualName}();
+}
+\`\`\`
+`;
+  }
+
   return `
 ${headingPrefix} Usage
 
@@ -208,9 +231,11 @@ function buildComponentDetails(
     ? sanitizeDescriptionFull(component.description)
     : "";
   const relativePath = toGithubPath(component);
+  const hook = isHook(component.displayName || "");
   const propsSection = buildPropsSection(
     component.props,
     opts?.propsHeadingLevel,
+    hook,
   );
   const usageSection = buildUsageSection(
     component.displayName || COMPONENT_PATTERNS.DEFAULT_NAME,

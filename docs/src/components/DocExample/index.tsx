@@ -25,6 +25,7 @@ const HEIGHT_OVERRIDES = {
   select: 450,
   "alert-dialog": 500,
   "context-menu": 500,
+  sidebar: 700,
 } as const satisfies Partial<Record<AppKitExampleKey, number>>;
 
 export function DocExample({ name }: DocExampleProps) {
