@@ -2,14 +2,14 @@ import type { PluginExecuteConfig } from "shared";
 
 /**
  * Execution defaults for read-tier operations (list, read, exists, metadata, preview).
- * Cache 60s
+ * Cache 60s (ttl in seconds)
  * Retry 3x with 1s backoff
  * Timeout 30s
  **/
 export const FILES_READ_DEFAULTS: PluginExecuteConfig = {
   cache: {
     enabled: true,
-    ttl: 60_000,
+    ttl: 60,
   },
   retry: {
     enabled: true,
