@@ -2040,7 +2040,7 @@ export default function SidebarExample() {
                                         size="lg"
                                         className="data-open:bg-sidebar-accent data-open:text-sidebar-accent-foreground"
                                     >
-                                        <Item className="p-0 w-full" size="xs">
+                                        <Item className="p-0 w-full" size="sm">
                                             <ItemContent>
                                                 <ItemTitle className="text-sm">Documentation</ItemTitle>
                                                 <ItemDescription>v{selectedVersion}</ItemDescription>

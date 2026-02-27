@@ -63,8 +63,11 @@ function SidebarProvider({
   children,
   ...props
 }: React.ComponentProps<"div"> & {
+  /** Initial open state for uncontrolled usage */
   defaultOpen?: boolean;
+  /** Controlled open state */
   open?: boolean;
+  /** Callback when open state changes */
   onOpenChange?: (open: boolean) => void;
 }) {
   const isMobile = useIsMobile();
@@ -161,8 +164,11 @@ function Sidebar({
   children,
   ...props
 }: React.ComponentProps<"div"> & {
+  /** Which side of the viewport the sidebar appears on */
   side?: "left" | "right";
+  /** Visual style: `"sidebar"` (standard with border), `"floating"` (rounded with shadow), or `"inset"` (content area gets rounded margin) */
   variant?: "sidebar" | "floating" | "inset";
+  /** Collapse behavior: `"offcanvas"` (slides off-screen), `"icon"` (collapses to icon width), or `"none"` (always expanded) */
   collapsible?: "offcanvas" | "icon" | "none";
 }) {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
@@ -409,7 +415,10 @@ function SidebarGroupLabel({
   className,
   asChild = false,
   ...props
-}: React.ComponentProps<"div"> & { asChild?: boolean }) {
+}: React.ComponentProps<"div"> & {
+  /** Render as child element instead of default tag */
+  asChild?: boolean;
+}) {
   const Comp = asChild ? Slot : "div";
 
   return (
@@ -431,7 +440,10 @@ function SidebarGroupAction({
   className,
   asChild = false,
   ...props
-}: React.ComponentProps<"button"> & { asChild?: boolean }) {
+}: React.ComponentProps<"button"> & {
+  /** Render as child element instead of default tag */
+  asChild?: boolean;
+}) {
   const Comp = asChild ? Slot : "button";
 
   return (
@@ -520,8 +532,11 @@ function SidebarMenuButton({
   className,
   ...props
 }: React.ComponentProps<"button"> & {
+  /** Render as child element instead of default tag */
   asChild?: boolean;
+  /** Whether this item is currently active/selected */
   isActive?: boolean;
+  /** Tooltip shown when sidebar is collapsed to icon mode */
   tooltip?: string | React.ComponentProps<typeof TooltipContent>;
 } & VariantProps<typeof sidebarMenuButtonVariants>) {
   const Comp = asChild ? Slot : "button";
@@ -568,7 +583,9 @@ function SidebarMenuAction({
   showOnHover = false,
   ...props
 }: React.ComponentProps<"button"> & {
+  /** Render as child element instead of default tag */
   asChild?: boolean;
+  /** Only show when parent menu item is hovered */
   showOnHover?: boolean;
 }) {
   const Comp = asChild ? Slot : "button";
@@ -623,6 +640,7 @@ function SidebarMenuSkeleton({
   showIcon = false,
   ...props
 }: React.ComponentProps<"div"> & {
+  /** Show a circular icon placeholder alongside the text skeleton */
   showIcon?: boolean;
 }) {
   // Random width between 50 to 90%.
@@ -695,8 +713,11 @@ function SidebarMenuSubButton({
   className,
   ...props
 }: React.ComponentProps<"a"> & {
+  /** Render as child element instead of default tag */
   asChild?: boolean;
+  /** Text size of the submenu button */
   size?: "sm" | "md";
+  /** Whether this submenu item is currently active/selected */
   isActive?: boolean;
 }) {
   const Comp = asChild ? Slot : "a";

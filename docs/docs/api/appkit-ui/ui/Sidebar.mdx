@@ -22,9 +22,9 @@ Collapsible navigation sidebar with mobile support
 
 | Prop | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `side` | `enum` |  | `left` | - |
-| `variant` | `enum` |  | `sidebar` | - |
-| `collapsible` | `enum` |  | `offcanvas` | - |
+| `side` | `enum` |  | `left` | Which side of the viewport the sidebar appears on |
+| `variant` | `enum` |  | `sidebar` | Visual style: `"sidebar"` (standard with border), `"floating"` (rounded with shadow), or `"inset"` (content area gets rounded margin) |
+| `collapsible` | `enum` |  | `offcanvas` | Collapse behavior: `"offcanvas"` (slides off-screen), `"icon"` (collapses to icon width), or `"none"` (always expanded) |
 
 
 
@@ -118,7 +118,7 @@ Action button displayed next to a sidebar group label
 
 | Prop | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `asChild` | `boolean` |  | `false` | - |
+| `asChild` | `boolean` |  | `false` | Render as child element instead of default tag |
 
 
 
@@ -166,7 +166,7 @@ Label heading for a sidebar group
 
 | Prop | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `asChild` | `boolean` |  | `false` | - |
+| `asChild` | `boolean` |  | `false` | Render as child element instead of default tag |
 
 
 
@@ -283,8 +283,8 @@ Action button displayed alongside a menu item
 
 | Prop | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `asChild` | `boolean` |  | `false` | - |
-| `showOnHover` | `boolean` |  | `false` | - |
+| `asChild` | `boolean` |  | `false` | Render as child element instead of default tag |
+| `showOnHover` | `boolean` |  | `false` | Only show when parent menu item is hovered |
 
 
 
@@ -330,9 +330,9 @@ import { SidebarMenuBadge } from '@databricks/appkit-ui';
 
 | Prop | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `asChild` | `boolean` |  | `false` | - |
-| `isActive` | `boolean` |  | `false` | - |
-| `tooltip` | `string \| (TooltipContentProps & RefAttributes<HTMLDivElement>)` |  | - | - |
+| `asChild` | `boolean` |  | `false` | Render as child element instead of default tag |
+| `isActive` | `boolean` |  | `false` | Whether this item is currently active/selected |
+| `tooltip` | `string \| (TooltipContentProps & RefAttributes<HTMLDivElement>)` |  | - | Tooltip shown when sidebar is collapsed to icon mode |
 | `variant` | `"default" \| "outline" \| null` |  | `default` | - |
 | `size` | `"default" \| "sm" \| "lg" \| null` |  | `default` | - |
 
@@ -382,7 +382,7 @@ Loading skeleton placeholder for menu items
 
 | Prop | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `showIcon` | `boolean` |  | `false` | - |
+| `showIcon` | `boolean` |  | `false` | Show a circular icon placeholder alongside the text skeleton |
 
 
 
@@ -430,9 +430,9 @@ Button for submenu items
 
 | Prop | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `asChild` | `boolean` |  | `false` | - |
-| `size` | `enum` |  | `md` | - |
-| `isActive` | `boolean` |  | `false` | - |
+| `asChild` | `boolean` |  | `false` | Render as child element instead of default tag |
+| `size` | `enum` |  | `md` | Text size of the submenu button |
+| `isActive` | `boolean` |  | `false` | Whether this submenu item is currently active/selected |
 
 
 
@@ -478,9 +478,9 @@ import { SidebarMenuSubItem } from '@databricks/appkit-ui';
 
 | Prop | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `defaultOpen` | `boolean` |  | `true` | - |
-| `open` | `boolean` |  | - | - |
-| `onOpenChange` | `((open: boolean) => void)` |  | - | - |
+| `defaultOpen` | `boolean` |  | `true` | Initial open state for uncontrolled usage |
+| `open` | `boolean` |  | - | Controlled open state |
+| `onOpenChange` | `((open: boolean) => void)` |  | - | Callback when open state changes |
 
 
 

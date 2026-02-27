@@ -199,6 +199,26 @@ export abstract class Plugin<
    * Returns the public exports for this plugin.
    * Override this to define a custom public API.
    * By default, returns an empty object.
+   *
+   * The returned object becomes the plugin's public API on the AppKit instance
+   * (e.g. `appkit.myPlugin.method()`). AppKit automatically binds method context
+   * and adds `asUser(req)` for user-scoped execution.
+   *
+   * @example
+   * ```ts
+   * class MyPlugin extends Plugin {
+   *   name = "myPlugin";
+   *   private getData() { return []; }
+   *
+   *   exports() {
+   *     return { getData: this.getData };
+   *   }
+   * }
+   *
+   * // After registration:
+   * const appkit = await createApp({ plugins: [myPlugin()] });
+   * appkit.myPlugin.getData();
+   * ```
    */
   exports(): unknown {
     return {};

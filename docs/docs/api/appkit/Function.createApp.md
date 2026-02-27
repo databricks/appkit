@@ -11,6 +11,11 @@ function createApp<T>(config: {
 
 Bootstraps AppKit with the provided configuration.
 
+Initializes telemetry, cache, and service context, then registers plugins
+in phase order (core, normal, deferred) and awaits their setup.
+The returned object maps each plugin name to its `exports()` API,
+with an `asUser(req)` method for user-scoped execution.
+
 ## Type Parameters
 
 | Type Parameter |
@@ -30,3 +35,28 @@ Bootstraps AppKit with the provided configuration.
 ## Returns
 
 `Promise`\<`PluginMap`\<`T`\>\>
+
+A `PluginMap` keyed by plugin name with typed exports
+
+## Examples
+
+```ts
+import { createApp, server } from "@databricks/appkit";
+
+await createApp({
+  plugins: [server()],
+});
+```
+
+```ts
+import { createApp, server, analytics } from "@databricks/appkit";
+
+const appkit = await createApp({
+  plugins: [server({ autoStart: false }), analytics({})],
+});
+
+appkit.server.extend((app) => {
+  app.get("/custom", (_req, res) => res.json({ ok: true }));
+});
+await appkit.server.start();
+```
