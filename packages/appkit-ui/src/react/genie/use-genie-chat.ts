@@ -210,8 +210,10 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
 
+      const requestId = crypto.randomUUID();
+
       connectSSE({
-        url: `${basePath}/${encodeURIComponent(alias)}/messages`,
+        url: `${basePath}/${encodeURIComponent(alias)}/messages?requestId=${encodeURIComponent(requestId)}`,
         payload: {
           content: trimmed,
           conversationId: conversationIdRef.current ?? undefined,
@@ -259,8 +261,10 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
 
+      const requestId = crypto.randomUUID();
+
       connectSSE({
-        url: `${basePath}/${encodeURIComponent(alias)}/conversations/${encodeURIComponent(convId)}`,
+        url: `${basePath}/${encodeURIComponent(alias)}/conversations/${encodeURIComponent(convId)}?requestId=${encodeURIComponent(requestId)}`,
         signal: abortController.signal,
         onMessage: async (message) => {
           try {
