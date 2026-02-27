@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Time, TimeUnits } from "@databricks/sdk-experimental";
 import type {
   GenieMessage,
@@ -134,6 +135,7 @@ export class GeniePlugin extends Plugin {
     );
 
     const timeout = this.config.timeout ?? 120_000;
+    const requestId = (req.query.requestId as string) || randomUUID();
 
     const streamSettings: StreamExecutionSettings = {
       ...genieStreamDefaults,
@@ -144,9 +146,7 @@ export class GeniePlugin extends Plugin {
       },
       stream: {
         ...genieStreamDefaults.stream,
-        streamId: conversationId
-          ? `genie:send:${spaceId}:${conversationId}`
-          : `genie:send:${spaceId}:new-${Date.now()}`,
+        streamId: requestId,
       },
     };
 
@@ -294,6 +294,7 @@ export class GeniePlugin extends Plugin {
     }
 
     const includeQueryResults = req.query.includeQueryResults !== "false";
+    const requestId = (req.query.requestId as string) || randomUUID();
 
     logger.debug(
       "Fetching conversation %s from space %s (alias=%s, includeQueryResults=%s)",
@@ -309,7 +310,7 @@ export class GeniePlugin extends Plugin {
       ...genieStreamDefaults,
       stream: {
         ...genieStreamDefaults.stream,
-        streamId: `genie:conversation:${spaceId}:${conversationId}`,
+        streamId: requestId,
       },
     };
 

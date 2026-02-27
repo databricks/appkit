@@ -994,7 +994,7 @@ describe("Genie Plugin", () => {
       executeStreamSpy.mockRestore();
     });
 
-    test("sendMessage with conversationId should use deterministic streamId", async () => {
+    test("sendMessage should use requestId query param as streamId", async () => {
       const plugin = new GeniePlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -1003,6 +1003,7 @@ describe("Genie Plugin", () => {
       const handler = getHandler("POST", "/:alias/messages");
       const mockReq = createMockRequest({
         params: { alias: "myspace" },
+        query: { requestId: "req-uuid-123" },
         body: {
           content: "follow-up question",
           conversationId: "conv-42",
@@ -1021,14 +1022,14 @@ describe("Genie Plugin", () => {
         expect.any(Function),
         expect.objectContaining({
           stream: expect.objectContaining({
-            streamId: "genie:send:test-space-id:conv-42",
+            streamId: "req-uuid-123",
             bufferSize: 100,
           }),
         }),
       );
     });
 
-    test("sendMessage without conversationId should use timestamped streamId", async () => {
+    test("sendMessage without requestId should generate a random streamId", async () => {
       const plugin = new GeniePlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -1053,7 +1054,7 @@ describe("Genie Plugin", () => {
         expect.objectContaining({
           stream: expect.objectContaining({
             streamId: expect.stringMatching(
-              /^genie:send:test-space-id:new-\d+$/,
+              /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
             ),
             bufferSize: 100,
           }),
@@ -1061,7 +1062,7 @@ describe("Genie Plugin", () => {
       );
     });
 
-    test("getConversation should use deterministic streamId", async () => {
+    test("getConversation should use requestId query param as streamId", async () => {
       const plugin = new GeniePlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -1073,7 +1074,7 @@ describe("Genie Plugin", () => {
       );
       const mockReq = createMockRequest({
         params: { alias: "myspace", conversationId: "conv-99" },
-        query: {},
+        query: { requestId: "req-uuid-456" },
         headers: {
           "x-forwarded-access-token": "user-token",
           "x-forwarded-user": "user-1",
@@ -1088,7 +1089,7 @@ describe("Genie Plugin", () => {
         expect.any(Function),
         expect.objectContaining({
           stream: expect.objectContaining({
-            streamId: "genie:conversation:test-space-id:conv-99",
+            streamId: "req-uuid-456",
             bufferSize: 100,
           }),
         }),
