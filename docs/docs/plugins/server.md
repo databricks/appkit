@@ -28,7 +28,7 @@ The Server plugin uses the deferred initialization phase to access routes from o
 The smallest valid AppKit server:
 
 ```ts
-// server/index.ts
+// server/server.ts
 import { createApp, server } from "@databricks/appkit";
 
 await createApp({

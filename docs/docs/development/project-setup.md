@@ -13,7 +13,7 @@ Recommended structure (client/server split):
 ```
 my-app/
 ├── server/
-│   ├── index.ts              # backend entry point (AppKit)
+│   ├── server.ts              # backend entry point (AppKit)
 │   └── .env                  # optional local dev env vars (do not commit)
 ├── client/
 │   ├── index.html
@@ -46,9 +46,9 @@ The AppKit `server()` plugin automatically serves:
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "NODE_ENV=development tsx watch server/index.ts",
+    "dev": "NODE_ENV=development tsx watch server/server.ts",
     "build": "npm run build:server && npm run build:client",
-    "build:server": "tsdown --out-dir build server/index.ts",
+    "build:server": "tsdown --out-dir build server/server.ts",
     "build:client": "tsc -b && vite build --config client/vite.config.ts",
     "start": "node build/index.mjs"
   },
@@ -145,7 +145,7 @@ export default defineConfig({
 }
 ```
 
-### `server/index.ts`
+### `server/server.ts`
 
 ```ts
 import { createApp, server } from "@databricks/appkit";
@@ -185,7 +185,7 @@ If you don't already have a `client/` folder, create one and move your Vite app 
 - Move `vite.config.ts` → `client/vite.config.ts`
 - Move `src/` → `client/src/`
 
-### 2. Create `server/index.ts` (New File)
+### 2. Create `server/server.ts` (New File)
 
 ```ts
 import { createApp, server } from "@databricks/appkit";
@@ -200,9 +200,9 @@ await createApp({
 ```json
 {
   "scripts": {
-    "dev": "NODE_ENV=development tsx watch server/index.ts",
+    "dev": "NODE_ENV=development tsx watch server/server.ts",
     "build": "npm run build:server && npm run build:client",
-    "build:server": "tsdown --out-dir build server/index.ts",
+    "build:server": "tsdown --out-dir build server/server.ts",
     "build:client": "tsc -b && vite build --config client/vite.config.ts",
     "start": "node build/index.mjs"
   }
@@ -218,7 +218,7 @@ AppKit's server plugin will automatically serve your Vite app in dev mode and `c
 To add SQL query execution capabilities:
 
 ```ts
-// server/index.ts
+// server/server.ts
 import { createApp, server, analytics } from "@databricks/appkit";
 
 await createApp({

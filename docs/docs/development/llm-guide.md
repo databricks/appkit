@@ -71,7 +71,7 @@ Examples:
 
 - `package.json` has `"type": "module"`
 - `tsx` is in devDependencies for dev server
-- `dev` script uses `NODE_ENV=development tsx watch server/index.ts`
+- `dev` script uses `NODE_ENV=development tsx watch server/server.ts`
 - `client/index.html` exists with `<div id="root"></div>` and script pointing to `client/src/main.tsx`
 
 ### Backend
