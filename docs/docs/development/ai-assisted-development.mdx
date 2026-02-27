@@ -22,7 +22,9 @@ There are two ways to access the documentation:
 2. Use the `npx @databricks/appkit docs` command to view the documentation in the terminal.
 
   ```bash
-  npx @databricks/appkit docs # returns the llms.txt file content with all available documentation pages
-  npx @databricks/appkit docs <path> # for specific documentation file
+  npx @databricks/appkit docs            # documentation index with section overview
+  npx @databricks/appkit docs "appkit-ui API reference"  # view a specific section
+  npx @databricks/appkit docs --full     # full index with all API entries
+  npx @databricks/appkit docs ./docs.md  # view a specific documentation file
   ```
 

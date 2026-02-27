@@ -54,16 +54,16 @@ View API reference (docs only, NOT for scaffolding):
 
 ```bash
 # ONLY for viewing documentation - do NOT use for init/scaffold
-npx @databricks/appkit docs <path>
+npx @databricks/appkit docs <query>
 ```
 
-**IMPORTANT**: ALWAYS run `npx @databricks/appkit docs` (no path) FIRST to see available pages. DO NOT guess paths - use the index to find correct paths.
+**IMPORTANT**: ALWAYS run `npx @databricks/appkit docs` (no query) FIRST to see the documentation index. DO NOT guess paths - use the index to find correct paths.
 
-Examples of known paths:
-- Root index: `npx @databricks/appkit docs`
-- Getting started: `npx @databricks/appkit docs ./docs.md`
-- API reference: `npx @databricks/appkit docs ./docs/api.md`
-- Component docs: `npx @databricks/appkit docs ./docs/api/appkit-ui/components/Sidebar.md`
+Examples:
+- Documentation index: `npx @databricks/appkit docs`
+- View a section: `npx @databricks/appkit docs "appkit-ui API reference"`
+- Full index (all API entries): `npx @databricks/appkit docs --full`
+- View specific doc: `npx @databricks/appkit docs ./docs/plugins/analytics.md`
 
 ## LLM checklist (before finalizing code)
 
