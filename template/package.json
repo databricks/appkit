@@ -4,7 +4,7 @@
   "main": "build/index.js",
   "type": "module",
   "scripts": {
-    "start": "NODE_ENV=production node --env-file-if-exists=./.env ./dist/server.mjs",
+    "start": "NODE_ENV=production node --env-file-if-exists=./.env ./dist/server.js",
     "dev": "NODE_ENV=development tsx watch --tsconfig ./tsconfig.server.json --env-file-if-exists=./.env ./server/server.ts",
     "build:client": "tsc -b tsconfig.client.json && vite build --config client/vite.config.ts",
     "build:server": "tsdown -c tsdown.server.config.ts",
