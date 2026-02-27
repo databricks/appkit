@@ -1,10 +1,10 @@
 # Minimal Databricks App
 
-A minimal Databricks App powered by Databricks AppKit, featuring React, TypeScript, tRPC, and Tailwind CSS.
+A minimal Databricks App powered by Databricks AppKit, featuring React, TypeScript, and Tailwind CSS.
 
 ## Prerequisites
 
-- Node.js 18+ and npm
+- Node.js v22+ and npm
 - Databricks CLI (for deployment)
 - Access to a Databricks workspace
 
@@ -18,12 +18,12 @@ For local development, configure your environment variables by creating a `.env`
 cp env.example .env
 ```
 
-Edit `.env` and set the following:
+Edit `.env` and set the environment variables you need:
 
 ```env
 DATABRICKS_HOST=https://your-workspace.cloud.databricks.com
-DATABRICKS_WAREHOUSE_ID=your-warehouse-id
 DATABRICKS_APP_PORT=8000
+# ... other environment variables, depending on the plugins you use
 ```
 
 ### CLI Authentication
@@ -103,6 +103,8 @@ npm start
 
 ## Code Quality
 
+There are a few commands to help you with code quality:
+
 ```bash
 # Type checking
 npm run typecheck
@@ -166,18 +168,20 @@ databricks bundle deploy -t prod
 
 ```
 * client/          # React frontend
-  * src/         # Source code
-  * public/      # Static assets
+  * src/           # Source code
+  * public/        # Static assets
 * server/          # Express backend
-  * server.ts     # Server entry point
-  * trpc.ts      # tRPC router
+  * server.ts      # Server entry point
+  * routes/        # Routes
 * shared/          # Shared types
 * databricks.yml   # Bundle configuration
+* app.yaml         # App configuration
+* .env.example     # Environment variables example
 ```
 
 ## Tech Stack
 
-- **Frontend**: React 19, TypeScript, Vite, Tailwind CSS
-- **Backend**: Node.js, Express, tRPC
+- **Backend**: Node.js, Express
+- **Frontend**: React.js, TypeScript, Vite, Tailwind CSS, React Router
 - **UI Components**: Radix UI, shadcn/ui
-- **Databricks**: App Kit SDK, Analytics SDK
+- **Databricks**: AppKit SDK
