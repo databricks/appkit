@@ -8,9 +8,46 @@ import Prerequisites from './_prerequisites_app.mdx';
 
 <Prerequisites />
 
-AppKit-specific agent skills for AI coding assistants are coming soon. This documentation will be updated with instructions when available.
+AppKit integrates with AI coding assistants through the Agent Skills.
 
-In the meantime, refer to the LLM resources section below for guidance on working with AppKit in AI-assisted development environments.
+## Installing Agent Skills
+
+To install the Databricks Agent Skills for your preferred AI assistant, run:
+
+```bash
+databricks experimental aitools skills install
+```
+
+## Skills capabilities
+
+The Agent Skills expose the following capabilities for AI assistants:
+
+- **Data exploration**: Query catalogs, schemas, tables, and execute SQL
+- **CLI command execution**: Deploy and manage apps, and run other workspace operations
+- **Workspace resource discovery**: Inspect and navigate workspace resources
+
+## Example prompts
+
+Here are some basic examples you can use to explore your app and workspace:
+
+1. Creating a new basic app
+  ```
+  Create a new Databricks app that displays a dashboard of the users table in main.default.
+  ```
+1. Introspecting a table schema
+  ```
+  Show me the schema of the users table in main.default.
+  ```
+1. Creating a new query
+  ```
+  Create a new query to find users created in the last 7 days.
+  ```
+1. Deploying an app
+  ```
+  Deploy the app to Databricks with the name "my-app".
+  ```
+
+Possibilities are virtually endless. Ask your AI assistant to help you with your app and workspace.
 
 ## LLM resources
 
@@ -23,8 +60,9 @@ There are two ways to access the documentation:
 
   ```bash
   npx @databricks/appkit docs            # documentation index with section overview
-  npx @databricks/appkit docs "appkit-ui API reference"  # view a specific section
-  npx @databricks/appkit docs --full     # full index with all API entries
-  npx @databricks/appkit docs ./docs.md  # view a specific documentation file
+	npx @databricks/appkit docs <query> # for specific documentation file or section
   ```
 
+## See more
+
+To learn more about Agent Skills, see the [Agent Skills repository](https://github.com/databricks/databricks-agent-skills).
