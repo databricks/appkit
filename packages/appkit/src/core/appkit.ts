@@ -211,7 +211,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
  * });
  * ```
  *
- * @example Server with analytics
+ * @example Extended Server with analytics and custom endpoint
  * ```ts
  * import { createApp, server, analytics } from "@databricks/appkit";
  *
