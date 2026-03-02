@@ -1,66 +1,20 @@
 import { randomUUID } from "node:crypto";
-import { Time, TimeUnits } from "@databricks/sdk-experimental";
-import type {
-  GenieMessage,
-  GenieStartConversationResponse,
-} from "@databricks/sdk-experimental/dist/apis/dashboards";
-import type { Waiter } from "@databricks/sdk-experimental/dist/wait";
 import type express from "express";
 import type { IAppRouter, StreamExecutionSettings } from "shared";
+import { GenieConnector } from "../../connectors";
 import { getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging";
 import { Plugin, toPlugin } from "../../plugin";
 import { genieStreamDefaults } from "./defaults";
 import { genieManifest } from "./manifest";
-import { pollWaiter } from "./poll-waiter";
 import type {
-  GenieAttachmentResponse,
   GenieConversationHistoryResponse,
-  GenieMessageResponse,
   GenieSendMessageRequest,
   GenieStreamEvent,
   IGenieConfig,
 } from "./types";
 
 const logger = createLogger("genie");
-
-type StartConversationWaiter = Waiter<
-  GenieStartConversationResponse,
-  GenieMessage
->;
-type CreateMessageWaiter = Waiter<GenieMessage, GenieMessage>;
-
-/** Extract our cleaned attachment response from a raw SDK GenieMessage */
-function mapAttachments(message: GenieMessage): GenieAttachmentResponse[] {
-  return (
-    message.attachments?.map((att) => ({
-      attachmentId: att.attachment_id,
-      query: att.query
-        ? {
-            title: att.query.title,
-            description: att.query.description,
-            query: att.query.query,
-            statementId: att.query.statement_id,
-          }
-        : undefined,
-      text: att.text ? { content: att.text.content } : undefined,
-      suggestedQuestions: att.suggested_questions?.questions,
-    })) ?? []
-  );
-}
-
-/** Build a GenieMessageResponse from a raw SDK GenieMessage */
-function toMessageResponse(message: GenieMessage): GenieMessageResponse {
-  return {
-    messageId: message.message_id,
-    conversationId: message.conversation_id,
-    spaceId: message.space_id,
-    status: message.status ?? "COMPLETED",
-    content: message.content,
-    attachments: mapAttachments(message),
-    error: message.error?.error,
-  };
-}
 
 export class GeniePlugin extends Plugin {
   name = "genie";
@@ -71,12 +25,18 @@ export class GeniePlugin extends Plugin {
     "AI/BI Genie space integration for natural language data queries";
   protected declare config: IGenieConfig;
 
+  private readonly genieConnector: GenieConnector;
+
   constructor(config: IGenieConfig) {
     super(config);
     this.config = {
       ...config,
       spaces: config.spaces ?? this.defaultSpaces(),
     };
+    this.genieConnector = new GenieConnector({
+      timeout: this.config.timeout,
+      maxMessages: 200,
+    });
   }
 
   private defaultSpaces(): Record<string, string> {
@@ -141,7 +101,6 @@ export class GeniePlugin extends Plugin {
       ...genieStreamDefaults,
       default: {
         ...genieStreamDefaults.default,
-        // timeout: 0 means indefinite (no TimeoutInterceptor)
         timeout,
       },
       stream: {
@@ -150,136 +109,20 @@ export class GeniePlugin extends Plugin {
       },
     };
 
+    const workspaceClient = getWorkspaceClient();
+
     await this.executeStream<GenieStreamEvent>(
       res,
-      async function* () {
-        const workspaceClient = getWorkspaceClient();
-
-        try {
-          // Step 1: API call → get waiter + IDs
-          let messageWaiter: CreateMessageWaiter;
-          let resultConversationId: string;
-          let resultMessageId: string;
-
-          if (conversationId) {
-            messageWaiter = await workspaceClient.genie.createMessage({
-              space_id: spaceId,
-              conversation_id: conversationId,
-              content,
-            });
-            resultConversationId = conversationId;
-            resultMessageId = messageWaiter.message_id ?? "";
-          } else {
-            const startWaiter: StartConversationWaiter =
-              await workspaceClient.genie.startConversation({
-                space_id: spaceId,
-                content,
-              });
-            resultConversationId = startWaiter.conversation_id;
-            resultMessageId = startWaiter.message_id;
-            messageWaiter = startWaiter as unknown as CreateMessageWaiter;
-          }
-
-          // Step 2: Yield message_start immediately — IDs are available from API response
-          yield {
-            type: "message_start" as const,
-            conversationId: resultConversationId,
-            messageId: resultMessageId,
-            spaceId,
-          };
-
-          // Step 3: Poll for status updates and completion
-          let completedMessage!: GenieMessage;
-          for await (const event of pollWaiter(messageWaiter)) {
-            if (event.type === "progress") {
-              if (event.value.status) {
-                yield { type: "status" as const, status: event.value.status };
-              }
-            } else {
-              completedMessage = event.value;
-              resultMessageId = event.value.message_id;
-            }
-          }
-
-          // Step 4: Build cleaned message response
-          const messageResponse = toMessageResponse(completedMessage);
-
-          yield {
-            type: "message_result" as const,
-            message: messageResponse,
-          };
-
-          // Step 5: Fetch query results for each query attachment
-          const attachments = messageResponse.attachments ?? [];
-          for (const att of attachments) {
-            if (att.query?.statementId && att.attachmentId) {
-              try {
-                const queryResult =
-                  await workspaceClient.genie.getMessageAttachmentQueryResult({
-                    space_id: spaceId,
-                    conversation_id: resultConversationId,
-                    message_id: resultMessageId,
-                    attachment_id: att.attachmentId,
-                  });
-
-                yield {
-                  type: "query_result" as const,
-                  attachmentId: att.attachmentId,
-                  statementId: att.query.statementId,
-                  data: queryResult.statement_response,
-                };
-              } catch (error) {
-                logger.error(
-                  "Failed to fetch query result for attachment %s: %O",
-                  att.attachmentId,
-                  error,
-                );
-                yield {
-                  type: "error" as const,
-                  error: `Failed to fetch query result for attachment ${att.attachmentId}`,
-                };
-              }
-            }
-          }
-        } catch (error) {
-          logger.error("Genie message error: %O", error);
-          yield {
-            type: "error" as const,
-            error:
-              error instanceof Error ? error.message : "Genie request failed",
-          };
-        }
-      },
+      () =>
+        this.genieConnector.streamSendMessage(
+          workspaceClient,
+          spaceId,
+          content,
+          conversationId,
+          { timeout },
+        ),
       streamSettings,
     );
-  }
-
-  private async _fetchAllMessages(
-    spaceId: string,
-    conversationId: string,
-  ): Promise<GenieMessage[]> {
-    const workspaceClient = getWorkspaceClient();
-    const allMessages: GenieMessage[] = [];
-    let pageToken: string | undefined;
-    const maxMessages = 200;
-
-    do {
-      const response = await workspaceClient.genie.listConversationMessages({
-        space_id: spaceId,
-        conversation_id: conversationId,
-        page_size: 100,
-        ...(pageToken ? { page_token: pageToken } : {}),
-      });
-
-      if (response.messages) {
-        allMessages.push(...response.messages);
-      }
-
-      pageToken = response.next_page_token;
-    } while (pageToken && allMessages.length < maxMessages);
-
-    // Genie API returns newest-first; reverse to chronological order
-    return allMessages.slice(0, maxMessages).reverse();
   }
 
   async _handleGetConversation(
@@ -305,8 +148,6 @@ export class GeniePlugin extends Plugin {
       includeQueryResults,
     );
 
-    const self = this;
-
     const streamSettings: StreamExecutionSettings = {
       ...genieStreamDefaults,
       stream: {
@@ -315,97 +156,17 @@ export class GeniePlugin extends Plugin {
       },
     };
 
+    const workspaceClient = getWorkspaceClient();
+
     await this.executeStream<GenieStreamEvent>(
       res,
-      async function* () {
-        try {
-          const messages = await self._fetchAllMessages(
-            spaceId,
-            conversationId,
-          );
-
-          const messageResponses: GenieMessageResponse[] = [];
-
-          for (const message of messages) {
-            const messageResponse = toMessageResponse(message);
-            messageResponses.push(messageResponse);
-
-            yield {
-              type: "message_result" as const,
-              message: messageResponse,
-            };
-          }
-
-          if (includeQueryResults) {
-            // Collect all query attachments across all messages
-            const queryAttachments: Array<{
-              messageId: string;
-              attachmentId: string;
-              statementId: string;
-            }> = [];
-
-            for (const msg of messageResponses) {
-              for (const att of msg.attachments ?? []) {
-                if (att.query?.statementId && att.attachmentId) {
-                  queryAttachments.push({
-                    messageId: msg.messageId,
-                    attachmentId: att.attachmentId,
-                    statementId: att.query.statementId,
-                  });
-                }
-              }
-            }
-
-            // Fetch all query results in parallel
-            const workspaceClient = getWorkspaceClient();
-            const results = await Promise.allSettled(
-              queryAttachments.map(async (att) => {
-                const queryResult =
-                  await workspaceClient.genie.getMessageAttachmentQueryResult({
-                    space_id: spaceId,
-                    conversation_id: conversationId,
-                    message_id: att.messageId,
-                    attachment_id: att.attachmentId,
-                  });
-                return {
-                  attachmentId: att.attachmentId,
-                  statementId: att.statementId,
-                  data: queryResult.statement_response,
-                };
-              }),
-            );
-
-            for (const result of results) {
-              if (result.status === "fulfilled") {
-                yield {
-                  type: "query_result" as const,
-                  attachmentId: result.value.attachmentId,
-                  statementId: result.value.statementId,
-                  data: result.value.data,
-                };
-              } else {
-                logger.error("Failed to fetch query result: %O", result.reason);
-                yield {
-                  type: "error" as const,
-                  error:
-                    result.reason instanceof Error
-                      ? result.reason.message
-                      : "Failed to fetch query result",
-                };
-              }
-            }
-          }
-        } catch (error) {
-          logger.error("Genie getConversation error: %O", error);
-          yield {
-            type: "error" as const,
-            error:
-              error instanceof Error
-                ? error.message
-                : "Failed to fetch conversation",
-          };
-        }
-      },
+      () =>
+        this.genieConnector.streamConversation(
+          workspaceClient,
+          spaceId,
+          conversationId,
+          { includeQueryResults },
+        ),
       streamSettings,
     );
   }
@@ -415,60 +176,43 @@ export class GeniePlugin extends Plugin {
     conversationId: string,
   ): Promise<GenieConversationHistoryResponse> {
     const spaceId = this.resolveSpaceId(alias);
-    if (!spaceId) {
-      throw new Error(`Unknown space alias: ${alias}`);
-    }
 
-    const messages = await this._fetchAllMessages(spaceId, conversationId);
-
-    return {
-      conversationId,
-      spaceId,
-      messages: messages.map(toMessageResponse),
-    };
-  }
-
-  async sendMessage(
-    alias: string,
-    content: string,
-    conversationId?: string,
-  ): Promise<GenieMessageResponse> {
-    const spaceId = this.resolveSpaceId(alias);
     if (!spaceId) {
       throw new Error(`Unknown space alias: ${alias}`);
     }
 
     const workspaceClient = getWorkspaceClient();
-    const timeout = this.config.timeout ?? 120_000;
 
-    let messageWaiter: CreateMessageWaiter;
-    let resultConversationId: string;
+    return this.genieConnector.getConversation(
+      workspaceClient,
+      spaceId,
+      conversationId,
+    );
+  }
 
-    if (conversationId) {
-      messageWaiter = await workspaceClient.genie.createMessage({
-        space_id: spaceId,
-        conversation_id: conversationId,
-        content,
-      });
-      resultConversationId = conversationId;
-    } else {
-      const startWaiter: StartConversationWaiter =
-        await workspaceClient.genie.startConversation({
-          space_id: spaceId,
-          content,
-        });
-      resultConversationId = startWaiter.conversation_id;
-      messageWaiter = startWaiter as unknown as CreateMessageWaiter;
+  /**
+   * Send a message and consume events as a stream (message_start, status,
+   * message_result, query_result, error).
+   */
+  async *sendMessage(
+    alias: string,
+    content: string,
+    conversationId?: string,
+    options?: { timeout?: number },
+  ): AsyncGenerator<GenieStreamEvent> {
+    const spaceId = this.resolveSpaceId(alias);
+    if (!spaceId) {
+      throw new Error(`Unknown space alias: ${alias}`);
     }
-
-    const waitOptions =
-      timeout > 0 ? { timeout: new Time(timeout, TimeUnits.milliseconds) } : {};
-    const completedMessage = await messageWaiter.wait(waitOptions);
-
-    return {
-      ...toMessageResponse(completedMessage),
-      conversationId: resultConversationId,
-    };
+    const workspaceClient = getWorkspaceClient();
+    const timeout = options?.timeout ?? this.config.timeout ?? 120_000;
+    yield* this.genieConnector.streamSendMessage(
+      workspaceClient,
+      spaceId,
+      content,
+      conversationId,
+      { timeout },
+    );
   }
 
   async shutdown(): Promise<void> {
