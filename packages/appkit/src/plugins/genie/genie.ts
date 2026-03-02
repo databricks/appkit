@@ -9,7 +9,6 @@ import { genieStreamDefaults } from "./defaults";
 import { genieManifest } from "./manifest";
 import type {
   GenieConversationHistoryResponse,
-  GenieMessageResponse,
   GenieSendMessageRequest,
   GenieStreamEvent,
   IGenieConfig,
@@ -193,12 +192,9 @@ export class GeniePlugin extends Plugin {
 
   /**
    * Send a message and consume events as a stream (message_start, status,
-   * message_result, query_result, error). Use this when you want progress
-   * updates (e.g. in a UI) instead of waiting for the final result.
-   *
-   * TODO: THIS SHOULD BE THE sendMessage method.
+   * message_result, query_result, error).
    */
-  async *streamSendMessage(
+  async *sendMessage(
     alias: string,
     content: string,
     conversationId?: string,
@@ -219,28 +215,6 @@ export class GeniePlugin extends Plugin {
     );
   }
 
-  /**
-   * Send a message and wait for the final result only (no streaming updates).
-   * For progress updates, use `streamSendMessage` instead.
-   */
-  async sendMessage(
-    alias: string,
-    content: string,
-    conversationId?: string,
-  ): Promise<GenieMessageResponse> {
-    const spaceId = this.resolveSpaceId(alias);
-    if (!spaceId) {
-      throw new Error(`Unknown space alias: ${alias}`);
-    }
-    const workspaceClient = getWorkspaceClient();
-    return this.genieConnector.sendMessage(
-      workspaceClient,
-      spaceId,
-      content,
-      conversationId,
-    );
-  }
-
   async shutdown(): Promise<void> {
     this.streamManager.abortAll();
   }
@@ -248,7 +222,6 @@ export class GeniePlugin extends Plugin {
   exports() {
     return {
       sendMessage: this.sendMessage,
-      streamSendMessage: this.streamSendMessage,
       getConversation: this.getConversation,
     };
   }
