@@ -1,9 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import {
-  type Pollable,
-  type PollEvent,
-  pollWaiter,
-} from "../../../connectors/genie";
+import { type Pollable, type PollEvent, pollWaiter } from "./poll-waiter";
 
 function createMockWaiter<P>(opts: {
   progressValues?: P[];
