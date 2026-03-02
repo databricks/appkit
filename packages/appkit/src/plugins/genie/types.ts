@@ -3,10 +3,10 @@ import type { BasePluginConfig } from "shared";
 // Re-export connector types for backward compatibility
 export type {
   GenieAttachmentResponse,
-  GenieConversationHistoryResponse,
   GenieMessageResponse,
   GenieStreamEvent,
-} from "../../connectors/genie";
+} from "shared";
+export type { GenieConversationHistoryResponse } from "../../connectors/genie";
 
 export interface IGenieConfig extends BasePluginConfig {
   /** Map of alias → Genie Space ID. Defaults to { default: DATABRICKS_GENIE_SPACE_ID } if omitted. */
