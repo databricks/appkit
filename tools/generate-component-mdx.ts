@@ -10,12 +10,14 @@ const COMPONENTS_EXAMPLES_DIR = "packages/appkit-ui/src/react/ui/examples";
 const COMPONENTS_DIR = "packages/appkit-ui/src/react/ui";
 const CHARTS_DIR = "packages/appkit-ui/src/react/charts";
 const TABLE_DIR = "packages/appkit-ui/src/react/table";
+const GENIE_DIR = "packages/appkit-ui/src/react/genie";
 const DOCS_OUTPUT_DIR = "docs/docs/api/appkit-ui";
 
 const SOURCE_DIRS = [
   { name: "ui", path: COMPONENTS_DIR },
   { name: "charts", path: CHARTS_DIR },
   { name: "table", path: TABLE_DIR },
+  { name: "genie", path: GENIE_DIR },
 ] as const;
 
 const FILE_EXTENSIONS = {
@@ -36,6 +38,7 @@ const COMPONENT_PATTERNS = {
 const PATH_PATTERNS = {
   CHARTS_DIR: "src/react/charts/",
   TABLE_DIR: "src/react/table/",
+  GENIE_DIR: "src/react/genie/",
   DATA_TABLE_FILE: "data-table.tsx",
   REACT_TYPES: "@types/react",
 } as const;
@@ -43,6 +46,7 @@ const PATH_PATTERNS = {
 const OUTPUT_SUBDIRS = {
   DATA: "data",
   UI: "ui",
+  GENIE: "genie",
   EXAMPLES: "examples",
 } as const;
 
@@ -91,11 +95,11 @@ function stripDocSuffix(name: string): string {
     : name;
 }
 
-type ComponentCategory = "chart" | "table" | "ui";
+type ComponentCategory = "chart" | "table" | "ui" | "genie";
 
 interface ComponentInfo {
   category: ComponentCategory;
-  subdir: string; // "data" or "ui"
+  subdir: string; // "data", "ui", or "genie"
   chartDir?: string; // Only for charts
 }
 
@@ -114,6 +118,10 @@ function categorizeComponent(component: ComponentDoc): ComponentInfo {
 
   if (relativePath.includes("table/")) {
     return { category: "table", subdir: OUTPUT_SUBDIRS.DATA };
+  }
+
+  if (relativePath.includes(PATH_PATTERNS.GENIE_DIR)) {
+    return { category: "genie", subdir: OUTPUT_SUBDIRS.GENIE };
   }
 
   return { category: "ui", subdir: OUTPUT_SUBDIRS.UI };
@@ -279,6 +287,18 @@ function buildExampleInfo(component: ComponentDoc): ExampleInfo | undefined {
       : undefined;
   }
 
+  // Genie / Multi-Genie / Chat components — examples next to source files
+  if (info.category === "genie") {
+    const sourceDir = path.dirname(filePath);
+    const examplePath = path.join(
+      sourceDir,
+      `${baseName}${FILE_EXTENSIONS.EXAMPLE}`,
+    );
+    return fs.existsSync(examplePath)
+      ? { name: baseName, path: examplePath }
+      : undefined;
+  }
+
   return undefined;
 }
 
@@ -304,7 +324,7 @@ ${buildComponentDetails(component, {
   // Generate example section based on component type
   let exampleSection = "";
   if (example) {
-    if (subdir === OUTPUT_SUBDIRS.DATA) {
+    if (subdir === OUTPUT_SUBDIRS.DATA || subdir === OUTPUT_SUBDIRS.GENIE) {
       // For data components: show code only (no interactive preview)
       const sourceCode = fs.readFileSync(example.path, MARKDOWN.FILE_ENCODING);
       exampleSection = `
@@ -493,6 +513,19 @@ function main() {
       return false;
     }
 
+    // Exclude non-component files from genie directories (types, hooks, markdown utils)
+    if (info.category === "genie") {
+      const basename = path.basename(filePath);
+      if (
+        basename === "types.ts" ||
+        basename.startsWith("use-") ||
+        basename === "markdown.ts" ||
+        basename === "index.ts"
+      ) {
+        return false;
+      }
+    }
+
     return (
       Boolean(displayName) &&
       !excludeList.includes(displayName) &&
@@ -575,8 +608,10 @@ function main() {
   // Create subdirectories
   const dataOutputDir = path.join(outputDir, OUTPUT_SUBDIRS.DATA);
   const uiOutputDir = path.join(outputDir, OUTPUT_SUBDIRS.UI);
+  const genieOutputDir = path.join(outputDir, OUTPUT_SUBDIRS.GENIE);
   fs.mkdirSync(dataOutputDir, { recursive: true });
   fs.mkdirSync(uiOutputDir, { recursive: true });
+  fs.mkdirSync(genieOutputDir, { recursive: true });
 
   // Create _category_.json files for proper sidebar labels
   fs.writeFileSync(
@@ -597,6 +632,18 @@ function main() {
       {
         label: "Data components",
         position: 3,
+      },
+      null,
+      2,
+    )}\n`,
+    MARKDOWN.FILE_ENCODING,
+  );
+  fs.writeFileSync(
+    path.join(genieOutputDir, FILE_EXTENSIONS.CATEGORY_CONFIG),
+    `${JSON.stringify(
+      {
+        label: "Genie components",
+        position: 4,
       },
       null,
       2,

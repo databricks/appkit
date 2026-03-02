@@ -80,6 +80,14 @@ function RootComponent() {
                     SQL Helpers
                   </Button>
                 </Link>
+                <Link to="/genie" className="no-underline">
+                  <Button
+                    variant="ghost"
+                    className="text-foreground hover:text-secondary-foreground"
+                  >
+                    Genie
+                  </Button>
+                </Link>
                 <ThemeSelector />
               </div>
             </nav>

@@ -166,6 +166,25 @@ function IndexRoute() {
           <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
             <div className="flex flex-col h-full">
               <h3 className="text-2xl font-semibold text-foreground mb-3">
+                Genie Chat
+              </h3>
+              <p className="text-muted-foreground mb-6 flex-grow">
+                Ask natural language questions about your data using AI/BI
+                Genie. Features SSE streaming, markdown rendering, and
+                conversation persistence.
+              </p>
+              <Button
+                onClick={() => navigate({ to: "/genie" })}
+                className="w-full"
+              >
+                Try Genie Chat
+              </Button>
+            </div>
+          </Card>
+
+          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
+            <div className="flex flex-col h-full">
+              <h3 className="text-2xl font-semibold text-foreground mb-3">
                 Lakebase Examples
               </h3>
               <p className="text-muted-foreground mb-6 flex-grow">

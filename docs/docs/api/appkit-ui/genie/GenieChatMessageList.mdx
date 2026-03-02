@@ -1,0 +1,31 @@
+# GenieChatMessageList
+
+Scrollable message list that renders Genie chat messages with auto-scroll, skeleton loaders, and a streaming indicator.
+
+
+## GenieChatMessageList
+
+Scrollable message list that renders Genie chat messages with auto-scroll, skeleton loaders, and a streaming indicator.
+
+
+**Source:** [`packages/appkit-ui/src/react/genie/genie-chat-message-list.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/genie/genie-chat-message-list.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `messages` | `GenieMessageItem[]` | ✓ | - | Array of messages to display |
+| `status` | `enum` | ✓ | - | Current chat status (controls loading indicators and skeleton placeholders) |
+| `className` | `string` |  | - | Additional CSS class for the scroll area |
+
+
+
+### Usage
+
+```tsx
+import { GenieChatMessageList } from '@databricks/appkit-ui';
+
+<GenieChatMessageList /* props */ />
+```
+
