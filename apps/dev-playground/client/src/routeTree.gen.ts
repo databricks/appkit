@@ -16,6 +16,7 @@ import { Route as ReconnectRouteRouteImport } from './routes/reconnect.route'
 import { Route as LakebaseRouteRouteImport } from './routes/lakebase.route'
 import { Route as GenieRouteRouteImport } from './routes/genie.route'
 import { Route as DataVisualizationRouteRouteImport } from './routes/data-visualization.route'
+import { Route as ChartInferenceRouteRouteImport } from './routes/chart-inference.route'
 import { Route as ArrowAnalyticsRouteRouteImport } from './routes/arrow-analytics.route'
 import { Route as AnalyticsRouteRouteImport } from './routes/analytics.route'
 import { Route as IndexRouteImport } from './routes/index'
@@ -55,6 +56,11 @@ const DataVisualizationRouteRoute = DataVisualizationRouteRouteImport.update({
   path: '/data-visualization',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ChartInferenceRouteRoute = ChartInferenceRouteRouteImport.update({
+  id: '/chart-inference',
+  path: '/chart-inference',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ArrowAnalyticsRouteRoute = ArrowAnalyticsRouteRouteImport.update({
   id: '/arrow-analytics',
   path: '/arrow-analytics',
@@ -75,6 +81,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
+  '/chart-inference': typeof ChartInferenceRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
   '/genie': typeof GenieRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
@@ -87,6 +94,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
+  '/chart-inference': typeof ChartInferenceRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
   '/genie': typeof GenieRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
@@ -100,6 +108,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
+  '/chart-inference': typeof ChartInferenceRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
   '/genie': typeof GenieRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
@@ -114,6 +123,7 @@ export interface FileRouteTypes {
     | '/'
     | '/analytics'
     | '/arrow-analytics'
+    | '/chart-inference'
     | '/data-visualization'
     | '/genie'
     | '/lakebase'
@@ -126,6 +136,7 @@ export interface FileRouteTypes {
     | '/'
     | '/analytics'
     | '/arrow-analytics'
+    | '/chart-inference'
     | '/data-visualization'
     | '/genie'
     | '/lakebase'
@@ -138,6 +149,7 @@ export interface FileRouteTypes {
     | '/'
     | '/analytics'
     | '/arrow-analytics'
+    | '/chart-inference'
     | '/data-visualization'
     | '/genie'
     | '/lakebase'
@@ -151,6 +163,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AnalyticsRouteRoute: typeof AnalyticsRouteRoute
   ArrowAnalyticsRouteRoute: typeof ArrowAnalyticsRouteRoute
+  ChartInferenceRouteRoute: typeof ChartInferenceRouteRoute
   DataVisualizationRouteRoute: typeof DataVisualizationRouteRoute
   GenieRouteRoute: typeof GenieRouteRoute
   LakebaseRouteRoute: typeof LakebaseRouteRoute
@@ -211,6 +224,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DataVisualizationRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/chart-inference': {
+      id: '/chart-inference'
+      path: '/chart-inference'
+      fullPath: '/chart-inference'
+      preLoaderRoute: typeof ChartInferenceRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/arrow-analytics': {
       id: '/arrow-analytics'
       path: '/arrow-analytics'
@@ -239,6 +259,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AnalyticsRouteRoute: AnalyticsRouteRoute,
   ArrowAnalyticsRouteRoute: ArrowAnalyticsRouteRoute,
+  ChartInferenceRouteRoute: ChartInferenceRouteRoute,
   DataVisualizationRouteRoute: DataVisualizationRouteRoute,
   GenieRouteRoute: GenieRouteRoute,
   LakebaseRouteRoute: LakebaseRouteRoute,

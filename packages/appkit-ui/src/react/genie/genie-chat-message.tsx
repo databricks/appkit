@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { cn } from "../lib/utils";
 import { Avatar, AvatarFallback } from "../ui/avatar";
 import { Card } from "../ui/card";
+import { GenieQueryVisualization } from "./genie-query-visualization";
 import type { GenieAttachmentResponse, GenieMessageItem } from "./types";
 
 /**
@@ -91,30 +92,41 @@ export function GenieChatMessage({
 
         {queryAttachments.length > 0 && (
           <div className="flex flex-col gap-2 w-full min-w-0">
-            {queryAttachments.map((att) => (
-              <Card
-                key={att.attachmentId ?? "query"}
-                className="px-4 py-3 text-xs overflow-hidden shadow-none"
-              >
-                <details>
-                  <summary className="cursor-pointer select-none font-medium">
-                    {att.query?.title ?? "SQL Query"}
-                  </summary>
-                  <div className="mt-2 flex flex-col gap-1">
-                    {att.query?.description && (
-                      <span className="text-muted-foreground">
-                        {att.query.description}
-                      </span>
-                    )}
-                    {att.query?.query && (
-                      <pre className="mt-1 p-2 rounded bg-background text-[11px] whitespace-pre-wrap break-all">
-                        {att.query.query}
-                      </pre>
-                    )}
-                  </div>
-                </details>
-              </Card>
-            ))}
+            {queryAttachments.map((att) => {
+              const key = att.attachmentId ?? "query";
+              const queryResult = att.attachmentId
+                ? message.queryResults.get(att.attachmentId)
+                : undefined;
+
+              return (
+                <div key={key} className="flex flex-col gap-2">
+                  <Card className="px-4 py-3 text-xs overflow-hidden shadow-none">
+                    <details>
+                      <summary className="cursor-pointer select-none font-medium">
+                        {att.query?.title ?? "SQL Query"}
+                      </summary>
+                      <div className="mt-2 flex flex-col gap-1">
+                        {att.query?.description && (
+                          <span className="text-muted-foreground">
+                            {att.query.description}
+                          </span>
+                        )}
+                        {att.query?.query && (
+                          <pre className="mt-1 p-2 rounded bg-background text-[11px] whitespace-pre-wrap break-all">
+                            {att.query.query}
+                          </pre>
+                        )}
+                      </div>
+                    </details>
+                  </Card>
+                  {queryResult != null && (
+                    <Card className="px-4 py-3 overflow-hidden">
+                      <GenieQueryVisualization data={queryResult} />
+                    </Card>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

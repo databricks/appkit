@@ -88,6 +88,14 @@ function RootComponent() {
                     Genie
                   </Button>
                 </Link>
+                <Link to="/chart-inference" className="no-underline">
+                  <Button
+                    variant="ghost"
+                    className="text-foreground hover:text-secondary-foreground"
+                  >
+                    Chart Inference
+                  </Button>
+                </Link>
                 <ThemeSelector />
               </div>
             </nav>
