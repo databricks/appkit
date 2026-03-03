@@ -1,5 +1,5 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
-import { Time, TimeUnits } from "@databricks/sdk-experimental";
+import * as SDK from "@databricks/sdk-experimental";
 import type { GenieMessage } from "@databricks/sdk-experimental/dist/apis/dashboards";
 import type { Waiter } from "@databricks/sdk-experimental/dist/wait";
 import { createLogger } from "../../logging";
@@ -12,6 +12,7 @@ import type {
   GenieStreamEvent,
 } from "./types";
 
+const { Time, TimeUnits } = SDK;
 const logger = createLogger("connectors:genie");
 
 type CreateMessageWaiter = Waiter<GenieMessage, GenieMessage>;

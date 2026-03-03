@@ -48,10 +48,15 @@ vi.mock("../storage/persistent", () => ({
   }),
 }));
 
-// Mock WorkspaceClient
-vi.mock("@databricks/sdk-experimental", () => ({
-  WorkspaceClient: vi.fn().mockImplementation(() => ({})),
-}));
+// Mock WorkspaceClient (preserve Time, TimeUnits, and other SDK exports)
+vi.mock("@databricks/sdk-experimental", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@databricks/sdk-experimental")>();
+  return {
+    ...actual,
+    WorkspaceClient: vi.fn().mockImplementation(() => ({})),
+  };
+});
 
 /** Create a mock storage for testing */
 function createMockStorage(persistent = false): CacheStorage {
