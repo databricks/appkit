@@ -30,11 +30,35 @@ export function extractParameters(sql: string): string[] {
 // parameters that are injected by the server
 export const SERVER_INJECTED_PARAMS = ["workspaceId"];
 
+/**
+ * Generates the TypeScript type literal for query parameters from SQL.
+ * Shared by both the success and failure paths.
+ */
+function formatParametersType(sql: string): string {
+  const params = extractParameters(sql).filter(
+    (p) => !SERVER_INJECTED_PARAMS.includes(p),
+  );
+  const paramTypes = extractParameterTypes(sql);
+
+  return params.length > 0
+    ? `{\n      ${params
+        .map((p) => {
+          const sqlType = paramTypes[p];
+          const markerType = sqlType
+            ? sqlTypeToMarker[sqlType]
+            : "SQLTypeMarker";
+          const helper = sqlType ? sqlTypeToHelper[sqlType] : "sql.*()";
+          return `/** ${sqlType || "any"} - use ${helper} */\n      ${p}: ${markerType}`;
+        })
+        .join(";\n      ")};\n    }`
+    : "Record<string, never>";
+}
+
 export function convertToQueryType(
   result: DatabricksStatementExecutionResponse,
   sql: string,
   queryName: string,
-): string {
+): { type: string; hasResults: boolean } {
   const dataRows = result.result?.data_array || [];
   const columns = dataRows.map((row) => ({
     name: row[0] || "",
@@ -42,27 +66,7 @@ export function convertToQueryType(
     comment: row[2] || undefined,
   }));
 
-  const params = extractParameters(sql).filter(
-    (p) => !SERVER_INJECTED_PARAMS.includes(p),
-  );
-
-  const paramTypes = extractParameterTypes(sql);
-
-  // generate parameters types with JSDoc hints
-  const paramsType =
-    params.length > 0
-      ? `{\n      ${params
-          .map((p) => {
-            const sqlType = paramTypes[p];
-            // if no type annotation, use SQLTypeMarker (union type)
-            const markerType = sqlType
-              ? sqlTypeToMarker[sqlType]
-              : "SQLTypeMarker";
-            const helper = sqlType ? sqlTypeToHelper[sqlType] : "sql.*()";
-            return `/** ${sqlType || "any"} - use ${helper} */\n      ${p}: ${markerType}`;
-          })
-          .join(";\n      ")};\n    }`
-      : "Record<string, never>";
+  const paramsType = formatParametersType(sql);
 
   // generate result fields with JSDoc
   const resultFields = columns.map((column) => {
@@ -81,12 +85,34 @@ export function convertToQueryType(
     return `${comment}${name}: ${mappedType}`;
   });
 
+  const hasResults = resultFields.length > 0;
+
+  const type = `{
+    name: "${queryName}";
+    parameters: ${paramsType};
+    result: ${
+      hasResults
+        ? `Array<{
+      ${resultFields.join(";\n      ")};
+    }>`
+        : "unknown"
+    };
+  }`;
+
+  return { type, hasResults };
+}
+
+/**
+ * Used when DESCRIBE QUERY fails so the query still appears in QueryRegistry.
+ * Generates a type with unknown result from SQL alone (no warehouse call).
+ */
+function generateUnknownResultQuery(sql: string, queryName: string): string {
+  const paramsType = formatParametersType(sql);
+
   return `{
     name: "${queryName}";
     parameters: ${paramsType};
-    result: Array<{
-      ${resultFields.join(";\n      ")};
-    }>;
+    result: unknown;
   }`;
 }
 
@@ -131,7 +157,6 @@ export async function generateQueriesFromDescribe(
 
   const client = new WorkspaceClient({});
   const querySchemas: QuerySchema[] = [];
-  const failedQueries: { name: string; error: string }[] = [];
   const spinner = new Spinner();
 
   // process each query file
@@ -144,9 +169,9 @@ export async function generateQueriesFromDescribe(
     const sql = fs.readFileSync(path.join(queryFolder, file), "utf8");
     const sqlHash = hashSQL(sql);
 
-    // check cache
+    // check cache (skip if marked for retry after a failed DESCRIBE)
     const cached = cache.queries[queryName];
-    if (cached && cached.hash === sqlHash) {
+    if (cached && cached.hash === sqlHash && !cached.retry) {
       querySchemas.push({ name: queryName, type: cached.type });
       spinner.start(`Processing ${queryName} (${i + 1}/${queryFiles.length})`);
       spinner.stop(`✓ ${queryName} (cached)`);
@@ -170,38 +195,36 @@ export async function generateQueriesFromDescribe(
       if (result.status.state === "FAILED") {
         const sqlError =
           result.status.error?.message || "Query execution failed";
+        const type = generateUnknownResultQuery(sql, queryName);
+        querySchemas.push({ name: queryName, type });
+        cache.queries[queryName] = { hash: sqlHash, type, retry: true };
+        saveCache(cache);
         spinner.stop(`✗ ${queryName} - failed`);
         spinner.printDetail(`SQL Error: ${sqlError}`);
         spinner.printDetail(`Query: ${cleanedSql.slice(0, 200)}`);
-        failedQueries.push({
-          name: queryName,
-          error: sqlError,
-        });
         continue;
       }
 
       // convert result to query schema
-      const type = convertToQueryType(result, sql, queryName);
+      const { type, hasResults } = convertToQueryType(result, sql, queryName);
       querySchemas.push({ name: queryName, type });
 
-      // update cache
-      cache.queries[queryName] = { hash: sqlHash, type };
+      // update cache immediately so successful results survive partial failures
+      // retry if DESCRIBE returned no columns (result: unknown)
+      const retry = !hasResults;
+      cache.queries[queryName] = { hash: sqlHash, type, retry };
+      saveCache(cache);
 
       spinner.stop(`✓ ${queryName}`);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Unknown error";
-      spinner.stop(`✗ ${queryName} - ${errorMessage}`);
-      failedQueries.push({ name: queryName, error: errorMessage });
+      spinner.stop(`✗ ${queryName}: \n${errorMessage}`);
+      const type = generateUnknownResultQuery(sql, queryName);
+      querySchemas.push({ name: queryName, type });
+      cache.queries[queryName] = { hash: sqlHash, type, retry: true };
+      saveCache(cache);
     }
-  }
-
-  // save cache
-  saveCache(cache);
-
-  // log warning if there are failed queries
-  if (failedQueries.length > 0) {
-    logger.debug("Warning: %d queries failed", failedQueries.length);
   }
 
   return querySchemas;

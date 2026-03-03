@@ -165,21 +165,21 @@ describe("convertToQueryType", () => {
 
   test("generates query type with parameters", () => {
     const sql = "SELECT * FROM users WHERE start_date = :startDate";
-    const result = convertToQueryType(mockResponse, sql, "users");
+    const { type } = convertToQueryType(mockResponse, sql, "users");
 
-    expect(result).toContain('name: "users"');
-    expect(result).toContain("parameters:");
-    expect(result).toContain("startDate: SQLTypeMarker");
-    expect(result).toContain("result: Array<{");
+    expect(type).toContain('name: "users"');
+    expect(type).toContain("parameters:");
+    expect(type).toContain("startDate: SQLTypeMarker");
+    expect(type).toContain("result: Array<{");
   });
 
   test("excludes server-injected params from parameters type", () => {
     const sql =
       "SELECT * FROM users WHERE workspace_id = :workspaceId AND date = :startDate";
-    const result = convertToQueryType(mockResponse, sql, "users");
+    const { type } = convertToQueryType(mockResponse, sql, "users");
 
-    expect(result).toContain("startDate: SQLTypeMarker");
-    expect(result).not.toContain("workspaceId:");
+    expect(type).toContain("startDate: SQLTypeMarker");
+    expect(type).not.toContain("workspaceId:");
   });
 
   test("uses specific marker types when @param annotation is provided", () => {
@@ -187,33 +187,33 @@ describe("convertToQueryType", () => {
 -- @param count NUMERIC
 -- @param name STRING
 SELECT * FROM users WHERE date = :startDate AND count = :count AND name = :name`;
-    const result = convertToQueryType(mockResponse, sql, "users");
+    const { type } = convertToQueryType(mockResponse, sql, "users");
 
-    expect(result).toContain("startDate: SQLDateMarker");
-    expect(result).toContain("count: SQLNumberMarker");
-    expect(result).toContain("name: SQLStringMarker");
+    expect(type).toContain("startDate: SQLDateMarker");
+    expect(type).toContain("count: SQLNumberMarker");
+    expect(type).toContain("name: SQLStringMarker");
   });
 
   test("generates Record<string, never> for queries without params", () => {
     const sql = "SELECT * FROM users";
-    const result = convertToQueryType(mockResponse, sql, "users");
+    const { type } = convertToQueryType(mockResponse, sql, "users");
 
-    expect(result).toContain("parameters: Record<string, never>");
+    expect(type).toContain("parameters: Record<string, never>");
   });
 
   test("maps column types correctly", () => {
-    const result = convertToQueryType(mockResponse, "SELECT 1", "test");
+    const { type } = convertToQueryType(mockResponse, "SELECT 1", "test");
 
-    expect(result).toContain("id: string");
-    expect(result).toContain("name: string");
-    expect(result).toContain("count: number");
+    expect(type).toContain("id: string");
+    expect(type).toContain("name: string");
+    expect(type).toContain("count: number");
   });
 
   test("adds JSDoc comments with @sqlType", () => {
-    const result = convertToQueryType(mockResponse, "SELECT 1", "test");
+    const { type } = convertToQueryType(mockResponse, "SELECT 1", "test");
 
-    expect(result).toContain("/** @sqlType STRING */");
-    expect(result).toContain("/** @sqlType INT */");
+    expect(type).toContain("/** @sqlType STRING */");
+    expect(type).toContain("/** @sqlType INT */");
   });
 
   test("uses column comment when available", () => {
@@ -225,9 +225,13 @@ SELECT * FROM users WHERE date = :startDate AND count = :count AND name = :name`
       },
     };
 
-    const result = convertToQueryType(responseWithComment, "SELECT 1", "test");
+    const { type } = convertToQueryType(
+      responseWithComment,
+      "SELECT 1",
+      "test",
+    );
 
-    expect(result).toContain("/** Total amount in USD */");
+    expect(type).toContain("/** Total amount in USD */");
   });
 
   test("quotes invalid column identifiers", () => {
@@ -239,12 +243,31 @@ SELECT * FROM users WHERE date = :startDate AND count = :count AND name = :name`
       },
     };
 
-    const result = convertToQueryType(
+    const { type } = convertToQueryType(
       responseWithInvalidName,
       "SELECT 1",
       "test",
     );
 
-    expect(result).toContain('"(1 = 1)": boolean');
+    expect(type).toContain('"(1 = 1)": boolean');
+  });
+
+  test("returns hasResults: true when columns exist", () => {
+    const { hasResults } = convertToQueryType(mockResponse, "SELECT 1", "test");
+    expect(hasResults).toBe(true);
+  });
+
+  test("returns hasResults: false when no columns exist", () => {
+    const emptyResponse: DatabricksStatementExecutionResponse = {
+      statement_id: "test-123",
+      status: { state: "SUCCEEDED" },
+      result: { data_array: [] },
+    };
+    const { hasResults } = convertToQueryType(
+      emptyResponse,
+      "SELECT 1",
+      "test",
+    );
+    expect(hasResults).toBe(false);
   });
 });

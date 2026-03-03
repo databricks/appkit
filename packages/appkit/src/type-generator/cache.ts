@@ -1,6 +1,9 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { createLogger } from "../logging/logger";
+
+const logger = createLogger("type-generator:cache");
 
 /**
  * Cache types
@@ -10,6 +13,7 @@ import path from "node:path";
 interface CacheEntry {
   hash: string;
   type: string;
+  retry: boolean;
 }
 
 /**
@@ -22,7 +26,7 @@ interface Cache {
   queries: Record<string, CacheEntry>;
 }
 
-export const CACHE_VERSION = "1";
+export const CACHE_VERSION = "2";
 const CACHE_FILE = ".appkit-types-cache.json";
 const CACHE_DIR = path.join(
   process.cwd(),
@@ -60,7 +64,7 @@ export function loadCache(): Cache {
       }
     }
   } catch {
-    // ignore cache errors
+    logger.warn("Cache file is corrupted, flushing cache completely.");
   }
   return { version: CACHE_VERSION, queries: {} };
 }
