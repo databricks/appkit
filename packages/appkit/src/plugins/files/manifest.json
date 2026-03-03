@@ -29,6 +29,11 @@
           "type": "number",
           "default": 30000,
           "description": "File operation timeout in milliseconds"
+        },
+        "maxUploadSize": {
+          "type": "number",
+          "default": 5368709120,
+          "description": "Maximum upload size in bytes. Defaults to 5 GB (Databricks Files API v2 limit)."
         }
       }
     }

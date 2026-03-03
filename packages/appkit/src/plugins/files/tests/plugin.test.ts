@@ -132,4 +132,150 @@ describe("FilesPlugin", () => {
 
     expect(abortAllSpy).toHaveBeenCalled();
   });
+
+  describe("Upload Size Validation", () => {
+    function getUploadHandler(plugin: FilesPlugin) {
+      const mockRouter = {
+        use: vi.fn(),
+        get: vi.fn(),
+        post: vi.fn(),
+        put: vi.fn(),
+        delete: vi.fn(),
+        patch: vi.fn(),
+      } as any;
+
+      plugin.injectRoutes(mockRouter);
+
+      // Find the upload handler — the POST call with path "/upload"
+      const uploadCall = mockRouter.post.mock.calls.find(
+        (call: unknown[]) => call[0] === "/upload",
+      );
+      // The handler is the last argument (after path and optional middlewares)
+      return uploadCall[uploadCall.length - 1] as (
+        req: any,
+        res: any,
+      ) => Promise<void>;
+    }
+
+    function mockRes() {
+      const res: any = {};
+      res.status = vi.fn().mockReturnValue(res);
+      res.json = vi.fn().mockReturnValue(res);
+      return res;
+    }
+
+    test("rejects upload with content-length over default limit (413)", async () => {
+      const plugin = new FilesPlugin({ defaultVolume: "/Volumes/test" });
+      const handler = getUploadHandler(plugin);
+      const res = mockRes();
+
+      await handler(
+        {
+          query: { path: "/Volumes/test/large.bin" },
+          headers: { "content-length": String(6 * 1024 * 1024 * 1024) },
+        },
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(413);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("exceeds maximum allowed size"),
+          plugin: "files",
+        }),
+      );
+    });
+
+    test("rejects upload with content-length over custom limit (413)", async () => {
+      const plugin = new FilesPlugin({
+        defaultVolume: "/Volumes/test",
+        maxUploadSize: 1024, // 1 KB
+      });
+      const handler = getUploadHandler(plugin);
+      const res = mockRes();
+
+      await handler(
+        {
+          query: { path: "/Volumes/test/file.bin" },
+          headers: { "content-length": "2048" },
+        },
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(413);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("2048 bytes"),
+          plugin: "files",
+        }),
+      );
+    });
+
+    test("allows upload with content-length at exactly the limit", async () => {
+      const plugin = new FilesPlugin({
+        defaultVolume: "/Volumes/test",
+        maxUploadSize: 1024,
+      });
+      const handler = getUploadHandler(plugin);
+      const res = mockRes();
+
+      // Content-length === maxUploadSize should NOT trigger 413.
+      // The handler will fail later (mock req isn't a real Readable stream),
+      // but it must pass the size check first.
+      let caughtError: unknown;
+      try {
+        await handler(
+          {
+            query: { path: "/Volumes/test/file.bin" },
+            headers: { "content-length": "1024" },
+          },
+          res,
+        );
+      } catch (err) {
+        caughtError = err;
+      }
+
+      // Verify the error is from Readable.toWeb (past the size check)
+      expect(caughtError).toBeDefined();
+      expect((caughtError as Error).message).toMatch(/stream\.Readable/i);
+
+      // Should NOT have been called with 413
+      const statusCalls = res.status.mock.calls;
+      const has413 = statusCalls.some((call: number[]) => call[0] === 413);
+      expect(has413).toBe(false);
+    });
+
+    test("allows upload when content-length header is missing", async () => {
+      const plugin = new FilesPlugin({
+        defaultVolume: "/Volumes/test",
+        maxUploadSize: 1024,
+      });
+      const handler = getUploadHandler(plugin);
+      const res = mockRes();
+
+      // Without content-length, the size check is skipped.
+      // Handler will fail later on Readable.toWeb(req).
+      let caughtError: unknown;
+      try {
+        await handler(
+          {
+            query: { path: "/Volumes/test/file.bin" },
+            headers: {},
+          },
+          res,
+        );
+      } catch (err) {
+        caughtError = err;
+      }
+
+      // Verify the error is from Readable.toWeb (past the size check)
+      expect(caughtError).toBeDefined();
+      expect((caughtError as Error).message).toMatch(/stream\.Readable/i);
+
+      // Should NOT have been called with 413
+      const statusCalls = res.status.mock.calls;
+      const has413 = statusCalls.some((call: number[]) => call[0] === 413);
+      expect(has413).toBe(false);
+    });
+  });
 });

@@ -11,6 +11,8 @@ export interface IFilesConfig extends BasePluginConfig {
   defaultVolume?: string;
   /** Map of file extensions to MIME types that takes priority over the built-in extension map. */
   customContentTypes?: Record<string, string>;
+  /** Maximum upload size in bytes. Defaults to 5 GB (Databricks Files API v2 limit). */
+  maxUploadSize?: number;
 }
 
 /** A single entry returned when listing a directory. Re-exported from `@databricks/sdk-experimental`. */

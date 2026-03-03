@@ -13,6 +13,7 @@ import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import {
   FILES_DOWNLOAD_DEFAULTS,
+  FILES_MAX_UPLOAD_SIZE,
   FILES_READ_DEFAULTS,
   FILES_WRITE_DEFAULTS,
 } from "./defaults";
@@ -298,6 +299,7 @@ export class FilesPlugin extends Plugin {
       });
       return;
     }
+    logger.error("Unhandled error in %s: %O", this.name, error);
     res.status(500).json({ error: fallbackMessage, plugin: this.name });
   }
 
@@ -553,6 +555,24 @@ export class FilesPlugin extends Plugin {
       return;
     }
 
+    const maxSize = this.config.maxUploadSize ?? FILES_MAX_UPLOAD_SIZE;
+    const rawContentLength = req.headers["content-length"];
+    const contentLength = rawContentLength
+      ? parseInt(rawContentLength, 10)
+      : undefined;
+
+    if (
+      contentLength !== undefined &&
+      !Number.isNaN(contentLength) &&
+      contentLength > maxSize
+    ) {
+      res.status(413).json({
+        error: `File size (${contentLength} bytes) exceeds maximum allowed size (${maxSize} bytes).`,
+        plugin: this.name,
+      });
+      return;
+    }
+
     logger.debug(req, "Upload started: path=%s", path);
 
     const webStream: ReadableStream<Uint8Array> = Readable.toWeb(req);
@@ -561,9 +581,7 @@ export class FilesPlugin extends Plugin {
       req,
       "Upload body received: path=%s, size=%d bytes",
       path,
-      req.headers["content-length"]
-        ? parseInt(req.headers["content-length"], 10)
-        : 0,
+      contentLength ?? 0,
     );
 
     try {
@@ -581,9 +599,7 @@ export class FilesPlugin extends Plugin {
           req,
           "Upload failed: path=%s, size=%d bytes",
           path,
-          req.headers["content-length"]
-            ? parseInt(req.headers["content-length"], 10)
-            : 0,
+          contentLength ?? 0,
         );
         res.status(500).json({ error: "Upload failed", plugin: this.name });
         return;

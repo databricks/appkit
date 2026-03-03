@@ -2,28 +2,7 @@ import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import { createMockTelemetry } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { FilesConnector } from "../client";
-
-function streamFromString(text: string): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder();
-  return new ReadableStream({
-    start(controller) {
-      controller.enqueue(encoder.encode(text));
-      controller.close();
-    },
-  });
-}
-
-function streamFromChunks(chunks: string[]): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder();
-  return new ReadableStream({
-    start(controller) {
-      for (const chunk of chunks) {
-        controller.enqueue(encoder.encode(chunk));
-      }
-      controller.close();
-    },
-  });
-}
+import { streamFromChunks, streamFromString } from "./utils";
 
 const { mockFilesApi, mockConfig, mockClient, MockApiError } = vi.hoisted(
   () => {

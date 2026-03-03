@@ -1,4 +1,4 @@
-import type { Server } from "node:http";
+import http, { type Server } from "node:http";
 import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 import {
   afterAll,
@@ -482,6 +482,47 @@ describe("Files Plugin Integration", () => {
       expect(response.status).toBe(401);
       const data = (await response.json()) as { error: string; plugin: string };
       expect(data.plugin).toBe("files");
+    });
+  });
+
+  describe("Upload Size Validation", () => {
+    /** Send a raw HTTP POST so we can set arbitrary content-length headers. */
+    function rawPost(
+      path: string,
+      headers: Record<string, string>,
+    ): Promise<{ status: number; body: string }> {
+      return new Promise((resolve, reject) => {
+        const req = http.request(
+          `${baseUrl}${path}`,
+          { method: "POST", headers },
+          (res) => {
+            let data = "";
+            res.on("data", (chunk) => {
+              data += chunk;
+            });
+            res.on("end", () =>
+              resolve({ status: res.statusCode ?? 0, body: data }),
+            );
+          },
+        );
+        req.on("error", reject);
+        req.end();
+      });
+    }
+
+    test("POST /api/files/upload with content-length over limit returns 413", async () => {
+      const res = await rawPost(
+        "/api/files/upload?path=/Volumes/catalog/schema/vol/large.bin",
+        {
+          ...MOCK_AUTH_HEADERS,
+          "content-length": String(6 * 1024 * 1024 * 1024), // 6 GB
+        },
+      );
+
+      expect(res.status).toBe(413);
+      const data = JSON.parse(res.body) as { error: string; plugin: string };
+      expect(data.plugin).toBe("files");
+      expect(data.error).toMatch(/exceeds maximum allowed size/);
     });
   });
 
