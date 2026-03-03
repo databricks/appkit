@@ -50,6 +50,7 @@ vi.mock("../storage/persistent", () => ({
 
 // Mock WorkspaceClient
 vi.mock("@databricks/sdk-experimental", () => ({
+  default: {},
   WorkspaceClient: vi.fn().mockImplementation(() => ({})),
 }));
 

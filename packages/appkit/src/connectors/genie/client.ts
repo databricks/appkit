@@ -1,5 +1,8 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
-import { Time, TimeUnits } from "@databricks/sdk-experimental";
+import sdk from "@databricks/sdk-experimental";
+
+const { Time, TimeUnits } = sdk;
+
 import type { GenieMessage } from "@databricks/sdk-experimental/dist/apis/dashboards";
 import type { Waiter } from "@databricks/sdk-experimental/dist/wait";
 import { createLogger } from "../../logging";
