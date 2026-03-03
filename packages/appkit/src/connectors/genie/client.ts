@@ -12,7 +12,9 @@ import type {
   GenieStreamEvent,
 } from "./types";
 
-const { Time, TimeUnits } = SDK;
+const { TimeUnits } = SDK;
+const Time = SDK.Time ?? (SDK as any).default.Time;
+
 const logger = createLogger("connectors:genie");
 
 type CreateMessageWaiter = Waiter<GenieMessage, GenieMessage>;
