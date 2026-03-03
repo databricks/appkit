@@ -13,9 +13,15 @@ resources:
       description: "{{.appDescription}}"
       source_code_path: ./
 
+{{- if .plugins.genie}}
+      user_api_scopes:
+        - dashboards.genie
+{{- end}}
+{{- if not .plugins.genie}}
       # Uncomment to enable on behalf of user API scopes. Available scopes: sql, dashboards.genie, files.files
       # user_api_scopes:
       #   - sql
+{{- end}}
 {{- if .bundle.resources}}
 
       # The resources which this app has access to.
