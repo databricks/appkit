@@ -220,7 +220,8 @@ export abstract class Plugin<
    *
    * @param req - The Express request containing the user token in headers
    * @returns A proxied plugin instance that executes as the user
-   * @throws AuthenticationError if user token is not available in request headers
+   * @throws AuthenticationError if user token is not available in request headers (production only).
+   *   In development mode (`NODE_ENV=development`), falls back to the service principal instead of throwing.
    */
   asUser(req: express.Request): this {
     const token = req.header("x-forwarded-access-token");

@@ -246,7 +246,12 @@ export class FilesConnector {
       // 2. apiClient.request() checks `instanceof` against its own ReadableStream
       //    subclass, so standard ReadableStream instances get JSON.stringified to "{}"
       // Bypass both by calling the REST API directly with SDK-provided auth.
-      const hostValue = client.config.host ?? "";
+      const hostValue = client.config.host;
+      if (!hostValue) {
+        throw new Error(
+          "Databricks host is not configured. Set DATABRICKS_HOST or configure client.config.host.",
+        );
+      }
       const host = hostValue.startsWith("http")
         ? hostValue
         : `https://${hostValue}`;

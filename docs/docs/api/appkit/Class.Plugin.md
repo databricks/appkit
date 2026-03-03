@@ -241,7 +241,7 @@ A proxied plugin instance that executes as the user
 
 #### Throws
 
-AuthenticationError if user token is not available in request headers
+AuthenticationError if user token is not available in request headers (production only). In development mode (`NODE_ENV=development`), falls back to the service principal instead of throwing.
 
 ***
 
