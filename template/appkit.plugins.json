@@ -56,10 +56,25 @@
       "description": "SQL query execution against Databricks Lakebase Autoscaling",
       "package": "@databricks/appkit",
       "resources": {
-        "required": [],
+        "required": [
+          {
+            "type": "postgres",
+            "alias": "Postgres",
+            "resourceKey": "postgres",
+            "description": "Lakebase Postgres database for persistent storage",
+            "permission": "CAN_CONNECT_AND_CREATE",
+            "fields": {
+              "endpoint": {
+                "env": "LAKEBASE_ENDPOINT",
+                "description": "Lakebase endpoint path",
+                "bundleIgnore": true
+              }
+            }
+          }
+        ],
         "optional": []
       },
-      "onSetupMessage": "Configure environment variables before running or deploying the app.\nSee: https://databricks.github.io/appkit/docs/plugins/lakebase"
+      "onSetupMessage": "Ensure you have granted proper database privileges to your app's service principal.\nSee: https://databricks.github.io/appkit/docs/plugins/lakebase"
     },
     "server": {
       "name": "server",

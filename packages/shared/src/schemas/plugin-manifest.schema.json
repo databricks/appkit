@@ -111,6 +111,7 @@
         "uc_function",
         "uc_connection",
         "database",
+        "postgres",
         "genie_space",
         "experiment",
         "app"
@@ -162,6 +163,11 @@
       "enum": ["CAN_CONNECT_AND_CREATE"],
       "description": "Permission for database resources"
     },
+    "postgresPermission": {
+      "type": "string",
+      "enum": ["CAN_CONNECT_AND_CREATE"],
+      "description": "Permission for Postgres resources"
+    },
     "genieSpacePermission": {
       "type": "string",
       "enum": ["CAN_VIEW", "CAN_RUN", "CAN_EDIT", "CAN_MANAGE"],
@@ -190,20 +196,18 @@
         "description": {
           "type": "string",
           "description": "Human-readable description for this field"
+        },
+        "bundleIgnore": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, this field is excluded from Databricks bundle configuration (e.g. app.yaml) generation."
         }
       },
       "additionalProperties": false
     },
     "resourceRequirement": {
       "type": "object",
-      "required": [
-        "type",
-        "alias",
-        "resourceKey",
-        "description",
-        "permission",
-        "fields"
-      ],
+      "required": ["type", "alias", "resourceKey", "description", "permission"],
       "properties": {
         "type": {
           "$ref": "#/$defs/resourceType"
@@ -334,6 +338,17 @@
           "then": {
             "properties": {
               "permission": { "$ref": "#/$defs/databasePermission" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "postgres" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": { "$ref": "#/$defs/postgresPermission" }
             }
           }
         },

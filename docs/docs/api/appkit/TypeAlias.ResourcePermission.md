@@ -11,6 +11,7 @@ type ResourcePermission =
   | UcFunctionPermission
   | UcConnectionPermission
   | DatabasePermission
+  | PostgresPermission
   | GenieSpacePermission
   | ExperimentPermission
   | AppPermission;

@@ -5,6 +5,16 @@ Single-value types use one key (e.g. id); multi-value types (database, secret) u
 
 ## Properties
 
+### bundleIgnore?
+
+```ts
+optional bundleIgnore: boolean;
+```
+
+When true, this field is excluded from Databricks bundle configuration (e.g. app.yaml) generation.
+
+***
+
 ### description?
 
 ```ts
