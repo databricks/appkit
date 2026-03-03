@@ -19,7 +19,7 @@ const AppKit = await createApp({
   plugins: [
     server({ port: 8000 }),
     analytics(),
-    genie({ spaces: { default: process.env.DATABRICKS_GENIE_SPACE_ID } }),
+    genie(),
   ],
 });
 ```

@@ -21,9 +21,7 @@ import { createApp, genie, server } from "@databricks/appkit";
 await createApp({
   plugins: [
     server(),
-    genie({
-      spaces: { default: process.env.DATABRICKS_GENIE_SPACE_ID },
-    }),
+    genie(),
   ],
 });
 ```
