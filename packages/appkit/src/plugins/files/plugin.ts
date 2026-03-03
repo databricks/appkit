@@ -7,11 +7,7 @@ import {
   FilesConnector,
   isSafeInlineContentType,
 } from "../../connectors/files";
-import {
-  getCurrentUserId,
-  getWorkspaceClient,
-  runInUserContext,
-} from "../../context";
+import { getCurrentUserId, getWorkspaceClient } from "../../context";
 import { AuthenticationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
@@ -150,42 +146,6 @@ export class FilesPlugin extends Plugin {
   }
 
   injectRoutes(router: IAppRouter) {
-    /**
-     * OBO gateway: resolve user context before any handler runs.
-     * In production, requests without a valid user token are rejected with 401.
-     */
-    router.use(
-      (
-        req: express.Request,
-        res: express.Response,
-        next: express.NextFunction,
-      ) => {
-        try {
-          const userContext = this.resolveUserContext(req);
-          if (userContext) {
-            runInUserContext(userContext, next);
-          } else {
-            next();
-          }
-        } catch (err) {
-          if (err instanceof AuthenticationError) {
-            res.status(401).json({
-              error:
-                err.message ||
-                "User token missing. Login to access this resource.",
-              plugin: this.name,
-            });
-            return;
-          }
-          logger.error("OBO gateway error: %O", err);
-          res.status(500).json({
-            error: "Internal server error resolving user context.",
-            plugin: this.name,
-          });
-        }
-      },
-    );
-
     this.route(router, {
       name: "root",
       method: "get",
@@ -319,6 +279,13 @@ export class FilesPlugin extends Plugin {
     error: unknown,
     fallbackMessage: string,
   ): void {
+    if (error instanceof AuthenticationError) {
+      res.status(401).json({
+        error: error.message,
+        plugin: this.name,
+      });
+      return;
+    }
     if (error instanceof ApiError) {
       const status =
         error.statusCode === 401 || error.statusCode === 403
@@ -341,7 +308,8 @@ export class FilesPlugin extends Plugin {
     const path = req.query.path as string | undefined;
 
     try {
-      const result = await this.execute(
+      const executor = this.asUser(req);
+      const result = await executor.execute(
         async () => this.list(path),
         this._readSettings([
           "files:list",
@@ -370,7 +338,8 @@ export class FilesPlugin extends Plugin {
     }
 
     try {
-      const result = await this.execute(
+      const executor = this.asUser(req);
+      const result = await executor.execute(
         async () => this.read(path),
         this._readSettings(["files:read", this._resolvePath(path)]),
       );
@@ -396,10 +365,11 @@ export class FilesPlugin extends Plugin {
     }
 
     try {
+      const executor = this.asUser(req);
       const settings: PluginExecutionSettings = {
         default: FILES_DOWNLOAD_DEFAULTS,
       };
-      const response = await this.execute(
+      const response = await executor.execute(
         async () => this.download(path),
         settings,
       );
@@ -443,10 +413,11 @@ export class FilesPlugin extends Plugin {
     }
 
     try {
+      const executor = this.asUser(req);
       const settings: PluginExecutionSettings = {
         default: FILES_DOWNLOAD_DEFAULTS,
       };
-      const response = await this.execute(
+      const response = await executor.execute(
         async () => this.download(path),
         settings,
       );
@@ -498,7 +469,8 @@ export class FilesPlugin extends Plugin {
     }
 
     try {
-      const result = await this.execute(
+      const executor = this.asUser(req);
+      const result = await executor.execute(
         async () => this.exists(path),
         this._readSettings(["files:exists", this._resolvePath(path)]),
       );
@@ -526,7 +498,8 @@ export class FilesPlugin extends Plugin {
     }
 
     try {
-      const result = await this.execute(
+      const executor = this.asUser(req);
+      const result = await executor.execute(
         async () => this.metadata(path),
         this._readSettings(["files:metadata", this._resolvePath(path)]),
       );
@@ -554,7 +527,8 @@ export class FilesPlugin extends Plugin {
     }
 
     try {
-      const result = await this.execute(
+      const executor = this.asUser(req);
+      const result = await executor.execute(
         async () => this.preview(path),
         this._readSettings(["files:preview", this._resolvePath(path)]),
       );
@@ -593,10 +567,11 @@ export class FilesPlugin extends Plugin {
     );
 
     try {
+      const executor = this.asUser(req);
       const settings: PluginExecutionSettings = {
         default: FILES_WRITE_DEFAULTS,
       };
-      const result = await this.execute(async () => {
+      const result = await executor.execute(async () => {
         await this.upload(path, webStream);
         return { success: true as const };
       }, settings);
@@ -634,10 +609,11 @@ export class FilesPlugin extends Plugin {
     }
 
     try {
+      const executor = this.asUser(req);
       const settings: PluginExecutionSettings = {
         default: FILES_WRITE_DEFAULTS,
       };
-      const result = await this.execute(async () => {
+      const result = await executor.execute(async () => {
         await this.createDirectory(dirPath);
         return { success: true as const };
       }, settings);
@@ -668,10 +644,11 @@ export class FilesPlugin extends Plugin {
     }
 
     try {
+      const executor = this.asUser(req);
       const settings: PluginExecutionSettings = {
         default: FILES_WRITE_DEFAULTS,
       };
-      const result = await this.execute(async () => {
+      const result = await executor.execute(async () => {
         await this.delete(path);
         return { success: true as const };
       }, settings);

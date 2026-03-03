@@ -56,7 +56,6 @@ const EXCLUDED_FROM_PROXY = new Set([
   "abortActiveOperations",
   // asUser itself - prevent chaining like .asUser().asUser()
   "asUser",
-  "resolveUserContext",
   // Internal methods
   "constructor",
 ]);
@@ -215,24 +214,27 @@ export abstract class Plugin<
   }
 
   /**
-   * Resolve the user context from a request without creating a proxy.
-   * Returns the raw UserContext for use with runInUserContext(),
-   * or null in development mode when no user token is available.
+   * Execute operations using the user's identity from the request.
+   * Returns a proxy of this plugin where all method calls execute
+   * with the user's Databricks credentials instead of the service principal.
    *
    * @param req - The Express request containing the user token in headers
-   * @returns UserContext or null (dev-mode service-principal fallback)
-   * @throws AuthenticationError if user token is missing in production
+   * @returns A proxied plugin instance that executes as the user
+   * @throws AuthenticationError if user token is not available in request headers
    */
-  protected resolveUserContext(req: express.Request): UserContext | null {
+  asUser(req: express.Request): this {
     const token = req.header("x-forwarded-access-token");
     const userId = req.header("x-forwarded-user");
     const isDev = process.env.NODE_ENV === "development";
 
+    // In local development, fall back to service principal
+    // since there's no user token available
     if (!token && isDev) {
       logger.warn(
-        "resolveUserContext() called without user token in development mode. Using service principal.",
+        "asUser() called without user token in development mode. Using service principal.",
       );
-      return null;
+
+      return this;
     }
 
     if (!token) {
@@ -243,25 +245,14 @@ export abstract class Plugin<
       throw AuthenticationError.missingUserId();
     }
 
-    return ServiceContext.createUserContext(token, userId || "dev-user");
-  }
+    const effectiveUserId = userId || "dev-user";
 
-  /**
-   * Execute operations using the user's identity from the request.
-   * Returns a proxy of this plugin where all method calls execute
-   * with the user's Databricks credentials instead of the service principal.
-   *
-   * @param req - The Express request containing the user token in headers
-   * @returns A proxied plugin instance that executes as the user
-   * @throws AuthenticationError if user token is not available in request headers
-   */
-  asUser(req: express.Request): this {
-    const userContext = this.resolveUserContext(req);
+    const userContext = ServiceContext.createUserContext(
+      token,
+      effectiveUserId,
+    );
 
-    if (!userContext) {
-      return this;
-    }
-
+    // Return a proxy that wraps method calls in user context
     return this._createUserContextProxy(userContext);
   }
 

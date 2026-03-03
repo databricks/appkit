@@ -414,7 +414,7 @@ describe("Files Plugin Integration", () => {
   describe("OBO Gateway", () => {
     test("production: rejects requests without user token with 401", async () => {
       // NODE_ENV defaults to "test" in vitest (not "development"),
-      // so resolveUserContext should throw AuthenticationError
+      // so asUser should throw AuthenticationError
       const response = await fetch(`${baseUrl}/api/files/list`);
 
       expect(response.status).toBe(401);

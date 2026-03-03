@@ -194,29 +194,6 @@ All routes are mounted under `/api/files`. File paths are passed via the `path` 
 | `POST` | `/api/files/mkdir`          | Create a directory (`{ path }` in body).             |
 | `POST` | `/api/files/delete`         | Delete a file or directory (`{ path }` in body).     |
 
-#### Authentication: OBO gateway
-
-The Files plugin enforces **user-scoped (OBO) execution** for all routes via a router-level middleware. Every request must carry a valid user token — the service principal is never used for file operations in production.
-
-| Environment   | Behavior                                                                 |
-| ------------- | ------------------------------------------------------------------------ |
-| **Production** | Requests without `x-forwarded-access-token` are rejected with **401**.  |
-| **Development** | Missing token falls back to service principal with a warning log.      |
-
-The middleware runs before any route handler, calling `resolveUserContext(req)` and wrapping all downstream handlers in `runInUserContext()`. Individual handlers do not call `asUser(req)` — the user context is already established when they execute.
-
-```ts
-// Simplified view of the gateway inside FilesPlugin.injectRoutes()
-router.use((req, res, next) => {
-  const userContext = this.resolveUserContext(req);
-  if (userContext) {
-    runInUserContext(userContext, next);
-  } else {
-    next(); // dev-mode fallback
-  }
-});
-```
-
 #### Execution defaults
 
 Operations use three tiers of execution settings:
@@ -307,23 +284,6 @@ const app = await createApp({
 });
 ```
 
-#### User-scoped operations in a route handler
-
-Plugins that use the OBO gateway (like Files) run every handler in user context automatically. Handlers call methods on `this` directly:
-
-```ts
-// Inside a Files plugin handler — user context is already active
-const entries = await this.list();
-```
-
-For plugins where only some routes need user-scoped execution, use `asUser(req)` per handler instead:
-
-```ts
-// Inside a custom plugin handler (no OBO gateway)
-const userScoped = this.asUser(req);
-const entries = await userScoped.list();
-```
-
 ### Execution context and `asUser(req)`
 
 AppKit manages Databricks authentication via two contexts:
@@ -355,47 +315,10 @@ router.post("/system/data", async (req, res) => {
 });
 ```
 
-#### Using `resolveUserContext(req)` for middleware-level auth
-
-While `asUser(req)` returns a proxied plugin instance (convenient for per-handler use), `resolveUserContext(req)` returns the raw `UserContext` object (or `null` in dev mode). This is designed for middleware that needs to establish user context before route handlers run:
-
-```ts
-// OBO gateway — enforce user auth for all routes in a plugin
-injectRoutes(router: IAppRouter) {
-  router.use((req, res, next) => {
-    try {
-      const userContext = this.resolveUserContext(req);
-      if (userContext) {
-        runInUserContext(userContext, next);
-      } else {
-        next(); // dev-mode fallback
-      }
-    } catch (err) {
-      if (err instanceof AuthenticationError) {
-        res.status(401).json({ error: err.message });
-        return;
-      }
-      throw err;
-    }
-  });
-
-  // All routes below run in user context automatically
-  this.route(router, { ... });
-}
-```
-
-**When to use which:**
-
-| Method                 | Returns                | Use case                                                      |
-| ---------------------- | ---------------------- | ------------------------------------------------------------- |
-| `asUser(req)`          | Proxied plugin (`this`) | Per-handler control — some routes as user, others as service principal |
-| `resolveUserContext(req)` | `UserContext \| null`   | Middleware gateway — enforce OBO across all routes in a plugin |
-
 #### Context helper functions
 
 Exported from `@databricks/appkit`:
 
-- `this.resolveUserContext(req)` _(protected, available in plugin subclasses)_: Returns raw `UserContext` from request headers, or `null` in dev mode. Throws `AuthenticationError` in production if token is missing
 - `getCurrentUserId()`: Returns user ID in user context, service user ID otherwise
 - `getWorkspaceClient()`: Returns the appropriate WorkspaceClient for current context
 - `getWarehouseId()`: `Promise<string>` (from `DATABRICKS_WAREHOUSE_ID` or auto-selected in dev)
