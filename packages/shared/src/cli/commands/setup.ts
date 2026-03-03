@@ -52,6 +52,14 @@ function generateSection(packages: typeof PACKAGES) {
 This project uses Databricks AppKit packages. For AI assistant guidance on using these packages, refer to:
 
 ${links}
+
+### Databricks Skills
+
+For enhanced AI assistance with Databricks CLI operations, authentication, data exploration, and app development, install the Databricks skills:
+
+\`\`\`bash
+databricks experimental aitools skills install
+\`\`\`
 ${SECTION_END}`;
 }
 
@@ -74,6 +82,14 @@ ${SECTION_START}
 This project uses Databricks AppKit packages. For AI assistant guidance on using these packages, refer to:
 
 ${links}
+
+### Databricks Skills
+
+For enhanced AI assistance with Databricks CLI operations, authentication, data exploration, and app development, install the Databricks skills:
+
+\`\`\`bash
+databricks experimental aitools skills install
+\`\`\`
 ${SECTION_END}
 `;
 }
