@@ -156,6 +156,7 @@ vi.mock("node:fs", async (importOriginal) => {
 
 vi.mock("../utils", () => ({
   getRoutes: vi.fn().mockReturnValue([]),
+  printRoutes: vi.fn(),
 }));
 
 import fs from "node:fs";

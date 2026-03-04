@@ -12,7 +12,7 @@ import { serverManifest } from "./manifest";
 import { RemoteTunnelController } from "./remote-tunnel/remote-tunnel-controller";
 import { StaticServer } from "./static-server";
 import type { ServerConfig } from "./types";
-import { getRoutes, type PluginEndpoints } from "./utils";
+import { getRoutes, type PluginEndpoints, printRoutes } from "./utils";
 import { ViteDevServer } from "./vite-dev-server";
 
 dotenv.config({ path: path.resolve(process.cwd(), "./.env") });
@@ -124,7 +124,7 @@ export class ServerPlugin extends Plugin {
 
     if (process.env.NODE_ENV === "development") {
       const allRoutes = getRoutes(this.serverApplication._router.stack);
-      console.dir(allRoutes, { depth: null });
+      printRoutes(allRoutes);
     }
     return this.serverApplication;
   }

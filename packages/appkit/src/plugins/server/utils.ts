@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import type http from "node:http";
 import path from "node:path";
+import pc from "picocolors";
 
 export function parseCookies(
   req: http.IncomingMessage,
@@ -70,6 +71,50 @@ export function getRoutes(stack: unknown[], basePath = "") {
   });
 
   return routes;
+}
+
+const METHOD_COLORS: Record<string, (s: string) => string> = {
+  GET: pc.green,
+  POST: pc.blue,
+  PUT: pc.yellow,
+  PATCH: pc.yellow,
+  DELETE: pc.red,
+  HEAD: pc.magenta,
+  OPTIONS: pc.magenta,
+};
+
+export function printRoutes(
+  routes: Array<{ path: string; methods: string[] }>,
+) {
+  if (routes.length === 0) return;
+
+  const rows = routes
+    .flatMap((r) => r.methods.map((m) => ({ method: m, path: r.path })))
+    .sort(
+      (a, b) =>
+        a.method.localeCompare(b.method) || a.path.localeCompare(b.path),
+    );
+
+  const maxMethodLen = Math.max(...rows.map((r) => r.method.length));
+  const separator = pc.dim("─".repeat(50));
+
+  const colorizeParams = (p: string) =>
+    p.replace(/(:[a-zA-Z_]\w*)/g, (match) => pc.cyan(match));
+
+  console.log("");
+  console.log(
+    `  ${pc.bold("Registered Routes")} ${pc.dim(`(${rows.length})`)}`,
+  );
+  console.log(`  ${separator}`);
+
+  for (const { method, path } of rows) {
+    const colorize = METHOD_COLORS[method] || pc.white;
+    const methodStr = colorize(pc.bold(method.padEnd(maxMethodLen)));
+    console.log(`  ${methodStr}  ${colorizeParams(path)}`);
+  }
+
+  console.log(`  ${separator}`);
+  console.log("");
 }
 
 export function getQueries(configFolder: string) {
