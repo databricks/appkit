@@ -1,3 +1,8 @@
 {
-  "setup-worktree": ["pnpm install", "pnpm run build"]
+  "setup-worktree": [
+    "pnpm install",
+    "pnpm run build",
+    "cp $ROOT_WORKTREE_PATH/apps/dev-playground/.env apps/dev-playground/.env",
+    "cp $ROOT_WORKTREE_PATH/apps/clean-app/.env apps/clean-app/.env"
+  ]
 }
