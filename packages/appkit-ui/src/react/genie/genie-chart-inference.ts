@@ -30,11 +30,6 @@
  * │  KNOWN LIMITATIONS:                                                │
  * │    - First-column heuristic: picks first string col as category    │
  * │    - No semantic understanding (can't tell ID from meaningful val) │
- * │    - No negative value check for pie charts                        │
- * │    - Fixed thresholds (7/50/100) — tune based on real usage       │
- * │    - No stacking, heatmap, or radar inference                     │
- * │    - Assumes data is already aggregated by Genie's SQL            │
- * │    - Single-series pie only (multi-numeric never → pie)           │
  * └─────────────────────────────────────────────────────────────────────┘
  */
 
@@ -56,19 +51,11 @@ const INFERENCE_CONFIG = {
   groupedBarMaxCategories: 50,
 } as const;
 
-// ---------------------------------------------------------------------------
-// Public types
-// ---------------------------------------------------------------------------
-
 export interface ChartInference {
   chartType: ChartType;
   xKey: string;
   yKey: string | string[];
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function countUnique(rows: Record<string, unknown>[], key: string): number {
   const seen = new Set<unknown>();
@@ -76,6 +63,16 @@ function countUnique(rows: Record<string, unknown>[], key: string): number {
     seen.add(row[key]);
   }
   return seen.size;
+}
+
+function hasNegativeValues(
+  rows: Record<string, unknown>[],
+  key: string,
+): boolean {
+  for (const row of rows) {
+    if (Number(row[key]) < 0) return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -122,8 +119,11 @@ export function inferChartType(
     if (numericCols.length === 1) {
       const yKey = numericCols[0].name;
 
-      // Rule 2: few categories → pie
-      if (uniqueCategories <= INFERENCE_CONFIG.pieMaxCategories) {
+      // Rule 2: few categories → pie (skip if negative values)
+      if (
+        uniqueCategories <= INFERENCE_CONFIG.pieMaxCategories &&
+        !hasNegativeValues(rows, yKey)
+      ) {
         return { chartType: "pie", xKey, yKey };
       }
       // Rule 3: moderate categories → bar

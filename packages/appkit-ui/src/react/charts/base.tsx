@@ -172,7 +172,7 @@ export function BaseChart({
 
   // Memoize option building
   const option = useMemo(() => {
-    const { xData, yFields, chartType: detectedChartType } = normalized;
+    const { xData, yFields, xField, chartType: detectedChartType } = normalized;
 
     if (xData.length === 0) return null;
 
@@ -190,7 +190,7 @@ export function BaseChart({
       colors,
       title,
       showLegend,
-      xField: "xField" in normalized ? normalized.xField : undefined,
+      xField,
     };
     const isPie = chartType === "pie" || chartType === "donut";
     const isRadar = chartType === "radar";
