@@ -13,6 +13,12 @@
         "description": "Lakebase Postgres database for persistent storage",
         "permission": "CAN_CONNECT_AND_CREATE",
         "fields": {
+          "branch": {
+            "description": "Lakebase Postgres branch path"
+          },
+          "database": {
+            "description": "Lakebase Postgres database name"
+          },
           "endpoint": {
             "env": "LAKEBASE_ENDPOINT",
             "description": "Lakebase endpoint path",

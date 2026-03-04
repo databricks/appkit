@@ -185,7 +185,6 @@
     },
     "resourceFieldEntry": {
       "type": "object",
-      "required": ["env"],
       "properties": {
         "env": {
           "type": "string",
