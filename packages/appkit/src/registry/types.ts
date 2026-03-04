@@ -63,6 +63,8 @@ export interface ResourceFieldEntry {
   description?: string;
   /** When true, this field is excluded from Databricks bundle configuration (e.g. app.yaml) generation. */
   bundleIgnore?: boolean;
+  /** Example values showing the expected format for this field */
+  examples?: string[];
 }
 
 /**

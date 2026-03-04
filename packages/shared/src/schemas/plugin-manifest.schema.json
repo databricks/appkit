@@ -200,6 +200,11 @@
           "type": "boolean",
           "default": false,
           "description": "When true, this field is excluded from Databricks bundle configuration (e.g. app.yaml) generation."
+        },
+        "examples": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Example values showing the expected format for this field"
         }
       },
       "additionalProperties": false

@@ -8,6 +8,7 @@ export interface ResourceFieldEntry {
   env: string;
   description?: string;
   bundleIgnore?: boolean;
+  examples?: string[];
 }
 
 export interface ResourceRequirement {
