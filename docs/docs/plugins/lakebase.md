@@ -92,7 +92,7 @@ LAKEBASE_ENDPOINT=projects/<project-id>/branches/<branch-id>/endpoints/<endpoint
 PGSSLMODE=require
 ```
 
-You can copy them from already deployed app in the UI (**Compute > Apps > {app-name} > Environment** tab).
+You can copy them from already deployed app in the UI (**Compute > Apps > \{app-name\} > Environment** tab).
 
 For the full configuration reference (SSL, pool size, timeouts, logging, ORM examples), see the [`@databricks/lakebase` README](https://github.com/databricks/appkit/blob/main/packages/lakebase/README.md).
 

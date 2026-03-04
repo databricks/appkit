@@ -73,8 +73,7 @@
           }
         ],
         "optional": []
-      },
-      "onSetupMessage": "Ensure you have granted proper database privileges to your app's service principal.\nSee: https://databricks.github.io/appkit/docs/plugins/lakebase"
+      }
     },
     "server": {
       "name": "server",
