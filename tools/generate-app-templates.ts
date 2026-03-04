@@ -61,6 +61,7 @@ const APP_TEMPLATES: AppTemplate[] = [
     features: ["analytics", "lakebase"],
     set: {
       "analytics.sql-warehouse.id": "placeholder",
+      "lakebase.postgres.endpoint": "placeholder",
     },
     description:
       "Full-stack Node.js app with SQL analytics dashboards and Lakebase Autoscaling (Postgres) CRUD",
@@ -76,6 +77,9 @@ const APP_TEMPLATES: AppTemplate[] = [
   {
     name: "appkit-lakebase",
     features: ["lakebase"],
+    set: {
+      "lakebase.postgres.endpoint": "placeholder",
+    },
     description:
       "Node.js app with Lakebase Autoscaling (Postgres) CRUD operations",
   },
