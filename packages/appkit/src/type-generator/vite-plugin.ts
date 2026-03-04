@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import type { Plugin } from "vite";
 import { createLogger } from "../logging/logger";
@@ -62,7 +62,7 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         return false;
       }
 
-      if (!fs.existsSync(path.join(process.cwd(), "config", "queries"))) {
+      if (!existsSync(path.join(process.cwd(), "config", "queries"))) {
         return false;
       }
 

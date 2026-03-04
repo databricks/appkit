@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { createLogger } from "../logging/logger";
 
@@ -50,31 +50,29 @@ export function hashSQL(sql: string): string {
  * If the cache is not found, run the query explain
  * @returns - the cache
  */
-export function loadCache(): Cache {
+export async function loadCache(): Promise<Cache> {
   const cachePath = path.join(CACHE_DIR, CACHE_FILE);
   try {
-    if (!fs.existsSync(CACHE_DIR)) {
-      fs.mkdirSync(CACHE_DIR, { recursive: true });
-    }
+    await fs.mkdir(CACHE_DIR, { recursive: true });
 
-    if (fs.existsSync(cachePath)) {
-      const cache = JSON.parse(fs.readFileSync(cachePath, "utf8")) as Cache;
-      if (cache.version === CACHE_VERSION) {
-        return cache;
-      }
+    const raw = await fs.readFile(cachePath, "utf8");
+    const cache = JSON.parse(raw) as Cache;
+    if (cache.version === CACHE_VERSION) {
+      return cache;
     }
-  } catch {
-    logger.warn("Cache file is corrupted, flushing cache completely.");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      logger.warn("Cache file is corrupted, flushing cache completely.");
+    }
   }
   return { version: CACHE_VERSION, queries: {} };
 }
 
 /**
  * Save the cache to the file system
- * The cache is saved as a JSON file, it is used to avoid running the query explain multiple times
  * @param cache - cache object to save
  */
-export function saveCache(cache: Cache): void {
+export async function saveCache(cache: Cache): Promise<void> {
   const cachePath = path.join(CACHE_DIR, CACHE_FILE);
-  fs.writeFileSync(cachePath, JSON.stringify(cache, null, 2), "utf8");
+  await fs.writeFile(cachePath, JSON.stringify(cache, null, 2), "utf8");
 }

@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import dotenv from "dotenv";
 import { createLogger } from "../logging/logger";
 import { generateQueriesFromDescribe } from "./query-registry";
@@ -67,7 +67,7 @@ export async function generateFromEntryPoint(options: {
 
   const typeDeclarations = generateTypeDeclarations(queryRegistry);
 
-  fs.writeFileSync(outFile, typeDeclarations, "utf-8");
+  await fs.writeFile(outFile, typeDeclarations, "utf-8");
 
   logger.debug("Type generation complete!");
 }
