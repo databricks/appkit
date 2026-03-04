@@ -116,19 +116,6 @@ function generateUnknownResultQuery(sql: string, queryName: string): string {
   }`;
 }
 
-function cacheFailedQuery(
-  cache: ReturnType<typeof loadCache>,
-  querySchemas: QuerySchema[],
-  sql: string,
-  queryName: string,
-  sqlHash: string,
-): void {
-  const type = generateUnknownResultQuery(sql, queryName);
-  querySchemas.push({ name: queryName, type });
-  cache.queries[queryName] = { hash: sqlHash, type, retry: true };
-  saveCache(cache);
-}
-
 export function extractParameterTypes(sql: string): Record<string, string> {
   const paramTypes: Record<string, string> = {};
   const regex =
@@ -169,73 +156,168 @@ export async function generateQueriesFromDescribe(
   const cache = noCache ? { version: CACHE_VERSION, queries: {} } : loadCache();
 
   const client = new WorkspaceClient({});
-  const querySchemas: QuerySchema[] = [];
   const spinner = new Spinner();
 
-  // process each query file
+  // Phase 1: Read files, check cache, separate cached vs uncached
+  const cachedResults: Array<{ index: number; schema: QuerySchema }> = [];
+  const uncachedQueries: Array<{
+    index: number;
+    queryName: string;
+    sql: string;
+    sqlHash: string;
+    cleanedSql: string;
+  }> = [];
+
   for (let i = 0; i < queryFiles.length; i++) {
     const file = queryFiles[i];
     const rawName = path.basename(file, ".sql");
     const queryName = normalizeQueryName(rawName);
 
-    // read query file content
     const sql = fs.readFileSync(path.join(queryFolder, file), "utf8");
     const sqlHash = hashSQL(sql);
 
-    // check cache (skip if marked for retry after a failed DESCRIBE)
     const cached = cache.queries[queryName];
     if (cached && cached.hash === sqlHash && !cached.retry) {
-      querySchemas.push({ name: queryName, type: cached.type });
+      cachedResults.push({
+        index: i,
+        schema: { name: queryName, type: cached.type },
+      });
       spinner.start(`Processing ${queryName} (${i + 1}/${queryFiles.length})`);
       spinner.stop(`✓ ${queryName} (cached)`);
-      continue;
-    }
-
-    spinner.start(`Processing ${queryName} (${i + 1}/${queryFiles.length})`);
-
-    const sqlWithDefaults = sql.replace(/:([a-zA-Z_]\w*)/g, "''");
-
-    // strip trailing semicolon for DESCRIBE QUERY
-    const cleanedSql = sqlWithDefaults.trim().replace(/;\s*$/, "");
-
-    // execute DESCRIBE QUERY to get schema without running the actual query
-    try {
-      const result = (await client.statementExecution.executeStatement({
-        statement: `DESCRIBE QUERY ${cleanedSql}`,
-        warehouse_id: warehouseId,
-      })) as DatabricksStatementExecutionResponse;
-
-      if (result.status.state === "FAILED") {
-        const sqlError =
-          result.status.error?.message || "Query execution failed";
-        cacheFailedQuery(cache, querySchemas, sql, queryName, sqlHash);
-        spinner.stop(`✗ ${queryName} - failed`);
-        spinner.printDetail(`SQL Error: ${sqlError}`);
-        spinner.printDetail(`Query: ${cleanedSql.slice(0, 200)}`);
-        continue;
-      }
-
-      // convert result to query schema
-      const { type, hasResults } = convertToQueryType(result, sql, queryName);
-      querySchemas.push({ name: queryName, type });
-
-      // update cache immediately so successful results survive partial failures
-      // retry if DESCRIBE returned no columns (result: unknown)
-      const retry = !hasResults;
-      cache.queries[queryName] = { hash: sqlHash, type, retry };
-      saveCache(cache);
-
-      spinner.stop(`✓ ${queryName}`);
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown error";
-      spinner.stop(`✗ ${queryName}`);
-      spinner.printDetail(errorMessage);
-      cacheFailedQuery(cache, querySchemas, sql, queryName, sqlHash);
+    } else {
+      const sqlWithDefaults = sql.replace(/:([a-zA-Z_]\w*)/g, "''");
+      const cleanedSql = sqlWithDefaults.trim().replace(/;\s*$/, "");
+      uncachedQueries.push({ index: i, queryName, sql, sqlHash, cleanedSql });
     }
   }
 
-  return querySchemas;
+  // Phase 2: Execute all uncached DESCRIBE calls in parallel
+  type DescribeResult =
+    | {
+        status: "ok";
+        index: number;
+        schema: QuerySchema;
+        cacheEntry: { hash: string; type: string; retry: boolean };
+      }
+    | {
+        status: "fail";
+        index: number;
+        schema: QuerySchema;
+        cacheEntry: { hash: string; type: string; retry: boolean };
+        errorLines: string[];
+      };
+
+  const freshResults: Array<{ index: number; schema: QuerySchema }> = [];
+  const startTime = performance.now();
+
+  if (uncachedQueries.length > 0) {
+    let completed = 0;
+    const total = uncachedQueries.length;
+    spinner.start(
+      `Describing ${total} ${total === 1 ? "query" : "queries"} (0/${total})`,
+    );
+
+    const settled = await Promise.allSettled(
+      uncachedQueries.map(
+        async ({
+          index,
+          queryName,
+          sql,
+          sqlHash,
+          cleanedSql,
+        }): Promise<DescribeResult> => {
+          const result = (await client.statementExecution.executeStatement({
+            statement: `DESCRIBE QUERY ${cleanedSql}`,
+            warehouse_id: warehouseId,
+          })) as DatabricksStatementExecutionResponse;
+
+          completed++;
+          spinner.update(
+            `Describing ${total} ${total === 1 ? "query" : "queries"} (${completed}/${total})`,
+          );
+
+          if (result.status.state === "FAILED") {
+            const sqlError =
+              result.status.error?.message || "Query execution failed";
+            const type = generateUnknownResultQuery(sql, queryName);
+            return {
+              status: "fail",
+              index,
+              schema: { name: queryName, type },
+              cacheEntry: { hash: sqlHash, type, retry: true },
+              errorLines: [
+                `SQL Error: ${sqlError}`,
+                `Query: ${cleanedSql.slice(0, 200)}`,
+              ],
+            };
+          }
+
+          const { type, hasResults } = convertToQueryType(
+            result,
+            sql,
+            queryName,
+          );
+          return {
+            status: "ok",
+            index,
+            schema: { name: queryName, type },
+            cacheEntry: { hash: sqlHash, type, retry: !hasResults },
+          };
+        },
+      ),
+    );
+
+    spinner.stop(`✓ Described ${total} ${total === 1 ? "query" : "queries"}`);
+
+    // Print per-query results
+    for (let i = 0; i < settled.length; i++) {
+      const entry = settled[i];
+      const { queryName } = uncachedQueries[i];
+
+      if (entry.status === "fulfilled") {
+        const res = entry.value;
+        freshResults.push({ index: res.index, schema: res.schema });
+        cache.queries[queryName] = res.cacheEntry;
+
+        if (res.status === "ok") {
+          spinner.printDetail(`✓ ${queryName}`);
+        } else {
+          spinner.printDetail(`✗ ${queryName} - failed`);
+          for (const line of res.errorLines) {
+            spinner.printDetail(`  ${line}`);
+          }
+        }
+      } else {
+        const errorMessage =
+          entry.reason instanceof Error
+            ? entry.reason.message
+            : "Unknown error";
+        const { sql, sqlHash, index } = uncachedQueries[i];
+        const type = generateUnknownResultQuery(sql, queryName);
+        freshResults.push({ index, schema: { name: queryName, type } });
+        cache.queries[queryName] = { hash: sqlHash, type, retry: true };
+
+        spinner.printDetail(`✗ ${queryName}`);
+        spinner.printDetail(`  ${errorMessage}`);
+      }
+    }
+
+    // Save cache once after all queries are processed
+    saveCache(cache);
+  }
+
+  const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+  logger.debug(
+    "%d new queries, %d cached. Typegen: %ss",
+    uncachedQueries.length,
+    cachedResults.length,
+    elapsed,
+  );
+
+  // Merge and sort by original file index for deterministic output
+  return [...cachedResults, ...freshResults]
+    .sort((a, b) => a.index - b.index)
+    .map((r) => r.schema);
 }
 
 /**

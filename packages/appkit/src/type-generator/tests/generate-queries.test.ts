@@ -26,6 +26,7 @@ vi.mock("@databricks/sdk-experimental", () => ({
 vi.mock("../spinner", () => ({
   Spinner: vi.fn(() => ({
     start: vi.fn(),
+    update: vi.fn(),
     stop: mocks.spinnerStop,
     printDetail: mocks.spinnerPrintDetail,
   })),
@@ -69,7 +70,8 @@ describe("generateQueriesFromDescribe", () => {
     expect(schemas[0].name).toBe("users");
     expect(schemas[0].type).toContain("id: number");
     expect(schemas[0].type).toContain("name: string");
-    expect(mocks.spinnerStop).toHaveBeenCalledWith("✓ users");
+    expect(mocks.spinnerStop).toHaveBeenCalledWith("✓ Described 1 query");
+    expect(mocks.spinnerPrintDetail).toHaveBeenCalledWith("✓ users");
     expect(mocks.saveCache).toHaveBeenCalledTimes(1);
   });
 
@@ -89,9 +91,12 @@ describe("generateQueriesFromDescribe", () => {
     expect(schemas).toHaveLength(1);
     expect(schemas[0].name).toBe("bad_table");
     expect(schemas[0].type).toContain("result: unknown");
-    expect(mocks.spinnerStop).toHaveBeenCalledWith("✗ bad_table - failed");
+    expect(mocks.spinnerStop).toHaveBeenCalledWith("✓ Described 1 query");
     expect(mocks.spinnerPrintDetail).toHaveBeenCalledWith(
-      "SQL Error: Table or view not found: bad_table",
+      "✗ bad_table - failed",
+    );
+    expect(mocks.spinnerPrintDetail).toHaveBeenCalledWith(
+      expect.stringContaining("SQL Error: Table or view not found: bad_table"),
     );
     expect(mocks.spinnerPrintDetail).toHaveBeenCalledWith(
       expect.stringContaining("Query:"),
@@ -112,9 +117,10 @@ describe("generateQueriesFromDescribe", () => {
     expect(schemas).toHaveLength(1);
     expect(schemas[0].name).toBe("query");
     expect(schemas[0].type).toContain("result: unknown");
-    expect(mocks.spinnerStop).toHaveBeenCalledWith("✗ query - failed");
+    expect(mocks.spinnerStop).toHaveBeenCalledWith("✓ Described 1 query");
+    expect(mocks.spinnerPrintDetail).toHaveBeenCalledWith("✗ query - failed");
     expect(mocks.spinnerPrintDetail).toHaveBeenCalledWith(
-      "SQL Error: Query execution failed",
+      expect.stringContaining("SQL Error: Query execution failed"),
     );
     expect(mocks.saveCache).toHaveBeenCalledTimes(1);
   });
@@ -147,8 +153,8 @@ describe("generateQueriesFromDescribe", () => {
     expect(schemas[1].name).toBe("bad");
     expect(schemas[1].type).toContain("result: unknown");
 
-    // saveCache called for both queries (success + failure with retry: true)
-    expect(mocks.saveCache).toHaveBeenCalledTimes(2);
+    // saveCache called once after all parallel queries complete
+    expect(mocks.saveCache).toHaveBeenCalledTimes(1);
   });
 
   test("all queries fail — caches with retry flag, all unknown result types", async () => {
@@ -172,7 +178,8 @@ describe("generateQueriesFromDescribe", () => {
     expect(schemas[1].name).toBe("b");
     expect(schemas[1].type).toContain("result: unknown");
 
-    expect(mocks.saveCache).toHaveBeenCalledTimes(2);
+    // saveCache called once after all parallel queries complete
+    expect(mocks.saveCache).toHaveBeenCalledTimes(1);
   });
 
   test("unknown result type includes parameters from SQL", async () => {

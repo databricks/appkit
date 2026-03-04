@@ -17,6 +17,10 @@ export class Spinner {
     }, 300);
   }
 
+  update(text: string) {
+    this.text = text;
+  }
+
   stop(finalText?: string) {
     if (this.interval) {
       clearInterval(this.interval);
