@@ -78,6 +78,35 @@ export function createTimeSeriesData(
 }
 
 /**
+ * Sorts numeric x-data in ascending order, reordering y-data to match.
+ * Also coerces numeric string x-values to numbers.
+ */
+export function sortNumericAscending(
+  xData: (string | number)[],
+  yDataMap: Record<string, (string | number)[]>,
+  yFields: string[],
+): {
+  xData: (string | number)[];
+  yDataMap: Record<string, (string | number)[]>;
+} {
+  if (xData.length <= 1) {
+    return { xData, yDataMap };
+  }
+
+  const indices = xData.map((_, i) => i);
+  indices.sort((a, b) => Number(xData[a]) - Number(xData[b]));
+
+  const sortedXData = indices.map((i) => Number(xData[i]));
+  const sortedYDataMap: Record<string, (string | number)[]> = {};
+  for (const key of yFields) {
+    const original = yDataMap[key];
+    sortedYDataMap[key] = indices.map((i) => Number(original[i]));
+  }
+
+  return { xData: sortedXData, yDataMap: sortedYDataMap };
+}
+
+/**
  * Sorts time-series data in ascending chronological order.
  */
 export function sortTimeSeriesAscending(

@@ -190,6 +190,7 @@ export function BaseChart({
       colors,
       title,
       showLegend,
+      xField: "xField" in normalized ? normalized.xField : undefined,
     };
     const isPie = chartType === "pie" || chartType === "donut";
     const isRadar = chartType === "radar";

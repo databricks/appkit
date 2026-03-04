@@ -8,7 +8,11 @@ import type {
   Orientation,
 } from "./types";
 import { isArrowTable } from "./types";
-import { sortTimeSeriesAscending, toChartArray } from "./utils";
+import {
+  sortNumericAscending,
+  sortTimeSeriesAscending,
+  toChartArray,
+} from "./utils";
 
 // ============================================================================
 // Type Detection Helpers
@@ -244,6 +248,12 @@ export function normalizeChartData(
         yDataMap,
         resolvedYKeys,
       ));
+    } else if (xData.length > 0 && xData.every(isNumericValue)) {
+      ({ xData, yDataMap } = sortNumericAscending(
+        xData,
+        yDataMap,
+        resolvedYKeys,
+      ));
     }
 
     return {
@@ -279,6 +289,12 @@ export function normalizeChartData(
 
   if (detected.chartType === "timeseries") {
     ({ xData, yDataMap } = sortTimeSeriesAscending(
+      xData,
+      yDataMap,
+      resolvedYKeys,
+    ));
+  } else if (xData.length > 0 && xData.every(isNumericValue)) {
+    ({ xData, yDataMap } = sortNumericAscending(
       xData,
       yDataMap,
       resolvedYKeys,

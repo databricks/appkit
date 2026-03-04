@@ -12,6 +12,7 @@ export interface OptionBuilderContext {
   colors: string[];
   title?: string;
   showLegend: boolean;
+  xField?: string;
 }
 
 export interface CartesianContext extends OptionBuilderContext {
@@ -256,10 +257,11 @@ export function buildCartesianOption(
     ctx;
   const hasMultipleSeries = ctx.yFields.length > 1;
   const seriesType = chartType === "area" ? "line" : chartType;
+  const isScatter = chartType === "scatter";
 
   return {
     ...buildBaseOption(ctx),
-    tooltip: { trigger: "axis" },
+    tooltip: { trigger: isScatter ? "item" : "axis" },
     legend: ctx.showLegend && hasMultipleSeries ? { top: "bottom" } : undefined,
     grid: {
       left: "10%",
@@ -268,27 +270,34 @@ export function buildCartesianOption(
       bottom: ctx.showLegend && hasMultipleSeries ? "20%" : "15%",
     },
     xAxis: {
-      type: isTimeSeries ? "time" : "category",
-      data: isTimeSeries ? undefined : ctx.xData,
-      axisLabel: isTimeSeries
-        ? undefined
-        : {
-            rotate: ctx.xData.length > 10 ? 45 : 0,
-            formatter: (v: string) => truncateLabel(String(v), 10),
-          },
+      type: isScatter ? "value" : isTimeSeries ? "time" : "category",
+      data: isScatter || isTimeSeries ? undefined : ctx.xData,
+      name: ctx.xField ? formatLabel(ctx.xField) : undefined,
+      axisLabel:
+        isScatter || isTimeSeries
+          ? { show: true }
+          : {
+              rotate: ctx.xData.length > 10 ? 45 : 0,
+              formatter: (v: string) => truncateLabel(String(v), 10),
+            },
     },
-    yAxis: { type: "value" },
+    yAxis: {
+      type: "value",
+      name: ctx.yFields.length === 1 ? formatLabel(ctx.yFields[0]) : undefined,
+    },
     series: ctx.yFields.map((key, idx) => ({
       name: formatLabel(key),
       type: seriesType,
-      data: isTimeSeries
-        ? createTimeSeriesData(ctx.xData, ctx.yDataMap[key])
-        : ctx.yDataMap[key],
+      data: isScatter
+        ? ctx.xData.map((x, i) => [x, ctx.yDataMap[key][i]])
+        : isTimeSeries
+          ? createTimeSeriesData(ctx.xData, ctx.yDataMap[key])
+          : ctx.yDataMap[key],
       smooth: chartType === "line" || chartType === "area" ? smooth : undefined,
       showSymbol:
         chartType === "line" || chartType === "area" ? showSymbol : undefined,
-      symbol: chartType === "scatter" ? "circle" : undefined,
-      symbolSize: chartType === "scatter" ? symbolSize : undefined,
+      symbol: isScatter ? "circle" : undefined,
+      symbolSize: isScatter ? symbolSize : undefined,
       areaStyle: chartType === "area" ? { opacity: 0.3 } : undefined,
       stack: stacked && chartType === "area" ? "total" : undefined,
       itemStyle:
