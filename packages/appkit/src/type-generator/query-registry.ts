@@ -143,7 +143,11 @@ export async function generateQueriesFromDescribe(
   warehouseId: string,
   options: { noCache?: boolean; concurrency?: number } = {},
 ): Promise<QuerySchema[]> {
-  const { noCache = false, concurrency = 10 } = options;
+  const { noCache = false, concurrency: rawConcurrency = 10 } = options;
+  const concurrency =
+    typeof rawConcurrency === "number" && Number.isFinite(rawConcurrency)
+      ? Math.max(1, Math.floor(rawConcurrency))
+      : 10;
 
   // read all query files and cache in parallel
   const [allFiles, cache] = await Promise.all([
