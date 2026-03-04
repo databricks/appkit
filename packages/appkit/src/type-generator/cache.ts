@@ -61,8 +61,11 @@ export async function loadCache(): Promise<Cache> {
       return cache;
     }
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-      logger.warn("Cache file is corrupted, flushing cache completely.");
+    const error = err as NodeJS.ErrnoException;
+    if (error.code !== "ENOENT") {
+      logger.warn(
+        `Failed to load cache file at ${cachePath} (code: ${error.code ?? "UNKNOWN"}). Assuming empty cache.`,
+      );
     }
   }
   return { version: CACHE_VERSION, queries: {} };
