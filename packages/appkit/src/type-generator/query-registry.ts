@@ -116,6 +116,19 @@ function generateUnknownResultQuery(sql: string, queryName: string): string {
   }`;
 }
 
+function cacheFailedQuery(
+  cache: ReturnType<typeof loadCache>,
+  querySchemas: QuerySchema[],
+  sql: string,
+  queryName: string,
+  sqlHash: string,
+): void {
+  const type = generateUnknownResultQuery(sql, queryName);
+  querySchemas.push({ name: queryName, type });
+  cache.queries[queryName] = { hash: sqlHash, type, retry: true };
+  saveCache(cache);
+}
+
 export function extractParameterTypes(sql: string): Record<string, string> {
   const paramTypes: Record<string, string> = {};
   const regex =
@@ -195,10 +208,7 @@ export async function generateQueriesFromDescribe(
       if (result.status.state === "FAILED") {
         const sqlError =
           result.status.error?.message || "Query execution failed";
-        const type = generateUnknownResultQuery(sql, queryName);
-        querySchemas.push({ name: queryName, type });
-        cache.queries[queryName] = { hash: sqlHash, type, retry: true };
-        saveCache(cache);
+        cacheFailedQuery(cache, querySchemas, sql, queryName, sqlHash);
         spinner.stop(`✗ ${queryName} - failed`);
         spinner.printDetail(`SQL Error: ${sqlError}`);
         spinner.printDetail(`Query: ${cleanedSql.slice(0, 200)}`);
@@ -221,10 +231,7 @@ export async function generateQueriesFromDescribe(
         error instanceof Error ? error.message : "Unknown error";
       spinner.stop(`✗ ${queryName}`);
       spinner.printDetail(errorMessage);
-      const type = generateUnknownResultQuery(sql, queryName);
-      querySchemas.push({ name: queryName, type });
-      cache.queries[queryName] = { hash: sqlHash, type, retry: true };
-      saveCache(cache);
+      cacheFailedQuery(cache, querySchemas, sql, queryName, sqlHash);
     }
   }
 
