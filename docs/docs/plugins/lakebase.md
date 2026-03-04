@@ -48,9 +48,17 @@ const AppKit = await createApp({
   plugins: [server(), lakebase()],
 });
 
-// Direct query (parameterized)
+await AppKit.lakebase.query(`CREATE SCHEMA IF NOT EXISTS app`);
+
+await AppKit.lakebase.query(`CREATE TABLE IF NOT EXISTS app.orders (
+  id SERIAL PRIMARY KEY,
+  user_id VARCHAR(255) NOT NULL,
+  amount DECIMAL(10, 2) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)`);
+
 const result = await AppKit.lakebase.query(
-  "SELECT * FROM orders WHERE user_id = $1",
+  "SELECT * FROM app.orders WHERE user_id = $1",
   [userId],
 );
 
@@ -116,7 +124,7 @@ await createApp({
 
 ## Database Permissions
 
-When you create the app with the Lakebase resource using the [Getting started](#getting-started-with-the-lakebase) guide, the Service Principal is automatically granted `CONNECT_AND_CREATE` permission on the `postgres` resource.
+When you create the app with the Lakebase resource using the [Getting started](#getting-started-with-the-lakebase) guide, the Service Principal is automatically granted `CONNECT_AND_CREATE` permission on the `postgres` resource. That means, the Service Principal can connect to the database and create new objects in the database but **cannot access any existing schemas or tables.**
 
 ### Local development
 
@@ -132,7 +140,7 @@ If you are not the project owner, [create an OAuth role](https://docs.databricks
 Deploy and run the app at least once before executing these grants so the Service Principal initializes the database schema first.
 :::
 
-Replace `subject` with your user email.
+Replace `subject` with your user email and `schema` with your schema name.
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS databricks_auth;
@@ -140,25 +148,26 @@ CREATE EXTENSION IF NOT EXISTS databricks_auth;
 DO $$
 DECLARE
   subject TEXT := 'your-subject';  -- User email like name@databricks.com
+  schema TEXT := 'your_schema'; -- Replace 'your_schema' with your schema name
 BEGIN
   -- Create OAuth role for the Databricks identity
   PERFORM databricks_create_role(subject, 'USER');
 
   -- Connection and schema access
   EXECUTE format('GRANT CONNECT ON DATABASE "databricks_postgres" TO %I', subject);
-  EXECUTE format('GRANT ALL ON SCHEMA public TO %I', subject);
+  EXECUTE format('GRANT ALL ON SCHEMA %s TO %I', schema, subject);
 
   -- Privileges on existing objects
-  EXECUTE format('GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO %I', subject);
-  EXECUTE format('GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO %I', subject);
-  EXECUTE format('GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO %I', subject);
-  EXECUTE format('GRANT ALL PRIVILEGES ON ALL PROCEDURES IN SCHEMA public TO %I', subject);
+  EXECUTE format('GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA %s TO %I', schema, subject);
+  EXECUTE format('GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA %s TO %I', schema, subject);
+  EXECUTE format('GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA %s TO %I', schema, subject);
+  EXECUTE format('GRANT ALL PRIVILEGES ON ALL PROCEDURES IN SCHEMA %s TO %I', schema, subject);
 
   -- Default privileges on future objects
-  EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO %I', subject);
-  EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO %I', subject);
-  EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO %I', subject);
-  EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON ROUTINES TO %I', subject);
+  EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %s GRANT ALL ON TABLES TO %I', schema, subject);
+  EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %s GRANT ALL ON SEQUENCES TO %I', schema, subject);
+  EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %s GRANT ALL ON FUNCTIONS TO %I', schema, subject);
+  EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %s GRANT ALL ON ROUTINES TO %I', schema, subject);
 END $$;
 ```
 
