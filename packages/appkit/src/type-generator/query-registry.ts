@@ -219,7 +219,8 @@ export async function generateQueriesFromDescribe(
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Unknown error";
-      spinner.stop(`✗ ${queryName}: \n${errorMessage}`);
+      spinner.stop(`✗ ${queryName}`);
+      spinner.printDetail(errorMessage);
       const type = generateUnknownResultQuery(sql, queryName);
       querySchemas.push({ name: queryName, type });
       cache.queries[queryName] = { hash: sqlHash, type, retry: true };
