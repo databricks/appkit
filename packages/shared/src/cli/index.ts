@@ -10,11 +10,6 @@ import { lintCommand } from "./commands/lint.js";
 import { pluginCommand } from "./commands/plugin/index.js";
 import { setupCommand } from "./commands/setup.js";
 
-// Side-effect imports: ensure the bundler includes these JSON schema files in
-// the output so CLI commands (validate, sync) can resolve them at runtime.
-import "../schemas/plugin-manifest.schema.json";
-import "../schemas/template-plugins.schema.json";
-
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkgPath = join(__dirname, "../../package.json");
 const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
