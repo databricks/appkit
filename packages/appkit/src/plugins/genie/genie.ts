@@ -9,7 +9,6 @@ import { genieStreamDefaults } from "./defaults";
 import { genieManifest } from "./manifest";
 import type {
   GenieConversationHistoryResponse,
-  GenieMessagePageResponse,
   GenieSendMessageRequest,
   GenieStreamEvent,
   IGenieConfig,
@@ -65,15 +64,6 @@ export class GeniePlugin extends Plugin {
       path: "/:alias/conversations/:conversationId",
       handler: async (req: express.Request, res: express.Response) => {
         await this.asUser(req)._handleGetConversation(req, res);
-      },
-    });
-
-    this.route(router, {
-      name: "getConversationMessages",
-      method: "get",
-      path: "/:alias/conversations/:conversationId/messages",
-      handler: async (req: express.Request, res: express.Response) => {
-        await this.asUser(req)._handleGetConversationMessages(req, res);
       },
     });
   }
@@ -148,14 +138,16 @@ export class GeniePlugin extends Plugin {
     }
 
     const includeQueryResults = req.query.includeQueryResults !== "false";
+    const pageToken = req.query.pageToken as string | undefined;
     const requestId = (req.query.requestId as string) || randomUUID();
 
     logger.debug(
-      "Fetching conversation %s from space %s (alias=%s, includeQueryResults=%s)",
+      "Fetching conversation %s from space %s (alias=%s, includeQueryResults=%s, pageToken=%s)",
       conversationId,
       spaceId,
       alias,
       includeQueryResults,
+      pageToken ?? "none",
     );
 
     const streamSettings: StreamExecutionSettings = {
@@ -175,108 +167,10 @@ export class GeniePlugin extends Plugin {
           workspaceClient,
           spaceId,
           conversationId,
-          { includeQueryResults },
+          { includeQueryResults, pageToken },
         ),
       streamSettings,
     );
-  }
-
-  async _handleGetConversationMessages(
-    req: express.Request,
-    res: express.Response,
-  ): Promise<void> {
-    const { alias, conversationId } = req.params;
-    const spaceId = this.resolveSpaceId(alias);
-
-    if (!spaceId) {
-      res.status(404).json({ error: `Unknown space alias: ${alias}` });
-      return;
-    }
-
-    const pageToken = req.query.pageToken as string | undefined;
-    const rawPageSize = req.query.pageSize
-      ? Number.parseInt(req.query.pageSize as string, 10)
-      : undefined;
-    const pageSize =
-      rawPageSize && Number.isFinite(rawPageSize) && rawPageSize > 0
-        ? Math.min(rawPageSize, 100)
-        : undefined;
-    const includeQueryResults = req.query.includeQueryResults !== "false";
-
-    logger.debug(
-      "Fetching message page for conversation %s (alias=%s, pageToken=%s)",
-      conversationId,
-      alias,
-      pageToken ?? "none",
-    );
-
-    const workspaceClient = getWorkspaceClient();
-
-    try {
-      const { messages, nextPageToken } =
-        await this.genieConnector.listConversationMessages(
-          workspaceClient,
-          spaceId,
-          conversationId,
-          { pageSize, pageToken },
-        );
-
-      const queryResults: Record<string, unknown> = {};
-
-      if (includeQueryResults) {
-        const queryAttachments: Array<{
-          messageId: string;
-          attachmentId: string;
-        }> = [];
-
-        for (const msg of messages) {
-          for (const att of msg.attachments ?? []) {
-            if (att.query?.statementId && att.attachmentId) {
-              queryAttachments.push({
-                messageId: msg.messageId,
-                attachmentId: att.attachmentId,
-              });
-            }
-          }
-        }
-
-        const results = await Promise.allSettled(
-          queryAttachments.map(async (att) => {
-            const data =
-              await this.genieConnector.getMessageAttachmentQueryResult(
-                workspaceClient,
-                spaceId,
-                conversationId,
-                att.messageId,
-                att.attachmentId,
-              );
-            return { attachmentId: att.attachmentId, data };
-          }),
-        );
-
-        for (const result of results) {
-          if (result.status === "fulfilled") {
-            queryResults[result.value.attachmentId] = result.value.data;
-          } else {
-            logger.error("Failed to fetch query result: %O", result.reason);
-          }
-        }
-      }
-
-      const response: GenieMessagePageResponse = {
-        messages,
-        queryResults,
-        nextPageToken,
-      };
-
-      res.json(response);
-    } catch (error) {
-      logger.error("Failed to fetch message page: %O", error);
-      res.status(500).json({
-        error:
-          error instanceof Error ? error.message : "Failed to fetch messages",
-      });
-    }
   }
 
   async getConversation(

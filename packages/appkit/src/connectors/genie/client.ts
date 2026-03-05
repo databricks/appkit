@@ -257,7 +257,11 @@ export class GenieConnector {
     workspaceClient: WorkspaceClient,
     spaceId: string,
     conversationId: string,
-    options?: { includeQueryResults?: boolean; pageSize?: number },
+    options?: {
+      includeQueryResults?: boolean;
+      pageSize?: number;
+      pageToken?: string;
+    },
   ): AsyncGenerator<GenieStreamEvent> {
     const includeQueryResults = options?.includeQueryResults !== false;
 
@@ -267,7 +271,7 @@ export class GenieConnector {
           workspaceClient,
           spaceId,
           conversationId,
-          { pageSize: options?.pageSize },
+          { pageSize: options?.pageSize, pageToken: options?.pageToken },
         );
 
       for (const messageResponse of messageResponses) {

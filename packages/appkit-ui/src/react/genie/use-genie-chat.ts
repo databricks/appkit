@@ -3,7 +3,6 @@ import { connectSSE } from "@/js";
 import type {
   GenieChatStatus,
   GenieMessageItem,
-  GenieMessagePageResponse,
   GenieMessageResponse,
   GenieStreamEvent,
   UseGenieChatOptions,
@@ -319,39 +318,55 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
     setError(null);
 
     const token = nextPageTokenRef.current;
+    const convId = conversationIdRef.current;
+    const requestId = crypto.randomUUID();
 
-    fetch(
-      `${basePath}/${encodeURIComponent(alias)}/conversations/${encodeURIComponent(conversationIdRef.current)}/messages?pageToken=${encodeURIComponent(token)}`,
-    )
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        return response.json() as Promise<GenieMessagePageResponse>;
-      })
-      .then((data) => {
-        const olderItems = data.messages.flatMap(messageResultToItems);
+    // Collect older messages from SSE, then prepend them all at once
+    const olderItems: GenieMessageItem[] = [];
 
-        // Distribute query results into the message items
-        for (const item of olderItems) {
-          for (const att of item.attachments) {
-            if (att.attachmentId && att.attachmentId in data.queryResults) {
-              item.queryResults.set(
-                att.attachmentId,
-                data.queryResults[att.attachmentId],
-              );
-            }
+    connectSSE({
+      url: `${basePath}/${encodeURIComponent(alias)}/conversations/${encodeURIComponent(convId)}?pageToken=${encodeURIComponent(token)}&requestId=${encodeURIComponent(requestId)}`,
+      onMessage: async (message) => {
+        try {
+          const event = JSON.parse(message.data) as GenieStreamEvent;
+          switch (event.type) {
+            case "message_result":
+              olderItems.push(...messageResultToItems(event.message));
+              break;
+            case "query_result":
+              for (let i = olderItems.length - 1; i >= 0; i--) {
+                const item = olderItems[i];
+                if (
+                  item.attachments.some(
+                    (a) => a.attachmentId === event.attachmentId,
+                  )
+                ) {
+                  item.queryResults.set(event.attachmentId, event.data);
+                  break;
+                }
+              }
+              break;
+            case "history_info":
+              setNextPageToken(event.nextPageToken);
+              break;
+            case "error":
+              setError(event.error);
+              break;
           }
+        } catch {
+          // Malformed SSE data
         }
-
-        setMessages((prev) => [...olderItems, ...prev]);
-        setNextPageToken(data.nextPageToken);
-        setStatus("idle");
-      })
-      .catch((err) => {
+      },
+      onError: (err) => {
         setError(
           err instanceof Error ? err.message : "Failed to load older messages.",
         );
+      },
+    })
+      .then(() => {
+        if (olderItems.length > 0) {
+          setMessages((prev) => [...olderItems, ...prev]);
+        }
         setStatus("idle");
       })
       .finally(() => {

@@ -6,5 +6,5 @@ export const genieConnectorDefaults = {
   /** Default page size for listConversationMessages. */
   pageSize: 100,
   /** Default page size for initial conversation load (lazy loading). */
-  initialPageSize: 3,
+  initialPageSize: 20,
 } as const;

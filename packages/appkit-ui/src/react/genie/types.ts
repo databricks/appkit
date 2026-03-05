@@ -2,7 +2,6 @@ import type { GenieAttachmentResponse } from "shared";
 
 export type {
   GenieAttachmentResponse,
-  GenieMessagePageResponse,
   GenieMessageResponse,
   GenieStreamEvent,
 } from "shared";

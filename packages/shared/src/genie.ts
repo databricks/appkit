@@ -36,14 +36,6 @@ export interface GenieMessageResponse {
   error?: string;
 }
 
-/** Response for paginated message fetching (REST endpoint) */
-export interface GenieMessagePageResponse {
-  messages: GenieMessageResponse[];
-  /** attachmentId → query result data */
-  queryResults: Record<string, unknown>;
-  nextPageToken: string | null;
-}
-
 export interface GenieAttachmentResponse {
   attachmentId?: string;
   query?: {
