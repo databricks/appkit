@@ -5,7 +5,7 @@ argument-hint: [base-branch]
 
 # Code Review for Pull Request / Branch
 
-Please review **all changes in the current branch** (compared to $ARGUMENTS or main) against the Databricks AppKit Core Principles.
+Please review **all changes in the current branch** (compared to $ARGUMENTS or origin/main) against the Databricks AppKit Core Principles.
 
 ## Context
 
@@ -36,7 +36,7 @@ The SDK provides high-level plugins, low-level primitives, and extension points 
 
 ## Review Instructions
 
-1. Determine base branch (use $ARGUMENTS if provided, otherwise 'main')
+1. Determine base branch (use $ARGUMENTS if provided, otherwise 'origin/main')
 
 2. Show full diff: `git diff [base-branch]...HEAD`
 
