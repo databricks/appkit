@@ -45,7 +45,9 @@ const logger = createLogger("server");
 export class ServerPlugin extends Plugin {
   public static DEFAULT_CONFIG = {
     host: process.env.FLASK_RUN_HOST || "0.0.0.0",
-    port: Number(process.env.DATABRICKS_APP_PORT) || 8000,
+    port:
+      Number(process.env.DATABRICKS_APP_PORT) ||
+      (process.env.NODE_ENV === "development" ? 0 : 8000),
   };
 
   /** Plugin manifest declaring metadata and resource requirements */
@@ -309,7 +311,11 @@ export class ServerPlugin extends Plugin {
   private logStartupInfo() {
     const isDev = process.env.NODE_ENV === "development";
     const hasExplicitStaticPath = this.config.staticPath !== undefined;
-    const port = this.config.port ?? ServerPlugin.DEFAULT_CONFIG.port;
+    const address = this.server?.address();
+    const port =
+      typeof address === "object" && address?.port
+        ? address.port
+        : (this.config.port ?? ServerPlugin.DEFAULT_CONFIG.port);
     const host = this.config.host ?? ServerPlugin.DEFAULT_CONFIG.host;
 
     logger.info("Server running on http://%s:%d", host, port);
