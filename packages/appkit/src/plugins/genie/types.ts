@@ -3,6 +3,7 @@ import type { BasePluginConfig } from "shared";
 // Re-export connector types for backward compatibility
 export type {
   GenieAttachmentResponse,
+  GenieMessagePageResponse,
   GenieMessageResponse,
   GenieStreamEvent,
 } from "shared";

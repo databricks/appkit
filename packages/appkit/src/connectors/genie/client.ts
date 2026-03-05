@@ -111,28 +111,27 @@ export class GenieConnector {
     workspaceClient: WorkspaceClient,
     spaceId: string,
     conversationId: string,
-    options?: { maxMessages?: number },
-  ): Promise<GenieMessageResponse[]> {
-    const maxMessages = options?.maxMessages ?? this.config.maxMessages;
-    const allMessages: GenieMessage[] = [];
-    let pageToken: string | undefined;
+    options?: { pageSize?: number; pageToken?: string },
+  ): Promise<{
+    messages: GenieMessageResponse[];
+    nextPageToken: string | null;
+  }> {
+    const pageSize =
+      options?.pageSize ?? genieConnectorDefaults.initialPageSize;
 
-    do {
-      const response = await workspaceClient.genie.listConversationMessages({
-        space_id: spaceId,
-        conversation_id: conversationId,
-        page_size: genieConnectorDefaults.pageSize,
-        ...(pageToken ? { page_token: pageToken } : {}),
-      });
+    const response = await workspaceClient.genie.listConversationMessages({
+      space_id: spaceId,
+      conversation_id: conversationId,
+      page_size: pageSize,
+      ...(options?.pageToken ? { page_token: options.pageToken } : {}),
+    });
 
-      if (response.messages) {
-        allMessages.push(...response.messages);
-      }
+    const messages = (response.messages ?? []).reverse().map(toMessageResponse);
 
-      pageToken = response.next_page_token;
-    } while (pageToken && allMessages.length < maxMessages);
-
-    return allMessages.slice(0, maxMessages).reverse().map(toMessageResponse);
+    return {
+      messages,
+      nextPageToken: response.next_page_token ?? null,
+    };
   }
 
   async getMessageAttachmentQueryResult(
@@ -258,20 +257,30 @@ export class GenieConnector {
     workspaceClient: WorkspaceClient,
     spaceId: string,
     conversationId: string,
-    options?: { includeQueryResults?: boolean },
+    options?: { includeQueryResults?: boolean; pageSize?: number },
   ): AsyncGenerator<GenieStreamEvent> {
     const includeQueryResults = options?.includeQueryResults !== false;
 
     try {
-      const messageResponses = await this.listConversationMessages(
-        workspaceClient,
-        spaceId,
-        conversationId,
-      );
+      const { messages: messageResponses, nextPageToken } =
+        await this.listConversationMessages(
+          workspaceClient,
+          spaceId,
+          conversationId,
+          { pageSize: options?.pageSize },
+        );
 
       for (const messageResponse of messageResponses) {
         yield { type: "message_result", message: messageResponse };
       }
+
+      yield {
+        type: "history_info",
+        conversationId,
+        spaceId,
+        nextPageToken,
+        loadedCount: messageResponses.length,
+      };
 
       if (includeQueryResults) {
         const queryAttachments: Array<{
@@ -367,15 +376,27 @@ export class GenieConnector {
     spaceId: string,
     conversationId: string,
   ): Promise<GenieConversationHistoryResponse> {
-    const messages = await this.listConversationMessages(
-      workspaceClient,
-      spaceId,
-      conversationId,
-    );
+    const allMessages: GenieMessageResponse[] = [];
+    let pageToken: string | undefined;
+
+    do {
+      const { messages, nextPageToken } = await this.listConversationMessages(
+        workspaceClient,
+        spaceId,
+        conversationId,
+        {
+          pageSize: genieConnectorDefaults.pageSize,
+          pageToken,
+        },
+      );
+      allMessages.push(...messages);
+      pageToken = nextPageToken ?? undefined;
+    } while (pageToken && allMessages.length < this.config.maxMessages);
+
     return {
       conversationId,
       spaceId,
-      messages,
+      messages: allMessages.slice(0, this.config.maxMessages),
     };
   }
 }

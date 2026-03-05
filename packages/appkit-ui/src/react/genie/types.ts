@@ -2,6 +2,7 @@ import type { GenieAttachmentResponse } from "shared";
 
 export type {
   GenieAttachmentResponse,
+  GenieMessagePageResponse,
   GenieMessageResponse,
   GenieStreamEvent,
 } from "shared";
@@ -9,6 +10,7 @@ export type {
 export type GenieChatStatus =
   | "idle"
   | "loading-history"
+  | "loading-older"
   | "streaming"
   | "error";
 
@@ -40,6 +42,10 @@ export interface UseGenieChatReturn {
   error: string | null;
   sendMessage: (content: string) => void;
   reset: () => void;
+  /** Whether older messages exist that can be loaded */
+  hasOlderMessages: boolean;
+  /** Fetch the next page of older messages */
+  loadOlderMessages: () => void;
 }
 
 export interface GenieChatProps {

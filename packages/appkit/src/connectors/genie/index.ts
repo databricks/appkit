@@ -4,6 +4,7 @@ export { type Pollable, type PollEvent, pollWaiter } from "./poll-waiter";
 export type {
   GenieAttachmentResponse,
   GenieConversationHistoryResponse,
+  GenieMessagePageResponse,
   GenieMessageResponse,
   GenieStreamEvent,
 } from "./types";

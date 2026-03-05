@@ -18,6 +18,8 @@ Scrollable message list that renders Genie chat messages with auto-scroll, skele
 | `messages` | `GenieMessageItem[]` | ✓ | - | Array of messages to display |
 | `status` | `enum` | ✓ | - | Current chat status (controls loading indicators and skeleton placeholders) |
 | `className` | `string` |  | - | Additional CSS class for the scroll area |
+| `hasOlderMessages` | `boolean` |  | `false` | Whether older messages are available to load |
+| `onLoadOlder` | `(() => void)` |  | - | Callback to load older messages |
 
 
 

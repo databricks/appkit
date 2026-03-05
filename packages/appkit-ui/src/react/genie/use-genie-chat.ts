@@ -3,6 +3,7 @@ import { connectSSE } from "@/js";
 import type {
   GenieChatStatus,
   GenieMessageItem,
+  GenieMessagePageResponse,
   GenieMessageResponse,
   GenieStreamEvent,
   UseGenieChatOptions,
@@ -94,13 +95,22 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
   const [status, setStatus] = useState<GenieChatStatus>("idle");
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [nextPageToken, setNextPageToken] = useState<string | null>(null);
+
+  const hasOlderMessages = nextPageToken !== null;
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const conversationIdRef = useRef<string | null>(null);
+  const nextPageTokenRef = useRef<string | null>(null);
+  const isLoadingOlderRef = useRef(false);
 
   useEffect(() => {
     conversationIdRef.current = conversationId;
   }, [conversationId]);
+
+  useEffect(() => {
+    nextPageTokenRef.current = nextPageToken;
+  }, [nextPageToken]);
 
   const processEvent = useCallback(
     (event: GenieStreamEvent, isHistory: boolean) => {
@@ -165,6 +175,11 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
             }
             return updated;
           });
+          break;
+        }
+
+        case "history_info": {
+          setNextPageToken(event.nextPageToken);
           break;
         }
 
@@ -291,12 +306,66 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
     [alias, basePath, processEvent],
   );
 
+  const loadOlderMessages = useCallback(() => {
+    if (
+      !nextPageTokenRef.current ||
+      !conversationIdRef.current ||
+      isLoadingOlderRef.current
+    )
+      return;
+
+    isLoadingOlderRef.current = true;
+    setStatus("loading-older");
+    setError(null);
+
+    const token = nextPageTokenRef.current;
+
+    fetch(
+      `${basePath}/${encodeURIComponent(alias)}/conversations/${encodeURIComponent(conversationIdRef.current)}/messages?pageToken=${encodeURIComponent(token)}`,
+    )
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        return response.json() as Promise<GenieMessagePageResponse>;
+      })
+      .then((data) => {
+        const olderItems = data.messages.flatMap(messageResultToItems);
+
+        // Distribute query results into the message items
+        for (const item of olderItems) {
+          for (const att of item.attachments) {
+            if (att.attachmentId && att.attachmentId in data.queryResults) {
+              item.queryResults.set(
+                att.attachmentId,
+                data.queryResults[att.attachmentId],
+              );
+            }
+          }
+        }
+
+        setMessages((prev) => [...olderItems, ...prev]);
+        setNextPageToken(data.nextPageToken);
+        setStatus("idle");
+      })
+      .catch((err) => {
+        setError(
+          err instanceof Error ? err.message : "Failed to load older messages.",
+        );
+        setStatus("idle");
+      })
+      .finally(() => {
+        isLoadingOlderRef.current = false;
+      });
+  }, [alias, basePath]);
+
   const reset = useCallback(() => {
     abortControllerRef.current?.abort();
     setMessages([]);
     setConversationId(null);
     setError(null);
     setStatus("idle");
+    setNextPageToken(null);
     if (persistInUrl) {
       removeUrlParam(urlParamName);
     }
@@ -313,5 +382,14 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
     };
   }, [persistInUrl, urlParamName, loadHistory]);
 
-  return { messages, status, conversationId, error, sendMessage, reset };
+  return {
+    messages,
+    status,
+    conversationId,
+    error,
+    sendMessage,
+    reset,
+    hasOlderMessages,
+    loadOlderMessages,
+  };
 }
