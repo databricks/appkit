@@ -15,6 +15,29 @@ import {
 const logger = createLogger("type-generator:query-registry");
 
 /**
+ * Parse a raw API/SDK error into a structured code + message.
+ * Handles Databricks-style JSON bodies embedded in the message string,
+ * e.g. `Response from server (Bad Request) {"error_code":"...","message":"..."}`.
+ */
+function parseError(raw: string): { code?: string; message: string } {
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.error_code || parsed.message) {
+        return {
+          code: parsed.error_code,
+          message: parsed.message || raw,
+        };
+      }
+    } catch {
+      // not valid JSON, fall through
+    }
+  }
+  return { message: raw };
+}
+
+/**
  * Extract parameters from a SQL query
  * @param sql - the SQL query to extract parameters from
  * @returns an array of parameter names
@@ -186,6 +209,7 @@ export async function generateQueriesFromDescribe(
     queryName: string;
     status: "HIT" | "MISS";
     failed?: boolean;
+    error?: { code?: string; message: string };
   }> = [];
 
   for (let i = 0; i < queryFiles.length; i++) {
@@ -223,7 +247,7 @@ export async function generateQueriesFromDescribe(
         index: number;
         schema: QuerySchema;
         cacheEntry: { hash: string; type: string; retry: boolean };
-        errorLines: string[];
+        error: { code?: string; message: string };
       };
 
   const freshResults: Array<{ index: number; schema: QuerySchema }> = [];
@@ -261,10 +285,7 @@ export async function generateQueriesFromDescribe(
           index,
           schema: { name: queryName, type },
           cacheEntry: { hash: sqlHash, type, retry: true },
-          errorLines: [
-            `SQL Error: ${sqlError}`,
-            `Query: ${cleanedSql.slice(0, 200)}`,
-          ],
+          error: parseError(sqlError),
         };
       }
 
@@ -294,13 +315,23 @@ export async function generateQueriesFromDescribe(
             queryName,
             status: "MISS",
             failed: res.status === "fail",
+            error: res.status === "fail" ? res.error : undefined,
           });
         } else {
           const { sql, sqlHash, index } = uncachedQueries[batchOffset + i];
           const type = generateUnknownResultQuery(sql, queryName);
           freshResults.push({ index, schema: { name: queryName, type } });
           cache.queries[queryName] = { hash: sqlHash, type, retry: true };
-          logEntries.push({ queryName, status: "MISS", failed: true });
+          logEntries.push({
+            queryName,
+            status: "MISS",
+            failed: true,
+            error: parseError(
+              entry.reason instanceof Error
+                ? entry.reason.message
+                : String(entry.reason),
+            ),
+          });
         }
       }
     };
@@ -327,6 +358,7 @@ export async function generateQueriesFromDescribe(
 
   // Print formatted table
   if (logEntries.length > 0) {
+    const maxNameLen = Math.max(...logEntries.map((e) => e.queryName.length));
     const separator = pc.dim("─".repeat(50));
     console.log("");
     console.log(
@@ -334,19 +366,28 @@ export async function generateQueriesFromDescribe(
     );
     console.log(`  ${separator}`);
     for (const entry of logEntries) {
-      const tag =
-        entry.status === "HIT"
-          ? `cache ${pc.bold(pc.green("HIT "))}`
-          : `cache ${pc.bold(pc.red("MISS"))}`;
-      const name = entry.failed
-        ? pc.dim(pc.strikethrough(entry.queryName))
-        : entry.queryName;
-      console.log(`  ${tag}  ${name}`);
+      const tag = entry.failed
+        ? pc.bold(pc.red("ERROR"))
+        : entry.status === "HIT"
+          ? `cache ${pc.bold(pc.green("HIT  "))}`
+          : `cache ${pc.bold(pc.yellow("MISS "))}`;
+      const rawName = entry.queryName.padEnd(maxNameLen);
+      const name = entry.failed ? pc.dim(pc.strikethrough(rawName)) : rawName;
+      const reason = entry.error ? `  ${entry.error.message}` : "";
+      console.log(`  ${tag}  ${name}${reason}`);
     }
+    const newCount = logEntries.filter(
+      (e) => e.status === "MISS" && !e.failed,
+    ).length;
+    const cacheCount = logEntries.filter(
+      (e) => e.status === "HIT" && !e.failed,
+    ).length;
+    const errorCount = logEntries.filter((e) => e.failed).length;
     console.log(`  ${separator}`);
-    console.log(
-      `  ${uncachedQueries.length} new, ${cachedResults.length} from cache. ${pc.dim(`${elapsed}s`)}`,
-    );
+    const parts = [`${newCount} new`, `${cacheCount} from cache`];
+    if (errorCount > 0)
+      parts.push(`${errorCount} ${errorCount === 1 ? "error" : "errors"}`);
+    console.log(`  ${parts.join(", ")}. ${pc.dim(`${elapsed}s`)}`);
     console.log("");
   }
 
