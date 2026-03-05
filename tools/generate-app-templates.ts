@@ -52,6 +52,7 @@ interface AppTemplate {
 
 const FEATURE_DEPENDENCIES: Record<string, string> = {
   analytics: "SQL warehouse",
+  genie: "Genie Space",
   lakebase: "Database",
 };
 
@@ -72,6 +73,15 @@ const APP_TEMPLATES: AppTemplate[] = [
       "analytics.sql-warehouse.id": "placeholder",
     },
     description: "Node.js app with SQL analytics dashboards and charts",
+  },
+  {
+    name: "appkit-genie",
+    features: ["genie"],
+    set: {
+      "genie.genie-space.id": "placeholder",
+    },
+    description:
+      "Node.js app with AI/BI Genie for natural language data queries",
   },
   {
     name: "appkit-lakebase",
