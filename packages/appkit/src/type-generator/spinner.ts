@@ -31,6 +31,10 @@ export class Spinner {
   }
 
   printDetail(text: string) {
-    process.stdout.write(`\x1b[2m    ${text}\x1b[0m\n`);
+    // Clear spinner line, print detail, then redraw spinner
+    process.stdout.write(`\x1b[2K\r\x1b[2m    ${text}\x1b[0m\n`);
+    if (this.interval) {
+      process.stdout.write(`  ${this.text}${this.frames[this.current]}`);
+    }
   }
 }

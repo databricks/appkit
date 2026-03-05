@@ -195,7 +195,7 @@ export async function generateQueriesFromDescribe(
         schema: { name: queryName, type: cached.type },
       });
       spinner.start(`Processing ${queryName} (${i + 1}/${queryFiles.length})`);
-      spinner.stop(`✓ ${queryName} (cached)`);
+      spinner.stop(`✓ ${queryName} (cache HIT)`);
     } else {
       const sqlWithDefaults = sql.replace(/:([a-zA-Z_]\w*)/g, "''");
       const cleanedSql = sqlWithDefaults.trim().replace(/;\s*$/, "");
@@ -286,9 +286,9 @@ export async function generateQueriesFromDescribe(
           cache.queries[queryName] = res.cacheEntry;
 
           if (res.status === "ok") {
-            spinner.printDetail(`✓ ${queryName}`);
+            spinner.printDetail(`✓ ${queryName} (cache MISS)`);
           } else {
-            spinner.printDetail(`✗ ${queryName} - failed`);
+            spinner.printDetail(`✗ ${queryName} - failed (cache MISS)`);
             for (const line of res.errorLines) {
               spinner.printDetail(`  ${line}`);
             }
