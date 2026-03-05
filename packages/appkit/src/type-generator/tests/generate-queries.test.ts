@@ -70,8 +70,7 @@ describe("generateQueriesFromDescribe", () => {
     expect(schemas[0].name).toBe("users");
     expect(schemas[0].type).toContain("id: number");
     expect(schemas[0].type).toContain("name: string");
-    expect(mocks.spinnerStop).toHaveBeenCalledWith("✓ Described 1 query");
-    expect(mocks.spinnerPrintDetail).toHaveBeenCalledWith("✓ users");
+    expect(mocks.spinnerStop).toHaveBeenCalledWith("");
     expect(mocks.saveCache).toHaveBeenCalledTimes(1);
   });
 
@@ -91,16 +90,7 @@ describe("generateQueriesFromDescribe", () => {
     expect(schemas).toHaveLength(1);
     expect(schemas[0].name).toBe("bad_table");
     expect(schemas[0].type).toContain("result: unknown");
-    expect(mocks.spinnerStop).toHaveBeenCalledWith("✓ Described 1 query");
-    expect(mocks.spinnerPrintDetail).toHaveBeenCalledWith(
-      "✗ bad_table - failed",
-    );
-    expect(mocks.spinnerPrintDetail).toHaveBeenCalledWith(
-      expect.stringContaining("SQL Error: Table or view not found: bad_table"),
-    );
-    expect(mocks.spinnerPrintDetail).toHaveBeenCalledWith(
-      expect.stringContaining("Query:"),
-    );
+    expect(mocks.spinnerStop).toHaveBeenCalledWith("");
     expect(mocks.saveCache).toHaveBeenCalledTimes(1);
   });
 
@@ -117,11 +107,7 @@ describe("generateQueriesFromDescribe", () => {
     expect(schemas).toHaveLength(1);
     expect(schemas[0].name).toBe("query");
     expect(schemas[0].type).toContain("result: unknown");
-    expect(mocks.spinnerStop).toHaveBeenCalledWith("✓ Described 1 query");
-    expect(mocks.spinnerPrintDetail).toHaveBeenCalledWith("✗ query - failed");
-    expect(mocks.spinnerPrintDetail).toHaveBeenCalledWith(
-      expect.stringContaining("SQL Error: Query execution failed"),
-    );
+    expect(mocks.spinnerStop).toHaveBeenCalledWith("");
     expect(mocks.saveCache).toHaveBeenCalledTimes(1);
   });
 

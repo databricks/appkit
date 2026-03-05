@@ -336,8 +336,8 @@ export async function generateQueriesFromDescribe(
     for (const entry of logEntries) {
       const tag =
         entry.status === "HIT"
-          ? `cache ${pc.green("HIT ")}`
-          : `cache ${pc.red("MISS")}`;
+          ? `cache ${pc.bold(pc.green("HIT "))}`
+          : `cache ${pc.bold(pc.red("MISS"))}`;
       const name = entry.failed
         ? pc.dim(pc.strikethrough(entry.queryName))
         : entry.queryName;
