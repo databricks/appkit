@@ -73,6 +73,12 @@ const APP_TEMPLATES: AppTemplate[] = [
     },
     description: "Node.js app with SQL analytics dashboards and charts",
   },
+  {
+    name: "appkit-lakebase",
+    features: ["lakebase"],
+    description:
+      "Node.js app with Lakebase Autoscaling (Postgres) CRUD operations",
+  },
 ];
 
 function run(cmd: string, args: string[]): number {
