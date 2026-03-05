@@ -17,10 +17,12 @@ Then, ask the user the following questions to determine how to build the plugin.
 3. **Does it need to stream responses to the client?** — If yes, the plugin will use `executeStream()` with SSE. If no, it will use `execute()` for standard request-response.
 4. **What routes should it expose?** — e.g. `POST /query`, `GET /status/:id`, `POST /messages` — or none if it only exposes a programmatic API via `exports()`
 5. **Does it need async initialization?** — e.g. creating a connection pool, warming a cache, loading config from an API. If yes, the plugin will override `setup()`.
+6. **Does it need to perform operations on behalf of the logged-in user (OBO)?** — If yes, route handlers will use `this.asUser(req)` to proxy API calls with the user's Databricks credentials instead of the service principal's.
 
 Use the answers to determine:
 - Whether a **connector** is needed (yes if it talks to a Databricks API)
 - What **Databricks resources** to declare in the manifest (SQL warehouses, Genie spaces, etc. — or none)
+- What **user API scopes** are required for OBO (see section 4f)
 - Whether to use **streaming** (`executeStream`) or **standard** (`execute`) execution
 - What **defaults** to set (cache/retry/timeout)
 
@@ -260,7 +262,42 @@ Example resource entry:
 }
 ```
 
-### 4f. Index (`index.ts`)
+### 4f. User API Scopes (OBO)
+
+If the plugin performs operations on behalf of the logged-in user via `this.asUser(req)`, it requires one or more `user_api_scopes` in the Databricks Apps bundle config (`databricks.yml`). Without the correct scopes, OBO calls will fail at runtime.
+
+**Available scopes:**
+
+| Scope | When to use |
+|-------|-------------|
+| `sql` | Plugin executes SQL queries on behalf of the user (e.g. analytics `.obo.sql` files) |
+| `dashboards.genie` | Plugin interacts with Genie AI/BI spaces on behalf of the user |
+| `files.files` | Plugin reads/writes files on behalf of the user |
+
+**How to determine required scopes:**
+- If the plugin calls SQL Statement Execution APIs as the user → `sql`
+- If the plugin calls Genie/Dashboard APIs as the user → `dashboards.genie`
+- If the plugin calls Files API as the user → `files.files`
+- If the plugin only uses the service principal (no `asUser()`) → no scopes needed
+
+**Wiring scopes into the bundle template:**
+
+The Databricks Apps bundle config at `template/databricks.yml.tmpl` must include the plugin's scopes under `user_api_scopes`. Currently, scopes are driven by template conditionals (e.g. `{{- if .plugins.genie}}`). When adding a new plugin that requires OBO:
+
+1. Add a conditional block to `template/databricks.yml.tmpl` that emits the required `user_api_scopes` when the plugin is selected
+2. If the plugin's scope is already listed (e.g. another plugin uses `sql`), ensure it's not duplicated — the template should emit a unified list
+
+Example addition to `databricks.yml.tmpl`:
+```yaml
+{{- if .plugins.myPlugin}}
+      user_api_scopes:
+        - sql
+{{- end}}
+```
+
+If multiple plugins need different scopes, the template logic should merge them into a single `user_api_scopes` list.
+
+### 4g. Index (`index.ts`)
 
 ```typescript
 export * from "./{name}";
@@ -286,8 +323,8 @@ export * from "./{name}";
 ### Route Registration
 Routes mount at `/api/{pluginName}/...`. Use `this.route(router, { name, method, path, handler })`.
 
-### User-Scoped Execution
-`this.asUser(req)` returns a proxy where all method calls use the user's Databricks credentials. Use it in route handlers for user-scoped operations. Inside the proxied method, `getWorkspaceClient()` automatically returns the user-scoped client.
+### User-Scoped Execution (OBO)
+`this.asUser(req)` returns a proxy where all method calls use the user's Databricks credentials. Use it in route handlers for user-scoped operations. Inside the proxied method, `getWorkspaceClient()` automatically returns the user-scoped client. **Important:** any plugin using `asUser()` must declare the appropriate `user_api_scopes` in the bundle config — see section 4f.
 
 ### Execution Methods
 - `this.execute(fn, options)` — single request-response with interceptors (telemetry, timeout, retry, cache)
