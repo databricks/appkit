@@ -276,9 +276,17 @@ export async function generateQueriesFromDescribe(
         `Describing ${total} ${total === 1 ? "query" : "queries"} (${completed}/${total})`,
       );
 
+      logger.debug(
+        "DESCRIBE result for %s: state=%s, rows=%d",
+        queryName,
+        result.status.state,
+        result.result?.data_array?.length ?? 0,
+      );
+
       if (result.status.state === "FAILED") {
         const sqlError =
           result.status.error?.message || "Query execution failed";
+        logger.warn("DESCRIBE failed for %s: %s", queryName, sqlError);
         const type = generateUnknownResultQuery(sql, queryName);
         return {
           status: "fail",
@@ -319,6 +327,11 @@ export async function generateQueriesFromDescribe(
           });
         } else {
           const { sql, sqlHash, index } = uncachedQueries[batchOffset + i];
+          const reason =
+            entry.reason instanceof Error
+              ? entry.reason.message
+              : String(entry.reason);
+          logger.warn("DESCRIBE rejected for %s: %s", queryName, reason);
           const type = generateUnknownResultQuery(sql, queryName);
           freshResults.push({ index, schema: { name: queryName, type } });
           cache.queries[queryName] = { hash: sqlHash, type, retry: true };
@@ -326,11 +339,7 @@ export async function generateQueriesFromDescribe(
             queryName,
             status: "MISS",
             failed: true,
-            error: parseError(
-              entry.reason instanceof Error
-                ? entry.reason.message
-                : String(entry.reason),
-            ),
+            error: parseError(reason),
           });
         }
       }
@@ -373,7 +382,8 @@ export async function generateQueriesFromDescribe(
           : `cache ${pc.bold(pc.yellow("MISS "))}`;
       const rawName = entry.queryName.padEnd(maxNameLen);
       const name = entry.failed ? pc.dim(pc.strikethrough(rawName)) : rawName;
-      const reason = entry.error ? `  ${entry.error.message}` : "";
+      const errorCode = entry.error?.message.match(/\[([^\]]+)\]/)?.[1];
+      const reason = errorCode ? `  ${pc.dim(errorCode)}` : "";
       console.log(`  ${tag}  ${name}${reason}`);
     }
     const newCount = logEntries.filter(
