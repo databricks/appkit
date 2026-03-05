@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
+import pc from "picocolors";
 import { createLogger } from "../logging/logger";
 import { CACHE_VERSION, hashSQL, loadCache, saveCache } from "./cache";
 import { Spinner } from "./spinner";
@@ -170,6 +171,8 @@ export async function generateQueriesFromDescribe(
     queryFiles.map((file) => fs.readFile(path.join(queryFolder, file), "utf8")),
   );
 
+  const startTime = performance.now();
+
   // Phase 1: Check cache, separate cached vs uncached
   const cachedResults: Array<{ index: number; schema: QuerySchema }> = [];
   const uncachedQueries: Array<{
@@ -178,6 +181,11 @@ export async function generateQueriesFromDescribe(
     sql: string;
     sqlHash: string;
     cleanedSql: string;
+  }> = [];
+  const logEntries: Array<{
+    queryName: string;
+    status: "HIT" | "MISS";
+    failed?: boolean;
   }> = [];
 
   for (let i = 0; i < queryFiles.length; i++) {
@@ -194,8 +202,7 @@ export async function generateQueriesFromDescribe(
         index: i,
         schema: { name: queryName, type: cached.type },
       });
-      spinner.start(`Processing ${queryName} (${i + 1}/${queryFiles.length})`);
-      spinner.stop(`✓ ${queryName} (cache HIT)`);
+      logEntries.push({ queryName, status: "HIT" });
     } else {
       const sqlWithDefaults = sql.replace(/:([a-zA-Z_]\w*)/g, "''");
       const cleanedSql = sqlWithDefaults.trim().replace(/;\s*$/, "");
@@ -220,7 +227,6 @@ export async function generateQueriesFromDescribe(
       };
 
   const freshResults: Array<{ index: number; schema: QuerySchema }> = [];
-  const startTime = performance.now();
 
   if (uncachedQueries.length > 0) {
     let completed = 0;
@@ -284,27 +290,17 @@ export async function generateQueriesFromDescribe(
           const res = entry.value;
           freshResults.push({ index: res.index, schema: res.schema });
           cache.queries[queryName] = res.cacheEntry;
-
-          if (res.status === "ok") {
-            spinner.printDetail(`✓ ${queryName} (cache MISS)`);
-          } else {
-            spinner.printDetail(`✗ ${queryName} - failed (cache MISS)`);
-            for (const line of res.errorLines) {
-              spinner.printDetail(`  ${line}`);
-            }
-          }
+          logEntries.push({
+            queryName,
+            status: "MISS",
+            failed: res.status === "fail",
+          });
         } else {
-          const errorMessage =
-            entry.reason instanceof Error
-              ? entry.reason.message
-              : "Unknown error";
           const { sql, sqlHash, index } = uncachedQueries[batchOffset + i];
           const type = generateUnknownResultQuery(sql, queryName);
           freshResults.push({ index, schema: { name: queryName, type } });
           cache.queries[queryName] = { hash: sqlHash, type, retry: true };
-
-          spinner.printDetail(`✗ ${queryName}`);
-          spinner.printDetail(`  ${errorMessage}`);
+          logEntries.push({ queryName, status: "MISS", failed: true });
         }
       }
     };
@@ -324,16 +320,35 @@ export async function generateQueriesFromDescribe(
       await saveCache(cache);
     }
 
-    spinner.stop(`✓ Described ${total} ${total === 1 ? "query" : "queries"}`);
+    spinner.stop("");
   }
 
   const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
-  logger.debug(
-    "%d new queries, %d cached. Typegen: %ss",
-    uncachedQueries.length,
-    cachedResults.length,
-    elapsed,
-  );
+
+  // Print formatted table
+  if (logEntries.length > 0) {
+    const separator = pc.dim("─".repeat(50));
+    console.log("");
+    console.log(
+      `  ${pc.bold("Typegen Queries")} ${pc.dim(`(${logEntries.length})`)}`,
+    );
+    console.log(`  ${separator}`);
+    for (const entry of logEntries) {
+      const tag =
+        entry.status === "HIT"
+          ? `cache ${pc.green("HIT ")}`
+          : `cache ${pc.red("MISS")}`;
+      const name = entry.failed
+        ? pc.dim(pc.strikethrough(entry.queryName))
+        : entry.queryName;
+      console.log(`  ${tag}  ${name}`);
+    }
+    console.log(`  ${separator}`);
+    console.log(
+      `  ${uncachedQueries.length} new, ${cachedResults.length} from cache. ${pc.dim(`${elapsed}s`)}`,
+    );
+    console.log("");
+  }
 
   // Merge and sort by original file index for deterministic output
   return [...cachedResults, ...freshResults]
