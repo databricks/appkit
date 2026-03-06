@@ -6,6 +6,7 @@ import {
   setupDatabricksEnv,
 } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { genieConnectorDefaults } from "../../../connectors/genie/defaults";
 import { ServiceContext } from "../../../context/service-context";
 import { Plugin } from "../../../plugin";
 import { GeniePlugin, genie } from "../genie";
@@ -584,7 +585,7 @@ describe("Genie Plugin", () => {
         expect.objectContaining({
           space_id: "test-space-id",
           conversation_id: "conv-123",
-          page_size: 3,
+          page_size: genieConnectorDefaults.initialPageSize,
         }),
       );
 
@@ -750,7 +751,7 @@ describe("Genie Plugin", () => {
         expect.objectContaining({
           space_id: "test-space-id",
           conversation_id: "conv-123",
-          page_size: 3,
+          page_size: genieConnectorDefaults.initialPageSize,
         }),
       );
 
