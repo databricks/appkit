@@ -74,6 +74,69 @@ function messageResultToItems(msg: GenieMessageResponse): GenieMessageItem[] {
 }
 
 /**
+ * Streams a conversation page via SSE. Collects message items and query
+ * results into a buffer and returns them when the stream completes.
+ */
+function fetchConversationPage(
+  basePath: string,
+  alias: string,
+  convId: string,
+  options: {
+    pageToken?: string;
+    signal?: AbortSignal;
+    onPaginationInfo?: (nextPageToken: string | null) => void;
+    onError?: (error: string) => void;
+    onConnectionError?: (err: unknown) => void;
+  },
+): Promise<GenieMessageItem[]> {
+  const params = new URLSearchParams({
+    requestId: crypto.randomUUID(),
+  });
+  if (options.pageToken) {
+    params.set("pageToken", options.pageToken);
+  }
+
+  const items: GenieMessageItem[] = [];
+
+  return connectSSE({
+    url: `${basePath}/${encodeURIComponent(alias)}/conversations/${encodeURIComponent(convId)}?${params}`,
+    signal: options.signal,
+    onMessage: async (message) => {
+      try {
+        const event = JSON.parse(message.data) as GenieStreamEvent;
+        switch (event.type) {
+          case "message_result":
+            items.push(...messageResultToItems(event.message));
+            break;
+          case "query_result":
+            for (let i = items.length - 1; i >= 0; i--) {
+              const item = items[i];
+              if (
+                item.attachments.some(
+                  (a) => a.attachmentId === event.attachmentId,
+                )
+              ) {
+                item.queryResults.set(event.attachmentId, event.data);
+                break;
+              }
+            }
+            break;
+          case "history_info":
+            options.onPaginationInfo?.(event.nextPageToken);
+            break;
+          case "error":
+            options.onError?.(event.error);
+            break;
+        }
+      } catch {
+        // Malformed SSE data
+      }
+    },
+    onError: (err) => options.onConnectionError?.(err),
+  }).then(() => items);
+}
+
+/**
  * Manages the full Genie chat lifecycle:
  * SSE streaming, conversation persistence via URL, and history replay.
  *
@@ -111,8 +174,9 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
     nextPageTokenRef.current = nextPageToken;
   }, [nextPageToken]);
 
-  const processEvent = useCallback(
-    (event: GenieStreamEvent, isHistory: boolean) => {
+  /** Process SSE events during live message streaming (sendMessage). */
+  const processStreamEvent = useCallback(
+    (event: GenieStreamEvent) => {
       switch (event.type) {
         case "message_start": {
           setConversationId(event.conversationId);
@@ -137,10 +201,7 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
           const msg = event.message;
           const hasAttachments = (msg.attachments?.length ?? 0) > 0;
 
-          if (isHistory) {
-            const items = messageResultToItems(msg);
-            setMessages((prev) => [...prev, ...items]);
-          } else if (hasAttachments) {
+          if (hasAttachments) {
             // During streaming we already appended the user message locally,
             // so only handle assistant results. Messages without attachments
             // are the user-message echo from the API — skip those.
@@ -174,11 +235,6 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
             }
             return updated;
           });
-          break;
-        }
-
-        case "history_info": {
-          setNextPageToken(event.nextPageToken);
           break;
         }
 
@@ -235,7 +291,7 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
         signal: abortController.signal,
         onMessage: async (message) => {
           try {
-            processEvent(JSON.parse(message.data) as GenieStreamEvent, false);
+            processStreamEvent(JSON.parse(message.data) as GenieStreamEvent);
           } catch {
             // Malformed SSE data
           }
@@ -261,7 +317,7 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
         }
       });
     },
-    [alias, basePath, processEvent],
+    [alias, basePath, processStreamEvent],
   );
 
   const loadHistory = useCallback(
@@ -275,19 +331,11 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
 
-      const requestId = crypto.randomUUID();
-
-      connectSSE({
-        url: `${basePath}/${encodeURIComponent(alias)}/conversations/${encodeURIComponent(convId)}?requestId=${encodeURIComponent(requestId)}`,
+      fetchConversationPage(basePath, alias, convId, {
         signal: abortController.signal,
-        onMessage: async (message) => {
-          try {
-            processEvent(JSON.parse(message.data) as GenieStreamEvent, true);
-          } catch {
-            // Malformed SSE data
-          }
-        },
-        onError: (err) => {
+        onPaginationInfo: setNextPageToken,
+        onError: setError,
+        onConnectionError: (err) => {
           if (abortController.signal.aborted) return;
           setError(
             err instanceof Error
@@ -296,13 +344,14 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
           );
           setStatus("error");
         },
-      }).then(() => {
+      }).then((items) => {
         if (!abortController.signal.aborted) {
+          setMessages(items);
           setStatus((prev) => (prev === "error" ? "error" : "idle"));
         }
       });
     },
-    [alias, basePath, processEvent],
+    [alias, basePath],
   );
 
   const loadOlderMessages = useCallback(() => {
@@ -317,55 +366,25 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
     setStatus("loading-older");
     setError(null);
 
-    const token = nextPageTokenRef.current;
-    const convId = conversationIdRef.current;
-    const requestId = crypto.randomUUID();
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
-    // Collect older messages from SSE, then prepend them all at once
-    const olderItems: GenieMessageItem[] = [];
-
-    connectSSE({
-      url: `${basePath}/${encodeURIComponent(alias)}/conversations/${encodeURIComponent(convId)}?pageToken=${encodeURIComponent(token)}&requestId=${encodeURIComponent(requestId)}`,
-      onMessage: async (message) => {
-        try {
-          const event = JSON.parse(message.data) as GenieStreamEvent;
-          switch (event.type) {
-            case "message_result":
-              olderItems.push(...messageResultToItems(event.message));
-              break;
-            case "query_result":
-              for (let i = olderItems.length - 1; i >= 0; i--) {
-                const item = olderItems[i];
-                if (
-                  item.attachments.some(
-                    (a) => a.attachmentId === event.attachmentId,
-                  )
-                ) {
-                  item.queryResults.set(event.attachmentId, event.data);
-                  break;
-                }
-              }
-              break;
-            case "history_info":
-              setNextPageToken(event.nextPageToken);
-              break;
-            case "error":
-              setError(event.error);
-              break;
-          }
-        } catch {
-          // Malformed SSE data
-        }
-      },
-      onError: (err) => {
+    fetchConversationPage(basePath, alias, conversationIdRef.current, {
+      pageToken: nextPageTokenRef.current,
+      signal: abortController.signal,
+      onPaginationInfo: setNextPageToken,
+      onError: setError,
+      onConnectionError: (err) => {
+        if (abortController.signal.aborted) return;
         setError(
           err instanceof Error ? err.message : "Failed to load older messages.",
         );
       },
     })
-      .then(() => {
-        if (olderItems.length > 0) {
-          setMessages((prev) => [...olderItems, ...prev]);
+      .then((items) => {
+        if (abortController.signal.aborted) return;
+        if (items.length > 0) {
+          setMessages((prev) => [...items, ...prev]);
         }
         setStatus("idle");
       })

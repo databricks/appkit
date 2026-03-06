@@ -584,7 +584,7 @@ describe("Genie Plugin", () => {
         expect.objectContaining({
           space_id: "test-space-id",
           conversation_id: "conv-123",
-          page_size: 20,
+          page_size: 3,
         }),
       );
 
@@ -750,7 +750,7 @@ describe("Genie Plugin", () => {
         expect.objectContaining({
           space_id: "test-space-id",
           conversation_id: "conv-123",
-          page_size: 20,
+          page_size: 3,
         }),
       );
 
