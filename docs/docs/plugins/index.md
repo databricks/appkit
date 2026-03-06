@@ -20,7 +20,7 @@ const AppKit = await createApp({
     server({ port: 8000 }),
     analytics(),
     genie(),
-    files({ volumes: { uploads: {}, exports: {} } }),
+    files(),
   ],
 });
 ```
