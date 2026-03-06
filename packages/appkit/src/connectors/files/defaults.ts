@@ -1,3 +1,10 @@
+/**
+ * Default maximum size for `read()` in bytes (10 MB).
+ * Prevents loading very large files into memory as a string.
+ * Use `download()` for files larger than this limit.
+ */
+export const FILES_MAX_READ_SIZE = 10 * 1024 * 1024; // 10 MB
+
 export const EXTENSION_CONTENT_TYPES: Record<string, string> = Object.freeze({
   ".png": "image/png",
   ".jpg": "image/jpeg",

@@ -24,9 +24,11 @@ import { parentDirectory, sanitizeFilename } from "./helpers";
 import { filesManifest } from "./manifest";
 import type {
   DownloadResponse,
+  FilesExport,
   IFilesConfig,
   VolumeAPI,
   VolumeConfig,
+  VolumeHandle,
 } from "./types";
 
 const logger = createLogger("files");
@@ -105,7 +107,7 @@ export class FilesPlugin extends Plugin {
         return;
       }
       throw AuthenticationError.missingToken(
-        `files.${method}() requires a user context. Use app.files.asUser(req).${method}() instead.`,
+        `files.${method}() requires a user context. Use app.files("volumeKey").asUser(req).${method}() instead.`,
       );
     }
   }
@@ -145,56 +147,32 @@ export class FilesPlugin extends Plugin {
 
   /**
    * Creates a VolumeAPI for a specific volume key.
-   * All methods require a user context.
+   * Should only be called on a user-scoped plugin instance (via `asUser`).
    */
-  private createVolumeAPI(volumeKey: string): VolumeAPI {
+  protected createVolumeAPI(volumeKey: string): VolumeAPI {
     const connector = this.volumeConnectors[volumeKey];
     return {
-      list: async (directoryPath?: string) => {
-        this.requireUserContext(`${volumeKey}.list`);
-        return connector.list(getWorkspaceClient(), directoryPath);
-      },
-      read: async (filePath: string) => {
-        this.requireUserContext(`${volumeKey}.read`);
-        return connector.read(getWorkspaceClient(), filePath);
-      },
-      download: async (filePath: string): Promise<DownloadResponse> => {
-        this.requireUserContext(`${volumeKey}.download`);
-        return connector.download(getWorkspaceClient(), filePath);
-      },
-      exists: async (filePath: string) => {
-        this.requireUserContext(`${volumeKey}.exists`);
-        return connector.exists(getWorkspaceClient(), filePath);
-      },
-      metadata: async (filePath: string) => {
-        this.requireUserContext(`${volumeKey}.metadata`);
-        return connector.metadata(getWorkspaceClient(), filePath);
-      },
-      upload: async (
+      list: (directoryPath?: string) =>
+        connector.list(getWorkspaceClient(), directoryPath),
+      read: (filePath: string, options?: { maxSize?: number }) =>
+        connector.read(getWorkspaceClient(), filePath, options),
+      download: (filePath: string): Promise<DownloadResponse> =>
+        connector.download(getWorkspaceClient(), filePath),
+      exists: (filePath: string) =>
+        connector.exists(getWorkspaceClient(), filePath),
+      metadata: (filePath: string) =>
+        connector.metadata(getWorkspaceClient(), filePath),
+      upload: (
         filePath: string,
         contents: ReadableStream | Buffer | string,
         options?: { overwrite?: boolean },
-      ) => {
-        this.requireUserContext(`${volumeKey}.upload`);
-        return connector.upload(
-          getWorkspaceClient(),
-          filePath,
-          contents,
-          options,
-        );
-      },
-      createDirectory: async (directoryPath: string) => {
-        this.requireUserContext(`${volumeKey}.createDirectory`);
-        return connector.createDirectory(getWorkspaceClient(), directoryPath);
-      },
-      delete: async (filePath: string) => {
-        this.requireUserContext(`${volumeKey}.delete`);
-        return connector.delete(getWorkspaceClient(), filePath);
-      },
-      preview: async (filePath: string) => {
-        this.requireUserContext(`${volumeKey}.preview`);
-        return connector.preview(getWorkspaceClient(), filePath);
-      },
+      ) => connector.upload(getWorkspaceClient(), filePath, contents, options),
+      createDirectory: (directoryPath: string) =>
+        connector.createDirectory(getWorkspaceClient(), directoryPath),
+      delete: (filePath: string) =>
+        connector.delete(getWorkspaceClient(), filePath),
+      preview: (filePath: string) =>
+        connector.preview(getWorkspaceClient(), filePath),
     };
   }
 
@@ -333,8 +311,9 @@ export class FilesPlugin extends Plugin {
     const volumeKey = req.params.volumeKey;
     const connector = this.volumeConnectors[volumeKey];
     if (!connector) {
+      const safeKey = volumeKey.replace(/[^a-zA-Z0-9_-]/g, "");
       res.status(404).json({
-        error: `Unknown volume "${volumeKey}". Available volumes: ${this.volumeKeys.join(", ")}`,
+        error: `Unknown volume "${safeKey}"`,
         plugin: this.name,
       });
       return { connector: undefined, volumeKey: undefined };
@@ -490,61 +469,9 @@ export class FilesPlugin extends Plugin {
     connector: FilesConnector,
     volumeKey: string,
   ): Promise<void> {
-    const path = req.query.path as string;
-    const valid = this._isValidPath(path);
-    if (valid !== true) {
-      res.status(400).json({ error: valid, plugin: this.name });
-      return;
-    }
-
-    const volumeCfg = this.volumeConfigs[volumeKey];
-
-    try {
-      const userPlugin = this.asUser(req);
-      const settings: PluginExecutionSettings = {
-        default: FILES_DOWNLOAD_DEFAULTS,
-      };
-      const response = await userPlugin.execute(async () => {
-        this.requireUserContext(`${volumeKey}.download`);
-        return connector.download(getWorkspaceClient(), path);
-      }, settings);
-
-      if (response === undefined) {
-        res.status(500).json({ error: "Download failed", plugin: this.name });
-        return;
-      }
-
-      const fileName = sanitizeFilename(path.split("/").pop() ?? "download");
-      res.setHeader(
-        "Content-Disposition",
-        `attachment; filename="${fileName}"`,
-      );
-      res.setHeader(
-        "Content-Type",
-        contentTypeFromPath(path, undefined, volumeCfg.customContentTypes),
-      );
-      res.setHeader("X-Content-Type-Options", "nosniff");
-      if (response.contents) {
-        const nodeStream = Readable.fromWeb(
-          response.contents as import("node:stream/web").ReadableStream,
-        );
-        nodeStream.on("error", (err) => {
-          logger.error("Stream error during download: %O", err);
-          if (!res.headersSent) {
-            res
-              .status(500)
-              .json({ error: "Download failed", plugin: this.name });
-          } else {
-            res.destroy();
-          }
-        });
-        nodeStream.pipe(res);
-      } else {
-        res.end();
-      }
-    } catch (error) {
-      this._handleApiError(res, error, "Download failed");
-    }
+    return this._serveFile(req, res, connector, volumeKey, {
+      mode: "download",
+    });
   }
 
   private async _handleRaw(
@@ -553,6 +480,23 @@ export class FilesPlugin extends Plugin {
     connector: FilesConnector,
     volumeKey: string,
   ): Promise<void> {
+    return this._serveFile(req, res, connector, volumeKey, {
+      mode: "raw",
+    });
+  }
+
+  /**
+   * Shared handler for `/download` and `/raw` endpoints.
+   * - `download`: always forces `Content-Disposition: attachment`.
+   * - `raw`: adds CSP sandbox; forces attachment only for unsafe content types.
+   */
+  private async _serveFile(
+    req: express.Request,
+    res: express.Response,
+    connector: FilesConnector,
+    volumeKey: string,
+    opts: { mode: "download" | "raw" },
+  ): Promise<void> {
     const path = req.query.path as string;
     const valid = this._isValidPath(path);
     if (valid !== true) {
@@ -560,6 +504,7 @@ export class FilesPlugin extends Plugin {
       return;
     }
 
+    const label = opts.mode === "download" ? "Download" : "Raw fetch";
     const volumeCfg = this.volumeConfigs[volumeKey];
 
     try {
@@ -573,7 +518,7 @@ export class FilesPlugin extends Plugin {
       }, settings);
 
       if (response === undefined) {
-        res.status(500).json({ error: "Raw fetch failed", plugin: this.name });
+        res.status(500).json({ error: `${label} failed`, plugin: this.name });
         return;
       }
 
@@ -582,13 +527,20 @@ export class FilesPlugin extends Plugin {
         undefined,
         volumeCfg.customContentTypes,
       );
+      const fileName = sanitizeFilename(path.split("/").pop() ?? "download");
 
       res.setHeader("Content-Type", resolvedType);
       res.setHeader("X-Content-Type-Options", "nosniff");
-      res.setHeader("Content-Security-Policy", "sandbox");
 
-      if (!isSafeInlineContentType(resolvedType)) {
-        const fileName = sanitizeFilename(path.split("/").pop() ?? "download");
+      if (opts.mode === "raw") {
+        res.setHeader("Content-Security-Policy", "sandbox");
+        if (!isSafeInlineContentType(resolvedType)) {
+          res.setHeader(
+            "Content-Disposition",
+            `attachment; filename="${fileName}"`,
+          );
+        }
+      } else {
         res.setHeader(
           "Content-Disposition",
           `attachment; filename="${fileName}"`,
@@ -600,11 +552,11 @@ export class FilesPlugin extends Plugin {
           response.contents as import("node:stream/web").ReadableStream,
         );
         nodeStream.on("error", (err) => {
-          logger.error("Stream error during raw fetch: %O", err);
+          logger.error("Stream error during %s: %O", opts.mode, err);
           if (!res.headersSent) {
             res
               .status(500)
-              .json({ error: "Raw fetch failed", plugin: this.name });
+              .json({ error: `${label} failed`, plugin: this.name });
           } else {
             res.destroy();
           }
@@ -614,7 +566,7 @@ export class FilesPlugin extends Plugin {
         res.end();
       }
     } catch (error) {
-      this._handleApiError(res, error, "Raw fetch failed");
+      this._handleApiError(res, error, `${label} failed`);
     }
   }
 
@@ -796,11 +748,20 @@ export class FilesPlugin extends Plugin {
       const settings: PluginExecutionSettings = {
         default: FILES_WRITE_DEFAULTS,
       };
-      const result = await userPlugin.execute(async () => {
-        this.requireUserContext(`${volumeKey}.upload`);
-        await connector.upload(getWorkspaceClient(), path, webStream);
-        return { success: true as const };
-      }, settings);
+      const result = await this.trackWrite(() =>
+        userPlugin.execute(async () => {
+          this.requireUserContext(`${volumeKey}.upload`);
+          await connector.upload(getWorkspaceClient(), path, webStream);
+          return { success: true as const };
+        }, settings),
+      );
+
+      this._invalidateListCache(
+        volumeKey,
+        path,
+        this.resolveUserId(req),
+        connector,
+      );
 
       if (result === undefined) {
         logger.error(
@@ -813,13 +774,6 @@ export class FilesPlugin extends Plugin {
         res.status(500).json({ error: "Upload failed", plugin: this.name });
         return;
       }
-
-      this._invalidateListCache(
-        volumeKey,
-        path,
-        this.resolveUserId(req),
-        connector,
-      );
 
       logger.debug(req, "Upload complete: volume=%s path=%s", volumeKey, path);
       res.json(result);
@@ -854,18 +808,13 @@ export class FilesPlugin extends Plugin {
       const settings: PluginExecutionSettings = {
         default: FILES_WRITE_DEFAULTS,
       };
-      const result = await userPlugin.execute(async () => {
-        this.requireUserContext(`${volumeKey}.createDirectory`);
-        await connector.createDirectory(getWorkspaceClient(), dirPath);
-        return { success: true as const };
-      }, settings);
-
-      if (result === undefined) {
-        res
-          .status(500)
-          .json({ error: "Create directory failed", plugin: this.name });
-        return;
-      }
+      const result = await this.trackWrite(() =>
+        userPlugin.execute(async () => {
+          this.requireUserContext(`${volumeKey}.createDirectory`);
+          await connector.createDirectory(getWorkspaceClient(), dirPath);
+          return { success: true as const };
+        }, settings),
+      );
 
       this._invalidateListCache(
         volumeKey,
@@ -873,6 +822,13 @@ export class FilesPlugin extends Plugin {
         this.resolveUserId(req),
         connector,
       );
+
+      if (result === undefined) {
+        res
+          .status(500)
+          .json({ error: "Create directory failed", plugin: this.name });
+        return;
+      }
 
       res.json(result);
     } catch (error) {
@@ -899,16 +855,13 @@ export class FilesPlugin extends Plugin {
       const settings: PluginExecutionSettings = {
         default: FILES_WRITE_DEFAULTS,
       };
-      const result = await userPlugin.execute(async () => {
-        this.requireUserContext(`${volumeKey}.delete`);
-        await connector.delete(getWorkspaceClient(), path);
-        return { success: true as const };
-      }, settings);
-
-      if (result === undefined) {
-        res.status(500).json({ error: "Delete failed", plugin: this.name });
-        return;
-      }
+      const result = await this.trackWrite(() =>
+        userPlugin.execute(async () => {
+          this.requireUserContext(`${volumeKey}.delete`);
+          await connector.delete(getWorkspaceClient(), path);
+          return { success: true as const };
+        }, settings),
+      );
 
       this._invalidateListCache(
         volumeKey,
@@ -917,27 +870,79 @@ export class FilesPlugin extends Plugin {
         connector,
       );
 
+      if (result === undefined) {
+        res.status(500).json({ error: "Delete failed", plugin: this.name });
+        return;
+      }
+
       res.json(result);
     } catch (error) {
       this._handleApiError(res, error, "Delete failed");
     }
   }
 
+  private inflightWrites = 0;
+
+  private trackWrite<T>(fn: () => Promise<T>): Promise<T> {
+    this.inflightWrites++;
+    return fn().finally(() => {
+      this.inflightWrites--;
+    });
+  }
+
   async shutdown(): Promise<void> {
+    // Wait up to 10 seconds for in-flight write operations to finish
+    const deadline = Date.now() + 10_000;
+    while (this.inflightWrites > 0 && Date.now() < deadline) {
+      logger.info(
+        "Waiting for %d in-flight write(s) to complete before shutdown…",
+        this.inflightWrites,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    if (this.inflightWrites > 0) {
+      logger.warn(
+        "Shutdown deadline reached with %d in-flight write(s) still pending.",
+        this.inflightWrites,
+      );
+    }
     this.streamManager.abortAll();
   }
 
   /**
    * Returns the programmatic API for the Files plugin.
-   * Returns one VolumeAPI per configured volume key.
-   * All methods require a user context — use `app.files.asUser(req).volumeKey.*`.
+   * Callable with a volume key to get a volume-scoped API with `asUser`.
+   *
+   * @example
+   * ```ts
+   * // Direct access
+   * appKit.files("uploads").asUser(req).list()
+   *
+   * // Store a reference for OBO-only patterns
+   * const vol = appKit.files.volume("uploads").asUser(req)
+   * await vol.list()
+   * ```
    */
-  exports() {
-    const result: Record<string, VolumeAPI> = {};
-    for (const key of this.volumeKeys) {
-      result[key] = this.createVolumeAPI(key);
-    }
-    return result;
+  exports(): FilesExport {
+    const resolveVolume = (volumeKey: string): VolumeHandle => {
+      if (!this.volumeKeys.includes(volumeKey)) {
+        throw new Error(
+          `Unknown volume "${volumeKey}". Available volumes: ${this.volumeKeys.join(", ")}`,
+        );
+      }
+      return {
+        asUser: (req: import("express").Request) => {
+          const userPlugin = this.asUser(req) as FilesPlugin;
+          return userPlugin.createVolumeAPI(volumeKey);
+        },
+      };
+    };
+
+    const filesExport = ((volumeKey: string) =>
+      resolveVolume(volumeKey)) as FilesExport;
+    filesExport.volume = resolveVolume;
+
+    return filesExport;
   }
 }
 

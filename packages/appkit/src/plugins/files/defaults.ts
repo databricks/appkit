@@ -62,4 +62,7 @@ export const FILES_WRITE_DEFAULTS: PluginExecuteConfig = {
  */
 export const FILES_MAX_UPLOAD_SIZE = 5 * 1024 * 1024 * 1024; // 5 GB
 
-export { EXTENSION_CONTENT_TYPES } from "../../connectors/files/defaults";
+export {
+  EXTENSION_CONTENT_TYPES,
+  FILES_MAX_READ_SIZE,
+} from "../../connectors/files/defaults";

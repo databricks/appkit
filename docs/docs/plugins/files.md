@@ -169,13 +169,17 @@ Write operations (`upload`, `mkdir`, `delete`) automatically invalidate the cach
 
 ## Programmatic API
 
-The `exports()` API returns one `VolumeAPI` object per configured volume. All methods require a user context — use `appkit.files.asUser(req)` to obtain user-scoped exports.
+The `exports()` API is a callable that accepts a volume key and returns a `VolumeAPI` with per-volume `asUser`. All methods require a user context.
 
 ```ts
-// Access volume APIs through asUser
-const userFiles = appkit.files.asUser(req);
-const entries = await userFiles.uploads.list();
-const content = await userFiles.exports.read("report.csv");
+// Access a volume and scope to user
+const entries = await appkit.files("uploads").asUser(req).list();
+const content = await appkit.files("exports").asUser(req).read("report.csv");
+
+// Store a reference for OBO-only patterns
+const vol = appkit.files.volume("uploads").asUser(req);
+await vol.list();
+await vol.upload("report.csv", data);
 ```
 
 ### VolumeAPI methods
@@ -318,5 +322,5 @@ Programmatic API changes from flat to nested:
 appkit.files.asUser(req).list()
 
 // After
-appkit.files.asUser(req).data.list()
+appkit.files("data").asUser(req).list()
 ```

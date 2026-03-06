@@ -8,7 +8,25 @@ import {
 } from "@databricks/appkit-ui/react";
 import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
 import { FolderPlus, Loader2, Upload } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type RefObject,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+
+function useAbortController(): RefObject<AbortController | null> {
+  const ref = useRef<AbortController | null>(null);
+  return ref;
+}
+
+function nextSignal(ref: RefObject<AbortController | null>): AbortSignal {
+  ref.current?.abort();
+  ref.current = new AbortController();
+  return ref.current.signal;
+}
+
 import { Header } from "@/components/layout/header";
 
 export const Route = createFileRoute("/files")({
@@ -36,6 +54,8 @@ function FilesRoute() {
   const [newDirName, setNewDirName] = useState("");
   const [showNewDirInput, setShowNewDirInput] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const listAbort = useAbortController();
+  const previewAbort = useAbortController();
 
   const normalize = (p: string) => p.replace(/\/+$/, "");
   const isAtRoot = !currentPath;
@@ -60,8 +80,9 @@ function FilesRoute() {
       setPreview(null);
 
       try {
+        const signal = nextSignal(listAbort);
         const url = path ? apiUrl("list", { path }) : apiUrl("list");
-        const response = await fetch(url);
+        const response = await fetch(url, { signal });
 
         if (!response.ok) {
           const data = await response.json().catch(() => ({}));
@@ -79,13 +100,14 @@ function FilesRoute() {
         setEntries(data);
         setCurrentPath(path ?? "");
       } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
         setError(err instanceof Error ? err.message : String(err));
         setEntries([]);
       } finally {
         setLoading(false);
       }
     },
-    [volumeKey, apiUrl],
+    [volumeKey, apiUrl, listAbort],
   );
 
   const loadPreview = useCallback(
@@ -94,7 +116,10 @@ function FilesRoute() {
       setPreview(null);
 
       try {
-        const response = await fetch(apiUrl("preview", { path: filePath }));
+        const signal = nextSignal(previewAbort);
+        const response = await fetch(apiUrl("preview", { path: filePath }), {
+          signal,
+        });
 
         if (!response.ok) {
           const data = await response.json().catch(() => ({}));
@@ -103,13 +128,14 @@ function FilesRoute() {
 
         const data = await response.json();
         setPreview(data);
-      } catch {
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
         setPreview(null);
       } finally {
         setPreviewLoading(false);
       }
     },
-    [apiUrl],
+    [apiUrl, previewAbort],
   );
 
   useEffect(() => {
@@ -167,9 +193,19 @@ function FilesRoute() {
     loadDirectory(targetPath);
   };
 
+  const MAX_UPLOAD_SIZE = 5 * 1024 * 1024 * 1024; // 5 GB
+
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    if (file.size > MAX_UPLOAD_SIZE) {
+      setError(
+        `File "${file.name}" is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum upload size is ${MAX_UPLOAD_SIZE / 1024 / 1024 / 1024} GB.`,
+      );
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
 
     setUploading(true);
     try {

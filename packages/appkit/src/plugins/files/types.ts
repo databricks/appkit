@@ -1,5 +1,5 @@
 import type { files } from "@databricks/sdk-experimental";
-import type { BasePluginConfig } from "shared";
+import type { BasePluginConfig, IAppRequest } from "shared";
 
 /**
  * Per-volume configuration options.
@@ -13,11 +13,11 @@ export interface VolumeConfig {
 
 /**
  * User-facing API for a single volume.
- * All methods require a user context — use `app.files.asUser(req).volumeKey.*`.
+ * All methods require a user context — use `app.files("volumeKey").asUser(req).list()`.
  */
 export interface VolumeAPI {
   list(directoryPath?: string): Promise<DirectoryEntry[]>;
-  read(filePath: string): Promise<string>;
+  read(filePath: string, options?: { maxSize?: number }): Promise<string>;
   download(filePath: string): Promise<DownloadResponse>;
   exists(filePath: string): Promise<boolean>;
   metadata(filePath: string): Promise<FileMetadata>;
@@ -73,4 +73,32 @@ export interface FilePreview extends FileMetadata {
   isText: boolean;
   /** Whether the file is detected as an image format. */
   isImage: boolean;
+}
+
+/**
+ * Volume handle returned by `app.files("volumeKey")`.
+ * Only exposes `asUser(req)` — volume methods are only accessible after
+ * scoping to a user context, enforcing OBO-only access.
+ */
+export interface VolumeHandle {
+  asUser: (req: IAppRequest) => VolumeAPI;
+}
+
+/**
+ * The public API shape of the files plugin.
+ * Callable to select a volume, with a `.volume()` alias.
+ *
+ * @example
+ * ```ts
+ * // Direct access
+ * appKit.files("uploads").asUser(req).list()
+ *
+ * // Named accessor (useful for storing a reference)
+ * const vol = appKit.files.volume("uploads").asUser(req)
+ * await vol.list()
+ * ```
+ */
+export interface FilesExport {
+  (volumeKey: string): VolumeHandle;
+  volume: (volumeKey: string) => VolumeHandle;
 }

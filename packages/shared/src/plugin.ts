@@ -166,20 +166,28 @@ export type PluginExports<T extends BasePlugin> =
 /**
  * Wraps an SDK with the `asUser` method that AppKit automatically adds.
  * When `asUser(req)` is called, it returns the same SDK but scoped to the user's credentials.
+ *
+ * When the SDK is a function (callable export), it is returned as-is since
+ * the plugin manages its own `asUser` pattern per-call.
  */
-export type WithAsUser<SDK> = SDK & {
-  /**
-   * Execute operations using the user's identity from the request.
-   * Returns a user-scoped SDK where all methods execute with the
-   * user's Databricks credentials instead of the service principal.
-   */
-  asUser: (req: IAppRequest) => SDK;
-};
+export type WithAsUser<SDK> = SDK extends (...args: any[]) => any
+  ? SDK
+  : SDK & {
+      /**
+       * Execute operations using the user's identity from the request.
+       * Returns a user-scoped SDK where all methods execute with the
+       * user's Databricks credentials instead of the service principal.
+       */
+      asUser: (req: IAppRequest) => SDK;
+    };
 
 /**
  * Maps plugin names to their exported types (with asUser automatically added).
  * Each plugin exposes its public API via the exports() method,
  * and AppKit wraps it with asUser() for user-scoped execution.
+ *
+ * Callable exports (functions) are passed through without wrapping,
+ * as they manage their own `asUser` pattern (e.g. files plugin).
  */
 export type PluginMap<
   U extends readonly PluginData<PluginConstructor, unknown, string>[],

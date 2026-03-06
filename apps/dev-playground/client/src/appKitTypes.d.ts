@@ -51,7 +51,10 @@ declare module "@databricks/appkit-ui/react" {
     example: {
         name: "example";
         parameters: Record<string, never>;
-        result: unknown;
+        result: Array<{
+          /** @sqlType BOOLEAN */
+          "(1 = 1)": boolean;
+        }>;
       };
     spend_data: {
         name: "spend_data";
@@ -88,7 +91,14 @@ declare module "@databricks/appkit-ui/react" {
           /** DATE - use sql.date() */
           startDate: SQLDateMarker;
         };
-        result: unknown;
+        result: Array<{
+          /** @sqlType DECIMAL(33,0) */
+          total: number;
+          /** @sqlType DECIMAL(33,0) */
+          average: number;
+          /** @sqlType DECIMAL(33,0) */
+          forecasted: number;
+        }>;
       };
     sql_helpers_test: {
         name: "sql_helpers_test";

@@ -16,7 +16,11 @@ import {
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
-import { contentTypeFromPath, isTextContentType } from "./defaults";
+import {
+  contentTypeFromPath,
+  FILES_MAX_READ_SIZE,
+  isTextContentType,
+} from "./defaults";
 
 const logger = createLogger("connectors:files");
 
@@ -157,8 +161,13 @@ export class FilesConnector {
     });
   }
 
-  async read(client: WorkspaceClient, filePath: string): Promise<string> {
+  async read(
+    client: WorkspaceClient,
+    filePath: string,
+    options?: { maxSize?: number },
+  ): Promise<string> {
     const resolvedPath = this.resolvePath(filePath);
+    const maxSize = options?.maxSize ?? FILES_MAX_READ_SIZE;
     return this.traced("read", { "files.path": resolvedPath }, async () => {
       const response = await this.download(client, filePath);
       if (!response.contents) {
@@ -167,9 +176,17 @@ export class FilesConnector {
       const reader = response.contents.getReader();
       const decoder = new TextDecoder();
       let result = "";
+      let bytesRead = 0;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        bytesRead += value.byteLength;
+        if (bytesRead > maxSize) {
+          await reader.cancel();
+          throw new Error(
+            `File exceeds maximum read size (${maxSize} bytes). Use download() for large files.`,
+          );
+        }
         result += decoder.decode(value, { stream: true });
       }
       result += decoder.decode();
@@ -261,6 +278,10 @@ export class FilesConnector {
 
       if (body instanceof ReadableStream) {
         fetchOptions.duplex = "half";
+      } else if (body instanceof Buffer) {
+        headers.set("Content-Length", String(body.length));
+      } else if (typeof body === "string") {
+        headers.set("Content-Length", String(Buffer.byteLength(body)));
       }
 
       await client.config.authenticate(headers);

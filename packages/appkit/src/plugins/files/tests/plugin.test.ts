@@ -1,6 +1,5 @@
 import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { isInUserContext } from "../../../context";
 import { ServiceContext } from "../../../context/service-context";
 import { AuthenticationError } from "../../../errors";
 import { ResourceType } from "../../../registry";
@@ -197,114 +196,100 @@ describe("FilesPlugin", () => {
   });
 
   describe("exports()", () => {
-    test("returns nested volume APIs with all 9 methods each", () => {
+    test("returns a callable function with a .volume alias", () => {
       const plugin = new FilesPlugin(VOLUMES_CONFIG);
       const exported = plugin.exports();
 
-      expect(exported).toHaveProperty("uploads");
-      expect(exported).toHaveProperty("exports");
+      expect(typeof exported).toBe("function");
+      expect(typeof exported.volume).toBe("function");
+    });
 
-      const volumeMethods = [
-        "list",
-        "read",
-        "download",
-        "exists",
-        "metadata",
-        "upload",
-        "createDirectory",
-        "delete",
-        "preview",
-      ];
+    test("returns volume handle with only asUser", () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const exported = plugin.exports();
 
       for (const key of ["uploads", "exports"]) {
-        const volumeApi = exported[key];
-        for (const method of volumeMethods) {
-          expect(typeof (volumeApi as any)[method]).toBe("function");
-        }
+        const handle = exported(key);
+        expect(typeof handle.asUser).toBe("function");
+        // No volume methods directly on the handle
+        expect(handle).not.toHaveProperty("list");
+        expect(handle).not.toHaveProperty("read");
+        expect(handle).not.toHaveProperty("upload");
       }
     });
 
-    test("does not expose flat methods at root level", () => {
+    test(".volume() returns the same shape as the callable", () => {
       const plugin = new FilesPlugin(VOLUMES_CONFIG);
-      const exported = plugin.exports() as Record<string, unknown>;
+      const exported = plugin.exports();
 
-      expect(exported).not.toHaveProperty("list");
-      expect(exported).not.toHaveProperty("read");
-      expect(exported).not.toHaveProperty("download");
+      const direct = exported("uploads");
+      const viaVolume = exported.volume("uploads");
+
+      expect(Object.keys(direct).sort()).toEqual(Object.keys(viaVolume).sort());
+    });
+
+    test("throws for unknown volume key", () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const exported = plugin.exports();
+
+      expect(() => exported("unknown")).toThrow(/Unknown volume "unknown"/);
+      expect(() => exported.volume("unknown")).toThrow(
+        /Unknown volume "unknown"/,
+      );
     });
   });
 
-  describe("requires user context for SDK methods", () => {
-    test("throws AuthenticationError when called outside user context in production", async () => {
+  describe("OBO-only access via asUser", () => {
+    test("volume handle only exposes asUser, not volume methods", () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handle = plugin.exports()("uploads");
+
+      expect(typeof handle.asUser).toBe("function");
+      expect(Object.keys(handle)).toEqual(["asUser"]);
+    });
+
+    test("asUser throws AuthenticationError without token in production", () => {
       const originalEnv = process.env.NODE_ENV;
       process.env.NODE_ENV = "production";
-      vi.mocked(isInUserContext).mockReturnValue(false);
 
       try {
         const plugin = new FilesPlugin(VOLUMES_CONFIG);
-        const api = plugin.exports();
+        const handle = plugin.exports()("uploads");
+        const mockReq = { header: () => undefined } as any;
 
-        await expect(api.uploads.list()).rejects.toThrow(AuthenticationError);
-        await expect(api.uploads.read("/file")).rejects.toThrow(
-          AuthenticationError,
-        );
-        await expect(api.uploads.download("/file")).rejects.toThrow(
-          AuthenticationError,
-        );
-        await expect(api.uploads.exists("/file")).rejects.toThrow(
-          AuthenticationError,
-        );
-        await expect(api.uploads.metadata("/file")).rejects.toThrow(
-          AuthenticationError,
-        );
-        await expect(api.uploads.upload("/file", "data")).rejects.toThrow(
-          AuthenticationError,
-        );
-        await expect(api.uploads.createDirectory("/dir")).rejects.toThrow(
-          AuthenticationError,
-        );
-        await expect(api.uploads.delete("/file")).rejects.toThrow(
-          AuthenticationError,
-        );
-        await expect(api.uploads.preview("/file")).rejects.toThrow(
-          AuthenticationError,
-        );
+        expect(() => handle.asUser(mockReq)).toThrow(AuthenticationError);
       } finally {
-        vi.mocked(isInUserContext).mockReturnValue(true);
         process.env.NODE_ENV = originalEnv;
       }
     });
 
-    test("error message suggests using asUser()", async () => {
-      const originalEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = "production";
-      vi.mocked(isInUserContext).mockReturnValue(false);
-
-      try {
-        const plugin = new FilesPlugin(VOLUMES_CONFIG);
-        const api = plugin.exports();
-        await expect(api.uploads.list()).rejects.toThrow(/asUser/);
-      } finally {
-        vi.mocked(isInUserContext).mockReturnValue(true);
-        process.env.NODE_ENV = originalEnv;
-      }
-    });
-
-    test("warns but allows in development mode without user context", async () => {
+    test("asUser in dev mode returns VolumeAPI with all 9 methods", () => {
       const originalEnv = process.env.NODE_ENV;
       process.env.NODE_ENV = "development";
-      vi.mocked(isInUserContext).mockReturnValue(false);
 
       try {
         const plugin = new FilesPlugin(VOLUMES_CONFIG);
-        const api = plugin.exports();
-        try {
-          await api.uploads.list();
-        } catch (error) {
-          expect(error).not.toBeInstanceOf(AuthenticationError);
+        const handle = plugin.exports()("uploads");
+        // In dev mode, asUser falls back to service principal when no token
+        const mockReq = { header: () => undefined } as any;
+        const api = handle.asUser(mockReq);
+
+        const volumeMethods = [
+          "list",
+          "read",
+          "download",
+          "exists",
+          "metadata",
+          "upload",
+          "createDirectory",
+          "delete",
+          "preview",
+        ];
+
+        for (const method of volumeMethods) {
+          expect(typeof (api as any)[method]).toBe("function");
         }
       } finally {
-        vi.mocked(isInUserContext).mockReturnValue(true);
         process.env.NODE_ENV = originalEnv;
       }
     });
@@ -530,8 +515,9 @@ describe("FilesPlugin", () => {
     test("files() with no volumes config discovers from env vars", () => {
       const plugin = new FilesPlugin({});
       const exported = plugin.exports();
-      expect(exported).toHaveProperty("uploads");
-      expect(exported).toHaveProperty("exports");
+      // Discovered volumes are accessible via the callable
+      expect(() => exported("uploads")).not.toThrow();
+      expect(() => exported("exports")).not.toThrow();
     });
 
     test("files() with no config and no env vars creates no volumes", () => {
@@ -539,7 +525,7 @@ describe("FilesPlugin", () => {
       delete process.env.DATABRICKS_VOLUME_EXPORTS;
       const plugin = new FilesPlugin({});
       const exported = plugin.exports();
-      expect(Object.keys(exported)).toHaveLength(0);
+      expect(() => exported("uploads")).toThrow(/Unknown volume/);
     });
   });
 
