@@ -15,6 +15,7 @@ import { Route as SqlHelpersRouteRouteImport } from './routes/sql-helpers.route'
 import { Route as ReconnectRouteRouteImport } from './routes/reconnect.route'
 import { Route as LakebaseRouteRouteImport } from './routes/lakebase.route'
 import { Route as GenieRouteRouteImport } from './routes/genie.route'
+import { Route as FilesRouteRouteImport } from './routes/files.route'
 import { Route as DataVisualizationRouteRouteImport } from './routes/data-visualization.route'
 import { Route as ChartInferenceRouteRouteImport } from './routes/chart-inference.route'
 import { Route as ArrowAnalyticsRouteRouteImport } from './routes/arrow-analytics.route'
@@ -51,6 +52,11 @@ const GenieRouteRoute = GenieRouteRouteImport.update({
   path: '/genie',
   getParentRoute: () => rootRouteImport,
 } as any)
+const FilesRouteRoute = FilesRouteRouteImport.update({
+  id: '/files',
+  path: '/files',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DataVisualizationRouteRoute = DataVisualizationRouteRouteImport.update({
   id: '/data-visualization',
   path: '/data-visualization',
@@ -83,6 +89,7 @@ export interface FileRoutesByFullPath {
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/chart-inference': typeof ChartInferenceRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
+  '/files': typeof FilesRouteRoute
   '/genie': typeof GenieRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
@@ -96,6 +103,7 @@ export interface FileRoutesByTo {
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/chart-inference': typeof ChartInferenceRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
+  '/files': typeof FilesRouteRoute
   '/genie': typeof GenieRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
@@ -110,6 +118,7 @@ export interface FileRoutesById {
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/chart-inference': typeof ChartInferenceRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
+  '/files': typeof FilesRouteRoute
   '/genie': typeof GenieRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
@@ -125,6 +134,7 @@ export interface FileRouteTypes {
     | '/arrow-analytics'
     | '/chart-inference'
     | '/data-visualization'
+    | '/files'
     | '/genie'
     | '/lakebase'
     | '/reconnect'
@@ -138,6 +148,7 @@ export interface FileRouteTypes {
     | '/arrow-analytics'
     | '/chart-inference'
     | '/data-visualization'
+    | '/files'
     | '/genie'
     | '/lakebase'
     | '/reconnect'
@@ -151,6 +162,7 @@ export interface FileRouteTypes {
     | '/arrow-analytics'
     | '/chart-inference'
     | '/data-visualization'
+    | '/files'
     | '/genie'
     | '/lakebase'
     | '/reconnect'
@@ -165,6 +177,7 @@ export interface RootRouteChildren {
   ArrowAnalyticsRouteRoute: typeof ArrowAnalyticsRouteRoute
   ChartInferenceRouteRoute: typeof ChartInferenceRouteRoute
   DataVisualizationRouteRoute: typeof DataVisualizationRouteRoute
+  FilesRouteRoute: typeof FilesRouteRoute
   GenieRouteRoute: typeof GenieRouteRoute
   LakebaseRouteRoute: typeof LakebaseRouteRoute
   ReconnectRouteRoute: typeof ReconnectRouteRoute
@@ -217,6 +230,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GenieRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/files': {
+      id: '/files'
+      path: '/files'
+      fullPath: '/files'
+      preLoaderRoute: typeof FilesRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/data-visualization': {
       id: '/data-visualization'
       path: '/data-visualization'
@@ -261,6 +281,7 @@ const rootRouteChildren: RootRouteChildren = {
   ArrowAnalyticsRouteRoute: ArrowAnalyticsRouteRoute,
   ChartInferenceRouteRoute: ChartInferenceRouteRoute,
   DataVisualizationRouteRoute: DataVisualizationRouteRoute,
+  FilesRouteRoute: FilesRouteRoute,
   GenieRouteRoute: GenieRouteRoute,
   LakebaseRouteRoute: LakebaseRouteRoute,
   ReconnectRouteRoute: ReconnectRouteRoute,
