@@ -59,12 +59,13 @@ const FEATURE_DEPENDENCIES: Record<string, string> = {
 const APP_TEMPLATES: AppTemplate[] = [
   {
     name: "appkit-all-in-one",
-    features: ["analytics", "lakebase"],
+    features: ["analytics", "genie", "lakebase"],
     set: {
       "analytics.sql-warehouse.id": "placeholder",
+      "genie.genie-space.id": "placeholder",
     },
     description:
-      "Full-stack Node.js app with SQL analytics dashboards and Lakebase Autoscaling (Postgres) CRUD",
+      "Full-stack Node.js app with SQL analytics dashboards, Genie AI conversations, and Lakebase Autoscaling (Postgres) CRUD",
   },
   {
     name: "appkit-analytics",

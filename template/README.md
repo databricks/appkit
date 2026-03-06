@@ -144,15 +144,9 @@ targets:
   default:
     workspace:
       host: https://your-workspace.cloud.databricks.com
-{{- if .plugins.analytics}}
-    variables:
-      sql_warehouse_id: your-warehouse-id
-{{- end}}
 ```
-{{- if .plugins.analytics}}
 
-Make sure to set the `sql_warehouse_id` variable to your Databricks SQL Warehouse ID.
-{{- end}}
+Make sure to replace all placeholder values in `databricks.yml` with your actual resource IDs.
 
 ### 2. Validate Bundle
 
