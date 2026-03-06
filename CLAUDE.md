@@ -408,8 +408,8 @@ This project uses conventional commits (enforced by commitlint):
 
 ## Important Context
 
-### Current Branch: improve-bundle-size
-This branch focuses on optimizing bundle size through tsdown configuration tuning.
+### Current Branch: plugin/files
+This branch implements the multi-volume files plugin architecture.
 
 ### Key Dependencies
 - `@databricks/sdk-experimental` v0.15.0+ - Databricks services SDK

@@ -13,13 +13,14 @@ For complete API documentation, see the [`Plugin`](../api/appkit/Class.Plugin.md
 Configure plugins when creating your AppKit instance:
 
 ```typescript
-import { createApp, server, analytics, genie } from "@databricks/appkit";
+import { createApp, server, analytics, genie, files } from "@databricks/appkit";
 
 const AppKit = await createApp({
   plugins: [
     server({ port: 8000 }),
     analytics(),
     genie(),
+    files({ volumes: { uploads: {}, exports: {} } }),
   ],
 });
 ```

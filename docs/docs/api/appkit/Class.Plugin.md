@@ -239,7 +239,8 @@ A proxied plugin instance that executes as the user
 
 #### Throws
 
-Error if user token is not available in request headers
+AuthenticationError if user token is not available in request headers (production only).
+  In development mode (`NODE_ENV=development`), falls back to the service principal instead of throwing.
 
 ***
 
@@ -251,6 +252,12 @@ protected execute<T>(
    options: PluginExecutionSettings, 
 userKey?: string): Promise<T | undefined>;
 ```
+
+Execute a function with the plugin's interceptor chain.
+
+All errors are caught and `undefined` is returned (production-safe).
+Route handlers should check for `undefined` and respond with an
+appropriate error status.
 
 #### Type Parameters
 
@@ -363,6 +370,24 @@ BasePlugin.getEndpoints
 
 ***
 
+### getSkipBodyParsingPaths()
+
+```ts
+getSkipBodyParsingPaths(): ReadonlySet<string>;
+```
+
+#### Returns
+
+`ReadonlySet`\<`string`\>
+
+#### Implementation of
+
+```ts
+BasePlugin.getSkipBodyParsingPaths
+```
+
+***
+
 ### injectRoutes()
 
 ```ts
@@ -403,6 +428,35 @@ protected registerEndpoint(name: string, path: string): void;
 #### Returns
 
 `void`
+
+***
+
+### resolveUserId()
+
+```ts
+protected resolveUserId(req: Request): string;
+```
+
+Resolve the effective user ID from a request.
+
+Returns the `x-forwarded-user` header when present. In development mode
+(`NODE_ENV=development`) falls back to the current context user ID so
+that callers outside an active `runInUserContext` scope still get a
+consistent value.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `req` | `Request` |
+
+#### Returns
+
+`string`
+
+#### Throws
+
+AuthenticationError in production when no user header is present.
 
 ***
 

@@ -47,6 +47,20 @@ env:
 
 This makes the warehouse ID available to your app at runtime. The `valueFrom: sql-warehouse` directive tells Databricks Apps to inject the configured warehouse ID.
 
+### Binding Unity Catalog volumes (files plugin)
+
+The files plugin uses named volumes. Each volume key maps to an environment variable `DATABRICKS_VOLUME_{KEY_UPPERCASE}`:
+
+```yaml
+env:
+  - name: DATABRICKS_VOLUME_UPLOADS
+    valueFrom: volume
+  - name: DATABRICKS_VOLUME_EXPORTS
+    valueFrom: volume
+```
+
+See the [Files plugin](./plugins/files.md) documentation for details.
+
 For advanced configuration options (authorization, networking, resource limits), see the [Databricks Apps Configuration](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/configuration) documentation.
 
 ## Environment variables
