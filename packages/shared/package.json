@@ -43,5 +43,7 @@
     "ajv-formats": "^3.0.1",
     "@clack/prompts": "^1.0.1",
     "commander": "^12.1.0"
-  }
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js"
 }

@@ -24,11 +24,11 @@ export default defineConfig({
   copy: [
     {
       from: "src/schemas/plugin-manifest.schema.json",
-      to: "dist/schemas",
+      to: "dist/schemas/plugin-manifest.schema.json",
     },
     {
       from: "src/schemas/template-plugins.schema.json",
-      to: "dist/schemas",
+      to: "dist/schemas/template-plugins.schema.json",
     },
   ],
 });

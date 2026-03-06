@@ -14,29 +14,44 @@ declare module "@databricks/appkit-ui/react" {
           endDate: SQLDateMarker;
         };
         result: Array<{
-          ;
+          /** @sqlType STRING */
+          app_name: string;
+          /** @sqlType STRING */
+          day_of_week: string;
+          /** @sqlType DECIMAL(35,2) */
+          spend: number;
         }>;
       };
     apps_list: {
         name: "apps_list";
         parameters: Record<string, never>;
         result: Array<{
-          ;
+          /** @sqlType STRING */
+          id: string;
+          /** @sqlType STRING */
+          name: string;
+          /** @sqlType STRING */
+          creator: string;
+          /** @sqlType STRING */
+          tags: string;
+          /** @sqlType DECIMAL(38,6) */
+          totalSpend: number;
+          /** @sqlType DATE */
+          createdAt: string;
         }>;
       };
     cost_recommendations: {
         name: "cost_recommendations";
         parameters: Record<string, never>;
         result: Array<{
-          ;
+          /** @sqlType INT */
+          dummy: number;
         }>;
       };
     example: {
         name: "example";
         parameters: Record<string, never>;
-        result: Array<{
-          ;
-        }>;
+        result: unknown;
       };
     spend_data: {
         name: "spend_data";
@@ -55,7 +70,12 @@ declare module "@databricks/appkit-ui/react" {
           creator: SQLStringMarker;
         };
         result: Array<{
-          ;
+          /** @sqlType STRING */
+          group_key: string;
+          /** @sqlType TIMESTAMP */
+          aggregation_period: string;
+          /** @sqlType DECIMAL(38,6) */
+          cost_usd: number;
         }>;
       };
     spend_summary: {
@@ -68,9 +88,7 @@ declare module "@databricks/appkit-ui/react" {
           /** DATE - use sql.date() */
           startDate: SQLDateMarker;
         };
-        result: Array<{
-          ;
-        }>;
+        result: unknown;
       };
     sql_helpers_test: {
         name: "sql_helpers_test";
@@ -89,7 +107,22 @@ declare module "@databricks/appkit-ui/react" {
           binaryParam: SQLStringMarker;
         };
         result: Array<{
-          ;
+          /** @sqlType STRING */
+          string_value: string;
+          /** @sqlType STRING */
+          number_value: string;
+          /** @sqlType STRING */
+          boolean_value: string;
+          /** @sqlType STRING */
+          date_value: string;
+          /** @sqlType STRING */
+          timestamp_value: string;
+          /** @sqlType BINARY */
+          binary_value: string;
+          /** @sqlType STRING */
+          binary_hex: string;
+          /** @sqlType INT */
+          binary_length: number;
         }>;
       };
     top_contributors: {
@@ -103,7 +136,10 @@ declare module "@databricks/appkit-ui/react" {
           endDate: SQLDateMarker;
         };
         result: Array<{
-          ;
+          /** @sqlType STRING */
+          app_name: string;
+          /** @sqlType DECIMAL(38,6) */
+          total_cost_usd: number;
         }>;
       };
     untagged_apps: {
