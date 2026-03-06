@@ -14,7 +14,8 @@ export default defineConfig([
     copy: [
       {
         from: "src/react/styles/globals.css",
-        to: "dist/styles.css",
+        to: "dist",
+        rename: "styles.css",
       },
     ],
     clean: false,
