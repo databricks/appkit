@@ -48,7 +48,7 @@ export {
 } from "./errors";
 // Plugin authoring
 export { Plugin, type ToPlugin, toPlugin } from "./plugin";
-export { analytics, genie, lakebase, server } from "./plugins";
+export { analytics, files, genie, lakebase, server } from "./plugins";
 // Registry types and utilities for plugin manifests
 export type {
   ConfigSchema,
@@ -75,5 +75,6 @@ export {
   SpanStatusCode,
   type TelemetryConfig,
 } from "./telemetry";
+
 // Vite plugin and type generation
 export { appKitTypesPlugin } from "./type-generator/vite-plugin";

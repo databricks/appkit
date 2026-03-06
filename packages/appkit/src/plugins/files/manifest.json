@@ -1,0 +1,27 @@
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "name": "files",
+  "displayName": "Files Plugin",
+  "description": "File operations against Databricks Volumes and Unity Catalog",
+  "resources": {
+    "required": [],
+    "optional": []
+  },
+  "config": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "timeout": {
+          "type": "number",
+          "default": 30000,
+          "description": "File operation timeout in milliseconds"
+        },
+        "maxUploadSize": {
+          "type": "number",
+          "default": 5368709120,
+          "description": "Maximum upload size in bytes. Defaults to 5 GB (Databricks Files API v2 limit)."
+        }
+      }
+    }
+  }
+}

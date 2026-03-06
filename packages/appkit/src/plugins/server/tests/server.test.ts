@@ -285,6 +285,52 @@ describe("ServerPlugin", () => {
       );
     });
 
+    test("should skip body parsing for paths declared by plugins", async () => {
+      process.env.NODE_ENV = "production";
+
+      const plugins: any = {
+        files: {
+          name: "files",
+          injectRoutes: vi.fn(),
+          getEndpoints: vi.fn().mockReturnValue({}),
+          getSkipBodyParsingPaths: vi
+            .fn()
+            .mockReturnValue(new Set(["/api/files/upload"])),
+        },
+      };
+
+      const plugin = new ServerPlugin({ autoStart: false, plugins });
+      await plugin.start();
+
+      // Get the type function passed to express.json
+      const jsonCall = vi.mocked(express.json).mock.calls[0][0] as any;
+      const typeFn = jsonCall.type;
+
+      // Should skip body parsing for the declared path
+      expect(typeFn({ url: "/api/files/upload", headers: {} })).toBe(false);
+
+      // Should skip body parsing for declared path with query string
+      expect(typeFn({ url: "/api/files/upload?path=foo", headers: {} })).toBe(
+        false,
+      );
+
+      // Should NOT skip body parsing for other routes (no hardcoded /upload check)
+      expect(
+        typeFn({
+          url: "/api/other/upload",
+          headers: { "content-type": "application/json" },
+        }),
+      ).toBe(true);
+
+      // Should still parse JSON for normal routes
+      expect(
+        typeFn({
+          url: "/api/analytics/query",
+          headers: { "content-type": "application/json" },
+        }),
+      ).toBe(true);
+    });
+
     test("extendRoutes registers plugin routes correctly", async () => {
       process.env.NODE_ENV = "production";
 

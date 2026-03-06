@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { WorkspaceClient } from "@databricks/sdk-experimental";
+import { ApiError, WorkspaceClient } from "@databricks/sdk-experimental";
 import type { CacheConfig, CacheStorage } from "shared";
 import { createLakebasePool } from "@/connectors/lakebase";
 import { AppKitError, ExecutionError, InitializationError } from "../errors";
@@ -267,7 +267,9 @@ export class CacheManager {
             .catch((error) => {
               span.recordException(error);
               span.setStatus({ code: SpanStatusCode.ERROR });
-              if (error instanceof AppKitError) {
+              // Preserve AppKit errors and Databricks API errors (with status codes)
+              // so route handlers can map them to proper HTTP responses.
+              if (error instanceof AppKitError || error instanceof ApiError) {
                 throw error;
               }
               throw ExecutionError.statementFailed(

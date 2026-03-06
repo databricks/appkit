@@ -40,6 +40,27 @@ export default defineConfig([
         from: "src/plugins/server/remote-tunnel/denied.html",
         to: "dist/plugins/server/remote-tunnel/denied.html",
       },
+      // Plugin manifest JSON files (source of truth for static analysis)
+      {
+        from: "src/plugins/analytics/manifest.json",
+        to: "dist/plugins/analytics/manifest.json",
+      },
+      {
+        from: "src/plugins/files/manifest.json",
+        to: "dist/plugins/files/manifest.json",
+      },
+      {
+        from: "src/plugins/genie/manifest.json",
+        to: "dist/plugins/genie/manifest.json",
+      },
+      {
+        from: "src/plugins/lakebase/manifest.json",
+        to: "dist/plugins/lakebase/manifest.json",
+      },
+      {
+        from: "src/plugins/server/manifest.json",
+        to: "dist/plugins/server/manifest.json",
+      },
     ],
   },
 ]);

@@ -555,6 +555,25 @@ describe("CacheManager", () => {
       expect((cache as any).inFlightRequests.has(cacheKey)).toBe(false);
     });
 
+    test("should re-throw ApiError without wrapping", async () => {
+      const { ApiError } = await import("@databricks/sdk-experimental");
+      const cache = await CacheManager.getInstance({
+        storage: createMockStorage(),
+      });
+      const apiError = new ApiError(
+        "Not Found",
+        "NOT_FOUND",
+        404,
+        undefined,
+        [],
+      );
+      const fn = vi.fn().mockRejectedValue(apiError);
+
+      await expect(cache.getOrExecute(["key"], fn, "user1")).rejects.toThrow(
+        apiError,
+      );
+    });
+
     test("should allow retry after error", async () => {
       const cache = await CacheManager.getInstance({
         storage: createMockStorage(),

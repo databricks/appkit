@@ -15,6 +15,22 @@ import { TelemetryManager } from "../../telemetry";
 import type { InterceptorContext } from "../interceptors/types";
 import { Plugin } from "../plugin";
 
+const { MockApiError } = vi.hoisted(() => {
+  class MockApiError extends Error {
+    statusCode: number;
+    constructor(message: string, statusCode: number) {
+      super(message);
+      this.name = "ApiError";
+      this.statusCode = statusCode;
+    }
+  }
+  return { MockApiError };
+});
+
+vi.mock("@databricks/sdk-experimental", () => ({
+  ApiError: MockApiError,
+}));
+
 // Mock all dependencies
 vi.mock("../../app");
 vi.mock("../../cache", () => ({
@@ -316,7 +332,7 @@ describe("Plugin", () => {
       expect(mockFn).toHaveBeenCalledTimes(1);
     });
 
-    test("should return undefined on function error (production-safe)", async () => {
+    test("should return undefined on non-API error (production-safe)", async () => {
       const plugin = new TestPlugin(config);
       const mockFn = vi.fn().mockRejectedValue(new Error("Test error"));
 
@@ -327,6 +343,42 @@ describe("Plugin", () => {
       const result = await (plugin as any).execute(mockFn, options, false);
 
       expect(result).toBeUndefined();
+    });
+
+    test("should rethrow ApiError so route handlers can map to HTTP status", async () => {
+      const plugin = new TestPlugin(config);
+      const apiError = new MockApiError("Not found", 404);
+      const mockFn = vi.fn().mockRejectedValue(apiError);
+
+      const options = { default: {} };
+
+      await expect(
+        (plugin as any).execute(mockFn, options, false),
+      ).rejects.toThrow(apiError);
+    });
+
+    test("should rethrow ApiError 401", async () => {
+      const plugin = new TestPlugin(config);
+      const apiError = new MockApiError("Unauthorized", 401);
+      const mockFn = vi.fn().mockRejectedValue(apiError);
+
+      const options = { default: {} };
+
+      await expect(
+        (plugin as any).execute(mockFn, options, false),
+      ).rejects.toThrow(apiError);
+    });
+
+    test("should rethrow ApiError 403", async () => {
+      const plugin = new TestPlugin(config);
+      const apiError = new MockApiError("Forbidden", 403);
+      const mockFn = vi.fn().mockRejectedValue(apiError);
+
+      const options = { default: {} };
+
+      await expect(
+        (plugin as any).execute(mockFn, options, false),
+      ).rejects.toThrow(apiError);
     });
   });
 
@@ -549,6 +601,50 @@ describe("Plugin", () => {
         expect.any(Function),
         context,
       );
+    });
+  });
+
+  describe("getSkipBodyParsingPaths", () => {
+    test("should return empty set by default", () => {
+      const plugin = new TestPlugin(config);
+
+      expect(plugin.getSkipBodyParsingPaths().size).toBe(0);
+    });
+
+    test("should include paths from routes with skipBodyParsing: true", () => {
+      const plugin = new TestPlugin({ ...config, name: "test" });
+      const mockRouter = {
+        post: vi.fn(),
+      } as any;
+
+      (plugin as any).route(mockRouter, {
+        name: "upload",
+        method: "post",
+        path: "/upload",
+        skipBodyParsing: true,
+        handler: vi.fn(),
+      });
+
+      const paths = plugin.getSkipBodyParsingPaths();
+      expect(paths.has("/api/test/upload")).toBe(true);
+      expect(paths.size).toBe(1);
+    });
+
+    test("should not include paths from routes without skipBodyParsing", () => {
+      const plugin = new TestPlugin({ ...config, name: "test" });
+      const mockRouter = {
+        post: vi.fn(),
+      } as any;
+
+      (plugin as any).route(mockRouter, {
+        name: "create",
+        method: "post",
+        path: "/create",
+        handler: vi.fn(),
+      });
+
+      const paths = plugin.getSkipBodyParsingPaths();
+      expect(paths.size).toBe(0);
     });
   });
 

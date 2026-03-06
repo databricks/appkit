@@ -1,3 +1,4 @@
+import { ApiError } from "@databricks/sdk-experimental";
 import type express from "express";
 import type {
   BasePlugin,
@@ -51,6 +52,7 @@ const EXCLUDED_FROM_PROXY = new Set([
   "shutdown",
   "injectRoutes",
   "getEndpoints",
+  "getSkipBodyParsingPaths",
   "abortActiveOperations",
   // asUser itself - prevent chaining like .asUser().asUser()
   "asUser",
@@ -155,6 +157,9 @@ export abstract class Plugin<
   /** Registered endpoints for this plugin */
   private registeredEndpoints: PluginEndpointMap = {};
 
+  /** Paths that opt out of JSON body parsing (e.g. file upload routes) */
+  private skipBodyParsingPaths: Set<string> = new Set();
+
   /**
    * Plugin initialization phase.
    * - 'core': Initialized first (e.g., config plugins)
@@ -192,6 +197,10 @@ export abstract class Plugin<
     return this.registeredEndpoints;
   }
 
+  getSkipBodyParsingPaths(): ReadonlySet<string> {
+    return this.skipBodyParsingPaths;
+  }
+
   abortActiveOperations(): void {
     this.streamManager.abortAll();
   }
@@ -225,17 +234,37 @@ export abstract class Plugin<
   }
 
   /**
+   * Resolve the effective user ID from a request.
+   *
+   * Returns the `x-forwarded-user` header when present. In development mode
+   * (`NODE_ENV=development`) falls back to the current context user ID so
+   * that callers outside an active `runInUserContext` scope still get a
+   * consistent value.
+   *
+   * @throws AuthenticationError in production when no user header is present.
+   */
+  protected resolveUserId(req: express.Request): string {
+    const userId = req.header("x-forwarded-user");
+    if (userId) return userId;
+    if (process.env.NODE_ENV === "development") return getCurrentUserId();
+    throw AuthenticationError.missingToken(
+      "Missing x-forwarded-user header. Cannot resolve user ID.",
+    );
+  }
+
+  /**
    * Execute operations using the user's identity from the request.
    * Returns a proxy of this plugin where all method calls execute
    * with the user's Databricks credentials instead of the service principal.
    *
    * @param req - The Express request containing the user token in headers
    * @returns A proxied plugin instance that executes as the user
-   * @throws Error if user token is not available in request headers
+   * @throws AuthenticationError if user token is not available in request headers (production only).
+   *   In development mode (`NODE_ENV=development`), falls back to the service principal instead of throwing.
    */
   asUser(req: express.Request): this {
-    const token = req.headers["x-forwarded-access-token"] as string;
-    const userId = req.headers["x-forwarded-user"] as string;
+    const token = req.header("x-forwarded-access-token");
+    const userId = req.header("x-forwarded-user");
     const isDev = process.env.NODE_ENV === "development";
 
     // In local development, fall back to service principal
@@ -354,7 +383,13 @@ export abstract class Plugin<
     await this.streamManager.stream(res, asyncWrapperFn, streamConfig);
   }
 
-  // single sync execution with interceptors
+  /**
+   * Execute a function with the plugin's interceptor chain.
+   *
+   * All errors are caught and `undefined` is returned (production-safe).
+   * Route handlers should check for `undefined` and respond with an
+   * appropriate error status.
+   */
   protected async execute<T>(
     fn: (signal?: AbortSignal) => Promise<T>,
     options: PluginExecutionSettings,
@@ -374,8 +409,12 @@ export abstract class Plugin<
 
     try {
       return await this._executeWithInterceptors(fn, interceptors, context);
-    } catch (_error) {
-      // production-safe, don't crash sdk
+    } catch (error) {
+      // Rethrow known errors so route handlers can map them to proper HTTP responses
+      if (error instanceof ApiError || error instanceof AuthenticationError) {
+        throw error;
+      }
+      // production-safe: swallow unknown errors, don't crash the sdk
       return undefined;
     }
   }
@@ -392,7 +431,12 @@ export abstract class Plugin<
 
     router[method](path, handler);
 
-    this.registerEndpoint(name, `/api/${this.name}${path}`);
+    const fullPath = `/api/${this.name}${path}`;
+    this.registerEndpoint(name, fullPath);
+
+    if (config.skipBodyParsing) {
+      this.skipBodyParsingPaths.add(fullPath);
+    }
   }
 
   // build execution options by merging defaults, plugin config, and user overrides

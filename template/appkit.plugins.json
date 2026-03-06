@@ -26,6 +26,38 @@
         "optional": []
       }
     },
+    "files": {
+      "name": "files",
+      "displayName": "Files Plugin",
+      "description": "File operations against Databricks Volumes and Unity Catalog",
+      "package": "@databricks/appkit",
+      "resources": {
+        "required": [
+          {
+            "type": "volume",
+            "alias": "Volume",
+            "resourceKey": "volume",
+            "description": "Databricks Volume for file storage and operations",
+            "permission": "WRITE_VOLUME",
+            "fields": {
+              "catalog": {
+                "env": "DATABRICKS_VOLUME_CATALOG",
+                "description": "Unity Catalog name"
+              },
+              "schema": {
+                "env": "DATABRICKS_VOLUME_SCHEMA",
+                "description": "Schema name"
+              },
+              "name": {
+                "env": "DATABRICKS_VOLUME_NAME",
+                "description": "Volume name"
+              }
+            }
+          }
+        ],
+        "optional": []
+      }
+    },
     "genie": {
       "name": "genie",
       "displayName": "Genie Plugin",
