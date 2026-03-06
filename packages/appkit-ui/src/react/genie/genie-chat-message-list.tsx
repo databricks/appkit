@@ -30,40 +30,24 @@ function formatStatus(status: string): string {
   return STATUS_LABELS[status] ?? status.replace(/_/g, " ").toLowerCase();
 }
 
-function StreamingIndicator({ messages }: { messages: GenieMessageItem[] }) {
-  const last = messages[messages.length - 1];
-  if (last?.role === "assistant" && last.id === "") {
-    return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground px-11">
-        <Spinner className="h-3 w-3" />
-        <span>{formatStatus(last.status)}</span>
-      </div>
-    );
-  }
-  return null;
-}
-
 function getViewport(scrollRef: React.RefObject<HTMLDivElement | null>) {
   return scrollRef.current?.querySelector<HTMLElement>(
     '[data-slot="scroll-area-viewport"]',
   );
 }
 
-/** Scrollable message list that renders Genie chat messages with auto-scroll, skeleton loaders, and a streaming indicator. */
-export function GenieChatMessageList({
-  messages,
-  status,
-  className,
-  hasOlderMessages = false,
-  onLoadOlder,
-}: GenieChatMessageListProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
+/**
+ * Manages scroll position: scrolls to bottom on append/initial load,
+ * preserves position when older messages are prepended.
+ */
+function useScrollManagement(
+  scrollRef: React.RefObject<HTMLDivElement | null>,
+  messages: GenieMessageItem[],
+  status: GenieChatStatus,
+) {
   const prevFirstMessageIdRef = useRef<string | null>(null);
   const prevScrollHeightRef = useRef(0);
 
-  // Handle scroll position after messages change.
-  // prevScrollHeightRef holds the scrollHeight from the *previous* render's
-  // effect, so on a prepend we can compute how much content was added above.
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional triggers for scroll management
   useLayoutEffect(() => {
     const viewport = getViewport(scrollRef);
@@ -75,25 +59,29 @@ export function GenieChatMessageList({
       firstMessageId !== prevFirstMessageIdRef.current;
 
     if (wasPrepend && prevScrollHeightRef.current > 0) {
-      // Older messages were prepended — preserve scroll position
       const delta = viewport.scrollHeight - prevScrollHeightRef.current;
       viewport.scrollTop += delta;
     } else {
-      // New messages appended or initial load — scroll to bottom
       viewport.scrollTop = viewport.scrollHeight;
     }
 
-    // Update refs *after* scroll adjustment so they're correct for the next render
     prevFirstMessageIdRef.current = firstMessageId;
     prevScrollHeightRef.current = viewport.scrollHeight;
   }, [messages.length, status]);
+}
 
-  // Auto-trigger loading older messages when scrolling to the top
-  const sentinelRef = useRef<HTMLDivElement>(null);
+/**
+ * Observes a sentinel element at the top of the scroll area and triggers
+ * `onLoadOlder` when the user scrolls to the top (only if content overflows).
+ */
+function useLoadOlderOnScroll(
+  scrollRef: React.RefObject<HTMLDivElement | null>,
+  sentinelRef: React.RefObject<HTMLDivElement | null>,
+  shouldObserve: boolean,
+  onLoadOlder?: () => void,
+) {
   const onLoadOlderRef = useRef(onLoadOlder);
   onLoadOlderRef.current = onLoadOlder;
-
-  const shouldObserve = hasOlderMessages && status !== "loading-older";
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -102,8 +90,6 @@ export function GenieChatMessageList({
 
     const observer = new IntersectionObserver(
       (entries) => {
-        // Only trigger when the user has actually scrolled near the top,
-        // not when content is too short to fill the viewport.
         const isScrollable = viewport.scrollHeight > viewport.clientHeight;
         if (entries[0]?.isIntersecting && isScrollable) {
           onLoadOlderRef.current?.();
@@ -114,12 +100,37 @@ export function GenieChatMessageList({
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [shouldObserve]);
+  }, [scrollRef, sentinelRef, shouldObserve]);
+}
+
+/** Scrollable message list that renders Genie chat messages with auto-scroll, skeleton loaders, and a streaming indicator. */
+export function GenieChatMessageList({
+  messages,
+  status,
+  className,
+  hasOlderMessages = false,
+  onLoadOlder,
+}: GenieChatMessageListProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  useScrollManagement(scrollRef, messages, status);
+  useLoadOlderOnScroll(
+    scrollRef,
+    sentinelRef,
+    hasOlderMessages && status !== "loading-older",
+    onLoadOlder,
+  );
+
+  const lastMessage = messages[messages.length - 1];
+  const showStreamingIndicator =
+    status === "streaming" &&
+    lastMessage?.role === "assistant" &&
+    lastMessage.id === "";
 
   return (
     <ScrollArea ref={scrollRef} className={cn("flex-1 min-h-0 p-4", className)}>
       <div className="flex flex-col gap-4">
-        {/* Sentinel element for auto-triggering load when scrolled to top */}
         {hasOlderMessages && <div ref={sentinelRef} className="h-px" />}
 
         {status === "loading-older" && (
@@ -146,8 +157,11 @@ export function GenieChatMessageList({
           return <GenieChatMessage key={msg.id} message={msg} />;
         })}
 
-        {status === "streaming" && messages.length > 0 && (
-          <StreamingIndicator messages={messages} />
+        {showStreamingIndicator && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground px-11">
+            <Spinner className="h-3 w-3" />
+            <span>{formatStatus(lastMessage.status)}</span>
+          </div>
         )}
 
         {messages.length === 0 && status === "idle" && (
