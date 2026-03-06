@@ -169,7 +169,7 @@ Write operations (`upload`, `mkdir`, `delete`) automatically invalidate the cach
 
 ## Programmatic API
 
-The `exports()` API is a callable that accepts a volume key and returns a `VolumeAPI` with per-volume `asUser`. All methods require a user context.
+The `exports()` API is a callable that accepts a volume key and returns a `VolumeHandle` with `asUser(req)`. Calling `asUser()` returns the full `VolumeAPI`. All methods require a user context.
 
 ```ts
 // Access a volume and scope to user
@@ -187,7 +187,7 @@ await vol.upload("report.csv", data);
 | Method            | Signature                                                                                          | Returns            |
 | ----------------- | -------------------------------------------------------------------------------------------------- | ------------------ |
 | `list`            | `(directoryPath?: string)`                                                                         | `DirectoryEntry[]` |
-| `read`            | `(filePath: string)`                                                                               | `string`           |
+| `read`            | `(filePath: string, options?: { maxSize?: number })`                                               | `string`           |
 | `download`        | `(filePath: string)`                                                                               | `DownloadResponse` |
 | `exists`          | `(filePath: string)`                                                                               | `boolean`          |
 | `metadata`        | `(filePath: string)`                                                                               | `FileMetadata`     |
@@ -195,6 +195,8 @@ await vol.upload("report.csv", data);
 | `createDirectory` | `(directoryPath: string)`                                                                          | `void`             |
 | `delete`          | `(filePath: string)`                                                                               | `void`             |
 | `preview`         | `(filePath: string)`                                                                               | `FilePreview`      |
+
+> `read()` loads the entire file into memory as a string. Files larger than 10 MB (default) are rejected — use `download()` for large files, or pass `{ maxSize: <bytes> }` to override.
 
 ## Path resolution
 
@@ -241,7 +243,7 @@ interface VolumeConfig {
 
 interface VolumeAPI {
   list(directoryPath?: string): Promise<DirectoryEntry[]>;
-  read(filePath: string): Promise<string>;
+  read(filePath: string, options?: { maxSize?: number }): Promise<string>;
   download(filePath: string): Promise<DownloadResponse>;
   exists(filePath: string): Promise<boolean>;
   metadata(filePath: string): Promise<FileMetadata>;
@@ -266,7 +268,7 @@ Built-in extensions: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.bmp`, `
 
 Routes use `this.asUser(req)` so operations execute with the requesting user's Databricks credentials (on-behalf-of / OBO). The `/volumes` route is the only exception since it only reads plugin config.
 
-Calling any programmatic method without a user context throws an `AuthenticationError`. In development mode (`NODE_ENV=development`), a warning is logged and the call proceeds using the service principal.
+The programmatic API enforces user context at the **type level**: `appkit.files("volumeKey")` returns a `VolumeHandle` that only exposes `asUser(req)`. Volume methods (`list`, `read`, etc.) are inaccessible without first calling `asUser()`. At runtime, route handlers additionally call `requireUserContext()` which throws `AuthenticationError` in production if no user token is present. In development mode (`NODE_ENV=development`), a warning is logged and the call proceeds using the service principal.
 
 ## Resource requirements
 
@@ -324,3 +326,42 @@ appkit.files.asUser(req).list()
 // After
 appkit.files("data").asUser(req).list()
 ```
+
+## Frontend components
+
+The `@databricks/appkit-ui` package provides ready-to-use React components for building a file browser:
+
+### FileBrowser
+
+A composable set of components for browsing, previewing, and managing files in a Unity Catalog Volume:
+
+```tsx
+import {
+  DirectoryList,
+  FileBreadcrumb,
+  FilePreviewPanel,
+} from "@databricks/appkit-ui/react";
+
+function FileBrowserPage() {
+  return (
+    <div style={{ display: "flex", gap: 16 }}>
+      <div style={{ flex: 1 }}>
+        <FileBreadcrumb
+          rootLabel="uploads"
+          segments={["data"]}
+          onNavigateToRoot={() => {}}
+          onNavigateToSegment={() => {}}
+        />
+        <DirectoryList
+          entries={[]}
+          onEntryClick={() => {}}
+          resolveEntryPath={(entry) => entry.path ?? ""}
+        />
+      </div>
+      <FilePreviewPanel selectedFile={null} preview={null} />
+    </div>
+  );
+}
+```
+
+See the [FileBrowser](../api/appkit-ui/files/FileBrowser.mdx) component reference for the full props API.

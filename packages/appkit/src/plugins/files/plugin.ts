@@ -12,7 +12,7 @@ import { getWorkspaceClient, isInUserContext } from "../../context";
 import { AuthenticationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
-import type { ResourceRequirement } from "../../registry";
+import type { PluginManifest, ResourceRequirement } from "../../registry";
 import { ResourceType } from "../../registry";
 import {
   FILES_DOWNLOAD_DEFAULTS,
@@ -21,7 +21,7 @@ import {
   FILES_WRITE_DEFAULTS,
 } from "./defaults";
 import { parentDirectory, sanitizeFilename } from "./helpers";
-import { filesManifest } from "./manifest";
+import manifest from "./manifest.json";
 import type {
   DownloadResponse,
   FilesExport,
@@ -37,7 +37,7 @@ export class FilesPlugin extends Plugin {
   name = "files";
 
   /** Plugin manifest declaring metadata and resource requirements. */
-  static manifest = filesManifest;
+  static manifest = manifest as PluginManifest;
   protected static description = "Files plugin for Databricks file operations";
   protected declare config: IFilesConfig;
 
