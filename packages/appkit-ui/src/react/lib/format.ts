@@ -54,5 +54,23 @@ export function formatFieldLabel(field: string): string {
     .trim();
 }
 
+/**
+ * Formats byte values into human-readable file sizes
+ * @param bytes - The file size in bytes
+ * @returns Formatted string (e.g., "1.5 KB", "3.2 MB")
+ * @example
+ * formatFileSize(512) // "512 B"
+ * formatFileSize(1536) // "1.5 KB"
+ * formatFileSize(2621440) // "2.5 MB"
+ */
+export function formatFileSize(bytes: number | undefined): string {
+  if (bytes === undefined || bytes === null) return "Unknown";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024)
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
 /** Regex for validating field names */
 export const SAFE_KEY_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
