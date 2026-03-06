@@ -1,0 +1,32 @@
+# FileBreadcrumb
+
+Path-aware breadcrumb navigation built on top of Breadcrumb primitives
+
+
+## FileBreadcrumb
+
+Path-aware breadcrumb navigation built on top of Breadcrumb primitives
+
+
+**Source:** [`packages/appkit-ui/src/react/file-browser/file-breadcrumb.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/file-browser/file-breadcrumb.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `rootLabel` | `string` | ✓ | - | Label for the root breadcrumb item |
+| `segments` | `string[]` | ✓ | - | Path segments after the root |
+| `onNavigateToRoot` | `() => void` | ✓ | - | Called when the root breadcrumb is clicked |
+| `onNavigateToSegment` | `(index: number) => void` | ✓ | - | Called when a segment breadcrumb is clicked (receives segment index) |
+
+
+
+### Usage
+
+```tsx
+import { FileBreadcrumb } from '@databricks/appkit-ui';
+
+<FileBreadcrumb /* props */ />
+```
+

@@ -1,0 +1,41 @@
+# DirectoryList
+
+Card-wrapped directory listing with loading, error, and empty states
+
+
+## DirectoryList
+
+Card-wrapped directory listing with loading, error, and empty states
+
+
+**Source:** [`packages/appkit-ui/src/react/file-browser/directory-list.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/file-browser/directory-list.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `entries` | `DirectoryEntry[]` | ✓ | - | Directory entries to display |
+| `loading` | `boolean` |  | - | Whether the directory is currently loading |
+| `error` | `string \| null` |  | - | Error message to display |
+| `onEntryClick` | `(entry: DirectoryEntry) => void` | ✓ | - | Called when an entry is clicked |
+| `onNavigateToParent` | `(() => void)` |  | - | Called when the back/parent button is clicked |
+| `onRetry` | `(() => void)` |  | - | Called when the retry button is clicked |
+| `isAtRoot` | `boolean` |  | - | Whether the user is at the root directory (hides back button) |
+| `selectedPath` | `string \| null` |  | - | Currently selected file path for highlighting |
+| `resolveEntryPath` | `(entry: DirectoryEntry) => string` | ✓ | - | Resolves a DirectoryEntry to its full path |
+| `headerContent` | `ReactNode` |  | - | Content rendered between the back button and the entry list (e.g., NewFolderInput) |
+| `hasCurrentPath` | `boolean` |  | - | Whether a current path is set (affects empty state message) |
+| `formatSize` | `((bytes: number) => string)` |  | - | Custom file size formatter |
+| `labels` | `Pick<FileBrowserLabels, "backToParent" \| "emptyDirectory" \| "noVolumeConfigured" \| "retry">` |  | - | Customizable labels |
+
+
+
+### Usage
+
+```tsx
+import { DirectoryList } from '@databricks/appkit-ui';
+
+<DirectoryList /* props */ />
+```
+

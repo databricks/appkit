@@ -1,0 +1,35 @@
+# NewFolderInput
+
+Inline folder-name input with create/cancel actions
+
+
+## NewFolderInput
+
+Inline folder-name input with create/cancel actions
+
+
+**Source:** [`packages/appkit-ui/src/react/file-browser/new-folder-input.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/file-browser/new-folder-input.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `value` | `string` | ✓ | - | Current folder name value |
+| `onChange` | `(value: string) => void` | ✓ | - | Called when folder name changes |
+| `onCreate` | `() => void` | ✓ | - | Called when the user confirms creation |
+| `onCancel` | `() => void` | ✓ | - | Called when the user cancels |
+| `creating` | `boolean` |  | - | Whether folder creation is in progress |
+| `autoFocus` | `boolean` |  | `true` | Auto-focus the input on mount |
+| `labels` | `Pick<FileBrowserLabels, "create" \| "folderNamePlaceholder">` |  | - | Customizable labels |
+
+
+
+### Usage
+
+```tsx
+import { NewFolderInput } from '@databricks/appkit-ui';
+
+<NewFolderInput /* props */ />
+```
+

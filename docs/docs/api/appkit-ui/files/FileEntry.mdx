@@ -1,0 +1,32 @@
+# FileEntry
+
+Single file or directory row with icon, name, size, and selection state
+
+
+## FileEntry
+
+Single file or directory row with icon, name, size, and selection state
+
+
+**Source:** [`packages/appkit-ui/src/react/file-browser/file-entry.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/file-browser/file-entry.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `entry` | `DirectoryEntry` | ✓ | - | The directory entry to render |
+| `entryPath` | `string` | ✓ | - | Resolved full path for this entry |
+| `isSelected` | `boolean` |  | - | Whether this entry is currently selected |
+| `formatSize` | `((bytes: number) => string)` |  | - | Custom file size formatter (defaults to formatFileSize) |
+
+
+
+### Usage
+
+```tsx
+import { FileEntry } from '@databricks/appkit-ui';
+
+<FileEntry /* props */ />
+```
+

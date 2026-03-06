@@ -13,11 +13,14 @@ const TABLE_DIR = "packages/appkit-ui/src/react/table";
 const GENIE_DIR = "packages/appkit-ui/src/react/genie";
 const DOCS_OUTPUT_DIR = "docs/docs/api/appkit-ui";
 
+const FILE_BROWSER_DIR = "packages/appkit-ui/src/react/file-browser";
+
 const SOURCE_DIRS = [
   { name: "ui", path: COMPONENTS_DIR },
   { name: "charts", path: CHARTS_DIR },
   { name: "table", path: TABLE_DIR },
   { name: "genie", path: GENIE_DIR },
+  { name: "file-browser", path: FILE_BROWSER_DIR },
 ] as const;
 
 const FILE_EXTENSIONS = {
@@ -39,6 +42,7 @@ const PATH_PATTERNS = {
   CHARTS_DIR: "src/react/charts/",
   TABLE_DIR: "src/react/table/",
   GENIE_DIR: "src/react/genie/",
+  FILE_BROWSER_DIR: "src/react/file-browser/",
   DATA_TABLE_FILE: "data-table.tsx",
   REACT_TYPES: "@types/react",
 } as const;
@@ -47,6 +51,7 @@ const OUTPUT_SUBDIRS = {
   DATA: "data",
   UI: "ui",
   GENIE: "genie",
+  FILES: "files",
   EXAMPLES: "examples",
 } as const;
 
@@ -95,7 +100,7 @@ function stripDocSuffix(name: string): string {
     : name;
 }
 
-type ComponentCategory = "chart" | "table" | "ui" | "genie";
+type ComponentCategory = "chart" | "table" | "ui" | "genie" | "file-browser";
 
 interface ComponentInfo {
   category: ComponentCategory;
@@ -122,6 +127,10 @@ function categorizeComponent(component: ComponentDoc): ComponentInfo {
 
   if (relativePath.includes(PATH_PATTERNS.GENIE_DIR)) {
     return { category: "genie", subdir: OUTPUT_SUBDIRS.GENIE };
+  }
+
+  if (relativePath.includes(PATH_PATTERNS.FILE_BROWSER_DIR)) {
+    return { category: "file-browser", subdir: OUTPUT_SUBDIRS.FILES };
   }
 
   return { category: "ui", subdir: OUTPUT_SUBDIRS.UI };
@@ -312,6 +321,18 @@ function buildExampleInfo(component: ComponentDoc): ExampleInfo | undefined {
       : undefined;
   }
 
+  // File-browser components — examples next to source files
+  if (info.category === "file-browser") {
+    const sourceDir = path.dirname(filePath);
+    const examplePath = path.join(
+      sourceDir,
+      `${baseName}${FILE_EXTENSIONS.EXAMPLE}`,
+    );
+    return fs.existsSync(examplePath)
+      ? { name: baseName, path: examplePath }
+      : undefined;
+  }
+
   // Genie / Multi-Genie / Chat components — examples next to source files
   if (info.category === "genie") {
     const sourceDir = path.dirname(filePath);
@@ -349,7 +370,11 @@ ${buildComponentDetails(component, {
   // Generate example section based on component type
   let exampleSection = "";
   if (example) {
-    if (subdir === OUTPUT_SUBDIRS.DATA || subdir === OUTPUT_SUBDIRS.GENIE) {
+    if (
+      subdir === OUTPUT_SUBDIRS.DATA ||
+      subdir === OUTPUT_SUBDIRS.GENIE ||
+      subdir === OUTPUT_SUBDIRS.FILES
+    ) {
       // For data components: show code only (no interactive preview)
       const sourceCode = fs.readFileSync(example.path, MARKDOWN.FILE_ENCODING);
       exampleSection = `
@@ -551,6 +576,14 @@ function main() {
       }
     }
 
+    // Exclude non-component files from file-browser directory
+    if (info.category === "file-browser") {
+      const basename = path.basename(filePath);
+      if (basename === "types.ts" || basename === "index.ts") {
+        return false;
+      }
+    }
+
     return (
       Boolean(displayName) &&
       !excludeList.includes(displayName) &&
@@ -634,9 +667,11 @@ function main() {
   const dataOutputDir = path.join(outputDir, OUTPUT_SUBDIRS.DATA);
   const uiOutputDir = path.join(outputDir, OUTPUT_SUBDIRS.UI);
   const genieOutputDir = path.join(outputDir, OUTPUT_SUBDIRS.GENIE);
+  const filesOutputDir = path.join(outputDir, OUTPUT_SUBDIRS.FILES);
   fs.mkdirSync(dataOutputDir, { recursive: true });
   fs.mkdirSync(uiOutputDir, { recursive: true });
   fs.mkdirSync(genieOutputDir, { recursive: true });
+  fs.mkdirSync(filesOutputDir, { recursive: true });
 
   // Create _category_.json files for proper sidebar labels
   fs.writeFileSync(
@@ -668,7 +703,19 @@ function main() {
     `${JSON.stringify(
       {
         label: "Genie components",
-        position: 4,
+        position: 5,
+      },
+      null,
+      2,
+    )}\n`,
+    MARKDOWN.FILE_ENCODING,
+  );
+  fs.writeFileSync(
+    path.join(filesOutputDir, FILE_EXTENSIONS.CATEGORY_CONFIG),
+    `${JSON.stringify(
+      {
+        label: "Files (UC) components",
+        position: 6,
       },
       null,
       2,

@@ -364,4 +364,4 @@ function FileBrowserPage() {
 }
 ```
 
-See the [FileBrowser](../api/appkit-ui/files/FileBrowser.mdx) component reference for the full props API.
+See the [Files (UC) components](../api/appkit-ui/files/DirectoryList) reference for the full props API.
