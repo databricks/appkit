@@ -73,13 +73,14 @@ function useScrollManagement(
 /**
  * Observes a sentinel element at the top of the scroll area and triggers
  * `onLoadOlder` when the user scrolls to the top (only if content overflows).
+ * Returns a ref to attach to the sentinel element.
  */
 function useLoadOlderOnScroll(
   scrollRef: React.RefObject<HTMLDivElement | null>,
-  sentinelRef: React.RefObject<HTMLDivElement | null>,
   shouldObserve: boolean,
   onLoadOlder?: () => void,
 ) {
+  const sentinelRef = useRef<HTMLDivElement>(null);
   const onLoadOlderRef = useRef(onLoadOlder);
   onLoadOlderRef.current = onLoadOlder;
 
@@ -100,7 +101,9 @@ function useLoadOlderOnScroll(
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [scrollRef, sentinelRef, shouldObserve]);
+  }, [scrollRef, shouldObserve]);
+
+  return sentinelRef;
 }
 
 /** Scrollable message list that renders Genie chat messages with auto-scroll, skeleton loaders, and a streaming indicator. */
@@ -112,12 +115,10 @@ export function GenieChatMessageList({
   onLoadOlder,
 }: GenieChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const sentinelRef = useRef<HTMLDivElement>(null);
 
   useScrollManagement(scrollRef, messages, status);
-  useLoadOlderOnScroll(
+  const sentinelRef = useLoadOlderOnScroll(
     scrollRef,
-    sentinelRef,
     hasOlderMessages && status !== "loading-older",
     onLoadOlder,
   );
@@ -150,12 +151,13 @@ export function GenieChatMessageList({
           </div>
         )}
 
-        {messages.map((msg) => {
-          if (msg.role === "assistant" && msg.id === "" && !msg.content) {
-            return null;
-          }
-          return <GenieChatMessage key={msg.id} message={msg} />;
-        })}
+        {messages
+          .filter(
+            (msg) => msg.role !== "assistant" || msg.id !== "" || msg.content,
+          )
+          .map((msg) => (
+            <GenieChatMessage key={msg.id} message={msg} />
+          ))}
 
         {showStreamingIndicator && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground px-11">
