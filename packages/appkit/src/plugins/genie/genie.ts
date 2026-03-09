@@ -95,7 +95,9 @@ export class GeniePlugin extends Plugin {
     );
 
     const timeout = this.config.timeout ?? 120_000;
-    const requestId = (req.query.requestId as string) || randomUUID();
+    const requestId =
+      (typeof req.query.requestId === "string" && req.query.requestId) ||
+      randomUUID();
 
     const streamSettings: StreamExecutionSettings = {
       ...genieStreamDefaults,
