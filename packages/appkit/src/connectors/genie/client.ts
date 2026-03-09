@@ -58,14 +58,14 @@ function classifyGenieError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
 
   if (message.includes("RESOURCE_DOES_NOT_EXIST")) {
-    return "You don't have access to this Genie Space. Please contact your workspace administrator to request access.";
+    return "You don't have access to this Genie Space.";
   }
 
   if (
     message.includes("failed to reach COMPLETED state") &&
     message.includes("FAILED")
   ) {
-    return "Your question could not be answered. You may not have access to the underlying data tables. Please verify your table permissions.";
+    return "You may not have access to the data tables. Please verify your table permissions.";
   }
 
   return message || "Genie request failed";

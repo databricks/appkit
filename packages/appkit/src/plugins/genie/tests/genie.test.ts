@@ -950,8 +950,9 @@ describe("Genie Plugin", () => {
       const writeCalls = mockRes.write.mock.calls.map((call: any[]) => call[0]);
       const allWritten = writeCalls.join("");
 
-      expect(allWritten).toContain("You don't have access to this Genie Space");
-      expect(allWritten).toContain("contact your workspace administrator");
+      expect(allWritten).toContain(
+        "You don't have access to this Genie Space.",
+      );
       expect(mockRes.end).toHaveBeenCalled();
     });
 
@@ -983,8 +984,9 @@ describe("Genie Plugin", () => {
       const writeCalls = mockRes.write.mock.calls.map((call: any[]) => call[0]);
       const allWritten = writeCalls.join("");
 
-      expect(allWritten).toContain("Your question could not be answered");
-      expect(allWritten).toContain("table permissions");
+      expect(allWritten).toContain(
+        "You may not have access to the data tables. Please verify your table permissions.",
+      );
       expect(mockRes.end).toHaveBeenCalled();
     });
 
@@ -1019,7 +1021,9 @@ describe("Genie Plugin", () => {
       const writeCalls = mockRes.write.mock.calls.map((call: any[]) => call[0]);
       const allWritten = writeCalls.join("");
 
-      expect(allWritten).toContain("You don't have access to this Genie Space");
+      expect(allWritten).toContain(
+        "You don't have access to this Genie Space.",
+      );
       expect(mockRes.end).toHaveBeenCalled();
     });
   });
