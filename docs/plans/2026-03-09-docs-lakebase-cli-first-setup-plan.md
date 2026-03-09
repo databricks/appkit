@@ -70,17 +70,17 @@ psql ... -c "SELECT rolname FROM pg_roles WHERE rolname = '${SP_CLIENT_ID}'"
 
 ## Acceptance Criteria
 
-- [ ] Single `sh` fenced code block replaces all 6 setup steps
-- [ ] Shell variables thread all values (`PROJECT_ID`, `BRANCH_ID`, `PGHOST`, `PGDATABASE`, `LAKEBASE_ENDPOINT`, `APP_NAME`, `SP_CLIENT_ID`, `PGPASSWORD`, `PGSSLMODE`)
-- [ ] Inline `#` comments explain what each section does
-- [ ] Prerequisites listed before the script (Databricks CLI, `jq`, `psql`)
-- [ ] All 5 screenshots removed (files deleted)
-- [ ] `:::info` admonition updated
-- [ ] Non-setup sections (Basic usage, Env vars, Pool access, Config) unchanged
-- [ ] Brief text before script explains where UI values come from (project URL pattern, Connect dialog)
-- [ ] Verification step uses `psql` query instead of UI tab check
-- [ ] `PGSSLMODE=require` included in the script
-- [ ] Doc stays `.md` (no MDX imports needed)
+- [x] Single `sh` fenced code block replaces all 6 setup steps
+- [x] Shell variables thread all values (`PROJECT_ID`, `BRANCH_ID`, `PGHOST`, `PGDATABASE`, `LAKEBASE_ENDPOINT`, `APP_NAME`, `SP_CLIENT_ID`, `PGPASSWORD`, `PGSSLMODE`)
+- [x] Inline `#` comments explain what each section does
+- [x] Prerequisites listed before the script (Databricks CLI, `jq`, `psql`)
+- [x] All 5 screenshots removed (files deleted)
+- [x] `:::info` admonition updated
+- [x] Non-setup sections (Basic usage, Env vars, Pool access, Config) unchanged
+- [x] Brief text before script explains where UI values come from (project URL pattern, Connect dialog)
+- [x] Verification step uses `psql` query instead of UI tab check
+- [x] `PGSSLMODE=require` included in the script
+- [x] Doc stays `.md` (no MDX imports needed)
 
 ## Questions to Resolve Before/During Implementation
 

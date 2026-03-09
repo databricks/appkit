@@ -5,7 +5,7 @@ sidebar_position: 4
 # Lakebase plugin
 
 :::info
-Currently, the Lakebase plugin currently requires a one-time manual setup to connect your Databricks App with your Lakebase database. An automated setup process is planned for an upcoming future release.
+This setup requires a one-time manual process to connect your Databricks App's service principal to your Lakebase database. You'll need the [Databricks CLI](https://docs.databricks.com/dev-tools/cli/install.html), [`jq`](https://jqlang.github.io/jq/), and [`psql`](https://www.postgresql.org/download/) installed locally.
 :::
 
 Provides a PostgreSQL connection pool for Databricks Lakebase Autoscaling with automatic OAuth token refresh.
@@ -18,57 +18,53 @@ Provides a PostgreSQL connection pool for Databricks Lakebase Autoscaling with a
 
 ## Setting up Lakebase
 
-Before using the plugin, you need to connect your Databricks App's service principal to your Lakebase database.
+Before using the plugin, you need to connect your Databricks App's service principal to your Lakebase database. The script below walks through the entire setup — fill in the variables at the top and run each section.
 
-### 1. Find your app's service principal
+Some values come from the Databricks UI:
+- **Project ID** and **Branch ID** — from the URL when viewing your Lakebase branch: `.../projects/{project-id}/branches/{branch-id}/...`
+- **PGHOST** — from the **Connect** dialog on your Lakebase branch
 
-Create a Databricks App from the UI (`Compute > Apps > Create App > Create a custom app`). Navigate to the **Environment** tab and note the `DATABRICKS_CLIENT_ID` value — this is the service principal that will connect to your Lakebase database.
+```sh
+# ──────────────────────────────────────────────────
+# 1. Set variables from the Lakebase UI
+# ──────────────────────────────────────────────────
+# From the branch URL: /projects/{id}/branches/{id}
+PROJECT_ID=<your-project-id>
+BRANCH_ID=<your-branch-id>
 
-![App environment tab](./assets/lakebase-setup/step-1.png)
+# From the Connect dialog on your Lakebase branch
+PGHOST=<your-lakebase-host>
+PGDATABASE=databricks_postgres
 
-### 2. Find your Project ID and Branch ID
+# ──────────────────────────────────────────────────
+# 2. Look up the endpoint via CLI
+# ──────────────────────────────────────────────────
+# Uses the first endpoint; branches typically have one
+LAKEBASE_ENDPOINT=$(databricks postgres list-endpoints "projects/${PROJECT_ID}/branches/${BRANCH_ID}" | jq -r '.[0].name')
+echo "Endpoint: ${LAKEBASE_ENDPOINT}"
 
-Create a new Lakebase Postgres Autoscaling project. Navigate to your Lakebase project's branch details and switch to the **Compute** tab. Note the **Project ID** and **Branch ID** from the URL.
+# ──────────────────────────────────────────────────
+# 3. Get your app's service principal
+# ──────────────────────────────────────────────────
+APP_NAME=<your-app-name>
+SP_CLIENT_ID=$(databricks apps get "${APP_NAME}" | jq -r '.service_principal_client_id')
+echo "Service principal: ${SP_CLIENT_ID}"
 
-![Branch details](./assets/lakebase-setup/step-2.png)
+# ──────────────────────────────────────────────────
+# 4. Grant access to the service principal via psql
+# ──────────────────────────────────────────────────
+export PGSSLMODE=require
+export PGPASSWORD=$(databricks postgres generate-database-credential "${LAKEBASE_ENDPOINT}" | jq -r '.token')
 
-### 3. Find your endpoint
+psql -h "${PGHOST}" -d "${PGDATABASE}" -U "$(databricks current-user me | jq -r '.userName')" <<"SQL"
 
-Use the Databricks CLI to list endpoints for the branch. Note the `name` field from the output — this is your `LAKEBASE_ENDPOINT` value.
-
-```bash
-databricks postgres list-endpoints projects/{project-id}/branches/{branch-id}
-```
-
-Example output:
-
-```json
-[
-  {
-    "create_time": "2026-02-19T12:13:02Z",
-    "name": "projects/{project-id}/branches/{branch-id}/endpoints/primary"
-  }
-]
-```
-
-### 4. Get connection parameters
-
-Click the **Connect** button on your Lakebase branch and copy the `PGHOST` and `PGDATABASE` values for later.
-
-![Connect dialog](./assets/lakebase-setup/step-4.png)
-
-### 5. Grant access to the service principal
-
-Navigate to the **SQL Editor** tab on your Lakebase branch. Run the following SQL against the `databricks_postgres` database, replacing the service principal ID in the `DECLARE` block with the `DATABRICKS_CLIENT_ID` value from step 1:
-
-```sql
 CREATE EXTENSION IF NOT EXISTS databricks_auth;
 
 DO $$
 DECLARE
-  sp TEXT := 'your-service-principal-id';  -- Replace with DATABRICKS_CLIENT_ID from Step 1
+  sp TEXT := '${SP_CLIENT_ID}';
 BEGIN
-  -- Create service principal role
+  -- Create service principal role (safe to re-run)
   PERFORM databricks_create_role(sp, 'SERVICE_PRINCIPAL');
 
   -- Connection and schema access
@@ -87,15 +83,15 @@ BEGIN
   EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO %I', sp);
   EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON ROUTINES TO %I', sp);
 END $$;
+
+SQL
+
+# ──────────────────────────────────────────────────
+# 5. Verify the role was created
+# ──────────────────────────────────────────────────
+psql -h "${PGHOST}" -d "${PGDATABASE}" -U "$(databricks current-user me | jq -r '.userName')" \
+  -c "SELECT rolname FROM pg_roles WHERE rolname = '${SP_CLIENT_ID}'"
 ```
-
-![SQL Editor](./assets/lakebase-setup/step-5.png)
-
-### 6. Verify the role
-
-Navigate to the **Roles & Databases** tab and confirm the role is visible. You may need to fully refresh the page.
-
-![Roles & Databases tab](./assets/lakebase-setup/step-6.png)
 
 ## Basic usage
 
