@@ -20,13 +20,16 @@ Provides a PostgreSQL connection pool for Databricks Lakebase Autoscaling with a
 
 Before using the plugin, you need to connect your Databricks App's service principal to your Lakebase database. The script below walks through the entire setup — fill in the variables at the top and run each section.
 
+> **Note:** The Databricks CLI commands below use your **DEFAULT** profile. To use a different profile, set `export DATABRICKS_CONFIG_PROFILE=<profile-name>` before running the script.
+
 Some values come from the Databricks UI:
 - **Project ID** and **Branch ID** — from the URL when viewing your Lakebase branch: `.../projects/{project-id}/branches/{branch-id}/...`
 - **PGHOST** — from the **Connect** dialog on your Lakebase branch
+- **App name** — your Databricks App name (from `Compute > Apps`)
 
 ```sh
 # ──────────────────────────────────────────────────
-# 1. Set variables from the Lakebase UI
+# 1. Set your variables
 # ──────────────────────────────────────────────────
 # From the branch URL: /projects/{id}/branches/{id}
 PROJECT_ID=<your-project-id>
@@ -35,6 +38,9 @@ BRANCH_ID=<your-branch-id>
 # From the Connect dialog on your Lakebase branch
 PGHOST=<your-lakebase-host>
 PGDATABASE=databricks_postgres
+
+# Your Databricks App name
+APP_NAME=<your-app-name>
 
 # ──────────────────────────────────────────────────
 # 2. Look up the endpoint via CLI
@@ -46,7 +52,6 @@ echo "Endpoint: ${LAKEBASE_ENDPOINT}"
 # ──────────────────────────────────────────────────
 # 3. Get your app's service principal
 # ──────────────────────────────────────────────────
-APP_NAME=<your-app-name>
 SP_CLIENT_ID=$(databricks apps get "${APP_NAME}" | jq -r '.service_principal_client_id')
 echo "Service principal: ${SP_CLIENT_ID}"
 
