@@ -18,9 +18,11 @@ createApp({
 {{- end}}
 {{- end}}
   ],
-}).then(async (appkit) => {
+})
 {{- if .plugins.lakebase}}
-  await setupSampleLakebaseRoutes(appkit);
-  await appkit.server.start();
+  .then(async (appkit) => {
+    await setupSampleLakebaseRoutes(appkit);
+    await appkit.server.start();
+  })
 {{- end}}
-}).catch(console.error);
+  .catch(console.error);
