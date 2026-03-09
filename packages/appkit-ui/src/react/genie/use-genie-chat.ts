@@ -135,6 +135,9 @@ function fetchConversationPage(
   }).then(() => items);
 }
 
+/** Minimum time (ms) to hold the loading-older state so scroll inertia settles before prepending messages. */
+const MIN_PREVIOUS_PAGE_LOAD_MS = 800;
+
 /**
  * Manages the full Genie chat lifecycle:
  * SSE streaming, conversation persistence via URL, and history replay.
@@ -394,6 +397,7 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
     setStatus("loading-older");
     setError(null);
 
+    const startTime = Date.now();
     const { promise, abortController } = fetchPage(
       paginationAbortRef,
       conversationIdRef.current,
@@ -403,14 +407,18 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
       },
     );
     promise
-      .then((items) => {
+      .then(async (items) => {
+        if (abortController.signal.aborted) return;
+        const elapsed = Date.now() - startTime;
+        if (elapsed < MIN_PREVIOUS_PAGE_LOAD_MS) {
+          await new Promise((r) =>
+            setTimeout(r, MIN_PREVIOUS_PAGE_LOAD_MS - elapsed),
+          );
+        }
         if (abortController.signal.aborted) return;
         if (items.length > 0) {
           setMessages((prev) => [...items, ...prev]);
         }
-        // Only transition to idle if we're still in loading-older state —
-        // another operation (e.g. sendMessage) may have taken over.
-        // If onError already set "error", this preserves it.
         setStatus((current) =>
           current === "loading-older" ? "idle" : current,
         );
