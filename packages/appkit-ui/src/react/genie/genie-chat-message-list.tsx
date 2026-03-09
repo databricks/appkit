@@ -48,6 +48,19 @@ function useScrollManagement(
   const prevScrollHeightRef = useRef(0);
   const prevMessageCountRef = useRef(0);
 
+  // Keep prevScrollHeightRef fresh when async content (images, embeds)
+  // changes the viewport height between renders.
+  useEffect(() => {
+    const viewport = getViewport(scrollRef);
+    if (!viewport) return;
+
+    const observer = new ResizeObserver(() => {
+      prevScrollHeightRef.current = viewport.scrollHeight;
+    });
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [scrollRef]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — only react to message count changes
   useLayoutEffect(() => {
     const viewport = getViewport(scrollRef);

@@ -97,6 +97,7 @@ function fetchConversationPage(
   }
 
   const items: GenieMessageItem[] = [];
+  let hadError = false;
 
   return connectSSE({
     url: `${basePath}/${encodeURIComponent(alias)}/conversations/${encodeURIComponent(convId)}?${params}`,
@@ -125,6 +126,7 @@ function fetchConversationPage(
             options.onPaginationInfo?.(event.nextPageToken);
             break;
           case "error":
+            hadError = true;
             options.onError?.(event.error);
             break;
         }
@@ -133,7 +135,7 @@ function fetchConversationPage(
       }
     },
     onError: (err) => options.onConnectionError?.(err),
-  }).then(() => items);
+  }).then(() => ({ items, hadError }));
 }
 
 /**
@@ -217,19 +219,28 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
         }
 
         case "query_result": {
-          setMessages((prev) =>
-            prev.map((msg) =>
-              msg.attachments.some((a) => a.attachmentId === event.attachmentId)
-                ? {
-                    ...msg,
-                    queryResults: new Map(msg.queryResults).set(
-                      event.attachmentId,
-                      event.data,
-                    ),
-                  }
-                : msg,
-            ),
-          );
+          setMessages((prev) => {
+            // Reverse scan — query results typically match recent messages
+            for (let i = prev.length - 1; i >= 0; i--) {
+              const msg = prev[i];
+              if (
+                msg.attachments.some(
+                  (a) => a.attachmentId === event.attachmentId,
+                )
+              ) {
+                const updated = prev.slice();
+                updated[i] = {
+                  ...msg,
+                  queryResults: new Map(msg.queryResults).set(
+                    event.attachmentId,
+                    event.data,
+                  ),
+                };
+                return updated;
+              }
+            }
+            return prev;
+          });
           break;
         }
 
@@ -319,15 +330,13 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
   /** Creates an AbortController, stores it in the given ref, and fetches a conversation page. */
   const fetchPage = useCallback(
     (
-      controllerRef: React.RefObject<AbortController | null>,
+      controllerRef: { current: AbortController | null },
       convId: string,
       options?: { pageToken?: string; errorMessage?: string },
     ) => {
       controllerRef.current?.abort();
       const abortController = new AbortController();
-      (
-        controllerRef as React.MutableRefObject<AbortController | null>
-      ).current = abortController;
+      controllerRef.current = abortController;
 
       const promise = fetchConversationPage(basePath, alias, convId, {
         pageToken: options?.pageToken,
@@ -362,10 +371,10 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
         convId,
         { errorMessage: "Failed to load conversation history." },
       );
-      promise.then((items) => {
+      promise.then(({ items, hadError }) => {
         if (!abortController.signal.aborted) {
           setMessages(items);
-          setStatus((prev) => (prev === "error" ? "error" : "idle"));
+          setStatus(hadError ? "error" : "idle");
         }
       });
     },
@@ -393,16 +402,20 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
       },
     );
     promise
-      .then((items) => {
+      .then(({ items, hadError }) => {
         if (abortController.signal.aborted) return;
         if (items.length > 0) {
           setMessages((prev) => [...items, ...prev]);
         }
-        // Only transition to idle if we're still in loading-older state —
-        // another operation (e.g. sendMessage) may have taken over.
-        setStatus((current) =>
-          current === "loading-older" ? "idle" : current,
-        );
+        if (hadError) {
+          setStatus("error");
+        } else {
+          // Only transition to idle if we're still in loading-older state —
+          // another operation (e.g. sendMessage) may have taken over.
+          setStatus((current) =>
+            current === "loading-older" ? "idle" : current,
+          );
+        }
       })
       .finally(() => {
         isLoadingOlderRef.current = false;
