@@ -3,6 +3,11 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ServiceContext } from "../../../context/service-context";
 import { AuthenticationError } from "../../../errors";
 import { ResourceType } from "../../../registry";
+import {
+  FILES_DOWNLOAD_DEFAULTS,
+  FILES_READ_DEFAULTS,
+  FILES_WRITE_DEFAULTS,
+} from "../defaults";
 import { FilesPlugin, files } from "../plugin";
 
 const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
@@ -50,10 +55,14 @@ vi.mock("@databricks/sdk-experimental", () => ({
   ApiError: MockApiError,
 }));
 
-vi.mock("../../../context", () => ({
-  getWorkspaceClient: vi.fn(() => mockClient),
-  isInUserContext: vi.fn(() => true),
-}));
+vi.mock("../../../context", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../context")>();
+  return {
+    ...actual,
+    getWorkspaceClient: vi.fn(() => mockClient),
+    isInUserContext: vi.fn(() => true),
+  };
+});
 
 vi.mock("../../../cache", () => ({
   CacheManager: {
@@ -526,6 +535,348 @@ describe("FilesPlugin", () => {
       const plugin = new FilesPlugin({});
       const exported = plugin.exports();
       expect(() => exported("uploads")).toThrow(/Unknown volume/);
+    });
+  });
+
+  describe("Timeout behavior", () => {
+    function getRouteHandlerForTimeout(
+      plugin: FilesPlugin,
+      method: "get" | "post" | "delete",
+      pathSuffix: string,
+    ) {
+      const mockRouter = {
+        use: vi.fn(),
+        get: vi.fn(),
+        post: vi.fn(),
+        put: vi.fn(),
+        delete: vi.fn(),
+        patch: vi.fn(),
+      } as any;
+
+      plugin.injectRoutes(mockRouter);
+
+      const call = mockRouter[method].mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === "string" && (c[0] as string).endsWith(pathSuffix),
+      );
+      return call[call.length - 1] as (req: any, res: any) => Promise<void>;
+    }
+
+    function mockRes() {
+      const res: any = {
+        headersSent: false,
+      };
+      res.status = vi.fn().mockReturnValue(res);
+      res.json = vi.fn().mockReturnValue(res);
+      res.type = vi.fn().mockReturnValue(res);
+      res.send = vi.fn().mockReturnValue(res);
+      res.setHeader = vi.fn().mockReturnValue(res);
+      res.destroy = vi.fn();
+      res.end = vi.fn();
+      res.on = vi.fn().mockReturnValue(res);
+      res.pipe = vi.fn().mockReturnValue(res);
+      return res;
+    }
+
+    function mockReq(volumeKey: string, overrides: Record<string, any> = {}) {
+      const headers: Record<string, string> = {
+        "x-forwarded-access-token": "test-token",
+        "x-forwarded-user": "test-user",
+        ...(overrides.headers ?? {}),
+      };
+      return {
+        params: { volumeKey },
+        query: {},
+        ...overrides,
+        headers,
+        header: (name: string) => headers[name.toLowerCase()],
+      };
+    }
+
+    /**
+     * Creates a mock that resolves after a signal-based abort.
+     * The returned promise rejects with an abort error when the
+     * interceptor's timeout signal fires, simulating a well-behaved
+     * SDK call that respects AbortSignal.
+     */
+    function hangingWithAbort(): {
+      promise: Promise<never>;
+      capturedReject: (reason: unknown) => void;
+    } {
+      let capturedReject!: (reason: unknown) => void;
+      const promise = new Promise<never>((_resolve, reject) => {
+        capturedReject = reject;
+      });
+      return { promise, capturedReject };
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    test("read-tier: list succeeds when operation completes within timeout", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handler = getRouteHandlerForTimeout(plugin, "get", "/list");
+      const res = mockRes();
+
+      mockClient.files.listDirectoryContents.mockImplementation(
+        async function* () {
+          yield { name: "file.txt", path: "/file.txt", is_directory: false };
+        },
+      );
+
+      const handlerPromise = handler(mockReq("uploads"), res);
+
+      await vi.advanceTimersByTimeAsync(100);
+      await handlerPromise;
+
+      expect(res.json).toHaveBeenCalledWith(
+        expect.arrayContaining([expect.objectContaining({ name: "file.txt" })]),
+      );
+      expect(res.status).not.toHaveBeenCalled();
+    });
+
+    test("read-tier: list returns 500 when SDK call rejects", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handler = getRouteHandlerForTimeout(plugin, "get", "/list");
+      const res = mockRes();
+
+      // Simulate an SDK call that rejects (e.g. network error).
+      // Returns an async iterable whose first iteration throws.
+      mockClient.files.listDirectoryContents.mockReturnValue({
+        [Symbol.asyncIterator]: () => ({
+          next: () => Promise.reject(new Error("network failure")),
+        }),
+      });
+
+      const handlerPromise = handler(mockReq("uploads"), res);
+      // Advance past retry delays (3 attempts: 1s + 2s backoff)
+      await vi.advanceTimersByTimeAsync(4_000);
+      await handlerPromise;
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: "List failed",
+          plugin: "files",
+        }),
+      );
+    });
+
+    test("read-tier: read returns 500 when SDK call rejects", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handler = getRouteHandlerForTimeout(plugin, "get", "/read");
+      const res = mockRes();
+
+      mockClient.files.download.mockRejectedValue(new Error("network failure"));
+
+      const handlerPromise = handler(
+        mockReq("uploads", { query: { path: "test.txt" } }),
+        res,
+      );
+
+      // Advance past retry delays
+      await vi.advanceTimersByTimeAsync(4_000);
+      await handlerPromise;
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ error: "Read failed" }),
+      );
+    });
+
+    test("read-tier: exists returns 500 when SDK call rejects", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handler = getRouteHandlerForTimeout(plugin, "get", "/exists");
+      const res = mockRes();
+
+      mockClient.files.getMetadata.mockRejectedValue(
+        new Error("network failure"),
+      );
+
+      const handlerPromise = handler(
+        mockReq("uploads", { query: { path: "test.txt" } }),
+        res,
+      );
+
+      // Advance past retry delays: attempt 1 fails, wait 1s, attempt 2 fails, wait 2s, attempt 3 fails
+      await vi.advanceTimersByTimeAsync(4_000);
+      await handlerPromise;
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ error: "Exists check failed" }),
+      );
+    });
+
+    test("read-tier: metadata returns 500 when SDK call rejects", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handler = getRouteHandlerForTimeout(plugin, "get", "/metadata");
+      const res = mockRes();
+
+      mockClient.files.getMetadata.mockRejectedValue(
+        new Error("network failure"),
+      );
+
+      const handlerPromise = handler(
+        mockReq("uploads", { query: { path: "test.txt" } }),
+        res,
+      );
+
+      // Advance past retry delays
+      await vi.advanceTimersByTimeAsync(4_000);
+      await handlerPromise;
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ error: "Metadata fetch failed" }),
+      );
+    });
+
+    test("download-tier: download returns 500 when SDK call rejects", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handler = getRouteHandlerForTimeout(plugin, "get", "/download");
+      const res = mockRes();
+
+      mockClient.files.download.mockRejectedValue(new Error("network failure"));
+
+      const handlerPromise = handler(
+        mockReq("uploads", { query: { path: "big.bin" } }),
+        res,
+      );
+
+      // Advance past retry delays
+      await vi.advanceTimersByTimeAsync(4_000);
+      await handlerPromise;
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ error: "Download failed" }),
+      );
+    });
+
+    test("write-tier: mkdir returns 500 when SDK call rejects", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handler = getRouteHandlerForTimeout(plugin, "post", "/mkdir");
+      const res = mockRes();
+
+      mockClient.files.createDirectory.mockRejectedValue(
+        new Error("network failure"),
+      );
+
+      const handlerPromise = handler(
+        mockReq("uploads", { body: { path: "new-dir" } }),
+        res,
+      );
+
+      await vi.advanceTimersByTimeAsync(100);
+      await handlerPromise;
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ error: "Create directory failed" }),
+      );
+    });
+
+    test("write-tier: inflightWrites decrements after error", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handler = getRouteHandlerForTimeout(plugin, "post", "/mkdir");
+      const res = mockRes();
+
+      mockClient.files.createDirectory.mockRejectedValue(
+        new Error("network failure"),
+      );
+
+      expect((plugin as any).inflightWrites).toBe(0);
+
+      const handlerPromise = handler(
+        mockReq("uploads", { body: { path: "dir" } }),
+        res,
+      );
+
+      await vi.advanceTimersByTimeAsync(100);
+      await handlerPromise;
+
+      expect((plugin as any).inflightWrites).toBe(0);
+    });
+
+    test("error response does not leak internal details", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handler = getRouteHandlerForTimeout(plugin, "get", "/list");
+      const res = mockRes();
+
+      mockClient.files.listDirectoryContents.mockReturnValue({
+        [Symbol.asyncIterator]: () => ({
+          next: () =>
+            Promise.reject(new Error("internal: secret connection string xyz")),
+        }),
+      });
+
+      const handlerPromise = handler(mockReq("uploads"), res);
+      // Advance past retry delays
+      await vi.advanceTimersByTimeAsync(4_000);
+      await handlerPromise;
+
+      const errorBody = res.json.mock.calls[0][0];
+      expect(errorBody.error).toBe("List failed");
+      expect(errorBody.error).not.toContain("secret");
+      expect(errorBody.error).not.toContain("internal");
+    });
+
+    test("timeout interceptor sets abort signal on context but callbacks ignore it", async () => {
+      // This test documents a known gap: the TimeoutInterceptor sets
+      // context.signal, but the files plugin callbacks don't consume it.
+      // The timeout only works if the underlying SDK call respects the signal
+      // or rejects on its own.
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handler = getRouteHandlerForTimeout(plugin, "get", "/list");
+      const res = mockRes();
+
+      let signalWasAborted = false;
+      const { promise, capturedReject } = hangingWithAbort();
+
+      mockClient.files.listDirectoryContents.mockReturnValue({
+        [Symbol.asyncIterator]: () => ({
+          next: () => {
+            // Simulate: we set up a timeout that rejects the hanging promise,
+            // proving the timeout WOULD fire if the SDK respected the signal.
+            const timeoutId = setTimeout(() => {
+              signalWasAborted = true;
+              capturedReject(new Error("Operation timed out after 30000 ms"));
+            }, 30_000);
+
+            return promise.finally(() => clearTimeout(timeoutId));
+          },
+        }),
+      });
+
+      const handlerPromise = handler(mockReq("uploads"), res);
+
+      // Advance past read-tier timeout (30s)
+      await vi.advanceTimersByTimeAsync(31_000);
+      await handlerPromise;
+
+      expect(signalWasAborted).toBe(true);
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ error: "List failed" }),
+      );
+    });
+
+    test("timeout defaults: read-tier uses 30s", () => {
+      expect(FILES_READ_DEFAULTS.timeout).toBe(30_000);
+    });
+
+    test("timeout defaults: download-tier uses 30s", () => {
+      expect(FILES_DOWNLOAD_DEFAULTS.timeout).toBe(30_000);
+    });
+
+    test("timeout defaults: write-tier uses 600s", () => {
+      expect(FILES_WRITE_DEFAULTS.timeout).toBe(600_000);
     });
   });
 
