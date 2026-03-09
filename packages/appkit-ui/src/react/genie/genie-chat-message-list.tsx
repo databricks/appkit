@@ -43,15 +43,25 @@ function getViewport(scrollRef: React.RefObject<HTMLDivElement | null>) {
 function useScrollManagement(
   scrollRef: React.RefObject<HTMLDivElement | null>,
   messages: GenieMessageItem[],
-  status: GenieChatStatus,
 ) {
   const prevFirstMessageIdRef = useRef<string | null>(null);
   const prevScrollHeightRef = useRef(0);
+  const prevMessageCountRef = useRef(0);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional triggers for scroll management
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — only react to message count changes
   useLayoutEffect(() => {
     const viewport = getViewport(scrollRef);
     if (!viewport) return;
+
+    const count = messages.length;
+    const countChanged = count !== prevMessageCountRef.current;
+    prevMessageCountRef.current = count;
+
+    // Nothing to do if message count didn't change (e.g. status-only transition)
+    if (!countChanged) {
+      prevScrollHeightRef.current = viewport.scrollHeight;
+      return;
+    }
 
     const firstMessageId = messages[0]?.id ?? null;
     const wasPrepend =
@@ -59,15 +69,17 @@ function useScrollManagement(
       firstMessageId !== prevFirstMessageIdRef.current;
 
     if (wasPrepend && prevScrollHeightRef.current > 0) {
+      // Older messages prepended — preserve scroll position
       const delta = viewport.scrollHeight - prevScrollHeightRef.current;
       viewport.scrollTop += delta;
     } else {
+      // Messages appended or initial load — scroll to bottom
       viewport.scrollTop = viewport.scrollHeight;
     }
 
     prevFirstMessageIdRef.current = firstMessageId;
     prevScrollHeightRef.current = viewport.scrollHeight;
-  }, [messages.length, status]);
+  }, [messages.length]);
 }
 
 /**
@@ -89,8 +101,17 @@ function useLoadOlderOnScroll(
     const viewport = getViewport(scrollRef);
     if (!sentinel || !viewport || !shouldObserve) return;
 
+    // Skip the first callback after (re-)subscribing — the observer fires
+    // immediately if the sentinel is visible, which happens right after a
+    // page load before the scroll adjustment has pushed it off-screen.
+    let initialFire = true;
+
     const observer = new IntersectionObserver(
       (entries) => {
+        if (initialFire) {
+          initialFire = false;
+          return;
+        }
         const isScrollable = viewport.scrollHeight > viewport.clientHeight;
         if (entries[0]?.isIntersecting && isScrollable) {
           onFetchPreviousPageRef.current?.();
@@ -116,7 +137,7 @@ export function GenieChatMessageList({
 }: GenieChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  useScrollManagement(scrollRef, messages, status);
+  useScrollManagement(scrollRef, messages);
   const sentinelRef = useLoadOlderOnScroll(
     scrollRef,
     hasPreviousPage && status !== "loading-older",

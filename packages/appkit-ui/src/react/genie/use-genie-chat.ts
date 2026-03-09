@@ -249,6 +249,7 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
       if (!trimmed) return;
 
       abortControllerRef.current?.abort();
+      paginationAbortRef.current?.abort();
       setError(null);
       setStatus("streaming");
 
@@ -397,7 +398,11 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
         if (items.length > 0) {
           setMessages((prev) => [...items, ...prev]);
         }
-        setStatus("idle");
+        // Only transition to idle if we're still in loading-older state —
+        // another operation (e.g. sendMessage) may have taken over.
+        setStatus((current) =>
+          current === "loading-older" ? "idle" : current,
+        );
       })
       .finally(() => {
         isLoadingOlderRef.current = false;
