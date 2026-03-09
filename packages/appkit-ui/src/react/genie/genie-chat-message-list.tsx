@@ -150,12 +150,12 @@ export function GenieChatMessageList({
 }: GenieChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  useScrollManagement(scrollRef, messages);
   const sentinelRef = useLoadOlderOnScroll(
     scrollRef,
     hasPreviousPage && status !== "loading-older",
     onFetchPreviousPage,
   );
+  useScrollManagement(scrollRef, messages);
 
   const lastMessage = messages[messages.length - 1];
   const showStreamingIndicator =
