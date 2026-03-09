@@ -6,6 +6,7 @@ sidebar_position: 4
 
 :::info
 This setup requires a one-time manual process to connect your Databricks App's service principal to your Lakebase database. You'll need the [Databricks CLI](https://docs.databricks.com/dev-tools/cli/install.html), [`jq`](https://jqlang.github.io/jq/), and [`psql`](https://www.postgresql.org/download/) installed locally.
+An automated setup is coming soon.
 :::
 
 Provides a PostgreSQL connection pool for Databricks Lakebase Autoscaling with automatic OAuth token refresh.
@@ -31,11 +32,13 @@ Some values come from the Databricks UI:
 # ──────────────────────────────────────────────────
 # 1. Set your variables
 # ──────────────────────────────────────────────────
-# From the branch URL: /projects/{id}/branches/{id}
+# Navigate to the Lakebase Branch Overview page (Projects -> Project dashboard -> Branch overview)
+# Copy the Project ID and Branch ID from the branch URL: /projects/{id}/branches/{id}
 PROJECT_ID=<your-project-id>
 BRANCH_ID=<your-branch-id>
 
-# From the Connect dialog on your Lakebase branch
+# Click "Connect" in the Lakebase Branch Overview page to get the details.
+# Use the "Parameters only" option to get the values.
 PGHOST=<your-lakebase-host>
 PGDATABASE=databricks_postgres
 
