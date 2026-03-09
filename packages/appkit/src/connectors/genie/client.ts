@@ -54,6 +54,23 @@ function toMessageResponse(message: GenieMessage): GenieMessageResponse {
   };
 }
 
+function classifyGenieError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (message.includes("RESOURCE_DOES_NOT_EXIST")) {
+    return "You don't have access to this Genie Space. Please contact your workspace administrator to request access.";
+  }
+
+  if (
+    message.includes("failed to reach COMPLETED state") &&
+    message.includes("FAILED")
+  ) {
+    return "Your question could not be answered. You may not have access to the underlying data tables. Please verify your table permissions.";
+  }
+
+  return message || "Genie request failed";
+}
+
 export class GenieConnector {
   private readonly config: Required<GenieConnectorConfig>;
 
@@ -206,11 +223,13 @@ export class GenieConnector {
         messageResponse,
       );
     } catch (error) {
-      logger.error("Genie message error: %O", error);
-      yield {
-        type: "error",
-        error: error instanceof Error ? error.message : "Genie request failed",
-      };
+      logger.error(
+        "Genie message error (spaceId=%s, conversationId=%s): %O",
+        spaceId,
+        conversationId ?? "new",
+        error,
+      );
+      yield { type: "error", error: classifyGenieError(error) };
     }
   }
 
@@ -330,14 +349,13 @@ export class GenieConnector {
         }
       }
     } catch (error) {
-      logger.error("Genie getConversation error: %O", error);
-      yield {
-        type: "error",
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to fetch conversation",
-      };
+      logger.error(
+        "Genie getConversation error (spaceId=%s, conversationId=%s): %O",
+        spaceId,
+        conversationId,
+        error,
+      );
+      yield { type: "error", error: classifyGenieError(error) };
     }
   }
 

@@ -921,6 +921,109 @@ describe("Genie Plugin", () => {
     });
   });
 
+  describe("error classification", () => {
+    test("should return user-friendly message for RESOURCE_DOES_NOT_EXIST error", async () => {
+      mockGenieService.startConversation.mockRejectedValue(
+        new Error(
+          "RESOURCE_DOES_NOT_EXIST: No Genie space found with id test-space-id",
+        ),
+      );
+
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/:alias/messages");
+      const mockReq = createMockRequest({
+        params: { alias: "myspace" },
+        body: { content: "test question" },
+        headers: {
+          "x-forwarded-access-token": "user-token",
+          "x-forwarded-user": "user-1",
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      const writeCalls = mockRes.write.mock.calls.map((call: any[]) => call[0]);
+      const allWritten = writeCalls.join("");
+
+      expect(allWritten).toContain("You don't have access to this Genie Space");
+      expect(allWritten).toContain("contact your workspace administrator");
+      expect(mockRes.end).toHaveBeenCalled();
+    });
+
+    test("should return user-friendly message for FAILED state error (table access denied)", async () => {
+      mockGenieService.startConversation.mockRejectedValue(
+        new Error(
+          "failed to reach COMPLETED state, got FAILED: [object Object]",
+        ),
+      );
+
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/:alias/messages");
+      const mockReq = createMockRequest({
+        params: { alias: "myspace" },
+        body: { content: "test question" },
+        headers: {
+          "x-forwarded-access-token": "user-token",
+          "x-forwarded-user": "user-1",
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      const writeCalls = mockRes.write.mock.calls.map((call: any[]) => call[0]);
+      const allWritten = writeCalls.join("");
+
+      expect(allWritten).toContain("Your question could not be answered");
+      expect(allWritten).toContain("table permissions");
+      expect(mockRes.end).toHaveBeenCalled();
+    });
+
+    test("should return user-friendly message for RESOURCE_DOES_NOT_EXIST on getConversation", async () => {
+      mockGenieService.listConversationMessages.mockRejectedValue(
+        new Error(
+          "RESOURCE_DOES_NOT_EXIST: No Genie space found with id test-space-id",
+        ),
+      );
+
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler(
+        "GET",
+        "/:alias/conversations/:conversationId",
+      );
+      const mockReq = createMockRequest({
+        params: { alias: "myspace", conversationId: "conv-123" },
+        query: {},
+        headers: {
+          "x-forwarded-access-token": "user-token",
+          "x-forwarded-user": "user-1",
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      const writeCalls = mockRes.write.mock.calls.map((call: any[]) => call[0]);
+      const allWritten = writeCalls.join("");
+
+      expect(allWritten).toContain("You don't have access to this Genie Space");
+      expect(mockRes.end).toHaveBeenCalled();
+    });
+  });
+
   describe("default spaces from DATABRICKS_GENIE_SPACE_ID", () => {
     test("should use env var as default space when spaces is omitted", async () => {
       process.env.DATABRICKS_GENIE_SPACE_ID = "env-space-id";
