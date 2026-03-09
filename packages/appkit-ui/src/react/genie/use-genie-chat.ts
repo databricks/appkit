@@ -361,6 +361,7 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
 
   const loadHistory = useCallback(
     (convId: string) => {
+      paginationAbortRef.current?.abort();
       setStatus("loading-history");
       setError(null);
       setMessages([]);

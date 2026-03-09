@@ -114,17 +114,18 @@ function useLoadOlderOnScroll(
     const viewport = getViewport(scrollRef);
     if (!sentinel || !viewport || !shouldObserve) return;
 
-    // Skip the first callback after (re-)subscribing — the observer fires
-    // immediately if the sentinel is visible, which happens right after a
-    // page load before the scroll adjustment has pushed it off-screen.
-    let initialFire = true;
+    // The observer fires synchronously on observe() if the sentinel is
+    // already visible. We arm it on the next frame so that synchronous
+    // initial fire is ignored, but a real intersection (user genuinely
+    // at the top on a short conversation) triggers on subsequent frames.
+    let armed = false;
+    const frameId = requestAnimationFrame(() => {
+      armed = true;
+    });
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (initialFire) {
-          initialFire = false;
-          return;
-        }
+        if (!armed) return;
         const isScrollable = viewport.scrollHeight > viewport.clientHeight;
         if (entries[0]?.isIntersecting && isScrollable) {
           onFetchPreviousPageRef.current?.();
@@ -134,7 +135,10 @@ function useLoadOlderOnScroll(
     );
 
     observer.observe(sentinel);
-    return () => observer.disconnect();
+    return () => {
+      cancelAnimationFrame(frameId);
+      observer.disconnect();
+    };
   }, [scrollRef, shouldObserve]);
 
   return sentinelRef;
