@@ -169,17 +169,19 @@ Write operations (`upload`, `mkdir`, `delete`) automatically invalidate the cach
 
 ## Programmatic API
 
-The `exports()` API is a callable that accepts a volume key and returns a `VolumeHandle` with `asUser(req)`. Calling `asUser()` returns the full `VolumeAPI`. All methods require a user context.
+The `exports()` API is a callable that accepts a volume key and returns a `VolumeHandle`. The handle exposes all `VolumeAPI` methods directly (service principal, logs a warning) and an `asUser(req)` method for OBO access (recommended).
 
 ```ts
-// Access a volume and scope to user
+// OBO access (recommended)
 const entries = await appkit.files("uploads").asUser(req).list();
 const content = await appkit.files("exports").asUser(req).read("report.csv");
 
-// Store a reference for OBO-only patterns
-const vol = appkit.files.volume("uploads").asUser(req);
-await vol.list();
-await vol.upload("report.csv", data);
+// Service principal access (logs a warning encouraging OBO)
+const entries = await appkit.files("uploads").list();
+
+// Named accessor
+const vol = appkit.files.volume("uploads");
+await vol.asUser(req).list();
 ```
 
 ### VolumeAPI methods
@@ -252,6 +254,11 @@ interface VolumeAPI {
   delete(filePath: string): Promise<void>;
   preview(filePath: string): Promise<FilePreview>;
 }
+
+/** Volume handle: all VolumeAPI methods (service principal) + asUser() for OBO. */
+type VolumeHandle = VolumeAPI & {
+  asUser: (req: Request) => VolumeAPI;
+};
 ```
 
 ## Content-type resolution
@@ -268,7 +275,7 @@ Built-in extensions: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.bmp`, `
 
 Routes use `this.asUser(req)` so operations execute with the requesting user's Databricks credentials (on-behalf-of / OBO). The `/volumes` route is the only exception since it only reads plugin config.
 
-The programmatic API enforces user context at the **type level**: `appkit.files("volumeKey")` returns a `VolumeHandle` that only exposes `asUser(req)`. Volume methods (`list`, `read`, etc.) are inaccessible without first calling `asUser()`. At runtime, route handlers additionally call `requireUserContext()` which throws `AuthenticationError` in production if no user token is present. In development mode (`NODE_ENV=development`), a warning is logged and the call proceeds using the service principal.
+The programmatic API returns a `VolumeHandle` that exposes all `VolumeAPI` methods directly (service principal) and an `asUser(req)` method for OBO access. Calling any method without `asUser()` logs a warning encouraging OBO usage but does not throw. OBO access is strongly recommended for production use.
 
 ## Resource requirements
 
@@ -290,11 +297,9 @@ All errors return JSON:
 | Status | Description                                                    |
 | ------ | -------------------------------------------------------------- |
 | 400    | Missing or invalid `path` parameter                            |
-| 401    | Missing user context / authentication                          |
 | 404    | Unknown volume key                                             |
 | 413    | Upload exceeds `maxUploadSize`                                 |
-| 4xx    | Upstream Databricks API client error (status passed through)   |
-| 500    | Operation failed (SDK, network, or unhandled error)            |
+| 500    | Operation failed (SDK, network, upstream, or unhandled error)  |
 
 ## Migration from single-volume (`defaultVolume`)
 
