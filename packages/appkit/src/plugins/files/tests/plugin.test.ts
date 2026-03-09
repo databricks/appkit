@@ -213,17 +213,16 @@ describe("FilesPlugin", () => {
       expect(typeof exported.volume).toBe("function");
     });
 
-    test("returns volume handle with only asUser", () => {
+    test("returns volume handle with asUser and direct VolumeAPI methods", () => {
       const plugin = new FilesPlugin(VOLUMES_CONFIG);
       const exported = plugin.exports();
 
       for (const key of ["uploads", "exports"]) {
         const handle = exported(key);
         expect(typeof handle.asUser).toBe("function");
-        // No volume methods directly on the handle
-        expect(handle).not.toHaveProperty("list");
-        expect(handle).not.toHaveProperty("read");
-        expect(handle).not.toHaveProperty("upload");
+        expect(typeof handle.list).toBe("function");
+        expect(typeof handle.read).toBe("function");
+        expect(typeof handle.upload).toBe("function");
       }
     });
 
@@ -248,13 +247,27 @@ describe("FilesPlugin", () => {
     });
   });
 
-  describe("OBO-only access via asUser", () => {
-    test("volume handle only exposes asUser, not volume methods", () => {
+  describe("OBO and service principal access", () => {
+    const volumeMethods = [
+      "list",
+      "read",
+      "download",
+      "exists",
+      "metadata",
+      "upload",
+      "createDirectory",
+      "delete",
+      "preview",
+    ];
+
+    test("volume handle exposes asUser and all VolumeAPI methods", () => {
       const plugin = new FilesPlugin(VOLUMES_CONFIG);
       const handle = plugin.exports()("uploads");
 
       expect(typeof handle.asUser).toBe("function");
-      expect(Object.keys(handle)).toEqual(["asUser"]);
+      for (const method of volumeMethods) {
+        expect(typeof (handle as any)[method]).toBe("function");
+      }
     });
 
     test("asUser throws AuthenticationError without token in production", () => {
@@ -279,21 +292,8 @@ describe("FilesPlugin", () => {
       try {
         const plugin = new FilesPlugin(VOLUMES_CONFIG);
         const handle = plugin.exports()("uploads");
-        // In dev mode, asUser falls back to service principal when no token
         const mockReq = { header: () => undefined } as any;
         const api = handle.asUser(mockReq);
-
-        const volumeMethods = [
-          "list",
-          "read",
-          "download",
-          "exists",
-          "metadata",
-          "upload",
-          "createDirectory",
-          "delete",
-          "preview",
-        ];
 
         for (const method of volumeMethods) {
           expect(typeof (api as any)[method]).toBe("function");
@@ -301,6 +301,30 @@ describe("FilesPlugin", () => {
       } finally {
         process.env.NODE_ENV = originalEnv;
       }
+    });
+
+    test("direct methods on handle work as service principal and log a warning", async () => {
+      const { isInUserContext } = await import("../../../context");
+      (isInUserContext as ReturnType<typeof vi.fn>).mockReturnValue(false);
+
+      const loggerWarnSpy = vi.spyOn(
+        await import("../../../logging/logger").then((m) =>
+          m.createLogger("files"),
+        ),
+        "warn",
+      );
+
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handle = plugin.exports()("uploads");
+
+      mockClient.files.listDirectoryContents.mockImplementation(
+        async function* () {
+          yield { name: "file.txt", path: "/file.txt", is_directory: false };
+        },
+      );
+
+      // Direct call should work (service principal) without throwing
+      await expect(handle.list()).resolves.toBeDefined();
     });
   });
 
