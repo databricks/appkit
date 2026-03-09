@@ -92,8 +92,8 @@ const APP_TEMPLATES: AppTemplate[] = [
   },
 ];
 
-function run(cmd: string, args: string[]): number {
-  const result = spawnSync(cmd, args, { stdio: "inherit" });
+function run(cmd: string, args: string[], opts?: { cwd?: string }): number {
+  const result = spawnSync(cmd, args, { stdio: "inherit", cwd: opts?.cwd });
   return result.status ?? 1;
 }
 
@@ -145,7 +145,7 @@ console.log(
 /**
  * Post-processes a generated template to clean it up for publishing:
  * - Deletes .env (contains resolved credentials from the generator's CLI profile)
- * - Filters appkit.plugins.json to only include the variant's enabled plugins
+ * - Syncs appkit.plugins.json via `appkit plugin sync --write`
  * - Replaces the resolved workspace host URL in databricks.yml with a placeholder
  */
 function postProcess(appDir: string, app: AppTemplate): void {
@@ -155,16 +155,17 @@ function postProcess(appDir: string, app: AppTemplate): void {
   //    templates should not ship credentials from the generator's environment.
   rmSync(join(appDir, ".env"), { force: true });
 
-  // 2. Filter appkit.plugins.json to only keep enabled features + server (always required).
-  const pluginsPath = join(appDir, "appkit.plugins.json");
-  const pluginsJson = JSON.parse(readFileSync(pluginsPath, "utf-8"));
-  const keepPlugins = new Set([...app.features, "server"]);
-  for (const name of Object.keys(pluginsJson.plugins)) {
-    if (!keepPlugins.has(name)) {
-      delete pluginsJson.plugins[name];
-    }
+  // 2. Sync appkit.plugins.json based on server imports (discovers available plugins
+  //    and marks the ones used in the plugins array as required).
+  const syncStatus = run(
+    "node",
+    [join(ROOT, "packages/shared/bin/appkit.js"), "plugin", "sync", "--write"],
+    { cwd: appDir },
+  );
+  if (syncStatus !== 0) {
+    console.error(`  Failed to sync plugins for ${app.name}`);
+    process.exit(syncStatus);
   }
-  writeFileSync(pluginsPath, `${JSON.stringify(pluginsJson, null, 2)}\n`);
 
   // 3. Replace the resolved workspace host URL with a placeholder.
   const databricksYmlPath = join(appDir, "databricks.yml");
