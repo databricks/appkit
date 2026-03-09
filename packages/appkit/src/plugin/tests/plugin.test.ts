@@ -345,40 +345,37 @@ describe("Plugin", () => {
       expect(result).toBeUndefined();
     });
 
-    test("should rethrow ApiError so route handlers can map to HTTP status", async () => {
+    test("should swallow ApiError and return undefined", async () => {
       const plugin = new TestPlugin(config);
       const apiError = new MockApiError("Not found", 404);
       const mockFn = vi.fn().mockRejectedValue(apiError);
 
       const options = { default: {} };
 
-      await expect(
-        (plugin as any).execute(mockFn, options, false),
-      ).rejects.toThrow(apiError);
+      const result = await (plugin as any).execute(mockFn, options, false);
+      expect(result).toBeUndefined();
     });
 
-    test("should rethrow ApiError 401", async () => {
+    test("should swallow ApiError 401 and return undefined", async () => {
       const plugin = new TestPlugin(config);
       const apiError = new MockApiError("Unauthorized", 401);
       const mockFn = vi.fn().mockRejectedValue(apiError);
 
       const options = { default: {} };
 
-      await expect(
-        (plugin as any).execute(mockFn, options, false),
-      ).rejects.toThrow(apiError);
+      const result = await (plugin as any).execute(mockFn, options, false);
+      expect(result).toBeUndefined();
     });
 
-    test("should rethrow ApiError 403", async () => {
+    test("should swallow ApiError 403 and return undefined", async () => {
       const plugin = new TestPlugin(config);
       const apiError = new MockApiError("Forbidden", 403);
       const mockFn = vi.fn().mockRejectedValue(apiError);
 
       const options = { default: {} };
 
-      await expect(
-        (plugin as any).execute(mockFn, options, false),
-      ).rejects.toThrow(apiError);
+      const result = await (plugin as any).execute(mockFn, options, false);
+      expect(result).toBeUndefined();
     });
   });
 

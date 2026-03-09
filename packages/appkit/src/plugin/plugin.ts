@@ -1,4 +1,3 @@
-import { ApiError } from "@databricks/sdk-experimental";
 import type express from "express";
 import type {
   BasePlugin,
@@ -410,11 +409,8 @@ export abstract class Plugin<
     try {
       return await this._executeWithInterceptors(fn, interceptors, context);
     } catch (error) {
-      // Rethrow known errors so route handlers can map them to proper HTTP responses
-      if (error instanceof ApiError || error instanceof AuthenticationError) {
-        throw error;
-      }
-      // production-safe: swallow unknown errors, don't crash the sdk
+      // production-safe: swallow all errors, don't crash the app
+      logger.error("Plugin execution failed", { error, plugin: this.name });
       return undefined;
     }
   }
