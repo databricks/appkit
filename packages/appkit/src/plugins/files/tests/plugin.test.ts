@@ -307,7 +307,7 @@ describe("FilesPlugin", () => {
       const { isInUserContext } = await import("../../../context");
       (isInUserContext as ReturnType<typeof vi.fn>).mockReturnValue(false);
 
-      const loggerWarnSpy = vi.spyOn(
+      vi.spyOn(
         await import("../../../logging/logger").then((m) =>
           m.createLogger("files"),
         ),

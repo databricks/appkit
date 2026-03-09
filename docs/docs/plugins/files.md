@@ -301,37 +301,6 @@ All errors return JSON:
 | 413    | Upload exceeds `maxUploadSize`                                 |
 | 500    | Operation failed (SDK, network, upstream, or unhandled error)  |
 
-## Migration from single-volume (`defaultVolume`)
-
-If you were using the previous single-volume API:
-
-```ts
-// Before
-files({ defaultVolume: "/Volumes/catalog/schema/vol" })
-
-// After
-files({ volumes: { data: {} } })
-// Set DATABRICKS_VOLUME_DATA=/Volumes/catalog/schema/vol
-```
-
-Route paths change from flat to volume-scoped:
-
-| Before             | After                  |
-| ------------------ | ---------------------- |
-| `/api/files/list`  | `/api/files/data/list` |
-| `/api/files/read`  | `/api/files/data/read` |
-| `/api/files/root`  | `/api/files/volumes`   |
-
-Programmatic API changes from flat to nested:
-
-```ts
-// Before
-appkit.files.asUser(req).list()
-
-// After
-appkit.files("data").asUser(req).list()
-```
-
 ## Frontend components
 
 The `@databricks/appkit-ui` package provides ready-to-use React components for building a file browser:
