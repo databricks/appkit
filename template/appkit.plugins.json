@@ -32,7 +32,21 @@
       "description": "File operations against Databricks Volumes and Unity Catalog",
       "package": "@databricks/appkit",
       "resources": {
-        "required": [],
+        "required": [
+          {
+            "type": "volume",
+            "alias": "Files",
+            "resourceKey": "files",
+            "description": "Permission to write to volumes",
+            "permission": "WRITE_VOLUME",
+            "fields": {
+              "path": {
+                "env": "DATABRICKS_VOLUME_FILES",
+                "description": "Volume path for file storage (e.g. /Volumes/catalog/schema/volume_name)"
+              }
+            }
+          }
+        ],
         "optional": []
       }
     },
