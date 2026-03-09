@@ -158,13 +158,6 @@ describe("transformGenieData", () => {
   test("returns null for null/undefined input", () => {
     expect(transformGenieData(null)).toBeNull();
     expect(transformGenieData(undefined)).toBeNull();
-    expect(transformGenieData("string")).toBeNull();
-  });
-
-  test("returns null for malformed structure", () => {
-    expect(transformGenieData({})).toBeNull();
-    expect(transformGenieData({ manifest: {} })).toBeNull();
-    expect(transformGenieData({ manifest: { schema: {} } })).toBeNull();
   });
 
   test("handles rows shorter than columns (missing cells)", () => {

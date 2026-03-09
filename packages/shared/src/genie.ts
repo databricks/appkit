@@ -12,9 +12,21 @@ export type GenieStreamEvent =
       type: "query_result";
       attachmentId: string;
       statementId: string;
-      data: unknown;
+      data: GenieStatementResponse;
     }
   | { type: "error"; error: string };
+
+/** Shape of the Databricks SQL statement_response returned by Genie queries */
+export interface GenieStatementResponse {
+  manifest: {
+    schema: {
+      columns: Array<{ name: string; type_name: string }>;
+    };
+  };
+  result: {
+    data_array: (string | null)[][];
+  };
+}
 
 /** Cleaned response — subset of SDK GenieMessage */
 export interface GenieMessageResponse {

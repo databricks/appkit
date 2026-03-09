@@ -1,8 +1,9 @@
-import type { GenieAttachmentResponse } from "shared";
+import type { GenieAttachmentResponse, GenieStatementResponse } from "shared";
 
 export type {
   GenieAttachmentResponse,
   GenieMessageResponse,
+  GenieStatementResponse,
   GenieStreamEvent,
 } from "shared";
 
@@ -18,7 +19,7 @@ export interface GenieMessageItem {
   content: string;
   status: string;
   attachments: GenieAttachmentResponse[];
-  queryResults: Map<string, unknown>;
+  queryResults: Map<string, GenieStatementResponse>;
   error?: string;
 }
 

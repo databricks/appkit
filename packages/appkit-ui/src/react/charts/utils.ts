@@ -100,7 +100,7 @@ export function sortNumericAscending(
   const sortedYDataMap: Record<string, (string | number)[]> = {};
   for (const key of yFields) {
     const original = yDataMap[key];
-    sortedYDataMap[key] = indices.map((i) => Number(original[i]));
+    sortedYDataMap[key] = indices.map((i) => original[i]);
   }
 
   return { xData: sortedXData, yDataMap: sortedYDataMap };

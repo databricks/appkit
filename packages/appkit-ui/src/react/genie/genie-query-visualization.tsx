@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import type { GenieStatementResponse } from "shared";
 import { BaseChart } from "../charts/base";
 import { ChartErrorBoundary } from "../charts/chart-error-boundary";
 import {
@@ -18,7 +19,7 @@ const CHART_HEIGHT = 250;
 
 export interface GenieQueryVisualizationProps {
   /** Raw statement_response from the Genie API */
-  data: unknown;
+  data: GenieStatementResponse;
   /** Additional CSS classes */
   className?: string;
 }

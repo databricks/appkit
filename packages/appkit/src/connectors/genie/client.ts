@@ -9,6 +9,7 @@ import type {
   GenieAttachmentResponse,
   GenieConversationHistoryResponse,
   GenieMessageResponse,
+  GenieStatementResponse,
   GenieStreamEvent,
 } from "./types";
 
@@ -142,7 +143,7 @@ export class GenieConnector {
     messageId: string,
     attachmentId: string,
     _signal?: AbortSignal,
-  ): Promise<unknown> {
+  ): Promise<GenieStatementResponse> {
     const response =
       await workspaceClient.genie.getMessageAttachmentQueryResult({
         space_id: spaceId,
@@ -150,7 +151,7 @@ export class GenieConnector {
         message_id: messageId,
         attachment_id: attachmentId,
       });
-    return response.statement_response;
+    return response.statement_response as GenieStatementResponse;
   }
 
   async *streamSendMessage(

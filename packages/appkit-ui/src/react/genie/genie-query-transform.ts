@@ -8,6 +8,8 @@
  * numbers and strings.
  */
 
+import type { GenieStatementResponse } from "shared";
+
 // SQL type_name values that map to numeric JS values
 const NUMERIC_SQL_TYPES = new Set([
   "DECIMAL",
@@ -75,27 +77,18 @@ function parseValue(raw: string | null, category: ColumnCategory): unknown {
  *
  * Returns `null` when the data is empty or malformed.
  */
-export function transformGenieData(data: unknown): TransformedGenieData | null {
-  if (!data || typeof data !== "object") return null;
+export function transformGenieData(
+  data: GenieStatementResponse | null | undefined,
+): TransformedGenieData | null {
+  if (!data) return null;
 
-  const obj = data as Record<string, unknown>;
-
-  // Extract columns schema
-  const manifest = obj.manifest as Record<string, unknown> | undefined;
-  const schema = manifest?.schema as Record<string, unknown> | undefined;
-  const rawColumns = schema?.columns as
-    | Array<{ name: string; type_name: string }>
-    | undefined;
-
-  if (!rawColumns || !Array.isArray(rawColumns) || rawColumns.length === 0) {
+  const rawColumns = data.manifest?.schema?.columns;
+  if (!rawColumns || rawColumns.length === 0) {
     return null;
   }
 
-  // Extract data rows
-  const result = obj.result as Record<string, unknown> | undefined;
-  const dataArray = result?.data_array as string[][] | undefined;
-
-  if (!dataArray || !Array.isArray(dataArray) || dataArray.length === 0) {
+  const dataArray = data.result?.data_array;
+  if (!dataArray || dataArray.length === 0) {
     return null;
   }
 
