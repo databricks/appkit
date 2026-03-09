@@ -18,8 +18,8 @@ export function GenieChat({
     error,
     sendMessage,
     reset,
-    hasOlderMessages,
-    loadOlderMessages,
+    hasPreviousPage,
+    fetchPreviousPage,
   } = useGenieChat({
     alias,
     basePath,
@@ -43,8 +43,8 @@ export function GenieChat({
       <GenieChatMessageList
         messages={messages}
         status={status}
-        hasOlderMessages={hasOlderMessages}
-        onLoadOlder={loadOlderMessages}
+        hasPreviousPage={hasPreviousPage}
+        onFetchPreviousPage={fetchPreviousPage}
       />
 
       {error && (

@@ -138,8 +138,11 @@ export class GeniePlugin extends Plugin {
     }
 
     const includeQueryResults = req.query.includeQueryResults !== "false";
-    const pageToken = req.query.pageToken as string | undefined;
-    const requestId = (req.query.requestId as string) || randomUUID();
+    const pageToken =
+      typeof req.query.pageToken === "string" ? req.query.pageToken : undefined;
+    const requestId =
+      (typeof req.query.requestId === "string" && req.query.requestId) ||
+      randomUUID();
 
     logger.debug(
       "Fetching conversation %s from space %s (alias=%s, includeQueryResults=%s, pageToken=%s)",

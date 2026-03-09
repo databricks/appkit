@@ -1052,6 +1052,40 @@ describe("Genie Plugin", () => {
       expect(allWritten).toContain("next-token-abc");
       expect(mockRes.end).toHaveBeenCalled();
     });
+
+    test("should yield error event when paginated request fails", async () => {
+      mockGenieService.listConversationMessages.mockRejectedValue(
+        new Error("Page token expired"),
+      );
+
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler(
+        "GET",
+        "/:alias/conversations/:conversationId",
+      );
+      const mockReq = createMockRequest({
+        params: { alias: "myspace", conversationId: "conv-123" },
+        query: { pageToken: "expired-token" },
+        headers: {
+          "x-forwarded-access-token": "user-token",
+          "x-forwarded-user": "user-1",
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      const writeCalls = mockRes.write.mock.calls.map((call: any[]) => call[0]);
+      const allWritten = writeCalls.join("");
+
+      expect(allWritten).toContain("error");
+      expect(allWritten).toContain("Page token expired");
+      expect(mockRes.end).toHaveBeenCalled();
+    });
   });
 
   describe("SSE reconnection streamId", () => {

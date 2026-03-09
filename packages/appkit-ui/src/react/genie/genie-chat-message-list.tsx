@@ -13,10 +13,10 @@ export interface GenieChatMessageListProps {
   status: GenieChatStatus;
   /** Additional CSS class for the scroll area */
   className?: string;
-  /** Whether older messages are available to load */
-  hasOlderMessages?: boolean;
-  /** Callback to load older messages */
-  onLoadOlder?: () => void;
+  /** Whether a previous page of older messages exists */
+  hasPreviousPage?: boolean;
+  /** Callback to fetch the previous page of messages */
+  onFetchPreviousPage?: () => void;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -72,17 +72,17 @@ function useScrollManagement(
 
 /**
  * Observes a sentinel element at the top of the scroll area and triggers
- * `onLoadOlder` when the user scrolls to the top (only if content overflows).
+ * `onFetchPreviousPage` when the user scrolls to the top (only if content overflows).
  * Returns a ref to attach to the sentinel element.
  */
 function useLoadOlderOnScroll(
   scrollRef: React.RefObject<HTMLDivElement | null>,
   shouldObserve: boolean,
-  onLoadOlder?: () => void,
+  onFetchPreviousPage?: () => void,
 ) {
   const sentinelRef = useRef<HTMLDivElement>(null);
-  const onLoadOlderRef = useRef(onLoadOlder);
-  onLoadOlderRef.current = onLoadOlder;
+  const onFetchPreviousPageRef = useRef(onFetchPreviousPage);
+  onFetchPreviousPageRef.current = onFetchPreviousPage;
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -93,7 +93,7 @@ function useLoadOlderOnScroll(
       (entries) => {
         const isScrollable = viewport.scrollHeight > viewport.clientHeight;
         if (entries[0]?.isIntersecting && isScrollable) {
-          onLoadOlderRef.current?.();
+          onFetchPreviousPageRef.current?.();
         }
       },
       { root: viewport, threshold: 0 },
@@ -111,16 +111,16 @@ export function GenieChatMessageList({
   messages,
   status,
   className,
-  hasOlderMessages = false,
-  onLoadOlder,
+  hasPreviousPage = false,
+  onFetchPreviousPage,
 }: GenieChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useScrollManagement(scrollRef, messages, status);
   const sentinelRef = useLoadOlderOnScroll(
     scrollRef,
-    hasOlderMessages && status !== "loading-older",
-    onLoadOlder,
+    hasPreviousPage && status !== "loading-older",
+    onFetchPreviousPage,
   );
 
   const lastMessage = messages[messages.length - 1];
@@ -132,7 +132,7 @@ export function GenieChatMessageList({
   return (
     <ScrollArea ref={scrollRef} className={cn("flex-1 min-h-0 p-4", className)}>
       <div className="flex flex-col gap-4">
-        {hasOlderMessages && <div ref={sentinelRef} className="h-px" />}
+        {hasPreviousPage && <div ref={sentinelRef} className="h-px" />}
 
         {status === "loading-older" && (
           <div className="flex items-center justify-center gap-2 py-2">

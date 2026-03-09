@@ -159,9 +159,11 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
   const [error, setError] = useState<string | null>(null);
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
 
-  const hasOlderMessages = nextPageToken !== null;
+  const hasPreviousPage = nextPageToken !== null;
+  const isFetchingPreviousPage = status === "loading-older";
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  const paginationAbortRef = useRef<AbortController | null>(null);
   const conversationIdRef = useRef<string | null>(null);
   const nextPageTokenRef = useRef<string | null>(null);
   const isLoadingOlderRef = useRef(false);
@@ -313,15 +315,18 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
     [alias, basePath, processStreamEvent],
   );
 
-  /** Creates an AbortController, stores it, and fetches a conversation page. */
+  /** Creates an AbortController, stores it in the given ref, and fetches a conversation page. */
   const fetchPage = useCallback(
     (
+      controllerRef: React.RefObject<AbortController | null>,
       convId: string,
       options?: { pageToken?: string; errorMessage?: string },
     ) => {
-      abortControllerRef.current?.abort();
+      controllerRef.current?.abort();
       const abortController = new AbortController();
-      abortControllerRef.current = abortController;
+      (
+        controllerRef as React.MutableRefObject<AbortController | null>
+      ).current = abortController;
 
       const promise = fetchConversationPage(basePath, alias, convId, {
         pageToken: options?.pageToken,
@@ -351,9 +356,11 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
       setMessages([]);
       setConversationId(convId);
 
-      const { promise, abortController } = fetchPage(convId, {
-        errorMessage: "Failed to load conversation history.",
-      });
+      const { promise, abortController } = fetchPage(
+        abortControllerRef,
+        convId,
+        { errorMessage: "Failed to load conversation history." },
+      );
       promise.then((items) => {
         if (!abortController.signal.aborted) {
           setMessages(items);
@@ -364,7 +371,7 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
     [fetchPage],
   );
 
-  const loadOlderMessages = useCallback(() => {
+  const fetchPreviousPage = useCallback(() => {
     if (
       !nextPageTokenRef.current ||
       !conversationIdRef.current ||
@@ -376,10 +383,14 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
     setStatus("loading-older");
     setError(null);
 
-    const { promise, abortController } = fetchPage(conversationIdRef.current, {
-      pageToken: nextPageTokenRef.current,
-      errorMessage: "Failed to load older messages.",
-    });
+    const { promise, abortController } = fetchPage(
+      paginationAbortRef,
+      conversationIdRef.current,
+      {
+        pageToken: nextPageTokenRef.current,
+        errorMessage: "Failed to load older messages.",
+      },
+    );
     promise
       .then((items) => {
         if (abortController.signal.aborted) return;
@@ -395,6 +406,7 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
 
   const reset = useCallback(() => {
     abortControllerRef.current?.abort();
+    paginationAbortRef.current?.abort();
     setMessages([]);
     setConversationId(null);
     setError(null);
@@ -413,6 +425,7 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
     }
     return () => {
       abortControllerRef.current?.abort();
+      paginationAbortRef.current?.abort();
     };
   }, [persistInUrl, urlParamName, loadHistory]);
 
@@ -423,7 +436,8 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
     error,
     sendMessage,
     reset,
-    hasOlderMessages,
-    loadOlderMessages,
+    hasPreviousPage,
+    isFetchingPreviousPage,
+    fetchPreviousPage,
   };
 }

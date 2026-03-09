@@ -41,10 +41,12 @@ export interface UseGenieChatReturn {
   error: string | null;
   sendMessage: (content: string) => void;
   reset: () => void;
-  /** Whether older messages exist that can be loaded */
-  hasOlderMessages: boolean;
-  /** Fetch the next page of older messages */
-  loadOlderMessages: () => void;
+  /** Whether a previous page of older messages exists */
+  hasPreviousPage: boolean;
+  /** Whether a previous page is currently being fetched */
+  isFetchingPreviousPage: boolean;
+  /** Fetch the previous page of older messages */
+  fetchPreviousPage: () => void;
 }
 
 export interface GenieChatProps {
