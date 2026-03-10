@@ -95,11 +95,23 @@ export class FilesPlugin extends Plugin {
    * Warns when a method is called without a user context (i.e. as service principal).
    * OBO access via `asUser(req)` is strongly recommended.
    */
-  private warnIfNoUserContext(method: string): void {
+  private warnIfNoUserContext(volumeKey: string, method: string): void {
     if (!isInUserContext()) {
       logger.warn(
-        `files.${method}() called without user context (service principal). ` +
-          `Please use OBO instead: app.files("volumeKey").asUser(req).${method}()`,
+        `app.files("${volumeKey}").${method}() called without user context (service principal). ` +
+          `Please use OBO instead: app.files("${volumeKey}").asUser(req).${method}()`,
+      );
+    }
+  }
+
+  /**
+   * Throws when a method is called without a user context (i.e. as service principal).
+   * OBO access via `asUser(req)` is enforced for now.
+   */
+  private throwIfNoUserContext(volumeKey: string, method: string): void {
+    if (!isInUserContext()) {
+      throw new Error(
+        `app.files("${volumeKey}").${method}() called without user context (service principal). Use OBO instead: app.files("${volumeKey}").asUser(req).${method}()`,
       );
     }
   }
@@ -145,23 +157,23 @@ export class FilesPlugin extends Plugin {
     const connector = this.volumeConnectors[volumeKey];
     return {
       list: (directoryPath?: string) => {
-        this.warnIfNoUserContext(`${volumeKey}.list`);
+        this.throwIfNoUserContext(volumeKey, `list`);
         return connector.list(getWorkspaceClient(), directoryPath);
       },
       read: (filePath: string, options?: { maxSize?: number }) => {
-        this.warnIfNoUserContext(`${volumeKey}.read`);
+        this.throwIfNoUserContext(volumeKey, `read`);
         return connector.read(getWorkspaceClient(), filePath, options);
       },
       download: (filePath: string): Promise<DownloadResponse> => {
-        this.warnIfNoUserContext(`${volumeKey}.download`);
+        this.throwIfNoUserContext(volumeKey, `download`);
         return connector.download(getWorkspaceClient(), filePath);
       },
       exists: (filePath: string) => {
-        this.warnIfNoUserContext(`${volumeKey}.exists`);
+        this.throwIfNoUserContext(volumeKey, `exists`);
         return connector.exists(getWorkspaceClient(), filePath);
       },
       metadata: (filePath: string) => {
-        this.warnIfNoUserContext(`${volumeKey}.metadata`);
+        this.throwIfNoUserContext(volumeKey, `metadata`);
         return connector.metadata(getWorkspaceClient(), filePath);
       },
       upload: (
@@ -169,7 +181,7 @@ export class FilesPlugin extends Plugin {
         contents: ReadableStream | Buffer | string,
         options?: { overwrite?: boolean },
       ) => {
-        this.warnIfNoUserContext(`${volumeKey}.upload`);
+        this.throwIfNoUserContext(volumeKey, `upload`);
         return connector.upload(
           getWorkspaceClient(),
           filePath,
@@ -178,15 +190,15 @@ export class FilesPlugin extends Plugin {
         );
       },
       createDirectory: (directoryPath: string) => {
-        this.warnIfNoUserContext(`${volumeKey}.createDirectory`);
+        this.throwIfNoUserContext(volumeKey, `createDirectory`);
         return connector.createDirectory(getWorkspaceClient(), directoryPath);
       },
       delete: (filePath: string) => {
-        this.warnIfNoUserContext(`${volumeKey}.delete`);
+        this.throwIfNoUserContext(volumeKey, `delete`);
         return connector.delete(getWorkspaceClient(), filePath);
       },
       preview: (filePath: string) => {
-        this.warnIfNoUserContext(`${volumeKey}.preview`);
+        this.throwIfNoUserContext(volumeKey, `preview`);
         return connector.preview(getWorkspaceClient(), filePath);
       },
     };
@@ -424,7 +436,7 @@ export class FilesPlugin extends Plugin {
       const userPlugin = this.asUser(req);
       const result = await userPlugin.execute(
         async () => {
-          this.warnIfNoUserContext(`${volumeKey}.list`);
+          this.warnIfNoUserContext(volumeKey, `list`);
           return connector.list(getWorkspaceClient(), path);
         },
         this._readSettings([
@@ -460,7 +472,7 @@ export class FilesPlugin extends Plugin {
       const userPlugin = this.asUser(req);
       const result = await userPlugin.execute(
         async () => {
-          this.warnIfNoUserContext(`${volumeKey}.read`);
+          this.warnIfNoUserContext(volumeKey, `read`);
           return connector.read(getWorkspaceClient(), path);
         },
         this._readSettings([
@@ -529,7 +541,7 @@ export class FilesPlugin extends Plugin {
         default: FILES_DOWNLOAD_DEFAULTS,
       };
       const response = await userPlugin.execute(async () => {
-        this.warnIfNoUserContext(`${volumeKey}.download`);
+        this.warnIfNoUserContext(volumeKey, `download`);
         return connector.download(getWorkspaceClient(), path);
       }, settings);
 
@@ -603,7 +615,7 @@ export class FilesPlugin extends Plugin {
       const userPlugin = this.asUser(req);
       const result = await userPlugin.execute(
         async () => {
-          this.warnIfNoUserContext(`${volumeKey}.exists`);
+          this.warnIfNoUserContext(volumeKey, `exists`);
           return connector.exists(getWorkspaceClient(), path);
         },
         this._readSettings([
@@ -641,7 +653,7 @@ export class FilesPlugin extends Plugin {
       const userPlugin = this.asUser(req);
       const result = await userPlugin.execute(
         async () => {
-          this.warnIfNoUserContext(`${volumeKey}.metadata`);
+          this.warnIfNoUserContext(volumeKey, `metadata`);
           return connector.metadata(getWorkspaceClient(), path);
         },
         this._readSettings([
@@ -679,7 +691,7 @@ export class FilesPlugin extends Plugin {
       const userPlugin = this.asUser(req);
       const result = await userPlugin.execute(
         async () => {
-          this.warnIfNoUserContext(`${volumeKey}.preview`);
+          this.warnIfNoUserContext(volumeKey, `preview`);
           return connector.preview(getWorkspaceClient(), path);
         },
         this._readSettings([
@@ -766,7 +778,7 @@ export class FilesPlugin extends Plugin {
       };
       const result = await this.trackWrite(() =>
         userPlugin.execute(async () => {
-          this.warnIfNoUserContext(`${volumeKey}.upload`);
+          this.warnIfNoUserContext(volumeKey, `upload`);
           await connector.upload(getWorkspaceClient(), path, webStream);
           return { success: true as const };
         }, settings),
@@ -826,7 +838,7 @@ export class FilesPlugin extends Plugin {
       };
       const result = await this.trackWrite(() =>
         userPlugin.execute(async () => {
-          this.warnIfNoUserContext(`${volumeKey}.createDirectory`);
+          this.warnIfNoUserContext(volumeKey, `createDirectory`);
           await connector.createDirectory(getWorkspaceClient(), dirPath);
           return { success: true as const };
         }, settings),
@@ -873,7 +885,7 @@ export class FilesPlugin extends Plugin {
       };
       const result = await this.trackWrite(() =>
         userPlugin.execute(async () => {
-          this.warnIfNoUserContext(`${volumeKey}.delete`);
+          this.warnIfNoUserContext(volumeKey, `delete`);
           await connector.delete(getWorkspaceClient(), path);
           return { success: true as const };
         }, settings),
