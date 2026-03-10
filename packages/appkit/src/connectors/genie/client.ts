@@ -17,6 +17,14 @@ const Time = SDK.Time ?? (SDK as any).default.Time;
 
 const logger = createLogger("connectors:genie");
 
+const GenieErrors = {
+  SPACE_ACCESS_DENIED: "You don't have access to this Genie Space.",
+  TABLE_PERMISSIONS:
+    "You may not have access to the data tables. Please verify your table permissions.",
+  REQUEST_FAILED: "Genie request failed",
+  QUERY_RESULT_FAILED: "Failed to fetch query result",
+} as const;
+
 type CreateMessageWaiter = Waiter<GenieMessage, GenieMessage>;
 
 export interface GenieConnectorConfig {
@@ -58,17 +66,17 @@ function classifyGenieError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
 
   if (message.includes("RESOURCE_DOES_NOT_EXIST")) {
-    return "You don't have access to this Genie Space.";
+    return GenieErrors.SPACE_ACCESS_DENIED;
   }
 
   if (
     message.includes("failed to reach COMPLETED state") &&
     message.includes("FAILED")
   ) {
-    return "You may not have access to the data tables. Please verify your table permissions.";
+    return GenieErrors.TABLE_PERMISSIONS;
   }
 
-  return message || "Genie request failed";
+  return message || GenieErrors.REQUEST_FAILED;
 }
 
 export class GenieConnector {
@@ -267,7 +275,7 @@ export class GenieConnector {
         );
         yield {
           type: "error",
-          error: `Failed to fetch query result for attachment ${att.attachmentId}`,
+          error: `${GenieErrors.QUERY_RESULT_FAILED} for attachment ${att.attachmentId}`,
         };
       }
     }
@@ -343,7 +351,7 @@ export class GenieConnector {
               error:
                 result.reason instanceof Error
                   ? result.reason.message
-                  : "Failed to fetch query result",
+                  : GenieErrors.QUERY_RESULT_FAILED,
             };
           }
         }
