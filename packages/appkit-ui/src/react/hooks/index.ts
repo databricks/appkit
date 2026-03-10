@@ -14,3 +14,4 @@ export {
   type UseChartDataResult,
   useChartData,
 } from "./use-chart-data";
+export { usePluginClientConfig } from "./use-plugin-config";

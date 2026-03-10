@@ -7,7 +7,7 @@ import { ServerError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { appKitTypesPlugin } from "../../type-generator/vite-plugin";
 import { BaseServer } from "./base-server";
-import type { PluginEndpoints } from "./utils";
+import type { PluginClientConfigs, PluginEndpoints } from "./utils";
 
 const logger = createLogger("server:vite");
 
@@ -26,8 +26,12 @@ const logger = createLogger("server:vite");
 export class ViteDevServer extends BaseServer {
   private vite: ViteDevServerType | null;
 
-  constructor(app: express.Application, endpoints: PluginEndpoints = {}) {
-    super(app, endpoints);
+  constructor(
+    app: express.Application,
+    endpoints: PluginEndpoints = {},
+    pluginConfigs: PluginClientConfigs = {},
+  ) {
+    super(app, endpoints, pluginConfigs);
     this.vite = null;
   }
 

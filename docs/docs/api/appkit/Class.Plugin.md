@@ -244,6 +244,69 @@ AuthenticationError if user token is not available in request headers (productio
 
 ***
 
+### clientConfig()
+
+```ts
+clientConfig(): Record<string, unknown>;
+```
+
+Returns startup config to expose to the client.
+Override this to surface server-side values that are safe to publish to the
+frontend, such as feature flags, resource IDs, or other app boot settings.
+
+This runs once when the server starts, so it should not depend on
+request-scoped or user-specific state.
+
+String values that match non-public environment variables are redacted
+unless you intentionally expose them via a matching `PUBLIC_APPKIT_` env var.
+
+Values must be JSON-serializable plain data (no functions, Dates, classes,
+Maps, Sets, BigInts, or circular references).
+By default returns an empty object (plugin contributes nothing to client config).
+
+On the client, read the config with the `usePluginClientConfig` hook
+(React) or the `getPluginClientConfig` function (vanilla JS), both
+from `@databricks/appkit-ui`.
+
+#### Returns
+
+`Record`\<`string`, `unknown`\>
+
+#### Example
+
+```ts
+// Server — plugin definition
+class MyPlugin extends Plugin<MyConfig> {
+  clientConfig() {
+    return {
+      warehouseId: this.config.warehouseId,
+      features: { darkMode: true },
+    };
+  }
+}
+
+// Client — React component
+import { usePluginClientConfig } from "@databricks/appkit-ui/react";
+
+interface MyPluginConfig { warehouseId: string; features: { darkMode: boolean } }
+
+const config = usePluginClientConfig<MyPluginConfig>("myPlugin");
+config.warehouseId; // "abc-123"
+
+// Client — vanilla JS
+import { getPluginClientConfig } from "@databricks/appkit-ui/js";
+
+const config = getPluginClientConfig<MyPluginConfig>("myPlugin");
+```
+
+#### Implementation of
+
+```ts
+BasePlugin.clientConfig
+```
+
+***
+
 ### execute()
 
 ```ts

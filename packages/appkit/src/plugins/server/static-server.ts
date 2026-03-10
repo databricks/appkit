@@ -3,7 +3,7 @@ import path from "node:path";
 import type express from "express";
 import expressStatic from "express";
 import { BaseServer } from "./base-server";
-import type { PluginEndpoints } from "./utils";
+import type { PluginClientConfigs, PluginEndpoints } from "./utils";
 
 /**
  * Static server for the AppKit.
@@ -24,8 +24,9 @@ export class StaticServer extends BaseServer {
     app: express.Application,
     staticPath: string,
     endpoints: PluginEndpoints = {},
+    pluginConfigs: PluginClientConfigs = {},
   ) {
-    super(app, endpoints);
+    super(app, endpoints, pluginConfigs);
     this.staticPath = staticPath;
   }
 
