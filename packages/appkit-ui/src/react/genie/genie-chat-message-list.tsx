@@ -43,6 +43,7 @@ function getViewport(scrollRef: React.RefObject<HTMLDivElement | null>) {
 function useScrollManagement(
   scrollRef: React.RefObject<HTMLDivElement | null>,
   messages: GenieMessageItem[],
+  status: GenieChatStatus,
 ) {
   const prevFirstMessageIdRef = useRef<string | null>(null);
   const prevScrollHeightRef = useRef(0);
@@ -61,7 +62,7 @@ function useScrollManagement(
     return () => observer.disconnect();
   }, [scrollRef]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — only react to message count changes
+  // biome-ignore lint/correctness/useExhaustiveDependencies: react to message count AND status so prevScrollHeightRef stays accurate when the loading indicator appears/disappears
   useLayoutEffect(() => {
     const viewport = getViewport(scrollRef);
     if (!viewport) return;
@@ -92,7 +93,7 @@ function useScrollManagement(
 
     prevFirstMessageIdRef.current = firstMessageId;
     prevScrollHeightRef.current = viewport.scrollHeight;
-  }, [messages.length]);
+  }, [messages.length, status]);
 }
 
 /**
@@ -159,7 +160,7 @@ export function GenieChatMessageList({
     hasPreviousPage && status !== "loading-older",
     onFetchPreviousPage,
   );
-  useScrollManagement(scrollRef, messages);
+  useScrollManagement(scrollRef, messages, status);
 
   const lastMessage = messages[messages.length - 1];
   const showStreamingIndicator =
