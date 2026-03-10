@@ -9,6 +9,9 @@ A Databricks App powered by [AppKit](https://databricks.github.io/appkit/), feat
 {{- if .plugins.lakebase}}
 - **Lakebase** -- Fully managed Postgres database for transactional (OLTP) workloads on Databricks
 {{- end}}
+{{- if .plugins.genie}}
+- **Genie** -- AI/BI Genie conversational interface for natural language data queries
+{{- end}}
 - **Server** -- Express HTTP server with static file serving and Vite dev mode
 
 ## Prerequisites

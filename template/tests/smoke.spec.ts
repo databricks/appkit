@@ -12,6 +12,9 @@ const APP_CONFIG = {
 {{- if .plugins.lakebase}}
     'lakebase',
 {{- end}}
+{{- if .plugins.genie}}
+    'genie',
+{{- end}}
   ],
 } as const;
 
@@ -31,6 +34,11 @@ const PLUGIN_PAGES: Record<string, PluginPage> = {
     navLabel: 'Lakebase',
     path: '/lakebase',
     expectedTexts: ['Todo List'],
+  },
+  genie: {
+    navLabel: 'Genie',
+    path: '/genie',
+    expectedTexts: ['Genie', 'Ask questions about your data'],
   },
 };
 
