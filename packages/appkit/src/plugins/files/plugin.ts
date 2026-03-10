@@ -981,7 +981,4 @@ export class FilesPlugin extends Plugin {
 /**
  * @internal
  */
-export const files = toPlugin<typeof FilesPlugin, IFilesConfig, "files">(
-  FilesPlugin,
-  "files",
-);
+export const files = toPlugin(FilesPlugin);
