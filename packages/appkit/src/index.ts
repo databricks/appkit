@@ -10,6 +10,7 @@ export type {
   BasePluginConfig,
   CacheConfig,
   IAppRouter,
+  PluginData,
   StreamExecutionSettings,
 } from "shared";
 export { isSQLTypeMarker, sql } from "shared";

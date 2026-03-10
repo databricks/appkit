@@ -73,8 +73,8 @@ export type PluginConstructor<
  * Manifest declaration for plugins (imported from registry types).
  * Re-exported here to avoid circular dependencies.
  */
-export interface PluginManifest {
-  name: string;
+export interface PluginManifest<TName extends string = string> {
+  name: TName;
   displayName: string;
   description: string;
   resources: {

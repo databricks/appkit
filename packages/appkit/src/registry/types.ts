@@ -143,9 +143,9 @@ export type ConfigSchema = JSONSchema7;
  * Plugin manifest that declares metadata and resource requirements.
  * Attached to plugin classes as a static property.
  */
-export interface PluginManifest {
-  /** Plugin identifier (matches plugin.name) */
-  name: string;
+export interface PluginManifest<TName extends string = string> {
+  /** Plugin identifier — the single source of truth for the plugin's name */
+  name: TName;
 
   /** Human-readable display name for UI/CLI */
   displayName: string;

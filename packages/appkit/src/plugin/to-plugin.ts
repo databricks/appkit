@@ -6,14 +6,14 @@ import type { PluginConstructor, PluginData, ToPlugin } from "shared";
  *
  * @internal
  */
-export function toPlugin<T extends PluginConstructor & { name: string }>(
+export function toPlugin<T extends PluginConstructor>(
   plugin: T,
-): ToPlugin<T, ConstructorParameters<T>[0], T["name"]> {
+): ToPlugin<T, ConstructorParameters<T>[0], T["manifest"]["name"]> {
   type Config = ConstructorParameters<T>[0];
-  type Name = T["name"];
+  type Name = T["manifest"]["name"];
   return (config: Config = {} as Config): PluginData<T, Config, Name> => ({
     plugin: plugin as T,
     config: config as Config,
-    name: plugin.name as Name,
+    name: plugin.manifest.name as Name,
   });
 }

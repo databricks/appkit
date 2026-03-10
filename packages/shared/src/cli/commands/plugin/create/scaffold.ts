@@ -124,10 +124,7 @@ export function scaffoldPlugin(
 import manifest from "./manifest.json";
 
 export class ${className} extends Plugin {
-  static override readonly name = "${answers.name}";
-  name = "${answers.name}";
-
-  static manifest = manifest as PluginManifest;
+  static manifest = manifest as PluginManifest<"${answers.name}">;
 
   injectRoutes(router: IAppRouter): void {
     // Add your routes here, e.g.:

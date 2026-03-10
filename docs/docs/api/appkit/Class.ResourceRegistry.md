@@ -45,7 +45,7 @@ For each plugin, loads its manifest (required) and runtime resource requirements
 
 | Parameter | Type | Description |
 | ------ | ------ | ------ |
-| `rawPlugins` | `PluginData`\<`PluginConstructor`, `unknown`, `string`\>[] | Array of plugin data entries from createApp configuration |
+| `rawPlugins` | [`PluginData`](TypeAlias.PluginData.md)\<`PluginConstructor`, `unknown`, `string`\>[] | Array of plugin data entries from createApp configuration |
 
 #### Returns
 

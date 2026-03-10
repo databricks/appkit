@@ -20,4 +20,4 @@ type ToPlugin<T, U, N> = (config?: U) => PluginData<T, U, N>;
 
 ## Returns
 
-`PluginData`\<`T`, `U`, `N`\>
+[`PluginData`](TypeAlias.PluginData.md)\<`T`, `U`, `N`\>

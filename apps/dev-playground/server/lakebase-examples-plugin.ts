@@ -1,4 +1,9 @@
-import { getUsernameWithApiLookup, Plugin, toPlugin } from "@databricks/appkit";
+import {
+  getUsernameWithApiLookup,
+  Plugin,
+  type PluginManifest,
+  toPlugin,
+} from "@databricks/appkit";
 import type { IAppRouter } from "shared";
 import * as drizzleExample from "./lakebase-examples/drizzle-example";
 import * as rawExample from "./lakebase-examples/raw-driver-example";
@@ -19,8 +24,6 @@ import * as typeormExample from "./lakebase-examples/typeorm-example";
  */
 
 export class LakebaseExamplesPlugin extends Plugin {
-  static override readonly name = "lakebase-examples";
-  public name = "lakebase-examples";
   protected envVars: string[] = [];
 
   static manifest = {
@@ -31,7 +34,7 @@ export class LakebaseExamplesPlugin extends Plugin {
       required: [],
       optional: [],
     },
-  };
+  } satisfies PluginManifest;
 
   async setup() {
     // Check if Lakebase is configured

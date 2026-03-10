@@ -59,7 +59,7 @@ function normalizeResource(r: LooseResource): ResourceRequirement {
  * @throws {ConfigurationError} If the manifest is missing, invalid, or has invalid resource type/permission
  */
 export function getPluginManifest(plugin: PluginConstructor): PluginManifest {
-  const pluginName = plugin.name || "unknown";
+  const pluginName = plugin.manifest?.name || plugin.name || "unknown";
 
   if (!plugin.manifest) {
     throw new ConfigurationError(

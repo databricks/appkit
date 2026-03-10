@@ -27,11 +27,8 @@ import type {
 const logger = createLogger("analytics");
 
 export class AnalyticsPlugin extends Plugin {
-  static override readonly name = "analytics";
-  name = "analytics";
-
   /** Plugin manifest declaring metadata and resource requirements */
-  static manifest = manifest as PluginManifest;
+  static manifest = manifest as PluginManifest<"analytics">;
 
   protected static description = "Analytics plugin for data analysis";
   protected declare config: IAnalyticsConfig;

@@ -31,11 +31,8 @@ const logger = createLogger("lakebase");
  * ```
  */
 export class LakebasePlugin extends Plugin {
-  static override readonly name = "lakebase";
-  name = "lakebase";
-
   /** Plugin manifest declaring metadata and resource requirements */
-  static manifest = manifest as PluginManifest;
+  static manifest = manifest as PluginManifest<"lakebase">;
 
   protected declare config: ILakebaseConfig;
   private pool: Pool | null = null;

@@ -18,10 +18,7 @@ import type {
 const logger = createLogger("genie");
 
 export class GeniePlugin extends Plugin {
-  static override readonly name = "genie";
-  name = "genie";
-
-  static manifest = manifest as PluginManifest;
+  static manifest = manifest as PluginManifest<"genie">;
 
   protected static description =
     "AI/BI Genie space integration for natural language data queries";

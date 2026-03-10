@@ -93,7 +93,6 @@ const EXCLUDED_FROM_PROXY = new Set([
  *
  * class MyPlugin extends Plugin<MyConfig> {
  *   static manifest = myManifest;
- *   name = 'myPlugin';
  * }
  * ```
  *
@@ -117,8 +116,7 @@ const EXCLUDED_FROM_PROXY = new Set([
  * };
  *
  * class MyPlugin extends Plugin<MyConfig> {
- *   static manifest = myManifest;
- *   name = 'myPlugin';
+ *   static manifest = myManifest<"myPlugin">;
  *
  *   // Runtime method: converts optional resources to required based on config
  *   static getResourceRequirements(config: MyConfig) {
@@ -171,7 +169,10 @@ export abstract class Plugin<
   name: string;
 
   constructor(protected config: TConfig) {
-    this.name = config.name ?? "plugin";
+    this.name =
+      config.name ??
+      (this.constructor as { manifest?: { name: string } }).manifest?.name ??
+      "plugin";
     this.telemetry = TelemetryManager.getProvider(this.name, config.telemetry);
     this.streamManager = new StreamManager();
     this.cache = CacheManager.getInstanceSync();
@@ -207,7 +208,6 @@ export abstract class Plugin<
    * @example
    * ```ts
    * class MyPlugin extends Plugin {
-   *   name = "myPlugin";
    *   private getData() { return []; }
    *
    *   exports() {

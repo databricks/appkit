@@ -35,7 +35,6 @@ const myManifest: PluginManifest = {
 
 class MyPlugin extends Plugin<MyConfig> {
   static manifest = myManifest;
-  name = 'myPlugin';
 }
 ```
 
@@ -58,8 +57,7 @@ const myManifest: PluginManifest = {
 };
 
 class MyPlugin extends Plugin<MyConfig> {
-  static manifest = myManifest;
-  name = 'myPlugin';
+  static manifest = myManifest<"myPlugin">;
 
   // Runtime method: converts optional resources to required based on config
   static getResourceRequirements(config: MyConfig) {
@@ -327,7 +325,6 @@ and adds `asUser(req)` for user-scoped execution.
 
 ```ts
 class MyPlugin extends Plugin {
-  name = "myPlugin";
   private getData() { return []; }
 
   exports() {

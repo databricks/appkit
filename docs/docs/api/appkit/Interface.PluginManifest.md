@@ -1,7 +1,13 @@
-# Interface: PluginManifest
+# Interface: PluginManifest\<TName\>
 
 Plugin manifest that declares metadata and resource requirements.
 Attached to plugin classes as a static property.
+
+## Type Parameters
+
+| Type Parameter | Default type |
+| ------ | ------ |
+| `TName` *extends* `string` | `string` |
 
 ## Properties
 
@@ -83,10 +89,10 @@ optional license: string;
 ### name
 
 ```ts
-name: string;
+name: TName;
 ```
 
-Plugin identifier (matches plugin.name)
+Plugin identifier — the single source of truth for the plugin's name
 
 ***
 

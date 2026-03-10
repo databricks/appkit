@@ -42,10 +42,7 @@ export class ServerPlugin extends Plugin {
   };
 
   /** Plugin manifest declaring metadata and resource requirements */
-  static manifest = manifest as PluginManifest;
-
-  static override readonly name = "server";
-  public name = "server" as const;
+  static manifest = manifest as PluginManifest<"server">;
   private serverApplication: express.Application;
   private server: HTTPServer | null;
   private viteDevServer?: ViteDevServer;
@@ -351,8 +348,7 @@ export class ServerPlugin extends Plugin {
   }
 }
 
-const EXCLUDED_PLUGINS = [ServerPlugin.name];
-
+const EXCLUDED_PLUGINS: string[] = [ServerPlugin.manifest.name];
 /**
  * @internal
  */

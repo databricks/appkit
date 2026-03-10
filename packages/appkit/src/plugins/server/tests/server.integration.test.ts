@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 process.env.DATABRICKS_APP_PORT = "8000";
 process.env.FLASK_RUN_HOST = "0.0.0.0";
 
+import type { PluginManifest } from "shared";
 import { ServiceContext } from "../../../context/service-context";
 import { createApp } from "../../../core";
 import { Plugin, toPlugin } from "../../../plugin";
@@ -98,14 +99,12 @@ describe("ServerPlugin with custom plugin", () => {
 
     // Create a simple test plugin
     class TestPlugin extends Plugin {
-      static override readonly name = "test-plugin";
       static manifest = {
         name: "test-plugin",
         displayName: "Test Plugin",
         description: "Test plugin for integration tests",
         resources: { required: [], optional: [] },
-      };
-      name = "test-plugin" as const;
+      } satisfies PluginManifest<"test-plugin">;
 
       injectRoutes(router: any) {
         router.get("/echo", (_req: any, res: any) => {
