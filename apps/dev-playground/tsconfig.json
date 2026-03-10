@@ -3,6 +3,8 @@
   "compilerOptions": {
     "baseUrl": ".",
     "outDir": "./build",
+    "declaration": false,
+    "declarationMap": false,
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true
   },

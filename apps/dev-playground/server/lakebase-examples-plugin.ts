@@ -34,7 +34,7 @@ export class LakebaseExamplesPlugin extends Plugin {
       required: [],
       optional: [],
     },
-  } satisfies PluginManifest;
+  } satisfies PluginManifest<"lakebase-examples">;
 
   async setup() {
     // Check if Lakebase is configured
