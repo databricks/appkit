@@ -2,7 +2,7 @@ import { type KeyboardEvent, useRef, useState } from "react";
 import { cn } from "../lib/utils";
 import { Button } from "../ui/button";
 
-export interface GenieChatInputProps {
+interface GenieChatInputProps {
   /** Callback fired when the user submits a message */
   onSend: (content: string) => void;
   /** Disable the input and send button */

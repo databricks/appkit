@@ -23,9 +23,7 @@ export function createLakebasePool(config?: Partial<LakebasePoolConfig>): Pool {
 
 // Re-export everything else from lakebase
 export {
-  createTokenRefreshCallback,
   type DatabaseCredential,
-  type DriverTelemetry,
   type GenerateDatabaseCredentialRequest,
   generateDatabaseCredential,
   getLakebaseOrmConfig,
@@ -33,9 +31,7 @@ export {
   getUsernameWithApiLookup,
   getWorkspaceClient,
   type LakebasePoolConfig,
-  type Logger,
   type RequestedClaims,
   RequestedClaimsPermissionSet,
   type RequestedResource,
-  type TokenRefreshDeps,
 } from "@databricks/lakebase";

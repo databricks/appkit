@@ -73,7 +73,7 @@ class NonRecordingSpan implements Span {
   recordException(_exception: any, _time?: number): void {}
 }
 
-export class NoopTracer implements Tracer {
+class NoopTracer implements Tracer {
   startSpan(_name: string, _options?: SpanOptions, _context?: Context): Span {
     return new NonRecordingSpan(INVALID_SPAN_CONTEXT);
   }

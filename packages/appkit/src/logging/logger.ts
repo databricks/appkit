@@ -10,7 +10,7 @@ import { WideEventEmitter } from "./wide-event-emitter";
 /**
  * Logger interface for AppKit components
  */
-export interface Logger {
+interface Logger {
   /** Debug output (disabled by default, enable via DEBUG env var) */
   debug(message: string, ...args: unknown[]): void;
   debug(req: Request, message: string, ...args: unknown[]): void;
@@ -156,7 +156,7 @@ function setupResponseHandlers(req: Request, wideEvent: WideEvent): void {
  * app.use(wideEventMiddleware);
  * ```
  */
-export function wideEventMiddleware(
+function _wideEventMiddleware(
   req: Request,
   _res: Response,
   next: NextFunction,

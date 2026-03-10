@@ -136,15 +136,13 @@ import type { PluginEndpoints } from "shared";
 
 export type { PluginEndpoints };
 
-export interface RuntimeConfig {
+interface RuntimeConfig {
   appName: string;
   queries: Record<string, string>;
   endpoints: PluginEndpoints;
 }
 
-export function getRuntimeConfig(
-  endpoints: PluginEndpoints = {},
-): RuntimeConfig {
+function getRuntimeConfig(endpoints: PluginEndpoints = {}): RuntimeConfig {
   const configFolder = path.join(process.cwd(), "config");
 
   return {

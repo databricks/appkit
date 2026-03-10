@@ -24,7 +24,7 @@ const markdownStyles = cn(
   "[&_a]:underline",
 );
 
-export interface GenieChatMessageProps {
+interface GenieChatMessageProps {
   /** The message object to render */
   message: GenieMessageItem;
   /** Additional CSS class */

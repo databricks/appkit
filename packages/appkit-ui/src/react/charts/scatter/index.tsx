@@ -26,6 +26,6 @@ export const ScatterChart = createChart<ScatterChartProps>(
  *
  * Supports both query mode (queryKey + parameters) and data mode (static data).
  */
-export function ScatterChartDoc(props: ScatterChartProps): JSX.Element {
+function _ScatterChartDoc(props: ScatterChartProps): JSX.Element {
   return ScatterChart(props);
 }

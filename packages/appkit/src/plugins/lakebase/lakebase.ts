@@ -30,7 +30,7 @@ const logger = createLogger("lakebase");
  * const result = await AppKit.lakebase.query("SELECT * FROM users WHERE id = $1", [userId]);
  * ```
  */
-export class LakebasePlugin extends Plugin {
+class LakebasePlugin extends Plugin {
   /** Plugin manifest declaring metadata and resource requirements */
   static manifest = manifest as PluginManifest<"lakebase">;
 

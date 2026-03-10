@@ -412,7 +412,7 @@ export async function generateQueriesFromDescribe(
  * @param queryName - the query name to normalize
  * @returns the normalized query name
  */
-export function normalizeQueryName(fileName: string): string {
+function normalizeQueryName(fileName: string): string {
   return fileName.replace(/\.obo$/, "");
 }
 

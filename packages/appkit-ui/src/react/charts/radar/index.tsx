@@ -23,6 +23,6 @@ export const RadarChart = createChart<RadarChartProps>("radar", "RadarChart");
  *
  * Supports both query mode (queryKey + parameters) and data mode (static data).
  */
-export function RadarChartDoc(props: RadarChartProps): JSX.Element {
+function _RadarChartDoc(props: RadarChartProps): JSX.Element {
   return RadarChart(props);
 }

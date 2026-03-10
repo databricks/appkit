@@ -11,41 +11,17 @@
 
 // Re-export generated registry types (enum + const must be value exports for runtime)
 import {
-  type AppPermission,
-  type DatabasePermission,
-  type ExperimentPermission,
-  type GenieSpacePermission,
-  type JobPermission,
   PERMISSION_HIERARCHY_BY_TYPE,
   PERMISSIONS_BY_TYPE,
   type ResourcePermission,
   ResourceType,
-  type SecretPermission,
-  type ServingEndpointPermission,
-  type SqlWarehousePermission,
-  type UcConnectionPermission,
-  type UcFunctionPermission,
-  type VectorSearchIndexPermission,
-  type VolumePermission,
 } from "./types.generated";
 
 export {
   PERMISSION_HIERARCHY_BY_TYPE,
   PERMISSIONS_BY_TYPE,
   ResourceType,
-  type AppPermission,
-  type DatabasePermission,
-  type ExperimentPermission,
-  type GenieSpacePermission,
-  type JobPermission,
   type ResourcePermission,
-  type SecretPermission,
-  type ServingEndpointPermission,
-  type SqlWarehousePermission,
-  type UcConnectionPermission,
-  type UcFunctionPermission,
-  type VectorSearchIndexPermission,
-  type VolumePermission,
 };
 
 // ============================================================================

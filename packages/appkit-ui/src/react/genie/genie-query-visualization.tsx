@@ -17,7 +17,7 @@ import { transformGenieData } from "./genie-query-transform";
 const TABLE_ROW_LIMIT = 50;
 const CHART_HEIGHT = 250;
 
-export interface GenieQueryVisualizationProps {
+interface GenieQueryVisualizationProps {
   /** Raw statement_response from the Genie API */
   data: GenieStatementResponse;
   /** Additional CSS classes */

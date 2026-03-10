@@ -100,6 +100,3 @@ export const FALLBACK_COLORS_DIVERGING = [
   "hsla(10, 72%, 50%, 1)",
   "hsla(10, 80%, 40%, 1)", // Strong positive
 ];
-
-/** Legacy: Fallback colors (aliases to categorical) */
-export const FALLBACK_COLORS = FALLBACK_COLORS_CATEGORICAL;

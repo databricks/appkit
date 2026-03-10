@@ -39,7 +39,9 @@
     "start": "NODE_ENV=production pnpm build && pnpm --filter=dev-playground build:app && pnpm --filter=dev-playground start:local",
     "test:watch": "vitest",
     "test": "vitest run --coverage",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "knip": "knip",
+    "knip:fix": "knip --fix"
   },
   "lint-staged": {
     "(*.ts|*.tsx|*.js|*.jsx|*.json|*.md|*.yml|*.yaml|*.css)": [
@@ -58,9 +60,8 @@
     "@vitest/coverage-istanbul": "3.2.4",
     "husky": "^9.1.7",
     "jsdom": "^27.0.0",
+    "knip": "^5.86.0",
     "lint-staged": "^15.5.1",
-    "pg": "^8.18.0",
-    "plop": "^4.0.4",
     "publint": "^0.3.15",
     "release-it": "^19.1.0",
     "tsdown": "^0.20.3",

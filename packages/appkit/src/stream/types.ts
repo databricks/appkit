@@ -43,11 +43,6 @@ export interface StreamEntry {
   traceContext: Context;
 }
 
-export interface BufferEntry {
-  buffer: EventRingBuffer;
-  lastAccess: number;
-}
-
 export interface StreamOperation {
   controller: AbortController;
   type: "query" | "stream";

@@ -4,7 +4,7 @@ import type { IncomingMessage } from "node:http";
  * Paths and patterns to exclude from tracing and logging.
  * Requests matching these will not create spans or WideEvents.
  */
-export const EXCLUDED_PATH_PREFIXES = [
+const EXCLUDED_PATH_PREFIXES = [
   // Vite dev server internals
   "/@fs/",
   "/@vite/",
@@ -27,7 +27,7 @@ export const EXCLUDED_PATH_PREFIXES = [
  * File extensions to exclude from tracing.
  * These are typically static assets that don't need tracing.
  */
-export const EXCLUDED_EXTENSIONS = [
+const EXCLUDED_EXTENSIONS = [
   ".svg",
   ".png",
   ".jpg",

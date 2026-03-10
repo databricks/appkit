@@ -23,6 +23,6 @@ export const LineChart = createChart<LineChartProps>("line", "LineChart");
  *
  * Supports both query mode (queryKey + parameters) and data mode (static data).
  */
-export function LineChartDoc(props: LineChartProps): JSX.Element {
+function _LineChartDoc(props: LineChartProps): JSX.Element {
   return LineChart(props);
 }

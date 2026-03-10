@@ -1,0 +1,21 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "ignoreWorkspaces": [
+    "packages/shared",
+    "packages/lakebase",
+    "apps/**",
+    "docs"
+  ],
+  "workspaces": {
+    "packages/appkit": {},
+    "packages/appkit-ui": {}
+  },
+  "ignore": [
+    "**/*.generated.ts",
+    "**/*.example.tsx",
+    "template/**",
+    "tools/**",
+    "docs/**"
+  ],
+  "ignoreBinaries": ["tarball"]
+}

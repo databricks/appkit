@@ -28,7 +28,7 @@ const GenieErrors = {
 
 type CreateMessageWaiter = Waiter<GenieMessage, GenieMessage>;
 
-export interface GenieConnectorConfig {
+interface GenieConnectorConfig {
   timeout?: number;
   maxMessages?: number;
 }

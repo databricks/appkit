@@ -157,4 +157,4 @@ export class AppManager {
   }
 }
 
-export type { DevFileReader, QueryResult, RequestLike };
+export type { DevFileReader };

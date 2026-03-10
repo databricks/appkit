@@ -4,7 +4,7 @@ import type { WideEventData } from "./wide-event";
 /**
  * Sampling configuration for WideEvents
  */
-export interface SamplingConfig {
+interface SamplingConfig {
   /** Always sample if any of these conditions are true */
   alwaysSampleIf: {
     /** Sample if event has errors */

@@ -15,14 +15,14 @@ type PackageJson = {
 };
 
 // Packages whose direct dependencies we want to include in published artifacts
-export const PUBLISHED_PACKAGES = [
+const PUBLISHED_PACKAGES = [
   "packages/appkit",
   "packages/appkit-ui",
   "packages/lakebase",
   "packages/shared",
 ];
 
-export function getDirectDependencies(): Set<string> {
+function getDirectDependencies(): Set<string> {
   const directDeps = new Set<string>();
 
   for (const pkgPath of PUBLISHED_PACKAGES) {

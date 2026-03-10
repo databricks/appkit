@@ -7,11 +7,6 @@
  * loaded once, even if multiple components request it simultaneously.
  */
 
-import type { Field, Table } from "apache-arrow";
-
-// Re-export types for convenience (types don't add to bundle size)
-export type { Table, Field };
-
 // ============================================================================
 // Lazy Module Loading
 // ============================================================================

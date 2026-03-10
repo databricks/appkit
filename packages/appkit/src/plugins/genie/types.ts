@@ -1,11 +1,7 @@
 import type { BasePluginConfig } from "shared";
 
 // Re-export connector types for backward compatibility
-export type {
-  GenieAttachmentResponse,
-  GenieMessageResponse,
-  GenieStreamEvent,
-} from "shared";
+export type { GenieStreamEvent } from "shared";
 export type { GenieConversationHistoryResponse } from "../../connectors/genie";
 
 export interface IGenieConfig extends BasePluginConfig {

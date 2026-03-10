@@ -23,6 +23,6 @@ export const BarChart = createChart<BarChartProps>("bar", "BarChart");
  *
  * Supports both query mode (queryKey + parameters) and data mode (static data).
  */
-export function BarChartDoc(props: BarChartProps): JSX.Element {
+function _BarChartDoc(props: BarChartProps): JSX.Element {
   return BarChart(props);
 }

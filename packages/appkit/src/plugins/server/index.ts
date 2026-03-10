@@ -378,6 +378,4 @@ const EXCLUDED_PLUGINS: string[] = [ServerPlugin.manifest.name];
  * @internal
  */
 export const server = toPlugin(ServerPlugin);
-
 // Export manifest and types
-export type { ServerConfig } from "./types";

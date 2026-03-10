@@ -25,7 +25,7 @@ import { executeStatementDefaults } from "./defaults";
 
 const logger = createLogger("connectors:sql-warehouse");
 
-export interface SQLWarehouseConfig {
+interface SQLWarehouseConfig {
   timeout?: number;
   telemetry?: TelemetryOptions;
 }

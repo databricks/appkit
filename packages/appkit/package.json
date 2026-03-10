@@ -64,6 +64,7 @@
     "@opentelemetry/sdk-logs": "^0.208.0",
     "@opentelemetry/sdk-metrics": "^2.2.0",
     "@opentelemetry/sdk-node": "^0.208.0",
+    "@opentelemetry/sdk-trace-base": "^2.6.0",
     "@opentelemetry/semantic-conventions": "^1.38.0",
     "@types/semver": "^7.7.1",
     "dotenv": "^16.6.1",
@@ -74,8 +75,7 @@
     "semver": "^7.7.3",
     "shared": "workspace:*",
     "vite": "npm:rolldown-vite@7.1.14",
-    "ws": "^8.18.3",
-    "zod-to-ts": "^2.0.0"
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@types/express": "^4.17.25",

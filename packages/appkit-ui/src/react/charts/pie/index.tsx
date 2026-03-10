@@ -34,7 +34,7 @@ export const DonutChart = createChart<DonutChartProps>("donut", "DonutChart");
  *
  * Supports both query mode (queryKey + parameters) and data mode (static data).
  */
-export function PieChartDoc(props: PieChartProps): JSX.Element {
+function _PieChartDoc(props: PieChartProps): JSX.Element {
   return PieChart(props);
 }
 
@@ -47,6 +47,6 @@ export function PieChartDoc(props: PieChartProps): JSX.Element {
  *
  * Supports both query mode (queryKey + parameters) and data mode (static data).
  */
-export function DonutChartDoc(props: DonutChartProps): JSX.Element {
+function _DonutChartDoc(props: DonutChartProps): JSX.Element {
   return DonutChart(props);
 }

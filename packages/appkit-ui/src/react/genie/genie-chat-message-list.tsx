@@ -6,7 +6,7 @@ import { Spinner } from "../ui/spinner";
 import { GenieChatMessage } from "./genie-chat-message";
 import type { GenieChatStatus, GenieMessageItem } from "./types";
 
-export interface GenieChatMessageListProps {
+interface GenieChatMessageListProps {
   /** Array of messages to display */
   messages: GenieMessageItem[];
   /** Current chat status (controls loading indicators and skeleton placeholders) */

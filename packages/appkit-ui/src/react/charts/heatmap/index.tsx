@@ -36,6 +36,6 @@ export const HeatmapChart = createChart<HeatmapChartProps>(
  *
  * Supports both query mode (queryKey + parameters) and data mode (static data).
  */
-export function HeatmapChartDoc(props: HeatmapChartProps): JSX.Element {
+function _HeatmapChartDoc(props: HeatmapChartProps): JSX.Element {
   return HeatmapChart(props);
 }

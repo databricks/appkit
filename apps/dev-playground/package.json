@@ -28,14 +28,11 @@
     "drizzle-orm": "^0.45.1",
     "reflect-metadata": "^0.2.0",
     "sequelize": "^6.37.7",
-    "typeorm": "^0.3.20",
-    "zod": "^4.1.13"
+    "typeorm": "^0.3.20"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.1",
     "@types/node": "^20.0.0",
-    "@types/react-syntax-highlighter": "^15.5.13",
-    "@vitejs/plugin-react": "^5.0.4",
     "dotenv": "^16.0.0",
     "tsdown": "^0.20.3",
     "tsx": "^4.20.6",

@@ -23,6 +23,6 @@ export const AreaChart = createChart<AreaChartProps>("area", "AreaChart");
  *
  * Supports both query mode (queryKey + parameters) and data mode (static data).
  */
-export function AreaChartDoc(props: AreaChartProps): JSX.Element {
+function _AreaChartDoc(props: AreaChartProps): JSX.Element {
   return AreaChart(props);
 }

@@ -7,7 +7,7 @@ const logger = createLogger("stream:arrow");
 type ResultManifest = sql.ResultManifest;
 type ExternalLink = sql.ExternalLink;
 
-export interface ArrowStreamOptions {
+interface ArrowStreamOptions {
   maxConcurrentDownloads: number;
   timeout: number;
   retries: number;
@@ -17,7 +17,7 @@ export interface ArrowStreamOptions {
  * Result from zero-copy Arrow chunk processing.
  * Contains raw IPC bytes without server-side parsing.
  */
-export interface ArrowRawResult {
+interface ArrowRawResult {
   /** Concatenated raw Arrow IPC bytes */
   data: Uint8Array;
   /** Schema from Databricks manifest (not parsed from Arrow) */
