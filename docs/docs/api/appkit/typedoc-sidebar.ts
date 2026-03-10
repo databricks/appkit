@@ -84,6 +84,11 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
+          id: "api/appkit/Interface.AgentInterface",
+          label: "AgentInterface"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.BasePluginConfig",
           label: "BasePluginConfig"
         },
@@ -101,6 +106,16 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.GenerateDatabaseCredentialRequest",
           label: "GenerateDatabaseCredentialRequest"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.IAgentConfig",
+          label: "IAgentConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.InvokeParams",
+          label: "InvokeParams"
         },
         {
           type: "doc",
@@ -141,6 +156,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.ResourceRequirement",
           label: "ResourceRequirement"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.StandardAgent",
+          label: "StandardAgent"
         },
         {
           type: "doc",
@@ -185,6 +205,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.ResponseStreamEvent",
+          label: "ResponseStreamEvent"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.ToPlugin",
           label: "ToPlugin"
         }
@@ -194,6 +219,11 @@ const typedocSidebar: SidebarsConfig = {
       type: "category",
       label: "Variables",
       items: [
+        {
+          type: "doc",
+          id: "api/appkit/Variable.agent",
+          label: "agent"
+        },
         {
           type: "doc",
           id: "api/appkit/Variable.sql",
