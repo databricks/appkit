@@ -303,28 +303,17 @@ describe("FilesPlugin", () => {
       }
     });
 
-    test("direct methods on handle work as service principal and log a warning", async () => {
+    test("direct methods on handle throw without user context (OBO enforced)", async () => {
       const { isInUserContext } = await import("../../../context");
       (isInUserContext as ReturnType<typeof vi.fn>).mockReturnValue(false);
-
-      vi.spyOn(
-        await import("../../../logging/logger").then((m) =>
-          m.createLogger("files"),
-        ),
-        "warn",
-      );
 
       const plugin = new FilesPlugin(VOLUMES_CONFIG);
       const handle = plugin.exports()("uploads");
 
-      mockClient.files.listDirectoryContents.mockImplementation(
-        async function* () {
-          yield { name: "file.txt", path: "/file.txt", is_directory: false };
-        },
+      // Direct call without user context should throw synchronously
+      expect(() => handle.list()).toThrow(
+        'app.files("uploads").list() called without user context (service principal). Use OBO instead: app.files("uploads").asUser(req).list()',
       );
-
-      // Direct call should work (service principal) without throwing
-      await expect(handle.list()).resolves.toBeDefined();
     });
   });
 
