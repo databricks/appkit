@@ -1,10 +1,12 @@
 import { test, expect } from '@playwright/test';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+
+const pkg = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf-8'));
 
 // ── Templated configuration (resolved by `databricks apps init`) ────────────
 const APP_CONFIG = {
-  name: '{{.projectName}}',
+  name: pkg.name as string,
   plugins: [
 {{- if .plugins.analytics}}
     'analytics',
@@ -38,7 +40,7 @@ const PLUGIN_PAGES: Record<string, PluginPage> = {
   genie: {
     navLabel: 'Genie',
     path: '/genie',
-    expectedTexts: ['Genie', 'Ask questions about your data'],
+    expectedTexts: ['Ask questions about your data using Databricks AI/BI Genie'],
   },
 };
 
