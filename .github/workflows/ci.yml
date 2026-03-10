@@ -54,6 +54,8 @@ jobs:
         run: pnpm run check
       - name: Run Types Check
         run: pnpm run typecheck
+      - name: Run Knip Check
+        run: pnpm run knip
       - name: Run License Check
         run: pnpm run check:licenses
 
