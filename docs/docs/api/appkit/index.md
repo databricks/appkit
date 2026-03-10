@@ -30,10 +30,13 @@ plugin architecture, and React integration.
 
 | Interface | Description |
 | ------ | ------ |
+| [AgentInterface](Interface.AgentInterface.md) | Contract that agent implementations must fulfil. |
 | [BasePluginConfig](Interface.BasePluginConfig.md) | Base configuration interface for AppKit plugins |
 | [CacheConfig](Interface.CacheConfig.md) | Configuration for the CacheInterceptor. Controls TTL, size limits, storage backend, and probabilistic cleanup. |
 | [DatabaseCredential](Interface.DatabaseCredential.md) | Database credentials with OAuth token for Postgres connection |
 | [GenerateDatabaseCredentialRequest](Interface.GenerateDatabaseCredentialRequest.md) | Request parameters for generating database OAuth credentials |
+| [IAgentConfig](Interface.IAgentConfig.md) | Base configuration interface for AppKit plugins |
+| [InvokeParams](Interface.InvokeParams.md) | Agent interface types for the AppKit Agent Plugin. |
 | [ITelemetry](Interface.ITelemetry.md) | Plugin-facing interface for OpenTelemetry instrumentation. Provides a thin abstraction over OpenTelemetry APIs for plugins. |
 | [LakebasePoolConfig](Interface.LakebasePoolConfig.md) | Configuration for creating a Lakebase connection pool |
 | [PluginManifest](Interface.PluginManifest.md) | Plugin manifest that declares metadata and resource requirements. Attached to plugin classes as a static property. Extends the shared PluginManifest with strict resource types. |
@@ -42,6 +45,7 @@ plugin architecture, and React integration.
 | [ResourceEntry](Interface.ResourceEntry.md) | Internal representation of a resource in the registry. Extends ResourceRequirement with resolution state and plugin ownership. |
 | [ResourceFieldEntry](Interface.ResourceFieldEntry.md) | Defines a single field for a resource. Each field has its own environment variable and optional description. Single-value types use one key (e.g. id); multi-value types (database, secret) use multiple (e.g. instance_name, database_name or scope, key). |
 | [ResourceRequirement](Interface.ResourceRequirement.md) | Declares a resource requirement for a plugin. Can be defined statically in a manifest or dynamically via getResourceRequirements(). Narrows the generated base: type → ResourceType enum, permission → ResourcePermission union. |
+| [StandardAgent](Interface.StandardAgent.md) | Built-in [AgentInterface](Interface.AgentInterface.md) implementation that wraps a LangGraph `createReactAgent` and translates its stream events into Responses API SSE format. Use this as the default agent unless you need a custom implementation for a different LLM SDK. |
 | [StreamExecutionSettings](Interface.StreamExecutionSettings.md) | Execution settings for streaming endpoints. Extends PluginExecutionSettings with SSE stream configuration. |
 | [TelemetryConfig](Interface.TelemetryConfig.md) | OpenTelemetry configuration for AppKit applications |
 | [ValidationResult](Interface.ValidationResult.md) | Result of validating all registered resources against the environment. |
@@ -54,12 +58,14 @@ plugin architecture, and React integration.
 | [IAppRouter](TypeAlias.IAppRouter.md) | Express router type for plugin route registration |
 | [PluginData](TypeAlias.PluginData.md) | Tuple of plugin class, config, and name. Created by `toPlugin()` and passed to `createApp()`. |
 | [ResourcePermission](TypeAlias.ResourcePermission.md) | Union of all possible permission levels across all resource types. |
+| [ResponseStreamEvent](TypeAlias.ResponseStreamEvent.md) | - |
 | [ToPlugin](TypeAlias.ToPlugin.md) | Factory function type returned by `toPlugin()`. Accepts optional config and returns a PluginData tuple. |
 
 ## Variables
 
 | Variable | Description |
 | ------ | ------ |
+| [agent](Variable.agent.md) | - |
 | [sql](Variable.sql.md) | SQL helper namespace |
 
 ## Functions

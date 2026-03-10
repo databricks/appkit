@@ -1,6 +1,14 @@
 import "reflect-metadata";
-import { analytics, createApp, files, genie, server } from "@databricks/appkit";
+import {
+  agent,
+  analytics,
+  createApp,
+  files,
+  genie,
+  server,
+} from "@databricks/appkit";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
+import { demoTools } from "./agent-tools";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
@@ -26,11 +34,26 @@ createApp({
     }),
     lakebaseExamples(),
     files(),
+    agent({
+      model: process.env.DATABRICKS_MODEL || "databricks-claude-sonnet-4-5",
+      systemPrompt:
+        "You are a helpful assistant. Use tools when appropriate — for example, use get_weather for weather questions, and get_current_time for time queries.",
+      tools: [demoTools.weatherTool],
+    }),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
-}).then((appkit) => {
+}).then(async (appkit) => {
+  // Add tools (and optionally MCP servers) after app creation
+  await appkit.agent.addCapabilities({ tools: [demoTools.timeTool] });
+
   appkit.server
     .extend((app) => {
+      // Rewrite to use standard Databricks Apps convention: /invocations at root
+      app.post("/invocations", (req, res) => {
+        req.url = "/api/agent";
+        app(req, res);
+      });
+
       app.get("/sp", (_req, res) => {
         appkit.analytics
           .query("SELECT * FROM samples.nyctaxi.trips;")
