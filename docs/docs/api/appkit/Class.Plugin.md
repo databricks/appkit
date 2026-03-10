@@ -43,7 +43,7 @@ interface MyConfig extends BasePluginConfig {
   enableCaching?: boolean;
 }
 
-const myManifest: PluginManifest = {
+const myManifest: PluginManifest<"myPlugin"> = {
   name: 'myPlugin',
   resources: {
     required: [
@@ -57,7 +57,7 @@ const myManifest: PluginManifest = {
 };
 
 class MyPlugin extends Plugin<MyConfig> {
-  static manifest = myManifest<"myPlugin">;
+  static manifest = myManifest;
 
   // Runtime method: converts optional resources to required based on config
   static getResourceRequirements(config: MyConfig) {

@@ -17,13 +17,10 @@ For a deeper understanding of the plugin structure, read on.
 Extend the [`Plugin`](../api/appkit/Class.Plugin.md) class and export with `toPlugin()`:
 
 ```typescript
-import { Plugin, toPlugin } from "@databricks/appkit";
+import { Plugin, toPlugin, type PluginManifest } from "@databricks/appkit";
 import type express from "express";
 
 class MyPlugin extends Plugin {
-  static override readonly name = "myPlugin";
-  name = "myPlugin";
-
   static manifest = {
     name: "myPlugin",
     displayName: "My Plugin",
@@ -44,7 +41,7 @@ class MyPlugin extends Plugin {
       ],
       optional: []
     }
-  };
+  } satisfies PluginManifest<"myPlugin">;
 
   async setup() {
     // Initialize your plugin
@@ -80,9 +77,6 @@ interface MyPluginConfig extends BasePluginConfig {
 }
 
 class MyPlugin extends Plugin<MyPluginConfig> {
-  static override readonly name = "myPlugin";
-  name = "myPlugin";
-
   static manifest = {
     name: "myPlugin",
     displayName: "My Plugin",
@@ -96,7 +90,7 @@ class MyPlugin extends Plugin<MyPluginConfig> {
         { type: "database", alias: "cache", resourceKey: "cache", description: "Query result caching (if enabled)", permission: "CAN_CONNECT_AND_CREATE", fields: { instance_name: { env: "DATABRICKS_CACHE_INSTANCE" }, database_name: { env: "DATABRICKS_CACHE_DB" } } }
       ]
     }
-  };
+  } satisfies PluginManifest<"myPlugin">;
 
   // Runtime: Convert optional resources to required based on config
   static getResourceRequirements(config: MyPluginConfig) {

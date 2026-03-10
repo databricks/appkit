@@ -349,6 +349,7 @@ export class ServerPlugin extends Plugin {
 }
 
 const EXCLUDED_PLUGINS: string[] = [ServerPlugin.manifest.name];
+
 /**
  * @internal
  */

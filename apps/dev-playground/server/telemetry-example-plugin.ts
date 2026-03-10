@@ -25,7 +25,7 @@ class TelemetryExamples extends Plugin {
       required: [],
       optional: [],
     },
-  } as PluginManifest<"telemetry-examples">;
+  } satisfies PluginManifest<"telemetry-examples">;
 
   private requestCounter: Counter;
   private durationHistogram: Histogram;
