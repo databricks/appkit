@@ -1,0 +1,61 @@
+name: Build Eval Pack
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag, or commit to build from"
+        required: false
+        type: string
+        default: ""
+
+concurrency:
+  group: eval-pack-${{ github.event.inputs.ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build:
+    name: Build SDK Tarballs
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and pack SDK
+        run: pnpm pack:sdk
+
+      - name: Create eval pack
+        run: |
+          mkdir -p eval-pack
+          cp packages/appkit/tmp/*.tgz eval-pack/
+          cp packages/appkit-ui/tmp/*.tgz eval-pack/
+          echo "Tarballs:"
+          ls -la eval-pack/
+
+      - name: Upload eval pack
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-pack
+          path: eval-pack/*.tgz
+          retention-days: 30
