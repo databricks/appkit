@@ -75,8 +75,8 @@ vi.mock("../../../telemetry", () => ({
     }),
   },
   instrumentations: {
-    http: {},
-    express: {},
+    http: () => ({}),
+    express: () => ({}),
   },
 }));
 

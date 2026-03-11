@@ -24,8 +24,10 @@ import type { HostedTool } from "./hosted-tools";
 import { isHostedTool, resolveHostedTools } from "./hosted-tools";
 import { createInvokeHandler } from "./invoke-handler";
 import manifest from "./manifest.json";
+import { setupExperimentTraceLocation } from "./mlflow";
 import { StandardAgent } from "./standard-agent";
 import type { AgentTool, IAgentConfig } from "./types";
+import { instrumentLangChain } from "./tracing";
 
 const logger = createLogger("agent");
 
@@ -41,6 +43,36 @@ export class AgentPlugin extends Plugin<IAgentConfig> {
 
   static manifest = manifest as PluginManifest<"agent">;
 
+  /**
+   * Called by `_createApp` before TelemetryManager initializes.
+   *
+   * Resolves the MLflow experiment ID and UC table name from config / env.
+   * When `ucTableName` is not explicitly set, derives it deterministically
+   * from catalog + schema so the exporter header is available immediately.
+   * The actual UC location provisioning happens later in `setup()`.
+   *
+   * Returns OTLP headers only when an experiment ID is available.
+   */
+  static appendTraceHeaders(config?: IAgentConfig): Record<string, string> {
+    if (config?.tracing === false) return {};
+
+    const tracing = typeof config?.tracing === "object" ? config.tracing : {};
+
+    const experimentId =
+      tracing.experimentId ?? process.env.MLFLOW_EXPERIMENT_ID;
+    if (!experimentId) return {};
+
+    const ucTableName = tracing.ucTableName ?? process.env.OTEL_UC_TABLE_NAME;
+
+    const headers: Record<string, string> = {
+      "x-mlflow-experiment-id": experimentId,
+    };
+    if (ucTableName) {
+      headers["X-Databricks-UC-Table-Name"] = ucTableName;
+    }
+    return headers;
+  }
+
   protected declare config: IAgentConfig;
 
   private agentImpl: AgentInterface | null = null;
@@ -55,10 +87,63 @@ export class AgentPlugin extends Plugin<IAgentConfig> {
   /** Mutable list of all tools (config + added). Only used when building from config. */
   private toolsList: AgentTool[] = [];
 
+  /**
+   * Tracing is active when `tracing !== false` AND an experiment ID is
+   * available (from config or env).
+   */
+  private isTracingActive(): boolean {
+    if (this.config.tracing === false) {
+      return false;
+    }
+    const tracing =
+      typeof this.config.tracing === "object" ? this.config.tracing : {};
+
+    return Boolean(tracing.experimentId ?? process.env.MLFLOW_EXPERIMENT_ID);
+  }
+
+  /**
+   * Resolve tracing config for the location-setup API.
+   * Catalog and schema are derived from OTEL_UC_TABLE_NAME (catalog.schema.table).
+   */
+  private getTracingConfig() {
+    const tracing =
+      typeof this.config.tracing === "object" ? this.config.tracing : {};
+    const ucTableName = tracing.ucTableName ?? process.env.OTEL_UC_TABLE_NAME;
+    const parts = ucTableName?.split(".") ?? [];
+    return {
+      experimentId:
+        tracing.experimentId ?? process.env.MLFLOW_EXPERIMENT_ID ?? "",
+      ucCatalog: parts.length >= 3 ? parts[0] : undefined,
+      ucSchema: parts.length >= 3 ? parts[1] : undefined,
+      warehouseId: tracing.warehouseId,
+    };
+  }
+
   async setup() {
     this.systemPrompt = this.config.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
 
+    let tracingActive = this.isTracingActive();
+
+    // Ensure the UC trace location exists; skip instrumentation if it fails
+    if (tracingActive) {
+      const tracingConfig = this.getTracingConfig();
+      const location = await setupExperimentTraceLocation(tracingConfig).catch(
+        (err) => {
+          logger.warn("Trace location setup failed: %O", err);
+          return null;
+        },
+      );
+      if (!location) {
+        tracingActive = false;
+      }
+    }
+
+    // If a pre-built agent is provided, use it directly
     if (this.config.agentInstance) {
+      if (tracingActive) {
+        const cbModule = await import("@langchain/core/callbacks/manager");
+        await instrumentLangChain(cbModule);
+      }
       this.agentImpl = this.config.agentInstance;
       logger.info("AgentPlugin initialized with provided agentInstance");
       return;
@@ -73,6 +158,14 @@ export class AgentPlugin extends Plugin<IAgentConfig> {
     }
 
     const { ChatDatabricks } = await import("@databricks/langchainjs");
+
+    // Instrument LangChain callbacks using the *same* @langchain/core copy
+    // that the agent runtime (LangGraph, ChatDatabricks) will use.
+    // Spans flow through the global tracer provider (TelemetryManager).
+    if (tracingActive) {
+      const cbModule = await import("@langchain/core/callbacks/manager");
+      await instrumentLangChain(cbModule);
+    }
 
     this.model = new ChatDatabricks({
       model: modelName,

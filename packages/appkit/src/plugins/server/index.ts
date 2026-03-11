@@ -58,10 +58,12 @@ export class ServerPlugin extends Plugin {
     this.serverApplication = express();
     this.server = null;
     this.serverExtensions = [];
-    this.telemetry.registerInstrumentations([
-      instrumentations.http,
-      instrumentations.express,
-    ]);
+    if (config.enableDefaultTelemetry !== false) {
+      this.telemetry.registerInstrumentations([
+        instrumentations.http(),
+        instrumentations.express(),
+      ]);
+    }
   }
 
   /** Setup the server plugin. */

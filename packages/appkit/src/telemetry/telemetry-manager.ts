@@ -60,12 +60,14 @@ export class TelemetryManager {
     return TelemetryManager.instance;
   }
 
-  static initialize(config: Partial<TelemetryConfig> = {}): void {
+  static async initialize(
+    config: Partial<TelemetryConfig> = {},
+  ): Promise<void> {
     const instance = TelemetryManager.getInstance();
-    instance._initialize(config);
+    await instance._initialize(config);
   }
 
-  private _initialize(config: Partial<TelemetryConfig>): void {
+  private async _initialize(config: Partial<TelemetryConfig>): Promise<void> {
     if (this.sdk) return;
 
     if (!process.env.OTEL_EXPORTER_OTLP_ENDPOINT) {
@@ -73,11 +75,16 @@ export class TelemetryManager {
     }
 
     try {
+      const traceHeaders = await this.buildTraceExporterHeaders(
+        config.headers,
+        config.traceExporterHeaders,
+      );
+
       this.sdk = new NodeSDK({
         resource: this.createResource(config),
         autoDetectResources: false,
         sampler: new AppKitSampler(),
-        traceExporter: new OTLPTraceExporter({ headers: config.headers }),
+        traceExporter: new OTLPTraceExporter({ headers: traceHeaders }),
         metricReaders: [
           new PeriodicExportingMetricReader({
             exporter: new OTLPMetricExporter({ headers: config.headers }),
@@ -91,7 +98,8 @@ export class TelemetryManager {
             new OTLPLogExporter({ headers: config.headers }),
           ),
         ],
-        instrumentations: this.getDefaultInstrumentations(),
+        instrumentations:
+          config.instrumentations ?? this.getDefaultInstrumentations(),
       });
 
       this.sdk.start();
@@ -128,6 +136,44 @@ export class TelemetryManager {
       detectors: [envDetector, hostDetector, processDetector],
     });
     return initialResource.merge(detectedResource);
+  }
+
+  /**
+   * Builds headers for the trace exporter by merging (in priority order):
+   *   1. Base `headers` from TelemetryConfig
+   *   2. Databricks auth (auto-resolved when DATABRICKS_HOST is set)
+   *   3. Plugin-contributed `traceExporterHeaders` (e.g. MLflow experiment ID)
+   */
+  private async buildTraceExporterHeaders(
+    configHeaders?: Record<string, string>,
+    pluginHeaders?: Record<string, string>,
+  ): Promise<Record<string, string>> {
+    const headers: Record<string, string> = { ...configHeaders };
+
+    if (process.env.DATABRICKS_HOST && !headers.authorization) {
+      try {
+        const { WorkspaceClient } = await import(
+          "@databricks/sdk-experimental"
+        );
+        const client = new WorkspaceClient({});
+        const authHeaders = new Headers();
+        await client.config.authenticate(authHeaders);
+        authHeaders.forEach((value, key) => {
+          headers[key] = value;
+        });
+      } catch (err) {
+        logger.warn(
+          "Could not obtain Databricks auth for trace exporter: %O",
+          err,
+        );
+      }
+    }
+
+    if (pluginHeaders) {
+      Object.assign(headers, pluginHeaders);
+    }
+
+    return headers;
   }
 
   private getDefaultInstrumentations(): Instrumentation[] {

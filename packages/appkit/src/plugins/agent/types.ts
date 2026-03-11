@@ -51,4 +51,30 @@ export interface IAgentConfig extends BasePluginConfig {
    * Ignored when `agentInstance` is provided.
    */
   tools?: AgentTool[];
+
+  /**
+   * LangChain tracing configuration. Default: enabled.
+   *
+   * When enabled, instruments @langchain/core callbacks so that agent
+   * spans are emitted through AppKit's global tracer provider (TelemetryManager).
+   *
+   * The `experimentId` and `ucTableName` fields (or their corresponding
+   * env vars MLFLOW_EXPERIMENT_ID / OTEL_UC_TABLE_NAME) are forwarded as
+   * headers on the OTLP trace exporter via `appendTraceHeaders`.
+   *
+   * Pass `false` to disable LangChain tracing instrumentation entirely.
+   */
+  tracing?:
+  | false
+  | {
+    /** MLflow experiment ID. Defaults to MLFLOW_EXPERIMENT_ID env. */
+    experimentId?: string;
+    /**
+     * UC table name (catalog.schema.table). Defaults to OTEL_UC_TABLE_NAME env.
+     * Catalog and schema are derived from this value for trace location setup.
+     */
+    ucTableName?: string;
+    /** SQL warehouse ID for creating UC trace storage. Defaults to MLFLOW_TRACING_SQL_WAREHOUSE_ID env. */
+    warehouseId?: string;
+  };
 }

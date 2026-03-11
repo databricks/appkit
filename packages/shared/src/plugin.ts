@@ -77,6 +77,11 @@ export type PluginConstructor<
    * Use this when resource requirements depend on plugin configuration.
    */
   getResourceRequirements?(config: C): ResourceRequirement[];
+  /**
+   * Returns extra headers to append to the OTLP trace exporter.
+   * Called by `_createApp` before TelemetryManager initializes.
+   */
+  appendTraceHeaders?(config: C): Record<string, string>;
 };
 
 /**
