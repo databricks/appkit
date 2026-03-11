@@ -315,6 +315,7 @@ export class ResourceRegistry {
       const values: Record<string, string> = {};
       let allSet = true;
       for (const [fieldName, fieldDef] of Object.entries(entry.fields)) {
+        if (!fieldDef.env) continue;
         const val = process.env[fieldDef.env];
         if (val !== undefined && val !== "") {
           values[fieldName] = val;

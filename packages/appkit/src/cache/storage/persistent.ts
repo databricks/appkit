@@ -24,7 +24,9 @@ const logger = createLogger("cache:persistent");
  */
 export class PersistentStorage implements CacheStorage {
   private readonly pool: pg.Pool;
+  private readonly schemaName: string;
   private readonly tableName: string;
+  private readonly qualifiedTableName: string;
   private readonly maxBytes: number;
   private readonly maxEntryBytes: number;
   private readonly evictionBatchSize: number;
@@ -40,7 +42,9 @@ export class PersistentStorage implements CacheStorage {
     this.evictionCheckProbability =
       config.evictionCheckProbability ??
       lakebaseStorageDefaults.evictionCheckProbability;
-    this.tableName = lakebaseStorageDefaults.tableName; // hardcoded, safe for now
+    this.schemaName = lakebaseStorageDefaults.schemaName;
+    this.tableName = lakebaseStorageDefaults.tableName;
+    this.qualifiedTableName = `${this.schemaName}.${this.tableName}`;
     this.initialized = false;
   }
 
@@ -70,9 +74,10 @@ export class PersistentStorage implements CacheStorage {
     const result = await this.pool.query<{
       value: Buffer;
       expiry: string;
-    }>(`SELECT value, expiry FROM ${this.tableName} WHERE key_hash = $1`, [
-      keyHash,
-    ]);
+    }>(
+      `SELECT value, expiry FROM ${this.qualifiedTableName} WHERE key_hash = $1`,
+      [keyHash],
+    );
 
     if (result.rows.length === 0) return null;
 
@@ -81,7 +86,7 @@ export class PersistentStorage implements CacheStorage {
     // fire-and-forget update
     this.pool
       .query(
-        `UPDATE ${this.tableName} SET last_accessed = NOW() WHERE key_hash = $1`,
+        `UPDATE ${this.qualifiedTableName} SET last_accessed = NOW() WHERE key_hash = $1`,
         [keyHash],
       )
       .catch(() => {
@@ -125,7 +130,7 @@ export class PersistentStorage implements CacheStorage {
     }
 
     await this.pool.query(
-      `INSERT INTO ${this.tableName} (key_hash, key, value, byte_size, expiry, created_at, last_accessed)
+      `INSERT INTO ${this.qualifiedTableName} (key_hash, key, value, byte_size, expiry, created_at, last_accessed)
       VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
       ON CONFLICT (key_hash)
       DO UPDATE SET value = $3, byte_size = $4, expiry = $5, last_accessed = NOW()
@@ -142,15 +147,16 @@ export class PersistentStorage implements CacheStorage {
   async delete(key: string): Promise<void> {
     await this.ensureInitialized();
     const keyHash = this.hashKey(key);
-    await this.pool.query(`DELETE FROM ${this.tableName} WHERE key_hash = $1`, [
-      keyHash,
-    ]);
+    await this.pool.query(
+      `DELETE FROM ${this.qualifiedTableName} WHERE key_hash = $1`,
+      [keyHash],
+    );
   }
 
   /** Clear the persistent storage */
   async clear(): Promise<void> {
     await this.ensureInitialized();
-    await this.pool.query(`TRUNCATE TABLE ${this.tableName}`);
+    await this.pool.query(`TRUNCATE TABLE ${this.qualifiedTableName}`);
   }
 
   /**
@@ -163,7 +169,7 @@ export class PersistentStorage implements CacheStorage {
     const keyHash = this.hashKey(key);
 
     const result = await this.pool.query<{ exists: boolean }>(
-      `SELECT EXISTS(SELECT 1 FROM ${this.tableName} WHERE key_hash = $1) as exists`,
+      `SELECT EXISTS(SELECT 1 FROM ${this.qualifiedTableName} WHERE key_hash = $1) as exists`,
       [keyHash],
     );
 
@@ -178,7 +184,7 @@ export class PersistentStorage implements CacheStorage {
     await this.ensureInitialized();
 
     const result = await this.pool.query<{ count: string }>(
-      `SELECT COUNT(*) as count FROM ${this.tableName}`,
+      `SELECT COUNT(*) as count FROM ${this.qualifiedTableName}`,
     );
     return parseInt(result.rows[0]?.count ?? "0", 10);
   }
@@ -188,7 +194,7 @@ export class PersistentStorage implements CacheStorage {
     await this.ensureInitialized();
 
     const result = await this.pool.query<{ total: string }>(
-      `SELECT COALESCE(SUM(byte_size), 0) as total FROM ${this.tableName}`,
+      `SELECT COALESCE(SUM(byte_size), 0) as total FROM ${this.qualifiedTableName}`,
     );
     return parseInt(result.rows[0]?.total ?? "0", 10);
   }
@@ -226,7 +232,7 @@ export class PersistentStorage implements CacheStorage {
   async cleanupExpired(): Promise<number> {
     await this.ensureInitialized();
     const result = await this.pool.query<{ count: string }>(
-      `WITH deleted as (DELETE FROM ${this.tableName} WHERE expiry < $1 RETURNING *) SELECT COUNT(*) as count FROM deleted`,
+      `WITH deleted as (DELETE FROM ${this.qualifiedTableName} WHERE expiry < $1 RETURNING *) SELECT COUNT(*) as count FROM deleted`,
       [Date.now()],
     );
     return parseInt(result.rows[0]?.count ?? "0", 10);
@@ -243,8 +249,8 @@ export class PersistentStorage implements CacheStorage {
     }
 
     await this.pool.query(
-      `DELETE FROM ${this.tableName} WHERE key_hash IN
-      (SELECT key_hash FROM ${this.tableName} ORDER BY last_accessed ASC LIMIT $1)`,
+      `DELETE FROM ${this.qualifiedTableName} WHERE key_hash IN
+      (SELECT key_hash FROM ${this.qualifiedTableName} ORDER BY last_accessed ASC LIMIT $1)`,
       [this.evictionBatchSize],
     );
   }
@@ -275,9 +281,14 @@ export class PersistentStorage implements CacheStorage {
 
   /** Run migrations for the persistent storage */
   private async runMigrations(): Promise<void> {
-    try {
-      await this.pool.query(`
-            CREATE TABLE IF NOT EXISTS ${this.tableName} (
+    const steps = [
+      {
+        name: "create schema",
+        query: `CREATE SCHEMA IF NOT EXISTS ${this.schemaName}`,
+      },
+      {
+        name: "create table",
+        query: `CREATE TABLE IF NOT EXISTS ${this.qualifiedTableName} (
                 id BIGSERIAL PRIMARY KEY,
                 key_hash BIGINT NOT NULL,
                 key BYTEA NOT NULL,
@@ -286,34 +297,33 @@ export class PersistentStorage implements CacheStorage {
                 expiry BIGINT NOT NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT NOW(),
                 last_accessed TIMESTAMP NOT NULL DEFAULT NOW()
-            )
-            `);
+            )`,
+      },
+      {
+        name: "create index (key_hash)",
+        query: `CREATE UNIQUE INDEX IF NOT EXISTS idx_${this.tableName}_key_hash ON ${this.qualifiedTableName} (key_hash)`,
+      },
+      {
+        name: "create index (expiry)",
+        query: `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_expiry ON ${this.qualifiedTableName} (expiry)`,
+      },
+      {
+        name: "create index (last_accessed)",
+        query: `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_last_accessed ON ${this.qualifiedTableName} (last_accessed)`,
+      },
+      {
+        name: "create index (byte_size)",
+        query: `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_byte_size ON ${this.qualifiedTableName} (byte_size)`,
+      },
+    ];
 
-      // unique index on key_hash for fast lookups
-      await this.pool.query(
-        `CREATE UNIQUE INDEX IF NOT EXISTS idx_${this.tableName}_key_hash ON ${this.tableName} (key_hash);`,
-      );
-
-      // index on expiry for cleanup queries
-      await this.pool.query(
-        `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_expiry ON ${this.tableName} (expiry); `,
-      );
-
-      // index on last_accessed for LRU eviction
-      await this.pool.query(
-        `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_last_accessed ON ${this.tableName} (last_accessed); `,
-      );
-
-      // index on byte_size for monitoring
-      await this.pool.query(
-        `CREATE INDEX IF NOT EXISTS idx_${this.tableName}_byte_size ON ${this.tableName} (byte_size); `,
-      );
-    } catch (error) {
-      logger.error(
-        "Error in running migrations for persistent storage: %O",
-        error,
-      );
-      throw InitializationError.migrationFailed(error as Error);
+    for (const step of steps) {
+      try {
+        await this.pool.query(step.query);
+      } catch (error) {
+        logger.error("Migration step '%s' failed: %O", step.name, error);
+        throw InitializationError.migrationFailed(error as Error);
+      }
     }
   }
 }

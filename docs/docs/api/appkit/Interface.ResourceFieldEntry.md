@@ -5,6 +5,16 @@ Single-value types use one key (e.g. id); multi-value types (database, secret) u
 
 ## Properties
 
+### bundleIgnore?
+
+```ts
+optional bundleIgnore: boolean;
+```
+
+When true, this field is excluded from Databricks bundle configuration (e.g. app.yaml) generation.
+
+***
+
 ### description?
 
 ```ts
@@ -15,10 +25,20 @@ Human-readable description for this field
 
 ***
 
-### env
+### env?
 
 ```ts
-env: string;
+optional env: string;
 ```
 
 Environment variable name for this field
+
+***
+
+### examples?
+
+```ts
+optional examples: string[];
+```
+
+Example values showing the expected format for this field

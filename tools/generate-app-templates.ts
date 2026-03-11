@@ -63,6 +63,8 @@ const APP_TEMPLATES: AppTemplate[] = [
     set: {
       "analytics.sql-warehouse.id": "placeholder",
       "genie.genie-space.id": "placeholder",
+      "lakebase.postgres.branch": "placeholder",
+      "lakebase.postgres.database": "placeholder",
     },
     description:
       "Full-stack Node.js app with SQL analytics dashboards, Genie AI conversations, and Lakebase Autoscaling (Postgres) CRUD",
@@ -87,6 +89,10 @@ const APP_TEMPLATES: AppTemplate[] = [
   {
     name: "appkit-lakebase",
     features: ["lakebase"],
+    set: {
+      "lakebase.postgres.branch": "placeholder",
+      "lakebase.postgres.database": "placeholder",
+    },
     description:
       "Node.js app with Lakebase Autoscaling (Postgres) CRUD operations",
   },

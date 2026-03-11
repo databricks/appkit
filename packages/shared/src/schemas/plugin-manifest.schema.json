@@ -111,6 +111,7 @@
         "uc_function",
         "uc_connection",
         "database",
+        "postgres",
         "genie_space",
         "experiment",
         "app"
@@ -162,6 +163,11 @@
       "enum": ["CAN_CONNECT_AND_CREATE"],
       "description": "Permission for database resources"
     },
+    "postgresPermission": {
+      "type": "string",
+      "enum": ["CAN_CONNECT_AND_CREATE"],
+      "description": "Permission for Postgres resources"
+    },
     "genieSpacePermission": {
       "type": "string",
       "enum": ["CAN_VIEW", "CAN_RUN", "CAN_EDIT", "CAN_MANAGE"],
@@ -179,7 +185,6 @@
     },
     "resourceFieldEntry": {
       "type": "object",
-      "required": ["env"],
       "properties": {
         "env": {
           "type": "string",
@@ -190,20 +195,37 @@
         "description": {
           "type": "string",
           "description": "Human-readable description for this field"
+        },
+        "bundleIgnore": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, this field is excluded from Databricks bundle configuration (e.g. app.yaml) generation."
+        },
+        "examples": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Example values showing the expected format for this field"
+        },
+        "localOnly": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, this field is only generated for local .env files. The Databricks Apps platform auto-injects it at deploy time."
+        },
+        "value": {
+          "type": "string",
+          "description": "Static value for this field. Used when no prompted or resolved value exists."
+        },
+        "resolve": {
+          "type": "string",
+          "pattern": "^[a-z_]+:[a-zA-Z]+$",
+          "description": "Named resolver prefixed by resource type (e.g., 'postgres:host'). The CLI resolves this value during the init prompt flow."
         }
       },
       "additionalProperties": false
     },
     "resourceRequirement": {
       "type": "object",
-      "required": [
-        "type",
-        "alias",
-        "resourceKey",
-        "description",
-        "permission",
-        "fields"
-      ],
+      "required": ["type", "alias", "resourceKey", "description", "permission"],
       "properties": {
         "type": {
           "$ref": "#/$defs/resourceType"
@@ -334,6 +356,17 @@
           "then": {
             "properties": {
               "permission": { "$ref": "#/$defs/databasePermission" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "postgres" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": { "$ref": "#/$defs/postgresPermission" }
             }
           }
         },

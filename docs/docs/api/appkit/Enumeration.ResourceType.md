@@ -44,6 +44,14 @@ JOB: "job";
 
 ***
 
+### POSTGRES
+
+```ts
+POSTGRES: "postgres";
+```
+
+***
+
 ### SECRET
 
 ```ts

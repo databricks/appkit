@@ -103,9 +103,11 @@ export interface PluginManifest<TName extends string = string> {
  */
 export interface ResourceFieldEntry {
   /** Environment variable name for this field */
-  env: string;
+  env?: string;
   /** Human-readable description for this field */
   description?: string;
+  /** When true, this field is excluded from Databricks bundle configuration (e.g. app.yaml) generation. */
+  bundleIgnore?: boolean;
 }
 
 /**

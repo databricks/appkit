@@ -6,6 +6,8 @@ export const inMemoryStorageDefaults = {
 
 /** Default configuration for Lakebase storage */
 export const lakebaseStorageDefaults = {
+  /** Schema name for the cache tables */
+  schemaName: "appkit",
   /** Table name for the cache */
   tableName: "appkit_cache_entries",
   /** Maximum number of bytes in the cache */

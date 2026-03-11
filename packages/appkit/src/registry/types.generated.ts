@@ -12,6 +12,7 @@ export enum ResourceType {
   UC_FUNCTION = "uc_function",
   UC_CONNECTION = "uc_connection",
   DATABASE = "database",
+  POSTGRES = "postgres",
   GENIE_SPACE = "genie_space",
   EXPERIMENT = "experiment",
   APP = "app",
@@ -47,6 +48,9 @@ export type UcConnectionPermission = "USE_CONNECTION";
 /** Permissions for DATABASE resources */
 export type DatabasePermission = "CAN_CONNECT_AND_CREATE";
 
+/** Permissions for POSTGRES resources */
+export type PostgresPermission = "CAN_CONNECT_AND_CREATE";
+
 /** Permissions for GENIE_SPACE resources */
 export type GenieSpacePermission =
   | "CAN_VIEW"
@@ -71,6 +75,7 @@ export type ResourcePermission =
   | UcFunctionPermission
   | UcConnectionPermission
   | DatabasePermission
+  | PostgresPermission
   | GenieSpacePermission
   | ExperimentPermission
   | AppPermission;
@@ -89,6 +94,7 @@ export const PERMISSION_HIERARCHY_BY_TYPE: Record<
   [ResourceType.UC_FUNCTION]: ["EXECUTE"],
   [ResourceType.UC_CONNECTION]: ["USE_CONNECTION"],
   [ResourceType.DATABASE]: ["CAN_CONNECT_AND_CREATE"],
+  [ResourceType.POSTGRES]: ["CAN_CONNECT_AND_CREATE"],
   [ResourceType.GENIE_SPACE]: ["CAN_VIEW", "CAN_RUN", "CAN_EDIT", "CAN_MANAGE"],
   [ResourceType.EXPERIMENT]: ["CAN_READ", "CAN_EDIT", "CAN_MANAGE"],
   [ResourceType.APP]: ["CAN_USE"],

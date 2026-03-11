@@ -80,10 +80,64 @@
       "description": "SQL query execution against Databricks Lakebase Autoscaling",
       "package": "@databricks/appkit",
       "resources": {
-        "required": [],
+        "required": [
+          {
+            "type": "postgres",
+            "alias": "Postgres",
+            "resourceKey": "postgres",
+            "description": "Lakebase Postgres database for persistent storage",
+            "permission": "CAN_CONNECT_AND_CREATE",
+            "fields": {
+              "branch": {
+                "description": "Full Lakebase Postgres branch resource name. Obtain by running `databricks postgres list-branches projects/{project-id}`, select the desired item from the output array and use its .name value.",
+                "examples": [
+                  "projects/{project-id}/branches/{branch-id}"
+                ]
+              },
+              "database": {
+                "description": "Full Lakebase Postgres database resource name. Obtain by running `databricks postgres list-databases {branch-name}`, select the desired item from the output array and use its .name value. Requires the branch resource name.",
+                "examples": [
+                  "projects/{project-id}/branches/{branch-id}/databases/{database-id}"
+                ]
+              },
+              "host": {
+                "env": "PGHOST",
+                "localOnly": true,
+                "resolve": "postgres:host",
+                "description": "Postgres host for local development. Auto-injected by the platform at deploy time."
+              },
+              "databaseName": {
+                "env": "PGDATABASE",
+                "localOnly": true,
+                "resolve": "postgres:databaseName",
+                "description": "Postgres database name for local development. Auto-injected by the platform at deploy time."
+              },
+              "endpointPath": {
+                "env": "LAKEBASE_ENDPOINT",
+                "bundleIgnore": true,
+                "resolve": "postgres:endpointPath",
+                "description": "Lakebase endpoint resource name. Auto-injected at runtime via app.yaml valueFrom: postgres. For local development, obtain by running `databricks postgres list-endpoints {branch-name}`, select the desired item from the output array and use its .name value.",
+                "examples": [
+                  "projects/{project-id}/branches/{branch-id}/endpoints/{endpoint-id}"
+                ]
+              },
+              "port": {
+                "env": "PGPORT",
+                "localOnly": true,
+                "value": "5432",
+                "description": "Postgres port. Auto-injected by the platform at deploy time."
+              },
+              "sslmode": {
+                "env": "PGSSLMODE",
+                "localOnly": true,
+                "value": "require",
+                "description": "Postgres SSL mode. Auto-injected by the platform at deploy time."
+              }
+            }
+          }
+        ],
         "optional": []
-      },
-      "onSetupMessage": "Configure environment variables before running or deploying the app.\nSee: https://databricks.github.io/appkit/docs/plugins/lakebase"
+      }
     },
     "server": {
       "name": "server",
