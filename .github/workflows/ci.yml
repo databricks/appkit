@@ -105,6 +105,54 @@ jobs:
           DATABRICKS_WAREHOUSE_ID: e2e-mock
           DATABRICKS_WORKSPACE_ID: e2e-mock
 
+  pr-template-artifact:
+    name: PR Template Artifact
+    needs: detect-changes
+    if: needs.detect-changes.outputs.appkit == 'true'
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Set PR version
+        id: version
+        run: |
+          BRANCH="${{ github.head_ref }}"
+          SANITIZED_BRANCH=$(echo "$BRANCH" | sed 's/[^a-zA-Z0-9-]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//')
+          CURRENT_VERSION=$(node -p "require('./packages/appkit/package.json').version")
+          PR_VERSION="${CURRENT_VERSION}-${SANITIZED_BRANCH}"
+          echo "version=$PR_VERSION" >> "$GITHUB_OUTPUT"
+          pnpm exec tsx tools/sync-versions.ts "$PR_VERSION"
+
+      - name: Build SDK tarballs
+        run: pnpm pack:sdk
+
+      - name: Prepare template artifact
+        run: pnpm exec tsx tools/prepare-pr-template.ts "${{ steps.version.outputs.version }}"
+
+      - name: Install template dependencies
+        working-directory: pr-template
+        run: npm install
+
+      - name: Create zip artifact
+        working-directory: pr-template
+        run: zip -r ../pr-template.zip . -x 'node_modules/*'
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: appkit-template-${{ steps.version.outputs.version }}
+          path: pr-template.zip
+
   docs-build:
     name: Docs Build
     needs: detect-changes
