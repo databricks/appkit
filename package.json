@@ -13,6 +13,7 @@
     "generate:app-templates": "tsx tools/generate-app-templates.ts",
     "check:licenses": "tsx tools/check-licenses.ts",
     "build:notice": "tsx tools/build-notice.ts > NOTICE.md",
+    "build:pr-template-artifact": "tsx tools/build-pr-template-artifact.ts",
     "deploy:playground": "pnpm pack:sdk && tsx tools/playground/deploy-playground.ts",
     "clean:full": "rm -rf node_modules dist coverage && pnpm -r clean:full",
     "clean": "pnpm -r clean",

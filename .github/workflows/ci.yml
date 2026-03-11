@@ -105,6 +105,32 @@ jobs:
           DATABRICKS_WAREHOUSE_ID: e2e-mock
           DATABRICKS_WORKSPACE_ID: e2e-mock
 
+  pr-template-artifact:
+    name: PR Template Artifact
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build PR template artifact
+        run: pnpm build:pr-template-artifact
+        env:
+          GITHUB_HEAD_REF: ${{ github.head_ref }}
+      - name: Upload PR template artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-template-${{ github.event.pull_request.number }}
+          path: artifacts/pr-template
+          if-no-files-found: error
+
   docs-build:
     name: Docs Build
     needs: detect-changes

@@ -11,6 +11,11 @@ const CLI_DEPENDENCIES = sharedPkg.dependencies;
 fs.mkdirSync("tmp", { recursive: true });
 
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf-8"));
+const versionOverride = process.env.APPKIT_PACKAGE_VERSION_OVERRIDE?.trim();
+
+if (versionOverride) {
+  pkg.version = versionOverride;
+}
 
 // Packages that are workspace-local but published separately — replace workspace:* with real version.
 // "shared" is intentionally excluded: it is bundled directly into appkit/appkit-ui via noExternal.

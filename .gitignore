@@ -1,5 +1,6 @@
 dist
 build
+artifacts
 tmp
 node_modules
 .env
