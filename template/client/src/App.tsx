@@ -14,6 +14,9 @@ import { LakebasePage } from './pages/lakebase/LakebasePage';
 {{- if .plugins.genie}}
 import { GeniePage } from './pages/genie/GeniePage';
 {{- end}}
+{{- if .plugins.files}}
+import { FilesPage } from './pages/files/FilesPage';
+{{- end}}
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
@@ -46,6 +49,11 @@ function Layout() {
             Genie
           </NavLink>
 {{- end}}
+{{- if .plugins.files}}
+          <NavLink to="/files" className={navLinkClass}>
+            Files
+          </NavLink>
+{{- end}}
         </nav>
       </header>
 
@@ -69,6 +77,9 @@ const router = createBrowserRouter([
 {{- end}}
 {{- if .plugins.genie}}
       { path: '/genie', element: <GeniePage /> },
+{{- end}}
+{{- if .plugins.files}}
+      { path: '/files', element: <FilesPage /> },
 {{- end}}
     ],
   },
