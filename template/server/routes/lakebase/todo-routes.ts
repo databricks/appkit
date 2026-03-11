@@ -11,6 +11,11 @@ interface AppKitWithLakebase {
   };
 }
 
+const TABLE_EXISTS_SQL = `
+  SELECT 1 FROM information_schema.tables
+  WHERE table_schema = 'app' AND table_name = 'todos'
+`;
+
 const SETUP_SCHEMA_SQL = `CREATE SCHEMA IF NOT EXISTS app`;
 
 const CREATE_TABLE_SQL = `
@@ -25,8 +30,20 @@ const CREATE_TABLE_SQL = `
 const CreateTodoBody = z.object({ title: z.string().min(1) });
 
 export async function setupSampleLakebaseRoutes(appkit: AppKitWithLakebase) {
-  await appkit.lakebase.query(SETUP_SCHEMA_SQL);
-  await appkit.lakebase.query(CREATE_TABLE_SQL);
+  try {
+    const { rows } = await appkit.lakebase.query(TABLE_EXISTS_SQL);
+    if (rows.length > 0) {
+      console.log('[lakebase] Table app.todos already exists, skipping setup');
+    } else {
+      await appkit.lakebase.query(SETUP_SCHEMA_SQL);
+      await appkit.lakebase.query(CREATE_TABLE_SQL);
+      console.log('[lakebase] Created schema and table app.todos');
+    }
+  } catch (err) {
+    console.warn('[lakebase] Database setup failed:', (err as Error).message);
+    console.warn('[lakebase] Routes will be registered but may return errors');
+    console.warn('[lakebase] See https://databricks.github.io/appkit/docs/plugins/lakebase#database-permissions for troubleshooting');
+  }
 
   appkit.server.extend((app) => {
     app.get('/api/lakebase/todos', async (_req, res) => {
