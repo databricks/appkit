@@ -265,6 +265,7 @@ describe("FilesPlugin", () => {
       "list",
       "read",
       "download",
+      "createDownloadUrl",
       "exists",
       "metadata",
       "upload",
@@ -343,11 +344,11 @@ describe("FilesPlugin", () => {
 
     plugin.injectRoutes(mockRouter);
 
-    // 1 GET /volumes + 8 GET /:volumeKey/* routes
-    // (list, read, download, raw, download-url, exists, metadata, preview)
-    expect(mockRouter.get).toHaveBeenCalledTimes(9);
-    // 2 POST /:volumeKey/* routes (upload, mkdir)
-    expect(mockRouter.post).toHaveBeenCalledTimes(2);
+    // 1 GET /volumes + 7 GET /:volumeKey/* routes
+    // (list, read, download, raw, exists, metadata, preview)
+    expect(mockRouter.get).toHaveBeenCalledTimes(8);
+    // 3 POST /:volumeKey/* routes (upload, mkdir, download-url)
+    expect(mockRouter.post).toHaveBeenCalledTimes(3);
     // 1 DELETE /:volumeKey route
     expect(mockRouter.delete).toHaveBeenCalledTimes(1);
     expect(mockRouter.put).not.toHaveBeenCalled();
@@ -437,7 +438,7 @@ describe("FilesPlugin", () => {
 
       plugin.injectRoutes(mockRouter);
 
-      const call = mockRouter.get.mock.calls.find(
+      const call = mockRouter.post.mock.calls.find(
         (c: unknown[]) =>
           typeof c[0] === "string" &&
           (c[0] as string).endsWith("/download-url"),
@@ -453,14 +454,18 @@ describe("FilesPlugin", () => {
       return res;
     }
 
-    function mockReq(volumeKey: string, query: Record<string, string> = {}) {
+    function mockReq(
+      volumeKey: string,
+      body: Record<string, string | number> = {},
+    ) {
       const headers: Record<string, string> = {
         "x-forwarded-access-token": "test-token",
         "x-forwarded-user": "test-user",
       };
       return {
         params: { volumeKey },
-        query,
+        query: {},
+        body,
         headers,
         header: (name: string) => headers[name.toLowerCase()],
       };

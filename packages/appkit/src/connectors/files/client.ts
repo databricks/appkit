@@ -253,13 +253,13 @@ export class FilesConnector {
           ? hostValue
           : `https://${hostValue}`;
 
-        const expiresAt = new Date(
+        const requestExpireTime = new Date(
           Date.now() + expireInSeconds * 1000,
         ).toISOString();
 
         const url = new URL("/api/2.0/fs/create-download-url", host);
         url.searchParams.set("path", resolvedPath);
-        url.searchParams.set("expire_time", expiresAt);
+        url.searchParams.set("expire_time", requestExpireTime);
 
         const headers = new Headers({
           "Content-Type": "application/json",

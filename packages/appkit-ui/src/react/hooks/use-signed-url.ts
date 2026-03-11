@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 // ============================================================================
 // Types
@@ -14,6 +14,8 @@ export interface UseSignedUrlResult {
   loading: boolean;
   error: string | null;
   copied: boolean;
+  /** Whether the signed URL has expired based on `expiresAt`. */
+  expired: boolean;
   generate: (filePath: string) => Promise<void>;
   copyToClipboard: () => Promise<void>;
   reset: () => void;
@@ -30,7 +32,34 @@ export function useSignedUrl(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [expired, setExpired] = useState(false);
   const copiedTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const expiryTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => {
+    return () => {
+      clearTimeout(copiedTimer.current);
+      clearTimeout(expiryTimer.current);
+    };
+  }, []);
+
+  // Schedule expiry transition when a signed URL is set
+  useEffect(() => {
+    clearTimeout(expiryTimer.current);
+    if (!signedUrl) {
+      setExpired(false);
+      return;
+    }
+
+    const msUntilExpiry = new Date(signedUrl.expiresAt).getTime() - Date.now();
+    if (msUntilExpiry <= 0) {
+      setExpired(true);
+      return;
+    }
+
+    setExpired(false);
+    expiryTimer.current = setTimeout(() => setExpired(true), msUntilExpiry);
+  }, [signedUrl]);
 
   const reset = useCallback(() => {
     setSignedUrl(null);
@@ -45,9 +74,11 @@ export function useSignedUrl(
       setSignedUrl(null);
 
       try {
-        const response = await fetch(
-          apiUrl("download-url", { path: filePath }),
-        );
+        const response = await fetch(apiUrl("download-url"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: filePath }),
+        });
 
         if (!response.ok) {
           const data = await response.json().catch(() => ({}));
@@ -70,17 +101,24 @@ export function useSignedUrl(
   const copyToClipboard = useCallback(async () => {
     if (!signedUrl) return;
 
-    try {
+    // navigator.clipboard requires a secure context (HTTPS).
+    // Fall back to Selection API for http:// (e.g. local dev).
+    if (navigator.clipboard && globalThis.isSecureContext) {
       await navigator.clipboard.writeText(signedUrl.url);
-    } catch {
-      const textarea = document.createElement("textarea");
-      textarea.value = signedUrl.url;
-      textarea.style.position = "fixed";
-      textarea.style.opacity = "0";
-      document.body.appendChild(textarea);
-      textarea.select();
+    } else {
+      const range = document.createRange();
+      const span = document.createElement("span");
+      span.textContent = signedUrl.url;
+      span.style.position = "fixed";
+      span.style.opacity = "0";
+      document.body.appendChild(span);
+      range.selectNodeContents(span);
+      const selection = getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
       document.execCommand("copy");
-      document.body.removeChild(textarea);
+      selection?.removeAllRanges();
+      document.body.removeChild(span);
     }
 
     setCopied(true);
@@ -93,6 +131,7 @@ export function useSignedUrl(
     loading,
     error,
     copied,
+    expired,
     generate,
     copyToClipboard,
     reset,

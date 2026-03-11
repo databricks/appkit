@@ -273,7 +273,7 @@ export class FilesPlugin extends Plugin {
 
     this.route(router, {
       name: "download-url",
-      method: "get",
+      method: "post",
       path: "/:volumeKey/download-url",
       handler: async (req: express.Request, res: express.Response) => {
         const { connector, volumeKey } = this._resolveVolume(req, res);
@@ -543,17 +543,20 @@ export class FilesPlugin extends Plugin {
     connector: FilesConnector,
     volumeKey: string,
   ): Promise<void> {
-    const path = req.query.path as string;
+    const path =
+      typeof req.body?.path === "string"
+        ? req.body.path
+        : (req.query.path as string | undefined);
     const valid = this._isValidPath(path);
     if (valid !== true) {
       res.status(400).json({ error: valid, plugin: this.name });
       return;
     }
 
-    const rawExpire = req.query.expireInSeconds as string | undefined;
-    const expireInSeconds = rawExpire
-      ? Number.parseInt(rawExpire, 10)
-      : undefined;
+    const rawExpire =
+      req.body?.expireInSeconds ?? req.query.expireInSeconds ?? undefined;
+    const expireInSeconds =
+      rawExpire != null ? Number.parseInt(String(rawExpire), 10) : undefined;
     if (
       expireInSeconds !== undefined &&
       (Number.isNaN(expireInSeconds) ||

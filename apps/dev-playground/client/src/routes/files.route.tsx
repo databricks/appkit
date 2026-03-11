@@ -6,6 +6,7 @@ import {
   FileBreadcrumb,
   FilePreviewPanel,
   NewFolderInput,
+  useSignedUrl,
 } from "@databricks/appkit-ui/react";
 import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
 import { FolderPlus, Link, Loader2, Upload } from "lucide-react";
@@ -28,7 +29,6 @@ function nextSignal(ref: RefObject<AbortController | null>): AbortSignal {
   return ref.current.signal;
 }
 
-import { useSignedUrl } from "@databricks/appkit-ui/react";
 import { Header } from "@/components/layout/header";
 
 export const Route = createFileRoute("/files")({
@@ -78,6 +78,7 @@ function FilesRoute() {
     loading: signedUrlLoading,
     error: signedUrlError,
     copied,
+    expired: signedUrlExpired,
     generate: generateSignedUrl,
     copyToClipboard,
     reset: resetSignedUrl,
@@ -462,8 +463,12 @@ function FilesRoute() {
                         {copied ? "Copied!" : "Copy"}
                       </Button>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Expires: {new Date(signedUrl.expiresAt).toLocaleString()}
+                    <p
+                      className={`text-xs ${signedUrlExpired ? "text-destructive" : "text-muted-foreground"}`}
+                    >
+                      {signedUrlExpired
+                        ? "Expired — generate a new URL"
+                        : `Expires: ${new Date(signedUrl.expiresAt).toLocaleString()}`}
                     </p>
                   </div>
                 )}
