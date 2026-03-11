@@ -691,7 +691,6 @@ describe("FilesPlugin", () => {
     });
   });
 
-
   describe("Upload Size Validation", () => {
     function getUploadHandler(plugin: FilesPlugin) {
       const mockRouter = {

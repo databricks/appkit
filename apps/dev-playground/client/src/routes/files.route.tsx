@@ -83,7 +83,6 @@ function FilesRoute() {
     reset: resetSignedUrl,
   } = useSignedUrl(apiUrl);
 
-
   const loadDirectory = useCallback(
     async (path?: string) => {
       if (!volumeKey) return;

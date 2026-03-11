@@ -1115,5 +1115,48 @@ describe("FilesConnector", () => {
         "/Volumes/other/vol/file.txt",
       );
     });
+
+    test("throws when expireInSeconds is 0", async () => {
+      await expect(
+        connector.createDownloadUrl(mockClient, "file.txt", {
+          expireInSeconds: 0,
+        }),
+      ).rejects.toThrow("expireInSeconds must be between 1 and 3600");
+    });
+
+    test("throws when expireInSeconds is negative", async () => {
+      await expect(
+        connector.createDownloadUrl(mockClient, "file.txt", {
+          expireInSeconds: -1,
+        }),
+      ).rejects.toThrow("expireInSeconds must be between 1 and 3600");
+    });
+
+    test("throws when expireInSeconds exceeds 3600", async () => {
+      await expect(
+        connector.createDownloadUrl(mockClient, "file.txt", {
+          expireInSeconds: 7200,
+        }),
+      ).rejects.toThrow("expireInSeconds must be between 1 and 3600");
+    });
+
+    test("accepts expireInSeconds at boundary values (1 and 3600)", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ url: "https://s3/file", headers: [] }),
+      });
+
+      await expect(
+        connector.createDownloadUrl(mockClient, "file.txt", {
+          expireInSeconds: 1,
+        }),
+      ).resolves.toBeDefined();
+
+      await expect(
+        connector.createDownloadUrl(mockClient, "file.txt", {
+          expireInSeconds: 3600,
+        }),
+      ).resolves.toBeDefined();
+    });
   });
 });

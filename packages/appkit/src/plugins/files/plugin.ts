@@ -625,7 +625,6 @@ export class FilesPlugin extends Plugin {
     }
   }
 
-
   /**
    * Shared handler for `/download` and `/raw` endpoints.
    * - `download`: always forces `Content-Disposition: attachment`.

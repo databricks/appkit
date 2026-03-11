@@ -230,10 +230,19 @@ export class FilesConnector {
     const resolvedPath = this.resolvePath(filePath);
     const expireInSeconds = options?.expireInSeconds ?? 900;
 
+    if (expireInSeconds < 1 || expireInSeconds > 3600) {
+      throw new Error(
+        `expireInSeconds must be between 1 and 3600 (got ${expireInSeconds}).`,
+      );
+    }
+
     return this.traced(
       "createDownloadUrl",
-      { "files.path": resolvedPath },
-      async () => {
+      {
+        "files.path": resolvedPath,
+        "files.presign.expire_seconds": String(expireInSeconds),
+      },
+      async (span) => {
         const hostValue = client.config.host;
         if (!hostValue) {
           throw new Error(
@@ -266,6 +275,9 @@ export class FilesConnector {
           const text = await res.text();
           const errorCode = parsePresignErrorCode(res.status, text);
 
+          span.setAttribute("files.presign.error_code", errorCode);
+          span.setAttribute("files.presign.status_code", res.status);
+
           logger.error(
             `create-download-url failed (${res.status}, code=${errorCode}): ${text}`,
           );
@@ -286,6 +298,11 @@ export class FilesConnector {
           headers?: Array<{ name: string; value: string }>;
         };
 
+        // Compute expiresAt after the successful response to reduce clock drift
+        const actualExpiresAt = new Date(
+          Date.now() + expireInSeconds * 1000,
+        ).toISOString();
+
         const responseHeaders: Record<string, string> = {};
         if (body.headers) {
           for (const h of body.headers) {
@@ -293,11 +310,14 @@ export class FilesConnector {
           }
         }
 
-        return { url: body.url, headers: responseHeaders, expiresAt };
+        return {
+          url: body.url,
+          headers: responseHeaders,
+          expiresAt: actualExpiresAt,
+        };
       },
     );
   }
-
 
   async exists(client: WorkspaceClient, filePath: string): Promise<boolean> {
     const resolvedPath = this.resolvePath(filePath);
