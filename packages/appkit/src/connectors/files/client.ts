@@ -6,6 +6,7 @@ import type {
   DownloadResponse,
   FileMetadata,
   FilePreview,
+  PresignedDownloadUrl,
 } from "../../plugins/files/types";
 import type { TelemetryProvider } from "../../telemetry";
 import {
@@ -206,6 +207,98 @@ export class FilesConnector {
     });
   }
 
+  /**
+   * Requests a pre-signed download URL from Unity Catalog.
+   * The returned URL points directly to cloud storage (S3/ADLS/GCS),
+   * bypassing the Databricks Apps proxy.
+   *
+   * Uses the same direct-fetch pattern as {@link upload} to call the
+   * undocumented `/api/2.0/fs/create-download-url` endpoint used by
+   * the Databricks Python SDK.
+   *
+   * Known error modes (mirroring the Python SDK):
+   * - 403 with `FILES_API_API_IS_NOT_ENABLED` → feature not enabled on workspace
+   * - 500 with `FILES_API_REQUESTER_NETWORK_ZONE_UNKNOWN` → network zone issue
+   * - 404 → endpoint not available (older workspace version)
+   * - Other errors → transient or auth failures
+   */
+  async createDownloadUrl(
+    client: WorkspaceClient,
+    filePath: string,
+    options?: { expireInSeconds?: number },
+  ): Promise<PresignedDownloadUrl> {
+    const resolvedPath = this.resolvePath(filePath);
+    const expireInSeconds = options?.expireInSeconds ?? 900;
+
+    return this.traced(
+      "createDownloadUrl",
+      { "files.path": resolvedPath },
+      async () => {
+        const hostValue = client.config.host;
+        if (!hostValue) {
+          throw new Error(
+            "Databricks host is not configured. Set DATABRICKS_HOST or configure client.config.host.",
+          );
+        }
+        const host = hostValue.startsWith("http")
+          ? hostValue
+          : `https://${hostValue}`;
+
+        const expiresAt = new Date(
+          Date.now() + expireInSeconds * 1000,
+        ).toISOString();
+
+        const url = new URL("/api/2.0/fs/create-download-url", host);
+        url.searchParams.set("path", resolvedPath);
+        url.searchParams.set("expire_time", expiresAt);
+
+        const headers = new Headers({
+          "Content-Type": "application/json",
+        });
+        await client.config.authenticate(headers);
+
+        const res = await fetch(url.toString(), {
+          method: "POST",
+          headers,
+        });
+
+        if (!res.ok) {
+          const text = await res.text();
+          const errorCode = parsePresignErrorCode(res.status, text);
+
+          logger.error(
+            `create-download-url failed (${res.status}, code=${errorCode}): ${text}`,
+          );
+
+          const safeMessage =
+            text.length > 200 ? `${text.slice(0, 200)}…` : text;
+          throw new ApiError(
+            `Failed to create download URL: ${safeMessage}`,
+            errorCode,
+            res.status,
+            undefined,
+            [],
+          );
+        }
+
+        const body = (await res.json()) as {
+          url: string;
+          headers?: Array<{ name: string; value: string }>;
+        };
+
+        const responseHeaders: Record<string, string> = {};
+        if (body.headers) {
+          for (const h of body.headers) {
+            responseHeaders[h.name] = h.value;
+          }
+        }
+
+        return { url: body.url, headers: responseHeaders, expiresAt };
+      },
+    );
+  }
+
+
   async exists(client: WorkspaceClient, filePath: string): Promise<boolean> {
     const resolvedPath = this.resolvePath(filePath);
     return this.traced("exists", { "files.path": resolvedPath }, async () => {
@@ -370,4 +463,62 @@ export class FilesConnector {
       return { ...meta, textPreview: preview, isText: true, isImage: false };
     });
   }
+}
+
+/**
+ * Well-known error codes from the `create-download-url` endpoint.
+ * These mirror the error reasons the Databricks Python SDK checks for.
+ */
+export const PRESIGN_ERROR_CODES = {
+  /** Pre-signed URL feature is not enabled on this workspace. */
+  NOT_ENABLED: "PRESIGNED_URL_NOT_ENABLED",
+  /** The requester's network zone is unknown — typically a private link or firewall issue. */
+  NETWORK_ZONE_UNKNOWN: "PRESIGNED_URL_NETWORK_ZONE_UNKNOWN",
+  /** The endpoint itself is not available (404) — workspace may be on an older version. */
+  NOT_AVAILABLE: "PRESIGNED_URL_NOT_AVAILABLE",
+  /** Generic failure for unrecognised error shapes. */
+  FAILED: "PRESIGNED_URL_FAILED",
+} as const;
+
+/**
+ * Parses the Databricks API error response from `create-download-url` and
+ * returns a well-known error code.
+ *
+ * The Python SDK checks for two specific `error_info` reasons:
+ * - `FILES_API_API_IS_NOT_ENABLED` (PermissionDenied / 403)
+ * - `FILES_API_REQUESTER_NETWORK_ZONE_UNKNOWN` (InternalError / 500)
+ */
+function parsePresignErrorCode(status: number, responseText: string): string {
+  if (status === 404) {
+    return PRESIGN_ERROR_CODES.NOT_AVAILABLE;
+  }
+
+  try {
+    const body = JSON.parse(responseText) as {
+      error_code?: string;
+      message?: string;
+      error_info?: Array<{ reason?: string }>;
+    };
+
+    // Check error_info array (same structure the Python SDK inspects)
+    if (body.error_info) {
+      for (const info of body.error_info) {
+        if (info.reason === "FILES_API_API_IS_NOT_ENABLED") {
+          return PRESIGN_ERROR_CODES.NOT_ENABLED;
+        }
+        if (info.reason === "FILES_API_REQUESTER_NETWORK_ZONE_UNKNOWN") {
+          return PRESIGN_ERROR_CODES.NETWORK_ZONE_UNKNOWN;
+        }
+      }
+    }
+
+    // Fallback: check error_code field
+    if (body.error_code === "PERMISSION_DENIED" && status === 403) {
+      return PRESIGN_ERROR_CODES.NOT_ENABLED;
+    }
+  } catch {
+    // Response wasn't JSON — use generic code
+  }
+
+  return PRESIGN_ERROR_CODES.FAILED;
 }

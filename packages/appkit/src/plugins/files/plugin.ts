@@ -6,6 +6,7 @@ import {
   contentTypeFromPath,
   FilesConnector,
   isSafeInlineContentType,
+  PRESIGN_ERROR_CODES,
   validateCustomContentTypes,
 } from "../../connectors/files";
 import { getWorkspaceClient, isInUserContext } from "../../context";
@@ -26,6 +27,7 @@ import type {
   DownloadResponse,
   FilesExport,
   IFilesConfig,
+  PresignedDownloadUrl,
   VolumeAPI,
   VolumeConfig,
   VolumeHandle,
@@ -168,6 +170,17 @@ export class FilesPlugin extends Plugin {
         this.throwIfNoUserContext(volumeKey, `download`);
         return connector.download(getWorkspaceClient(), filePath);
       },
+      createDownloadUrl: (
+        filePath: string,
+        options?: { expireInSeconds?: number },
+      ): Promise<PresignedDownloadUrl> => {
+        this.throwIfNoUserContext(volumeKey, `createDownloadUrl`);
+        return connector.createDownloadUrl(
+          getWorkspaceClient(),
+          filePath,
+          options,
+        );
+      },
       exists: (filePath: string) => {
         this.throwIfNoUserContext(volumeKey, `exists`);
         return connector.exists(getWorkspaceClient(), filePath);
@@ -255,6 +268,17 @@ export class FilesPlugin extends Plugin {
         const { connector, volumeKey } = this._resolveVolume(req, res);
         if (!connector) return;
         await this._handleRaw(req, res, connector, volumeKey);
+      },
+    });
+
+    this.route(router, {
+      name: "download-url",
+      method: "get",
+      path: "/:volumeKey/download-url",
+      handler: async (req: express.Request, res: express.Response) => {
+        const { connector, volumeKey } = this._resolveVolume(req, res);
+        if (!connector) return;
+        await this._handleDownloadUrl(req, res, connector, volumeKey);
       },
     });
 
@@ -512,6 +536,95 @@ export class FilesPlugin extends Plugin {
       mode: "raw",
     });
   }
+
+  private async _handleDownloadUrl(
+    req: express.Request,
+    res: express.Response,
+    connector: FilesConnector,
+    volumeKey: string,
+  ): Promise<void> {
+    const path = req.query.path as string;
+    const valid = this._isValidPath(path);
+    if (valid !== true) {
+      res.status(400).json({ error: valid, plugin: this.name });
+      return;
+    }
+
+    const rawExpire = req.query.expireInSeconds as string | undefined;
+    const expireInSeconds = rawExpire
+      ? Number.parseInt(rawExpire, 10)
+      : undefined;
+    if (
+      expireInSeconds !== undefined &&
+      (Number.isNaN(expireInSeconds) ||
+        expireInSeconds < 1 ||
+        expireInSeconds > 3600)
+    ) {
+      res.status(400).json({
+        error: "expireInSeconds must be between 1 and 3600",
+        plugin: this.name,
+      });
+      return;
+    }
+
+    // Capture the error from inside execute() so we can surface
+    // well-known presign error codes (execute() swallows errors).
+    let capturedError: unknown;
+
+    try {
+      const userPlugin = this.asUser(req);
+      const settings: PluginExecutionSettings = {
+        default: FILES_DOWNLOAD_DEFAULTS,
+      };
+      const result = await userPlugin.execute(async () => {
+        this.warnIfNoUserContext(volumeKey, "createDownloadUrl");
+        try {
+          return await connector.createDownloadUrl(
+            getWorkspaceClient(),
+            path,
+            expireInSeconds ? { expireInSeconds } : undefined,
+          );
+        } catch (err) {
+          capturedError = err;
+          throw err;
+        }
+      }, settings);
+
+      if (result === undefined) {
+        // Check if execute() swallowed a presign-specific error so the
+        // client can decide to fall back to the proxy-based /download endpoint.
+        if (capturedError instanceof ApiError) {
+          const code = capturedError.errorCode;
+          const isNotSupported =
+            code === PRESIGN_ERROR_CODES.NOT_ENABLED ||
+            code === PRESIGN_ERROR_CODES.NOT_AVAILABLE ||
+            code === PRESIGN_ERROR_CODES.NETWORK_ZONE_UNKNOWN;
+
+          if (isNotSupported) {
+            const status = capturedError.statusCode ?? 501;
+            res.status(status).json({
+              error: capturedError.message,
+              errorCode: code,
+              fallback: "download",
+              plugin: this.name,
+            });
+            return;
+          }
+        }
+
+        res.status(500).json({
+          error: "Failed to create download URL",
+          plugin: this.name,
+        });
+        return;
+      }
+      res.setHeader("Cache-Control", "no-store");
+      res.json(result);
+    } catch (error) {
+      this._handleApiError(res, error, "Failed to create download URL");
+    }
+  }
+
 
   /**
    * Shared handler for `/download` and `/raw` endpoints.

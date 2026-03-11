@@ -1,5 +1,6 @@
 import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { PRESIGN_ERROR_CODES } from "../../../connectors/files";
 import { ServiceContext } from "../../../context/service-context";
 import { AuthenticationError } from "../../../errors";
 import { ResourceType } from "../../../registry";
@@ -29,11 +30,23 @@ const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
   };
 
   class MockApiError extends Error {
+    errorCode: string | undefined;
     statusCode: number;
-    constructor(message: string, statusCode: number) {
+    constructor(
+      message: string,
+      errorCodeOrStatus: string | number,
+      statusCode?: number,
+    ) {
       super(message);
       this.name = "ApiError";
-      this.statusCode = statusCode;
+      if (typeof errorCodeOrStatus === "number") {
+        // Legacy 2-arg form: (message, statusCode)
+        this.statusCode = errorCodeOrStatus;
+      } else {
+        // Full form: (message, errorCode, statusCode)
+        this.errorCode = errorCodeOrStatus;
+        this.statusCode = statusCode ?? 500;
+      }
     }
   }
 
@@ -330,9 +343,9 @@ describe("FilesPlugin", () => {
 
     plugin.injectRoutes(mockRouter);
 
-    // 1 GET /volumes + 7 GET /:volumeKey/* routes
-    // (list, read, download, raw, exists, metadata, preview)
-    expect(mockRouter.get).toHaveBeenCalledTimes(8);
+    // 1 GET /volumes + 8 GET /:volumeKey/* routes
+    // (list, read, download, raw, download-url, exists, metadata, preview)
+    expect(mockRouter.get).toHaveBeenCalledTimes(9);
     // 2 POST /:volumeKey/* routes (upload, mkdir)
     expect(mockRouter.post).toHaveBeenCalledTimes(2);
     // 1 DELETE /:volumeKey route
@@ -408,6 +421,276 @@ describe("FilesPlugin", () => {
       });
     });
   });
+
+  describe("download-url route", () => {
+    let fetchSpy: ReturnType<typeof vi.fn>;
+
+    function getDownloadUrlHandler(plugin: FilesPlugin) {
+      const mockRouter = {
+        use: vi.fn(),
+        get: vi.fn(),
+        post: vi.fn(),
+        put: vi.fn(),
+        delete: vi.fn(),
+        patch: vi.fn(),
+      } as any;
+
+      plugin.injectRoutes(mockRouter);
+
+      const call = mockRouter.get.mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === "string" &&
+          (c[0] as string).endsWith("/download-url"),
+      );
+      return call[call.length - 1] as (req: any, res: any) => Promise<void>;
+    }
+
+    function mockRes() {
+      const res: any = {};
+      res.status = vi.fn().mockReturnValue(res);
+      res.json = vi.fn().mockReturnValue(res);
+      res.setHeader = vi.fn().mockReturnValue(res);
+      return res;
+    }
+
+    function mockReq(volumeKey: string, query: Record<string, string> = {}) {
+      const headers: Record<string, string> = {
+        "x-forwarded-access-token": "test-token",
+        "x-forwarded-user": "test-user",
+      };
+      return {
+        params: { volumeKey },
+        query,
+        headers,
+        header: (name: string) => headers[name.toLowerCase()],
+      };
+    }
+
+    beforeEach(() => {
+      fetchSpy = vi.fn();
+      vi.stubGlobal("fetch", fetchSpy);
+      mockClient.config.authenticate.mockResolvedValue(undefined);
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    test("returns presigned URL on success", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handler = getDownloadUrlHandler(plugin);
+      const res = mockRes();
+
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            url: "https://s3.amazonaws.com/bucket/file",
+            headers: [{ name: "x-amz-token", value: "abc" }],
+          }),
+      });
+
+      await handler(mockReq("uploads", { path: "file.pdf" }), res);
+
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: "https://s3.amazonaws.com/bucket/file",
+          headers: { "x-amz-token": "abc" },
+          expiresAt: expect.any(String),
+        }),
+      );
+    });
+
+    test("sets Cache-Control: no-store on success", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handler = getDownloadUrlHandler(plugin);
+      const res = mockRes();
+
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ url: "https://s3/file", headers: [] }),
+      });
+
+      await handler(mockReq("uploads", { path: "file.pdf" }), res);
+
+      expect(res.setHeader).toHaveBeenCalledWith("Cache-Control", "no-store");
+    });
+
+    test("returns 400 when path is missing", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handler = getDownloadUrlHandler(plugin);
+      const res = mockRes();
+
+      await handler(mockReq("uploads", {}), res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ error: "path is required" }),
+      );
+    });
+
+    test("returns 400 when expireInSeconds is invalid", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handler = getDownloadUrlHandler(plugin);
+      const res = mockRes();
+
+      await handler(
+        mockReq("uploads", { path: "file.txt", expireInSeconds: "abc" }),
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: "expireInSeconds must be between 1 and 3600",
+        }),
+      );
+    });
+
+    test("returns 400 when expireInSeconds is 0", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handler = getDownloadUrlHandler(plugin);
+      const res = mockRes();
+
+      await handler(
+        mockReq("uploads", { path: "file.txt", expireInSeconds: "0" }),
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    test("returns 400 when expireInSeconds exceeds 3600", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handler = getDownloadUrlHandler(plugin);
+      const res = mockRes();
+
+      await handler(
+        mockReq("uploads", { path: "file.txt", expireInSeconds: "7200" }),
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    test("returns 404 for unknown volume", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handler = getDownloadUrlHandler(plugin);
+      const res = mockRes();
+
+      await handler(mockReq("unknown", { path: "file.txt" }), res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+    });
+
+    test("returns fallback hint when presigned URLs are not enabled (403)", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handler = getDownloadUrlHandler(plugin);
+      const res = mockRes();
+
+      fetchSpy.mockResolvedValue({
+        ok: false,
+        status: 403,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              error_code: "PERMISSION_DENIED",
+              message: "Presigned URLs not enabled",
+              error_info: [{ reason: "FILES_API_API_IS_NOT_ENABLED" }],
+            }),
+          ),
+      });
+
+      await handler(mockReq("uploads", { path: "file.txt" }), res);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          errorCode: PRESIGN_ERROR_CODES.NOT_ENABLED,
+          fallback: "download",
+          plugin: "files",
+        }),
+      );
+    });
+
+    test("returns fallback hint when endpoint is not available (404)", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handler = getDownloadUrlHandler(plugin);
+      const res = mockRes();
+
+      fetchSpy.mockResolvedValue({
+        ok: false,
+        status: 404,
+        text: () => Promise.resolve("Not Found"),
+      });
+
+      await handler(mockReq("uploads", { path: "file.txt" }), res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          errorCode: PRESIGN_ERROR_CODES.NOT_AVAILABLE,
+          fallback: "download",
+        }),
+      );
+    });
+
+    test("returns fallback hint for network zone errors (500)", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handler = getDownloadUrlHandler(plugin);
+      const res = mockRes();
+
+      fetchSpy.mockResolvedValue({
+        ok: false,
+        status: 500,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              error_code: "INTERNAL_ERROR",
+              error_info: [
+                { reason: "FILES_API_REQUESTER_NETWORK_ZONE_UNKNOWN" },
+              ],
+            }),
+          ),
+      });
+
+      await handler(mockReq("uploads", { path: "file.txt" }), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          errorCode: PRESIGN_ERROR_CODES.NETWORK_ZONE_UNKNOWN,
+          fallback: "download",
+        }),
+      );
+    });
+
+    test("returns generic 500 for unknown errors (no fallback hint)", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handler = getDownloadUrlHandler(plugin);
+      const res = mockRes();
+
+      fetchSpy.mockResolvedValue({
+        ok: false,
+        status: 502,
+        text: () => Promise.resolve("Bad Gateway"),
+      });
+
+      await handler(mockReq("uploads", { path: "file.txt" }), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: "Failed to create download URL",
+          plugin: "files",
+        }),
+      );
+      // Generic errors should NOT have fallback hint
+      const body = res.json.mock.calls[0][0];
+      expect(body.fallback).toBeUndefined();
+    });
+  });
+
 
   describe("Upload Size Validation", () => {
     function getUploadHandler(plugin: FilesPlugin) {

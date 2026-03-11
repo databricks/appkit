@@ -1,7 +1,7 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import { createMockTelemetry } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { FilesConnector } from "../client";
+import { FilesConnector, PRESIGN_ERROR_CODES } from "../client";
 import { streamFromChunks, streamFromString } from "./utils";
 
 const { mockFilesApi, mockConfig, mockClient, MockApiError } = vi.hoisted(
@@ -794,6 +794,326 @@ describe("FilesConnector", () => {
       const result = await connector.preview(mockClient, "short.txt");
 
       expect(result.textPreview).toBe(content);
+    });
+  });
+
+  describe("createDownloadUrl()", () => {
+    let connector: FilesConnector;
+    let fetchSpy: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      connector = new FilesConnector({
+        defaultVolume: "/Volumes/catalog/schema/vol",
+      });
+      mockConfig.authenticate.mockResolvedValue(undefined);
+      fetchSpy = vi.fn();
+      vi.stubGlobal("fetch", fetchSpy);
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    test("calls POST /api/2.0/fs/create-download-url with path and expire_time", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            url: "https://s3.amazonaws.com/bucket/file",
+            headers: [{ name: "x-amz-token", value: "abc123" }],
+          }),
+      });
+
+      await connector.createDownloadUrl(mockClient, "file.txt");
+
+      const calledUrl = new URL(fetchSpy.mock.calls[0][0]);
+      expect(calledUrl.pathname).toBe("/api/2.0/fs/create-download-url");
+      expect(calledUrl.searchParams.get("path")).toBe(
+        "/Volumes/catalog/schema/vol/file.txt",
+      );
+      expect(calledUrl.searchParams.get("expire_time")).toBeTruthy();
+      expect(fetchSpy.mock.calls[0][1].method).toBe("POST");
+    });
+
+    test("authenticates via client.config.authenticate", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ url: "https://s3/file", headers: [] }),
+      });
+
+      await connector.createDownloadUrl(mockClient, "file.txt");
+
+      expect(mockConfig.authenticate).toHaveBeenCalledWith(expect.any(Headers));
+    });
+
+    test("transforms headers array to Record<string, string>", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            url: "https://s3/file",
+            headers: [
+              { name: "x-amz-token", value: "abc" },
+              { name: "x-amz-date", value: "20250101" },
+            ],
+          }),
+      });
+
+      const result = await connector.createDownloadUrl(mockClient, "file.txt");
+
+      expect(result.headers).toEqual({
+        "x-amz-token": "abc",
+        "x-amz-date": "20250101",
+      });
+    });
+
+    test("handles response with no headers array", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ url: "https://s3/file" }),
+      });
+
+      const result = await connector.createDownloadUrl(mockClient, "file.txt");
+
+      expect(result.headers).toEqual({});
+    });
+
+    test("uses default 15-minute expiration", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ url: "https://s3/file", headers: [] }),
+      });
+
+      const before = Date.now();
+      const result = await connector.createDownloadUrl(mockClient, "file.txt");
+      const expiresAt = new Date(result.expiresAt).getTime();
+
+      // Should be ~15 minutes (900s) in the future
+      expect(expiresAt - before).toBeGreaterThanOrEqual(899_000);
+      expect(expiresAt - before).toBeLessThanOrEqual(901_000);
+    });
+
+    test("respects custom expireInSeconds", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ url: "https://s3/file", headers: [] }),
+      });
+
+      const before = Date.now();
+      const result = await connector.createDownloadUrl(mockClient, "file.txt", {
+        expireInSeconds: 300,
+      });
+      const expiresAt = new Date(result.expiresAt).getTime();
+
+      expect(expiresAt - before).toBeGreaterThanOrEqual(299_000);
+      expect(expiresAt - before).toBeLessThanOrEqual(301_000);
+    });
+
+    test("returns url and expiresAt from response", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            url: "https://s3.amazonaws.com/bucket/key?sig=xyz",
+            headers: [],
+          }),
+      });
+
+      const result = await connector.createDownloadUrl(mockClient, "file.txt");
+
+      expect(result.url).toBe("https://s3.amazonaws.com/bucket/key?sig=xyz");
+      expect(result.expiresAt).toBeTruthy();
+    });
+
+    test("throws ApiError with NOT_AVAILABLE on 404", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: false,
+        status: 404,
+        text: () => Promise.resolve("Not Found"),
+      });
+
+      try {
+        await connector.createDownloadUrl(mockClient, "file.txt");
+        expect.unreachable("should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(MockApiError);
+        expect((error as any).errorCode).toBe(
+          PRESIGN_ERROR_CODES.NOT_AVAILABLE,
+        );
+        expect((error as any).statusCode).toBe(404);
+      }
+    });
+
+    test("throws ApiError with NOT_ENABLED when error_info contains FILES_API_API_IS_NOT_ENABLED", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: false,
+        status: 403,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              error_code: "PERMISSION_DENIED",
+              message: "Presigned URLs are not enabled",
+              error_info: [{ reason: "FILES_API_API_IS_NOT_ENABLED" }],
+            }),
+          ),
+      });
+
+      try {
+        await connector.createDownloadUrl(mockClient, "file.txt");
+        expect.unreachable("should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(MockApiError);
+        expect((error as any).errorCode).toBe(PRESIGN_ERROR_CODES.NOT_ENABLED);
+        expect((error as any).statusCode).toBe(403);
+      }
+    });
+
+    test("throws ApiError with NETWORK_ZONE_UNKNOWN when error_info contains FILES_API_REQUESTER_NETWORK_ZONE_UNKNOWN", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: false,
+        status: 500,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              error_code: "INTERNAL_ERROR",
+              message: "Network zone unknown",
+              error_info: [
+                { reason: "FILES_API_REQUESTER_NETWORK_ZONE_UNKNOWN" },
+              ],
+            }),
+          ),
+      });
+
+      try {
+        await connector.createDownloadUrl(mockClient, "file.txt");
+        expect.unreachable("should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(MockApiError);
+        expect((error as any).errorCode).toBe(
+          PRESIGN_ERROR_CODES.NETWORK_ZONE_UNKNOWN,
+        );
+        expect((error as any).statusCode).toBe(500);
+      }
+    });
+
+    test("throws ApiError with NOT_ENABLED on 403 with PERMISSION_DENIED error_code (no error_info)", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: false,
+        status: 403,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              error_code: "PERMISSION_DENIED",
+              message: "Access denied",
+            }),
+          ),
+      });
+
+      try {
+        await connector.createDownloadUrl(mockClient, "file.txt");
+        expect.unreachable("should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(MockApiError);
+        expect((error as any).errorCode).toBe(PRESIGN_ERROR_CODES.NOT_ENABLED);
+      }
+    });
+
+    test("throws ApiError with FAILED on non-JSON error response", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: false,
+        status: 500,
+        text: () => Promise.resolve("Internal Server Error"),
+      });
+
+      try {
+        await connector.createDownloadUrl(mockClient, "file.txt");
+        expect.unreachable("should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(MockApiError);
+        expect((error as any).errorCode).toBe(PRESIGN_ERROR_CODES.FAILED);
+        expect((error as any).statusCode).toBe(500);
+      }
+    });
+
+    test("throws ApiError with FAILED on unknown JSON error shape", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: false,
+        status: 400,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              error_code: "BAD_REQUEST",
+              message: "Invalid request",
+            }),
+          ),
+      });
+
+      try {
+        await connector.createDownloadUrl(mockClient, "file.txt");
+        expect.unreachable("should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(MockApiError);
+        expect((error as any).errorCode).toBe(PRESIGN_ERROR_CODES.FAILED);
+      }
+    });
+
+    test("truncates long error messages to 200 chars", async () => {
+      const longMessage = "X".repeat(500);
+      fetchSpy.mockResolvedValue({
+        ok: false,
+        status: 500,
+        text: () => Promise.resolve(longMessage),
+      });
+
+      try {
+        await connector.createDownloadUrl(mockClient, "file.txt");
+        expect.unreachable("should have thrown");
+      } catch (error) {
+        expect((error as any).message.length).toBeLessThan(300);
+      }
+    });
+
+    test("throws when client.config.host is not set", async () => {
+      const noHostClient = {
+        files: mockFilesApi,
+        config: { host: undefined, authenticate: vi.fn() },
+      } as unknown as WorkspaceClient;
+
+      await expect(
+        connector.createDownloadUrl(noHostClient, "file.txt"),
+      ).rejects.toThrow("Databricks host is not configured");
+    });
+
+    test("resolves relative paths via defaultVolume", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ url: "https://s3/file", headers: [] }),
+      });
+
+      await connector.createDownloadUrl(mockClient, "subdir/file.txt");
+
+      const calledUrl = new URL(fetchSpy.mock.calls[0][0]);
+      expect(calledUrl.searchParams.get("path")).toBe(
+        "/Volumes/catalog/schema/vol/subdir/file.txt",
+      );
+    });
+
+    test("passes absolute path directly", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ url: "https://s3/file", headers: [] }),
+      });
+
+      await connector.createDownloadUrl(
+        mockClient,
+        "/Volumes/other/vol/file.txt",
+      );
+
+      const calledUrl = new URL(fetchSpy.mock.calls[0][0]);
+      expect(calledUrl.searchParams.get("path")).toBe(
+        "/Volumes/other/vol/file.txt",
+      );
     });
   });
 });

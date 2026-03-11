@@ -123,6 +123,7 @@ Routes are mounted at `/api/files/*`. All routes except `/volumes` execute in us
 | GET    | `/:volumeKey/list`         | `?path` (optional)           | `DirectoryEntry[]`                                |
 | GET    | `/:volumeKey/read`         | `?path` (required)           | `text/plain` body                                 |
 | GET    | `/:volumeKey/download`     | `?path` (required)           | Binary stream (`Content-Disposition: attachment`)  |
+| GET    | `/:volumeKey/download-url` | `?path` (required), `?expireInSeconds` (optional, 1–3600) | `PresignedDownloadUrl` |
 | GET    | `/:volumeKey/raw`          | `?path` (required)           | Binary stream (inline for safe types, attachment for unsafe) |
 | GET    | `/:volumeKey/exists`       | `?path` (required)           | `{ exists: boolean }`                             |
 | GET    | `/:volumeKey/metadata`     | `?path` (required)           | `FileMetadata`                                    |
@@ -154,7 +155,7 @@ Every operation runs through the interceptor pipeline with tier-specific default
 | Tier         | Cache | Retry | Timeout | Operations                            |
 | ------------ | ----- | ----- | ------- | ------------------------------------- |
 | **Read**     | 60 s  | 3x    | 30 s    | list, read, exists, metadata, preview |
-| **Download** | none  | 3x    | 30 s    | download, raw                         |
+| **Download** | none  | 3x    | 30 s    | download, download-url, raw           |
 | **Write**    | none  | none  | 600 s   | upload, mkdir, delete                 |
 
 Retry uses exponential backoff with a 1 s initial delay.
@@ -169,15 +170,13 @@ Write operations (`upload`, `mkdir`, `delete`) automatically invalidate the cach
 
 ## Programmatic API
 
-The `exports()` API is a callable that accepts a volume key and returns a `VolumeHandle`. The handle exposes all `VolumeAPI` methods directly (service principal, logs a warning) and an `asUser(req)` method for OBO access (recommended).
+The `files()` export is a callable that accepts a volume key and returns a `VolumeHandle`. All methods require OBO access via `asUser(req)` — calling them without a user context throws an error.
 
 ```ts
-// OBO access (recommended)
+// OBO access (required)
 const entries = await appkit.files("uploads").asUser(req).list();
 const content = await appkit.files("exports").asUser(req).read("report.csv");
 
-// Service principal access (logs a warning encouraging OBO)
-const entries = await appkit.files("uploads").list();
 
 // Named accessor
 const vol = appkit.files.volume("uploads");
@@ -191,6 +190,7 @@ await vol.asUser(req).list();
 | `list`            | `(directoryPath?: string)`                                                                         | `DirectoryEntry[]` |
 | `read`            | `(filePath: string, options?: { maxSize?: number })`                                               | `string`           |
 | `download`        | `(filePath: string)`                                                                               | `DownloadResponse` |
+| `createDownloadUrl` | `(filePath: string, options?: { expireInSeconds?: number })`                                     | `PresignedDownloadUrl` |
 | `exists`          | `(filePath: string)`                                                                               | `boolean`          |
 | `metadata`        | `(filePath: string)`                                                                               | `FileMetadata`     |
 | `upload`          | `(filePath: string, contents: ReadableStream \| Buffer \| string, options?: { overwrite?: boolean })` | `void`          |
@@ -199,6 +199,44 @@ await vol.asUser(req).list();
 | `preview`         | `(filePath: string)`                                                                               | `FilePreview`      |
 
 > `read()` loads the entire file into memory as a string. Files larger than 10 MB (default) are rejected — use `download()` for large files, or pass `{ maxSize: <bytes> }` to override.
+
+### `download` vs `createDownloadUrl`
+
+| | `download` | `createDownloadUrl` |
+| --- | --- | --- |
+| **How it works** | Streams the file through the AppKit server | Returns a pre-signed URL pointing to cloud storage (S3/ADLS/GCS) |
+| **Best for** | Server-side processing, or clients that can't reach cloud storage | Large file downloads, reducing server load |
+| **Proxy** | Yes — file bytes flow through the server | No — client fetches directly from cloud storage |
+
+### Pre-signed download URLs
+
+`createDownloadUrl` requests a short-lived, pre-signed URL from Unity Catalog. The URL points directly to cloud storage and bypasses the Databricks Apps proxy, making it ideal for large file downloads.
+
+```ts
+const { url, headers, expiresAt } = await appkit
+  .files("uploads")
+  .asUser(req)
+  .createDownloadUrl("data/report.parquet");
+
+// Client fetches directly from cloud storage using `url` and `headers`.
+```
+
+- **Expiration**: defaults to 900 seconds (15 min), configurable from 1 to 3600 via `expireInSeconds`.
+- **OBO-only**: throws if called without user context.
+- **Fallback**: if the workspace does not support pre-signed URLs, the `/download-url` HTTP route returns an error with `"fallback": "download"` so clients can fall back to the proxied `/download` endpoint.
+
+**Security: response headers contain cloud credentials.**
+The `headers` object returned by `createDownloadUrl` may contain cloud-provider authentication tokens (e.g., SAS tokens for ADLS, signed headers for S3). Do not log, cache, or expose these headers beyond the immediate client download.
+
+#### Known error codes
+
+| Code | Meaning |
+| --- | --- |
+| `PRESIGNED_URL_NOT_ENABLED` | Pre-signed URL feature is not enabled on this workspace |
+| `PRESIGNED_URL_NETWORK_ZONE_UNKNOWN` | Requester's network zone is unknown (private link / firewall) |
+| `PRESIGNED_URL_NOT_AVAILABLE` | Endpoint not available (older workspace version) |
+| `PRESIGNED_URL_FAILED` | Generic / unrecognised error |
+
 
 ## Path resolution
 
@@ -217,6 +255,19 @@ The `list()` method with no arguments lists the volume root.
 // Re-exported from @databricks/sdk-experimental
 type DirectoryEntry = files.DirectoryEntry;
 type DownloadResponse = files.DownloadResponse;
+
+interface PresignedDownloadUrl {
+  /** Pre-signed URL pointing directly to cloud storage. */
+  url: string;
+  /**
+   * Headers the client must include when fetching the pre-signed URL.
+   * May contain cloud-provider authentication tokens — do not log or expose.
+   */
+  headers: Record<string, string>;
+  /** ISO 8601 timestamp when the pre-signed URL expires. */
+  expiresAt: string;
+}
+
 
 interface FileMetadata {
   /** File size in bytes. */
@@ -247,6 +298,7 @@ interface VolumeAPI {
   list(directoryPath?: string): Promise<DirectoryEntry[]>;
   read(filePath: string, options?: { maxSize?: number }): Promise<string>;
   download(filePath: string): Promise<DownloadResponse>;
+  createDownloadUrl(filePath: string, options?: { expireInSeconds?: number }): Promise<PresignedDownloadUrl>;
   exists(filePath: string): Promise<boolean>;
   metadata(filePath: string): Promise<FileMetadata>;
   upload(filePath: string, contents: ReadableStream | Buffer | string, options?: { overwrite?: boolean }): Promise<void>;
@@ -255,7 +307,7 @@ interface VolumeAPI {
   preview(filePath: string): Promise<FilePreview>;
 }
 
-/** Volume handle: all VolumeAPI methods (service principal) + asUser() for OBO. */
+/** Volume handle: methods require OBO via asUser(req). Throws without user context. */
 type VolumeHandle = VolumeAPI & {
   asUser: (req: Request) => VolumeAPI;
 };
@@ -275,7 +327,7 @@ Built-in extensions: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.bmp`, `
 
 Routes use `this.asUser(req)` so operations execute with the requesting user's Databricks credentials (on-behalf-of / OBO). The `/volumes` route is the only exception since it only reads plugin config.
 
-The programmatic API returns a `VolumeHandle` that exposes all `VolumeAPI` methods directly (service principal) and an `asUser(req)` method for OBO access. Calling any method without `asUser()` logs a warning encouraging OBO usage but does not throw. OBO access is strongly recommended for production use.
+The programmatic API returns a `VolumeHandle` whose methods require OBO access via `asUser(req)`. Calling any method without a user context throws an error.
 
 ## Resource requirements
 

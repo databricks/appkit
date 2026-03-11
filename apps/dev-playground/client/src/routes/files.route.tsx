@@ -1,13 +1,14 @@
 import type { DirectoryEntry, FilePreview } from "@databricks/appkit-ui/react";
 import {
   Button,
+  Card,
   DirectoryList,
   FileBreadcrumb,
   FilePreviewPanel,
   NewFolderInput,
 } from "@databricks/appkit-ui/react";
 import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
-import { FolderPlus, Loader2, Upload } from "lucide-react";
+import { FolderPlus, Link, Loader2, Upload } from "lucide-react";
 import {
   type RefObject,
   useCallback,
@@ -27,6 +28,7 @@ function nextSignal(ref: RefObject<AbortController | null>): AbortSignal {
   return ref.current.signal;
 }
 
+import { useSignedUrl } from "@databricks/appkit-ui/react";
 import { Header } from "@/components/layout/header";
 
 export const Route = createFileRoute("/files")({
@@ -70,6 +72,17 @@ function FilesRoute() {
     },
     [volumeKey],
   );
+
+  const {
+    signedUrl,
+    loading: signedUrlLoading,
+    error: signedUrlError,
+    copied,
+    generate: generateSignedUrl,
+    copyToClipboard,
+    reset: resetSignedUrl,
+  } = useSignedUrl(apiUrl);
+
 
   const loadDirectory = useCallback(
     async (path?: string) => {
@@ -173,6 +186,7 @@ function FilesRoute() {
       loadDirectory(entryPath);
     } else {
       setSelectedFile(entryPath);
+      resetSignedUrl();
       loadPreview(entryPath);
     }
   };
@@ -391,18 +405,72 @@ function FilesRoute() {
             }
           />
 
-          <FilePreviewPanel
-            className="flex-1 min-w-0"
-            selectedFile={selectedFile}
-            preview={preview}
-            previewLoading={previewLoading}
-            onDownload={(path) =>
-              window.open(apiUrl("download", { path }), "_blank")
-            }
-            onDelete={handleDelete}
-            deleting={deleting}
-            imagePreviewSrc={(p) => apiUrl("raw", { path: p })}
-          />
+          <div className="flex-1 min-w-0 space-y-4">
+            <FilePreviewPanel
+              selectedFile={selectedFile}
+              preview={preview}
+              previewLoading={previewLoading}
+              onDownload={(path) =>
+                window.open(apiUrl("download", { path }), "_blank")
+              }
+              onDelete={handleDelete}
+              deleting={deleting}
+              imagePreviewSrc={(p) => apiUrl("raw", { path: p })}
+            />
+
+            {selectedFile && !previewLoading && preview && (
+              <Card className="p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-medium text-foreground">
+                    Pre-signed URL
+                  </h4>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={signedUrlLoading}
+                    onClick={() =>
+                      selectedFile && generateSignedUrl(selectedFile)
+                    }
+                  >
+                    {signedUrlLoading ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Link className="h-4 w-4 mr-2" />
+                    )}
+                    {signedUrlLoading ? "Generating..." : "Generate URL"}
+                  </Button>
+                </div>
+
+                {signedUrlError && (
+                  <p className="text-sm text-destructive">{signedUrlError}</p>
+                )}
+
+                {signedUrl && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={signedUrl.url}
+                        className="flex-1 rounded-md border border-input bg-muted/30 px-3 py-1.5 text-xs font-mono truncate"
+                        onClick={(e) => (e.target as HTMLInputElement).select()}
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={copyToClipboard}
+                      >
+                        {copied ? "Copied!" : "Copy"}
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Expires: {new Date(signedUrl.expiresAt).toLocaleString()}
+                    </p>
+                  </div>
+                )}
+              </Card>
+            )}
+          </div>
         </div>
       </div>
     </div>

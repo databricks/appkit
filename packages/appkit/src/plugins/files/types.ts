@@ -18,7 +18,19 @@ export interface VolumeConfig {
 export interface VolumeAPI {
   list(directoryPath?: string): Promise<DirectoryEntry[]>;
   read(filePath: string, options?: { maxSize?: number }): Promise<string>;
+  /** Streams the file through the AppKit server (proxied). Use when the server needs to process the file or when clients can't reach cloud storage directly. */
   download(filePath: string): Promise<DownloadResponse>;
+  /**
+   * Returns a pre-signed URL pointing directly to cloud storage (S3/ADLS/GCS), bypassing the server proxy.
+   * Use when the client should fetch the file directly — better for large files and reducing server load.
+   * OBO-only: throws if called without user context.
+   * @param filePath - Path to the file within the volume.
+   * @param options.expireInSeconds - URL lifetime in seconds (1–3600, default 900).
+   */
+  createDownloadUrl(
+    filePath: string,
+    options?: { expireInSeconds?: number },
+  ): Promise<PresignedDownloadUrl>;
   exists(filePath: string): Promise<boolean>;
   metadata(filePath: string): Promise<FileMetadata>;
   upload(
@@ -29,6 +41,22 @@ export interface VolumeAPI {
   createDirectory(directoryPath: string): Promise<void>;
   delete(filePath: string): Promise<void>;
   preview(filePath: string): Promise<FilePreview>;
+}
+
+/**
+ * Response from the UC pre-signed download URL endpoint.
+ * The `url` points directly to cloud storage (S3/ADLS/GCS) and bypasses the Databricks Apps proxy.
+ */
+export interface PresignedDownloadUrl {
+  /** Pre-signed URL pointing directly to cloud storage. */
+  url: string;
+  /**
+   * Headers that the client must include when fetching the pre-signed URL.
+   * May contain cloud-provider authentication tokens — do not log or expose beyond the immediate download.
+   */
+  headers: Record<string, string>;
+  /** ISO 8601 timestamp when the pre-signed URL expires. */
+  expiresAt: string;
 }
 
 /**
@@ -78,8 +106,8 @@ export interface FilePreview extends FileMetadata {
 /**
  * Volume handle returned by `app.files("volumeKey")`.
  *
- * - `asUser(req)` — executes on behalf of the user (recommended).
- * - Direct methods (e.g. `.list()`) — execute as the service principal (logs a warning encouraging OBO).
+ * - `asUser(req)` — executes on behalf of the user (required).
+ * - Direct methods (e.g. `.list()`) — throw if called without user context.
  */
 export type VolumeHandle = VolumeAPI & {
   asUser: (req: IAppRequest) => VolumeAPI;
@@ -91,10 +119,10 @@ export type VolumeHandle = VolumeAPI & {
  *
  * @example
  * ```ts
- * // OBO access (recommended)
+ * // OBO access (required)
  * appKit.files("uploads").asUser(req).list()
  *
- * // Service principal access (logs a warning)
+ * // Service principal access (throws — use asUser instead)
  * appKit.files("uploads").list()
  *
  * // Named accessor
