@@ -81,7 +81,7 @@ The required environment variables are:
 | `LAKEBASE_ENDPOINT` | Endpoint resource path (e.g. `projects/.../branches/.../endpoints/...`) |
 | `PGHOST` | Lakebase host (auto-injected in production by the `postgres` Databricks Apps resource) |
 | `PGDATABASE` | Database name (auto-injected in production by the `postgres` Databricks Apps resource) |
-| `PGSSLMODE` | TLS mode — set to `require` (auto-injected in production by the `postgres` Databricks Apps resource) |
+| `PGSSLMODE` | TLS mode - set to `require` (auto-injected in production by the `postgres` Databricks Apps resource) |
 
 When deployed to Databricks Apps with a `postgres` database resource configured, `PGHOST`, `PGDATABASE`, `PGSSLMODE`, `PGUSER`, `PGPORT`, and `PGAPPNAME` are automatically injected by the platform. Only `LAKEBASE_ENDPOINT` must be set explicitly:
 
@@ -124,41 +124,42 @@ await createApp({
 
 ## Database Permissions
 
-When you create the app with the Lakebase resource using the [Getting started](#getting-started-with-the-lakebase) guide, the Service Principal is automatically granted `CONNECT_AND_CREATE` permission on the `postgres` resource. That means, the Service Principal can connect to the database and create new objects in the database but **cannot access any existing schemas or tables.**
-
-### Schema ownership and DDL permissions
-
-When the app is deployed, the Service Principal creates schemas and tables and becomes their owner. When running locally against the same database, a user with the `databricks_superuser` role has full **DML access** (SELECT, INSERT, UPDATE, DELETE) to these objects, but **cannot run DDL** (CREATE SCHEMA, CREATE TABLE) on schemas owned by the Service Principal.
-
-Apps generated from `databricks apps init` already handle this by checking if the required tables already exist on startup, and skipping schema/table creation if they do.
+When you create the app with the Lakebase resource using the [Getting started](#getting-started-with-the-lakebase) guide, the Service Principal is automatically granted `CONNECT_AND_CREATE` permission on the `postgres` resource. This lets the Service Principal connect to the database and create new objects, but **not access any existing schemas or tables.**
 
 ### Local development
 
-:::note
-Deploy and run the app at least once before running it locally so the Service Principal creates the database schema and tables first.
-:::
+To develop locally against a deployed Lakebase database:
 
-Your Databricks user identity (email) is used for OAuth authentication. No additional permissions are required if your user has the `databricks_superuser` role, which gives full read and write access to all data in the database (full DDL access).
+1. **Deploy the app first.** The Service Principal creates the database schema and tables on first deploy. Apps generated from `databricks apps init` handle this automatically - they check if tables exist on startup and skip creation if they do.
 
-To grant `databricks_superuser` to your user:
+2. **Grant `databricks_superuser` via the Lakebase UI:**
+   1. Open the Lakebase Autoscaling UI and navigate to your project's **Branch Overview** page.
+   2. Click **Add role** (or **Edit role** if your OAuth role already exists).
+   3. Select your Databricks identity as the principal and check the **`databricks_superuser`** system role.
 
-1. Open the Lakebase Autoscaling UI and navigate to your project's **Branch Overview** page.
-2. Click **Add role** (or **Edit role** if your OAuth role already exists).
-3. Select your Databricks identity as the principal and check the **`databricks_superuser`** system role.
+3. **Run locally** - your Databricks user identity (email) is used for OAuth authentication. The `databricks_superuser` role gives full **DML access** (read/write data) but **not DDL** (creating schemas or tables) - that's why deploying first matters (see note below).
+
+For other users, use the same **Add role** flow in the Lakebase UI to create an OAuth role with `databricks_superuser` for each user.
 
 :::tip
 [Postgres password authentication](https://docs.databricks.com/aws/en/oltp/projects/authentication#overview) is a simpler alternative that avoids OAuth role permission complexity. However, it requires you to set up a password for the user in the **Branch Overview** page in the Lakebase Autoscaling UI.
 :::
 
-For other users, use the same **Add role** flow in the Lakebase UI to create an OAuth role with `databricks_superuser` for each user.
+:::info[Why deploy first?]
+When the app is deployed, the Service Principal creates schemas and tables and becomes their owner. A `databricks_superuser` has full **DML access** (SELECT, INSERT, UPDATE, DELETE) to these objects, but **cannot run DDL** (CREATE SCHEMA, CREATE TABLE) on schemas owned by the Service Principal. Deploying first ensures all objects exist before local development begins.
+:::
 
 ### Fine-grained permissions
 
-If you need fine-grained permissions for a given schema instead of `databricks_superuser` role, you can [create an OAuth role](https://docs.databricks.com/aws/en/oltp/projects/postgres-roles) and grant specific permissions using SQL. 
+For most use cases, `databricks_superuser` is sufficient. If you need schema-level grants instead, refer to the official documentation:
 
-:::note
+- [Manage database permissions](https://docs.databricks.com/aws/en/oltp/projects/manage-roles-permissions)
+- [Postgres roles](https://docs.databricks.com/aws/en/oltp/projects/postgres-roles)
+
+<details>
+<summary>SQL script for fine-grained grants</summary>
+
 Deploy and run the app at least once before executing these grants so the Service Principal initializes the database schema first.
-:::
 
 Replace `subject` with the user email and `schema` with your schema name:
 
@@ -191,4 +192,4 @@ BEGIN
 END $$;
 ```
 
-For more details, see [Manage database permissions](https://docs.databricks.com/aws/en/oltp/projects/manage-roles-permissions).
+</details>
