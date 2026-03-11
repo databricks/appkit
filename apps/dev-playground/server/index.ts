@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import { analytics, createApp, genie, server } from "@databricks/appkit";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
+import { env } from "config/environment";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
@@ -22,7 +23,7 @@ createApp({
     telemetryExamples(),
     analytics({}),
     genie({
-      spaces: { demo: process.env.DATABRICKS_GENIE_SPACE_ID ?? "placeholder" },
+      spaces: { demo: env.DATABRICKS_GENIE_SPACE_ID },
     }),
     lakebaseExamples(),
   ],

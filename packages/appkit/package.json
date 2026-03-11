@@ -83,6 +83,14 @@
   "overrides": {
     "vite": "npm:rolldown-vite@7.1.14"
   },
+  "peerDependencies": {
+    "zod": ">=3.23.0 || >=4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "zod": {
+      "optional": true
+    }
+  },
   "module": "./dist/index.js",
   "publishConfig": {
     "exports": {
