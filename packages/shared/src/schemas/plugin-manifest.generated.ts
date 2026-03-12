@@ -1,5 +1,9 @@
 // AUTO-GENERATED from plugin-manifest.schema.json — do not edit.
 // Run: pnpm exec tsx tools/generate-schema-types.ts
+/**
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "resourceRequirement".
+ */
 export type ResourceRequirement = {
   type: ResourceType;
   /**
@@ -25,7 +29,12 @@ export type ResourceRequirement = {
     [k: string]: ResourceFieldEntry;
   };
 };
-/**  * Type of Databricks resource */
+/**
+ * Type of Databricks resource
+ *
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "resourceType".
+ */
 export type ResourceType =
   | "secret"
   | "job"
@@ -40,35 +49,100 @@ export type ResourceType =
   | "genie_space"
   | "experiment"
   | "app";
-/**  * Permission for secret resources (order: weakest to strongest) */
+/**
+ * Permission for secret resources (order: weakest to strongest)
+ *
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "secretPermission".
+ */
 export type SecretPermission = "READ" | "WRITE" | "MANAGE";
-/**  * Permission for job resources (order: weakest to strongest) */
+/**
+ * Permission for job resources (order: weakest to strongest)
+ *
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "jobPermission".
+ */
 export type JobPermission = "CAN_VIEW" | "CAN_MANAGE_RUN" | "CAN_MANAGE";
-/**  * Permission for SQL warehouse resources (order: weakest to strongest) */
+/**
+ * Permission for SQL warehouse resources (order: weakest to strongest)
+ *
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "sqlWarehousePermission".
+ */
 export type SqlWarehousePermission = "CAN_USE" | "CAN_MANAGE";
-/**  * Permission for serving endpoint resources (order: weakest to strongest) */
+/**
+ * Permission for serving endpoint resources (order: weakest to strongest)
+ *
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "servingEndpointPermission".
+ */
 export type ServingEndpointPermission = "CAN_VIEW" | "CAN_QUERY" | "CAN_MANAGE";
-/**  * Permission for Unity Catalog volume resources */
+/**
+ * Permission for Unity Catalog volume resources
+ *
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "volumePermission".
+ */
 export type VolumePermission = "READ_VOLUME" | "WRITE_VOLUME";
-/**  * Permission for vector search index resources */
+/**
+ * Permission for vector search index resources
+ *
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "vectorSearchIndexPermission".
+ */
 export type VectorSearchIndexPermission = "SELECT";
-/**  * Permission for Unity Catalog function resources */
+/**
+ * Permission for Unity Catalog function resources
+ *
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "ucFunctionPermission".
+ */
 export type UcFunctionPermission = "EXECUTE";
-/**  * Permission for Unity Catalog connection resources */
+/**
+ * Permission for Unity Catalog connection resources
+ *
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "ucConnectionPermission".
+ */
 export type UcConnectionPermission = "USE_CONNECTION";
-/**  * Permission for database resources */
+/**
+ * Permission for database resources
+ *
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "databasePermission".
+ */
 export type DatabasePermission = "CAN_CONNECT_AND_CREATE";
-/**  * Permission for Postgres resources */
+/**
+ * Permission for Postgres resources
+ *
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "postgresPermission".
+ */
 export type PostgresPermission = "CAN_CONNECT_AND_CREATE";
-/**  * Permission for Genie Space resources (order: weakest to strongest) */
+/**
+ * Permission for Genie Space resources (order: weakest to strongest)
+ *
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "genieSpacePermission".
+ */
 export type GenieSpacePermission =
   | "CAN_VIEW"
   | "CAN_RUN"
   | "CAN_EDIT"
   | "CAN_MANAGE";
-/**  * Permission for MLflow experiment resources (order: weakest to strongest) */
+/**
+ * Permission for MLflow experiment resources (order: weakest to strongest)
+ *
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "experimentPermission".
+ */
 export type ExperimentPermission = "CAN_READ" | "CAN_EDIT" | "CAN_MANAGE";
-/**  * Permission for Databricks App resources */
+/**
+ * Permission for Databricks App resources
+ *
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "appPermission".
+ */
 export type AppPermission = "CAN_USE";
 
 /**
@@ -139,6 +213,10 @@ export interface PluginManifest {
    */
   hidden?: boolean;
 }
+/**
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "resourceFieldEntry".
+ */
 export interface ResourceFieldEntry {
   /**
    * Environment variable name for this field
@@ -169,6 +247,10 @@ export interface ResourceFieldEntry {
    */
   resolve?: string;
 }
+/**
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "configSchema".
+ */
 export interface ConfigSchema {
   type: "object" | "array" | "string" | "number" | "boolean";
   properties?: {
@@ -178,6 +260,10 @@ export interface ConfigSchema {
   required?: string[];
   additionalProperties?: boolean;
 }
+/**
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "configSchemaProperty".
+ */
 export interface ConfigSchemaProperty {
   type: "object" | "array" | "string" | "number" | "boolean" | "integer";
   description?: string;

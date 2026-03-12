@@ -25,34 +25,6 @@ const BANNER = `// AUTO-GENERATED from plugin-manifest.schema.json — do not ed
 // Run: pnpm exec tsx tools/generate-schema-types.ts
 `;
 
-// ---------------------------------------------------------------------------
-// Post-processing transforms (json-schema-to-typescript has no config for these)
-// ---------------------------------------------------------------------------
-
-/** allOf/if-then produces `{ [k: string]: unknown } & { … }` — strip the index-signature part. */
-function stripIndexSignatureIntersections(src: string): string {
-  return src.replace(/\{\s*\[k: string\]: unknown;?\s*\}\s*&\s*/g, "");
-}
-
-/** Remove auto-generated "This interface was referenced by …" JSDoc paragraphs. */
-function stripReferencedByJSDoc(src: string): string {
-  // Whole comment block whose only content is the paragraph:
-  src = src.replace(
-    /\/\*\*\s*\n(?:\s*\*\s*\n)*\s*\*\s*This interface was referenced by[\s\S]*?\*\/\n/g,
-    "",
-  );
-  // Trailing paragraph inside a block that also has a real description:
-  src = src.replace(
-    /\n\s*\*\s*\n\s*\*\s*This interface was referenced by[\s\S]*?(?=\s*\*\/)/g,
-    "\n ",
-  );
-  // Collapse JSDoc blocks left with empty trailing lines into single-line form:
-  src = src.replace(/\/\*\*\s*\n(\s*\*\s*[^\n]+)\n\s*\n\s*\*\//g, "/** $1 */");
-  return src;
-}
-
-// ---------------------------------------------------------------------------
-
 async function main(): Promise<void> {
   const raw = await compileFromFile(SCHEMA_PATH, {
     bannerComment: "",
@@ -69,13 +41,13 @@ async function main(): Promise<void> {
 
   // Post-processing: work around json-schema-to-typescript limitations that
   // have no config options. Track upstream: https://github.com/bcherny/json-schema-to-typescript/issues/428
-  let output = raw;
-  output = stripIndexSignatureIntersections(output);
-  output = stripReferencedByJSDoc(output);
-  output = BANNER + output;
+  // allOf/if-then produces `{ [k: string]: unknown } & { … }` — strip the index-signature part.
+  const output = raw.replace(/\{\s*\[k: string\]: unknown;?\s*\}\s*&\s*/g, "");
+
+  const result = BANNER + output;
 
   fs.mkdirSync(path.dirname(OUT_PATH), { recursive: true });
-  fs.writeFileSync(OUT_PATH, output, "utf-8");
+  fs.writeFileSync(OUT_PATH, result, "utf-8");
   console.log("Wrote", OUT_PATH);
 }
 

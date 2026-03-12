@@ -1,5 +1,8 @@
 # Interface: ResourceFieldEntry
 
+This interface was referenced by `PluginManifest`'s JSON-Schema
+via the `definition` "resourceFieldEntry".
+
 ## Properties
 
 ### bundleIgnore?
