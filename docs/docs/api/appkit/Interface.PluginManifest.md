@@ -1,7 +1,16 @@
 # Interface: PluginManifest\<TName\>
 
 Plugin manifest that declares metadata and resource requirements.
-Attached to plugin classes as a static property.
+Extends the shared PluginManifest with strict resource types.
+
+## See
+
+ - `packages/shared/src/schemas/plugin-manifest.generated.ts` `PluginManifest` — generated base
+ - SharedPluginManifest — shared re-export with JSONSchema7 config
+
+## Extends
+
+- `Omit`\<`SharedPluginManifest`, `"resources"` \| `"config"`\>
 
 ## Type Parameters
 
@@ -17,7 +26,13 @@ Attached to plugin classes as a static property.
 optional author: string;
 ```
 
-Optional metadata for community plugins
+Author name or organization
+
+#### Inherited from
+
+```ts
+Omit.author
+```
 
 ***
 
@@ -30,7 +45,7 @@ optional config: {
 ```
 
 Configuration schema for the plugin.
-Defines the shape and validation rules for plugin config.
+Uses JSONSchema7 instead of the generated ConfigSchema (which is too restrictive).
 
 #### schema
 
@@ -48,6 +63,12 @@ description: string;
 
 Brief description of what the plugin does
 
+#### Inherited from
+
+```ts
+Omit.description
+```
+
 ***
 
 ### displayName
@@ -56,7 +77,13 @@ Brief description of what the plugin does
 displayName: string;
 ```
 
-Human-readable display name for UI/CLI
+Human-readable display name for UI and CLI
+
+#### Inherited from
+
+```ts
+Omit.displayName
+```
 
 ***
 
@@ -66,7 +93,13 @@ Human-readable display name for UI/CLI
 optional hidden: boolean;
 ```
 
-When true, excluded from the template plugins manifest during sync.
+When true, this plugin is excluded from the template plugins manifest (appkit.plugins.json) during sync.
+
+#### Inherited from
+
+```ts
+Omit.hidden
+```
 
 ***
 
@@ -76,12 +109,28 @@ When true, excluded from the template plugins manifest during sync.
 optional keywords: string[];
 ```
 
+Keywords for plugin discovery
+
+#### Inherited from
+
+```ts
+Omit.keywords
+```
+
 ***
 
 ### license?
 
 ```ts
 optional license: string;
+```
+
+SPDX license identifier
+
+#### Inherited from
+
+```ts
+Omit.license
 ```
 
 ***
@@ -94,12 +143,42 @@ name: TName;
 
 Plugin identifier — the single source of truth for the plugin's name
 
+#### Overrides
+
+```ts
+Omit.name
+```
+
+***
+
+### onSetupMessage?
+
+```ts
+optional onSetupMessage: string;
+```
+
+Message displayed to the user after project initialization. Use this to inform about manual setup steps (e.g. environment variables, resource provisioning).
+
+#### Inherited from
+
+```ts
+Omit.onSetupMessage
+```
+
 ***
 
 ### repository?
 
 ```ts
 optional repository: string;
+```
+
+URL to the plugin's source repository
+
+#### Inherited from
+
+```ts
+Omit.repository
 ```
 
 ***
@@ -113,7 +192,7 @@ resources: {
 };
 ```
 
-Resource requirements declaration
+Resource requirements declaration (with strict ResourceRequirement types)
 
 #### optional
 
@@ -137,4 +216,12 @@ Resources that must be available for the plugin to function
 
 ```ts
 optional version: string;
+```
+
+Plugin version (semver format)
+
+#### Inherited from
+
+```ts
+Omit.version
 ```

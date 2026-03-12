@@ -1,5 +1,13 @@
 import type express from "express";
 import type { JSONSchema7 } from "json-schema";
+import type {
+  PluginManifest as GeneratedPluginManifest,
+  ResourceRequirement as GeneratedResourceRequirement,
+  ResourceFieldEntry,
+} from "./schemas/plugin-manifest.generated";
+
+// Re-export generated types as the shared canonical definitions.
+export type { ResourceFieldEntry };
 
 /** Base plugin interface. */
 export interface BasePlugin {
@@ -72,13 +80,20 @@ export type PluginConstructor<
 };
 
 /**
- * Manifest declaration for plugins (imported from registry types).
- * Re-exported here to avoid circular dependencies.
+ * Manifest declaration for plugins.
+ * Extends the generated PluginManifest with a generic name parameter
+ * and uses JSONSchema7 for config.schema (the generated ConfigSchema
+ * is too restrictive for plugin consumers).
+ *
+ * @see {@link GeneratedPluginManifest} — generated base from plugin-manifest.schema.json
+ * @see `packages/appkit/src/registry/types.ts` `PluginManifest` — strict appkit narrowing (enum types)
  */
-export interface PluginManifest<TName extends string = string> {
+export interface PluginManifest<TName extends string = string>
+  extends Omit<
+    GeneratedPluginManifest,
+    "name" | "config" | "$schema" | "resources"
+  > {
   name: TName;
-  displayName: string;
-  description: string;
   resources: {
     required: Omit<ResourceRequirement, "required">[];
     optional: Omit<ResourceRequirement, "required">[];
@@ -86,53 +101,17 @@ export interface PluginManifest<TName extends string = string> {
   config?: {
     schema: JSONSchema7;
   };
-  onSetupMessage?: string;
-  hidden?: boolean;
-  author?: string;
-  version?: string;
-  repository?: string;
-  keywords?: string[];
-  license?: string;
 }
 
 /**
- * Defines a single field for a resource.
- * Each field maps to its own environment variable and optional description.
- * Single-value types use one key (e.g. id); multi-value types (database, secret)
- * use multiple (e.g. instance_name, database_name or scope, key).
+ * Resource requirement with runtime fields added beyond the schema definition.
+ * - `fields` is made required (schema has it optional, but registry always populates it)
+ * - `required` boolean tracks whether the resource is mandatory at runtime
+ *
+ * @see {@link GeneratedResourceRequirement} — generated base from plugin-manifest.schema.json
+ * @see `packages/appkit/src/registry/types.ts` `ResourceRequirement` — strict appkit narrowing (enum types)
  */
-export interface ResourceFieldEntry {
-  /** Environment variable name for this field */
-  env?: string;
-  /** Human-readable description for this field */
-  description?: string;
-  /** When true, this field is excluded from Databricks bundle configuration (databricks.yml) generation. */
-  bundleIgnore?: boolean;
-  /** Example values showing the expected format for this field */
-  examples?: string[];
-  /** When true, this field is only generated for local .env files. The Databricks Apps platform auto-injects it at deploy time. */
-  localOnly?: boolean;
-  /** Static value for this field. Used when no prompted or resolved value exists. */
-  value?: string;
-  /** Named resolver prefixed by resource type (e.g., 'postgres:host'). The CLI resolves this value during the init prompt flow. */
-  resolve?: string;
-}
-
-/**
- * Resource requirement declaration (imported from registry types).
- * Re-exported here to avoid circular dependencies.
- */
-export interface ResourceRequirement {
-  type: string;
-  alias: string;
-  /** Stable key for machine use (env naming, composite keys, app.yaml). */
-  resourceKey: string;
-  description: string;
-  permission: string;
-  /**
-   * Map of field name to env and optional description.
-   * Single-value types use one key (e.g. id); multi-value (database, secret) use multiple keys.
-   */
+export interface ResourceRequirement extends GeneratedResourceRequirement {
   fields: Record<string, ResourceFieldEntry>;
   required: boolean;
 }

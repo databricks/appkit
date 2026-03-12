@@ -1,40 +1,17 @@
 /**
  * Shared types for plugin manifests used across CLI commands.
- * Single source of truth for manifest structure — avoids duplicate
- * definitions in sync, validate, list, and add-resource commands.
+ * Base types (ResourceFieldEntry, ResourceRequirement, PluginManifest) are
+ * generated from plugin-manifest.schema.json — only CLI-specific extensions
+ * (TemplatePlugin, TemplatePluginsManifest) are hand-written here.
  */
 
-export interface ResourceFieldEntry {
-  env?: string;
-  description?: string;
-  bundleIgnore?: boolean;
-  examples?: string[];
-  localOnly?: boolean;
-  value?: string;
-  resolve?: string;
-}
+export type {
+  PluginManifest,
+  ResourceFieldEntry,
+  ResourceRequirement,
+} from "../../../schemas/plugin-manifest.generated";
 
-export interface ResourceRequirement {
-  type: string;
-  alias: string;
-  resourceKey: string;
-  description: string;
-  permission: string;
-  fields: Record<string, ResourceFieldEntry>;
-}
-
-export interface PluginManifest {
-  name: string;
-  displayName: string;
-  description: string;
-  resources: {
-    required: ResourceRequirement[];
-    optional: ResourceRequirement[];
-  };
-  config?: { schema: unknown };
-  onSetupMessage?: string;
-  hidden?: boolean;
-}
+import type { PluginManifest } from "../../../schemas/plugin-manifest.generated";
 
 export interface TemplatePlugin extends Omit<PluginManifest, "config"> {
   package: string;

@@ -15,7 +15,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build:package": "tsdown --config tsdown.config.ts",
+    "build:package": "pnpm exec tsx ../../tools/generate-schema-types.ts && tsdown --config tsdown.config.ts",
     "build:watch": "tsdown --config tsdown.config.ts --watch",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist",

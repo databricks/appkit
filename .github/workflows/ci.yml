@@ -50,6 +50,18 @@ jobs:
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Check generated types are up to date
+        run: |
+          pnpm run generate:types
+          if ! git diff --exit-code packages/shared/src/schemas/plugin-manifest.generated.ts packages/appkit/src/registry/types.generated.ts; then
+            echo "❌ Error: Generated types are out of sync with plugin-manifest.schema.json."
+            echo ""
+            echo "To fix this:"
+            echo "  1. Run: pnpm run generate:types"
+            echo "  2. Review and commit the changes"
+            echo ""
+            exit 1
+          fi
       - name: Run Biome Check
         run: pnpm run check
       - name: Run Types Check

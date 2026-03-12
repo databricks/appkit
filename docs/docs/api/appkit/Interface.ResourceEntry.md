@@ -15,7 +15,7 @@ Extends ResourceRequirement with resolution state and plugin ownership.
 alias: string;
 ```
 
-Unique alias for this resource within the plugin (e.g., 'warehouse', 'secrets'). Used for UI/display.
+Human-readable label for UI/display only. Deduplication uses resourceKey, not alias.
 
 #### Inherited from
 
@@ -43,8 +43,7 @@ Human-readable description of why this resource is needed
 fields: Record<string, ResourceFieldEntry>;
 ```
 
-Map of field name to env and optional description.
-Single-value types use one key (e.g. id); multi-value (database, secret) use multiple keys.
+Map of field name to env and optional description. Single-value types use one key (e.g. id); multi-value (database, secret) use multiple (e.g. instance_name, database_name or scope, key).
 
 #### Inherited from
 
@@ -58,7 +57,7 @@ Single-value types use one key (e.g. id); multi-value (database, secret) use mul
 permission: ResourcePermission;
 ```
 
-Required permission level for the resource
+Required permission level for the resource (narrowed to union)
 
 #### Inherited from
 
@@ -94,8 +93,6 @@ Plugin(s) that require this resource (comma-separated if multiple)
 required: boolean;
 ```
 
-Whether this resource is required (true) or optional (false)
-
 #### Inherited from
 
 [`ResourceRequirement`](Interface.ResourceRequirement.md).[`required`](Interface.ResourceRequirement.md#required)
@@ -118,7 +115,7 @@ Whether the resource has been resolved (all field env vars set)
 resourceKey: string;
 ```
 
-Stable key for machine use (env naming, composite keys, app.yaml). Required.
+Stable key for machine use: deduplication, env naming, composite keys, app.yaml. Required for registry lookup.
 
 #### Inherited from
 
@@ -132,7 +129,7 @@ Stable key for machine use (env naming, composite keys, app.yaml). Required.
 type: ResourceType;
 ```
 
-Type of Databricks resource required
+Type of Databricks resource required (narrowed to enum)
 
 #### Inherited from
 

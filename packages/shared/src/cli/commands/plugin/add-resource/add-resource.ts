@@ -6,7 +6,7 @@ import { Command } from "commander";
 import { promptOneResource } from "../create/prompt-resource";
 import { humanizeResourceType } from "../create/resource-defaults";
 import { resolveManifestInDir } from "../manifest-resolve";
-import type { PluginManifest } from "../manifest-types";
+import type { PluginManifest, ResourceRequirement } from "../manifest-types";
 import { validateManifest } from "../validate/validate-manifest";
 
 /** Extended manifest type that preserves extra JSON fields (e.g. $schema, author, version) for round-trip writes. */
@@ -64,8 +64,10 @@ async function runPluginAddResource(options: { path?: string }): Promise<void> {
   }
 
   const alias = humanizeResourceType(spec.type);
-  const entry = {
-    type: spec.type,
+  const entry: ResourceRequirement = {
+    // Safe cast: spec.type comes from RESOURCE_TYPE_OPTIONS which reads values
+    // from the same JSON schema that generates the ResourceType union.
+    type: spec.type as ResourceRequirement["type"],
     alias,
     resourceKey: spec.resourceKey,
     description: spec.description || `Required for ${alias} functionality.`,
