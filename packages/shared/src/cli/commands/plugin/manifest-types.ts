@@ -9,6 +9,9 @@ export interface ResourceFieldEntry {
   description?: string;
   bundleIgnore?: boolean;
   examples?: string[];
+  localOnly?: boolean;
+  value?: string;
+  resolve?: string;
 }
 
 export interface ResourceRequirement {

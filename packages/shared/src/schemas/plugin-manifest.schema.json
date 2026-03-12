@@ -199,7 +199,7 @@
         "bundleIgnore": {
           "type": "boolean",
           "default": false,
-          "description": "When true, this field is excluded from Databricks bundle configuration (e.g. app.yaml) generation."
+          "description": "When true, this field is excluded from Databricks bundle configuration (databricks.yml) generation."
         },
         "examples": {
           "type": "array",
