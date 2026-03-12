@@ -24,7 +24,7 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
 
 function Layout() {
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col" data-appkit-template="true">
       <header className="border-b px-6 py-3 flex items-center gap-4">
         <h1 className="text-lg font-semibold text-foreground">{{.projectName}}</h1>
         <nav className="flex gap-1">
