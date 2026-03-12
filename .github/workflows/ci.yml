@@ -125,8 +125,9 @@ jobs:
 
       - name: Set PR version
         id: version
+        env:
+          BRANCH: ${{ github.head_ref }}
         run: |
-          BRANCH="${{ github.head_ref }}"
           SANITIZED_BRANCH=$(echo "$BRANCH" | sed 's/[^a-zA-Z0-9-]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//')
           CURRENT_VERSION=$(node -p "require('./packages/appkit/package.json').version")
           PR_VERSION="${CURRENT_VERSION}-${SANITIZED_BRANCH}"
