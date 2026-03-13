@@ -51,6 +51,8 @@ export { Plugin, type ToPlugin, toPlugin } from "./plugin";
 export { agent, analytics, files, genie, lakebase, server } from "./plugins";
 export type {
   AgentInterface,
+  AgentTool,
+  FunctionTool,
   IAgentConfig,
   InvokeParams,
   ResponseStreamEvent,

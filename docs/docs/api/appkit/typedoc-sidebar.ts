@@ -104,6 +104,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.FunctionTool",
+          label: "FunctionTool"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.GenerateDatabaseCredentialRequest",
           label: "GenerateDatabaseCredentialRequest"
         },
@@ -183,6 +188,11 @@ const typedocSidebar: SidebarsConfig = {
       type: "category",
       label: "Type Aliases",
       items: [
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.AgentTool",
+          label: "AgentTool"
+        },
         {
           type: "doc",
           id: "api/appkit/TypeAlias.ConfigSchema",

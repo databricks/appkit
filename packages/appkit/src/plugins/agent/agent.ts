@@ -19,10 +19,11 @@ import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import type { AgentInterface } from "./agent-interface";
+import { functionToolToStructuredTool, isFunctionTool } from "./function-tool";
 import { createInvokeHandler } from "./invoke-handler";
 import manifest from "./manifest.json";
 import { StandardAgent } from "./standard-agent";
-import type { IAgentConfig } from "./types";
+import type { AgentTool, IAgentConfig } from "./types";
 
 const logger = createLogger("agent");
 
@@ -50,9 +51,17 @@ export class AgentPlugin extends Plugin<IAgentConfig> {
   /** Only set when building from config (not agentInstance). Used when rebuilding after addTools/addMcpServers. */
   private model: ChatDatabricksInstance | null = null;
   /** Mutable list of tools (config + added). Only used when building from config. */
-  private toolsList: StructuredToolInterface[] = [];
+  private toolsList: AgentTool[] = [];
   /** Mutable list of MCP servers (config + added). Only used when building from config. */
   private mcpServersList: DatabricksMCPServer[] = [];
+
+  /**
+   * Normalize an AgentTool to a LangChain StructuredToolInterface.
+   * FunctionTool objects are converted; StructuredToolInterface pass through.
+   */
+  private static toStructuredTool(tool: AgentTool): StructuredToolInterface {
+    return isFunctionTool(tool) ? functionToolToStructuredTool(tool) : tool;
+  }
 
   async setup() {
     this.systemPrompt = this.config.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
@@ -146,7 +155,7 @@ export class AgentPlugin extends Plugin<IAgentConfig> {
       }
     }
 
-    tools.push(...this.toolsList);
+    tools.push(...this.toolsList.map(AgentPlugin.toStructuredTool));
 
     const { createReactAgent } = await import("@langchain/langgraph/prebuilt");
     const langGraphAgent = createReactAgent({
@@ -163,9 +172,11 @@ export class AgentPlugin extends Plugin<IAgentConfig> {
   /**
    * Batch-add tools and/or MCP servers with a single agent rebuild.
    * Only supported when the plugin was initialized from config (not agentInstance).
+   *
+   * Tools can be OpenResponses-aligned FunctionTool objects or LangChain StructuredToolInterface.
    */
   async addCapabilities(options: {
-    tools?: StructuredToolInterface[];
+    tools?: AgentTool[];
     mcpServers?: DatabricksMCPServer[];
   }): Promise<void> {
     if (this.config.agentInstance) {
@@ -196,8 +207,10 @@ export class AgentPlugin extends Plugin<IAgentConfig> {
    * Add tools to the agent after app creation. Only supported when the plugin
    * was initialized from config (not when using agentInstance). Rebuilds the
    * underlying LangGraph agent with the new tool set.
+   *
+   * Accepts OpenResponses-aligned FunctionTool objects or LangChain StructuredToolInterface.
    */
-  async addTools(tools: StructuredToolInterface[]): Promise<void> {
+  async addTools(tools: AgentTool[]): Promise<void> {
     await this.addCapabilities({ tools });
   }
 
@@ -270,11 +283,11 @@ export class AgentPlugin extends Plugin<IAgentConfig> {
         });
       }.bind(this),
 
-      addTools: (tools: StructuredToolInterface[]) => this.addTools(tools),
+      addTools: (tools: AgentTool[]) => this.addTools(tools),
       addMcpServers: (servers: DatabricksMCPServer[]) =>
         this.addMcpServers(servers),
       addCapabilities: (options: {
-        tools?: StructuredToolInterface[];
+        tools?: AgentTool[];
         mcpServers?: DatabricksMCPServer[];
       }) => this.addCapabilities(options),
     };

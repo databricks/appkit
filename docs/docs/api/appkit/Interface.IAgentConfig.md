@@ -118,10 +118,12 @@ Sampling temperature (0.0-1.0, default 0.1). Ignored when `agentInstance` is pro
 ### tools?
 
 ```ts
-optional tools: StructuredTool<ToolInputSchemaBase, any, any, any>[];
+optional tools: AgentTool[];
 ```
 
-Additional LangChain tools to register alongside MCP tools. Ignored when `agentInstance` is provided.
+Tools to register with the agent. Accepts OpenResponses-aligned FunctionTool
+objects or LangChain StructuredToolInterface instances.
+Ignored when `agentInstance` is provided.
 
 ***
 
