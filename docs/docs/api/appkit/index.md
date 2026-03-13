@@ -34,6 +34,7 @@ plugin architecture, and React integration.
 | [BasePluginConfig](Interface.BasePluginConfig.md) | Base configuration interface for AppKit plugins |
 | [CacheConfig](Interface.CacheConfig.md) | Configuration for caching |
 | [DatabaseCredential](Interface.DatabaseCredential.md) | Database credentials with OAuth token for Postgres connection |
+| [FunctionTool](Interface.FunctionTool.md) | - |
 | [GenerateDatabaseCredentialRequest](Interface.GenerateDatabaseCredentialRequest.md) | Request parameters for generating database OAuth credentials |
 | [IAgentConfig](Interface.IAgentConfig.md) | Base configuration interface for AppKit plugins |
 | [InvokeParams](Interface.InvokeParams.md) | Agent interface types for the AppKit Agent Plugin. |
@@ -54,6 +55,7 @@ plugin architecture, and React integration.
 
 | Type Alias | Description |
 | ------ | ------ |
+| [AgentTool](TypeAlias.AgentTool.md) | A tool that can be registered with the agent plugin. |
 | [ConfigSchema](TypeAlias.ConfigSchema.md) | Configuration schema definition for plugin config. Re-exported from the standard JSON Schema Draft 7 types. |
 | [IAppRouter](TypeAlias.IAppRouter.md) | Express router type for plugin route registration |
 | [PluginData](TypeAlias.PluginData.md) | - |
@@ -65,7 +67,7 @@ plugin architecture, and React integration.
 
 | Variable | Description |
 | ------ | ------ |
-| [agent](Variable.agent.md) | Agent plugin factory; runtime API includes invoke, stream, addCapabilities, addTools, addMcpServers. |
+| [agent](Variable.agent.md) | - |
 | [sql](Variable.sql.md) | SQL helper namespace |
 
 ## Functions

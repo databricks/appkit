@@ -1,8 +1,6 @@
 # Interface: IAgentConfig
 
-Base configuration interface for AppKit plugins.
-
-When you do **not** set `agentInstance`, the agent is built from `model`, `tools`, and `mcpServers`. You can then add more tools or MCP servers after app creation via `appkit.agent.addCapabilities()` (see [agent](Variable.agent.md) Plugin API).
+Base configuration interface for AppKit plugins
 
 ## Extends
 
@@ -27,7 +25,7 @@ When provided the plugin skips internal LangGraph setup and delegates
 directly to this instance. Use this to bring your own agent
 implementation or a different LangChain variant.
 
----
+***
 
 ### host?
 
@@ -39,7 +37,7 @@ optional host: string;
 
 [`BasePluginConfig`](Interface.BasePluginConfig.md).[`host`](Interface.BasePluginConfig.md#host)
 
----
+***
 
 ### maxTokens?
 
@@ -49,7 +47,7 @@ optional maxTokens: number;
 
 Max tokens to generate (default 2000). Ignored when `agentInstance` is provided.
 
----
+***
 
 ### mcpServers?
 
@@ -57,9 +55,9 @@ Max tokens to generate (default 2000). Ignored when `agentInstance` is provided.
 optional mcpServers: DatabricksMCPServer[];
 ```
 
-MCP servers for Databricks tool integration. Ignored when `agentInstance` is provided. You can add more at runtime with `appkit.agent.addCapabilities({ mcpServers: [...] })`.
+MCP servers for Databricks tool integration. Ignored when `agentInstance` is provided.
 
----
+***
 
 ### model?
 
@@ -71,7 +69,7 @@ Databricks model serving endpoint name (e.g. "databricks-claude-sonnet-4-5").
 Falls back to DATABRICKS_MODEL env var.
 Ignored when `agentInstance` is provided.
 
----
+***
 
 ### name?
 
@@ -83,7 +81,7 @@ optional name: string;
 
 [`BasePluginConfig`](Interface.BasePluginConfig.md).[`name`](Interface.BasePluginConfig.md#name)
 
----
+***
 
 ### systemPrompt?
 
@@ -93,7 +91,7 @@ optional systemPrompt: string;
 
 System prompt injected at the start of every conversation
 
----
+***
 
 ### telemetry?
 
@@ -105,7 +103,7 @@ optional telemetry: TelemetryOptions;
 
 [`BasePluginConfig`](Interface.BasePluginConfig.md).[`telemetry`](Interface.BasePluginConfig.md#telemetry)
 
----
+***
 
 ### temperature?
 
@@ -115,17 +113,19 @@ optional temperature: number;
 
 Sampling temperature (0.0-1.0, default 0.1). Ignored when `agentInstance` is provided.
 
----
+***
 
 ### tools?
 
 ```ts
-optional tools: StructuredTool<ToolInputSchemaBase, any, any, any>[];
+optional tools: AgentTool[];
 ```
 
-Additional LangChain tools to register alongside MCP tools. Ignored when `agentInstance` is provided. You can add more at runtime with `appkit.agent.addCapabilities({ tools: [...] })`.
+Tools to register with the agent. Accepts OpenResponses-aligned FunctionTool
+objects or LangChain StructuredToolInterface instances.
+Ignored when `agentInstance` is provided.
 
----
+***
 
 ### useResponsesApi?
 

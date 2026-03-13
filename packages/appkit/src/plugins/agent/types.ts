@@ -1,7 +1,16 @@
 import type { DatabricksMCPServer } from "@databricks/langchainjs";
-import type { StructuredTool } from "@langchain/core/tools";
+import type { StructuredToolInterface } from "@langchain/core/tools";
 import type { BasePluginConfig } from "shared";
 import type { AgentInterface } from "./agent-interface";
+import type { FunctionTool } from "./function-tool";
+
+/**
+ * A tool that can be registered with the agent plugin.
+ *
+ * - `FunctionTool` (preferred): OpenResponses-aligned plain object with JSON Schema parameters.
+ * - `StructuredToolInterface`: LangChain tool for advanced use cases.
+ */
+export type AgentTool = FunctionTool | StructuredToolInterface;
 
 export interface IAgentConfig extends BasePluginConfig {
   /**
@@ -38,6 +47,10 @@ export interface IAgentConfig extends BasePluginConfig {
   /** MCP servers for Databricks tool integration. Ignored when `agentInstance` is provided. */
   mcpServers?: DatabricksMCPServer[];
 
-  /** Additional LangChain tools to register alongside MCP tools. Ignored when `agentInstance` is provided. */
-  tools?: StructuredTool[];
+  /**
+   * Tools to register with the agent. Accepts OpenResponses-aligned FunctionTool
+   * objects or LangChain StructuredToolInterface instances.
+   * Ignored when `agentInstance` is provided.
+   */
+  tools?: AgentTool[];
 }
