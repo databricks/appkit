@@ -33,6 +33,10 @@
       "development": "./src/type-generator/index.ts",
       "default": "./dist/type-generator/index.js"
     },
+    "./dist/shared/src/plugin": {
+      "types": "./dist/shared/src/plugin.d.ts",
+      "default": "./dist/shared/src/plugin.d.ts"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -87,6 +91,7 @@
   "publishConfig": {
     "exports": {
       ".": "./dist/index.js",
+      "./dist/shared/src/plugin": "./dist/shared/src/plugin.d.ts",
       "./type-generator": "./dist/type-generator/index.js",
       "./package.json": "./package.json"
     }
