@@ -75,7 +75,9 @@ export function GenieChatMessage({
         <Card
           className={cn(
             "px-4 py-3 max-w-full overflow-hidden",
-            isUser ? "bg-primary text-primary-foreground" : "bg-muted",
+            isUser
+              ? "bg-primary text-primary-foreground [&_*::selection]:bg-primary-foreground/30 [&::selection]:bg-primary-foreground/30"
+              : "bg-muted",
           )}
         >
           {html && (

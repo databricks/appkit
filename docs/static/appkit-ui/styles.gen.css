@@ -4351,6 +4351,14 @@
       }
     }
   }
+  .\[\&_\*\:\:selection\]\:bg-primary-foreground\/30 {
+    & *::selection {
+      background-color: var(--primary-foreground);
+      @supports (color: color-mix(in lab, red, red)) {
+        background-color: color-mix(in oklab, var(--primary-foreground) 30%, transparent);
+      }
+    }
+  }
   .\[\&_\.recharts-cartesian-axis-tick_text\]\:fill-muted-foreground {
     & .recharts-cartesian-axis-tick text {
       fill: var(--muted-foreground);
@@ -4697,6 +4705,14 @@
   .\[\&\+\[data-slot\=item-content\]\]\:flex-none {
     &+[data-slot=item-content] {
       flex: none;
+    }
+  }
+  .\[\&\:\:selection\]\:bg-primary-foreground\/30 {
+    &::selection {
+      background-color: var(--primary-foreground);
+      @supports (color: color-mix(in lab, red, red)) {
+        background-color: color-mix(in oklab, var(--primary-foreground) 30%, transparent);
+      }
     }
   }
   .\[\&\:first-child\[data-selected\=true\]_button\]\:rounded-l-md {
