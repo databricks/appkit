@@ -127,6 +127,8 @@ The `@databricks/appkit-ui` package provides ready-to-use React components for G
 
 A full-featured chat interface that handles streaming, history, and reconnection:
 
+![GenieChat component](./assets/genie-chat.png)
+
 ```tsx
 import { GenieChat } from "@databricks/appkit-ui/react";
 
@@ -140,8 +142,6 @@ function GeniePage() {
 ```
 
 The `alias` prop must match a key in the `spaces` configuration on the server.
-
-![GenieChat component](./assets/genie-chat.png)
 
 ### useGenieChat hook
 
