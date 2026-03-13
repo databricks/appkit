@@ -32,10 +32,10 @@ AppKit's power comes from its plugin system. Each plugin adds a focused capabili
 ### Available now
 
 - **Analytics Plugin** — Query your Lakehouse data directly from your app. Define SQL queries as files, execute them against Databricks SQL Warehouses, and get automatic caching, parameterization, and on-behalf-of user execution out of the box. Perfect for building apps that surface insights from your Lakehouse.
+- **Genie Plugin** — Conversational AI interface powered by Databricks AI/BI Genie. Let users ask natural language questions against your data and get answers with automatic chart inference and visualization.
 
 ### Coming soon
 
-- **Genie Plugin** — Conversational AI interface powered by Databricks Genie
 - **Files Plugin** — Browse, upload, and manage files in Unity Catalog Volumes
 - **Lakebase Plugin** — OLTP database operations with automatic OAuth token management
 - ...and this is just the beginning.
