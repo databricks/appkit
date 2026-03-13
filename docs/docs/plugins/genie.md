@@ -48,6 +48,16 @@ genie({
 
 If you omit `spaces`, the plugin reads `DATABRICKS_GENIE_SPACE_ID` from the environment and registers it under the `default` alias.
 
+### Finding your Genie Space ID
+
+You can find the Space ID from the **About** tab on your Genie space page in Databricks:
+
+<div style={{maxWidth: 400}}>
+
+![Genie Space ID in the About tab](/img/genie-space-id.png)
+
+</div>
+
 ## Environment variables
 
 | Variable | Description |
@@ -130,6 +140,8 @@ function GeniePage() {
 ```
 
 The `alias` prop must match a key in the `spaces` configuration on the server.
+
+![GenieChat component](/img/genie-chat.png)
 
 ### useGenieChat hook
 
