@@ -1,4 +1,1 @@
-export {
-  streamFromChunks,
-  streamFromString,
-} from "../../../connectors/files/tests/utils";
+export { streamFromString } from "../../../connectors/files/tests/utils";

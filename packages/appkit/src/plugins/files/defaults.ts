@@ -61,8 +61,3 @@ export const FILES_WRITE_DEFAULTS: PluginExecuteConfig = {
  * This matches the Databricks Files API v2 per-file limit.
  */
 export const FILES_MAX_UPLOAD_SIZE = 5 * 1024 * 1024 * 1024; // 5 GB
-
-export {
-  EXTENSION_CONTENT_TYPES,
-  FILES_MAX_READ_SIZE,
-} from "../../connectors/files/defaults";

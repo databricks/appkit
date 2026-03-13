@@ -85,7 +85,7 @@ export function getWorkspaceId(): Promise<string> {
 /**
  * Check if currently running in a user context.
  */
-function _isInUserContext(): boolean {
+export function isInUserContext(): boolean {
   const ctx = executionContextStorage.getStore();
   return ctx !== undefined;
 }

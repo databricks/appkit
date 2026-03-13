@@ -24,7 +24,7 @@ import {
 
 const logger = createLogger("connectors:files");
 
-export interface FilesConnectorConfig {
+interface FilesConnectorConfig {
   defaultVolume?: string;
   timeout?: number;
   telemetry?: TelemetryOptions;

@@ -5,7 +5,7 @@
  */
 export const FILES_MAX_READ_SIZE = 10 * 1024 * 1024; // 10 MB
 
-export const EXTENSION_CONTENT_TYPES: Record<string, string> = Object.freeze({
+const EXTENSION_CONTENT_TYPES: Record<string, string> = Object.freeze({
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
@@ -87,7 +87,7 @@ export function isSafeInlineContentType(contentType: string): boolean {
  * browsers can execute scripts from them. Allowing these in custom mappings
  * would bypass the `/raw` endpoint's forced-download protection for unsafe types.
  */
-export const DANGEROUS_CONTENT_TYPES: ReadonlySet<string> = new Set([
+const DANGEROUS_CONTENT_TYPES: ReadonlySet<string> = new Set([
   "text/html",
   "text/javascript",
   "application/javascript",
