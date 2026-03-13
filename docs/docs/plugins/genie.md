@@ -54,7 +54,7 @@ You can find the Space ID from the **About** tab on your Genie space page in Dat
 
 <div style={{maxWidth: 400}}>
 
-![Genie Space ID in the About tab](/img/genie-space-id.png)
+![Genie Space ID in the About tab](./assets/genie-space-id.png)
 
 </div>
 
@@ -141,7 +141,7 @@ function GeniePage() {
 
 The `alias` prop must match a key in the `spaces` configuration on the server.
 
-![GenieChat component](/img/genie-chat.png)
+![GenieChat component](./assets/genie-chat.png)
 
 ### useGenieChat hook
 
