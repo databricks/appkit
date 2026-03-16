@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Ajv, { type ErrorObject } from "ajv";
 import addFormats from "ajv-formats";
-import type { PluginManifest } from "../manifest-types";
+import type { PluginManifest, TemplatePlugin } from "../manifest-types";
 
 export type { PluginManifest };
 
@@ -78,6 +78,157 @@ function getPluginValidator(): ReturnType<Ajv["compile"]> | null {
 
 let compiledTemplateValidator: ReturnType<Ajv["compile"]> | null = null;
 
+interface PluginLike {
+  name: string;
+  resources: PluginManifest["resources"];
+  postScaffold?: PluginManifest["postScaffold"];
+}
+
+function createSemanticError(
+  instancePath: string,
+  message: string,
+): ErrorObject {
+  return {
+    keyword: "custom",
+    instancePath,
+    schemaPath: "#/semantic",
+    params: {},
+    message,
+  } as ErrorObject;
+}
+
+function collectDiscoveryErrors(
+  fields: Record<string, { discovery?: { dependsOn?: string } }>,
+  fieldBasePath: string,
+): ErrorObject[] {
+  const errors: ErrorObject[] = [];
+  const fieldNames = new Set(Object.keys(fields));
+
+  for (const [fieldName, field] of Object.entries(fields)) {
+    const dependsOn = field.discovery?.dependsOn;
+    if (dependsOn && !fieldNames.has(dependsOn)) {
+      errors.push(
+        createSemanticError(
+          `${fieldBasePath}/${fieldName}/discovery/dependsOn`,
+          `dependsOn must reference another field in the same resource (got "${dependsOn}")`,
+        ),
+      );
+    }
+  }
+
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const stack: string[] = [];
+  const cycleFields = new Set<string>();
+
+  const visit = (fieldName: string) => {
+    if (visited.has(fieldName)) return;
+    if (visiting.has(fieldName)) {
+      const cycleStart = stack.indexOf(fieldName);
+      for (const name of stack.slice(cycleStart)) {
+        cycleFields.add(name);
+      }
+      cycleFields.add(fieldName);
+      return;
+    }
+
+    visiting.add(fieldName);
+    stack.push(fieldName);
+
+    const dependsOn = fields[fieldName]?.discovery?.dependsOn;
+    if (dependsOn && fieldNames.has(dependsOn)) {
+      visit(dependsOn);
+    }
+
+    stack.pop();
+    visiting.delete(fieldName);
+    visited.add(fieldName);
+  };
+
+  for (const fieldName of fieldNames) {
+    if (fields[fieldName]?.discovery?.dependsOn) {
+      visit(fieldName);
+    }
+  }
+
+  for (const fieldName of cycleFields) {
+    errors.push(
+      createSemanticError(
+        `${fieldBasePath}/${fieldName}/discovery/dependsOn`,
+        "dependsOn chains must be acyclic",
+      ),
+    );
+  }
+
+  return errors;
+}
+
+function collectPostScaffoldErrors(
+  steps: PluginLike["postScaffold"],
+  basePath: string,
+): ErrorObject[] {
+  if (!steps) return [];
+
+  const errors: ErrorObject[] = [];
+  const seen = new Set<number>();
+  let previousStep = 0;
+
+  for (let index = 0; index < steps.length; index += 1) {
+    const step = steps[index];
+    const stepPath = `${basePath}/postScaffold/${index}/step`;
+
+    if (seen.has(step.step)) {
+      errors.push(
+        createSemanticError(
+          stepPath,
+          "postScaffold step numbers must be unique",
+        ),
+      );
+    }
+
+    if (step.step <= previousStep) {
+      errors.push(
+        createSemanticError(
+          stepPath,
+          "postScaffold step numbers must be strictly increasing",
+        ),
+      );
+    }
+
+    seen.add(step.step);
+    previousStep = step.step;
+  }
+
+  return errors;
+}
+
+function collectPluginSemanticErrors(
+  plugin: PluginLike,
+  basePath: string,
+): ErrorObject[] {
+  const errors: ErrorObject[] = [];
+
+  const buckets = [
+    ["required", plugin.resources.required],
+    ["optional", plugin.resources.optional],
+  ] as const;
+
+  for (const [bucketName, resources] of buckets) {
+    resources.forEach((resource, resourceIndex) => {
+      errors.push(
+        ...collectDiscoveryErrors(
+          resource.fields ?? {},
+          `${basePath}/resources/${bucketName}/${resourceIndex}/fields`,
+        ),
+      );
+    });
+  }
+
+  errors.push(...collectPostScaffoldErrors(plugin.postScaffold, basePath));
+
+  return errors;
+}
+
 function getTemplateValidator(): ReturnType<Ajv["compile"]> | null {
   if (compiledTemplateValidator) return compiledTemplateValidator;
   const pluginSchema = loadSchema(PLUGIN_MANIFEST_SCHEMA_PATH);
@@ -137,7 +288,16 @@ export function validateManifest(obj: unknown): ValidateResult {
   }
 
   const valid = validate(obj);
-  if (valid) return { valid: true, manifest: obj as PluginManifest };
+  if (valid) {
+    const semanticErrors = collectPluginSemanticErrors(
+      obj as PluginManifest,
+      "",
+    );
+    if (semanticErrors.length > 0) {
+      return { valid: false, errors: semanticErrors };
+    }
+    return { valid: true, manifest: obj as PluginManifest };
+  }
   return { valid: false, errors: validate.errors ?? [] };
 }
 
@@ -178,7 +338,19 @@ export function validateTemplateManifest(obj: unknown): ValidateResult {
   }
 
   const valid = validate(obj);
-  if (valid) return { valid: true };
+  if (valid) {
+    const templateManifest = obj as {
+      plugins: Record<string, TemplatePlugin>;
+    };
+    const semanticErrors = Object.entries(templateManifest.plugins).flatMap(
+      ([pluginName, plugin]) =>
+        collectPluginSemanticErrors(plugin, `/plugins/${pluginName}`),
+    );
+    if (semanticErrors.length > 0) {
+      return { valid: false, errors: semanticErrors };
+    }
+    return { valid: true };
+  }
   return { valid: false, errors: validate.errors ?? [] };
 }
 
@@ -293,6 +465,8 @@ export function formatValidationErrors(
         lines.push(`  ${readable}: expected type "${e.params?.type}"`);
       } else if (e.keyword === "minLength") {
         lines.push(`  ${readable}: must not be empty`);
+      } else if (e.keyword === "custom") {
+        lines.push(`  ${readable}: ${e.message}`);
       } else {
         lines.push(
           `  ${readable}: ${e.message}${e.params ? ` (${JSON.stringify(e.params)})` : ""}`,

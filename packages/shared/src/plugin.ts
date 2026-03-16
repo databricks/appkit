@@ -3,11 +3,11 @@ import type { JSONSchema7 } from "json-schema";
 import type {
   PluginManifest as GeneratedPluginManifest,
   ResourceRequirement as GeneratedResourceRequirement,
-  ResourceFieldEntry,
+  ResourceFieldEntry as GeneratedResourceFieldEntry,
 } from "./schemas/plugin-manifest.generated";
 
 // Re-export generated types as the shared canonical definitions.
-export type { ResourceFieldEntry };
+export type ResourceFieldEntry = GeneratedResourceFieldEntry;
 
 /** Base plugin interface. */
 export interface BasePlugin {
@@ -101,6 +101,29 @@ export interface PluginManifest<TName extends string = string>
   config?: {
     schema: JSONSchema7;
   };
+}
+
+export type DiscoveryDescriptor = NonNullable<
+  GeneratedResourceFieldEntry["discovery"]
+>;
+export type ResourceResolution = NonNullable<
+  GeneratedResourceFieldEntry["resolution"]
+>;
+export type PostScaffoldStep = NonNullable<
+  GeneratedPluginManifest["postScaffold"]
+>[number];
+
+export interface ScaffoldingFlagDescriptor {
+  required: boolean;
+  description: string;
+  pattern?: string;
+  default?: string;
+}
+
+export interface ScaffoldingDescriptor {
+  command: string;
+  flags: Record<string, ScaffoldingFlagDescriptor>;
+  rules: string[];
 }
 
 /**

@@ -1,7 +1,9 @@
 {
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
   "name": "genie",
   "displayName": "Genie Plugin",
   "description": "AI/BI Genie space integration for natural language data queries",
+  "onSetupMessage": "Find your Genie Space ID in the AI/BI Genie UI.",
   "resources": {
     "required": [
       {
@@ -13,7 +15,8 @@
         "fields": {
           "id": {
             "env": "DATABRICKS_GENIE_SPACE_ID",
-            "description": "Default Genie Space ID"
+            "description": "Default Genie Space ID",
+            "resolution": "user-provided"
           }
         }
       }

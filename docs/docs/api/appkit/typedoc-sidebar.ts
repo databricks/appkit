@@ -134,11 +134,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Interface.ResourceFieldEntry",
-          label: "ResourceFieldEntry"
-        },
-        {
-          type: "doc",
           id: "api/appkit/Interface.ResourceRequirement",
           label: "ResourceRequirement"
         },
@@ -177,6 +172,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.PluginData",
           label: "PluginData"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.ResourceFieldEntry",
+          label: "ResourceFieldEntry"
         },
         {
           type: "doc",

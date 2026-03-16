@@ -211,6 +211,10 @@ export interface PluginManifest {
    */
   onSetupMessage?: string;
   /**
+   * Ordered follow-up steps that a user or agent should perform after scaffolding.
+   */
+  postScaffold?: PostScaffoldStep[];
+  /**
    * When true, this plugin is excluded from the template plugins manifest (appkit.plugins.json) during sync.
    */
   hidden?: boolean;
@@ -231,6 +235,14 @@ export interface ResourceFieldEntry {
    */
   description?: string;
   /**
+   * CLI discovery metadata for resolving this field non-interactively.
+   */
+  discovery?: DiscoveryDescriptor;
+  /**
+   * Indicates whether the value must be supplied by the user/agent or is injected automatically by the platform.
+   */
+  resolution?: ResourceResolution;
+  /**
    * When true, this field is excluded from Databricks bundle configuration (databricks.yml) generation.
    */
   bundleIgnore?: boolean;
@@ -250,6 +262,52 @@ export interface ResourceFieldEntry {
    * Named resolver prefixed by resource type (e.g., 'postgres:host'). The CLI resolves this value during the init prompt flow.
    */
   resolve?: string;
+}
+/**
+ * CLI discovery metadata for resolving a field non-interactively.
+ */
+export interface DiscoveryDescriptor {
+  /**
+   * CLI command to list candidate values. Use <PROFILE> as a placeholder for the Databricks CLI profile.
+   */
+  cliCommand: string;
+  /**
+   * jq-style field used to extract the machine-readable value from each command result.
+   */
+  selectField: string;
+  /**
+   * jq-style field used to extract a human-readable display value from each command result.
+   */
+  displayField?: string;
+  /**
+   * Field name in the same resource that must be resolved before running this discovery command.
+   */
+  dependsOn?: string;
+  /**
+   * Optional shortcut command that returns a single value directly.
+   */
+  shortcut?: string;
+}
+/**
+ * Indicates whether the value must be supplied by the user/agent or is injected automatically by the platform.
+ */
+export type ResourceResolution = "user-provided" | "platform-injected";
+/**
+ * Ordered post-scaffold step metadata.
+ */
+export interface PostScaffoldStep {
+  /**
+   * 1-based step number in the post-scaffold flow.
+   */
+  step: number;
+  /**
+   * Instruction to follow after scaffolding.
+   */
+  instruction: string;
+  /**
+   * When true, this step must be completed before proceeding.
+   */
+  blocking?: boolean;
 }
 /**
  * This interface was referenced by `PluginManifest`'s JSON-Schema

@@ -1,6 +1,43 @@
 {
   "$schema": "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
-  "version": "1.0",
+  "version": "2.0",
+  "scaffolding": {
+    "command": "databricks apps init",
+    "flags": {
+      "--name": {
+        "required": true,
+        "description": "App name: lowercase letters, numbers, hyphens only. Max 26 chars.",
+        "pattern": "^[a-z][a-z0-9-]{0,25}$"
+      },
+      "--features": {
+        "required": false,
+        "description": "Comma-separated plugin names where requiredByTemplate is false. Do NOT include requiredByTemplate=true plugins — they are included automatically."
+      },
+      "--set": {
+        "required": false,
+        "description": "Resource field values. Format: <pluginName>.<resourceKey>.<fieldName>=<value>. Required for every user-provided field in resources.required of all included plugins (both mandatory and optional)."
+      },
+      "--profile": {
+        "required": true,
+        "description": "Databricks CLI profile for authentication."
+      },
+      "--description": {
+        "required": false,
+        "description": "Short description of the app."
+      },
+      "--run": {
+        "required": false,
+        "default": "none",
+        "description": "Post-scaffold action: none (review code first), dev (start dev server), or deploy."
+      }
+    },
+    "rules": [
+      "Plugins with requiredByTemplate=true are included automatically. Do NOT add them to --features. You MUST still provide --set for their user-provided required resource fields.",
+      "Plugins with requiredByTemplate=false are optional. Add to --features only when the user's request needs that capability.",
+      "Every user-provided field in a plugin's resources.required MUST have a --set flag for each included plugin (mandatory + optional).",
+      "Fields with resolution='platform-injected' are auto-set at deploy time — do NOT include them in --set."
+    ]
+  },
   "plugins": {
     "analytics": {
       "name": "analytics",
@@ -18,13 +55,44 @@
             "fields": {
               "id": {
                 "env": "DATABRICKS_WAREHOUSE_ID",
-                "description": "SQL Warehouse ID"
+                "description": "SQL Warehouse ID",
+                "discovery": {
+                  "cliCommand": "databricks warehouses list --profile <PROFILE> -o json",
+                  "selectField": ".id",
+                  "displayField": ".name",
+                  "shortcut": "databricks experimental aitools tools get-default-warehouse --profile <PROFILE>"
+                },
+                "resolution": "user-provided"
               }
             }
           }
         ],
         "optional": []
-      }
+      },
+      "onSetupMessage": "Run 'databricks warehouses list' to find your SQL Warehouse ID.",
+      "postScaffold": [
+        {
+          "step": 1,
+          "instruction": "Create SQL query files in config/queries/"
+        },
+        {
+          "step": 2,
+          "instruction": "Run: npm run typegen",
+          "blocking": true
+        },
+        {
+          "step": 3,
+          "instruction": "Read client/src/appKitTypes.d.ts for generated types"
+        },
+        {
+          "step": 4,
+          "instruction": "Write UI code using the generated types"
+        },
+        {
+          "step": 5,
+          "instruction": "Update tests/smoke.spec.ts selectors for your app"
+        }
+      ]
     },
     "files": {
       "name": "files",
@@ -42,13 +110,25 @@
             "fields": {
               "path": {
                 "env": "DATABRICKS_VOLUME_FILES",
-                "description": "Volume path for file storage (e.g. /Volumes/catalog/schema/volume_name)"
+                "description": "Volume path for file storage (e.g. /Volumes/catalog/schema/volume_name)",
+                "resolution": "user-provided"
               }
             }
           }
         ],
         "optional": []
-      }
+      },
+      "onSetupMessage": "Provide the full volume path, e.g. /Volumes/catalog/schema/volume_name.",
+      "postScaffold": [
+        {
+          "step": 1,
+          "instruction": "Use the files plugin API to read/write volume files in your tRPC procedures"
+        },
+        {
+          "step": 2,
+          "instruction": "Build UI for file upload/download using tRPC"
+        }
+      ]
     },
     "genie": {
       "name": "genie",
@@ -66,13 +146,15 @@
             "fields": {
               "id": {
                 "env": "DATABRICKS_GENIE_SPACE_ID",
-                "description": "Default Genie Space ID"
+                "description": "Default Genie Space ID",
+                "resolution": "user-provided"
               }
             }
           }
         ],
         "optional": []
-      }
+      },
+      "onSetupMessage": "Find your Genie Space ID in the AI/BI Genie UI."
     },
     "lakebase": {
       "name": "lakebase",
@@ -92,25 +174,33 @@
                 "description": "Full Lakebase Postgres branch resource name. Obtain by running `databricks postgres list-branches projects/{project-id}`, select the desired item from the output array and use its .name value.",
                 "examples": [
                   "projects/{project-id}/branches/{branch-id}"
-                ]
+                ],
+                "discovery": {
+                  "cliCommand": "databricks postgres list-branches projects/{project-id} --profile <PROFILE> -o json",
+                  "selectField": ".name"
+                },
+                "resolution": "user-provided"
               },
               "database": {
-                "description": "Full Lakebase Postgres database resource name. Obtain by running `databricks postgres list-databases {branch-name}`, select the desired item from the output array and use its .name value. Requires the branch resource name.",
+                "description": "Full Lakebase Postgres database resource name for the selected branch.",
                 "examples": [
                   "projects/{project-id}/branches/{branch-id}/databases/{database-id}"
-                ]
+                ],
+                "resolution": "user-provided"
               },
               "host": {
                 "env": "PGHOST",
                 "localOnly": true,
                 "resolve": "postgres:host",
-                "description": "Postgres host for local development. Auto-injected by the platform at deploy time."
+                "description": "Postgres host for local development. Auto-injected by the platform at deploy time.",
+                "resolution": "platform-injected"
               },
               "databaseName": {
                 "env": "PGDATABASE",
                 "localOnly": true,
                 "resolve": "postgres:databaseName",
-                "description": "Postgres database name for local development. Auto-injected by the platform at deploy time."
+                "description": "Postgres database name for local development. Auto-injected by the platform at deploy time.",
+                "resolution": "platform-injected"
               },
               "endpointPath": {
                 "env": "LAKEBASE_ENDPOINT",
@@ -119,25 +209,52 @@
                 "description": "Lakebase endpoint resource name. Auto-injected at runtime via app.yaml valueFrom: postgres. For local development, obtain by running `databricks postgres list-endpoints {branch-name}`, select the desired item from the output array and use its .name value.",
                 "examples": [
                   "projects/{project-id}/branches/{branch-id}/endpoints/{endpoint-id}"
-                ]
+                ],
+                "discovery": {
+                  "cliCommand": "databricks postgres list-endpoints {branch} --profile <PROFILE> -o json",
+                  "selectField": ".name",
+                  "dependsOn": "branch"
+                },
+                "resolution": "user-provided"
               },
               "port": {
                 "env": "PGPORT",
                 "localOnly": true,
                 "value": "5432",
-                "description": "Postgres port. Auto-injected by the platform at deploy time."
+                "description": "Postgres port. Auto-injected by the platform at deploy time.",
+                "resolution": "platform-injected"
               },
               "sslmode": {
                 "env": "PGSSLMODE",
                 "localOnly": true,
                 "value": "require",
-                "description": "Postgres SSL mode. Auto-injected by the platform at deploy time."
+                "description": "Postgres SSL mode. Auto-injected by the platform at deploy time.",
+                "resolution": "platform-injected"
               }
             }
           }
         ],
         "optional": []
-      }
+      },
+      "onSetupMessage": "Run 'databricks postgres list-branches projects/{project-id}' to find your Lakebase branch.",
+      "postScaffold": [
+        {
+          "step": 1,
+          "instruction": "Define your schema in server/server.ts startup"
+        },
+        {
+          "step": 2,
+          "instruction": "Write tRPC procedures using pool.query() in server/server.ts"
+        },
+        {
+          "step": 3,
+          "instruction": "Build React frontend consuming tRPC procedures"
+        },
+        {
+          "step": 4,
+          "instruction": "Update tests/smoke.spec.ts selectors for your app"
+        }
+      ]
     },
     "server": {
       "name": "server",

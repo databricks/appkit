@@ -41,6 +41,22 @@ const VALID_MANIFEST_WITH_RESOURCE = {
   },
 };
 
+const VALID_SCAFFOLDING = {
+  command: "databricks apps init",
+  flags: {
+    "--name": {
+      required: true,
+      description: "App name",
+      pattern: "^[a-z][a-z0-9-]{0,25}$",
+    },
+    "--profile": {
+      required: true,
+      description: "CLI profile",
+    },
+  },
+  rules: ["Include required plugins automatically."],
+};
+
 describe("validate-manifest", () => {
   describe("detectSchemaType", () => {
     it('returns "plugin-manifest" for plugin manifest $schema', () => {
@@ -214,10 +230,122 @@ describe("validate-manifest", () => {
       });
       expect(result.valid).toBe(false);
     });
+
+    it("rejects discovery dependsOn references to missing fields", () => {
+      const result = validateManifest({
+        ...VALID_MANIFEST,
+        resources: {
+          required: [
+            {
+              type: "sql_warehouse",
+              alias: "SQL Warehouse",
+              resourceKey: "sql-warehouse",
+              description: "Required for queries",
+              permission: "CAN_USE",
+              fields: {
+                id: {
+                  env: "DATABRICKS_WAREHOUSE_ID",
+                  discovery: {
+                    cliCommand:
+                      "databricks warehouses list --profile <PROFILE> -o json",
+                    selectField: ".id",
+                    dependsOn: "missing",
+                  },
+                },
+              },
+            },
+          ],
+          optional: [],
+        },
+      });
+      expect(result.valid).toBe(false);
+      expect(formatValidationErrors(result.errors ?? [])).toContain(
+        "dependsOn must reference another field in the same resource",
+      );
+    });
+
+    it("rejects cyclic discovery dependsOn chains", () => {
+      const result = validateManifest({
+        ...VALID_MANIFEST,
+        resources: {
+          required: [
+            {
+              type: "postgres",
+              alias: "Postgres",
+              resourceKey: "postgres",
+              description: "Persistent storage",
+              permission: "CAN_CONNECT_AND_CREATE",
+              fields: {
+                branch: {
+                  discovery: {
+                    cliCommand:
+                      "databricks postgres list-branches projects/{project-id} --profile <PROFILE> -o json",
+                    selectField: ".name",
+                    dependsOn: "endpointPath",
+                  },
+                },
+                endpointPath: {
+                  discovery: {
+                    cliCommand:
+                      "databricks postgres list-endpoints {branch} --profile <PROFILE> -o json",
+                    selectField: ".name",
+                    dependsOn: "branch",
+                  },
+                },
+              },
+            },
+          ],
+          optional: [],
+        },
+      });
+      expect(result.valid).toBe(false);
+      expect(formatValidationErrors(result.errors ?? [])).toContain(
+        "dependsOn chains must be acyclic",
+      );
+    });
+
+    it("rejects postScaffold steps that are not strictly increasing", () => {
+      const result = validateManifest({
+        ...VALID_MANIFEST,
+        postScaffold: [
+          { step: 2, instruction: "Second" },
+          { step: 1, instruction: "First" },
+        ],
+      });
+      expect(result.valid).toBe(false);
+      expect(formatValidationErrors(result.errors ?? [])).toContain(
+        "postScaffold step numbers must be strictly increasing",
+      );
+    });
+
+    it("rejects duplicate postScaffold step numbers", () => {
+      const result = validateManifest({
+        ...VALID_MANIFEST,
+        postScaffold: [
+          { step: 1, instruction: "First" },
+          { step: 1, instruction: "Duplicate" },
+        ],
+      });
+      expect(result.valid).toBe(false);
+      expect(formatValidationErrors(result.errors ?? [])).toContain(
+        "postScaffold step numbers must be unique",
+      );
+    });
   });
 
   describe("validateTemplateManifest", () => {
-    it("validates a minimal correct template manifest", () => {
+    it("validates a version 2.0 template manifest with scaffolding", () => {
+      const result = validateTemplateManifest({
+        $schema:
+          "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
+        version: "2.0",
+        scaffolding: VALID_SCAFFOLDING,
+        plugins: {},
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it("continues to validate a legacy version 1.0 template manifest", () => {
       const result = validateTemplateManifest({
         $schema:
           "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
@@ -225,6 +353,60 @@ describe("validate-manifest", () => {
         plugins: {},
       });
       expect(result.valid).toBe(true);
+    });
+
+    it("rejects version 2.0 template manifests without scaffolding", () => {
+      const result = validateTemplateManifest({
+        $schema:
+          "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
+        version: "2.0",
+        plugins: {},
+      });
+      expect(result.valid).toBe(false);
+    });
+
+    it("applies semantic validation to plugins inside template manifests", () => {
+      const result = validateTemplateManifest({
+        $schema:
+          "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
+        version: "2.0",
+        scaffolding: VALID_SCAFFOLDING,
+        plugins: {
+          analytics: {
+            name: "analytics",
+            displayName: "Analytics Plugin",
+            description: "Warehouse-backed analytics",
+            package: "@databricks/appkit",
+            resources: {
+              required: [
+                {
+                  type: "sql_warehouse",
+                  alias: "SQL Warehouse",
+                  resourceKey: "sql-warehouse",
+                  description: "Required for queries",
+                  permission: "CAN_USE",
+                  fields: {
+                    id: {
+                      env: "DATABRICKS_WAREHOUSE_ID",
+                      discovery: {
+                        cliCommand:
+                          "databricks warehouses list --profile <PROFILE> -o json",
+                        selectField: ".id",
+                        dependsOn: "missing",
+                      },
+                    },
+                  },
+                },
+              ],
+              optional: [],
+            },
+          },
+        },
+      });
+      expect(result.valid).toBe(false);
+      expect(formatValidationErrors(result.errors ?? [])).toContain(
+        "dependsOn must reference another field in the same resource",
+      );
     });
 
     it("rejects non-object input", () => {

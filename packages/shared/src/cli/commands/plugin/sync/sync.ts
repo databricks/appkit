@@ -57,6 +57,50 @@ function validateManifestWithSchema(
 /** Safety limit for recursive directory scanning to prevent runaway traversal. */
 const MAX_SCAN_DEPTH = 5;
 
+const TEMPLATE_SCAFFOLDING: NonNullable<
+  TemplatePluginsManifest["scaffolding"]
+> = {
+  command: "databricks apps init",
+  flags: {
+    "--name": {
+      required: true,
+      description:
+        "App name: lowercase letters, numbers, hyphens only. Max 26 chars.",
+      pattern: "^[a-z][a-z0-9-]{0,25}$",
+    },
+    "--features": {
+      required: false,
+      description:
+        "Comma-separated plugin names where requiredByTemplate is false. Do NOT include requiredByTemplate=true plugins — they are included automatically.",
+    },
+    "--set": {
+      required: false,
+      description:
+        "Resource field values. Format: <pluginName>.<resourceKey>.<fieldName>=<value>. Required for every user-provided field in resources.required of all included plugins (both mandatory and optional).",
+    },
+    "--profile": {
+      required: true,
+      description: "Databricks CLI profile for authentication.",
+    },
+    "--description": {
+      required: false,
+      description: "Short description of the app.",
+    },
+    "--run": {
+      required: false,
+      default: "none",
+      description:
+        "Post-scaffold action: none (review code first), dev (start dev server), or deploy.",
+    },
+  },
+  rules: [
+    "Plugins with requiredByTemplate=true are included automatically. Do NOT add them to --features. You MUST still provide --set for their user-provided required resource fields.",
+    "Plugins with requiredByTemplate=false are optional. Add to --features only when the user's request needs that capability.",
+    "Every user-provided field in a plugin's resources.required MUST have a --set flag for each included plugin (mandatory + optional).",
+    "Fields with resolution='platform-injected' are auto-set at deploy time — do NOT include them in --set.",
+  ],
+};
+
 /**
  * Load and validate a resolved manifest, returning a TemplatePlugin entry or null.
  * Centralises the resolve → load → validate → build-entry pipeline used by
@@ -83,6 +127,9 @@ async function loadPluginEntry(
       resources: manifest.resources,
       ...(manifest.onSetupMessage && {
         onSetupMessage: manifest.onSetupMessage,
+      }),
+      ...(manifest.postScaffold && {
+        postScaffold: manifest.postScaffold,
       }),
     },
   ];
@@ -413,6 +460,9 @@ async function scanForPlugins(
         ...(manifest.onSetupMessage && {
           onSetupMessage: manifest.onSetupMessage,
         }),
+        ...(manifest.postScaffold && {
+          postScaffold: manifest.postScaffold,
+        }),
       } satisfies TemplatePlugin;
     }
   }
@@ -525,7 +575,8 @@ function writeManifest(
   const templateManifest: TemplatePluginsManifest = {
     $schema:
       "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
-    version: "1.0",
+    version: "2.0",
+    scaffolding: TEMPLATE_SCAFFOLDING,
     plugins,
   };
 

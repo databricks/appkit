@@ -168,6 +168,22 @@ Omit.onSetupMessage
 
 ***
 
+### postScaffold?
+
+```ts
+optional postScaffold: PostScaffoldStep[];
+```
+
+Ordered follow-up steps that a user or agent should perform after scaffolding.
+
+#### Inherited from
+
+```ts
+Omit.postScaffold
+```
+
+***
+
 ### repository?
 
 ```ts

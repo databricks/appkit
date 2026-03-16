@@ -12,8 +12,11 @@
     },
     "version": {
       "type": "string",
-      "const": "1.0",
+      "enum": ["1.0", "2.0"],
       "description": "Schema version for the template plugins manifest"
+    },
+    "scaffolding": {
+      "$ref": "#/$defs/scaffolding"
     },
     "plugins": {
       "type": "object",
@@ -23,6 +26,19 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "version": { "const": "2.0" }
+        },
+        "required": ["version"]
+      },
+      "then": {
+        "required": ["scaffolding"]
+      }
+    }
+  ],
   "additionalProperties": false,
   "$defs": {
     "templatePlugin": {
@@ -69,6 +85,13 @@
           "type": "string",
           "description": "Message displayed to the user after project initialization. Use this to inform about manual setup steps (e.g. environment variables, resource provisioning)."
         },
+        "postScaffold": {
+          "type": "array",
+          "description": "Ordered follow-up steps that a user or agent should perform after scaffolding.",
+          "items": {
+            "$ref": "plugin-manifest.schema.json#/$defs/postScaffoldStep"
+          }
+        },
         "resources": {
           "type": "object",
           "required": ["required", "optional"],
@@ -90,6 +113,52 @@
             }
           },
           "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "scaffoldingFlag": {
+      "type": "object",
+      "required": ["required", "description"],
+      "properties": {
+        "required": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pattern": {
+          "type": "string",
+          "minLength": 1
+        },
+        "default": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "scaffolding": {
+      "type": "object",
+      "required": ["command", "flags", "rules"],
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "flags": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "$ref": "#/$defs/scaffoldingFlag"
+          }
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       },
       "additionalProperties": false
