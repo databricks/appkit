@@ -13,14 +13,14 @@ resources:
       description: "{{.appDescription}}"
       source_code_path: ./
 
-{{- $scopes := list}}
-{{- if .plugins.genie}}{{$scopes = append $scopes "dashboards.genie"}}{{end}}
-{{- if .plugins.files}}{{$scopes = append $scopes "files.files"}}{{end}}
-{{- if $scopes}}
+{{- if or .plugins.genie .plugins.files}}
       user_api_scopes:
-      {{- range $scopes}}
-        - {{.}}
-      {{- end}}
+{{- if .plugins.genie}}
+        - dashboards.genie
+{{- end}}
+{{- if .plugins.files}}
+        - files.files
+{{- end}}
 {{- else}}
       # Uncomment to enable on behalf of user API scopes. Available scopes: sql, dashboards.genie, files.files
       # user_api_scopes:
