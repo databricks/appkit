@@ -20,7 +20,9 @@ const { mockDevHandler, mockAssetHandler, mockManagerInstance } = vi.hoisted(
 );
 
 vi.mock("./remote-tunnel-manager", () => ({
-  RemoteTunnelManager: vi.fn().mockImplementation(() => mockManagerInstance),
+  RemoteTunnelManager: vi.fn().mockImplementation(function (this: any) {
+    Object.assign(this, mockManagerInstance);
+  }),
 }));
 
 import { RemoteTunnelController } from "./remote-tunnel-controller";

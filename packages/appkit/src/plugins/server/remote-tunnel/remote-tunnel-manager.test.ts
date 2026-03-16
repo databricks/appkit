@@ -18,14 +18,17 @@ const { mockWebSocketServerCtor } = vi.hoisted(() => ({
 }));
 
 vi.mock("ws", () => ({
-  WebSocketServer: mockWebSocketServerCtor.mockImplementation((_opts: any) => ({
-    on: vi.fn(),
-    emit: vi.fn(),
-    handleUpgrade: vi.fn((_req: any, _socket: any, _head: any, cb: any) =>
+  WebSocketServer: mockWebSocketServerCtor.mockImplementation(function (
+    this: any,
+    _opts: any,
+  ) {
+    this.on = vi.fn();
+    this.emit = vi.fn();
+    this.handleUpgrade = vi.fn((_req: any, _socket: any, _head: any, cb: any) =>
       cb({}),
-    ),
-    close: vi.fn(),
-  })),
+    );
+    this.close = vi.fn();
+  }),
 }));
 
 import { REMOTE_TUNNEL_ASSET_PREFIXES } from "./gate";

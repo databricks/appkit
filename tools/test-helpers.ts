@@ -129,7 +129,7 @@ export function createMockRequest(overrides: any = {}) {
 /**
  * Creates a mock Express response object
  */
-export function createMockResponse() {
+export function createMockResponse(): Record<string, any> {
   const eventListeners: Record<string, Array<(...args: any[]) => void>> = {};
 
   const res = {
@@ -196,7 +196,7 @@ export interface TestContextOptions {
 /**
  * Creates a default mock WorkspaceClient for testing
  */
-export function createMockWorkspaceClient() {
+export function createMockWorkspaceClient(): Record<string, any> {
   return {
     statementExecution: {
       executeStatement: vi.fn().mockResolvedValue({
@@ -342,7 +342,7 @@ export async function parseSSEResponse(response: Response): Promise<any> {
   };
 }
 
-export function createConfigurableMockWorkspaceClient() {
+export function createConfigurableMockWorkspaceClient(): Record<string, any> {
   const executeStatement = vi.fn();
   const getStatement = vi.fn();
 

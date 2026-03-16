@@ -400,7 +400,7 @@ describe("useChartData", () => {
       const { result } = renderHook(() =>
         useChartData({
           queryKey: "test",
-          transformer,
+          transformer: transformer as <T>(data: T) => T,
         }),
       );
 

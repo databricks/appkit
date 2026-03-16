@@ -74,27 +74,49 @@ vi.mock("../../telemetry", () => ({
 
 // Mock interceptors
 vi.mock("../interceptors/cache", () => ({
-  CacheInterceptor: vi.fn().mockImplementation((_cache, _config) => ({
-    intercept: vi.fn().mockImplementation((fn, _context) => fn()),
-  })),
+  CacheInterceptor: vi.fn().mockImplementation(function (
+    this: any,
+    _cache: any,
+    _config: any,
+  ) {
+    this.intercept = vi
+      .fn()
+      .mockImplementation((fn: any, _context: any) => fn());
+  }),
 }));
 
 vi.mock("../interceptors/retry", () => ({
-  RetryInterceptor: vi.fn().mockImplementation((_config) => ({
-    intercept: vi.fn().mockImplementation((fn, _context) => fn()),
-  })),
+  RetryInterceptor: vi.fn().mockImplementation(function (
+    this: any,
+    _config: any,
+  ) {
+    this.intercept = vi
+      .fn()
+      .mockImplementation((fn: any, _context: any) => fn());
+  }),
 }));
 
 vi.mock("../interceptors/timeout", () => ({
-  TimeoutInterceptor: vi.fn().mockImplementation((_timeout) => ({
-    intercept: vi.fn().mockImplementation((fn, _context) => fn()),
-  })),
+  TimeoutInterceptor: vi.fn().mockImplementation(function (
+    this: any,
+    _timeout: any,
+  ) {
+    this.intercept = vi
+      .fn()
+      .mockImplementation((fn: any, _context: any) => fn());
+  }),
 }));
 
 vi.mock("../interceptors/telemetry", () => ({
-  TelemetryInterceptor: vi.fn().mockImplementation((_telemetry, _config) => ({
-    intercept: vi.fn().mockImplementation((fn, _context) => fn()),
-  })),
+  TelemetryInterceptor: vi.fn().mockImplementation(function (
+    this: any,
+    _telemetry: any,
+    _config: any,
+  ) {
+    this.intercept = vi
+      .fn()
+      .mockImplementation((fn: any, _context: any) => fn());
+  }),
 }));
 
 // Test plugin implementations
@@ -181,8 +203,12 @@ describe("Plugin", () => {
 
     // Setup constructor mocks
     vi.mocked(CacheManager.getInstanceSync).mockReturnValue(mockCache);
-    vi.mocked(AppManager).mockImplementation(() => mockApp);
-    vi.mocked(StreamManager).mockImplementation(() => mockStreamManager);
+    vi.mocked(AppManager).mockImplementation(function (this: any) {
+      Object.assign(this, mockApp);
+    });
+    vi.mocked(StreamManager).mockImplementation(function (this: any) {
+      Object.assign(this, mockStreamManager);
+    });
     vi.mocked(TelemetryManager.getProvider).mockReturnValue(
       mockTelemetry as TelemetryProvider,
     );

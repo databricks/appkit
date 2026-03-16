@@ -12,10 +12,10 @@ vi.mock("@databricks/sdk-experimental", () => {
   const mockRequest = vi.fn();
 
   return {
-    Config: vi.fn(),
-    ApiClient: vi.fn().mockImplementation(() => ({
-      request: mockRequest,
-    })),
+    Config: vi.fn(() => {}),
+    ApiClient: vi.fn().mockImplementation(function (this: any) {
+      this.request = mockRequest;
+    }),
   };
 });
 

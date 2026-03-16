@@ -14,37 +14,41 @@ vi.mock("@/connectors/lakebase", () => ({
 
 // Mock PersistentStorage
 vi.mock("../storage/persistent", () => ({
-  PersistentStorage: vi.fn().mockImplementation((_config: any, pool: any) => {
+  PersistentStorage: vi.fn().mockImplementation(function (
+    this: any,
+    _config: any,
+    pool: any,
+  ) {
     const cache = new Map<string, { value: unknown; expiry: number }>();
-    return {
-      initialize: vi.fn().mockResolvedValue(undefined),
-      get: vi
-        .fn()
-        .mockImplementation(async (key: string) => cache.get(key) || null),
-      set: vi
-        .fn()
-        .mockImplementation(async (key: string, entry: any) =>
-          cache.set(key, entry),
-        ),
-      delete: vi
-        .fn()
-        .mockImplementation(async (key: string) => cache.delete(key)),
-      clear: vi.fn().mockImplementation(async () => cache.clear()),
-      has: vi.fn().mockImplementation(async (key: string) => cache.has(key)),
-      size: vi.fn().mockImplementation(async () => cache.size),
-      isPersistent: vi.fn().mockReturnValue(true),
-      healthCheck: vi.fn().mockImplementation(async () => {
-        // Simulate real healthCheck: calls pool.query('SELECT 1')
-        try {
-          await pool.query("SELECT 1");
-          return true;
-        } catch {
-          return false;
-        }
-      }),
-      close: vi.fn().mockImplementation(async () => pool.end()),
-      cleanupExpired: vi.fn().mockResolvedValue(0),
-    };
+    this.initialize = vi.fn().mockResolvedValue(undefined);
+    this.get = vi
+      .fn()
+      .mockImplementation(async (key: string) => cache.get(key) || null);
+    this.set = vi
+      .fn()
+      .mockImplementation(async (key: string, entry: any) =>
+        cache.set(key, entry),
+      );
+    this.delete = vi
+      .fn()
+      .mockImplementation(async (key: string) => cache.delete(key));
+    this.clear = vi.fn().mockImplementation(async () => cache.clear());
+    this.has = vi
+      .fn()
+      .mockImplementation(async (key: string) => cache.has(key));
+    this.size = vi.fn().mockImplementation(async () => cache.size);
+    this.isPersistent = vi.fn().mockReturnValue(true);
+    this.healthCheck = vi.fn().mockImplementation(async () => {
+      // Simulate real healthCheck: calls pool.query('SELECT 1')
+      try {
+        await pool.query("SELECT 1");
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    this.close = vi.fn().mockImplementation(async () => pool.end());
+    this.cleanupExpired = vi.fn().mockResolvedValue(0);
   }),
 }));
 
@@ -54,7 +58,7 @@ vi.mock("@databricks/sdk-experimental", async (importOriginal) => {
     await importOriginal<typeof import("@databricks/sdk-experimental")>();
   return {
     ...actual,
-    WorkspaceClient: vi.fn().mockImplementation(() => ({})),
+    WorkspaceClient: vi.fn().mockImplementation(() => {}),
   };
 });
 

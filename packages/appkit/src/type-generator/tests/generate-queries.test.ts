@@ -18,18 +18,18 @@ vi.mock("node:fs/promises", () => ({
 }));
 
 vi.mock("@databricks/sdk-experimental", () => ({
-  WorkspaceClient: vi.fn(() => ({
-    statementExecution: { executeStatement: mocks.executeStatement },
-  })),
+  WorkspaceClient: vi.fn(function (this: any) {
+    this.statementExecution = { executeStatement: mocks.executeStatement };
+  }),
 }));
 
 vi.mock("../spinner", () => ({
-  Spinner: vi.fn(() => ({
-    start: vi.fn(),
-    update: vi.fn(),
-    stop: mocks.spinnerStop,
-    printDetail: mocks.spinnerPrintDetail,
-  })),
+  Spinner: vi.fn(function (this: any) {
+    this.start = vi.fn();
+    this.update = vi.fn();
+    this.stop = mocks.spinnerStop;
+    this.printDetail = mocks.spinnerPrintDetail;
+  }),
 }));
 
 vi.mock("../cache", async (importOriginal) => {

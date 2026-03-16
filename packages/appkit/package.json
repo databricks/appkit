@@ -74,7 +74,7 @@
     "picocolors": "^1.1.1",
     "semver": "^7.7.3",
     "shared": "workspace:*",
-    "vite": "npm:rolldown-vite@7.1.14",
+    "vite": "^8.0.0",
     "ws": "^8.18.3"
   },
   "devDependencies": {
@@ -82,10 +82,7 @@
     "@types/json-schema": "^7.0.15",
     "@types/pg": "^8.16.0",
     "@types/ws": "^8.18.1",
-    "@vitejs/plugin-react": "^5.1.1"
-  },
-  "overrides": {
-    "vite": "npm:rolldown-vite@7.1.14"
+    "@vitejs/plugin-react": "^6.0.1"
   },
   "module": "./dist/index.js",
   "publishConfig": {

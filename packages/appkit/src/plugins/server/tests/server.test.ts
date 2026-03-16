@@ -95,10 +95,10 @@ vi.mock("../../../utils", () => ({
 }));
 
 vi.mock("../vite-dev-server", () => ({
-  ViteDevServer: vi.fn().mockImplementation(() => ({
-    setup: vi.fn().mockResolvedValue(undefined),
-    close: vi.fn().mockResolvedValue(undefined),
-  })),
+  ViteDevServer: vi.fn().mockImplementation(function (this: any) {
+    this.setup = vi.fn().mockResolvedValue(undefined);
+    this.close = vi.fn().mockResolvedValue(undefined);
+  }),
 }));
 
 // Mock logger for testing log output
@@ -127,14 +127,14 @@ vi.mock("../../../logging/logger", () => ({
 }));
 
 vi.mock("../static-server", () => ({
-  StaticServer: vi.fn().mockImplementation(() => ({
-    setup: vi.fn(),
-  })),
+  StaticServer: vi.fn().mockImplementation(function (this: any) {
+    this.setup = vi.fn();
+  }),
 }));
 
 vi.mock("../remote-tunnel/remote-tunnel-controller", () => ({
-  RemoteTunnelController: vi.fn().mockImplementation(() => {
-    return mockRemoteTunnelControllerInstance;
+  RemoteTunnelController: vi.fn().mockImplementation(function (this: any) {
+    Object.assign(this, mockRemoteTunnelControllerInstance);
   }),
 }));
 

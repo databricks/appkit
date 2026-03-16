@@ -314,10 +314,12 @@ describe("useThemeColors", () => {
       const observeSpy = vi.fn();
       const disconnectSpy = vi.fn();
 
-      const MockMutationObserver = vi.fn().mockImplementation(() => ({
-        observe: observeSpy,
-        disconnect: disconnectSpy,
-      }));
+      const MockMutationObserver = vi.fn().mockImplementation(function (
+        this: any,
+      ) {
+        this.observe = observeSpy;
+        this.disconnect = disconnectSpy;
+      });
 
       window.MutationObserver = MockMutationObserver;
 
@@ -351,10 +353,12 @@ describe("useThemeColors", () => {
       }));
 
       // Also mock MutationObserver since the effect uses it
-      window.MutationObserver = vi.fn().mockImplementation(() => ({
-        observe: vi.fn(),
-        disconnect: vi.fn(),
-      }));
+      window.MutationObserver = vi.fn().mockImplementation(function (
+        this: any,
+      ) {
+        this.observe = vi.fn();
+        this.disconnect = vi.fn();
+      });
 
       let callCount = 0;
       vi.spyOn(window, "getComputedStyle").mockImplementation(() => {
@@ -384,12 +388,13 @@ describe("useThemeColors", () => {
     test("updates colors when theme attributes change via MutationObserver", () => {
       let mutationCallback: () => void = () => {};
 
-      const MockMutationObserver = vi.fn().mockImplementation((callback) => {
+      const MockMutationObserver = vi.fn().mockImplementation(function (
+        this: any,
+        callback: any,
+      ) {
         mutationCallback = callback;
-        return {
-          observe: vi.fn(),
-          disconnect: vi.fn(),
-        };
+        this.observe = vi.fn();
+        this.disconnect = vi.fn();
       });
 
       window.MutationObserver = MockMutationObserver;
@@ -435,10 +440,12 @@ describe("useThemeColors", () => {
         dispatchEvent: vi.fn(),
       }));
 
-      window.MutationObserver = vi.fn().mockImplementation(() => ({
-        observe: vi.fn(),
-        disconnect: disconnectSpy,
-      }));
+      window.MutationObserver = vi.fn().mockImplementation(function (
+        this: any,
+      ) {
+        this.observe = vi.fn();
+        this.disconnect = disconnectSpy;
+      });
 
       const { unmount } = renderHook(() => useThemeColors());
 
@@ -465,10 +472,12 @@ describe("useThemeColors", () => {
         dispatchEvent: vi.fn(),
       }));
 
-      window.MutationObserver = vi.fn().mockImplementation(() => ({
-        observe: observeSpy,
-        disconnect: disconnectSpy,
-      }));
+      window.MutationObserver = vi.fn().mockImplementation(function (
+        this: any,
+      ) {
+        this.observe = observeSpy;
+        this.disconnect = disconnectSpy;
+      });
 
       const { rerender } = renderHook(
         ({ palette }: { palette: ChartColorPalette }) =>
@@ -505,10 +514,10 @@ describe("useAllThemeColors", () => {
     window.matchMedia = createMockMatchMedia() as typeof window.matchMedia;
 
     // Mock MutationObserver
-    window.MutationObserver = vi.fn().mockImplementation(() => ({
-      observe: vi.fn(),
-      disconnect: vi.fn(),
-    }));
+    window.MutationObserver = vi.fn().mockImplementation(function (this: any) {
+      this.observe = vi.fn();
+      this.disconnect = vi.fn();
+    });
 
     // Reset to empty CSS variables - will use fallbacks
     vi.spyOn(window, "getComputedStyle").mockImplementation(

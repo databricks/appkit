@@ -47,7 +47,9 @@ const { mockFilesApi, mockConfig, mockClient, MockApiError } = vi.hoisted(
 );
 
 vi.mock("@databricks/sdk-experimental", () => ({
-  WorkspaceClient: vi.fn(() => mockClient),
+  WorkspaceClient: vi.fn(function (this: any) {
+    Object.assign(this, mockClient);
+  }),
   ApiError: MockApiError,
 }));
 

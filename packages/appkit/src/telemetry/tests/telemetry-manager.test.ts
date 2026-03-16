@@ -3,27 +3,29 @@ import { TelemetryManager } from "../telemetry-manager";
 
 // Mock only exporters to prevent network calls
 vi.mock("@opentelemetry/exporter-trace-otlp-proto", () => ({
-  OTLPTraceExporter: vi.fn(() => ({
-    export: vi.fn((_spans, callback) => callback({ code: 0 })),
-    shutdown: vi.fn().mockResolvedValue(undefined),
-    forceFlush: vi.fn().mockResolvedValue(undefined),
-  })),
+  OTLPTraceExporter: vi.fn(function (this: any) {
+    this.export = vi.fn((_spans: any, callback: any) => callback({ code: 0 }));
+    this.shutdown = vi.fn().mockResolvedValue(undefined);
+    this.forceFlush = vi.fn().mockResolvedValue(undefined);
+  }),
 }));
 
 vi.mock("@opentelemetry/exporter-metrics-otlp-proto", () => ({
-  OTLPMetricExporter: vi.fn(() => ({
-    export: vi.fn((_metrics, callback) => callback({ code: 0 })),
-    shutdown: vi.fn().mockResolvedValue(undefined),
-    forceFlush: vi.fn().mockResolvedValue(undefined),
-  })),
+  OTLPMetricExporter: vi.fn(function (this: any) {
+    this.export = vi.fn((_metrics: any, callback: any) =>
+      callback({ code: 0 }),
+    );
+    this.shutdown = vi.fn().mockResolvedValue(undefined);
+    this.forceFlush = vi.fn().mockResolvedValue(undefined);
+  }),
 }));
 
 vi.mock("@opentelemetry/exporter-logs-otlp-proto", () => ({
-  OTLPLogExporter: vi.fn(() => ({
-    export: vi.fn((_logs, callback) => callback({ code: 0 })),
-    shutdown: vi.fn().mockResolvedValue(undefined),
-    forceFlush: vi.fn().mockResolvedValue(undefined),
-  })),
+  OTLPLogExporter: vi.fn(function (this: any) {
+    this.export = vi.fn((_logs: any, callback: any) => callback({ code: 0 }));
+    this.shutdown = vi.fn().mockResolvedValue(undefined);
+    this.forceFlush = vi.fn().mockResolvedValue(undefined);
+  }),
 }));
 
 // Mock resource detection to avoid env complexity

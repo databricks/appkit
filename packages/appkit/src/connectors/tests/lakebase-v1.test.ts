@@ -9,12 +9,12 @@ vi.mock("pg", () => {
   const mockRelease = vi.fn();
   const mockOn = vi.fn();
 
-  const MockPool = vi.fn(() => ({
-    query: mockQuery,
-    connect: mockConnect,
-    end: mockEnd,
-    on: mockOn,
-  }));
+  const MockPool = vi.fn(function (this: any) {
+    this.query = mockQuery;
+    this.connect = mockConnect;
+    this.end = mockEnd;
+    this.on = mockOn;
+  });
 
   return {
     default: { Pool: MockPool },
@@ -33,16 +33,16 @@ vi.mock("@databricks/sdk-experimental", () => {
   const mockMe = vi.fn();
   const mockRequest = vi.fn();
 
-  const MockWorkspaceClient = vi.fn(() => ({
-    currentUser: { me: mockMe },
-    config: { host: "https://test.databricks.com" },
-  }));
+  const MockWorkspaceClient = vi.fn(function (this: any) {
+    this.currentUser = { me: mockMe };
+    this.config = { host: "https://test.databricks.com" };
+  });
 
-  const MockApiClient = vi.fn(() => ({
-    request: mockRequest,
-  }));
+  const MockApiClient = vi.fn(function (this: any) {
+    this.request = mockRequest;
+  });
 
-  const MockConfig = vi.fn(() => ({}));
+  const MockConfig = vi.fn(() => {});
 
   return {
     WorkspaceClient: MockWorkspaceClient,

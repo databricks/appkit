@@ -10,16 +10,16 @@ vi.mock("pg", () => {
   const mockEnd = vi.fn().mockResolvedValue(undefined);
   const mockOn = vi.fn();
 
-  const MockPool = vi.fn((config) => ({
-    query: mockQuery,
-    connect: mockConnect,
-    end: mockEnd,
-    on: mockOn,
-    options: config, // Store config for inspection
-    totalCount: 3,
-    idleCount: 1,
-    waitingCount: 0,
-  }));
+  const MockPool = vi.fn(function (this: any, config: any) {
+    this.query = mockQuery;
+    this.connect = mockConnect;
+    this.end = mockEnd;
+    this.on = mockOn;
+    this.options = config; // Store config for inspection
+    this.totalCount = 3;
+    this.idleCount = 1;
+    this.waitingCount = 0;
+  });
 
   return {
     default: { Pool: MockPool },

@@ -308,9 +308,9 @@ Databricks Services (SQL Warehouse, APIs)
 - **npm dependencies external** - Keeps bundle size small
 - **Generates .d.ts** - Type definitions with proper resolution
 
-### Frontend: Vite (rolldown-vite fork)
+### Frontend: Vite 8
 
-The frontend uses `rolldown-vite@7.1.14`, a performance-optimized Vite fork.
+The frontend uses `vite@8.0.0` with rolldown built-in natively.
 
 **Key plugins:**
 - `@vitejs/plugin-react` - React Fast Refresh
