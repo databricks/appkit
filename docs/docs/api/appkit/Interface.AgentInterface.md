@@ -22,7 +22,7 @@ invoke(params: InvokeParams): Promise<ResponseOutputItem[]>;
 
 #### Returns
 
-`Promise`\<`ResponseOutputItem`[]\>
+`Promise`\<[`ResponseOutputItem`](TypeAlias.ResponseOutputItem.md)[]\>
 
 ***
 

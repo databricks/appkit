@@ -1,7 +1,7 @@
 import type { AssistantPart } from "./types";
 import { tryFormatJson } from "./utils";
 
-export interface AgentChatPartProps {
+interface AgentChatPartProps {
   part: AssistantPart;
   showCursor?: boolean;
 }

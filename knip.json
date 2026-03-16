@@ -7,7 +7,14 @@
     "docs"
   ],
   "workspaces": {
-    "packages/appkit": {},
+    "packages/appkit": {
+      "ignoreDependencies": [
+        "@databricks/langchainjs",
+        "@langchain/core",
+        "@langchain/langgraph",
+        "@langchain/mcp-adapters"
+      ]
+    },
     "packages/appkit-ui": {}
   },
   "ignore": [

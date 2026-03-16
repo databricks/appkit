@@ -1,7 +1,7 @@
 import { AgentChatPart } from "./agent-chat-part";
 import type { ChatMessage } from "./types";
 
-export interface AgentChatMessageProps {
+interface AgentChatMessageProps {
   message: ChatMessage;
   isLast?: boolean;
   isStreaming?: boolean;

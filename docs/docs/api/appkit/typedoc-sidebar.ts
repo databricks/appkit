@@ -68,6 +68,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Class.StandardAgent",
+          label: "StandardAgent"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Class.TunnelError",
           label: "TunnelError"
         },
@@ -99,8 +104,18 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.CustomMcpServerTool",
+          label: "CustomMcpServerTool"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.DatabaseCredential",
           label: "DatabaseCredential"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ExternalMcpServerTool",
+          label: "ExternalMcpServerTool"
         },
         {
           type: "doc",
@@ -111,6 +126,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.GenerateDatabaseCredentialRequest",
           label: "GenerateDatabaseCredentialRequest"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.GenieTool",
+          label: "GenieTool"
         },
         {
           type: "doc",
@@ -164,8 +184,18 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Interface.StandardAgent",
-          label: "StandardAgent"
+          id: "api/appkit/Interface.ResponseFunctionCallOutput",
+          label: "ResponseFunctionCallOutput"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ResponseFunctionToolCall",
+          label: "ResponseFunctionToolCall"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ResponseOutputMessage",
+          label: "ResponseOutputMessage"
         },
         {
           type: "doc",
@@ -181,6 +211,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.ValidationResult",
           label: "ValidationResult"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.VectorSearchIndexTool",
+          label: "VectorSearchIndexTool"
         }
       ]
     },
@@ -200,6 +235,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.HostedTool",
+          label: "HostedTool"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.IAppRouter",
           label: "IAppRouter"
         },
@@ -212,6 +252,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.ResourcePermission",
           label: "ResourcePermission"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.ResponseOutputItem",
+          label: "ResponseOutputItem"
         },
         {
           type: "doc",
@@ -257,6 +302,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.createInvokeHandler",
+          label: "createInvokeHandler"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.createLakebasePool",
           label: "createLakebasePool"
         },
@@ -299,6 +349,16 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.getWorkspaceClient",
           label: "getWorkspaceClient"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.isFunctionTool",
+          label: "isFunctionTool"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.isHostedTool",
+          label: "isHostedTool"
         },
         {
           type: "doc",

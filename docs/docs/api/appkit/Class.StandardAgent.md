@@ -1,4 +1,4 @@
-# Interface: StandardAgent
+# Class: StandardAgent
 
 Built-in [AgentInterface](Interface.AgentInterface.md) implementation that wraps a LangGraph
 `createReactAgent` and translates its stream events into Responses API
@@ -8,6 +8,25 @@ implementation for a different LLM SDK.
 ## Implements
 
 - [`AgentInterface`](Interface.AgentInterface.md)
+
+## Constructors
+
+### Constructor
+
+```ts
+new StandardAgent(agent: LangGraphAgent, systemPrompt: string): StandardAgent;
+```
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `agent` | `LangGraphAgent` |
+| `systemPrompt` | `string` |
+
+#### Returns
+
+`StandardAgent`
 
 ## Methods
 
@@ -25,13 +44,11 @@ invoke(params: InvokeParams): Promise<ResponseOutputItem[]>;
 
 #### Returns
 
-`Promise`\<`ResponseOutputItem`[]\>
+`Promise`\<[`ResponseOutputItem`](TypeAlias.ResponseOutputItem.md)[]\>
 
 #### Implementation of
 
-```ts
-AgentInterface.invoke
-```
+[`AgentInterface`](Interface.AgentInterface.md).[`invoke`](Interface.AgentInterface.md#invoke)
 
 ***
 
@@ -53,6 +70,4 @@ stream(params: InvokeParams): AsyncGenerator<ResponseStreamEvent>;
 
 #### Implementation of
 
-```ts
-AgentInterface.stream
-```
+[`AgentInterface`](Interface.AgentInterface.md).[`stream`](Interface.AgentInterface.md#stream)
