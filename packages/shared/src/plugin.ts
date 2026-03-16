@@ -186,7 +186,9 @@ export type PluginMap<
   >;
 };
 
+/** Tuple of plugin class, config, and name. Created by `toPlugin()` and passed to `createApp()`. */
 export type PluginData<T, U, N> = { plugin: T; config: U; name: N };
+/** Factory function type returned by `toPlugin()`. Accepts optional config and returns a PluginData tuple. */
 export type ToPlugin<T, U, N extends string> = (
   config?: U,
 ) => PluginData<T, U, N>;

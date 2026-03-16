@@ -8,6 +8,8 @@ type PluginData<T, U, N> = {
 };
 ```
 
+Tuple of plugin class, config, and name. Created by `toPlugin()` and passed to `createApp()`.
+
 ## Type Parameters
 
 | Type Parameter |

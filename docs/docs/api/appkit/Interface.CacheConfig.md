@@ -1,6 +1,6 @@
 # Interface: CacheConfig
 
-Configuration for caching
+Configuration for the CacheInterceptor. Controls TTL, size limits, storage backend, and probabilistic cleanup.
 
 ## Indexable
 

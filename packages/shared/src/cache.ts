@@ -32,7 +32,7 @@ export interface CacheStorage {
   close(): Promise<void>;
 }
 
-/** Configuration for caching */
+/** Configuration for the CacheInterceptor. Controls TTL, size limits, storage backend, and probabilistic cleanup. */
 export interface CacheConfig {
   /** Whether caching is enabled */
   enabled?: boolean;
