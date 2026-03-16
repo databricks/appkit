@@ -27,6 +27,14 @@ Human-readable description for this field
 
 ***
 
+### discovery?
+
+```ts
+optional discovery: DiscoveryDescriptor;
+```
+
+***
+
 ### env?
 
 ```ts
@@ -64,6 +72,16 @@ optional resolve: string;
 ```
 
 Named resolver prefixed by resource type (e.g., 'postgres:host'). The CLI resolves this value during the init prompt flow.
+
+***
+
+### setupHint?
+
+```ts
+optional setupHint: string;
+```
+
+Short actionable instruction for obtaining this field's value.
 
 ***
 

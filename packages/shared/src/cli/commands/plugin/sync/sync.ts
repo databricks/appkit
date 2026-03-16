@@ -9,6 +9,8 @@ import {
 } from "../manifest-resolve";
 import type {
   PluginManifest,
+  ResourceFieldEntry,
+  Scaffolding,
   TemplatePlugin,
   TemplatePluginsManifest,
 } from "../manifest-types";
@@ -83,6 +85,9 @@ async function loadPluginEntry(
       resources: manifest.resources,
       ...(manifest.onSetupMessage && {
         onSetupMessage: manifest.onSetupMessage,
+      }),
+      ...(manifest.postScaffold && {
+        postScaffold: manifest.postScaffold,
       }),
     },
   ];
@@ -413,6 +418,9 @@ async function scanForPlugins(
         ...(manifest.onSetupMessage && {
           onSetupMessage: manifest.onSetupMessage,
         }),
+        ...(manifest.postScaffold && {
+          postScaffold: manifest.postScaffold,
+        }),
       } satisfies TemplatePlugin;
     }
   }
@@ -515,6 +523,81 @@ async function scanPluginsDir(
 }
 
 /**
+ * Derive the resolution strategy for a resource field from its existing properties.
+ */
+function computeResolution(
+  field: ResourceFieldEntry,
+): "platform-injected" | "static" | "cli-resolved" | "user-provided" {
+  if (field.localOnly) return "platform-injected";
+  if (field.value !== undefined && field.value !== "") return "static";
+  if (field.resolve) return "cli-resolved";
+  return "user-provided";
+}
+
+/**
+ * Walk every resource field in every plugin and inject the computed `resolution` value.
+ * This is emitted only in the template manifest — not authored in per-plugin manifests.
+ */
+function enrichPluginsWithResolution(
+  plugins: TemplatePluginsManifest["plugins"],
+): void {
+  for (const plugin of Object.values(plugins)) {
+    for (const resource of [
+      ...plugin.resources.required,
+      ...plugin.resources.optional,
+    ]) {
+      if (!resource.fields) continue;
+      for (const field of Object.values(resource.fields)) {
+        (field as ResourceFieldEntry & { resolution: string }).resolution =
+          computeResolution(field);
+      }
+    }
+  }
+}
+
+const SCAFFOLDING: Scaffolding = {
+  command: "databricks apps init",
+  flags: {
+    "--name": {
+      required: true,
+      description:
+        "App name: lowercase letters, numbers, hyphens only. Max 26 chars.",
+      pattern: "^[a-z][a-z0-9-]{0,25}$",
+    },
+    "--features": {
+      required: false,
+      description:
+        "Comma-separated plugin names where requiredByTemplate is false. Do NOT include requiredByTemplate=true plugins — they are included automatically.",
+    },
+    "--set": {
+      required: false,
+      description:
+        "Resource field values. Format: <pluginName>.<resourceKey>.<fieldName>=<value>. Required for every field with resolution='user-provided' in all included plugins (both mandatory and optional).",
+    },
+    "--profile": {
+      required: true,
+      description: "Databricks CLI profile for authentication.",
+    },
+    "--description": {
+      required: false,
+      description: "Short description of the app.",
+    },
+    "--run": {
+      required: false,
+      default: "none",
+      description:
+        "Post-scaffold action: none (review code first), dev (start dev server), or deploy.",
+    },
+  },
+  rules: [
+    "Plugins with requiredByTemplate=true are included automatically. Do NOT add them to --features. You MUST still provide --set for their user-provided resource fields.",
+    "Plugins with requiredByTemplate=false are optional. Add to --features only when the user's request needs that capability.",
+    "Every field with resolution='user-provided' MUST have a --set value for each included plugin (mandatory + optional).",
+    "Fields with resolution='platform-injected', 'static', or 'cli-resolved' are handled automatically — do NOT include them in --set.",
+  ],
+};
+
+/**
  * Write (or preview) the template plugins manifest to disk.
  */
 function writeManifest(
@@ -522,10 +605,13 @@ function writeManifest(
   { plugins }: { plugins: TemplatePluginsManifest["plugins"] },
   options: { write?: boolean; silent?: boolean },
 ) {
+  enrichPluginsWithResolution(plugins);
+
   const templateManifest: TemplatePluginsManifest = {
     $schema:
       "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
-    version: "1.0",
+    version: "1.1",
+    scaffolding: SCAFFOLDING,
     plugins,
   };
 
@@ -761,8 +847,10 @@ async function runPluginsSync(options: {
   writeManifest(outputPath, { plugins }, options);
 }
 
-/** Exported for testing: path boundary check, AST parsing, trust checks. */
+/** Exported for testing: path boundary check, AST parsing, trust checks, resolution. */
 export {
+  computeResolution,
+  enrichPluginsWithResolution,
   isWithinDirectory,
   parseImports,
   parsePluginUsages,

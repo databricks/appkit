@@ -216,12 +216,219 @@ describe("validate-manifest", () => {
     });
   });
 
+  describe("validateManifest – new fields", () => {
+    it("accepts manifest with discovery on a resource field", () => {
+      const result = validateManifest({
+        ...VALID_MANIFEST,
+        resources: {
+          required: [
+            {
+              type: "sql_warehouse",
+              alias: "SQL Warehouse",
+              resourceKey: "sql-warehouse",
+              description: "Required for queries",
+              permission: "CAN_USE",
+              fields: {
+                id: {
+                  env: "DATABRICKS_WAREHOUSE_ID",
+                  description: "SQL Warehouse ID",
+                  setupHint: "Run 'databricks warehouses list' to find it.",
+                  discovery: {
+                    cliCommand:
+                      "databricks warehouses list --profile <PROFILE> -o json",
+                    selectField: ".id",
+                    displayField: ".name",
+                  },
+                },
+              },
+            },
+          ],
+          optional: [],
+        },
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it("accepts manifest with discovery including dependsOn and shortcut", () => {
+      const result = validateManifest({
+        ...VALID_MANIFEST,
+        resources: {
+          required: [
+            {
+              type: "postgres",
+              alias: "Postgres",
+              resourceKey: "postgres",
+              description: "Database",
+              permission: "CAN_CONNECT_AND_CREATE",
+              fields: {
+                branch: {
+                  description: "Branch",
+                  discovery: {
+                    cliCommand:
+                      "databricks postgres list-branches --profile <PROFILE> -o json",
+                    selectField: ".name",
+                  },
+                },
+                database: {
+                  description: "Database",
+                  discovery: {
+                    cliCommand:
+                      "databricks postgres list-databases {branch} --profile <PROFILE> -o json",
+                    selectField: ".name",
+                    dependsOn: "branch",
+                  },
+                },
+              },
+            },
+          ],
+          optional: [],
+        },
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it("rejects discovery missing required cliCommand", () => {
+      const result = validateManifest({
+        ...VALID_MANIFEST,
+        resources: {
+          required: [
+            {
+              type: "sql_warehouse",
+              alias: "SQL Warehouse",
+              resourceKey: "sql-warehouse",
+              description: "test",
+              permission: "CAN_USE",
+              fields: {
+                id: {
+                  env: "WAREHOUSE_ID",
+                  discovery: {
+                    selectField: ".id",
+                  },
+                },
+              },
+            },
+          ],
+          optional: [],
+        },
+      });
+      expect(result.valid).toBe(false);
+    });
+
+    it("rejects discovery with unknown property", () => {
+      const result = validateManifest({
+        ...VALID_MANIFEST,
+        resources: {
+          required: [
+            {
+              type: "sql_warehouse",
+              alias: "SQL Warehouse",
+              resourceKey: "sql-warehouse",
+              description: "test",
+              permission: "CAN_USE",
+              fields: {
+                id: {
+                  env: "WAREHOUSE_ID",
+                  discovery: {
+                    cliCommand: "databricks warehouses list -o json",
+                    selectField: ".id",
+                    unknownField: "bad",
+                  },
+                },
+              },
+            },
+          ],
+          optional: [],
+        },
+      });
+      expect(result.valid).toBe(false);
+    });
+
+    it("accepts manifest with postScaffold steps", () => {
+      const result = validateManifest({
+        ...VALID_MANIFEST,
+        postScaffold: [
+          { step: 1, instruction: "Create files" },
+          { step: 2, instruction: "Run typegen", blocking: true },
+          { step: 3, instruction: "Write UI code" },
+        ],
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it("rejects postScaffold step missing instruction", () => {
+      const result = validateManifest({
+        ...VALID_MANIFEST,
+        postScaffold: [{ step: 1 }],
+      });
+      expect(result.valid).toBe(false);
+    });
+
+    it("rejects postScaffold step with invalid step number", () => {
+      const result = validateManifest({
+        ...VALID_MANIFEST,
+        postScaffold: [{ step: 0, instruction: "Invalid step" }],
+      });
+      expect(result.valid).toBe(false);
+    });
+
+    it("accepts manifest with setupHint on a field", () => {
+      const result = validateManifest({
+        ...VALID_MANIFEST,
+        resources: {
+          required: [
+            {
+              type: "volume",
+              alias: "Files",
+              resourceKey: "files",
+              description: "Volume access",
+              permission: "WRITE_VOLUME",
+              fields: {
+                path: {
+                  env: "VOLUME_PATH",
+                  setupHint: "Provide the full volume path.",
+                },
+              },
+            },
+          ],
+          optional: [],
+        },
+      });
+      expect(result.valid).toBe(true);
+    });
+  });
+
   describe("validateTemplateManifest", () => {
     it("validates a minimal correct template manifest", () => {
       const result = validateTemplateManifest({
         $schema:
           "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
         version: "1.0",
+        plugins: {},
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it("validates a v1.1 template manifest with scaffolding", () => {
+      const result = validateTemplateManifest({
+        $schema:
+          "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
+        version: "1.1",
+        scaffolding: {
+          command: "databricks apps init",
+          flags: {
+            "--name": {
+              required: true,
+              description: "App name",
+              pattern: "^[a-z][a-z0-9-]{0,25}$",
+            },
+            "--run": {
+              required: false,
+              description: "Post-scaffold action",
+              default: "none",
+            },
+          },
+          rules: ["Rule 1", "Rule 2"],
+        },
         plugins: {},
       });
       expect(result.valid).toBe(true);

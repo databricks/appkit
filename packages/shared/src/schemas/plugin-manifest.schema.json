@@ -95,6 +95,13 @@
       "type": "boolean",
       "default": false,
       "description": "When true, this plugin is excluded from the template plugins manifest (appkit.plugins.json) during sync."
+    },
+    "postScaffold": {
+      "type": "array",
+      "description": "Ordered steps to follow after scaffolding. Steps marked blocking must complete before proceeding.",
+      "items": {
+        "$ref": "#/$defs/postScaffoldStep"
+      }
     }
   },
   "additionalProperties": false,
@@ -220,6 +227,13 @@
           "type": "string",
           "pattern": "^[a-z_]+:[a-zA-Z]+$",
           "description": "Named resolver prefixed by resource type (e.g., 'postgres:host'). The CLI resolves this value during the init prompt flow."
+        },
+        "discovery": {
+          "$ref": "#/$defs/discoveryDescriptor"
+        },
+        "setupHint": {
+          "type": "string",
+          "description": "Short actionable instruction for obtaining this field's value."
         }
       },
       "additionalProperties": false
@@ -404,6 +418,56 @@
           }
         }
       ]
+    },
+    "discoveryDescriptor": {
+      "type": "object",
+      "description": "How to discover candidate values for this field via CLI commands.",
+      "required": ["cliCommand", "selectField"],
+      "properties": {
+        "cliCommand": {
+          "type": "string",
+          "description": "CLI command to list candidate values. Use <PROFILE> as a placeholder for the Databricks CLI profile."
+        },
+        "selectField": {
+          "type": "string",
+          "description": "jq-style field to extract the value from each result (e.g. '.id')."
+        },
+        "displayField": {
+          "type": "string",
+          "description": "jq-style field for human-readable display (e.g. '.name')."
+        },
+        "dependsOn": {
+          "type": "string",
+          "description": "Field name in the same resource that must be resolved first."
+        },
+        "shortcut": {
+          "type": "string",
+          "description": "Optional command that returns a single value directly instead of a list."
+        }
+      },
+      "additionalProperties": false
+    },
+    "postScaffoldStep": {
+      "type": "object",
+      "description": "A single post-scaffolding step.",
+      "required": ["step", "instruction"],
+      "properties": {
+        "step": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Step number (sequential, starting from 1)."
+        },
+        "instruction": {
+          "type": "string",
+          "description": "What to do in this step."
+        },
+        "blocking": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, this step must finish before proceeding to the next."
+        }
+      },
+      "additionalProperties": false
     },
     "configSchemaProperty": {
       "type": "object",

@@ -14,13 +14,33 @@
         "fields": {
           "id": {
             "env": "DATABRICKS_WAREHOUSE_ID",
-            "description": "SQL Warehouse ID"
+            "description": "SQL Warehouse ID",
+            "setupHint": "Run 'databricks warehouses list' to find your SQL Warehouse ID.",
+            "discovery": {
+              "cliCommand": "databricks warehouses list --profile <PROFILE> -o json",
+              "selectField": ".id",
+              "displayField": ".name",
+              "shortcut": "databricks experimental aitools tools get-default-warehouse --profile <PROFILE>"
+            }
           }
         }
       }
     ],
     "optional": []
   },
+  "postScaffold": [
+    { "step": 1, "instruction": "Create SQL query files in config/queries/" },
+    { "step": 2, "instruction": "Run: npm run typegen", "blocking": true },
+    {
+      "step": 3,
+      "instruction": "Read client/src/appKitTypes.d.ts for generated types"
+    },
+    { "step": 4, "instruction": "Write UI code using the generated types" },
+    {
+      "step": 5,
+      "instruction": "Update tests/smoke.spec.ts selectors for your app"
+    }
+  ],
   "config": {
     "schema": {
       "type": "object",

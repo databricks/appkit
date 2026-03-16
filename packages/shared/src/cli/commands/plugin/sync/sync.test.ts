@@ -1,7 +1,10 @@
 import path from "node:path";
 import { Lang, parse } from "@ast-grep/napi";
 import { describe, expect, it } from "vitest";
+import type { TemplatePluginsManifest } from "../manifest-types";
 import {
+  computeResolution,
+  enrichPluginsWithResolution,
   isWithinDirectory,
   parseImports,
   parsePluginUsages,
@@ -180,6 +183,123 @@ describe("plugin sync", () => {
     it("rejects untrusted package scopes by default", () => {
       expect(shouldAllowJsManifestForPackage("my-plugin")).toBe(false);
       expect(shouldAllowJsManifestForPackage("@acme/plugin")).toBe(false);
+    });
+  });
+
+  describe("computeResolution", () => {
+    it('returns "platform-injected" when localOnly is true', () => {
+      expect(computeResolution({ localOnly: true })).toBe("platform-injected");
+    });
+
+    it('returns "platform-injected" when localOnly is true even with value and resolve', () => {
+      expect(
+        computeResolution({
+          localOnly: true,
+          value: "5432",
+          resolve: "postgres:host",
+        }),
+      ).toBe("platform-injected");
+    });
+
+    it('returns "static" when value is set', () => {
+      expect(computeResolution({ value: "5432" })).toBe("static");
+    });
+
+    it('returns "static" for non-empty value without localOnly', () => {
+      expect(computeResolution({ value: "require" })).toBe("static");
+    });
+
+    it('returns "cli-resolved" when resolve is set', () => {
+      expect(computeResolution({ resolve: "postgres:host" })).toBe(
+        "cli-resolved",
+      );
+    });
+
+    it('returns "user-provided" when no localOnly, value, or resolve', () => {
+      expect(computeResolution({})).toBe("user-provided");
+      expect(
+        computeResolution({ env: "MY_VAR", description: "Some field" }),
+      ).toBe("user-provided");
+    });
+
+    it('returns "user-provided" for empty value string', () => {
+      expect(computeResolution({ value: "" })).toBe("user-provided");
+    });
+  });
+
+  describe("enrichPluginsWithResolution", () => {
+    it("injects resolution on every resource field", () => {
+      const plugins: TemplatePluginsManifest["plugins"] = {
+        analytics: {
+          name: "analytics",
+          displayName: "Analytics",
+          description: "Test",
+          package: "@databricks/appkit",
+          resources: {
+            required: [
+              {
+                type: "sql_warehouse",
+                alias: "SQL Warehouse",
+                resourceKey: "sql-warehouse",
+                description: "test",
+                permission: "CAN_USE",
+                fields: {
+                  id: { env: "WAREHOUSE_ID", description: "Warehouse ID" },
+                },
+              },
+            ],
+            optional: [],
+          },
+        },
+        lakebase: {
+          name: "lakebase",
+          displayName: "Lakebase",
+          description: "Test",
+          package: "@databricks/appkit",
+          resources: {
+            required: [
+              {
+                type: "postgres",
+                alias: "Postgres",
+                resourceKey: "postgres",
+                description: "test",
+                permission: "CAN_CONNECT_AND_CREATE",
+                fields: {
+                  branch: { description: "Branch" },
+                  host: {
+                    env: "PGHOST",
+                    localOnly: true,
+                    resolve: "postgres:host",
+                  },
+                  port: { env: "PGPORT", localOnly: true, value: "5432" },
+                  endpoint: { resolve: "postgres:endpointPath" },
+                },
+              },
+            ],
+            optional: [],
+          },
+        },
+      };
+
+      enrichPluginsWithResolution(plugins);
+
+      const analyticsId = plugins.analytics.resources.required[0].fields
+        .id as Record<string, unknown>;
+      expect(analyticsId.resolution).toBe("user-provided");
+
+      const lakebaseFields = plugins.lakebase.resources.required[0].fields;
+      expect(
+        (lakebaseFields.branch as Record<string, unknown>).resolution,
+      ).toBe("user-provided");
+      expect((lakebaseFields.host as Record<string, unknown>).resolution).toBe(
+        "platform-injected",
+      );
+      expect((lakebaseFields.port as Record<string, unknown>).resolution).toBe(
+        "platform-injected",
+      );
+      expect(
+        (lakebaseFields.endpoint as Record<string, unknown>).resolution,
+      ).toBe("cli-resolved");
     });
   });
 });

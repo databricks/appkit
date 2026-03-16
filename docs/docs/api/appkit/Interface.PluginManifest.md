@@ -168,6 +168,22 @@ Omit.onSetupMessage
 
 ***
 
+### postScaffold?
+
+```ts
+optional postScaffold: PostScaffoldStep[];
+```
+
+Ordered steps to follow after scaffolding. Steps marked blocking must complete before proceeding.
+
+#### Inherited from
+
+```ts
+Omit.postScaffold
+```
+
+***
+
 ### repository?
 
 ```ts

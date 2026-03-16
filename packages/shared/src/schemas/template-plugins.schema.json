@@ -12,8 +12,11 @@
     },
     "version": {
       "type": "string",
-      "const": "1.0",
+      "enum": ["1.0", "1.1"],
       "description": "Schema version for the template plugins manifest"
+    },
+    "scaffolding": {
+      "$ref": "#/$defs/scaffolding"
     },
     "plugins": {
       "type": "object",
@@ -25,6 +28,38 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "scaffolding": {
+      "type": "object",
+      "description": "Template-level metadata for constructing the scaffolding CLI command.",
+      "required": ["command", "flags", "rules"],
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "The base CLI command for scaffolding."
+        },
+        "flags": {
+          "type": "object",
+          "description": "Map of flag name to flag descriptor.",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["required", "description"],
+            "properties": {
+              "required": { "type": "boolean" },
+              "description": { "type": "string" },
+              "pattern": { "type": "string" },
+              "default": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "rules": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Rules for constructing the scaffolding command."
+        }
+      },
+      "additionalProperties": false
+    },
     "templatePlugin": {
       "type": "object",
       "required": [
@@ -69,6 +104,13 @@
           "type": "string",
           "description": "Message displayed to the user after project initialization. Use this to inform about manual setup steps (e.g. environment variables, resource provisioning)."
         },
+        "postScaffold": {
+          "type": "array",
+          "description": "Ordered steps to follow after scaffolding.",
+          "items": {
+            "$ref": "plugin-manifest.schema.json#/$defs/postScaffoldStep"
+          }
+        },
         "resources": {
           "type": "object",
           "required": ["required", "optional"],
@@ -98,7 +140,23 @@
       "$ref": "plugin-manifest.schema.json#/$defs/resourceType"
     },
     "resourceFieldEntry": {
-      "$ref": "plugin-manifest.schema.json#/$defs/resourceFieldEntry"
+      "allOf": [
+        { "$ref": "plugin-manifest.schema.json#/$defs/resourceFieldEntry" },
+        {
+          "properties": {
+            "resolution": {
+              "type": "string",
+              "enum": [
+                "user-provided",
+                "platform-injected",
+                "static",
+                "cli-resolved"
+              ],
+              "description": "Computed during sync. Indicates how the field's value is provided: user-provided (needs --set), platform-injected (auto-set at deploy), static (has a default value), or cli-resolved (resolved by the CLI during init)."
+            }
+          }
+        }
+      ]
     },
     "resourceRequirement": {
       "$ref": "plugin-manifest.schema.json#/$defs/resourceRequirement"

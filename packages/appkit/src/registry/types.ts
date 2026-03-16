@@ -29,7 +29,7 @@ export {
   type ResourcePermission,
 };
 
-// Re-export generated base type from shared (schema-derived, used directly).
+// Re-export generated base types from shared (schema-derived, used directly).
 export type { ResourceFieldEntry } from "shared";
 
 // Import shared base types for strict extension below.

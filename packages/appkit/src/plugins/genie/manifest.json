@@ -13,13 +13,28 @@
         "fields": {
           "id": {
             "env": "DATABRICKS_GENIE_SPACE_ID",
-            "description": "Default Genie Space ID"
+            "description": "Default Genie Space ID",
+            "setupHint": "Find your Genie Space ID in the AI/BI Genie UI."
           }
         }
       }
     ],
     "optional": []
   },
+  "postScaffold": [
+    {
+      "step": 1,
+      "instruction": "Configure Genie Space aliases in the plugin config spaces map"
+    },
+    {
+      "step": 2,
+      "instruction": "Build UI components to send natural language queries via the Genie tRPC procedures"
+    },
+    {
+      "step": 3,
+      "instruction": "Update tests/smoke.spec.ts selectors for your app"
+    }
+  ],
   "config": {
     "schema": {
       "type": "object",

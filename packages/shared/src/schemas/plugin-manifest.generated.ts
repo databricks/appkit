@@ -214,6 +214,10 @@ export interface PluginManifest {
    * When true, this plugin is excluded from the template plugins manifest (appkit.plugins.json) during sync.
    */
   hidden?: boolean;
+  /**
+   * Ordered steps to follow after scaffolding. Steps marked blocking must complete before proceeding.
+   */
+  postScaffold?: PostScaffoldStep[];
 }
 /**
  * Defines a single field for a resource. Each field has its own environment variable and optional description. Single-value types use one key (e.g. id); multi-value types (database, secret) use multiple (e.g. instance_name, database_name or scope, key).
@@ -250,6 +254,39 @@ export interface ResourceFieldEntry {
    * Named resolver prefixed by resource type (e.g., 'postgres:host'). The CLI resolves this value during the init prompt flow.
    */
   resolve?: string;
+  discovery?: DiscoveryDescriptor;
+  /**
+   * Short actionable instruction for obtaining this field's value.
+   */
+  setupHint?: string;
+}
+/**
+ * How to discover candidate values for this field via CLI commands.
+ *
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "discoveryDescriptor".
+ */
+export interface DiscoveryDescriptor {
+  /**
+   * CLI command to list candidate values. Use <PROFILE> as a placeholder for the Databricks CLI profile.
+   */
+  cliCommand: string;
+  /**
+   * jq-style field to extract the value from each result (e.g. '.id').
+   */
+  selectField: string;
+  /**
+   * jq-style field for human-readable display (e.g. '.name').
+   */
+  displayField?: string;
+  /**
+   * Field name in the same resource that must be resolved first.
+   */
+  dependsOn?: string;
+  /**
+   * Optional command that returns a single value directly instead of a list.
+   */
+  shortcut?: string;
 }
 /**
  * This interface was referenced by `PluginManifest`'s JSON-Schema
@@ -282,4 +319,24 @@ export interface ConfigSchemaProperty {
   minLength?: number;
   maxLength?: number;
   required?: string[];
+}
+/**
+ * A single post-scaffolding step.
+ *
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "postScaffoldStep".
+ */
+export interface PostScaffoldStep {
+  /**
+   * Step number (sequential, starting from 1).
+   */
+  step: number;
+  /**
+   * What to do in this step.
+   */
+  instruction: string;
+  /**
+   * When true, this step must finish before proceeding to the next.
+   */
+  blocking?: boolean;
 }
