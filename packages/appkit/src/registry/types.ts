@@ -44,6 +44,7 @@ import type {
 
 /**
  * Declares a resource requirement for a plugin.
+ * Can be defined statically in a manifest or dynamically via getResourceRequirements().
  * Narrows the generated base: type → ResourceType enum, permission → ResourcePermission union.
  *
  * @see `packages/shared/src/schemas/plugin-manifest.generated.ts` `ResourceRequirement` — generated base
@@ -105,6 +106,7 @@ export type ConfigSchema = JSONSchema7;
 
 /**
  * Plugin manifest that declares metadata and resource requirements.
+ * Attached to plugin classes as a static property.
  * Extends the shared PluginManifest with strict resource types.
  *
  * @see `packages/shared/src/schemas/plugin-manifest.generated.ts` `PluginManifest` — generated base

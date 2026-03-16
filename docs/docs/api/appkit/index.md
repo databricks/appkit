@@ -36,12 +36,12 @@ plugin architecture, and React integration.
 | [GenerateDatabaseCredentialRequest](Interface.GenerateDatabaseCredentialRequest.md) | Request parameters for generating database OAuth credentials |
 | [ITelemetry](Interface.ITelemetry.md) | Plugin-facing interface for OpenTelemetry instrumentation. Provides a thin abstraction over OpenTelemetry APIs for plugins. |
 | [LakebasePoolConfig](Interface.LakebasePoolConfig.md) | Configuration for creating a Lakebase connection pool |
-| [PluginManifest](Interface.PluginManifest.md) | Plugin manifest that declares metadata and resource requirements. Extends the shared PluginManifest with strict resource types. |
+| [PluginManifest](Interface.PluginManifest.md) | Plugin manifest that declares metadata and resource requirements. Attached to plugin classes as a static property. Extends the shared PluginManifest with strict resource types. |
 | [RequestedClaims](Interface.RequestedClaims.md) | Optional claims for fine-grained Unity Catalog table permissions When specified, the returned token will be scoped to only the requested tables |
 | [RequestedResource](Interface.RequestedResource.md) | Resource to request permissions for in Unity Catalog |
 | [ResourceEntry](Interface.ResourceEntry.md) | Internal representation of a resource in the registry. Extends ResourceRequirement with resolution state and plugin ownership. |
-| [ResourceFieldEntry](Interface.ResourceFieldEntry.md) | This interface was referenced by `PluginManifest`'s JSON-Schema via the `definition` "resourceFieldEntry". |
-| [ResourceRequirement](Interface.ResourceRequirement.md) | Declares a resource requirement for a plugin. Narrows the generated base: type → ResourceType enum, permission → ResourcePermission union. |
+| [ResourceFieldEntry](Interface.ResourceFieldEntry.md) | Defines a single field for a resource. Each field has its own environment variable and optional description. Single-value types use one key (e.g. id); multi-value types (database, secret) use multiple (e.g. instance_name, database_name or scope, key). |
+| [ResourceRequirement](Interface.ResourceRequirement.md) | Declares a resource requirement for a plugin. Can be defined statically in a manifest or dynamically via getResourceRequirements(). Narrows the generated base: type → ResourceType enum, permission → ResourcePermission union. |
 | [StreamExecutionSettings](Interface.StreamExecutionSettings.md) | Configuration for streaming execution with default and user-scoped settings |
 | [TelemetryConfig](Interface.TelemetryConfig.md) | OpenTelemetry configuration for AppKit applications |
 | [ValidationResult](Interface.ValidationResult.md) | Result of validating all registered resources against the environment. |

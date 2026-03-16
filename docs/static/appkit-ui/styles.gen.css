@@ -5578,7 +5578,10 @@
   }
   ::selection {
     background-color: var(--primary);
-    opacity: 0.2;
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklch, var(--primary) 30%, transparent);
+    }
+    color: var(--primary-foreground);
   }
   @media (prefers-reduced-motion: reduce) {
     *,

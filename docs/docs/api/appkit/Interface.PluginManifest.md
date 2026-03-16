@@ -1,6 +1,7 @@
 # Interface: PluginManifest\<TName\>
 
 Plugin manifest that declares metadata and resource requirements.
+Attached to plugin classes as a static property.
 Extends the shared PluginManifest with strict resource types.
 
 ## See

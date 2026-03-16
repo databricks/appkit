@@ -1,6 +1,8 @@
 // AUTO-GENERATED from plugin-manifest.schema.json — do not edit.
 // Run: pnpm exec tsx tools/generate-schema-types.ts
 /**
+ * Declares a resource requirement for a plugin. Can be defined statically in a manifest or dynamically via getResourceRequirements().
+ *
  * This interface was referenced by `PluginManifest`'s JSON-Schema
  * via the `definition` "resourceRequirement".
  */
@@ -214,6 +216,8 @@ export interface PluginManifest {
   hidden?: boolean;
 }
 /**
+ * Defines a single field for a resource. Each field has its own environment variable and optional description. Single-value types use one key (e.g. id); multi-value types (database, secret) use multiple (e.g. instance_name, database_name or scope, key).
+ *
  * This interface was referenced by `PluginManifest`'s JSON-Schema
  * via the `definition` "resourceFieldEntry".
  */

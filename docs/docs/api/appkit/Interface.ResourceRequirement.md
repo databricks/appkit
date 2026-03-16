@@ -1,6 +1,7 @@
 # Interface: ResourceRequirement
 
 Declares a resource requirement for a plugin.
+Can be defined statically in a manifest or dynamically via getResourceRequirements().
 Narrows the generated base: type → ResourceType enum, permission → ResourcePermission union.
 
 ## See
