@@ -4,7 +4,7 @@
   "title": "AppKit Template Plugins Manifest",
   "description": "Aggregated plugin manifest for AppKit templates. Read by Databricks CLI during init to discover available plugins and their resource requirements.",
   "type": "object",
-  "required": ["version", "plugins"],
+  "required": ["version", "scaffolding", "plugins"],
   "properties": {
     "$schema": {
       "type": "string",
@@ -12,8 +12,11 @@
     },
     "version": {
       "type": "string",
-      "const": "1.0",
+      "const": "2.0",
       "description": "Schema version for the template plugins manifest"
+    },
+    "scaffolding": {
+      "$ref": "#/$defs/scaffoldingDescriptor"
     },
     "plugins": {
       "type": "object",
@@ -69,6 +72,17 @@
           "type": "string",
           "description": "Message displayed to the user after project initialization. Use this to inform about manual setup steps (e.g. environment variables, resource provisioning)."
         },
+        "agentHint": {
+          "type": "string",
+          "description": "Short free-text hint for agents on how to discover resource values (e.g. which CLI command to run)."
+        },
+        "postScaffold": {
+          "type": "array",
+          "description": "Ordered steps a user or agent should follow after scaffolding.",
+          "items": {
+            "$ref": "plugin-manifest.schema.json#/$defs/postScaffoldStep"
+          }
+        },
         "resources": {
           "type": "object",
           "required": ["required", "optional"],
@@ -102,6 +116,55 @@
     },
     "resourceRequirement": {
       "$ref": "plugin-manifest.schema.json#/$defs/resourceRequirement"
+    },
+    "scaffoldingFlag": {
+      "type": "object",
+      "required": ["required", "description"],
+      "properties": {
+        "required": {
+          "type": "boolean",
+          "description": "Whether this flag must be provided."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the flag."
+        },
+        "pattern": {
+          "type": "string",
+          "description": "Regex pattern the flag value must match."
+        },
+        "default": {
+          "type": "string",
+          "description": "Default value when the flag is omitted."
+        }
+      },
+      "additionalProperties": false
+    },
+    "scaffoldingDescriptor": {
+      "type": "object",
+      "required": ["command", "flags", "rules"],
+      "description": "Describes how to construct the scaffolding command for this template.",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "The base CLI command for scaffolding."
+        },
+        "flags": {
+          "type": "object",
+          "description": "Map of flag name to flag descriptor.",
+          "additionalProperties": {
+            "$ref": "#/$defs/scaffoldingFlag"
+          }
+        },
+        "rules": {
+          "type": "array",
+          "description": "Rules an agent must follow when constructing the scaffolding command.",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

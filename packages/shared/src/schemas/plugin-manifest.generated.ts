@@ -211,6 +211,14 @@ export interface PluginManifest {
    */
   onSetupMessage?: string;
   /**
+   * Short free-text hint for agents on how to discover resource values (e.g. which CLI command to run). Complements the structured discovery fields.
+   */
+  agentHint?: string;
+  /**
+   * Ordered steps a user or agent should follow after scaffolding.
+   */
+  postScaffold?: PostScaffoldStep[];
+  /**
    * When true, this plugin is excluded from the template plugins manifest (appkit.plugins.json) during sync.
    */
   hidden?: boolean;
@@ -250,6 +258,39 @@ export interface ResourceFieldEntry {
    * Named resolver prefixed by resource type (e.g., 'postgres:host'). The CLI resolves this value during the init prompt flow.
    */
   resolve?: string;
+  discovery?: DiscoveryDescriptor;
+  /**
+   * Who provides the value. 'user-provided': agent/user must supply it via --set. 'platform-injected': auto-set by the platform at deploy time.
+   */
+  resolution?: "user-provided" | "platform-injected";
+}
+/**
+ * Describes how an agent or CLI can discover a candidate value for this field.
+ *
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "discoveryDescriptor".
+ */
+export interface DiscoveryDescriptor {
+  /**
+   * CLI command to list candidate values. Use <PROFILE> as placeholder for the Databricks profile.
+   */
+  cliCommand: string;
+  /**
+   * jq-style field path to extract the value from each result item (e.g. ".id").
+   */
+  selectField: string;
+  /**
+   * jq-style field path for a human-readable label (e.g. ".name").
+   */
+  displayField?: string;
+  /**
+   * Field name in the same resource that must be resolved first.
+   */
+  dependsOn?: string;
+  /**
+   * Optional command that returns a single value directly, bypassing the list-and-select flow.
+   */
+  shortcut?: string;
 }
 /**
  * This interface was referenced by `PluginManifest`'s JSON-Schema
@@ -282,4 +323,24 @@ export interface ConfigSchemaProperty {
   minLength?: number;
   maxLength?: number;
   required?: string[];
+}
+/**
+ * A single ordered step for post-scaffold setup.
+ *
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "postScaffoldStep".
+ */
+export interface PostScaffoldStep {
+  /**
+   * Step number (must be unique and sequential within a plugin).
+   */
+  step: number;
+  /**
+   * Human or agent-readable instruction for this step.
+   */
+  instruction: string;
+  /**
+   * When true, this step must complete before proceeding to the next.
+   */
+  blocking?: boolean;
 }

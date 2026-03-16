@@ -5,6 +5,7 @@ import {
   isWithinDirectory,
   parseImports,
   parsePluginUsages,
+  SCAFFOLDING_DESCRIPTOR,
   shouldAllowJsManifestForPackage,
 } from "./sync";
 
@@ -180,6 +181,47 @@ describe("plugin sync", () => {
     it("rejects untrusted package scopes by default", () => {
       expect(shouldAllowJsManifestForPackage("my-plugin")).toBe(false);
       expect(shouldAllowJsManifestForPackage("@acme/plugin")).toBe(false);
+    });
+  });
+
+  describe("SCAFFOLDING_DESCRIPTOR", () => {
+    it("has the required databricks apps init command", () => {
+      expect(SCAFFOLDING_DESCRIPTOR.command).toBe("databricks apps init");
+    });
+
+    it("has all required flags with correct required status", () => {
+      expect(SCAFFOLDING_DESCRIPTOR.flags["--name"].required).toBe(true);
+      expect(SCAFFOLDING_DESCRIPTOR.flags["--profile"].required).toBe(true);
+      expect(SCAFFOLDING_DESCRIPTOR.flags["--features"].required).toBe(false);
+      expect(SCAFFOLDING_DESCRIPTOR.flags["--set"].required).toBe(false);
+      expect(SCAFFOLDING_DESCRIPTOR.flags["--run"].required).toBe(false);
+    });
+
+    it("has a pattern for --name that enforces app name format", () => {
+      const pattern = SCAFFOLDING_DESCRIPTOR.flags["--name"].pattern;
+      expect(pattern).toBeDefined();
+      const re = new RegExp(pattern!);
+      expect(re.test("my-app")).toBe(true);
+      expect(re.test("my app")).toBe(false);
+      expect(re.test("MyApp")).toBe(false);
+      expect(re.test("a".repeat(26))).toBe(true);
+      expect(re.test("a".repeat(27))).toBe(false);
+    });
+
+    it("has a default of none for --run", () => {
+      expect(SCAFFOLDING_DESCRIPTOR.flags["--run"].default).toBe("none");
+    });
+
+    it("has rules that mention platform-injected and user-provided", () => {
+      const rulesText = SCAFFOLDING_DESCRIPTOR.rules.join(" ");
+      expect(rulesText).toContain("platform-injected");
+      expect(rulesText).toContain("user-provided");
+    });
+
+    it("has rules that clarify requiredByTemplate behaviour", () => {
+      const rulesText = SCAFFOLDING_DESCRIPTOR.rules.join(" ");
+      expect(rulesText).toContain("requiredByTemplate=true");
+      expect(rulesText).toContain("--features");
     });
   });
 });

@@ -21,6 +21,22 @@ Extends the shared PluginManifest with strict resource types.
 
 ## Properties
 
+### agentHint?
+
+```ts
+optional agentHint: string;
+```
+
+Short free-text hint for agents on how to discover resource values (e.g. which CLI command to run). Complements the structured discovery fields.
+
+#### Inherited from
+
+```ts
+Omit.agentHint
+```
+
+***
+
 ### author?
 
 ```ts
@@ -164,6 +180,22 @@ Message displayed to the user after project initialization. Use this to inform a
 
 ```ts
 Omit.onSetupMessage
+```
+
+***
+
+### postScaffold?
+
+```ts
+optional postScaffold: PostScaffoldStep[];
+```
+
+Ordered steps a user or agent should follow after scaffolding.
+
+#### Inherited from
+
+```ts
+Omit.postScaffold
 ```
 
 ***

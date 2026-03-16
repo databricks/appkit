@@ -23,7 +23,12 @@ function cleanDir(dir: string): void {
 const TEMPLATE_MANIFEST_JSON = {
   $schema:
     "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
-  version: "1.0",
+  version: "2.0",
+  scaffolding: {
+    command: "databricks apps init",
+    flags: { "--name": { required: true, description: "App name" } },
+    rules: [],
+  },
   plugins: {
     server: {
       name: "server",
@@ -94,7 +99,12 @@ describe("list", () => {
         JSON.stringify({
           $schema:
             "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
-          version: "1.0",
+          version: "2.0",
+          scaffolding: {
+            command: "databricks apps init",
+            flags: { "--name": { required: true, description: "App name" } },
+            rules: [],
+          },
           plugins: {},
         }),
       );

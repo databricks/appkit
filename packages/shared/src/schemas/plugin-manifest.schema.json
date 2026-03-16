@@ -91,6 +91,17 @@
       "type": "string",
       "description": "Message displayed to the user after project initialization. Use this to inform about manual setup steps (e.g. environment variables, resource provisioning)."
     },
+    "agentHint": {
+      "type": "string",
+      "description": "Short free-text hint for agents on how to discover resource values (e.g. which CLI command to run). Complements the structured discovery fields."
+    },
+    "postScaffold": {
+      "type": "array",
+      "description": "Ordered steps a user or agent should follow after scaffolding.",
+      "items": {
+        "$ref": "#/$defs/postScaffoldStep"
+      }
+    },
     "hidden": {
       "type": "boolean",
       "default": false,
@@ -220,6 +231,71 @@
           "type": "string",
           "pattern": "^[a-z_]+:[a-zA-Z]+$",
           "description": "Named resolver prefixed by resource type (e.g., 'postgres:host'). The CLI resolves this value during the init prompt flow."
+        },
+        "discovery": {
+          "$ref": "#/$defs/discoveryDescriptor"
+        },
+        "resolution": {
+          "type": "string",
+          "enum": ["user-provided", "platform-injected"],
+          "description": "Who provides the value. 'user-provided': agent/user must supply it via --set. 'platform-injected': auto-set by the platform at deploy time."
+        }
+      },
+      "additionalProperties": false
+    },
+    "discoveryDescriptor": {
+      "type": "object",
+      "required": ["cliCommand", "selectField"],
+      "description": "Describes how an agent or CLI can discover a candidate value for this field.",
+      "properties": {
+        "cliCommand": {
+          "type": "string",
+          "description": "CLI command to list candidate values. Use <PROFILE> as placeholder for the Databricks profile.",
+          "examples": ["databricks warehouses list --profile <PROFILE> -o json"]
+        },
+        "selectField": {
+          "type": "string",
+          "description": "jq-style field path to extract the value from each result item (e.g. \".id\").",
+          "examples": [".id", ".name"]
+        },
+        "displayField": {
+          "type": "string",
+          "description": "jq-style field path for a human-readable label (e.g. \".name\").",
+          "examples": [".name", ".title"]
+        },
+        "dependsOn": {
+          "type": "string",
+          "description": "Field name in the same resource that must be resolved first."
+        },
+        "shortcut": {
+          "type": "string",
+          "description": "Optional command that returns a single value directly, bypassing the list-and-select flow.",
+          "examples": [
+            "databricks experimental aitools tools get-default-warehouse --profile <PROFILE>"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "postScaffoldStep": {
+      "type": "object",
+      "required": ["step", "instruction"],
+      "description": "A single ordered step for post-scaffold setup.",
+      "properties": {
+        "step": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Step number (must be unique and sequential within a plugin)."
+        },
+        "instruction": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human or agent-readable instruction for this step."
+        },
+        "blocking": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, this step must complete before proceeding to the next."
         }
       },
       "additionalProperties": false

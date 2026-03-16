@@ -13,6 +13,19 @@ export type {
 
 import type { PluginManifest } from "../../../schemas/plugin-manifest.generated";
 
+export interface ScaffoldingFlag {
+  required: boolean;
+  description: string;
+  pattern?: string;
+  default?: string;
+}
+
+export interface ScaffoldingDescriptor {
+  command: string;
+  flags: Record<string, ScaffoldingFlag>;
+  rules: string[];
+}
+
 export interface TemplatePlugin extends Omit<PluginManifest, "config"> {
   package: string;
   /** When true, this plugin is required by the template and cannot be deselected during CLI init. */
@@ -22,5 +35,6 @@ export interface TemplatePlugin extends Omit<PluginManifest, "config"> {
 export interface TemplatePluginsManifest {
   $schema: string;
   version: string;
+  scaffolding: ScaffoldingDescriptor;
   plugins: Record<string, TemplatePlugin>;
 }

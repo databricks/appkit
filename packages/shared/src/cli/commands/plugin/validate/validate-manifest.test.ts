@@ -217,14 +217,45 @@ describe("validate-manifest", () => {
   });
 
   describe("validateTemplateManifest", () => {
+    const minimalScaffolding = {
+      command: "databricks apps init",
+      flags: {
+        "--name": { required: true, description: "App name" },
+        "--profile": { required: true, description: "CLI profile" },
+      },
+      rules: ["Example rule"],
+    };
+
     it("validates a minimal correct template manifest", () => {
       const result = validateTemplateManifest({
         $schema:
           "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
-        version: "1.0",
+        version: "2.0",
+        scaffolding: minimalScaffolding,
         plugins: {},
       });
       expect(result.valid).toBe(true);
+    });
+
+    it("rejects version 1.0 manifests", () => {
+      const result = validateTemplateManifest({
+        $schema:
+          "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
+        version: "1.0",
+        scaffolding: minimalScaffolding,
+        plugins: {},
+      });
+      expect(result.valid).toBe(false);
+    });
+
+    it("rejects manifest missing scaffolding", () => {
+      const result = validateTemplateManifest({
+        $schema:
+          "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
+        version: "2.0",
+        plugins: {},
+      });
+      expect(result.valid).toBe(false);
     });
 
     it("rejects non-object input", () => {

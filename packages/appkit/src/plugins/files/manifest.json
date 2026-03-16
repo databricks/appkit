@@ -3,6 +3,7 @@
   "name": "files",
   "displayName": "Files Plugin",
   "description": "File operations against Databricks Volumes and Unity Catalog",
+  "agentHint": "Provide the full volume path, e.g. /Volumes/catalog/schema/volume_name.",
   "resources": {
     "required": [
       {
@@ -14,7 +15,13 @@
         "fields": {
           "path": {
             "env": "DATABRICKS_VOLUME_FILES",
-            "description": "Volume path for file storage (e.g. /Volumes/catalog/schema/volume_name)"
+            "description": "Volume path for file storage (e.g. /Volumes/catalog/schema/volume_name)",
+            "resolution": "user-provided",
+            "discovery": {
+              "cliCommand": "databricks volumes list <catalog>.<schema> --profile <PROFILE> -o json",
+              "selectField": ".full_name",
+              "displayField": ".name"
+            }
           }
         }
       }
@@ -37,5 +44,12 @@
         }
       }
     }
-  }
+  },
+  "postScaffold": [
+    {
+      "step": 1,
+      "instruction": "Use the files plugin API to read/write volume files in your tRPC procedures"
+    },
+    { "step": 2, "instruction": "Build UI for file upload/download using tRPC" }
+  ]
 }

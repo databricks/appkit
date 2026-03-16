@@ -27,6 +27,14 @@ Human-readable description for this field
 
 ***
 
+### discovery?
+
+```ts
+optional discovery: DiscoveryDescriptor;
+```
+
+***
+
 ### env?
 
 ```ts
@@ -54,6 +62,16 @@ optional localOnly: boolean;
 ```
 
 When true, this field is only generated for local .env files. The Databricks Apps platform auto-injects it at deploy time.
+
+***
+
+### resolution?
+
+```ts
+optional resolution: "user-provided" | "platform-injected";
+```
+
+Who provides the value. 'user-provided': agent/user must supply it via --set. 'platform-injected': auto-set by the platform at deploy time.
 
 ***
 
