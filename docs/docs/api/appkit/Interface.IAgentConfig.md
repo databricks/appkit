@@ -49,16 +49,6 @@ Max tokens to generate (default 2000). Ignored when `agentInstance` is provided.
 
 ***
 
-### mcpServers?
-
-```ts
-optional mcpServers: DatabricksMCPServer[];
-```
-
-MCP servers for Databricks tool integration. Ignored when `agentInstance` is provided.
-
-***
-
 ### model?
 
 ```ts
@@ -121,8 +111,10 @@ Sampling temperature (0.0-1.0, default 0.1). Ignored when `agentInstance` is pro
 optional tools: AgentTool[];
 ```
 
-Tools to register with the agent. Accepts OpenResponses-aligned FunctionTool
-objects or LangChain StructuredToolInterface instances.
+Tools to register with the agent. Accepts:
+- OpenResponses-aligned `FunctionTool` objects (local tool with execute handler)
+- Databricks hosted tools (`genie`, `vector_search_index`, `custom_mcp_server`, `external_mcp_server`)
+
 Ignored when `agentInstance` is provided.
 
 ***

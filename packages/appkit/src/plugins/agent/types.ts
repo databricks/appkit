@@ -1,16 +1,15 @@
-import type { DatabricksMCPServer } from "@databricks/langchainjs";
-import type { StructuredToolInterface } from "@langchain/core/tools";
 import type { BasePluginConfig } from "shared";
 import type { AgentInterface } from "./agent-interface";
 import type { FunctionTool } from "./function-tool";
+import type { HostedTool } from "./hosted-tools";
 
 /**
  * A tool that can be registered with the agent plugin.
  *
- * - `FunctionTool` (preferred): OpenResponses-aligned plain object with JSON Schema parameters.
- * - `StructuredToolInterface`: LangChain tool for advanced use cases.
+ * - `FunctionTool`: OpenResponses-aligned plain object with JSON Schema parameters and an execute handler.
+ * - `HostedTool`: Databricks-hosted tool (genie, vector_search_index, custom_mcp_server, external_mcp_server).
  */
-export type AgentTool = FunctionTool | StructuredToolInterface;
+export type AgentTool = FunctionTool | HostedTool;
 
 export interface IAgentConfig extends BasePluginConfig {
   /**
@@ -44,12 +43,11 @@ export interface IAgentConfig extends BasePluginConfig {
   /** Max tokens to generate (default 2000). Ignored when `agentInstance` is provided. */
   maxTokens?: number;
 
-  /** MCP servers for Databricks tool integration. Ignored when `agentInstance` is provided. */
-  mcpServers?: DatabricksMCPServer[];
-
   /**
-   * Tools to register with the agent. Accepts OpenResponses-aligned FunctionTool
-   * objects or LangChain StructuredToolInterface instances.
+   * Tools to register with the agent. Accepts:
+   * - OpenResponses-aligned `FunctionTool` objects (local tool with execute handler)
+   * - Databricks hosted tools (`genie`, `vector_search_index`, `custom_mcp_server`, `external_mcp_server`)
+   *
    * Ignored when `agentInstance` is provided.
    */
   tools?: AgentTool[];

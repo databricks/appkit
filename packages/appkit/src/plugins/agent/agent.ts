@@ -1,24 +1,27 @@
 /**
- * AgentPlugin — first-class AppKit plugin for LangChain/LangGraph agents.
+ * AgentPlugin — first-class AppKit plugin for building AI agents.
  *
  * Provides:
  *  - POST /api/agent  (standard AppKit namespaced route)
  *
  * Supports two modes:
  *  1. Bring-your-own agent via `config.agentInstance`
- *  2. Auto-build a LangGraph ReAct agent from config (model, tools, MCP servers)
+ *  2. Auto-build a ReAct agent from config (model, tools)
  *
- * When using config (not agentInstance), you can add tools and MCP servers
- * after app creation via appkit.agent.addTools() and appkit.agent.addMcpServers().
+ * Tools can be local (FunctionTool with an execute handler) or hosted on
+ * Databricks (genie, vector_search_index, custom_mcp_server, external_mcp_server).
+ * Hosted tools are resolved to managed MCP servers transparently.
  */
 
-import type { DatabricksMCPServer } from "@databricks/langchainjs";
-import type { StructuredToolInterface } from "@langchain/core/tools";
 import type express from "express";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
+import type { PluginManifest } from "../../registry";
 import type { AgentInterface } from "./agent-interface";
-import { functionToolToStructuredTool, isFunctionTool } from "./function-tool";
+import type { FunctionTool } from "./function-tool";
+import { functionToolToStructuredTool } from "./function-tool";
+import type { HostedTool } from "./hosted-tools";
+import { isHostedTool, resolveHostedTools } from "./hosted-tools";
 import { createInvokeHandler } from "./invoke-handler";
 import manifest from "./manifest.json";
 import { StandardAgent } from "./standard-agent";
@@ -36,43 +39,31 @@ type ChatDatabricksInstance = InstanceType<
 export class AgentPlugin extends Plugin<IAgentConfig> {
   public name = "agent" as const;
 
-  static manifest = manifest;
+  static manifest = manifest as PluginManifest<"agent">;
 
   protected declare config: IAgentConfig;
 
   private agentImpl: AgentInterface | null = null;
   private systemPrompt = DEFAULT_SYSTEM_PROMPT;
   private mcpClient: {
-    getTools(): Promise<StructuredToolInterface[]>;
+    getTools(): Promise<unknown[]>;
     close(): Promise<void>;
   } | null = null;
 
-  /** Only set when building from config (not agentInstance). Used when rebuilding after addTools/addMcpServers. */
+  /** Only set when building from config (not agentInstance). */
   private model: ChatDatabricksInstance | null = null;
-  /** Mutable list of tools (config + added). Only used when building from config. */
+  /** Mutable list of all tools (config + added). Only used when building from config. */
   private toolsList: AgentTool[] = [];
-  /** Mutable list of MCP servers (config + added). Only used when building from config. */
-  private mcpServersList: DatabricksMCPServer[] = [];
-
-  /**
-   * Normalize an AgentTool to a LangChain StructuredToolInterface.
-   * FunctionTool objects are converted; StructuredToolInterface pass through.
-   */
-  private static toStructuredTool(tool: AgentTool): StructuredToolInterface {
-    return isFunctionTool(tool) ? functionToolToStructuredTool(tool) : tool;
-  }
 
   async setup() {
     this.systemPrompt = this.config.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
 
-    // If a pre-built agent is provided, use it directly
     if (this.config.agentInstance) {
       this.agentImpl = this.config.agentInstance;
       logger.info("AgentPlugin initialized with provided agentInstance");
       return;
     }
 
-    // Otherwise build a LangGraph ReAct agent from config
     const modelName = this.config.model ?? process.env.DATABRICKS_MODEL;
 
     if (!modelName) {
@@ -92,26 +83,50 @@ export class AgentPlugin extends Plugin<IAgentConfig> {
     });
 
     this.toolsList = [...(this.config.tools ?? [])];
-    this.mcpServersList = [...(this.config.mcpServers ?? [])];
 
     await this.buildStandardAgent();
 
+    const { localTools, hostedTools } = AgentPlugin.partitionTools(
+      this.toolsList,
+    );
     logger.info(
-      "AgentPlugin initialized: model=%s tools=%d mcpServers=%d",
+      "AgentPlugin initialized: model=%s localTools=%d hostedTools=%d",
       modelName,
-      this.toolsList.length,
-      this.mcpServersList.length,
+      localTools.length,
+      hostedTools.length,
     );
   }
 
   /**
-   * Builds or rebuilds the LangGraph ReAct agent from current model, toolsList, and mcpServersList.
-   * Call this after changing toolsList or mcpServersList (e.g. via addTools/addMcpServers).
+   * Partition the tools list into local FunctionTools and hosted tools
+   * (Databricks-managed MCP services).
+   */
+  private static partitionTools(tools: AgentTool[]): {
+    localTools: FunctionTool[];
+    hostedTools: HostedTool[];
+  } {
+    const localTools: FunctionTool[] = [];
+    const hostedTools: HostedTool[] = [];
+
+    for (const tool of tools) {
+      if (isHostedTool(tool)) {
+        hostedTools.push(tool);
+      } else {
+        localTools.push(tool);
+      }
+    }
+
+    return { localTools, hostedTools };
+  }
+
+  /**
+   * Builds or rebuilds the ReAct agent from current model and toolsList.
+   * FunctionTools are converted to the internal tool format; hosted tools
+   * are resolved to MCP server connections.
    */
   private async buildStandardAgent(): Promise<void> {
     if (!this.model) return;
 
-    // Close existing MCP client before creating a new one
     if (this.mcpClient) {
       try {
         await this.mcpClient.close();
@@ -121,16 +136,19 @@ export class AgentPlugin extends Plugin<IAgentConfig> {
       this.mcpClient = null;
     }
 
-    const tools: StructuredToolInterface[] = [];
+    const { localTools, hostedTools } = AgentPlugin.partitionTools(
+      this.toolsList,
+    );
 
-    if (this.mcpServersList.length > 0) {
+    const tools: unknown[] = [];
+
+    if (hostedTools.length > 0) {
       try {
+        const mcpServers = await resolveHostedTools(hostedTools);
         const { buildMCPServerConfig } = await import(
           "@databricks/langchainjs"
         );
-        const mcpServerConfigs = await buildMCPServerConfig(
-          this.mcpServersList,
-        );
+        const mcpServerConfigs = await buildMCPServerConfig(mcpServers);
         const { MultiServerMCPClient } = await import(
           "@langchain/mcp-adapters"
         );
@@ -142,24 +160,24 @@ export class AgentPlugin extends Plugin<IAgentConfig> {
         const mcpTools = await this.mcpClient.getTools();
         tools.push(...mcpTools);
         logger.info(
-          "Loaded %d MCP tools from %d server(s)",
+          "Loaded %d MCP tools from %d hosted tool(s)",
           mcpTools.length,
-          this.mcpServersList.length,
+          hostedTools.length,
         );
       } catch (err) {
         logger.warn(
-          "Failed to load MCP tools — continuing without them: %O",
+          "Failed to load hosted tools — continuing without them: %O",
           err,
         );
       }
     }
 
-    tools.push(...this.toolsList.map(AgentPlugin.toStructuredTool));
+    tools.push(...localTools.map(functionToolToStructuredTool));
 
     const { createReactAgent } = await import("@langchain/langgraph/prebuilt");
     const langGraphAgent = createReactAgent({
       llm: this.model,
-      tools,
+      tools: tools as any,
     });
 
     this.agentImpl = new StandardAgent(
@@ -169,57 +187,30 @@ export class AgentPlugin extends Plugin<IAgentConfig> {
   }
 
   /**
-   * Batch-add tools and/or MCP servers with a single agent rebuild.
-   * Only supported when the plugin was initialized from config (not agentInstance).
+   * Add tools to the agent after app creation. Only supported when the plugin
+   * was initialized from config (not when using agentInstance). Rebuilds the
+   * underlying agent with the new tool set.
    *
-   * Tools can be OpenResponses-aligned FunctionTool objects or LangChain StructuredToolInterface.
+   * Accepts FunctionTool or hosted tool definitions.
    */
-  async addCapabilities(options: {
-    tools?: AgentTool[];
-    mcpServers?: DatabricksMCPServer[];
-  }): Promise<void> {
+  async addTools(tools: AgentTool[]): Promise<void> {
     if (this.config.agentInstance) {
       throw new Error(
-        "addCapabilities() is not supported when using a custom agentInstance",
+        "addTools() is not supported when using a custom agentInstance",
       );
     }
     if (!this.model) {
       throw new Error("AgentPlugin not initialized — call setup() first");
     }
 
-    const { tools, mcpServers } = options;
-    if (tools?.length) this.toolsList.push(...tools);
-    if (mcpServers?.length) this.mcpServersList.push(...mcpServers);
-
+    this.toolsList.push(...tools);
     await this.buildStandardAgent();
 
     logger.info(
-      "Configured agent: added %d tool(s), %d MCP server(s); totals tools=%d servers=%d",
-      tools?.length ?? 0,
-      mcpServers?.length ?? 0,
+      "Added %d tool(s); total tools=%d",
+      tools.length,
       this.toolsList.length,
-      this.mcpServersList.length,
     );
-  }
-
-  /**
-   * Add tools to the agent after app creation. Only supported when the plugin
-   * was initialized from config (not when using agentInstance). Rebuilds the
-   * underlying LangGraph agent with the new tool set.
-   *
-   * Accepts OpenResponses-aligned FunctionTool objects or LangChain StructuredToolInterface.
-   */
-  async addTools(tools: AgentTool[]): Promise<void> {
-    await this.addCapabilities({ tools });
-  }
-
-  /**
-   * Add MCP servers to the agent after app creation. Only supported when the
-   * plugin was initialized from config (not when using agentInstance). Rebuilds
-   * the underlying LangGraph agent so new MCP tools are available.
-   */
-  async addMcpServers(servers: DatabricksMCPServer[]): Promise<void> {
-    await this.addCapabilities({ mcpServers: servers });
   }
 
   private getAgentImpl(): AgentInterface {
@@ -283,12 +274,6 @@ export class AgentPlugin extends Plugin<IAgentConfig> {
       }.bind(this),
 
       addTools: (tools: AgentTool[]) => this.addTools(tools),
-      addMcpServers: (servers: DatabricksMCPServer[]) =>
-        this.addMcpServers(servers),
-      addCapabilities: (options: {
-        tools?: AgentTool[];
-        mcpServers?: DatabricksMCPServer[];
-      }) => this.addCapabilities(options),
     };
   }
 }

@@ -43,8 +43,8 @@ createApp({
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
 }).then(async (appkit) => {
-  // Add tools (and optionally MCP servers) after app creation
-  await appkit.agent.addCapabilities({ tools: [demoTools.timeTool] });
+  // Add tools after app creation
+  await appkit.agent.addTools([demoTools.timeTool]);
 
   appkit.server
     .extend((app) => {

@@ -21,7 +21,7 @@ import type {
 /**
  * Minimal interface for the LangGraph agent returned by createReactAgent.
  */
-export interface LangGraphAgent {
+interface LangGraphAgent {
   invoke(input: {
     messages: BaseMessage[];
   }): Promise<{ messages: BaseMessage[] }>;

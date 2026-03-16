@@ -52,10 +52,24 @@ export { agent, analytics, files, genie, lakebase, server } from "./plugins";
 export type {
   AgentInterface,
   AgentTool,
+  CustomMcpServerTool,
+  ExternalMcpServerTool,
   FunctionTool,
+  GenieTool,
+  HostedTool,
   IAgentConfig,
   InvokeParams,
+  ResponseFunctionCallOutput,
+  ResponseFunctionToolCall,
+  ResponseOutputItem,
+  ResponseOutputMessage,
   ResponseStreamEvent,
+  VectorSearchIndexTool,
+} from "./plugins/agent";
+export {
+  createInvokeHandler,
+  isFunctionTool,
+  isHostedTool,
   StandardAgent,
 } from "./plugins/agent";
 // Registry types and utilities for plugin manifests
