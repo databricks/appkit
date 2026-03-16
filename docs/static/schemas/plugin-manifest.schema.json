@@ -91,6 +91,13 @@
       "type": "string",
       "description": "Message displayed to the user after project initialization. Use this to inform about manual setup steps (e.g. environment variables, resource provisioning)."
     },
+    "postScaffold": {
+      "type": "array",
+      "description": "Ordered guidance for human or agent follow-up after scaffolding.",
+      "items": {
+        "$ref": "#/$defs/postScaffoldStep"
+      }
+    },
     "hidden": {
       "type": "boolean",
       "default": false,
@@ -220,9 +227,52 @@
           "type": "string",
           "pattern": "^[a-z_]+:[a-zA-Z]+$",
           "description": "Named resolver prefixed by resource type (e.g., 'postgres:host'). The CLI resolves this value during the init prompt flow."
+        },
+        "discovery": {
+          "$ref": "#/$defs/discoveryDescriptor"
+        },
+        "resolution": {
+          "$ref": "#/$defs/resourceResolution"
         }
       },
       "additionalProperties": false
+    },
+    "discoveryDescriptor": {
+      "type": "object",
+      "required": ["cliCommand", "selectField"],
+      "properties": {
+        "cliCommand": {
+          "type": "string",
+          "minLength": 1,
+          "description": "CLI command to list candidate values. Use <PROFILE> as a placeholder for the Databricks CLI profile."
+        },
+        "selectField": {
+          "type": "string",
+          "minLength": 1,
+          "description": "jq-style selector for the machine-readable value to capture from the CLI output."
+        },
+        "displayField": {
+          "type": "string",
+          "minLength": 1,
+          "description": "jq-style selector for a human-readable label to display alongside the selected value."
+        },
+        "dependsOn": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Field name in the same resource that must be resolved before running this discovery command."
+        },
+        "shortcut": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional direct CLI command that returns a single preferred value."
+        }
+      },
+      "additionalProperties": false
+    },
+    "resourceResolution": {
+      "type": "string",
+      "enum": ["user-provided", "platform-injected"],
+      "description": "How this field's value is supplied to the app."
     },
     "resourceRequirement": {
       "type": "object",
@@ -404,6 +454,28 @@
           }
         }
       ]
+    },
+    "postScaffoldStep": {
+      "type": "object",
+      "required": ["step", "instruction"],
+      "properties": {
+        "step": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Step number in the ordered post-scaffold flow."
+        },
+        "instruction": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Instruction to follow after scaffolding completes."
+        },
+        "blocking": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, this step must finish before continuing."
+        }
+      },
+      "additionalProperties": false
     },
     "configSchemaProperty": {
       "type": "object",

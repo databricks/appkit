@@ -3,6 +3,7 @@ import { ConfigurationError } from "../errors";
 import { createLogger } from "../logging/logger";
 import type {
   PluginManifest,
+  ResourceFieldEntry,
   ResourcePermission,
   ResourceRequirement,
 } from "./types";
@@ -17,7 +18,7 @@ interface LooseResource {
   resourceKey: string;
   description: string;
   permission: string;
-  fields: Record<string, { env: string; description?: string }>;
+  fields: Record<string, ResourceFieldEntry>;
 }
 
 function normalizeType(s: string): ResourceType {

@@ -30,5 +30,9 @@ export default defineConfig({
       from: "src/schemas/template-plugins.schema.json",
       to: "dist/schemas",
     },
+    {
+      from: "src/schemas/template-plugins.schema.v2.json",
+      to: "dist/schemas",
+    },
   ],
 });

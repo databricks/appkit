@@ -3,7 +3,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Ajv, { type ErrorObject } from "ajv";
 import addFormats from "ajv-formats";
-import type { PluginManifest } from "../manifest-types";
+import type {
+  PluginManifest,
+  TemplatePluginsManifest,
+} from "../manifest-types";
 
 export type { PluginManifest };
 
@@ -13,9 +16,9 @@ const PLUGIN_MANIFEST_SCHEMA_PATH = path.join(
   SCHEMAS_DIR,
   "plugin-manifest.schema.json",
 );
-const TEMPLATE_PLUGINS_SCHEMA_PATH = path.join(
+const TEMPLATE_PLUGINS_V2_SCHEMA_PATH = path.join(
   SCHEMAS_DIR,
-  "template-plugins.schema.json",
+  "template-plugins.schema.v2.json",
 );
 
 export type SchemaType = "plugin-manifest" | "template-plugins" | "unknown";
@@ -23,7 +26,7 @@ export type SchemaType = "plugin-manifest" | "template-plugins" | "unknown";
 const SCHEMA_ID_MAP: Record<string, SchemaType> = {
   "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json":
     "plugin-manifest",
-  "https://databricks.github.io/appkit/schemas/template-plugins.schema.json":
+  "https://databricks.github.io/appkit/schemas/template-plugins.schema.v2.json":
     "template-plugins",
 };
 
@@ -42,6 +45,159 @@ export interface ValidateResult {
   valid: boolean;
   manifest?: PluginManifest;
   errors?: ErrorObject[];
+}
+
+function makeSemanticError(
+  instancePath: string,
+  message: string,
+  params: Record<string, unknown> = {},
+): ErrorObject {
+  return {
+    keyword: "semantic",
+    instancePath,
+    schemaPath: "#/semantic",
+    params,
+    message,
+  } as ErrorObject;
+}
+
+function validateResourceFields(
+  fields: NonNullable<
+    PluginManifest["resources"]["required"]
+  >[number]["fields"],
+  instancePath: string,
+): ErrorObject[] {
+  const errors: ErrorObject[] = [];
+  const fieldNames = new Set(Object.keys(fields));
+  const dependencyGraph = new Map<string, string>();
+
+  for (const [fieldName, field] of Object.entries(fields)) {
+    const discoveryPath = `${instancePath}/fields/${fieldName}/discovery`;
+    const fieldPath = `${instancePath}/fields/${fieldName}`;
+
+    if (
+      field.resolution !== undefined &&
+      !["user-provided", "platform-injected"].includes(field.resolution)
+    ) {
+      errors.push(
+        makeSemanticError(
+          `${fieldPath}/resolution`,
+          'must be "user-provided" or "platform-injected"',
+        ),
+      );
+    }
+
+    if (!field.discovery) continue;
+
+    if (!field.discovery.cliCommand.includes("--profile")) {
+      errors.push(
+        makeSemanticError(
+          `${discoveryPath}/cliCommand`,
+          "must include --profile in discovery CLI commands",
+        ),
+      );
+    }
+
+    if (
+      field.discovery.shortcut &&
+      !field.discovery.shortcut.includes("--profile")
+    ) {
+      errors.push(
+        makeSemanticError(
+          `${discoveryPath}/shortcut`,
+          "must include --profile in discovery shortcut commands",
+        ),
+      );
+    }
+
+    if (field.discovery.dependsOn) {
+      if (!fieldNames.has(field.discovery.dependsOn)) {
+        errors.push(
+          makeSemanticError(
+            `${discoveryPath}/dependsOn`,
+            "must reference another field in the same resource",
+            { dependsOn: field.discovery.dependsOn },
+          ),
+        );
+      } else {
+        dependencyGraph.set(fieldName, field.discovery.dependsOn);
+      }
+    }
+  }
+
+  const visited = new Set<string>();
+  const visiting = new Set<string>();
+
+  function visit(fieldName: string) {
+    if (visiting.has(fieldName)) {
+      errors.push(
+        makeSemanticError(
+          `${instancePath}/fields`,
+          "discovery.dependsOn must not form a cycle",
+        ),
+      );
+      return;
+    }
+    if (visited.has(fieldName)) return;
+
+    visiting.add(fieldName);
+    const dependency = dependencyGraph.get(fieldName);
+    if (dependency) visit(dependency);
+    visiting.delete(fieldName);
+    visited.add(fieldName);
+  }
+
+  for (const fieldName of dependencyGraph.keys()) {
+    visit(fieldName);
+  }
+
+  return errors;
+}
+
+function validatePostScaffold(
+  postScaffold: PluginManifest["postScaffold"],
+  instancePath: string,
+): ErrorObject[] {
+  if (!postScaffold || postScaffold.length === 0) return [];
+
+  const steps = postScaffold.map((step) => step.step);
+  const expected = Array.from(
+    { length: steps.length },
+    (_, index) => index + 1,
+  );
+  const isSequential =
+    steps.length === expected.length &&
+    steps.every((step, index) => step === expected[index]);
+
+  if (isSequential) return [];
+
+  return [
+    makeSemanticError(
+      `${instancePath}/postScaffold`,
+      "postScaffold steps must be unique, ordered, and sequential starting at 1",
+      { steps },
+    ),
+  ];
+}
+
+function validatePluginSemantics(
+  plugin: Pick<PluginManifest, "resources" | "postScaffold">,
+  instancePath: string,
+): ErrorObject[] {
+  const errors: ErrorObject[] = [];
+  const required = plugin.resources?.required ?? [];
+  const optional = plugin.resources?.optional ?? [];
+
+  for (const [index, resource] of [...required, ...optional].entries()) {
+    const resourcePath =
+      index < required.length
+        ? `${instancePath}/resources/required/${index}`
+        : `${instancePath}/resources/optional/${index - required.length}`;
+    errors.push(...validateResourceFields(resource.fields, resourcePath));
+  }
+
+  errors.push(...validatePostScaffold(plugin.postScaffold, instancePath));
+  return errors;
 }
 
 let schemaLoadWarned = false;
@@ -81,7 +237,7 @@ let compiledTemplateValidator: ReturnType<Ajv["compile"]> | null = null;
 function getTemplateValidator(): ReturnType<Ajv["compile"]> | null {
   if (compiledTemplateValidator) return compiledTemplateValidator;
   const pluginSchema = loadSchema(PLUGIN_MANIFEST_SCHEMA_PATH);
-  const templateSchema = loadSchema(TEMPLATE_PLUGINS_SCHEMA_PATH);
+  const templateSchema = loadSchema(TEMPLATE_PLUGINS_V2_SCHEMA_PATH);
   if (!pluginSchema || !templateSchema) return null;
   try {
     const ajv = new Ajv({ allErrors: true, strict: false });
@@ -137,7 +293,13 @@ export function validateManifest(obj: unknown): ValidateResult {
   }
 
   const valid = validate(obj);
-  if (valid) return { valid: true, manifest: obj as PluginManifest };
+  if (valid) {
+    const semanticErrors = validatePluginSemantics(obj as PluginManifest, "");
+    if (semanticErrors.length > 0) {
+      return { valid: false, errors: semanticErrors };
+    }
+    return { valid: true, manifest: obj as PluginManifest };
+  }
   return { valid: false, errors: validate.errors ?? [] };
 }
 
@@ -178,7 +340,17 @@ export function validateTemplateManifest(obj: unknown): ValidateResult {
   }
 
   const valid = validate(obj);
-  if (valid) return { valid: true };
+  if (valid) {
+    const manifest = obj as TemplatePluginsManifest;
+    const semanticErrors = Object.entries(manifest.plugins).flatMap(
+      ([pluginName, plugin]) =>
+        validatePluginSemantics(plugin, `/plugins/${pluginName}`),
+    );
+    if (semanticErrors.length > 0) {
+      return { valid: false, errors: semanticErrors };
+    }
+    return { valid: true };
+  }
   return { valid: false, errors: validate.errors ?? [] };
 }
 

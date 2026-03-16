@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { Lang, parse } from "@ast-grep/napi";
 import { describe, expect, it } from "vitest";
@@ -6,6 +8,10 @@ import {
   parseImports,
   parsePluginUsages,
   shouldAllowJsManifestForPackage,
+  TEMPLATE_PLUGINS_SCHEMA_ID,
+  TEMPLATE_PLUGINS_VERSION,
+  TEMPLATE_SCAFFOLDING,
+  writeManifest,
 } from "./sync";
 
 describe("plugin sync", () => {
@@ -180,6 +186,76 @@ describe("plugin sync", () => {
     it("rejects untrusted package scopes by default", () => {
       expect(shouldAllowJsManifestForPackage("my-plugin")).toBe(false);
       expect(shouldAllowJsManifestForPackage("@acme/plugin")).toBe(false);
+    });
+  });
+
+  describe("writeManifest", () => {
+    it("writes a v2 template manifest with scaffolding and plugin metadata", () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-sync-"));
+      const outputPath = path.join(tmpDir, "appkit.plugins.json");
+
+      writeManifest(
+        outputPath,
+        {
+          plugins: {
+            analytics: {
+              name: "analytics",
+              displayName: "Analytics Plugin",
+              description:
+                "SQL query execution against Databricks SQL Warehouses",
+              package: "@databricks/appkit",
+              onSetupMessage:
+                "Run 'databricks warehouses list' to find your SQL Warehouse ID.",
+              postScaffold: [
+                {
+                  step: 1,
+                  instruction: "Create SQL query files in config/queries/",
+                },
+              ],
+              resources: {
+                required: [
+                  {
+                    type: "sql_warehouse",
+                    alias: "SQL Warehouse",
+                    resourceKey: "sql-warehouse",
+                    description:
+                      "SQL Warehouse for executing analytics queries",
+                    permission: "CAN_USE",
+                    fields: {
+                      id: {
+                        env: "DATABRICKS_WAREHOUSE_ID",
+                        description: "SQL Warehouse ID",
+                        discovery: {
+                          cliCommand:
+                            "databricks warehouses list --profile <PROFILE> -o json",
+                          selectField: ".id",
+                        },
+                        resolution: "user-provided",
+                      },
+                    },
+                  },
+                ],
+                optional: [],
+              },
+            },
+          },
+        },
+        { write: true, silent: true },
+      );
+
+      const manifest = JSON.parse(
+        fs.readFileSync(outputPath, "utf-8"),
+      ) as Record<string, unknown>;
+
+      expect(manifest.$schema).toBe(TEMPLATE_PLUGINS_SCHEMA_ID);
+      expect(manifest.version).toBe(TEMPLATE_PLUGINS_VERSION);
+      expect(manifest.scaffolding).toEqual(TEMPLATE_SCAFFOLDING);
+      expect(
+        (manifest.plugins as Record<string, { postScaffold?: unknown[] }>)
+          .analytics.postScaffold,
+      ).toEqual([
+        { step: 1, instruction: "Create SQL query files in config/queries/" },
+      ]);
     });
   });
 });

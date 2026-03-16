@@ -9,6 +9,7 @@ import {
 } from "../manifest-resolve";
 import type {
   PluginManifest,
+  Scaffolding,
   TemplatePlugin,
   TemplatePluginsManifest,
 } from "../manifest-types";
@@ -57,6 +58,52 @@ function validateManifestWithSchema(
 /** Safety limit for recursive directory scanning to prevent runaway traversal. */
 const MAX_SCAN_DEPTH = 5;
 
+const TEMPLATE_PLUGINS_SCHEMA_ID =
+  "https://databricks.github.io/appkit/schemas/template-plugins.schema.v2.json";
+const TEMPLATE_PLUGINS_VERSION = "2.0";
+
+const TEMPLATE_SCAFFOLDING: Scaffolding = {
+  command: "databricks apps init",
+  flags: {
+    "--name": {
+      required: true,
+      description:
+        "App name: lowercase letters, numbers, hyphens only. Max 26 chars.",
+      pattern: "^[a-z][a-z0-9-]{0,25}$",
+    },
+    "--features": {
+      required: false,
+      description:
+        "Comma-separated plugin names where requiredByTemplate is false. Do NOT include requiredByTemplate=true plugins; they are included automatically.",
+    },
+    "--set": {
+      required: false,
+      description:
+        "Resource field values. Format: <pluginName>.<resourceKey>.<fieldName>=<value>. Required for every field in resources.required of all included plugins (both mandatory and optional), except fields marked resolution='platform-injected'.",
+    },
+    "--profile": {
+      required: true,
+      description: "Databricks CLI profile for authentication.",
+    },
+    "--description": {
+      required: false,
+      description: "Short description of the app.",
+    },
+    "--run": {
+      required: false,
+      default: "none",
+      description:
+        "Post-scaffold action: none (review code first), dev (start dev server), or deploy.",
+    },
+  },
+  rules: [
+    "Plugins with requiredByTemplate=true are included automatically. Do NOT add them to --features. You MUST still provide --set for their required resource fields unless those fields are platform-injected.",
+    "Plugins with requiredByTemplate=false are optional. Add to --features only when the user's request needs that capability.",
+    "Every field in a plugin's resources.required MUST have a --set flag for each included plugin (mandatory and optional), unless the field has resolution='platform-injected'.",
+    "Fields with resolution='platform-injected' are auto-set at deploy time. Do NOT include them in --set.",
+  ],
+};
+
 /**
  * Load and validate a resolved manifest, returning a TemplatePlugin entry or null.
  * Centralises the resolve → load → validate → build-entry pipeline used by
@@ -83,6 +130,9 @@ async function loadPluginEntry(
       resources: manifest.resources,
       ...(manifest.onSetupMessage && {
         onSetupMessage: manifest.onSetupMessage,
+      }),
+      ...(manifest.postScaffold && {
+        postScaffold: manifest.postScaffold,
       }),
     },
   ];
@@ -413,6 +463,9 @@ async function scanForPlugins(
         ...(manifest.onSetupMessage && {
           onSetupMessage: manifest.onSetupMessage,
         }),
+        ...(manifest.postScaffold && {
+          postScaffold: manifest.postScaffold,
+        }),
       } satisfies TemplatePlugin;
     }
   }
@@ -523,9 +576,9 @@ function writeManifest(
   options: { write?: boolean; silent?: boolean },
 ) {
   const templateManifest: TemplatePluginsManifest = {
-    $schema:
-      "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
-    version: "1.0",
+    $schema: TEMPLATE_PLUGINS_SCHEMA_ID,
+    version: TEMPLATE_PLUGINS_VERSION,
+    scaffolding: TEMPLATE_SCAFFOLDING,
     plugins,
   };
 
@@ -767,6 +820,10 @@ export {
   parseImports,
   parsePluginUsages,
   shouldAllowJsManifestForPackage,
+  TEMPLATE_PLUGINS_SCHEMA_ID,
+  TEMPLATE_PLUGINS_VERSION,
+  TEMPLATE_SCAFFOLDING,
+  writeManifest,
 };
 
 export const pluginsSyncCommand = new Command("sync")

@@ -15,25 +15,38 @@
         "fields": {
           "branch": {
             "description": "Full Lakebase Postgres branch resource name. Obtain by running `databricks postgres list-branches projects/{project-id}`, select the desired item from the output array and use its .name value.",
-            "examples": ["projects/{project-id}/branches/{branch-id}"]
+            "examples": ["projects/{project-id}/branches/{branch-id}"],
+            "discovery": {
+              "cliCommand": "databricks postgres list-branches projects/{project-id} --profile <PROFILE> -o json",
+              "selectField": ".name"
+            },
+            "resolution": "user-provided"
           },
           "database": {
             "description": "Full Lakebase Postgres database resource name. Obtain by running `databricks postgres list-databases {branch-name}`, select the desired item from the output array and use its .name value. Requires the branch resource name.",
             "examples": [
               "projects/{project-id}/branches/{branch-id}/databases/{database-id}"
-            ]
+            ],
+            "discovery": {
+              "cliCommand": "databricks postgres list-databases {branch} --profile <PROFILE> -o json",
+              "selectField": ".name",
+              "dependsOn": "branch"
+            },
+            "resolution": "user-provided"
           },
           "host": {
             "env": "PGHOST",
             "localOnly": true,
             "resolve": "postgres:host",
-            "description": "Postgres host for local development. Auto-injected by the platform at deploy time."
+            "description": "Postgres host for local development. Auto-injected by the platform at deploy time.",
+            "resolution": "platform-injected"
           },
           "databaseName": {
             "env": "PGDATABASE",
             "localOnly": true,
             "resolve": "postgres:databaseName",
-            "description": "Postgres database name for local development. Auto-injected by the platform at deploy time."
+            "description": "Postgres database name for local development. Auto-injected by the platform at deploy time.",
+            "resolution": "platform-injected"
           },
           "endpointPath": {
             "env": "LAKEBASE_ENDPOINT",
@@ -42,23 +55,50 @@
             "description": "Lakebase endpoint resource name. Auto-injected at runtime via app.yaml valueFrom: postgres. For local development, obtain by running `databricks postgres list-endpoints {branch-name}`, select the desired item from the output array and use its .name value.",
             "examples": [
               "projects/{project-id}/branches/{branch-id}/endpoints/{endpoint-id}"
-            ]
+            ],
+            "discovery": {
+              "cliCommand": "databricks postgres list-endpoints {branch} --profile <PROFILE> -o json",
+              "selectField": ".name",
+              "dependsOn": "branch"
+            },
+            "resolution": "user-provided"
           },
           "port": {
             "env": "PGPORT",
             "localOnly": true,
             "value": "5432",
-            "description": "Postgres port. Auto-injected by the platform at deploy time."
+            "description": "Postgres port. Auto-injected by the platform at deploy time.",
+            "resolution": "platform-injected"
           },
           "sslmode": {
             "env": "PGSSLMODE",
             "localOnly": true,
             "value": "require",
-            "description": "Postgres SSL mode. Auto-injected by the platform at deploy time."
+            "description": "Postgres SSL mode. Auto-injected by the platform at deploy time.",
+            "resolution": "platform-injected"
           }
         }
       }
     ],
     "optional": []
-  }
+  },
+  "onSetupMessage": "Run 'databricks postgres list-branches' to find your Lakebase branch.",
+  "postScaffold": [
+    {
+      "step": 1,
+      "instruction": "Define your schema in server/server.ts startup"
+    },
+    {
+      "step": 2,
+      "instruction": "Write tRPC procedures using pool.query() in server/server.ts"
+    },
+    {
+      "step": 3,
+      "instruction": "Build React frontend consuming tRPC procedures"
+    },
+    {
+      "step": 4,
+      "instruction": "Update tests/smoke.spec.ts selectors for your app"
+    }
+  ]
 }

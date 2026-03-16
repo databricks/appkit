@@ -41,6 +41,28 @@ const VALID_MANIFEST_WITH_RESOURCE = {
   },
 };
 
+const VALID_TEMPLATE_MANIFEST = {
+  $schema:
+    "https://databricks.github.io/appkit/schemas/template-plugins.schema.v2.json",
+  version: "2.0",
+  scaffolding: {
+    command: "databricks apps init",
+    flags: {
+      "--name": {
+        required: true,
+        description: "App name",
+        pattern: "^[a-z][a-z0-9-]{0,25}$",
+      },
+      "--profile": {
+        required: true,
+        description: "Databricks CLI profile for authentication.",
+      },
+    },
+    rules: ["Plugins with requiredByTemplate=true are included automatically."],
+  },
+  plugins: {},
+};
+
 describe("validate-manifest", () => {
   describe("detectSchemaType", () => {
     it('returns "plugin-manifest" for plugin manifest $schema', () => {
@@ -56,7 +78,7 @@ describe("validate-manifest", () => {
       expect(
         detectSchemaType({
           $schema:
-            "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
+            "https://databricks.github.io/appkit/schemas/template-plugins.schema.v2.json",
         }),
       ).toBe("template-plugins");
     });
@@ -92,6 +114,121 @@ describe("validate-manifest", () => {
       const result = validateManifest(VALID_MANIFEST_WITH_RESOURCE);
       expect(result.valid).toBe(true);
       expect(result.manifest?.resources.required).toHaveLength(1);
+    });
+
+    it("rejects discovery CLI commands without --profile", () => {
+      const result = validateManifest({
+        ...VALID_MANIFEST_WITH_RESOURCE,
+        resources: {
+          required: [
+            {
+              ...VALID_MANIFEST_WITH_RESOURCE.resources.required[0],
+              fields: {
+                id: {
+                  env: "DATABRICKS_WAREHOUSE_ID",
+                  discovery: {
+                    cliCommand: "databricks warehouses list -o json",
+                    selectField: ".id",
+                  },
+                },
+              },
+            },
+          ],
+          optional: [],
+        },
+      });
+
+      expect(result.valid).toBe(false);
+      expect(result.errors?.[0]?.instancePath).toBe(
+        "/resources/required/0/fields/id/discovery/cliCommand",
+      );
+    });
+
+    it("rejects discovery dependsOn values that reference missing fields", () => {
+      const result = validateManifest({
+        ...VALID_MANIFEST,
+        resources: {
+          required: [
+            {
+              type: "postgres",
+              alias: "Postgres",
+              resourceKey: "postgres",
+              description: "Required for persistence",
+              permission: "CAN_CONNECT_AND_CREATE",
+              fields: {
+                database: {
+                  discovery: {
+                    cliCommand:
+                      "databricks postgres list-databases {branch} --profile <PROFILE> -o json",
+                    selectField: ".name",
+                    dependsOn: "branch",
+                  },
+                },
+              },
+            },
+          ],
+          optional: [],
+        },
+      });
+
+      expect(result.valid).toBe(false);
+      expect(result.errors?.[0]?.instancePath).toBe(
+        "/resources/required/0/fields/database/discovery/dependsOn",
+      );
+    });
+
+    it("rejects cyclic discovery dependencies", () => {
+      const result = validateManifest({
+        ...VALID_MANIFEST,
+        resources: {
+          required: [
+            {
+              type: "postgres",
+              alias: "Postgres",
+              resourceKey: "postgres",
+              description: "Required for persistence",
+              permission: "CAN_CONNECT_AND_CREATE",
+              fields: {
+                branch: {
+                  discovery: {
+                    cliCommand:
+                      "databricks postgres list-branches projects/{project-id} --profile <PROFILE> -o json",
+                    selectField: ".name",
+                    dependsOn: "database",
+                  },
+                },
+                database: {
+                  discovery: {
+                    cliCommand:
+                      "databricks postgres list-databases {branch} --profile <PROFILE> -o json",
+                    selectField: ".name",
+                    dependsOn: "branch",
+                  },
+                },
+              },
+            },
+          ],
+          optional: [],
+        },
+      });
+
+      expect(result.valid).toBe(false);
+      expect(result.errors?.[0]?.instancePath).toBe(
+        "/resources/required/0/fields",
+      );
+    });
+
+    it("rejects non-sequential postScaffold steps", () => {
+      const result = validateManifest({
+        ...VALID_MANIFEST,
+        postScaffold: [
+          { step: 1, instruction: "Do one thing" },
+          { step: 3, instruction: "Skip a number" },
+        ],
+      });
+
+      expect(result.valid).toBe(false);
+      expect(result.errors?.[0]?.instancePath).toBe("/postScaffold");
     });
 
     it("rejects non-object input", () => {
@@ -218,18 +355,54 @@ describe("validate-manifest", () => {
 
   describe("validateTemplateManifest", () => {
     it("validates a minimal correct template manifest", () => {
-      const result = validateTemplateManifest({
-        $schema:
-          "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
-        version: "1.0",
-        plugins: {},
-      });
+      const result = validateTemplateManifest(VALID_TEMPLATE_MANIFEST);
       expect(result.valid).toBe(true);
     });
 
     it("rejects non-object input", () => {
       expect(validateTemplateManifest(null).valid).toBe(false);
       expect(validateTemplateManifest("string").valid).toBe(false);
+    });
+
+    it("rejects template plugin metadata with invalid discovery semantics", () => {
+      const result = validateTemplateManifest({
+        ...VALID_TEMPLATE_MANIFEST,
+        plugins: {
+          analytics: {
+            name: "analytics",
+            displayName: "Analytics Plugin",
+            description:
+              "SQL query execution against Databricks SQL Warehouses",
+            package: "@databricks/appkit",
+            resources: {
+              required: [
+                {
+                  type: "sql_warehouse",
+                  alias: "SQL Warehouse",
+                  resourceKey: "sql-warehouse",
+                  description: "Required for queries",
+                  permission: "CAN_USE",
+                  fields: {
+                    id: {
+                      env: "DATABRICKS_WAREHOUSE_ID",
+                      discovery: {
+                        cliCommand: "databricks warehouses list -o json",
+                        selectField: ".id",
+                      },
+                    },
+                  },
+                },
+              ],
+              optional: [],
+            },
+          },
+        },
+      });
+
+      expect(result.valid).toBe(false);
+      expect(result.errors?.[0]?.instancePath).toBe(
+        "/plugins/analytics/resources/required/0/fields/id/discovery/cliCommand",
+      );
     });
   });
 

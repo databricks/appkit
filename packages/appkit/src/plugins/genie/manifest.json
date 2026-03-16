@@ -1,4 +1,5 @@
 {
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
   "name": "genie",
   "displayName": "Genie Plugin",
   "description": "AI/BI Genie space integration for natural language data queries",
@@ -13,7 +14,13 @@
         "fields": {
           "id": {
             "env": "DATABRICKS_GENIE_SPACE_ID",
-            "description": "Default Genie Space ID"
+            "description": "Default Genie Space ID",
+            "discovery": {
+              "cliCommand": "databricks genie list-spaces --profile <PROFILE> -o json",
+              "selectField": ".space_id",
+              "displayField": ".title"
+            },
+            "resolution": "user-provided"
           }
         }
       }
@@ -39,5 +46,24 @@
       },
       "required": ["spaces"]
     }
-  }
+  },
+  "onSetupMessage": "Find your Genie Space ID in the AI/BI Genie UI.",
+  "postScaffold": [
+    {
+      "step": 1,
+      "instruction": "Configure your Genie space aliases in server setup or rely on the default space ID"
+    },
+    {
+      "step": 2,
+      "instruction": "Build a chat UI with GenieChat or useGenieChat against your chosen alias"
+    },
+    {
+      "step": 3,
+      "instruction": "Wire your app routes and page navigation to the Genie experience"
+    },
+    {
+      "step": 4,
+      "instruction": "Update tests/smoke.spec.ts selectors for your app"
+    }
+  ]
 }

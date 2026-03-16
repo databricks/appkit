@@ -6,7 +6,10 @@
  */
 
 export type {
+  DiscoveryDescriptor,
   PluginManifest,
+  PostScaffoldStep,
+  ResourceResolution,
   ResourceFieldEntry,
   ResourceRequirement,
 } from "../../../schemas/plugin-manifest.generated";
@@ -19,8 +22,22 @@ export interface TemplatePlugin extends Omit<PluginManifest, "config"> {
   requiredByTemplate?: boolean;
 }
 
+export interface ScaffoldingFlag {
+  required: boolean;
+  description: string;
+  pattern?: string;
+  default?: string;
+}
+
+export interface Scaffolding {
+  command: string;
+  flags: Record<string, ScaffoldingFlag>;
+  rules: string[];
+}
+
 export interface TemplatePluginsManifest {
   $schema: string;
   version: string;
+  scaffolding: Scaffolding;
   plugins: Record<string, TemplatePlugin>;
 }

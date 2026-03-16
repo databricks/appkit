@@ -27,6 +27,16 @@ Human-readable description for this field
 
 ***
 
+### discovery?
+
+```ts
+optional discovery: DiscoveryDescriptor;
+```
+
+CLI discovery metadata for non-interactive resolution.
+
+***
+
 ### env?
 
 ```ts
@@ -54,6 +64,16 @@ optional localOnly: boolean;
 ```
 
 When true, this field is only generated for local .env files. The Databricks Apps platform auto-injects it at deploy time.
+
+***
+
+### resolution?
+
+```ts
+optional resolution: ResourceResolution;
+```
+
+How this field's value is supplied to the app.
 
 ***
 

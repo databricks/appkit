@@ -1,0 +1,163 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://databricks.github.io/appkit/schemas/template-plugins.schema.v2.json",
+  "title": "AppKit Template Plugins Manifest V2",
+  "description": "Aggregated plugin manifest for AppKit templates. Read by Databricks CLI during init to discover available plugins, resource requirements, and scaffold guidance.",
+  "type": "object",
+  "required": ["version", "scaffolding", "plugins"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Reference to the JSON Schema for validation"
+    },
+    "version": {
+      "type": "string",
+      "const": "2.0",
+      "description": "Schema version for the template plugins manifest"
+    },
+    "scaffolding": {
+      "$ref": "#/$defs/scaffolding"
+    },
+    "plugins": {
+      "type": "object",
+      "description": "Map of plugin name to plugin manifest with package source",
+      "additionalProperties": {
+        "$ref": "#/$defs/templatePlugin"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "templatePlugin": {
+      "type": "object",
+      "required": [
+        "name",
+        "displayName",
+        "description",
+        "package",
+        "resources"
+      ],
+      "description": "Plugin manifest with package source information",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Plugin identifier. Must be lowercase, start with a letter, and contain only letters, numbers, and hyphens.",
+          "examples": ["analytics", "server", "my-custom-plugin"]
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable display name for UI and CLI",
+          "examples": ["Analytics Plugin", "Server Plugin"]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Brief description of what the plugin does",
+          "examples": ["SQL query execution against Databricks SQL Warehouses"]
+        },
+        "package": {
+          "type": "string",
+          "minLength": 1,
+          "description": "NPM package name or relative path that provides this plugin",
+          "examples": ["@databricks/appkit", "./plugins/custom-plugin"]
+        },
+        "requiredByTemplate": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, this plugin is required by the template and cannot be deselected during CLI init."
+        },
+        "onSetupMessage": {
+          "type": "string",
+          "description": "Human-facing message displayed after project initialization to explain manual setup steps."
+        },
+        "postScaffold": {
+          "type": "array",
+          "description": "Ordered follow-up guidance for a human or agent after scaffolding.",
+          "items": {
+            "$ref": "plugin-manifest.schema.json#/$defs/postScaffoldStep"
+          }
+        },
+        "resources": {
+          "type": "object",
+          "required": ["required", "optional"],
+          "description": "Databricks resource requirements for this plugin",
+          "properties": {
+            "required": {
+              "type": "array",
+              "description": "Resources that must be available for the plugin to function",
+              "items": {
+                "$ref": "#/$defs/resourceRequirement"
+              }
+            },
+            "optional": {
+              "type": "array",
+              "description": "Resources that enhance functionality but are not mandatory",
+              "items": {
+                "$ref": "#/$defs/resourceRequirement"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "scaffoldingFlag": {
+      "type": "object",
+      "required": ["required", "description"],
+      "properties": {
+        "required": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pattern": {
+          "type": "string",
+          "minLength": 1
+        },
+        "default": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "scaffolding": {
+      "type": "object",
+      "required": ["command", "flags", "rules"],
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "flags": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "$ref": "#/$defs/scaffoldingFlag"
+          }
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "resourceType": {
+      "$ref": "plugin-manifest.schema.json#/$defs/resourceType"
+    },
+    "resourceFieldEntry": {
+      "$ref": "plugin-manifest.schema.json#/$defs/resourceFieldEntry"
+    },
+    "resourceRequirement": {
+      "$ref": "plugin-manifest.schema.json#/$defs/resourceRequirement"
+    }
+  }
+}

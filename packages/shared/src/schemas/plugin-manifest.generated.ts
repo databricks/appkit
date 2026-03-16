@@ -148,6 +148,27 @@ export type ExperimentPermission = "CAN_READ" | "CAN_EDIT" | "CAN_MANAGE";
 export type AppPermission = "CAN_USE";
 
 /**
+ * Ordered guidance for human or agent follow-up after scaffolding.
+ *
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "postScaffoldStep".
+ */
+export interface PostScaffoldStep {
+  /**
+   * Step number in the ordered post-scaffold flow.
+   */
+  step: number;
+  /**
+   * Instruction to follow after scaffolding completes.
+   */
+  instruction: string;
+  /**
+   * When true, this step must finish before continuing.
+   */
+  blocking?: boolean;
+}
+
+/**
  * Schema for Databricks AppKit plugin manifest files. Defines plugin metadata, resource requirements, and configuration options.
  */
 export interface PluginManifest {
@@ -211,10 +232,49 @@ export interface PluginManifest {
    */
   onSetupMessage?: string;
   /**
+   * Ordered guidance for human or agent follow-up after scaffolding.
+   */
+  postScaffold?: PostScaffoldStep[];
+  /**
    * When true, this plugin is excluded from the template plugins manifest (appkit.plugins.json) during sync.
    */
   hidden?: boolean;
 }
+/**
+ * CLI discovery metadata for non-interactive resolution.
+ *
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "discoveryDescriptor".
+ */
+export interface DiscoveryDescriptor {
+  /**
+   * CLI command to list candidate values. Use <PROFILE> as a placeholder for the Databricks CLI profile.
+   */
+  cliCommand: string;
+  /**
+   * jq-style selector for the machine-readable value to capture from the CLI output.
+   */
+  selectField: string;
+  /**
+   * jq-style selector for a human-readable label to display alongside the selected value.
+   */
+  displayField?: string;
+  /**
+   * Field name in the same resource that must be resolved before running this discovery command.
+   */
+  dependsOn?: string;
+  /**
+   * Optional direct CLI command that returns a single preferred value.
+   */
+  shortcut?: string;
+}
+/**
+ * How this field's value is supplied to the app.
+ *
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "resourceResolution".
+ */
+export type ResourceResolution = "user-provided" | "platform-injected";
 /**
  * Defines a single field for a resource. Each field has its own environment variable and optional description. Single-value types use one key (e.g. id); multi-value types (database, secret) use multiple (e.g. instance_name, database_name or scope, key).
  *
@@ -250,6 +310,14 @@ export interface ResourceFieldEntry {
    * Named resolver prefixed by resource type (e.g., 'postgres:host'). The CLI resolves this value during the init prompt flow.
    */
   resolve?: string;
+  /**
+   * CLI discovery metadata for non-interactive resolution.
+   */
+  discovery?: DiscoveryDescriptor;
+  /**
+   * How this field's value is supplied to the app.
+   */
+  resolution?: ResourceResolution;
 }
 /**
  * This interface was referenced by `PluginManifest`'s JSON-Schema
