@@ -49,6 +49,7 @@ export {
 // Plugin authoring
 export { Plugin, type ToPlugin, toPlugin } from "./plugin";
 export { analytics, files, genie, lakebase, server } from "./plugins";
+export { policy } from "./plugins/files";
 // Registry types and utilities for plugin manifests
 export type {
   ConfigSchema,

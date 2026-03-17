@@ -1,5 +1,12 @@
 import "reflect-metadata";
-import { analytics, createApp, files, genie, server } from "@databricks/appkit";
+import {
+  analytics,
+  createApp,
+  files,
+  genie,
+  policy,
+  server,
+} from "@databricks/appkit";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
@@ -25,7 +32,7 @@ createApp({
       spaces: { demo: process.env.DATABRICKS_GENIE_SPACE_ID ?? "placeholder" },
     }),
     lakebaseExamples(),
-    files(),
+    files({ volumes: { default: { policy: policy.denyAll() } } }),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
 }).then((appkit) => {

@@ -438,17 +438,35 @@ describe("Files Plugin Integration", () => {
     });
   });
 
-  describe("OBO Gateway", () => {
-    test("production: rejects requests without user token with 401", async () => {
-      const response = await fetch(`${baseUrl}/api/files/${VOL}/list`);
+  describe("Service principal execution", () => {
+    test("requests without user token execute as service principal", async () => {
+      mockFilesApi.listDirectoryContents.mockReturnValue(
+        (async function* () {
+          yield {
+            name: "sp-file.txt",
+            path: "/Volumes/catalog/schema/vol/sp-only/sp-file.txt",
+            is_directory: false,
+          };
+        })(),
+      );
 
-      expect(response.status).toBe(401);
-      const data = (await response.json()) as { error: string; plugin: string };
-      expect(data.plugin).toBe("files");
-      expect(data.error).toMatch(/token/i);
+      // Use a unique path to avoid cached results from earlier tests
+      const response = await fetch(
+        `${baseUrl}/api/files/${VOL}/list?path=sp-only`,
+      );
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data).toEqual([
+        {
+          name: "sp-file.txt",
+          path: "/Volumes/catalog/schema/vol/sp-only/sp-file.txt",
+          is_directory: false,
+        },
+      ]);
     });
 
-    test("production: allows requests with valid user token (OBO)", async () => {
+    test("requests with user headers also succeed", async () => {
       mockFilesApi.listDirectoryContents.mockReturnValue(
         (async function* () {
           yield {
@@ -466,51 +484,16 @@ describe("Files Plugin Integration", () => {
       expect(response.status).toBe(200);
     });
 
-    test("development: falls back to service principal when no user token", async () => {
-      const originalEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = "development";
+    test("write operations without user token execute as service principal", async () => {
+      mockFilesApi.createDirectory.mockResolvedValue(undefined);
 
-      try {
-        mockFilesApi.listDirectoryContents.mockReturnValue(
-          (async function* () {
-            yield {
-              name: "dev-file.txt",
-              path: "/Volumes/catalog/schema/vol/dev-file.txt",
-              is_directory: false,
-            };
-          })(),
-        );
-
-        const response = await fetch(`${baseUrl}/api/files/${VOL}/list`);
-
-        expect(response.status).toBe(200);
-        const data = await response.json();
-        expect(data).toEqual([
-          {
-            name: "dev-file.txt",
-            path: "/Volumes/catalog/schema/vol/dev-file.txt",
-            is_directory: false,
-          },
-        ]);
-      } finally {
-        if (originalEnv === undefined) {
-          delete process.env.NODE_ENV;
-        } else {
-          process.env.NODE_ENV = originalEnv;
-        }
-      }
-    });
-
-    test("production: rejects write operations without user token", async () => {
       const response = await fetch(`${baseUrl}/api/files/${VOL}/mkdir`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: "/Volumes/catalog/schema/vol/newdir" }),
+        body: JSON.stringify({ path: "newdir" }),
       });
 
-      expect(response.status).toBe(401);
-      const data = (await response.json()) as { error: string; plugin: string };
-      expect(data.plugin).toBe("files");
+      expect(response.status).toBe(200);
     });
   });
 

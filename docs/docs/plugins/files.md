@@ -15,6 +15,7 @@ File operations against Databricks Unity Catalog Volumes. Supports listing, read
 - Automatic cache invalidation on write operations
 - Custom content type mappings
 - Per-user execution context (OBO)
+- **Access policies**: Per-volume policy functions that gate read and write operations
 
 ## Basic usage
 
@@ -75,6 +76,8 @@ interface IFilesConfig {
 }
 
 interface VolumeConfig {
+  /** Access policy for this volume. */
+  policy?: FilePolicy;
   /** Maximum upload size in bytes for this volume. Overrides plugin-level default. */
   maxUploadSize?: number;
   /** Map of file extensions to MIME types for this volume. Overrides plugin-level default. */
@@ -96,6 +99,115 @@ files({
   },
 });
 ```
+
+### Permission model
+
+There are three layers of access control in the files plugin. Understanding how they interact is critical for securing your app:
+
+```
+┌─────────────────────────────────────────────────┐
+│  Unity Catalog grants                           │
+│  (WRITE_VOLUME on the SP — set at deploy time)  │
+├─────────────────────────────────────────────────┤
+│  Execution identity                             │
+│  HTTP routes → always service principal         │
+│  Programmatic → SP by default, asUser() for OBO │
+├─────────────────────────────────────────────────┤
+│  File policies                                  │
+│  Per-volume (action, resource, user) → boolean  │
+│  Only app-level gate for HTTP routes            │
+└─────────────────────────────────────────────────┘
+```
+
+- **UC grants** control what the service principal can do at the Databricks level. These are set at deploy time via `app.yaml` resource bindings. The SP needs `WRITE_VOLUME` — the plugin declares this via resource requirements.
+- **Execution identity** determines whose credentials are used for the actual API call. HTTP routes always use the SP. The programmatic API uses SP by default but supports `asUser(req)` for OBO.
+- **File policies** are application-level checks evaluated **before** the API call. They receive the requesting user's identity (from the `x-forwarded-user` header) and decide allow/deny. This is the only gate that distinguishes between users on HTTP routes.
+
+:::warning
+
+Since HTTP routes always execute as the service principal, removing a user's UC `WRITE_VOLUME` grant has **no effect** on HTTP access — the SP's grant is what's used. Policies are how you restrict what individual users can do through your app.
+
+:::
+
+#### Access policies
+
+Attach a policy to a volume to control which actions are allowed:
+
+```ts
+import { files, policy } from "@databricks/appkit";
+
+files({
+  volumes: {
+    uploads: { policy: policy.publicRead() },
+  },
+});
+```
+
+#### Actions
+
+Policies receive an action string. The full list, split by category:
+
+| Category | Actions |
+|----------|---------|
+| Read | `list`, `read`, `download`, `raw`, `exists`, `metadata`, `preview` |
+| Write | `upload`, `mkdir`, `delete` |
+
+#### Built-in policies
+
+| Helper | Allows | Denies |
+|--------|--------|--------|
+| `policy.publicRead()` | all read actions | all write actions |
+| `policy.allowAll()` | everything | nothing |
+| `policy.denyAll()` | nothing | everything |
+
+#### Composing policies
+
+Combine built-in and custom policies with three combinators:
+
+- **`policy.all(a, b)`** — AND: all policies must allow. Short-circuits on first denial.
+- **`policy.any(a, b)`** — OR: at least one policy must allow. Short-circuits on first allow.
+- **`policy.not(p)`** — Inverts a policy. For example, `not(publicRead())` yields a write-only policy (useful for ingestion/drop-box volumes).
+
+```ts
+// Read-only for regular users, full access for the service principal
+files({
+  volumes: {
+    shared: {
+      policy: policy.any(
+        (_action, _resource, user) => !!user.isServicePrincipal,
+        policy.publicRead(),
+      ),
+    },
+  },
+});
+```
+
+#### Custom policies
+
+`FilePolicy` is a function `(action, resource, user) → boolean | Promise<boolean>`, so you can inline arbitrary logic:
+
+```ts
+import { type FilePolicy, WRITE_ACTIONS } from "@databricks/appkit";
+
+const ADMIN_IDS = ["admin-sp-id", "lead-user-id"];
+
+const adminOnly: FilePolicy = (action, _resource, user) => {
+  if (WRITE_ACTIONS.has(action)) {
+    return ADMIN_IDS.includes(user.id);
+  }
+  return true; // reads allowed for everyone
+};
+
+files({
+  volumes: { reports: { policy: adminOnly } },
+});
+```
+
+#### Enforcement
+
+- **HTTP routes**: Policy checked before every operation. Denied → `403` JSON response with `"Action denied by volume policy"`.
+- **Programmatic API**: Policy checked on both `appkit.files("vol").list()` (SP identity, `isServicePrincipal: true`) and `appkit.files("vol").asUser(req).list()` (user identity). Denied → throws `PolicyDeniedError`.
+- **No policy configured**: All actions allowed (backwards compatible with existing behaviour).
 
 ### Custom content types
 
@@ -236,7 +348,36 @@ interface FilePreview extends FileMetadata {
   isImage: boolean;
 }
 
+type FileAction =
+  | "list" | "read" | "download" | "raw"
+  | "exists" | "metadata" | "preview"
+  | "upload" | "mkdir" | "delete";
+
+interface FileResource {
+  /** Relative path within the volume. */
+  path: string;
+  /** The volume key (e.g. `"uploads"`). */
+  volume: string;
+  /** Content length in bytes — only present for uploads. */
+  size?: number;
+}
+
+interface FilePolicyUser {
+  /** User ID from the `x-forwarded-user` header. */
+  id: string;
+  /** `true` when the caller is the service principal (direct SDK call, not `asUser`). */
+  isServicePrincipal?: boolean;
+}
+
+type FilePolicy = (
+  action: FileAction,
+  resource: FileResource,
+  user: FilePolicyUser,
+) => boolean | Promise<boolean>;
+
 interface VolumeConfig {
+  /** Access policy for this volume. */
+  policy?: FilePolicy;
   /** Maximum upload size in bytes for this volume. */
   maxUploadSize?: number;
   /** Map of file extensions to MIME types for this volume. */
@@ -297,6 +438,7 @@ All errors return JSON:
 | Status | Description                                                    |
 | ------ | -------------------------------------------------------------- |
 | 400    | Missing or invalid `path` parameter                            |
+| 403    | Action denied by volume policy                                 |
 | 404    | Unknown volume key                                             |
 | 413    | Upload exceeds `maxUploadSize`                                 |
 | 500    | Operation failed (SDK, network, upstream, or unhandled error)  |

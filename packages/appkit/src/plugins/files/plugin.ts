@@ -8,7 +8,7 @@ import {
   isSafeInlineContentType,
   validateCustomContentTypes,
 } from "../../connectors/files";
-import { getWorkspaceClient, isInUserContext } from "../../context";
+import { getCurrentUserId, getWorkspaceClient } from "../../context";
 import { AuthenticationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
@@ -22,6 +22,12 @@ import {
 } from "./defaults";
 import { parentDirectory, sanitizeFilename } from "./helpers";
 import manifest from "./manifest.json";
+import {
+  type FileAction,
+  type FilePolicyUser,
+  type FileResource,
+  PolicyDeniedError,
+} from "./policy";
 import type {
   DownloadResponse,
   FilesExport,
@@ -91,29 +97,92 @@ export class FilesPlugin extends Plugin {
     }));
   }
 
+  /** Whether a volume has a policy attached. */
+  private _hasPolicy(volumeKey: string): boolean {
+    return typeof this.volumeConfigs[volumeKey]?.policy === "function";
+  }
+
   /**
-   * Warns when a method is called without a user context (i.e. as service principal).
-   * OBO access via `asUser(req)` is strongly recommended.
+   * Extract user identity from the request.
+   * Falls back to `getCurrentUserId()` in development mode.
    */
-  private warnIfNoUserContext(volumeKey: string, method: string): void {
-    if (!isInUserContext()) {
-      logger.warn(
-        `app.files("${volumeKey}").${method}() called without user context (service principal). ` +
-          `Please use OBO instead: app.files("${volumeKey}").asUser(req).${method}()`,
-      );
+  private _extractUser(req: import("express").Request): FilePolicyUser {
+    const userId = req.header("x-forwarded-user");
+    if (userId) return { id: userId };
+    if (process.env.NODE_ENV === "development") {
+      return { id: getCurrentUserId() };
+    }
+    throw AuthenticationError.missingToken(
+      "Missing x-forwarded-user header. Cannot resolve user ID.",
+    );
+  }
+
+  /**
+   * Check the policy for a volume. No-op if no policy is configured.
+   * Throws `PolicyDeniedError` if denied.
+   */
+  private async _checkPolicy(
+    volumeKey: string,
+    action: FileAction,
+    path: string,
+    user: FilePolicyUser,
+    resourceOverrides?: Partial<FileResource>,
+  ): Promise<void> {
+    const policyFn = this.volumeConfigs[volumeKey]?.policy;
+    if (typeof policyFn !== "function") return;
+
+    const resource: FileResource = {
+      path,
+      volume: volumeKey,
+      ...resourceOverrides,
+    };
+    const allowed = await policyFn(action, resource, user);
+    if (!allowed) {
+      throw new PolicyDeniedError(action, volumeKey);
     }
   }
 
   /**
-   * Throws when a method is called without a user context (i.e. as service principal).
-   * OBO access via `asUser(req)` is enforced for now.
+   * HTTP-level wrapper around `_checkPolicy`.
+   * Extracts user (401 on failure), runs policy (403 on denial).
+   * Returns `true` if the request may proceed, `false` if a response was sent.
    */
-  private throwIfNoUserContext(volumeKey: string, method: string): void {
-    if (!isInUserContext()) {
-      throw new Error(
-        `app.files("${volumeKey}").${method}() called without user context (service principal). Use OBO instead: app.files("${volumeKey}").asUser(req).${method}()`,
-      );
+  private async _enforcePolicy(
+    req: import("express").Request,
+    res: import("express").Response,
+    volumeKey: string,
+    action: FileAction,
+    resourceOverrides?: Partial<FileResource>,
+  ): Promise<boolean> {
+    if (!this._hasPolicy(volumeKey)) return true;
+
+    let user: FilePolicyUser;
+    try {
+      user = this._extractUser(req);
+    } catch (error) {
+      if (error instanceof AuthenticationError) {
+        res.status(401).json({ error: error.message, plugin: this.name });
+        return false;
+      }
+      throw error;
     }
+
+    const path =
+      (req.query.path as string | undefined) ??
+      (typeof req.body?.path === "string" ? req.body.path : undefined) ??
+      "/";
+
+    try {
+      await this._checkPolicy(volumeKey, action, path, user, resourceOverrides);
+    } catch (error) {
+      if (error instanceof PolicyDeniedError) {
+        res.status(403).json({ error: error.message, plugin: this.name });
+        return false;
+      }
+      throw error;
+    }
+
+    return true;
   }
 
   constructor(config: IFilesConfig) {
@@ -137,6 +206,7 @@ export class FilesPlugin extends Plugin {
         maxUploadSize: volumeCfg.maxUploadSize ?? config.maxUploadSize,
         customContentTypes:
           volumeCfg.customContentTypes ?? config.customContentTypes,
+        policy: volumeCfg.policy,
       };
       this.volumeConfigs[key] = mergedConfig;
 
@@ -151,56 +221,32 @@ export class FilesPlugin extends Plugin {
 
   /**
    * Creates a VolumeAPI for a specific volume key.
-   * Each method warns if called outside a user context (service principal).
+   * All operations execute as the service principal.
    */
   protected createVolumeAPI(volumeKey: string): VolumeAPI {
     const connector = this.volumeConnectors[volumeKey];
     return {
-      list: (directoryPath?: string) => {
-        this.throwIfNoUserContext(volumeKey, `list`);
-        return connector.list(getWorkspaceClient(), directoryPath);
-      },
-      read: (filePath: string, options?: { maxSize?: number }) => {
-        this.throwIfNoUserContext(volumeKey, `read`);
-        return connector.read(getWorkspaceClient(), filePath, options);
-      },
-      download: (filePath: string): Promise<DownloadResponse> => {
-        this.throwIfNoUserContext(volumeKey, `download`);
-        return connector.download(getWorkspaceClient(), filePath);
-      },
-      exists: (filePath: string) => {
-        this.throwIfNoUserContext(volumeKey, `exists`);
-        return connector.exists(getWorkspaceClient(), filePath);
-      },
-      metadata: (filePath: string) => {
-        this.throwIfNoUserContext(volumeKey, `metadata`);
-        return connector.metadata(getWorkspaceClient(), filePath);
-      },
+      list: (directoryPath?: string) =>
+        connector.list(getWorkspaceClient(), directoryPath),
+      read: (filePath: string, options?: { maxSize?: number }) =>
+        connector.read(getWorkspaceClient(), filePath, options),
+      download: (filePath: string): Promise<DownloadResponse> =>
+        connector.download(getWorkspaceClient(), filePath),
+      exists: (filePath: string) =>
+        connector.exists(getWorkspaceClient(), filePath),
+      metadata: (filePath: string) =>
+        connector.metadata(getWorkspaceClient(), filePath),
       upload: (
         filePath: string,
         contents: ReadableStream | Buffer | string,
         options?: { overwrite?: boolean },
-      ) => {
-        this.throwIfNoUserContext(volumeKey, `upload`);
-        return connector.upload(
-          getWorkspaceClient(),
-          filePath,
-          contents,
-          options,
-        );
-      },
-      createDirectory: (directoryPath: string) => {
-        this.throwIfNoUserContext(volumeKey, `createDirectory`);
-        return connector.createDirectory(getWorkspaceClient(), directoryPath);
-      },
-      delete: (filePath: string) => {
-        this.throwIfNoUserContext(volumeKey, `delete`);
-        return connector.delete(getWorkspaceClient(), filePath);
-      },
-      preview: (filePath: string) => {
-        this.throwIfNoUserContext(volumeKey, `preview`);
-        return connector.preview(getWorkspaceClient(), filePath);
-      },
+      ) => connector.upload(getWorkspaceClient(), filePath, contents, options),
+      createDirectory: (directoryPath: string) =>
+        connector.createDirectory(getWorkspaceClient(), directoryPath),
+      delete: (filePath: string) =>
+        connector.delete(getWorkspaceClient(), filePath),
+      preview: (filePath: string) =>
+        connector.preview(getWorkspaceClient(), filePath),
     };
   }
 
@@ -380,7 +426,6 @@ export class FilesPlugin extends Plugin {
   private _invalidateListCache(
     volumeKey: string,
     parentPath: string,
-    userId: string,
     connector: FilesConnector,
   ): void {
     const parent = parentDirectory(parentPath);
@@ -389,9 +434,49 @@ export class FilesPlugin extends Plugin {
       : "__root__";
     const listKey = this.cache.generateKey(
       [`files:${volumeKey}:list`, cachePathSegment],
-      userId,
+      getCurrentUserId(),
     );
     this.cache.delete(listKey);
+  }
+
+  /**
+   * Like `execute()`, but re-throws Databricks API client errors (4xx)
+   * so route handlers can return the appropriate HTTP status via `_handleApiError`.
+   *
+   * Server errors and infrastructure failures are still swallowed (returns `undefined`).
+   */
+  private async _executeOrThrow<T>(
+    fn: (signal?: AbortSignal) => Promise<T>,
+    options: PluginExecutionSettings,
+    userKey?: string,
+  ): Promise<T | undefined> {
+    let capturedClientError: unknown;
+
+    const result = await this.execute<T>(
+      async (signal) => {
+        try {
+          return await fn(signal);
+        } catch (error) {
+          if (
+            error instanceof ApiError &&
+            error.statusCode !== undefined &&
+            error.statusCode >= 400 &&
+            error.statusCode < 500
+          ) {
+            capturedClientError = error;
+          }
+          throw error;
+        }
+      },
+      options,
+      userKey,
+    );
+
+    if (result === undefined && capturedClientError) {
+      throw capturedClientError;
+    }
+
+    return result;
   }
 
   private _handleApiError(
@@ -399,6 +484,13 @@ export class FilesPlugin extends Plugin {
     error: unknown,
     fallbackMessage: string,
   ): void {
+    if (error instanceof PolicyDeniedError) {
+      res.status(403).json({
+        error: error.message,
+        plugin: this.name,
+      });
+      return;
+    }
     if (error instanceof AuthenticationError) {
       res.status(401).json({
         error: error.message,
@@ -430,15 +522,13 @@ export class FilesPlugin extends Plugin {
     connector: FilesConnector,
     volumeKey: string,
   ): Promise<void> {
+    if (!(await this._enforcePolicy(req, res, volumeKey, "list"))) return;
+
     const path = req.query.path as string | undefined;
 
     try {
-      const userPlugin = this.asUser(req);
-      const result = await userPlugin.execute(
-        async () => {
-          this.warnIfNoUserContext(volumeKey, `list`);
-          return connector.list(getWorkspaceClient(), path);
-        },
+      const result = await this.execute(
+        async () => connector.list(getWorkspaceClient(), path),
         this._readSettings([
           `files:${volumeKey}:list`,
           path ? connector.resolvePath(path) : "__root__",
@@ -461,6 +551,8 @@ export class FilesPlugin extends Plugin {
     connector: FilesConnector,
     volumeKey: string,
   ): Promise<void> {
+    if (!(await this._enforcePolicy(req, res, volumeKey, "read"))) return;
+
     const path = req.query.path as string;
     const valid = this._isValidPath(path);
     if (valid !== true) {
@@ -469,12 +561,8 @@ export class FilesPlugin extends Plugin {
     }
 
     try {
-      const userPlugin = this.asUser(req);
-      const result = await userPlugin.execute(
-        async () => {
-          this.warnIfNoUserContext(volumeKey, `read`);
-          return connector.read(getWorkspaceClient(), path);
-        },
+      const result = await this.execute(
+        async () => connector.read(getWorkspaceClient(), path),
         this._readSettings([
           `files:${volumeKey}:read`,
           connector.resolvePath(path),
@@ -525,6 +613,8 @@ export class FilesPlugin extends Plugin {
     volumeKey: string,
     opts: { mode: "download" | "raw" },
   ): Promise<void> {
+    if (!(await this._enforcePolicy(req, res, volumeKey, opts.mode))) return;
+
     const path = req.query.path as string;
     const valid = this._isValidPath(path);
     if (valid !== true) {
@@ -536,14 +626,13 @@ export class FilesPlugin extends Plugin {
     const volumeCfg = this.volumeConfigs[volumeKey];
 
     try {
-      const userPlugin = this.asUser(req);
       const settings: PluginExecutionSettings = {
         default: FILES_DOWNLOAD_DEFAULTS,
       };
-      const response = await userPlugin.execute(async () => {
-        this.warnIfNoUserContext(volumeKey, `download`);
-        return connector.download(getWorkspaceClient(), path);
-      }, settings);
+      const response = await this.execute(
+        async () => connector.download(getWorkspaceClient(), path),
+        settings,
+      );
 
       if (response === undefined) {
         res.status(500).json({ error: `${label} failed`, plugin: this.name });
@@ -604,6 +693,8 @@ export class FilesPlugin extends Plugin {
     connector: FilesConnector,
     volumeKey: string,
   ): Promise<void> {
+    if (!(await this._enforcePolicy(req, res, volumeKey, "exists"))) return;
+
     const path = req.query.path as string;
     const valid = this._isValidPath(path);
     if (valid !== true) {
@@ -612,12 +703,8 @@ export class FilesPlugin extends Plugin {
     }
 
     try {
-      const userPlugin = this.asUser(req);
-      const result = await userPlugin.execute(
-        async () => {
-          this.warnIfNoUserContext(volumeKey, `exists`);
-          return connector.exists(getWorkspaceClient(), path);
-        },
+      const result = await this.execute(
+        async () => connector.exists(getWorkspaceClient(), path),
         this._readSettings([
           `files:${volumeKey}:exists`,
           connector.resolvePath(path),
@@ -642,6 +729,8 @@ export class FilesPlugin extends Plugin {
     connector: FilesConnector,
     volumeKey: string,
   ): Promise<void> {
+    if (!(await this._enforcePolicy(req, res, volumeKey, "metadata"))) return;
+
     const path = req.query.path as string;
     const valid = this._isValidPath(path);
     if (valid !== true) {
@@ -650,12 +739,8 @@ export class FilesPlugin extends Plugin {
     }
 
     try {
-      const userPlugin = this.asUser(req);
-      const result = await userPlugin.execute(
-        async () => {
-          this.warnIfNoUserContext(volumeKey, `metadata`);
-          return connector.metadata(getWorkspaceClient(), path);
-        },
+      const result = await this.execute(
+        async () => connector.metadata(getWorkspaceClient(), path),
         this._readSettings([
           `files:${volumeKey}:metadata`,
           connector.resolvePath(path),
@@ -680,6 +765,8 @@ export class FilesPlugin extends Plugin {
     connector: FilesConnector,
     volumeKey: string,
   ): Promise<void> {
+    if (!(await this._enforcePolicy(req, res, volumeKey, "preview"))) return;
+
     const path = req.query.path as string;
     const valid = this._isValidPath(path);
     if (valid !== true) {
@@ -688,12 +775,8 @@ export class FilesPlugin extends Plugin {
     }
 
     try {
-      const userPlugin = this.asUser(req);
-      const result = await userPlugin.execute(
-        async () => {
-          this.warnIfNoUserContext(volumeKey, `preview`);
-          return connector.preview(getWorkspaceClient(), path);
-        },
+      const result = await this.execute(
+        async () => connector.preview(getWorkspaceClient(), path),
         this._readSettings([
           `files:${volumeKey}:preview`,
           connector.resolvePath(path),
@@ -742,6 +825,13 @@ export class FilesPlugin extends Plugin {
       return;
     }
 
+    if (
+      !(await this._enforcePolicy(req, res, volumeKey, "upload", {
+        size: contentLength,
+      }))
+    )
+      return;
+
     logger.debug(req, "Upload started: volume=%s path=%s", volumeKey, path);
 
     try {
@@ -772,24 +862,17 @@ export class FilesPlugin extends Plugin {
         path,
         contentLength ?? 0,
       );
-      const userPlugin = this.asUser(req);
       const settings: PluginExecutionSettings = {
         default: FILES_WRITE_DEFAULTS,
       };
       const result = await this.trackWrite(() =>
-        userPlugin.execute(async () => {
-          this.warnIfNoUserContext(volumeKey, `upload`);
+        this.execute(async () => {
           await connector.upload(getWorkspaceClient(), path, webStream);
           return { success: true as const };
         }, settings),
       );
 
-      this._invalidateListCache(
-        volumeKey,
-        path,
-        this.resolveUserId(req),
-        connector,
-      );
+      this._invalidateListCache(volumeKey, path, "global", connector);
 
       if (result === undefined) {
         logger.error(
@@ -823,6 +906,8 @@ export class FilesPlugin extends Plugin {
     connector: FilesConnector,
     volumeKey: string,
   ): Promise<void> {
+    if (!(await this._enforcePolicy(req, res, volumeKey, "mkdir"))) return;
+
     const dirPath =
       typeof req.body?.path === "string" ? req.body.path : undefined;
     const valid = this._isValidPath(dirPath);
@@ -832,24 +917,17 @@ export class FilesPlugin extends Plugin {
     }
 
     try {
-      const userPlugin = this.asUser(req);
       const settings: PluginExecutionSettings = {
         default: FILES_WRITE_DEFAULTS,
       };
       const result = await this.trackWrite(() =>
-        userPlugin.execute(async () => {
-          this.warnIfNoUserContext(volumeKey, `createDirectory`);
+        this.execute(async () => {
           await connector.createDirectory(getWorkspaceClient(), dirPath);
           return { success: true as const };
         }, settings),
       );
 
-      this._invalidateListCache(
-        volumeKey,
-        dirPath,
-        this.resolveUserId(req),
-        connector,
-      );
+      this._invalidateListCache(volumeKey, dirPath, "global", connector);
 
       if (result === undefined) {
         res
@@ -870,6 +948,8 @@ export class FilesPlugin extends Plugin {
     connector: FilesConnector,
     volumeKey: string,
   ): Promise<void> {
+    if (!(await this._enforcePolicy(req, res, volumeKey, "delete"))) return;
+
     const rawPath = req.query.path as string | undefined;
     const valid = this._isValidPath(rawPath);
     if (valid !== true) {
@@ -879,24 +959,17 @@ export class FilesPlugin extends Plugin {
     const path = rawPath as string;
 
     try {
-      const userPlugin = this.asUser(req);
       const settings: PluginExecutionSettings = {
         default: FILES_WRITE_DEFAULTS,
       };
       const result = await this.trackWrite(() =>
-        userPlugin.execute(async () => {
-          this.warnIfNoUserContext(volumeKey, `delete`);
+        this.execute(async () => {
           await connector.delete(getWorkspaceClient(), path);
           return { success: true as const };
         }, settings),
       );
 
-      this._invalidateListCache(
-        volumeKey,
-        path,
-        this.resolveUserId(req),
-        connector,
-      );
+      this._invalidateListCache(volumeKey, path, "global", connector);
 
       if (result === undefined) {
         res.status(500).json({ error: "Delete failed", plugin: this.name });
@@ -907,6 +980,70 @@ export class FilesPlugin extends Plugin {
     } catch (error) {
       this._handleApiError(res, error, "Delete failed");
     }
+  }
+
+  /**
+   * Creates a VolumeAPI that enforces the volume's policy and then delegates
+   * to the connector as the service principal.
+   */
+  private _createPolicyWrappedAPI(
+    volumeKey: string,
+    user: FilePolicyUser,
+  ): VolumeAPI {
+    const connector = this.volumeConnectors[volumeKey];
+    const check = (
+      action: FileAction,
+      path: string,
+      overrides?: Partial<FileResource>,
+    ) => this._checkPolicy(volumeKey, action, path, user, overrides);
+
+    return {
+      list: async (directoryPath?: string) => {
+        await check("list", directoryPath ?? "/");
+        return connector.list(getWorkspaceClient(), directoryPath);
+      },
+      read: async (filePath: string, options?: { maxSize?: number }) => {
+        await check("read", filePath);
+        return connector.read(getWorkspaceClient(), filePath, options);
+      },
+      download: async (filePath: string) => {
+        await check("download", filePath);
+        return connector.download(getWorkspaceClient(), filePath);
+      },
+      exists: async (filePath: string) => {
+        await check("exists", filePath);
+        return connector.exists(getWorkspaceClient(), filePath);
+      },
+      metadata: async (filePath: string) => {
+        await check("metadata", filePath);
+        return connector.metadata(getWorkspaceClient(), filePath);
+      },
+      upload: async (
+        filePath: string,
+        contents: ReadableStream | Buffer | string,
+        options?: { overwrite?: boolean },
+      ) => {
+        await check("upload", filePath);
+        return connector.upload(
+          getWorkspaceClient(),
+          filePath,
+          contents,
+          options,
+        );
+      },
+      createDirectory: async (directoryPath: string) => {
+        await check("mkdir", directoryPath);
+        return connector.createDirectory(getWorkspaceClient(), directoryPath);
+      },
+      delete: async (filePath: string) => {
+        await check("delete", filePath);
+        return connector.delete(getWorkspaceClient(), filePath);
+      },
+      preview: async (filePath: string) => {
+        await check("preview", filePath);
+        return connector.preview(getWorkspaceClient(), filePath);
+      },
+    };
   }
 
   private inflightWrites = 0;
@@ -941,13 +1078,16 @@ export class FilesPlugin extends Plugin {
    * Returns the programmatic API for the Files plugin.
    * Callable with a volume key to get a volume-scoped handle.
    *
+   * All operations execute as the service principal.
+   * Use policies to control per-user access.
+   *
    * @example
    * ```ts
-   * // OBO access (recommended)
-   * appKit.files("uploads").asUser(req).list()
-   *
-   * // Service principal access (logs a warning)
+   * // Service principal access
    * appKit.files("uploads").list()
+   *
+   * // With policy: pass user identity for access control
+   * appKit.files("uploads").asUser(req).list()
    * ```
    */
   exports(): FilesExport {
@@ -958,14 +1098,21 @@ export class FilesPlugin extends Plugin {
         );
       }
 
-      // Service principal API — each method logs a warning recommending OBO
-      const spApi = this.createVolumeAPI(volumeKey);
+      const spApi = this._hasPolicy(volumeKey)
+        ? this._createPolicyWrappedAPI(volumeKey, {
+            id: getCurrentUserId(),
+            isServicePrincipal: true,
+          })
+        : this.createVolumeAPI(volumeKey);
 
       return {
         ...spApi,
         asUser: (req: import("express").Request) => {
-          const userPlugin = this.asUser(req) as FilesPlugin;
-          return userPlugin.createVolumeAPI(volumeKey);
+          if (this._hasPolicy(volumeKey)) {
+            const user = this._extractUser(req);
+            return this._createPolicyWrappedAPI(volumeKey, user);
+          }
+          return spApi;
         },
       };
     };
