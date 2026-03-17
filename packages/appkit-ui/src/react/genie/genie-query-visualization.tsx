@@ -162,19 +162,31 @@ export function GenieQueryVisualization({
           </DropdownMenu>
         )}
       </div>
-      <TabsContent value="chart">
-        <ChartErrorBoundary fallback={dataTable}>
-          <BaseChart
-            data={rows}
-            chartType={activeChartType}
-            xKey={inference.xKey}
-            yKey={inference.yKey}
-            height={CHART_HEIGHT}
-            showLegend={Array.isArray(inference.yKey)}
-          />
-        </ChartErrorBoundary>
-      </TabsContent>
-      <TabsContent value="table">{dataTable}</TabsContent>
+      <div className="grid [&>*]:col-start-1 [&>*]:row-start-1">
+        <TabsContent
+          value="chart"
+          forceMount
+          className="data-[state=inactive]:invisible"
+        >
+          <ChartErrorBoundary fallback={dataTable}>
+            <BaseChart
+              data={rows}
+              chartType={activeChartType}
+              xKey={inference.xKey}
+              yKey={inference.yKey}
+              height={CHART_HEIGHT}
+              showLegend={Array.isArray(inference.yKey)}
+            />
+          </ChartErrorBoundary>
+        </TabsContent>
+        <TabsContent
+          value="table"
+          forceMount
+          className="data-[state=inactive]:invisible"
+        >
+          {dataTable}
+        </TabsContent>
+      </div>
     </Tabs>
   );
 }
