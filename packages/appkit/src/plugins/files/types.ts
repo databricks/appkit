@@ -1,5 +1,6 @@
 import type { files } from "@databricks/sdk-experimental";
 import type { BasePluginConfig, IAppRequest } from "shared";
+import type { FilePolicy } from "./policy";
 
 /**
  * Per-volume configuration options.
@@ -9,11 +10,17 @@ export interface VolumeConfig {
   maxUploadSize?: number;
   /** Map of file extensions to MIME types for this volume. Inherits from plugin-level `customContentTypes` if not set. */
   customContentTypes?: Record<string, string>;
+  /**
+   * Access-control policy for this volume. When set, operations execute as the
+   * service principal and the policy decides whether the action is allowed.
+   */
+  policy?: FilePolicy;
 }
 
 /**
  * User-facing API for a single volume.
- * Prefer OBO access via `app.files("volumeKey").asUser(req).list()`.
+ * All operations execute as the service principal. When a policy is
+ * configured on the volume, every call is checked against that policy.
  */
 export interface VolumeAPI {
   list(directoryPath?: string): Promise<DirectoryEntry[]>;
@@ -78,8 +85,9 @@ export interface FilePreview extends FileMetadata {
 /**
  * Volume handle returned by `app.files("volumeKey")`.
  *
- * - `asUser(req)` — executes on behalf of the user (recommended).
- * - Direct methods (e.g. `.list()`) — execute as the service principal (logs a warning encouraging OBO).
+ * All methods execute as the service principal and enforce the volume's
+ * policy (if configured) with `{ isServicePrincipal: true }`.
+ * `asUser(req)` re-wraps with the real user identity for per-user policy checks.
  */
 export type VolumeHandle = VolumeAPI & {
   asUser: (req: IAppRequest) => VolumeAPI;
@@ -91,15 +99,15 @@ export type VolumeHandle = VolumeAPI & {
  *
  * @example
  * ```ts
- * // OBO access (recommended)
- * appKit.files("uploads").asUser(req).list()
- *
- * // Service principal access (logs a warning)
+ * // Service principal access
  * appKit.files("uploads").list()
+ *
+ * // With policy: pass user identity for access control
+ * appKit.files("uploads").asUser(req).list()
  *
  * // Named accessor
  * const vol = appKit.files.volume("uploads")
- * await vol.asUser(req).list()
+ * await vol.list()
  * ```
  */
 export interface FilesExport {

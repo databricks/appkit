@@ -4,6 +4,7 @@ import {
   createApp,
   files,
   genie,
+  policy,
   server,
   serving,
 } from "@databricks/appkit";
@@ -34,7 +35,7 @@ createApp({
       spaces: { demo: process.env.DATABRICKS_GENIE_SPACE_ID ?? "placeholder" },
     }),
     lakebaseExamples(),
-    files(),
+    files({ volumes: { default: { policy: policy.denyAll() } } }),
     serving(),
     // TODO: re-enable once vector-search is exported from @databricks/appkit
     // vectorSearch({

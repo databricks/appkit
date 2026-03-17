@@ -54,6 +54,7 @@ export {
   toPlugin,
 } from "./plugin";
 export { analytics, files, genie, lakebase, server, serving } from "./plugins";
+export { policy } from "./plugins/files";
 export type {
   EndpointConfig,
   ServingEndpointEntry,
