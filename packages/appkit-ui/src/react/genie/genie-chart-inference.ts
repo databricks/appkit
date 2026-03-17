@@ -57,6 +57,33 @@ export interface ChartInference {
   yKey: string | string[];
 }
 
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+interface ClassifiedColumns {
+  dateCols: GenieColumnMeta[];
+  numericCols: GenieColumnMeta[];
+  stringCols: GenieColumnMeta[];
+}
+
+function classifyColumns(
+  rows: Record<string, unknown>[],
+  columns: GenieColumnMeta[],
+): ClassifiedColumns | null {
+  if (rows.length < INFERENCE_CONFIG.minRows || columns.length < 2) {
+    return null;
+  }
+
+  const dateCols = columns.filter((c) => c.category === "date");
+  const numericCols = columns.filter((c) => c.category === "numeric");
+  const stringCols = columns.filter((c) => c.category === "string");
+
+  if (numericCols.length === 0) return null;
+
+  return { dateCols, numericCols, stringCols };
+}
+
 function countUnique(rows: Record<string, unknown>[], key: string): number {
   const seen = new Set<unknown>();
   for (const row of rows) {
@@ -87,17 +114,10 @@ export function inferChartType(
   rows: Record<string, unknown>[],
   columns: GenieColumnMeta[],
 ): ChartInference | null {
-  // Guard: need at least minRows and 2 columns
-  if (rows.length < INFERENCE_CONFIG.minRows || columns.length < 2) {
-    return null;
-  }
+  const classified = classifyColumns(rows, columns);
+  if (!classified) return null;
 
-  const dateCols = columns.filter((c) => c.category === "date");
-  const numericCols = columns.filter((c) => c.category === "numeric");
-  const stringCols = columns.filter((c) => c.category === "string");
-
-  // Guard: must have at least one numeric column
-  if (numericCols.length === 0) return null;
+  const { dateCols, numericCols, stringCols } = classified;
 
   // Rule 1: DATE + numeric(s) → line (timeseries)
   if (dateCols.length > 0 && numericCols.length >= 1) {
@@ -174,15 +194,10 @@ export function getCompatibleChartTypes(
   rows: Record<string, unknown>[],
   columns: GenieColumnMeta[],
 ): ChartType[] {
-  if (rows.length < INFERENCE_CONFIG.minRows || columns.length < 2) {
-    return [];
-  }
+  const classified = classifyColumns(rows, columns);
+  if (!classified) return [];
 
-  const dateCols = columns.filter((c) => c.category === "date");
-  const numericCols = columns.filter((c) => c.category === "numeric");
-  const stringCols = columns.filter((c) => c.category === "string");
-
-  if (numericCols.length === 0) return [];
+  const { dateCols, numericCols, stringCols } = classified;
 
   // DATE + numeric(s) → timeseries-compatible types
   if (dateCols.length > 0 && numericCols.length >= 1) {

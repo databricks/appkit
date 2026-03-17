@@ -61,20 +61,15 @@ export function GenieQueryVisualization({
   className,
 }: GenieQueryVisualizationProps) {
   const transformed = useMemo(() => transformGenieData(data), [data]);
-  const inference = useMemo(
-    () =>
-      transformed
-        ? inferChartType(transformed.rows, transformed.columns)
-        : null,
-    [transformed],
-  );
-  const compatibleTypes = useMemo(
-    () =>
-      transformed
-        ? getCompatibleChartTypes(transformed.rows, transformed.columns)
-        : [],
-    [transformed],
-  );
+  const { inference, compatibleTypes } = useMemo(() => {
+    if (!transformed)
+      return { inference: null, compatibleTypes: [] as ChartType[] };
+    const { rows, columns } = transformed;
+    return {
+      inference: inferChartType(rows, columns),
+      compatibleTypes: getCompatibleChartTypes(rows, columns),
+    };
+  }, [transformed]);
 
   const [chartTypeOverride, setChartTypeOverride] = useState<ChartType | null>(
     null,
