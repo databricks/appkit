@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { inferChartType } from "../genie-chart-inference";
+import {
+  getCompatibleChartTypes,
+  inferChartType,
+} from "../genie-chart-inference";
 import type { GenieColumnMeta } from "../genie-query-transform";
 
 // ---------------------------------------------------------------------------
@@ -298,5 +301,133 @@ describe("inferChartType — priority", () => {
     const result = inferChartType(rows, columns);
     expect(result?.chartType).toBe("line");
     expect(result?.xKey).toBe("day");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getCompatibleChartTypes
+// ---------------------------------------------------------------------------
+
+describe("getCompatibleChartTypes", () => {
+  test("returns [] for < 2 rows", () => {
+    const columns = cols(["name", "string"], ["value", "numeric"]);
+    const rows = makeRows(["name", "value"], [["A", 10]]);
+    expect(getCompatibleChartTypes(rows, columns)).toEqual([]);
+  });
+
+  test("returns [] for < 2 columns", () => {
+    const columns = cols(["value", "numeric"]);
+    const rows = makeRows(["value"], [[10], [20]]);
+    expect(getCompatibleChartTypes(rows, columns)).toEqual([]);
+  });
+
+  test("returns [] when no numeric columns", () => {
+    const columns = cols(["a", "string"], ["b", "string"]);
+    const rows = makeRows(
+      ["a", "b"],
+      [
+        ["x", "y"],
+        ["w", "z"],
+      ],
+    );
+    expect(getCompatibleChartTypes(rows, columns)).toEqual([]);
+  });
+
+  test("date + numeric → line, bar, area", () => {
+    const columns = cols(["day", "date"], ["revenue", "numeric"]);
+    const rows = makeRows(
+      ["day", "revenue"],
+      [
+        ["2024-01-01", 100],
+        ["2024-01-02", 200],
+      ],
+    );
+    expect(getCompatibleChartTypes(rows, columns)).toEqual([
+      "line",
+      "bar",
+      "area",
+    ]);
+  });
+
+  test("string + 1 numeric, few categories → includes pie and donut", () => {
+    const columns = cols(["region", "string"], ["sales", "numeric"]);
+    const rows = makeRows(
+      ["region", "sales"],
+      [
+        ["North", 100],
+        ["South", 200],
+        ["East", 150],
+      ],
+    );
+    expect(getCompatibleChartTypes(rows, columns)).toEqual([
+      "pie",
+      "donut",
+      "bar",
+      "line",
+      "area",
+    ]);
+  });
+
+  test("string + 1 numeric, many categories → bar, line, area (no pie)", () => {
+    const columns = cols(["product", "string"], ["revenue", "numeric"]);
+    const rows = makeRows(
+      ["product", "revenue"],
+      Array.from({ length: 15 }, (_, i) => [`product${i}`, i * 100]),
+    );
+    expect(getCompatibleChartTypes(rows, columns)).toEqual([
+      "bar",
+      "line",
+      "area",
+    ]);
+  });
+
+  test("string + N numerics → bar, line, area", () => {
+    const columns = cols(
+      ["department", "string"],
+      ["budget", "numeric"],
+      ["actual", "numeric"],
+    );
+    const rows = makeRows(
+      ["department", "budget", "actual"],
+      Array.from({ length: 8 }, (_, i) => [`dept${i}`, i * 100, i * 90]),
+    );
+    expect(getCompatibleChartTypes(rows, columns)).toEqual([
+      "bar",
+      "line",
+      "area",
+    ]);
+  });
+
+  test("2+ numerics only → scatter, line, area", () => {
+    const columns = cols(["height", "numeric"], ["weight", "numeric"]);
+    const rows = makeRows(
+      ["height", "weight"],
+      [
+        [170, 70],
+        [180, 80],
+        [160, 55],
+      ],
+    );
+    expect(getCompatibleChartTypes(rows, columns)).toEqual([
+      "scatter",
+      "line",
+      "area",
+    ]);
+  });
+
+  test("inferred type is always in the compatible list", () => {
+    const columns = cols(["region", "string"], ["sales", "numeric"]);
+    const rows = makeRows(
+      ["region", "sales"],
+      [
+        ["North", 100],
+        ["South", 200],
+        ["East", 150],
+      ],
+    );
+    const inference = inferChartType(rows, columns);
+    const compatible = getCompatibleChartTypes(rows, columns);
+    expect(inference).not.toBeNull();
+    expect(compatible).toContain(inference?.chartType);
   });
 });

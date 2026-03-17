@@ -1,5 +1,6 @@
 export {
   type ChartInference,
+  getCompatibleChartTypes,
   inferChartType,
 } from "./genie-chart-inference";
 export { GenieChat } from "./genie-chat";

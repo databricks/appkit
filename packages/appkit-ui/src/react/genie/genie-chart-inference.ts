@@ -161,3 +161,63 @@ export function inferChartType(
   // Rule 8: fallback — no chart
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// Compatible chart types
+// ---------------------------------------------------------------------------
+
+/**
+ * Return the chart types that are compatible with the given data shape.
+ * Used to populate the chart-type selector dropdown.
+ */
+export function getCompatibleChartTypes(
+  rows: Record<string, unknown>[],
+  columns: GenieColumnMeta[],
+): ChartType[] {
+  if (rows.length < INFERENCE_CONFIG.minRows || columns.length < 2) {
+    return [];
+  }
+
+  const dateCols = columns.filter((c) => c.category === "date");
+  const numericCols = columns.filter((c) => c.category === "numeric");
+  const stringCols = columns.filter((c) => c.category === "string");
+
+  if (numericCols.length === 0) return [];
+
+  // DATE + numeric(s) → timeseries-compatible types
+  if (dateCols.length > 0 && numericCols.length >= 1) {
+    return ["line", "bar", "area"];
+  }
+
+  // STRING + numeric(s)
+  if (stringCols.length > 0 && numericCols.length >= 1) {
+    const xKey = stringCols[0].name;
+    const uniqueCategories = countUnique(rows, xKey);
+
+    if (numericCols.length === 1) {
+      const yKey = numericCols[0].name;
+      // Few categories and no negatives → pie/donut are viable
+      if (
+        uniqueCategories <= INFERENCE_CONFIG.pieMaxCategories &&
+        !hasNegativeValues(rows, yKey)
+      ) {
+        return ["pie", "donut", "bar", "line", "area"];
+      }
+      return ["bar", "line", "area"];
+    }
+
+    // Multiple numerics
+    return ["bar", "line", "area"];
+  }
+
+  // 2+ numerics only → scatter-compatible
+  if (
+    numericCols.length >= 2 &&
+    stringCols.length === 0 &&
+    dateCols.length === 0
+  ) {
+    return ["scatter", "line", "area"];
+  }
+
+  return [];
+}

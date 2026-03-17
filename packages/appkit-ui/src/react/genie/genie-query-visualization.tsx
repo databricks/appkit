@@ -1,7 +1,18 @@
-import { useMemo } from "react";
+import { BarChart3Icon, ChevronDownIcon } from "lucide-react";
+import { useMemo, useState } from "react";
 import type { GenieStatementResponse } from "shared";
 import { BaseChart } from "../charts/base";
 import { ChartErrorBoundary } from "../charts/chart-error-boundary";
+import type { ChartType } from "../charts/types";
+import { Button } from "../ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu";
 import {
   Table,
   TableBody,
@@ -11,11 +22,25 @@ import {
   TableRow,
 } from "../ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import { inferChartType } from "./genie-chart-inference";
+import {
+  getCompatibleChartTypes,
+  inferChartType,
+} from "./genie-chart-inference";
 import { transformGenieData } from "./genie-query-transform";
 
 const TABLE_ROW_LIMIT = 50;
 const CHART_HEIGHT = 250;
+
+const CHART_TYPE_LABELS: Record<ChartType, string> = {
+  bar: "Bar",
+  line: "Line",
+  area: "Area",
+  pie: "Pie",
+  donut: "Donut",
+  scatter: "Scatter",
+  radar: "Radar",
+  heatmap: "Heatmap",
+};
 
 interface GenieQueryVisualizationProps {
   /** Raw statement_response from the Genie API */
@@ -43,12 +68,28 @@ export function GenieQueryVisualization({
         : null,
     [transformed],
   );
+  const compatibleTypes = useMemo(
+    () =>
+      transformed
+        ? getCompatibleChartTypes(transformed.rows, transformed.columns)
+        : [],
+    [transformed],
+  );
+
+  const [chartTypeOverride, setChartTypeOverride] = useState<ChartType | null>(
+    null,
+  );
 
   if (!transformed || transformed.rows.length === 0) return null;
 
   const { rows, columns } = transformed;
   const truncated = rows.length > TABLE_ROW_LIMIT;
   const displayRows = truncated ? rows.slice(0, TABLE_ROW_LIMIT) : rows;
+
+  const activeChartType =
+    chartTypeOverride && compatibleTypes.includes(chartTypeOverride)
+      ? chartTypeOverride
+      : (inference?.chartType ?? null);
 
   const dataTable = (
     <div className="overflow-auto max-h-[300px]">
@@ -81,21 +122,51 @@ export function GenieQueryVisualization({
     </div>
   );
 
-  if (!inference) {
+  if (!inference || !activeChartType) {
     return <div className={className}>{dataTable}</div>;
   }
 
   return (
     <Tabs defaultValue="chart" className={className}>
-      <TabsList>
-        <TabsTrigger value="chart">Chart</TabsTrigger>
-        <TabsTrigger value="table">Table</TabsTrigger>
-      </TabsList>
+      <div className="flex items-center justify-between">
+        <TabsList>
+          <TabsTrigger value="chart">Chart</TabsTrigger>
+          <TabsTrigger value="table">Table</TabsTrigger>
+        </TabsList>
+        {compatibleTypes.length > 1 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Change chart type"
+                className="gap-0.5"
+              >
+                <BarChart3Icon className="size-3.5" />
+                <ChevronDownIcon className="size-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>Chart type</DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={activeChartType}
+                onValueChange={(v) => setChartTypeOverride(v as ChartType)}
+              >
+                {compatibleTypes.map((type) => (
+                  <DropdownMenuRadioItem key={type} value={type}>
+                    {CHART_TYPE_LABELS[type]}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
       <TabsContent value="chart">
         <ChartErrorBoundary fallback={dataTable}>
           <BaseChart
             data={rows}
-            chartType={inference.chartType}
+            chartType={activeChartType}
             xKey={inference.xKey}
             yKey={inference.yKey}
             height={CHART_HEIGHT}
