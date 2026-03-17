@@ -304,10 +304,6 @@ describe("inferChartType — priority", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// getCompatibleChartTypes
-// ---------------------------------------------------------------------------
-
 describe("getCompatibleChartTypes", () => {
   test("returns [] for < 2 rows", () => {
     const columns = cols(["name", "string"], ["value", "numeric"]);

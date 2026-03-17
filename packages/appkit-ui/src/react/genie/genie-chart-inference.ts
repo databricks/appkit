@@ -57,10 +57,6 @@ export interface ChartInference {
   yKey: string | string[];
 }
 
-// ---------------------------------------------------------------------------
-// Shared helpers
-// ---------------------------------------------------------------------------
-
 interface ClassifiedColumns {
   dateCols: GenieColumnMeta[];
   numericCols: GenieColumnMeta[];
@@ -181,10 +177,6 @@ export function inferChartType(
   // Rule 8: fallback — no chart
   return null;
 }
-
-// ---------------------------------------------------------------------------
-// Compatible chart types
-// ---------------------------------------------------------------------------
 
 /**
  * Return the chart types that are compatible with the given data shape.
