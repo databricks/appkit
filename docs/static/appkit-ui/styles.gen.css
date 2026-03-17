@@ -3584,6 +3584,11 @@
       --tw-exit-opacity: 0;
     }
   }
+  .data-\[state\=inactive\]\:invisible {
+    &[data-state="inactive"] {
+      visibility: hidden;
+    }
+  }
   .data-\[state\=on\]\:bg-accent {
     &[data-state="on"] {
       background-color: var(--accent);
@@ -4829,6 +4834,16 @@
     &:nth-child(2)[data-selected=true] button {
       border-top-left-radius: var(--radius-md);
       border-bottom-left-radius: var(--radius-md);
+    }
+  }
+  .\[\&\>\*\]\:col-start-1 {
+    &>* {
+      grid-column-start: 1;
+    }
+  }
+  .\[\&\>\*\]\:row-start-1 {
+    &>* {
+      grid-row-start: 1;
     }
   }
   .\[\&\>\*\]\:w-full {

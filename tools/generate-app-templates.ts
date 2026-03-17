@@ -52,6 +52,7 @@ interface AppTemplate {
 
 const FEATURE_DEPENDENCIES: Record<string, string> = {
   analytics: "SQL warehouse",
+  files: "Volume",
   genie: "Genie Space",
   lakebase: "Database",
 };
@@ -59,15 +60,16 @@ const FEATURE_DEPENDENCIES: Record<string, string> = {
 const APP_TEMPLATES: AppTemplate[] = [
   {
     name: "appkit-all-in-one",
-    features: ["analytics", "genie", "lakebase"],
+    features: ["analytics", "files", "genie", "lakebase"],
     set: {
       "analytics.sql-warehouse.id": "placeholder",
+      "files.files.path": "placeholder",
       "genie.genie-space.id": "placeholder",
       "lakebase.postgres.branch": "placeholder",
       "lakebase.postgres.database": "placeholder",
     },
     description:
-      "Full-stack Node.js app with SQL analytics dashboards, Genie AI conversations, and Lakebase Autoscaling (Postgres) CRUD",
+      "Full-stack Node.js app with SQL analytics dashboards, file browser, Genie AI conversations, and Lakebase Autoscaling (Postgres) CRUD",
   },
   {
     name: "appkit-analytics",
@@ -85,6 +87,14 @@ const APP_TEMPLATES: AppTemplate[] = [
     },
     description:
       "Node.js app with AI/BI Genie for natural language data queries",
+  },
+  {
+    name: "appkit-files",
+    features: ["files"],
+    set: {
+      "files.files.path": "placeholder",
+    },
+    description: "Node.js app with file browser for Databricks Volumes",
   },
   {
     name: "appkit-lakebase",
