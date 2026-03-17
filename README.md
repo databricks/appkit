@@ -2,17 +2,6 @@
 
 Build Databricks Apps faster with our brand-new Node.js + React SDK. Built for humans and AI.
 
-> [!WARNING]  
-> PREVIEW - NOT FOR PRODUCTION USE
-
-> **This SDK is in preview and is subject to change without notice.**
->
-> - ❌ **Do NOT use in production environments**
-> - ⚠️ **Breaking changes may occur at any time**
-> - 🔬 **APIs are experimental and unstable**
-> - 📝 **Use for development and testing only**
->
-
 ## Introduction
 
 AppKit is a TypeScript SDK for building production-ready Databricks applications with a plugin-based architecture. It provides opinionated defaults, built-in observability, and seamless integration with Databricks services.
