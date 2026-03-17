@@ -107,6 +107,8 @@ export function buildPieOption(
           show: showLabels,
           position: labelPosition,
           formatter: "{b}: {d}%",
+          color: "inherit",
+          textBorderWidth: 0,
         },
         emphasis: {
           itemStyle: {
