@@ -18,16 +18,10 @@ AppKit simplifies building data applications on Databricks by providing:
 
 AppKit's power comes from its plugin system. Each plugin adds a focused capability to your app with minimal configuration.
 
-### Available now
-
-- **Analytics Plugin** — Query your Lakehouse data directly from your app. Define SQL queries as files, execute them against Databricks SQL Warehouses, and get automatic caching, parameterization, and on-behalf-of user execution out of the box. Perfect for building apps that surface insights from your Lakehouse.
+- **Analytics Plugin** — Query your Lakehouse data directly from your app. Define SQL queries as files, execute them against Databricks SQL Warehouses, and get automatic caching, parameterization, and on-behalf-of user execution out of the box.
 - **Genie Plugin** — Conversational AI interface powered by Databricks AI/BI Genie. Let users ask natural language questions against your data and get answers with automatic chart inference and visualization.
-
-### Coming soon
-
-- **Files Plugin** — Browse, upload, and manage files in Unity Catalog Volumes
-- **Lakebase Plugin** — OLTP database operations with automatic OAuth token management
-- ...and this is just the beginning.
+- **Files Plugin** — Browse, upload, and manage files in Unity Catalog Volumes. Supports multiple volumes, content type validation, and on-behalf-of user access.
+- **Lakebase Plugin** — OLTP database operations against Databricks Lakebase with automatic OAuth token management. Returns a standard `pg.Pool` compatible with Prisma, Drizzle, TypeORM, and other ORMs.
 
 > Missing a plugin? [Open an issue](https://github.com/databricks/appkit/issues/new) and tell us what you need — community input directly shapes the roadmap.
 
