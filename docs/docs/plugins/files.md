@@ -207,7 +207,7 @@ files({
 
 - **HTTP routes**: Policy checked before every operation. Denied → `403` JSON response with `"Action denied by volume policy"`.
 - **Programmatic API**: Policy checked on both `appkit.files("vol").list()` (SP identity, `isServicePrincipal: true`) and `appkit.files("vol").asUser(req).list()` (user identity). Denied → throws `PolicyDeniedError`.
-- **No policy configured**: All actions allowed (backwards compatible with existing behaviour).
+- **No policy configured**: Defaults to `publicRead()` — read actions are allowed, write actions are denied. A startup warning is logged encouraging you to set an explicit policy.
 
 ### Custom content types
 

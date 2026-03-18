@@ -61,6 +61,7 @@ vi.mock("../../../context", async (importOriginal) => {
   return {
     ...actual,
     getWorkspaceClient: vi.fn(() => mockClient),
+    getCurrentUserId: vi.fn(() => "test-service-principal"),
     isInUserContext: vi.fn(() => true),
   };
 });
@@ -73,8 +74,8 @@ vi.mock("../../../cache", () => ({
 
 const VOLUMES_CONFIG = {
   volumes: {
-    uploads: { maxUploadSize: 100_000_000 },
-    exports: {},
+    uploads: { maxUploadSize: 100_000_000, policy: policy.allowAll() },
+    exports: { policy: policy.allowAll() },
   },
 };
 
@@ -271,7 +272,7 @@ describe("FilesPlugin", () => {
       }
     });
 
-    test("asUser without policy returns SP API (no auth check)", () => {
+    test("asUser without user header in production → throws AuthenticationError", () => {
       const originalEnv = process.env.NODE_ENV;
       process.env.NODE_ENV = "production";
 
@@ -280,10 +281,7 @@ describe("FilesPlugin", () => {
         const handle = plugin.exports()("uploads");
         const mockReq = { header: () => undefined } as any;
 
-        const api = handle.asUser(mockReq);
-        for (const method of volumeMethods) {
-          expect(typeof (api as any)[method]).toBe("function");
-        }
+        expect(() => handle.asUser(mockReq)).toThrow(AuthenticationError);
       } finally {
         process.env.NODE_ENV = originalEnv;
       }
@@ -296,7 +294,10 @@ describe("FilesPlugin", () => {
       try {
         const plugin = new FilesPlugin(VOLUMES_CONFIG);
         const handle = plugin.exports()("uploads");
-        const mockReq = { header: () => undefined } as any;
+        const mockReq = {
+          header: (name: string) =>
+            name === "x-forwarded-user" ? "test-user" : undefined,
+        } as any;
         const api = handle.asUser(mockReq);
 
         for (const method of volumeMethods) {
@@ -492,11 +493,16 @@ describe("FilesPlugin", () => {
       const handler = getUploadHandler(plugin);
       const res = mockRes();
 
+      const headers: Record<string, string> = {
+        "content-length": String(100_000_000),
+        "x-forwarded-user": "test-user",
+      };
       await handler(
         {
           params: { volumeKey: "uploads" },
           query: { path: "/file.bin" },
-          headers: { "content-length": String(100_000_000) },
+          headers,
+          header: (name: string) => headers[name.toLowerCase()],
         },
         res,
       );
@@ -514,11 +520,15 @@ describe("FilesPlugin", () => {
       const handler = getUploadHandler(plugin);
       const res = mockRes();
 
+      const headers: Record<string, string> = {
+        "x-forwarded-user": "test-user",
+      };
       await handler(
         {
           params: { volumeKey: "uploads" },
           query: { path: "/file.bin" },
-          headers: {},
+          headers,
+          header: (name: string) => headers[name.toLowerCase()],
         },
         res,
       );
@@ -643,6 +653,8 @@ describe("FilesPlugin", () => {
 
       const handlerPromise = handler(mockReq("uploads"), res);
 
+      // Flush microtasks (policy check) before advancing timers
+      await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(100);
       await handlerPromise;
 
@@ -868,6 +880,8 @@ describe("FilesPlugin", () => {
 
       const handlerPromise = handler(mockReq("uploads"), res);
 
+      // Flush microtasks (policy check) before advancing timers
+      await vi.advanceTimersByTimeAsync(0);
       // Advance past read-tier timeout (30s)
       await vi.advanceTimersByTimeAsync(31_000);
       await handlerPromise;
@@ -1060,7 +1074,7 @@ describe("FilesPlugin", () => {
       }
     });
 
-    test("non-policy volume → executes as service principal", async () => {
+    test("default publicRead() volume → reads succeed", async () => {
       const plugin = new FilesPlugin(POLICY_CONFIG);
       const handler = getRouteHandler(plugin, "get", "/list");
       const res = mockRes();
@@ -1073,9 +1087,29 @@ describe("FilesPlugin", () => {
 
       await handler(mockReq("uploads"), res);
 
-      // Should succeed (no 403)
+      // Should succeed (reads allowed by publicRead default)
       expect(res.json).toHaveBeenCalledWith(
         expect.arrayContaining([expect.objectContaining({ name: "c.txt" })]),
+      );
+    });
+
+    test("default publicRead() volume → writes denied with 403", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "post", "/mkdir");
+      const res = mockRes();
+
+      await handler(
+        mockReq("uploads", {
+          body: { path: "/newdir" },
+        }),
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+        }),
       );
     });
 

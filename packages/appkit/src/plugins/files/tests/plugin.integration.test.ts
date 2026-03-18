@@ -439,31 +439,15 @@ describe("Files Plugin Integration", () => {
   });
 
   describe("Service principal execution", () => {
-    test("requests without user token execute as service principal", async () => {
-      mockFilesApi.listDirectoryContents.mockReturnValue(
-        (async function* () {
-          yield {
-            name: "sp-file.txt",
-            path: "/Volumes/catalog/schema/vol/sp-only/sp-file.txt",
-            is_directory: false,
-          };
-        })(),
-      );
-
+    test("requests without user token return 401 (policy requires user identity)", async () => {
       // Use a unique path to avoid cached results from earlier tests
       const response = await fetch(
         `${baseUrl}/api/files/${VOL}/list?path=sp-only`,
       );
 
-      expect(response.status).toBe(200);
-      const data = await response.json();
-      expect(data).toEqual([
-        {
-          name: "sp-file.txt",
-          path: "/Volumes/catalog/schema/vol/sp-only/sp-file.txt",
-          is_directory: false,
-        },
-      ]);
+      expect(response.status).toBe(401);
+      const data = (await response.json()) as { error: string };
+      expect(data.error).toMatch(/x-forwarded-user/);
     });
 
     test("requests with user headers also succeed", async () => {
@@ -484,16 +468,21 @@ describe("Files Plugin Integration", () => {
       expect(response.status).toBe(200);
     });
 
-    test("write operations without user token execute as service principal", async () => {
+    test("write operations without explicit policy are denied by default publicRead()", async () => {
       mockFilesApi.createDirectory.mockResolvedValue(undefined);
 
       const response = await fetch(`${baseUrl}/api/files/${VOL}/mkdir`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          ...MOCK_AUTH_HEADERS,
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({ path: "newdir" }),
       });
 
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(403);
+      const data = (await response.json()) as { error: string };
+      expect(data.error).toMatch(/Policy denied/);
     });
   });
 
