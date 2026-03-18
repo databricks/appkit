@@ -76,9 +76,6 @@ export class AgentPlugin extends Plugin<IAgentConfig> {
 
     this.model = new ChatDatabricks({
       model: modelName,
-      useResponsesApi: this.config.useResponsesApi ?? false,
-      temperature: this.config.temperature ?? 0.1,
-      maxTokens: this.config.maxTokens ?? 2000,
       maxRetries: 3,
     });
 

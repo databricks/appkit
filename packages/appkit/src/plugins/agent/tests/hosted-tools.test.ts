@@ -9,7 +9,7 @@ import type {
 import { isHostedTool } from "../hosted-tools";
 
 const genieTool: GenieTool = {
-  type: "genie",
+  type: "genie-space",
   genie_space: { id: "space-123" },
 };
 

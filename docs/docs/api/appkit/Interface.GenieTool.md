@@ -27,5 +27,5 @@ id: string;
 ### type
 
 ```ts
-type: "genie";
+type: "genie-space";
 ```

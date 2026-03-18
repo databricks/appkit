@@ -27,21 +27,8 @@ export interface IAgentConfig extends BasePluginConfig {
    */
   model?: string;
 
-  /**
-   * Whether ChatDatabricks calls the upstream model using the Responses API
-   * instead of the Chat Completions API. Default: false.
-   * Ignored when `agentInstance` is provided.
-   */
-  useResponsesApi?: boolean;
-
   /** System prompt injected at the start of every conversation */
   systemPrompt?: string;
-
-  /** Sampling temperature (0.0-1.0, default 0.1). Ignored when `agentInstance` is provided. */
-  temperature?: number;
-
-  /** Max tokens to generate (default 2000). Ignored when `agentInstance` is provided. */
-  maxTokens?: number;
 
   /**
    * Tools to register with the agent. Accepts:

@@ -39,16 +39,6 @@ optional host: string;
 
 ***
 
-### maxTokens?
-
-```ts
-optional maxTokens: number;
-```
-
-Max tokens to generate (default 2000). Ignored when `agentInstance` is provided.
-
-***
-
 ### model?
 
 ```ts
@@ -95,16 +85,6 @@ optional telemetry: TelemetryOptions;
 
 ***
 
-### temperature?
-
-```ts
-optional temperature: number;
-```
-
-Sampling temperature (0.0-1.0, default 0.1). Ignored when `agentInstance` is provided.
-
-***
-
 ### tools?
 
 ```ts
@@ -115,16 +95,4 @@ Tools to register with the agent. Accepts:
 - OpenResponses-aligned `FunctionTool` objects (local tool with execute handler)
 - Databricks hosted tools (`genie`, `vector_search_index`, `custom_mcp_server`, `external_mcp_server`)
 
-Ignored when `agentInstance` is provided.
-
-***
-
-### useResponsesApi?
-
-```ts
-optional useResponsesApi: boolean;
-```
-
-Whether ChatDatabricks calls the upstream model using the Responses API
-instead of the Chat Completions API. Default: false.
 Ignored when `agentInstance` is provided.
