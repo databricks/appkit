@@ -172,8 +172,14 @@ export function GenieChatMessageList({
     !TERMINAL_STATUSES.has(lastMessage.status);
 
   return (
-    <ScrollArea ref={scrollRef} className={cn("flex-1 min-h-0 p-4", className)}>
-      <div className="flex flex-col gap-4">
+    <ScrollArea
+      ref={scrollRef}
+      className={cn(
+        "flex-1 min-h-0 p-4 [&_[data-slot=scroll-area-viewport]>div]:!block",
+        className,
+      )}
+    >
+      <div className="flex flex-col gap-4 min-w-0">
         {hasPreviousPage && <div ref={sentinelRef} className="h-px" />}
 
         {status === "loading-older" && (
