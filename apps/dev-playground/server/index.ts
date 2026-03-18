@@ -32,7 +32,7 @@ createApp({
       spaces: { demo: process.env.DATABRICKS_GENIE_SPACE_ID ?? "placeholder" },
     }),
     lakebaseExamples(),
-    files({ volumes: { default: { policy: policy.denyAll() } } }),
+    files({ volumes: { default: { policy: policy.allowAll() } } }),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
 }).then((appkit) => {

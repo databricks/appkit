@@ -62,7 +62,6 @@ vi.mock("../../../context", async (importOriginal) => {
     ...actual,
     getWorkspaceClient: vi.fn(() => mockClient),
     getCurrentUserId: vi.fn(() => "test-service-principal"),
-    isInUserContext: vi.fn(() => true),
   };
 });
 
