@@ -438,7 +438,7 @@ All errors return JSON:
 | Status | Description                                                    |
 | ------ | -------------------------------------------------------------- |
 | 400    | Missing or invalid `path` parameter                            |
-| 403    | Action denied by volume policy                                 |
+| 403    | Policy denied "`{action}`" on volume "`{volumeKey}`"          |
 | 404    | Unknown volume key                                             |
 | 413    | Upload exceeds `maxUploadSize`                                 |
 | 500    | Operation failed (SDK, network, upstream, or unhandled error)  |

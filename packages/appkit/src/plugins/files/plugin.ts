@@ -112,6 +112,10 @@ export class FilesPlugin extends Plugin {
     const userId = req.header("x-forwarded-user");
     if (userId) return { id: userId };
     if (process.env.NODE_ENV === "development") {
+      logger.warn(
+        "No x-forwarded-user header — falling back to service principal identity for policy checks. " +
+          "Ensure your proxy forwards user headers to test per-user policies.",
+      );
       return { id: getCurrentUserId() };
     }
     throw AuthenticationError.missingToken(
