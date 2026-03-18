@@ -902,7 +902,7 @@ export class FilesPlugin extends Plugin {
         }, settings),
       );
 
-      this._invalidateListCache(volumeKey, path, "global", connector);
+      this._invalidateListCache(volumeKey, path, connector);
 
       if (!result.ok) {
         logger.error(
@@ -957,7 +957,7 @@ export class FilesPlugin extends Plugin {
         }, settings),
       );
 
-      this._invalidateListCache(volumeKey, dirPath, "global", connector);
+      this._invalidateListCache(volumeKey, dirPath, connector);
 
       if (!result.ok) {
         this._sendStatusError(res, result.status);
@@ -997,7 +997,7 @@ export class FilesPlugin extends Plugin {
         }, settings),
       );
 
-      this._invalidateListCache(volumeKey, path, "global", connector);
+      this._invalidateListCache(volumeKey, path, connector);
 
       if (!result.ok) {
         this._sendStatusError(res, result.status);
