@@ -28,6 +28,7 @@ import {
   type FilePolicyUser,
   type FileResource,
   PolicyDeniedError,
+  policy,
 } from "./policy";
 import type {
   DownloadResponse,
@@ -139,6 +140,17 @@ export class FilesPlugin extends Plugin {
     };
     const allowed = await policyFn(action, resource, user);
     if (!allowed) {
+      try {
+        logger.warn(
+          'Policy denied "%s" on volume "%s" for user "%s"',
+          action,
+          volumeKey,
+          user.id,
+        );
+      } catch {
+        // user.id may not be resolvable in all contexts (e.g. lazy SP getter)
+        logger.warn('Policy denied "%s" on volume "%s"', action, volumeKey);
+      }
       throw new PolicyDeniedError(action, volumeKey);
     }
   }
@@ -207,7 +219,7 @@ export class FilesPlugin extends Plugin {
         maxUploadSize: volumeCfg.maxUploadSize ?? config.maxUploadSize,
         customContentTypes:
           volumeCfg.customContentTypes ?? config.customContentTypes,
-        policy: volumeCfg.policy,
+        policy: volumeCfg.policy ?? policy.publicRead(),
       };
       this.volumeConfigs[key] = mergedConfig;
 
@@ -217,6 +229,18 @@ export class FilesPlugin extends Plugin {
         telemetry: config.telemetry,
         customContentTypes: mergedConfig.customContentTypes,
       });
+    }
+
+    // Warn at startup for volumes without an explicit policy
+    for (const key of this.volumeKeys) {
+      if (!volumes[key].policy) {
+        logger.warn(
+          'Volume "%s" has no explicit policy — defaulting to publicRead(). ' +
+            "Set a policy in files({ volumes: { %s: { policy: ... } } }) to silence this warning.",
+          key,
+          key,
+        );
+      }
     }
   }
 
@@ -1098,21 +1122,21 @@ export class FilesPlugin extends Plugin {
         );
       }
 
-      const spApi = this._hasPolicy(volumeKey)
-        ? this._createPolicyWrappedAPI(volumeKey, {
-            id: getCurrentUserId(),
-            isServicePrincipal: true,
-          })
-        : this.createVolumeAPI(volumeKey);
+      // Lazy user resolution: getCurrentUserId() is called when a method
+      // is invoked (policy check), not when exports() is called.
+      const spUser: FilePolicyUser = {
+        get id() {
+          return getCurrentUserId();
+        },
+        isServicePrincipal: true,
+      };
+      const spApi = this._createPolicyWrappedAPI(volumeKey, spUser);
 
       return {
         ...spApi,
         asUser: (req: import("express").Request) => {
-          if (this._hasPolicy(volumeKey)) {
-            const user = this._extractUser(req);
-            return this._createPolicyWrappedAPI(volumeKey, user);
-          }
-          return spApi;
+          const user = this._extractUser(req);
+          return this._createPolicyWrappedAPI(volumeKey, user);
         },
       };
     };
