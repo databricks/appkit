@@ -60,6 +60,7 @@ plugin architecture, and React integration.
 
 | Variable | Description |
 | ------ | ------ |
+| [policy](Variable.policy.md) | Utility namespace with common policy combinators. |
 | [sql](Variable.sql.md) | SQL helper namespace |
 
 ## Functions
