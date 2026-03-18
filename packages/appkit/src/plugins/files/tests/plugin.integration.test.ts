@@ -579,22 +579,21 @@ describe("Files Plugin Integration", () => {
     });
 
     test("ApiError 409 is swallowed and returns 500", async () => {
-      mockFilesApi.createDirectory.mockRejectedValue(
+      mockFilesApi.getMetadata.mockRejectedValue(
         new MockApiError("Conflict", 409),
       );
 
-      const response = await fetch(`${baseUrl}/api/files/${VOL}/mkdir`, {
-        method: "POST",
-        headers: { ...MOCK_AUTH_HEADERS, "Content-Type": "application/json" },
-        body: JSON.stringify({ path: "/Volumes/catalog/schema/vol/existing" }),
-      });
+      const response = await fetch(
+        `${baseUrl}/api/files/${VOL}/metadata?path=/Volumes/catalog/schema/vol/existing`,
+        { headers: MOCK_AUTH_HEADERS },
+      );
 
       expect(response.status).toBe(500);
       const data = (await response.json()) as {
         error: string;
         plugin: string;
       };
-      expect(data.error).toBe("Create directory failed");
+      expect(data.error).toBe("Metadata fetch failed");
       expect(data.plugin).toBe("files");
     });
   });
