@@ -583,11 +583,10 @@ describe("Files Plugin Integration", () => {
         new MockApiError("Conflict", 409),
       );
 
-      const response = await fetch(`${baseUrl}/api/files/${VOL}/mkdir`, {
-        method: "POST",
-        headers: { ...MOCK_AUTH_HEADERS, "Content-Type": "application/json" },
-        body: JSON.stringify({ path: "/Volumes/catalog/schema/vol/existing" }),
-      });
+      const response = await fetch(
+        `${baseUrl}/api/files/${VOL}/metadata?path=/Volumes/catalog/schema/vol/existing`,
+        { headers: MOCK_AUTH_HEADERS },
+      );
 
       expect(response.status).toBe(409);
       const data = (await response.json()) as {

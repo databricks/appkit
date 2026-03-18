@@ -20,6 +20,13 @@ export interface UserContext {
 }
 
 /**
+ * Type guard to check if a context is a UserContext.
+ */
+export function isUserContext(ctx: ExecutionContext): ctx is UserContext {
+  return "isUserContext" in ctx && ctx.isUserContext === true;
+}
+
+/**
  * Execution context can be either service or user context.
  */
 export type ExecutionContext = ServiceContextState | UserContext;
