@@ -175,9 +175,13 @@ describe("Genie Plugin", () => {
         expect.any(Function),
       );
 
-      expect(router.get).toHaveBeenCalledTimes(1);
+      expect(router.get).toHaveBeenCalledTimes(2);
       expect(router.get).toHaveBeenCalledWith(
         "/:alias/conversations/:conversationId",
+        expect.any(Function),
+      );
+      expect(router.get).toHaveBeenCalledWith(
+        "/:alias/conversations/:conversationId/messages/:messageId",
         expect.any(Function),
       );
     });

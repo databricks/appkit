@@ -122,7 +122,7 @@ export function GenieChatMessage({
                     </details>
                   </Card>
                   {queryResult != null && (
-                    <Card className="px-4 py-3 overflow-hidden">
+                    <Card className="px-4 py-3 overflow-x-auto">
                       <GenieQueryVisualization data={queryResult} />
                     </Card>
                   )}

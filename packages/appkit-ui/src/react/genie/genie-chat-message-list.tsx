@@ -26,6 +26,8 @@ const STATUS_LABELS: Record<string, string> = {
   COMPLETED: "Done",
 };
 
+const TERMINAL_STATUSES = new Set(["COMPLETED", "FAILED"]);
+
 function formatStatus(status: string): string {
   return STATUS_LABELS[status] ?? status.replace(/_/g, " ").toLowerCase();
 }
@@ -166,7 +168,8 @@ export function GenieChatMessageList({
   const showStreamingIndicator =
     status === "streaming" &&
     lastMessage?.role === "assistant" &&
-    lastMessage.id === "";
+    !lastMessage.content &&
+    !TERMINAL_STATUSES.has(lastMessage.status);
 
   return (
     <ScrollArea ref={scrollRef} className={cn("flex-1 min-h-0 p-4", className)}>
@@ -192,7 +195,10 @@ export function GenieChatMessageList({
 
         {messages
           .filter(
-            (msg) => msg.role !== "assistant" || msg.id !== "" || msg.content,
+            (msg) =>
+              msg.role !== "assistant" ||
+              msg.content ||
+              (msg.id !== "" && TERMINAL_STATUSES.has(msg.status)),
           )
           .map((msg) => (
             <GenieChatMessage key={msg.id} message={msg} />

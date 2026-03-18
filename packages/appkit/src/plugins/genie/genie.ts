@@ -65,6 +65,15 @@ export class GeniePlugin extends Plugin {
         await this.asUser(req)._handleGetConversation(req, res);
       },
     });
+
+    this.route(router, {
+      name: "getMessage",
+      method: "get",
+      path: "/:alias/conversations/:conversationId/messages/:messageId",
+      handler: async (req: express.Request, res: express.Response) => {
+        await this.asUser(req)._handleGetMessage(req, res);
+      },
+    });
   }
 
   async _handleSendMessage(
@@ -172,6 +181,59 @@ export class GeniePlugin extends Plugin {
           spaceId,
           conversationId,
           { includeQueryResults, pageToken },
+        ),
+      streamSettings,
+    );
+  }
+
+  async _handleGetMessage(
+    req: express.Request,
+    res: express.Response,
+  ): Promise<void> {
+    const { alias, conversationId, messageId } = req.params;
+    const spaceId = this.resolveSpaceId(alias);
+
+    if (!spaceId) {
+      res.status(404).json({ error: `Unknown space alias: ${alias}` });
+      return;
+    }
+
+    const requestId =
+      (typeof req.query.requestId === "string" && req.query.requestId) ||
+      randomUUID();
+
+    logger.debug(
+      "Polling message %s in conversation %s from space %s (alias=%s)",
+      messageId,
+      conversationId,
+      spaceId,
+      alias,
+    );
+
+    const timeout = this.config.timeout ?? 120_000;
+    const streamSettings: StreamExecutionSettings = {
+      ...genieStreamDefaults,
+      default: {
+        ...genieStreamDefaults.default,
+        timeout,
+      },
+      stream: {
+        ...genieStreamDefaults.stream,
+        streamId: requestId,
+      },
+    };
+
+    const workspaceClient = getWorkspaceClient();
+
+    await this.executeStream<GenieStreamEvent>(
+      res,
+      () =>
+        this.genieConnector.streamGetMessage(
+          workspaceClient,
+          spaceId,
+          conversationId,
+          messageId,
+          { timeout },
         ),
       streamSettings,
     );

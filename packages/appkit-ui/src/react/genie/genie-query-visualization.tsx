@@ -4,6 +4,7 @@ import type { GenieStatementResponse } from "shared";
 import { BaseChart } from "../charts/base";
 import { ChartErrorBoundary } from "../charts/chart-error-boundary";
 import type { ChartType } from "../charts/types";
+import { cn } from "../lib/utils";
 import { Button } from "../ui/button";
 import {
   DropdownMenu,
@@ -118,11 +119,11 @@ export function GenieQueryVisualization({
   );
 
   if (!inference || !activeChartType) {
-    return <div className={className}>{dataTable}</div>;
+    return <div className={cn("min-w-0", className)}>{dataTable}</div>;
   }
 
   return (
-    <Tabs defaultValue="chart" className={className}>
+    <Tabs defaultValue="chart" className={cn("min-w-0", className)}>
       <div className="flex items-center justify-between">
         <TabsList>
           <TabsTrigger value="chart">Chart</TabsTrigger>
@@ -157,7 +158,7 @@ export function GenieQueryVisualization({
           </DropdownMenu>
         )}
       </div>
-      <div className="grid [&>*]:col-start-1 [&>*]:row-start-1">
+      <div className="grid min-w-0 [&>*]:col-start-1 [&>*]:row-start-1 [&>*]:min-w-0">
         <TabsContent
           value="chart"
           forceMount

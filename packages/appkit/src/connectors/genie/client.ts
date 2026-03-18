@@ -381,6 +381,71 @@ export class GenieConnector {
     }
   }
 
+  /**
+   * Polls a single message via `getMessage` until it reaches a terminal
+   * state (`COMPLETED` or `FAILED`). Yields the same event types as
+   * `streamSendMessage` so callers can reuse the same SSE processing logic.
+   */
+  async *streamGetMessage(
+    workspaceClient: WorkspaceClient,
+    spaceId: string,
+    conversationId: string,
+    messageId: string,
+    options?: { timeout?: number; pollInterval?: number },
+  ): AsyncGenerator<GenieStreamEvent> {
+    const timeout = options?.timeout ?? this.config.timeout;
+    const pollInterval = options?.pollInterval ?? 3_000;
+    const deadline =
+      timeout > 0 ? Date.now() + timeout : Number.POSITIVE_INFINITY;
+    let lastStatus = "";
+
+    try {
+      while (true) {
+        const message = await workspaceClient.genie.getMessage({
+          space_id: spaceId,
+          conversation_id: conversationId,
+          message_id: messageId,
+        });
+
+        if (message.status && message.status !== lastStatus) {
+          lastStatus = message.status;
+          yield { type: "status", status: message.status };
+        }
+
+        const isTerminal =
+          message.status === "COMPLETED" || message.status === "FAILED";
+        if (isTerminal) {
+          const messageResponse = toMessageResponse(message);
+          yield { type: "message_result", message: messageResponse };
+          yield* this.emitQueryResults(
+            workspaceClient,
+            spaceId,
+            conversationId,
+            messageId,
+            messageResponse,
+          );
+          return;
+        }
+
+        if (Date.now() >= deadline) {
+          yield { type: "error", error: "Message polling timed out" };
+          return;
+        }
+
+        await new Promise((r) => setTimeout(r, pollInterval));
+      }
+    } catch (error) {
+      logger.error(
+        "Genie getMessage poll error (spaceId=%s, conversationId=%s, messageId=%s): %O",
+        spaceId,
+        conversationId,
+        messageId,
+        error,
+      );
+      yield { type: "error", error: classifyGenieError(error) };
+    }
+  }
+
   async sendMessage(
     workspaceClient: WorkspaceClient,
     spaceId: string,
