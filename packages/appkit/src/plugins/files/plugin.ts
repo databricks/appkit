@@ -900,7 +900,7 @@ export class FilesPlugin extends Plugin {
         }, settings),
       );
 
-      this._invalidateListCache(volumeKey, path, "global", connector);
+      this._invalidateListCache(volumeKey, path, connector);
 
       if (result === undefined) {
         logger.error(
@@ -955,7 +955,7 @@ export class FilesPlugin extends Plugin {
         }, settings),
       );
 
-      this._invalidateListCache(volumeKey, dirPath, "global", connector);
+      this._invalidateListCache(volumeKey, dirPath, connector);
 
       if (result === undefined) {
         res
@@ -997,7 +997,7 @@ export class FilesPlugin extends Plugin {
         }, settings),
       );
 
-      this._invalidateListCache(volumeKey, path, "global", connector);
+      this._invalidateListCache(volumeKey, path, connector);
 
       if (result === undefined) {
         res.status(500).json({ error: "Delete failed", plugin: this.name });
