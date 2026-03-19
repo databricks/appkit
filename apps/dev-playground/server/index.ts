@@ -36,29 +36,33 @@ createApp({
     lakebaseExamples(),
     files(),
     sidecar({
-      name: "sidecar-http",
-      command: "python3",
-      args: ["main.py"],
-      cwd: path.join(
-        path.dirname(url.fileURLToPath(import.meta.url)),
-        "sidecar-app",
-      ),
-      mode: "http",
-      port: 0,
-      startupTimeout: 15000,
-    }),
-    sidecar({
-      name: "sidecar-stdio",
-      command: "python3",
-      args: ["main.py"],
-      cwd: path.join(
-        path.dirname(url.fileURLToPath(import.meta.url)),
-        "sidecar-stdio-app",
-      ),
-      mode: "stdio",
-      stdio: {
-        requestTimeout: 10000,
-      },
+      sidecars: [
+        {
+          id: "sidecar-http",
+          command: "python3",
+          args: ["main.py"],
+          cwd: path.join(
+            path.dirname(url.fileURLToPath(import.meta.url)),
+            "sidecar-app",
+          ),
+          mode: "http",
+          port: 0,
+          startupTimeout: 15000,
+        },
+        {
+          id: "sidecar-stdio",
+          command: "python3",
+          args: ["main.py"],
+          cwd: path.join(
+            path.dirname(url.fileURLToPath(import.meta.url)),
+            "sidecar-stdio-app",
+          ),
+          mode: "stdio",
+          stdio: {
+            requestTimeout: 10000,
+          },
+        },
+      ],
     }),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),

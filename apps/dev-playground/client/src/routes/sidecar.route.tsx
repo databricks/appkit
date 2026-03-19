@@ -275,7 +275,7 @@ function SidecarRoute() {
                   The sidecar spawns a Python HTTP server on an auto-assigned
                   port. AppKit proxies all requests under{" "}
                   <code className="font-mono text-xs bg-secondary px-1 py-0.5 rounded">
-                    /api/sidecar-http/*
+                    /api/sidecar/sidecar-http/*
                   </code>{" "}
                   directly to the child process. Health checks poll{" "}
                   <code className="font-mono text-xs bg-secondary px-1 py-0.5 rounded">
@@ -287,7 +287,7 @@ function SidecarRoute() {
               <Separator />
               <SidecarPanel
                 mode="http"
-                basePath="/api/sidecar-http"
+                basePath="/api/sidecar/sidecar-http"
                 endpoints={[
                   { label: "/hello", method: "GET", path: "/hello" },
                   { label: "/health", method: "GET", path: "/health" },
@@ -305,7 +305,7 @@ function SidecarRoute() {
                   line-delimited JSON-RPC 2.0 over stdin/stdout. AppKit
                   translates HTTP requests arriving at{" "}
                   <code className="font-mono text-xs bg-secondary px-1 py-0.5 rounded">
-                    /api/sidecar-stdio/*
+                    /api/sidecar/sidecar-stdio/*
                   </code>{" "}
                   into JSON-RPC messages, correlating responses by ID.
                 </p>
@@ -313,7 +313,7 @@ function SidecarRoute() {
               <Separator />
               <SidecarPanel
                 mode="stdio"
-                basePath="/api/sidecar-stdio"
+                basePath="/api/sidecar/sidecar-stdio"
                 endpoints={[
                   { label: "/hello", method: "GET", path: "/hello" },
                   {

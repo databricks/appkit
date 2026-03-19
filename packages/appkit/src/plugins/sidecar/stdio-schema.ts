@@ -12,7 +12,7 @@ const _requestCheck: StdioRequestPayload = {} as z.infer<
   typeof stdioRequestSchema
 >;
 
-export const stdioResponseSchema = z.object({
+const stdioResponseSchema = z.object({
   status: z.number().int().min(100).max(599).default(200),
   headers: z.record(z.string(), z.string()).optional(),
   body: z.unknown().optional(),

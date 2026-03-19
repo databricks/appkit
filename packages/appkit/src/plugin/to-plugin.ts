@@ -6,7 +6,7 @@ import type { PluginConstructor, PluginData, ToPlugin } from "shared";
  *
  * @internal
  */
-export function toPlugin<T extends PluginConstructor>(
+export function toPlugin<T extends PluginConstructor<any>>(
   plugin: T,
 ): ToPlugin<T, ConstructorParameters<T>[0], T["manifest"]["name"]> {
   type Config = ConstructorParameters<T>[0];

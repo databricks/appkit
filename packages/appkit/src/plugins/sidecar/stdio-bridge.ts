@@ -31,7 +31,7 @@ interface JsonRpcNotification {
 
 type JsonRpcMessage = JsonRpcResponse | JsonRpcNotification;
 
-export interface StdioRequestParams {
+interface StdioRequestParams {
   path: string;
   method?: string;
   headers?: Record<string, string>;
@@ -272,6 +272,7 @@ export class StdioBridge {
     };
 
     try {
+      logger.info("Sending ping request to sidecar", message);
       this.write(message);
       await this.waitForResponse(id, pingTimeout);
       return true;

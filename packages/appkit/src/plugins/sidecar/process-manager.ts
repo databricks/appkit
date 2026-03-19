@@ -5,7 +5,7 @@ import path from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { SidecarError } from "../../errors/sidecar";
 import { createLogger } from "../../logging/logger";
-import type { ISidecarConfig, RestartConfig, SidecarStatus } from "./types";
+import type { RestartConfig, SidecarDefinition, SidecarStatus } from "./types";
 
 const logger = createLogger("sidecar:process");
 
@@ -41,7 +41,7 @@ export class ProcessManager {
   /** Shell metacharacters that must not appear in the command string. */
   private static readonly SHELL_META = /[;|&$`\n\r]/;
 
-  constructor(config: ISidecarConfig) {
+  constructor(config: SidecarDefinition) {
     this.command = ProcessManager.validateCommand(config.command);
     this.args = config.args ?? [];
     this.cwd = ProcessManager.validateCwd(config.cwd);

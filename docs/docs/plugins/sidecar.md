@@ -67,8 +67,20 @@ await createApp({
 
 ### `ISidecarConfig`
 
+The plugin config accepts either a `sidecars` array (recommended) or a flat `SidecarDefinition` at the top level (legacy, backward compatible).
+
 | Property | Type | Default | Description |
 | --- | --- | --- | --- |
+| `sidecars` | `SidecarDefinition[]` | — | Array of sidecar definitions. Each entry describes a child process to manage. |
+| `name` | `string` | `"sidecar"` | Plugin instance name. |
+
+When `sidecars` is omitted, all `SidecarDefinition` fields can be passed at the top level (legacy single-sidecar form).
+
+### `SidecarDefinition`
+
+| Property | Type | Default | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | **(required)** | Unique identifier. Used for route namespacing (`/api/{id}/*`). |
 | `mode` | `"http" \| "stdio"` | `"http"` | Communication mode. |
 | `command` | `string` | **(required)** | Command to execute (e.g., `"python3"`, `"ruby"`, `"go"`). |
 | `args` | `string[]` | `[]` | Arguments passed to the command. |
@@ -76,11 +88,11 @@ await createApp({
 | `env` | `Record<string, string>` | `{}` | Additional environment variables. Merged with `process.env`. |
 | `startupTimeout` | `number` | `30000` | Milliseconds to wait for readiness during `setup()`. |
 | `restart` | `RestartConfig` | See below | Process restart configuration. |
+| `setupCommands` | `string[]` | `[]` | Shell commands to run before spawning the process. |
 | `port` | `number` | `0` (auto) | **HTTP mode only.** Port the child listens on. `0` for auto-assign. |
 | `healthCheck` | `HealthCheckConfig` | See below | **HTTP mode only.** Health check configuration. |
 | `proxy` | `ProxyConfig` | See below | **HTTP mode only.** Proxy behavior configuration. |
 | `stdio` | `StdioConfig` | See below | **stdio mode only.** Communication layer configuration. |
-| `name` | `string` | `"sidecar"` | Plugin instance name. Override to run multiple sidecars. |
 
 ### `HealthCheckConfig`
 
@@ -632,26 +644,49 @@ The `exports()` method returns a `SidecarExport` object, accessible as `appkit.s
 
 ```ts
 const appkit = await createApp({
-  plugins: [server(), sidecar({ command: "python3", args: ["main.py"], cwd: "./api" })],
+  plugins: [
+    server(),
+    sidecar({
+      sidecars: [
+        { id: "api", command: "python3", args: ["main.py"], cwd: "./api" },
+        { id: "worker", mode: "stdio", command: "go", args: ["run", "worker.go"], cwd: "./worker" },
+      ],
+    }),
+  ],
 });
 
-// Check sidecar status
-const status = appkit.sidecar.getStatus(); // "healthy" | "starting" | "unhealthy" | "stopped" | "crashed"
+// Get a specific sidecar's export by id
+const api = appkit.sidecar.get("api");
+api?.getStatus(); // "healthy" | "starting" | "unhealthy" | "stopped" | "crashed"
+api?.getPort();   // assigned port (HTTP mode)
 
-// Get the assigned port (HTTP mode only)
-const port = appkit.sidecar.getPort();
+// Shorthand helpers target a sidecar by id
+const status = appkit.sidecar.getStatus("api");
+const lines = appkit.sidecar.getOutput("worker", 50); // last 50 lines
 
-// Read recent output (stdout/stderr)
-const lines = appkit.sidecar.getOutput(50); // last 50 lines
+// Restart / stop a specific sidecar
+await appkit.sidecar.restart("api");
+await appkit.sidecar.stop("worker");
 
-// Restart the process
-await appkit.sidecar.restart();
-
-// Stop the process
-await appkit.sidecar.stop();
+// Iterate all sidecars
+for (const [id, sc] of appkit.sidecar.getAll()) {
+  console.log(id, sc.getStatus());
+}
 ```
 
 ### `SidecarExport` interface
+
+| Method | Signature | Description |
+| --- | --- | --- |
+| `get` | `(id: string) => SingleSidecarExport \| undefined` | Get the export API for a specific sidecar by id. |
+| `getAll` | `() => Map<string, SingleSidecarExport>` | Get all sidecar exports as a Map keyed by id. |
+| `getStatus` | `(id: string) => SidecarStatus` | Current process status for a specific sidecar. |
+| `restart` | `(id: string) => Promise<void>` | Stop and re-spawn a specific sidecar. |
+| `stop` | `(id: string) => Promise<void>` | Stop a specific sidecar. |
+| `getOutput` | `(id: string, lines?: number) => string[]` | Recent stdout/stderr lines from the output ring buffer (up to 1000 lines). |
+| `getPort` | `(id: string) => number` | Assigned port (HTTP mode). Returns `0` in stdio mode. |
+
+### `SingleSidecarExport` interface
 
 | Method | Signature | Description |
 | --- | --- | --- |
@@ -663,7 +698,7 @@ await appkit.sidecar.stop();
 
 ### Route pattern
 
-All sidecar routes are mounted at `/api/sidecar/*` (or `/api/{name}/*` if a custom `name` is provided). In HTTP mode, the route is registered as `"proxy"`. In stdio mode, it is registered as `"stdio"`.
+All sidecar routes are mounted at `/api/{sidecar.id}/*`. In HTTP mode, the route is registered as `"proxy:{id}"`. In stdio mode, it is registered as `"stdio:{id}"`.
 
 ### Request format (stdio mode)
 
@@ -680,29 +715,41 @@ The client can send any HTTP method (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`) an
 
 ### Running multiple sidecars
 
-Use the `name` property to run multiple sidecar instances:
+Pass a `sidecars` array to run multiple child processes from a single plugin instance:
 
 ```ts
 await createApp({
   plugins: [
     server(),
     sidecar({
-      name: "python-api",
-      command: "python3",
-      args: ["api.py"],
-      cwd: "./python-api",
-    }),
-    sidecar({
-      name: "go-worker",
-      mode: "stdio",
-      command: "go",
-      args: ["run", "worker.go"],
-      cwd: "./go-worker",
+      sidecars: [
+        {
+          id: "python-api",
+          command: "python3",
+          args: ["api.py"],
+          cwd: "./python-api",
+        },
+        {
+          id: "go-worker",
+          mode: "stdio",
+          command: "go",
+          args: ["run", "worker.go"],
+          cwd: "./go-worker",
+        },
+      ],
     }),
   ],
 });
 // /api/python-api/* -> Python HTTP sidecar
 // /api/go-worker/*  -> Go stdio sidecar
+```
+
+All sidecars start concurrently during `setup()`. Each has independent health checking and restart logic.
+
+The **legacy single-sidecar** form is still supported for backward compatibility:
+
+```ts
+sidecar({ id: "python-api", command: "python3", args: ["api.py"], cwd: "./python-api" })
 ```
 
 ### Passing environment variables

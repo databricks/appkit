@@ -264,11 +264,6 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.isSQLTypeMarker",
           label: "isSQLTypeMarker"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Function.sidecar",
-          label: "sidecar"
         }
       ]
     }
