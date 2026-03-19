@@ -159,6 +159,11 @@ export abstract class Plugin<
   /** Paths that opt out of JSON body parsing (e.g. file upload routes) */
   private skipBodyParsingPaths: Set<string> = new Set();
 
+  /** Register a path that should skip body parsing (e.g. proxy or file upload routes) */
+  protected addSkipBodyParsingPath(path: string): void {
+    this.skipBodyParsingPaths.add(path);
+  }
+
   /**
    * Plugin initialization phase.
    * - 'core': Initialized first (e.g., config plugins)

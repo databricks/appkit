@@ -149,6 +149,16 @@
         "optional": []
       },
       "requiredByTemplate": true
+    },
+    "sidecar": {
+      "name": "sidecar",
+      "displayName": "Sidecar",
+      "description": "Run another stack (Python, Ruby, Go, etc.) as a child process alongside the AppKit server",
+      "package": "@databricks/appkit",
+      "resources": {
+        "required": [],
+        "optional": []
+      }
     }
   }
 }

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "name": "sidecar",
+  "displayName": "Sidecar",
+  "description": "Run another stack (Python, Ruby, Go, etc.) as a child process alongside the AppKit server",
+  "resources": {
+    "required": [],
+    "optional": []
+  },
+  "config": {
+    "schema": {
+      "type": "object",
+      "required": ["command"],
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Command to execute (e.g., 'python', 'ruby', 'go')"
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Arguments to the command"
+        },
+        "port": {
+          "type": "number",
+          "description": "Port the child process listens on. 0 for auto-assign."
+        },
+        "startupTimeout": {
+          "type": "number",
+          "default": 30000,
+          "description": "Timeout in ms to wait for child process readiness"
+        }
+      }
+    }
+  }
+}

@@ -1,5 +1,14 @@
 import "reflect-metadata";
-import { analytics, createApp, files, genie, server } from "@databricks/appkit";
+import path from "node:path";
+import url from "node:url";
+import {
+  analytics,
+  createApp,
+  files,
+  genie,
+  server,
+  sidecar,
+} from "@databricks/appkit";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
@@ -26,6 +35,31 @@ createApp({
     }),
     lakebaseExamples(),
     files(),
+    sidecar({
+      name: "sidecar-http",
+      command: "python3",
+      args: ["main.py"],
+      cwd: path.join(
+        path.dirname(url.fileURLToPath(import.meta.url)),
+        "sidecar-app",
+      ),
+      mode: "http",
+      port: 0,
+      startupTimeout: 15000,
+    }),
+    sidecar({
+      name: "sidecar-stdio",
+      command: "python3",
+      args: ["main.py"],
+      cwd: path.join(
+        path.dirname(url.fileURLToPath(import.meta.url)),
+        "sidecar-stdio-app",
+      ),
+      mode: "stdio",
+      stdio: {
+        requestTimeout: 10000,
+      },
+    }),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
 }).then((appkit) => {

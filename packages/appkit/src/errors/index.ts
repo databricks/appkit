@@ -26,5 +26,6 @@ export { ConnectionError } from "./connection";
 export { ExecutionError } from "./execution";
 export { InitializationError } from "./initialization";
 export { ServerError } from "./server";
+export { SidecarError } from "./sidecar";
 export { TunnelError } from "./tunnel";
 export { ValidationError } from "./validation";

@@ -104,6 +104,14 @@ function RootComponent() {
                     Files
                   </Button>
                 </Link>
+                <Link to="/sidecar" className="no-underline">
+                  <Button
+                    variant="ghost"
+                    className="text-foreground hover:text-secondary-foreground"
+                  >
+                    Sidecar
+                  </Button>
+                </Link>
                 <ThemeSelector />
               </div>
             </nav>
