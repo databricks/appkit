@@ -1,8 +1,11 @@
 import http from "node:http";
 import posixPath from "node:path/posix";
+import type { Counter, Histogram, UpDownCounter } from "@opentelemetry/api";
+import { SpanKind, SpanStatusCode } from "@opentelemetry/api";
 import type { IAppRequest, IAppResponse } from "shared";
 import { SidecarError } from "../../errors/sidecar";
 import { createLogger } from "../../logging/logger";
+import type { ITelemetry } from "../../telemetry/types";
 import type { ProxyConfig, SidecarStatus } from "./types";
 
 const logger = createLogger("sidecar:proxy");
@@ -25,13 +28,54 @@ const HOP_BY_HOP_HEADERS = new Set([
   "upgrade",
 ]);
 
+function classifyError(err: NodeJS.ErrnoException): string {
+  switch (err.code) {
+    case "ECONNREFUSED":
+      return "connection_refused";
+    case "ECONNRESET":
+      return "connection_reset";
+    case "ETIMEDOUT":
+      return "timeout";
+    default:
+      return "proxy_error";
+  }
+}
+
 export class SidecarProxy {
   private readonly config: Required<ProxyConfig>;
   private readonly port: number;
+  private readonly telemetry: ITelemetry;
+  private readonly metrics: {
+    requestCount: Counter;
+    requestDuration: Histogram;
+    errorCount: Counter;
+    pendingGauge: UpDownCounter;
+  };
 
-  constructor(port: number, config?: ProxyConfig) {
+  constructor(port: number, telemetry: ITelemetry, config?: ProxyConfig) {
     this.port = port;
+    this.telemetry = telemetry;
     this.config = { ...DEFAULTS, ...config };
+
+    const meter = this.telemetry.getMeter();
+    this.metrics = {
+      requestCount: meter.createCounter("sidecar.proxy.request.count", {
+        description: "Total proxied HTTP requests to sidecar",
+        unit: "1",
+      }),
+      requestDuration: meter.createHistogram("sidecar.proxy.request.duration", {
+        description: "Round-trip time for proxied HTTP requests",
+        unit: "ms",
+      }),
+      errorCount: meter.createCounter("sidecar.proxy.error.count", {
+        description: "Total proxy errors (timeout, connection, etc.)",
+        unit: "1",
+      }),
+      pendingGauge: meter.createUpDownCounter("sidecar.proxy.pending", {
+        description: "Currently pending (in-flight) proxied requests",
+        unit: "1",
+      }),
+    };
   }
 
   middleware(
@@ -62,65 +106,143 @@ export class SidecarProxy {
     const headers = this.buildHeaders(req);
     const fullPath = targetPath + this.extractQueryString(req.url);
 
-    logger.debug(
-      "%s %s → localhost:%d%s",
-      req.method,
-      req.path,
-      this.port,
-      fullPath,
-    );
+    // Fire-and-forget — all error handling is internal to executeProxy
+    void this.executeProxy(req, res, fullPath, headers);
+  }
 
-    const proxyReq = http.request(
+  private executeProxy(
+    req: IAppRequest,
+    res: IAppResponse,
+    fullPath: string,
+    headers: Record<string, string | string[]>,
+  ): Promise<void> {
+    return this.telemetry.startActiveSpan(
+      "sidecar.proxy.request",
       {
-        hostname: "localhost",
-        port: this.port,
-        method: req.method,
-        path: fullPath,
-        headers,
-        timeout: this.config.timeout,
+        kind: SpanKind.CLIENT,
+        attributes: {
+          "sidecar.proxy.path": req.path,
+          "sidecar.proxy.method": req.method,
+          "sidecar.proxy.target_port": this.port,
+        },
       },
-      (proxyRes) => {
-        const statusCode = proxyRes.statusCode ?? 502;
-        logger.debug("%s %s ← %d", req.method, req.path, statusCode);
+      async (span) => {
+        const startTime = Date.now();
+        this.metrics.pendingGauge.add(1);
 
-        res.status(statusCode);
+        try {
+          logger.debug(
+            "%s %s → localhost:%d%s",
+            req.method,
+            req.path,
+            this.port,
+            fullPath,
+          );
 
-        // Forward response headers (skip hop-by-hop)
-        for (const [key, value] of Object.entries(proxyRes.headers)) {
-          if (
-            !HOP_BY_HOP_HEADERS.has(key.toLowerCase()) &&
-            value !== undefined
-          ) {
-            res.setHeader(key, value);
-          }
+          const statusCode = await new Promise<number>((resolve, reject) => {
+            const proxyReq = http.request(
+              {
+                hostname: "localhost",
+                port: this.port,
+                method: req.method,
+                path: fullPath,
+                headers,
+                timeout: this.config.timeout,
+              },
+              (proxyRes) => {
+                const status = proxyRes.statusCode ?? 502;
+                logger.debug("%s %s ← %d", req.method, req.path, status);
+
+                res.status(status);
+
+                for (const [key, value] of Object.entries(proxyRes.headers)) {
+                  if (
+                    !HOP_BY_HOP_HEADERS.has(key.toLowerCase()) &&
+                    value !== undefined
+                  ) {
+                    res.setHeader(key, value);
+                  }
+                }
+
+                span.addEvent("sidecar.proxy.request_forwarded", {
+                  "sidecar.proxy.response_status": status,
+                });
+
+                proxyRes.pipe(res);
+                proxyRes.on("end", () => resolve(status));
+                proxyRes.on("error", reject);
+              },
+            );
+
+            proxyReq.on("error", (err) => {
+              logger.error("Proxy request failed: %s", err.message);
+              if (!res.headersSent) {
+                if (
+                  (err as NodeJS.ErrnoException).code === "ECONNREFUSED"
+                ) {
+                  res
+                    .status(502)
+                    .json({ error: "Sidecar process is unavailable" });
+                } else {
+                  res
+                    .status(502)
+                    .json({ error: "Failed to proxy request to sidecar" });
+                }
+              }
+              reject(err);
+            });
+
+            proxyReq.on("timeout", () => {
+              proxyReq.destroy();
+              if (!res.headersSent) {
+                res.status(504).json({ error: "Sidecar request timed out" });
+              }
+              reject(
+                Object.assign(new Error("Sidecar request timed out"), {
+                  code: "ETIMEDOUT",
+                }),
+              );
+            });
+
+            req.pipe(proxyReq);
+          });
+
+          const duration = Date.now() - startTime;
+          const metricAttrs = {
+            "sidecar.proxy.path": req.path,
+            "sidecar.proxy.method": req.method,
+            "sidecar.proxy.status": statusCode,
+          };
+          this.metrics.requestCount.add(1, metricAttrs);
+          this.metrics.requestDuration.record(duration, metricAttrs);
+
+          span.setAttribute("sidecar.proxy.duration_ms", duration);
+          span.setAttribute("sidecar.proxy.response_status", statusCode);
+          span.setStatus({ code: SpanStatusCode.OK });
+        } catch (error) {
+          const duration = Date.now() - startTime;
+          const errorType = classifyError(error as NodeJS.ErrnoException);
+
+          span.recordException(error as Error);
+          span.setAttribute("sidecar.proxy.error_type", errorType);
+          span.setStatus({
+            code: SpanStatusCode.ERROR,
+            message: (error as Error).message,
+          });
+
+          this.metrics.errorCount.add(1, {
+            "sidecar.proxy.path": req.path,
+            "sidecar.proxy.error_type": errorType,
+          });
+          this.metrics.requestDuration.record(duration, {
+            "sidecar.proxy.path": req.path,
+            "sidecar.proxy.error": "true",
+          });
+        } finally {
+          this.metrics.pendingGauge.add(-1);
         }
-
-        // Pipe response body
-        proxyRes.pipe(res);
       },
     );
-
-    proxyReq.on("error", (err) => {
-      logger.error("Proxy request failed: %s", err.message);
-
-      if (!res.headersSent) {
-        if ((err as NodeJS.ErrnoException).code === "ECONNREFUSED") {
-          res.status(502).json({ error: "Sidecar process is unavailable" });
-        } else {
-          res.status(502).json({ error: "Failed to proxy request to sidecar" });
-        }
-      }
-    });
-
-    proxyReq.on("timeout", () => {
-      proxyReq.destroy();
-      if (!res.headersSent) {
-        res.status(504).json({ error: "Sidecar request timed out" });
-      }
-    });
-
-    // Pipe request body to the sidecar
-    req.pipe(proxyReq);
   }
 
   private buildTargetPath(originalPath: string): string {

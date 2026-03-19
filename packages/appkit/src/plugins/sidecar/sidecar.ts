@@ -85,7 +85,7 @@ export class SidecarPlugin extends Plugin<ISidecarConfig> {
       },
     });
 
-    this.proxy = new SidecarProxy(port, this.config.proxy);
+    this.proxy = new SidecarProxy(port, this.telemetry, this.config.proxy);
 
     logger.info("Sidecar '%s' ready on port %d", this.config.command, port);
   }
