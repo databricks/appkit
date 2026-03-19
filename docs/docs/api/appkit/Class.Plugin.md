@@ -215,6 +215,26 @@ BasePlugin.abortActiveOperations
 
 ***
 
+### addSkipBodyParsingPath()
+
+```ts
+protected addSkipBodyParsingPath(path: string): void;
+```
+
+Register a path that should skip body parsing (e.g. proxy or file upload routes)
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `path` | `string` |
+
+#### Returns
+
+`void`
+
+***
+
 ### asUser()
 
 ```ts
