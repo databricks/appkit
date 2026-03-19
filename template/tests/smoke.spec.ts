@@ -15,6 +15,9 @@ const APP_CONFIG = {
 {{- if .plugins.genie}}
     'genie',
 {{- end}}
+{{- if .plugins.sidecar}}
+    'sidecar',
+{{- end}}
   ],
 } as const;
 
@@ -39,6 +42,11 @@ const PLUGIN_PAGES: Record<string, PluginPage> = {
     navLabel: 'Genie',
     path: '/genie',
     expectedTexts: ['Ask questions about your data using Databricks AI/BI Genie'],
+  },
+  sidecar: {
+    navLabel: 'Sidecar',
+    path: '/sidecar',
+    expectedTexts: ['Call Sidecar'],
   },
 };
 

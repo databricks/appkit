@@ -55,6 +55,7 @@ const FEATURE_DEPENDENCIES: Record<string, string> = {
   files: "Volume",
   genie: "Genie Space",
   lakebase: "Database",
+  sidecar: "None",
 };
 
 const APP_TEMPLATES: AppTemplate[] = [
@@ -105,6 +106,12 @@ const APP_TEMPLATES: AppTemplate[] = [
     },
     description:
       "Node.js app with Lakebase Autoscaling (Postgres) CRUD operations",
+  },
+  {
+    name: "appkit-sidecar",
+    features: ["sidecar"],
+    description:
+      "Node.js app with a Python sidecar process managed by AppKit",
   },
 ];
 

@@ -17,6 +17,9 @@ import { GeniePage } from './pages/genie/GeniePage';
 {{- if .plugins.files}}
 import { FilesPage } from './pages/files/FilesPage';
 {{- end}}
+{{- if .plugins.sidecar}}
+import { SidecarPage } from './pages/sidecar/SidecarPage';
+{{- end}}
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
@@ -54,6 +57,11 @@ function Layout() {
             Files
           </NavLink>
 {{- end}}
+{{- if .plugins.sidecar}}
+          <NavLink to="/sidecar" className={navLinkClass}>
+            Sidecar
+          </NavLink>
+{{- end}}
         </nav>
       </header>
 
@@ -80,6 +88,9 @@ const router = createBrowserRouter([
 {{- end}}
 {{- if .plugins.files}}
       { path: '/files', element: <FilesPage /> },
+{{- end}}
+{{- if .plugins.sidecar}}
+      { path: '/sidecar', element: <SidecarPage /> },
 {{- end}}
     ],
   },

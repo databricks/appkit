@@ -8,14 +8,23 @@ createApp({
 {{- if .plugins.lakebase}}
     server({ autoStart: false }),
 {{- range $name, $_ := .plugins}}
-{{- if ne $name "server"}}
+{{- if and (ne $name "server") (ne $name "sidecar")}}
     {{$name}}(),
 {{- end}}
 {{- end}}
 {{- else}}
 {{- range $name, $_ := .plugins}}
+{{- if ne $name "sidecar"}}
     {{$name}}(),
 {{- end}}
+{{- end}}
+{{- end}}
+{{- if .plugins.sidecar}}
+    sidecar({
+      command: 'python3',
+      args: ['main.py'],
+      cwd: './sidecar',
+    }),
 {{- end}}
   ],
 })
