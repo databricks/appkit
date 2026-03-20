@@ -16,7 +16,7 @@ export interface Command {
   run: () => Promise<void>;
 }
 
-export type InspectorView = "commands" | "picked" | "performance" | "health" | "waterfall" | "streams" | "queries" | "hidden";
+export type InspectorView = "commands" | "picked" | "performance" | "health" | "waterfall" | "streams" | "queries" | "console" | "hidden";
 
 export interface PerformanceData {
   totalRequests: number;

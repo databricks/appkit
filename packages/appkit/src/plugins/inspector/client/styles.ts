@@ -867,6 +867,79 @@ kbd {
   font-size: 10px;
   font-family: ui-monospace, "SF Mono", monospace;
 }
+.summary-clickable {
+  cursor: pointer;
+  transition: background 80ms ease;
+}
+.summary-clickable:hover {
+  background: rgba(129, 140, 248, 0.08) !important;
+}
+.console-list {
+  display: grid;
+  gap: 2px;
+  padding: 4px;
+  max-height: min(50vh, 400px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+}
+.console-entry {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  border-left: 3px solid transparent;
+}
+.console-error {
+  border-left-color: #f87171;
+  background: rgba(248, 113, 113, 0.04);
+}
+.console-warn {
+  border-left-color: #fbbf24;
+  background: rgba(251, 191, 36, 0.04);
+}
+.console-info {
+  border-left-color: #60a5fa;
+}
+.console-log {
+  border-left-color: rgba(255, 255, 255, 0.1);
+}
+.console-entry-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+.console-level {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: ui-monospace, "SF Mono", monospace;
+  letter-spacing: 0.03em;
+}
+.console-level-error { color: #f87171; }
+.console-level-warn { color: #fbbf24; }
+.console-level-info { color: #60a5fa; }
+.console-level-log { color: rgba(255, 255, 255, 0.4); }
+.console-time {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.25);
+}
+.console-message {
+  font-size: 12px;
+  color: #d4d4d8;
+  font-family: ui-monospace, "SF Mono", monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+.console-stack {
+  margin-top: 4px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.25);
+  font-family: ui-monospace, "SF Mono", monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.4;
+}
 @media (max-width: 640px) {
   .wf-row { grid-template-columns: 36px 80px 1fr 44px 30px; }
 }

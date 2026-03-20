@@ -940,6 +940,43 @@ export function CommandPalette({
             </div>
           )}
 
+          {state.view === "console" && (
+            <div>
+              <div className="perf-back-row">
+                <button
+                  type="button"
+                  className="perf-back-btn"
+                  onClick={() => dispatch({ type: "SET_VIEW", view: "commands" })}
+                >
+                  <span dangerouslySetInnerHTML={{ __html: ICONS.back }} /> Back
+                </button>
+              </div>
+              <div className="section-label">Console Output</div>
+              {consoleState.recentEntries.length === 0 ? (
+                <div className="empty-state">No console entries recorded.</div>
+              ) : (
+                <div className="console-list">
+                  {consoleState.recentEntries.map((entry, i) => (
+                    <div key={`${entry.timestamp}-${i}`} className={`console-entry console-${entry.level}`}>
+                      <div className="console-entry-header">
+                        <span className={`console-level console-level-${entry.level}`}>
+                          {entry.level.toUpperCase()}
+                        </span>
+                        <span className="console-time">
+                          {new Date(entry.timestamp).toLocaleTimeString()}
+                        </span>
+                      </div>
+                      <div className="console-message">{entry.message}</div>
+                      {entry.stack && (
+                        <div className="console-stack">{entry.stack}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="divider" />
           <div className="summary">
             <div>
@@ -961,7 +998,10 @@ export function CommandPalette({
               <strong>Recent actions</strong>
               {String(networkState.recentActions.length)}
             </div>
-            <div>
+            <div
+              className="summary-clickable"
+              onClick={() => dispatch({ type: "SET_VIEW", view: "console" })}
+            >
               <strong>Console entries</strong>
               {String(consoleState.recentEntries.length)}
               {consoleState.recentEntries.filter((e) => e.level === "error").length > 0 && (
