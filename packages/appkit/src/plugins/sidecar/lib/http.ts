@@ -96,8 +96,6 @@ export const httpHandler: ModeHandler = {
     helpers: PluginRouteHelpers,
   ) {
     const state = narrowHttp(inst);
-    if (!state.proxy) return;
-
     const { definition: def, processManager } = inst;
 
     const subRouter = Router();

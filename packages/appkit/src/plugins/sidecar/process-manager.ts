@@ -112,6 +112,7 @@ export class ProcessManager {
     if (!this.stdinEnabled) {
       childEnv.PORT = String(this._port);
       childEnv.SIDECAR_PORT = String(this._port);
+      childEnv.DATABRICKS_APP_PORT = String(this._port);
     }
 
     const stdioOpt: ["pipe", "pipe", "pipe"] | ["ignore", "pipe", "pipe"] = this

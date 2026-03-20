@@ -1,5 +1,3 @@
-import type { BasePluginConfig } from "shared";
-
 export interface HealthCheckConfig {
   /** Path for health check HTTP request. Default: "/health" */
   path?: string;
@@ -113,12 +111,11 @@ export interface SidecarDefinition {
 /**
  * Configuration for the sidecar plugin.
  *
- * Supports two forms:
- * - **Multi-sidecar** (recommended): pass a `sidecars` array with one or more {@link SidecarDefinition} entries.
- * - **Legacy single-sidecar**: pass all sidecar fields at the top level (backward compatible).
+ * Accepts either:
+ * - A single {@link SidecarDefinition} object.
+ * - An array of {@link SidecarDefinition} entries for multi-sidecar setups.
  */
-export type ISidecarConfig = BasePluginConfig &
-  ({ sidecars: SidecarDefinition[] } | SidecarDefinition);
+export type ISidecarConfig = SidecarDefinition | SidecarDefinition[];
 
 export type SidecarStatus =
   | "starting"

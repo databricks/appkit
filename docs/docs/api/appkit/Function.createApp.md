@@ -20,7 +20,7 @@ with an `asUser(req)` method for user-scoped execution.
 
 | Type Parameter |
 | ------ |
-| `T` *extends* [`PluginData`](TypeAlias.PluginData.md)\<`PluginConstructor`, `unknown`, `string`\>[] |
+| `T` *extends* [`PluginData`](TypeAlias.PluginData.md)\<`PluginConstructor`\<`any`\>, `unknown`, `string`\>[] |
 
 ## Parameters
 

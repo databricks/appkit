@@ -113,14 +113,16 @@ export const stdioHandler: ModeHandler = {
     helpers: PluginRouteHelpers,
   ) {
     const state = narrowStdio(inst);
-    if (!state.stdioBridge) return;
-
     const { definition: def, processManager } = inst;
-    const bridge = state.stdioBridge;
     const getStatus = () => processManager.status;
 
     const subRouter = Router();
     subRouter.all("/*", async (req: IAppRequest, res) => {
+      if (!state.stdioBridge) {
+        res.status(503).json({ error: "Sidecar stdio bridge not ready" });
+        return;
+      }
+
       const status = getStatus();
       if (status !== "healthy") {
         res.status(503).json({ error: "Sidecar process is not ready", status });
@@ -144,7 +146,7 @@ export const stdioHandler: ModeHandler = {
       const authHeaders = extractAuthHeaders(req);
 
       try {
-        const result = await bridge.sendRequest({
+        const result = await state.stdioBridge.sendRequest({
           ...parsed.data,
           headers: authHeaders,
         });

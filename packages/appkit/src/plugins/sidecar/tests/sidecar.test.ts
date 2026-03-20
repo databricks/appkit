@@ -134,18 +134,17 @@ function makeStdioConfig(overrides: Partial<SidecarDefinition> = {}): ISidecarCo
 }
 
 function makeMultiConfig(defs: SidecarDefinition[]): ISidecarConfig {
-  return { sidecars: defs } as ISidecarConfig;
+  return defs;
 }
 
 /**
- * Instantiate SidecarPlugin directly via the toPlugin factory.
- * `sidecar(config)` returns `{ plugin: SidecarPlugin, config, name }`.
- * We use `new data.plugin(config)` to get an instance.
+ * Instantiate SidecarPlugin via the sidecar() factory.
+ * The factory normalizes the config, so we pass data.config to the constructor.
  */
 function createPlugin(config: ISidecarConfig) {
   const data = sidecar(config);
   const PluginClass = data.plugin as any;
-  return new PluginClass(config);
+  return new PluginClass(data.config);
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -210,12 +209,11 @@ describe("SidecarPlugin", () => {
     });
 
     test("A8: plugin name is always 'sidecar' from manifest", () => {
-      // toPlugin derives name from the static manifest, not from config.name
-      const data = sidecar({ ...makeHttpConfig(), name: "my-sidecar" });
+      const data = sidecar(makeHttpConfig());
       expect(data.name).toBe("sidecar");
-      // But the instance name comes from config.name
-      const inst = createPlugin({ ...makeHttpConfig(), name: "my-sidecar" });
-      expect(inst.name).toBe("my-sidecar");
+      // Instance name falls back to manifest name when no config.name
+      const inst = createPlugin(makeHttpConfig());
+      expect(inst.name).toBe("sidecar");
     });
   });
 
@@ -324,9 +322,10 @@ describe("SidecarPlugin", () => {
         all: vi.fn(),
       } as any;
 
-      // Mode handler hasn't set up proxy yet (no setup() call), so injectRoutes
-      // will skip route registration. This is fine — we're testing it doesn't crash.
+      // Mode handler hasn't set up proxy yet (no setup() call), but injectRoutes
+      // still registers routes — the middleware handles proxy-not-ready at request time.
       expect(() => inst.injectRoutes(mockRouter)).not.toThrow();
+      expect(mockRouter.use).toHaveBeenCalled();
     });
 
     test("abortActiveOperations does not throw for multiple instances", () => {

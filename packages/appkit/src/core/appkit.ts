@@ -160,7 +160,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
   }
 
   static async _createApp<
-    T extends PluginData<PluginConstructor, unknown, string>[],
+    T extends PluginData<PluginConstructor<any>, unknown, string>[],
   >(
     config: {
       plugins?: T;
@@ -251,7 +251,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
  * ```
  */
 export async function createApp<
-  T extends PluginData<PluginConstructor, unknown, string>[],
+  T extends PluginData<PluginConstructor<any>, unknown, string>[],
 >(
   config: {
     plugins?: T;

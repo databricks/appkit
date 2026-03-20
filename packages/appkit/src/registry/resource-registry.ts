@@ -94,7 +94,7 @@ export class ResourceRegistry {
    * @throws {ConfigurationError} If any plugin is missing a manifest or manifest is invalid
    */
   public collectResources(
-    rawPlugins: PluginData<PluginConstructor, unknown, string>[],
+    rawPlugins: PluginData<PluginConstructor<any>, unknown, string>[],
   ): void {
     for (const pluginData of rawPlugins) {
       if (!pluginData?.plugin) continue;

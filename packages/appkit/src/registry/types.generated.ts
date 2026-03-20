@@ -52,11 +52,7 @@ export type DatabasePermission = "CAN_CONNECT_AND_CREATE";
 export type PostgresPermission = "CAN_CONNECT_AND_CREATE";
 
 /** Permissions for GENIE_SPACE resources */
-export type GenieSpacePermission =
-  | "CAN_VIEW"
-  | "CAN_RUN"
-  | "CAN_EDIT"
-  | "CAN_MANAGE";
+export type GenieSpacePermission = "CAN_VIEW" | "CAN_RUN" | "CAN_EDIT" | "CAN_MANAGE";
 
 /** Permissions for EXPERIMENT resources */
 export type ExperimentPermission = "CAN_READ" | "CAN_EDIT" | "CAN_MANAGE";
@@ -81,10 +77,7 @@ export type ResourcePermission =
   | AppPermission;
 
 /** Permission hierarchy per resource type (weakest to strongest). Schema enum order. */
-export const PERMISSION_HIERARCHY_BY_TYPE: Record<
-  ResourceType,
-  readonly ResourcePermission[]
-> = {
+export const PERMISSION_HIERARCHY_BY_TYPE: Record<ResourceType, readonly ResourcePermission[]> = {
   [ResourceType.SECRET]: ["READ", "WRITE", "MANAGE"],
   [ResourceType.JOB]: ["CAN_VIEW", "CAN_MANAGE_RUN", "CAN_MANAGE"],
   [ResourceType.SQL_WAREHOUSE]: ["CAN_USE", "CAN_MANAGE"],
@@ -101,7 +94,4 @@ export const PERMISSION_HIERARCHY_BY_TYPE: Record<
 } as const;
 
 /** Set of valid permissions per type (for validation). */
-export const PERMISSIONS_BY_TYPE: Record<
-  ResourceType,
-  readonly ResourcePermission[]
-> = PERMISSION_HIERARCHY_BY_TYPE;
+export const PERMISSIONS_BY_TYPE: Record<ResourceType, readonly ResourcePermission[]> = PERMISSION_HIERARCHY_BY_TYPE;

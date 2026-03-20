@@ -35,7 +35,7 @@ Useful for testing or when rebuilding the registry.
 ### collectResources()
 
 ```ts
-collectResources(rawPlugins: PluginData<PluginConstructor, unknown, string>[]): void;
+collectResources(rawPlugins: PluginData<PluginConstructor<any>, unknown, string>[]): void;
 ```
 
 Collects and registers resource requirements from an array of plugins.
@@ -45,7 +45,7 @@ For each plugin, loads its manifest (required) and runtime resource requirements
 
 | Parameter | Type | Description |
 | ------ | ------ | ------ |
-| `rawPlugins` | [`PluginData`](TypeAlias.PluginData.md)\<`PluginConstructor`, `unknown`, `string`\>[] | Array of plugin data entries from createApp configuration |
+| `rawPlugins` | [`PluginData`](TypeAlias.PluginData.md)\<`PluginConstructor`\<`any`\>, `unknown`, `string`\>[] | Array of plugin data entries from createApp configuration |
 
 #### Returns
 
@@ -240,7 +240,7 @@ ValidationResult with validity status, missing resources, and all resources
 #### Example
 
 ```typescript
-const registry = ResourceRegistry.getInstance();
+const registry = new ResourceRegistry();
 const result = registry.validate();
 
 if (!result.valid) {

@@ -1,9 +1,9 @@
 import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { IAppRouter } from "shared";
+import type { BasePluginConfig, IAppRouter, PluginData } from "shared";
 import { SidecarError } from "../../errors/sidecar";
 import { createLogger } from "../../logging/logger";
-import { Plugin, toPlugin } from "../../plugin";
+import { Plugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import { httpHandler } from "./lib/http";
 import type { ModeHandler, SidecarInstance } from "./lib/shared";
@@ -23,27 +23,28 @@ const execFileAsync = promisify(execFile);
 
 const logger = createLogger("sidecar");
 
-function normalizeSidecars(config: ISidecarConfig): SidecarDefinition[] {
-  if ("sidecars" in config && Array.isArray(config.sidecars)) {
-    return config.sidecars;
-  }
-  const { name: _name, host: _host, telemetry: _telemetry, ...def } = config;
-  return [def as SidecarDefinition];
+/** Internal config shape after factory normalization — always a plain object. */
+type NormalizedSidecarConfig = BasePluginConfig & {
+  definitions: SidecarDefinition[];
+};
+
+function normalizeSidecars(
+  config: NormalizedSidecarConfig,
+): SidecarDefinition[] {
+  return config.definitions;
 }
 
 function handlerForMode(mode: string | undefined): ModeHandler {
   return mode === "stdio" ? stdioHandler : httpHandler;
 }
 
-class SidecarPlugin extends Plugin {
+class SidecarPlugin extends Plugin<NormalizedSidecarConfig> {
   static manifest = manifest as PluginManifest<"sidecar">;
-  protected declare config: ISidecarConfig;
 
   private instances = new Map<string, SidecarInstance>();
 
-  constructor(config: ISidecarConfig) {
+  constructor(config: NormalizedSidecarConfig) {
     super(config);
-    this.config = config;
 
     const definitions = normalizeSidecars(config);
     const ids = new Set<string>();
@@ -192,4 +193,12 @@ class SidecarPlugin extends Plugin {
 /**
  * @internal
  */
-export const sidecar = toPlugin(SidecarPlugin);
+export const sidecar = (
+  config: ISidecarConfig,
+): PluginData<typeof SidecarPlugin, NormalizedSidecarConfig, "sidecar"> => ({
+  plugin: SidecarPlugin,
+  config: {
+    definitions: Array.isArray(config) ? config : [config],
+  },
+  name: "sidecar" as const,
+});

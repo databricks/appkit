@@ -27,18 +27,16 @@ import { createApp, sidecar, server } from "@databricks/appkit";
 await createApp({
   plugins: [
     server(),
-    sidecar({
-      sidecars: [
-        {
-          id: "python-api",
-          command: "python3",
-          args: ["-m", "uvicorn", "main:app", "--host", "0.0.0.0"],
-          cwd: "./python-api",
-          port: 0, // auto-assign
-          healthCheck: { path: "/health" },
-        },
-      ],
-    }),
+    sidecar([
+      {
+        id: "python-api",
+        command: "python3",
+        args: ["-m", "uvicorn", "main:app", "--host", "0.0.0.0"],
+        cwd: "./python-api",
+        port: 0, // auto-assign
+        healthCheck: { path: "/health" },
+      },
+    ]),
   ],
 });
 // GET /api/sidecar/python-api/users -> proxied to Python at http://localhost:{auto-port}/users
@@ -54,21 +52,19 @@ import { createApp, sidecar, server } from "@databricks/appkit";
 await createApp({
   plugins: [
     server(),
-    sidecar({
-      sidecars: [
-        {
-          id: "ml-model",
-          mode: "stdio",
-          command: "python3",
-          args: ["inference.py"],
-          cwd: "./ml-model",
-          stdio: {
-            requestTimeout: 60_000,
-            maxConcurrency: 10,
-          },
+    sidecar([
+      {
+        id: "ml-model",
+        mode: "stdio",
+        command: "python3",
+        args: ["inference.py"],
+        cwd: "./ml-model",
+        stdio: {
+          requestTimeout: 60_000,
+          maxConcurrency: 10,
         },
-      ],
-    }),
+      },
+    ]),
   ],
 });
 // POST /api/sidecar/ml-model/predict -> JSON-RPC over stdin -> Python responds on stdout
@@ -78,14 +74,24 @@ await createApp({
 
 ### `ISidecarConfig`
 
-The plugin config accepts either a `sidecars` array (recommended) or a flat `SidecarDefinition` at the top level (legacy, backward compatible).
+The plugin config accepts either a single `SidecarDefinition` or an array of `SidecarDefinition` entries:
 
-| Property | Type | Default | Description |
-| --- | --- | --- | --- |
-| `sidecars` | `SidecarDefinition[]` | — | Array of sidecar definitions. Each entry describes a child process to manage. |
-| `name` | `string` | `"sidecar"` | Plugin instance name. |
+```ts
+type ISidecarConfig = SidecarDefinition | SidecarDefinition[];
+```
 
-When `sidecars` is omitted, all `SidecarDefinition` fields can be passed at the top level (legacy single-sidecar form).
+Pass an array for multi-sidecar setups, or a single object for a one-sidecar setup:
+
+```ts
+// Single sidecar
+sidecar({ id: "api", command: "python3", args: ["main.py"], cwd: "./api" })
+
+// Multiple sidecars
+sidecar([
+  { id: "api", command: "python3", args: ["main.py"], cwd: "./api" },
+  { id: "worker", mode: "stdio", command: "go", args: ["run", "worker.go"], cwd: "./worker" },
+])
+```
 
 ### `SidecarDefinition`
 
@@ -99,7 +105,8 @@ When `sidecars` is omitted, all `SidecarDefinition` fields can be passed at the 
 | `env` | `Record<string, string>` | `{}` | Additional environment variables. Merged with `process.env`. |
 | `startupTimeout` | `number` | `30000` | Milliseconds to wait for readiness during `setup()`. |
 | `restart` | `RestartConfig` | See below | Process restart configuration. |
-| `setupCommands` | `string[]` | `[]` | Shell commands to run before spawning the process. |
+| `setupCommands` | `string[]` | `[]` | Commands to run before spawning the process. |
+| `setupShell` | `boolean` | `false` | When `true`, setup commands run in a shell (supports pipes, redirects, globbing). When `false`, commands are split on whitespace and executed directly with `execFile` (safer against command injection). |
 | `port` | `number` | `0` (auto) | **HTTP mode only.** Port the child listens on. `0` for auto-assign. |
 | `healthCheck` | `HealthCheckConfig` | See below | **HTTP mode only.** Health check configuration. |
 | `proxy` | `ProxyConfig` | See below | **HTTP mode only.** Proxy behavior configuration. |
@@ -154,7 +161,7 @@ stdio mode only. Controls the JSON-RPC communication layer.
 
 ### How it works
 
-1. AppKit spawns the child process with `PORT` and `SIDECAR_PORT` environment variables set to the assigned port.
+1. AppKit spawns the child process with `PORT`, `SIDECAR_PORT`, and `DATABRICKS_APP_PORT` environment variables set to the assigned port.
 2. The child process starts its own HTTP server on that port.
 3. AppKit polls the health check endpoint until it responds with a 2xx status.
 4. Once healthy, all requests to `/api/sidecar/{id}/*` are proxied to `http://localhost:{port}/*`.
@@ -162,7 +169,7 @@ stdio mode only. Controls the JSON-RPC communication layer.
 
 ### Port assignment
 
-- **Auto-assign (default, `port: 0`):** AppKit binds a temporary `net.Server` on port 0, reads the OS-assigned port, closes the server, then passes the port to the child via `PORT` and `SIDECAR_PORT` environment variables. This avoids port conflicts.
+- **Auto-assign (default, `port: 0`):** AppKit binds a temporary `net.Server` on port 0, reads the OS-assigned port, closes the server, then passes the port to the child via `PORT`, `SIDECAR_PORT`, and `DATABRICKS_APP_PORT` environment variables. This avoids port conflicts.
 - **Explicit port:** Set `port: 8081` to use a fixed port. The child must listen on that port.
 
 ### Health checks
@@ -213,14 +220,12 @@ if __name__ == "__main__":
 
 ```ts
 sidecar({
-  sidecars: [{
-    id: "flask-api",
-    command: "python3",
-    args: ["main.py"],
-    cwd: "./python-api",
-    port: 0,
-    healthCheck: { path: "/health" },
-  }],
+  id: "flask-api",
+  command: "python3",
+  args: ["main.py"],
+  cwd: "./python-api",
+  port: 0,
+  healthCheck: { path: "/health" },
 })
 ```
 
@@ -246,14 +251,12 @@ def predict(input: dict):
 
 ```ts
 sidecar({
-  sidecars: [{
-    id: "fastapi",
-    command: "python3",
-    args: ["-m", "uvicorn", "main:app", "--host", "0.0.0.0"],
-    cwd: "./python-api",
-    port: 0,
-    healthCheck: { path: "/health" },
-  }],
+  id: "fastapi",
+  command: "python3",
+  args: ["-m", "uvicorn", "main:app", "--host", "0.0.0.0"],
+  cwd: "./python-api",
+  port: 0,
+  healthCheck: { path: "/health" },
 })
 ```
 
@@ -297,14 +300,12 @@ func main() {
 
 ```ts
 sidecar({
-  sidecars: [{
-    id: "go-api",
-    command: "go",
-    args: ["run", "main.go"],
-    cwd: "./go-api",
-    port: 0,
-    healthCheck: { path: "/health" },
-  }],
+  id: "go-api",
+  command: "go",
+  args: ["run", "main.go"],
+  cwd: "./go-api",
+  port: 0,
+  healthCheck: { path: "/health" },
 })
 ```
 
@@ -499,18 +500,16 @@ if __name__ == "__main__":
 
 ```ts
 sidecar({
-  sidecars: [{
-    id: "inference",
-    mode: "stdio",
-    command: "python3",
-    args: ["inference.py"],
-    cwd: "./ml-model",
-    stdio: {
-      requestTimeout: 60_000,  // ML inference can be slow
-      maxConcurrency: 10,
-    },
-    restart: { enabled: true, maxRestarts: 3 },
-  }],
+  id: "inference",
+  mode: "stdio",
+  command: "python3",
+  args: ["inference.py"],
+  cwd: "./ml-model",
+  stdio: {
+    requestTimeout: 60_000,  // ML inference can be slow
+    maxConcurrency: 10,
+  },
+  restart: { enabled: true, maxRestarts: 3 },
 })
 ```
 
@@ -691,12 +690,10 @@ The `exports()` method returns a `SidecarExport` object, accessible as `appkit.s
 const appkit = await createApp({
   plugins: [
     server(),
-    sidecar({
-      sidecars: [
-        { id: "api", command: "python3", args: ["main.py"], cwd: "./api" },
-        { id: "worker", mode: "stdio", command: "go", args: ["run", "worker.go"], cwd: "./worker" },
-      ],
-    }),
+    sidecar([
+      { id: "api", command: "python3", args: ["main.py"], cwd: "./api" },
+      { id: "worker", mode: "stdio", command: "go", args: ["run", "worker.go"], cwd: "./worker" },
+    ]),
   ],
 });
 
@@ -743,7 +740,7 @@ for (const [id, sc] of appkit.sidecar.getAll()) {
 
 ### Route pattern
 
-All sidecar routes are mounted at `/api/{sidecar.id}/*`. In HTTP mode, the route is registered as `"proxy:{id}"`. In stdio mode, it is registered as `"stdio:{id}"`.
+All sidecar routes are mounted at `/api/sidecar/{id}/*`. In HTTP mode, the route is registered as `"proxy:{id}"`. In stdio mode, it is registered as `"stdio:{id}"`.
 
 ### Request format (stdio mode)
 
@@ -760,38 +757,36 @@ The client can send any HTTP method (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`) an
 
 ### Running multiple sidecars
 
-Pass a `sidecars` array to run multiple child processes from a single plugin instance:
+Pass an array to run multiple child processes from a single plugin instance:
 
 ```ts
 await createApp({
   plugins: [
     server(),
-    sidecar({
-      sidecars: [
-        {
-          id: "python-api",
-          command: "python3",
-          args: ["api.py"],
-          cwd: "./python-api",
-        },
-        {
-          id: "go-worker",
-          mode: "stdio",
-          command: "go",
-          args: ["run", "worker.go"],
-          cwd: "./go-worker",
-        },
-      ],
-    }),
+    sidecar([
+      {
+        id: "python-api",
+        command: "python3",
+        args: ["api.py"],
+        cwd: "./python-api",
+      },
+      {
+        id: "go-worker",
+        mode: "stdio",
+        command: "go",
+        args: ["run", "worker.go"],
+        cwd: "./go-worker",
+      },
+    ]),
   ],
 });
-// /api/python-api/* -> Python HTTP sidecar
-// /api/go-worker/*  -> Go stdio sidecar
+// /api/sidecar/python-api/* -> Python HTTP sidecar
+// /api/sidecar/go-worker/*  -> Go stdio sidecar
 ```
 
 All sidecars start concurrently during `setup()`. Each has independent health checking and restart logic.
 
-The **legacy single-sidecar** form is still supported for backward compatibility:
+For a single sidecar, you can pass a plain object instead of an array:
 
 ```ts
 sidecar({ id: "python-api", command: "python3", args: ["api.py"], cwd: "./python-api" })
@@ -801,21 +796,19 @@ sidecar({ id: "python-api", command: "python3", args: ["api.py"], cwd: "./python
 
 ```ts
 sidecar({
-  sidecars: [{
-    id: "python-api",
-    command: "python3",
-    args: ["main.py"],
-    cwd: "./python-api",
-    env: {
-      MODEL_PATH: "/mnt/models/v2",
-      LOG_LEVEL: "debug",
-      DATABASE_URL: process.env.DATABASE_URL ?? "",
-    },
-  }],
+  id: "python-api",
+  command: "python3",
+  args: ["main.py"],
+  cwd: "./python-api",
+  env: {
+    MODEL_PATH: "/mnt/models/v2",
+    LOG_LEVEL: "debug",
+    DATABASE_URL: process.env.DATABASE_URL ?? "",
+  },
 })
 ```
 
-In HTTP mode, `PORT` and `SIDECAR_PORT` are automatically set. In stdio mode, no port variables are set.
+In HTTP mode, `PORT`, `SIDECAR_PORT`, and `DATABRICKS_APP_PORT` are automatically set. In stdio mode, no port variables are set.
 
 ### Forwarding Databricks auth context
 
@@ -861,20 +854,18 @@ notify("progress", {"taskId": "abc", "percent": 50})
 
 ```ts
 sidecar({
-  sidecars: [{
-    id: "worker",
-    mode: "stdio",
-    command: "python3",
-    args: ["worker.py"],
-    stdio: {
-      onNotification: (method, params) => {
-        if (method === "progress") {
-          const { taskId, percent } = params as { taskId: string; percent: number };
-          console.log(`Task ${taskId}: ${percent}%`);
-        }
-      },
+  id: "worker",
+  mode: "stdio",
+  command: "python3",
+  args: ["worker.py"],
+  stdio: {
+    onNotification: (method, params) => {
+      if (method === "progress") {
+        const { taskId, percent } = params as { taskId: string; percent: number };
+        console.log(`Task ${taskId}: ${percent}%`);
+      }
     },
-  }],
+  },
 })
 ```
 
