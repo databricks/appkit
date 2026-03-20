@@ -1,0 +1,47 @@
+{
+  "name": "@databricks/appkit-vector-search",
+  "version": "0.1.0",
+  "description": "Vector Search plugin for Databricks Appkit",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./ui": {
+      "import": "./dist/ui/index.js",
+      "types": "./dist/ui/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "peerDependencies": {
+    "@databricks/appkit": "^0.1.0",
+    "react": "^18.0.0"
+  },
+  "dependencies": {
+    "@radix-ui/react-icons": "^1.3.0",
+    "@radix-ui/react-select": "^2.1.0",
+    "@radix-ui/react-slider": "^1.2.0",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.4.0",
+    "@testing-library/react": "^15.0.0",
+    "@types/express": "^4.17.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^19.2.3",
+    "@types/supertest": "^7.2.0",
+    "jsdom": "^24.0.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "supertest": "^7.2.2",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  }
+}
