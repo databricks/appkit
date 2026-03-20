@@ -258,7 +258,7 @@ function ChartInferenceRoute() {
       <main className="max-w-5xl mx-auto px-6 py-12">
         <div className="flex flex-col gap-6">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight text-foreground">
+            <h1 className="text-3xl font-bold tracking-tight text-blue-500">
               Chart Inference Demo
             </h1>
             <p className="text-muted-foreground mt-2">

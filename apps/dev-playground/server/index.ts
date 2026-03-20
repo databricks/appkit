@@ -12,6 +12,7 @@ import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
 
+
 function createMockClient() {
   const client = new WorkspaceClient({
     host: "http://localhost",

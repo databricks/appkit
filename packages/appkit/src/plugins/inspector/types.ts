@@ -3,6 +3,7 @@ import type { BasePlugin, BasePluginConfig, PluginEndpointMap } from "shared";
 export interface IInspectorConfig extends BasePluginConfig {
   enabledByDefault?: boolean;
   bridgeTarget?: string;
+  sourceRoot?: string;
   maxForwardPayloadBytes?: number;
   maxRecentEvents?: number;
   maxStoredSessions?: number;
@@ -47,6 +48,13 @@ export interface InspectorClientNetworkEvent {
   durationMs?: number;
 }
 
+export interface InspectorSourceLocation {
+  fileName: string;
+  lineNumber: number;
+  columnNumber?: number;
+  componentName?: string;
+}
+
 export interface InspectorElementReference {
   domPath: string;
   selector?: string;
@@ -58,6 +66,8 @@ export interface InspectorElementReference {
   type?: string;
   href?: string;
   text?: string;
+  source?: InspectorSourceLocation;
+  componentStack?: string[];
 }
 
 export interface InspectorClientAction {
@@ -74,6 +84,8 @@ export interface InspectorClientSnapshot {
   route?: string;
   selectedText?: string;
   selectedElement?: InspectorElementReference;
+  pickedElement?: InspectorElementReference;
+  userPrompt?: string;
   textExcerpt?: string;
   network?: InspectorClientNetworkEvent[];
   actions?: InspectorClientAction[];
@@ -97,6 +109,8 @@ export interface InspectorContextBundle {
     route: string;
     selectedText?: string;
     selectedElement?: InspectorElementReference;
+    pickedElement?: InspectorElementReference;
+    userPrompt?: string;
     textExcerpt?: string;
     recentActions: InspectorClientAction[];
   };

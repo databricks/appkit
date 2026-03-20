@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { docsCommand } from "./commands/docs.js";
 import { generateTypesCommand } from "./commands/generate-types.js";
+import { inspectCommand } from "./commands/inspect.js";
 import { lintCommand } from "./commands/lint.js";
 import { pluginCommand } from "./commands/plugin/index.js";
 import { setupCommand } from "./commands/setup.js";
@@ -26,5 +27,6 @@ cmd.addCommand(generateTypesCommand);
 cmd.addCommand(lintCommand);
 cmd.addCommand(docsCommand);
 cmd.addCommand(pluginCommand);
+cmd.addCommand(inspectCommand);
 
 cmd.parse();

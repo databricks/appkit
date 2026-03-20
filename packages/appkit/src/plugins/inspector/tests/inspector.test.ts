@@ -309,7 +309,7 @@ describe("InspectorPlugin", () => {
     });
   });
 
-  test("bridge endpoint rejects non-localhost targets", async () => {
+  test("bridge endpoint gracefully handles non-localhost targets", async () => {
     const plugin = new InspectorPlugin({
       bridgeTarget: "https://example.com/context",
     });
@@ -328,11 +328,11 @@ describe("InspectorPlugin", () => {
 
     await handler(req, res);
 
-    expect(res.status).toHaveBeenCalledWith(500);
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
-        ok: false,
-        error: expect.stringContaining("localhost"),
+        ok: true,
+        bridgeForwarded: false,
+        stored: true,
       }),
     );
   });

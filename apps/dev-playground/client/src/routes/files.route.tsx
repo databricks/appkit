@@ -298,6 +298,7 @@ function FilesRoute() {
           title="File Browser"
           description="Browse and preview files in Databricks Volumes."
           tooltip="Uses the Files plugin to interact with Databricks Volumes via the Unity Catalog Files API"
+          titleClassName="text-3xl font-bold text-green-500"
         />
 
         <div className="mb-6 flex items-center justify-between">
