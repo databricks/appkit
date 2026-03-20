@@ -2,7 +2,7 @@
 
 import { describeElement, isSameOrigin, summarizeText, toPath } from "./dom-utils";
 
-const MAX_ITEMS = 20;
+const MAX_ITEMS = 50;
 
 export interface NetworkEvent {
   id: string;

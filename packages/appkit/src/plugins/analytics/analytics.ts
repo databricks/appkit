@@ -189,26 +189,54 @@ export class AnalyticsPlugin extends Plugin {
       default: defaultConfig,
     };
 
-    await executor.executeStream(
-      res,
-      async (signal) => {
-        const processedParams = await this.queryProcessor.processQueryParams(
-          query,
-          parameters,
-        );
+    const queryStartedAt = Date.now();
+    let executedQuery = false;
 
-        const result = await executor.query(
-          query,
-          processedParams,
-          queryParameters.formatParameters,
-          signal,
-        );
+    try {
+      await executor.executeStream(
+        res,
+        async (signal) => {
+          executedQuery = true;
+          const processedParams = await this.queryProcessor.processQueryParams(
+            query,
+            parameters,
+          );
 
-        return { type: queryParameters.type, ...result };
-      },
-      streamExecutionSettings,
-      executorKey,
-    );
+          const result = await executor.query(
+            query,
+            processedParams,
+            queryParameters.formatParameters,
+            signal,
+          );
+
+          return { type: queryParameters.type, ...result };
+        },
+        streamExecutionSettings,
+        executorKey,
+      );
+
+      this.emitQueryEvent({
+        queryKey: query_key,
+        parameters: (parameters as Record<string, unknown>) ?? {},
+        durationMs: Date.now() - queryStartedAt,
+        cacheHit: !executedQuery,
+        isObo: isAsUser,
+        executorKey,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      this.emitQueryEvent({
+        queryKey: query_key,
+        parameters: (parameters as Record<string, unknown>) ?? {},
+        durationMs: Date.now() - queryStartedAt,
+        cacheHit: false,
+        isObo: isAsUser,
+        executorKey,
+        timestamp: new Date().toISOString(),
+        error: error instanceof Error ? error.message : "Query failed",
+      });
+      throw error;
+    }
   }
 
   /**

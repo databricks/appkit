@@ -22,14 +22,19 @@ import type {
   IInspectorConfig,
   InspectorBridgeResponse,
   InspectorClientSnapshot,
+  InspectorConsoleEntry,
   InspectorContextBundle,
   InspectorElementReference,
   InspectorInternalConfig,
+  InspectorPerformanceEntry,
+  InspectorPluginHealthEntry,
   InspectorPluginMatch,
   InspectorPluginMetadata,
   InspectorPromptResponse,
+  InspectorQueryEvent,
   InspectorRecentEvent,
   InspectorRuntimeConfig,
+  InspectorStreamDebugEntry,
 } from "./types";
 
 const logger = createLogger("inspector");
@@ -66,6 +71,8 @@ export class InspectorPlugin extends Plugin<IInspectorConfig> {
 
   private agentProviders: InspectorAgentProvider[] = [];
   private activeAgentAbort: AbortController | null = null;
+  private queryEvents: InspectorQueryEvent[] = [];
+  private static readonly MAX_QUERY_EVENTS = 50;
 
   injectServerMiddleware(app: express.Application) {
     app.use((req, res, next) => {
@@ -228,6 +235,10 @@ export class InspectorPlugin extends Plugin<IInspectorConfig> {
 
     this.agentProviders = createAgentProviders();
 
+    Plugin.onQueryEvent((event) => {
+      this.recordQueryEvent(event);
+    });
+
     this.route(router, {
       name: "component-map",
       method: "get",
@@ -353,6 +364,99 @@ export class InspectorPlugin extends Plugin<IInspectorConfig> {
         if (this.activeAgentAbort) {
           this.activeAgentAbort.abort();
           this.activeAgentAbort = null;
+        }
+        res.json({ ok: true });
+      },
+    });
+
+    this.route(router, {
+      name: "performance",
+      method: "get",
+      path: "/performance",
+      handler: async (req, res) => {
+        const sessionId =
+          typeof req.query.sessionId === "string" ? req.query.sessionId : "";
+        const thresholdMs =
+          typeof req.query.threshold === "string"
+            ? Number(req.query.threshold)
+            : 500;
+        res.json(this.getPerformanceSnapshot(sessionId, thresholdMs));
+      },
+    });
+
+    this.route(router, {
+      name: "health",
+      method: "get",
+      path: "/health-dashboard",
+      handler: async (_req, res) => {
+        res.json({ plugins: this.getPluginHealthDashboard() });
+      },
+    });
+
+    this.route(router, {
+      name: "streams",
+      method: "get",
+      path: "/streams",
+      handler: async (_req, res) => {
+        res.json(this.getStreamDebugSnapshot());
+      },
+    });
+
+    this.route(router, {
+      name: "stream-events",
+      method: "get",
+      path: "/stream-events",
+      handler: async (req, res) => {
+        const pluginName = typeof req.query.plugin === "string" ? req.query.plugin : "";
+        const streamId = typeof req.query.streamId === "string" ? req.query.streamId : "";
+        if (!pluginName || !streamId) {
+          res.json({ events: [] });
+          return;
+        }
+
+        const plugins = this.getRuntimePlugins();
+        const plugin = Object.values(plugins).find((p) => p.name === pluginName);
+        if (!plugin) {
+          res.json({ events: [] });
+          return;
+        }
+
+        try {
+          const events = (plugin as any).getStreamEvents?.(streamId) ?? [];
+          const safe = events.map((e: any) => {
+            let parsed: unknown;
+            try { parsed = JSON.parse(e.data); } catch { parsed = e.data; }
+            return {
+              id: e.id,
+              type: e.type,
+              data: parsed,
+              timestamp: e.timestamp,
+            };
+          });
+          res.json({ events: safe.reverse() });
+        } catch {
+          res.json({ events: [] });
+        }
+      },
+    });
+
+    this.route(router, {
+      name: "queries",
+      method: "get",
+      path: "/queries",
+      handler: async (_req, res) => {
+        res.json({ queries: this.queryEvents });
+      },
+    });
+
+    this.route(router, {
+      name: "query-event",
+      method: "post",
+      path: "/query-event",
+      handler: async (req, res) => {
+        const event = req.body as InspectorQueryEvent;
+        if (event?.queryKey) {
+          this.recordQueryEvent(event);
         }
         res.json({ ok: true });
       },
@@ -499,6 +603,7 @@ export class InspectorPlugin extends Plugin<IInspectorConfig> {
         userPrompt: undefined,
         recentActions: 0,
         recentNetwork: 0,
+        recentConsole: 0,
         recentServerEvents: 0,
       };
     }
@@ -513,6 +618,7 @@ export class InspectorPlugin extends Plugin<IInspectorConfig> {
       userPrompt: bundle.page.userPrompt || undefined,
       recentActions: bundle.page.recentActions.length,
       recentNetwork: bundle.client.recentNetwork.length,
+      recentConsole: bundle.client.recentConsole.length,
       recentServerEvents: bundle.server.recentEvents.length,
     };
   }
@@ -563,6 +669,9 @@ export class InspectorPlugin extends Plugin<IInspectorConfig> {
             url: this.redactUrl(event.url),
             path: this.redactUrl(event.path),
           }))
+          .slice(0, this.config.maxRecentEvents ?? DEFAULT_MAX_RECENT_EVENTS),
+        recentConsole: (snapshot?.console ?? [])
+          .map((entry) => this.sanitizeConsoleEntry(entry))
           .slice(0, this.config.maxRecentEvents ?? DEFAULT_MAX_RECENT_EVENTS),
       },
       server: {
@@ -681,6 +790,8 @@ export class InspectorPlugin extends Plugin<IInspectorConfig> {
       return this.buildPickedElementPrompt(bundle, hasUserPrompt);
     }
 
+    const consoleSection = this.formatConsoleSection(bundle.client.recentConsole);
+
     return [
       "You are helping inspect a Databricks AppKit screen.",
       "",
@@ -701,6 +812,8 @@ export class InspectorPlugin extends Plugin<IInspectorConfig> {
       "",
       "Recent user-triggered actions:",
       recentActions,
+      "",
+      consoleSection,
       "",
       bundle.page.selectedText
         ? `Selected text:\n${bundle.page.selectedText}`
@@ -777,6 +890,24 @@ export class InspectorPlugin extends Plugin<IInspectorConfig> {
     ].join("\n");
   }
 
+  private formatConsoleSection(entries: InspectorConsoleEntry[]): string {
+    const errors = entries.filter((e) => e.level === "error" || e.level === "warn");
+    if (errors.length === 0 && entries.length === 0) {
+      return "Recent console output:\n- none recorded";
+    }
+
+    const relevant = errors.length > 0 ? errors : entries;
+    const lines = relevant
+      .slice(0, 10)
+      .map((e) => {
+        const prefix = e.level === "error" ? "ERROR" : e.level === "warn" ? "WARN" : e.level.toUpperCase();
+        const msg = e.message.length > 200 ? `${e.message.slice(0, 200)}…` : e.message;
+        return `- [${prefix}] ${msg}`;
+      });
+
+    return ["Recent console output:", ...lines].join("\n");
+  }
+
   private async forwardBundleToBridge(
     bundle: InspectorContextBundle,
     prompt = "",
@@ -837,6 +968,10 @@ export class InspectorPlugin extends Plugin<IInspectorConfig> {
           url: this.redactUrl(event.url),
           path: this.redactUrl(event.path),
         })),
+        recentConsole: (bundle.client.recentConsole ?? []).slice(
+          0,
+          this.config.maxRecentEvents ?? DEFAULT_MAX_RECENT_EVENTS,
+        ),
       },
       server: {
         recentEvents: bundle.server.recentEvents.slice(
@@ -1043,6 +1178,138 @@ export class InspectorPlugin extends Plugin<IInspectorConfig> {
     const clientBundle = readFileSync(clientPath, "utf-8");
     this.inspectorClientBundle = configScript + "\n" + clientBundle;
     return this.inspectorClientBundle;
+  }
+
+  private sanitizeConsoleEntry(entry: InspectorConsoleEntry): InspectorConsoleEntry {
+    return {
+      level: entry.level,
+      message: this.trimText(entry.message || "", 500),
+      timestamp: entry.timestamp,
+      stack: entry.stack ? this.trimText(entry.stack, 500) : undefined,
+    };
+  }
+
+  private getAllEvents(): InspectorRecentEvent[] {
+    const all: InspectorRecentEvent[] = [];
+    for (const events of this.sessionEvents.values()) {
+      all.push(...events);
+    }
+    return all;
+  }
+
+  private getPerformanceSnapshot(sessionId: string, thresholdMs: number) {
+    const events = sessionId
+      ? this.getRecentEvents(sessionId)
+      : this.getAllEvents();
+
+    const slowRequests: InspectorPerformanceEntry[] = events
+      .filter((e) => e.durationMs >= thresholdMs)
+      .sort((a, b) => b.durationMs - a.durationMs)
+      .slice(0, 20)
+      .map((e) => ({
+        method: e.method,
+        path: e.path,
+        statusCode: e.statusCode,
+        durationMs: e.durationMs,
+        timestamp: e.timestamp,
+        pluginName: e.pluginName,
+        isError: e.isError,
+      }));
+
+    const durations = events.map((e) => e.durationMs).sort((a, b) => a - b);
+    const errorCount = events.filter((e) => e.isError).length;
+
+    return {
+      totalRequests: events.length,
+      errorCount,
+      slowRequests,
+      thresholdMs,
+      timing: durations.length > 0
+        ? {
+            avg: Math.round(durations.reduce((a, b) => a + b, 0) / durations.length),
+            p50: durations[Math.floor(durations.length * 0.5)] ?? 0,
+            p95: durations[Math.floor(durations.length * 0.95)] ?? 0,
+            max: durations[durations.length - 1] ?? 0,
+          }
+        : null,
+    };
+  }
+
+  private getPluginHealthDashboard(): InspectorPluginHealthEntry[] {
+    const allEvents = this.getAllEvents();
+    const byPlugin = new Map<string, InspectorRecentEvent[]>();
+
+    for (const event of allEvents) {
+      const name = event.pluginName || "unknown";
+      if (!byPlugin.has(name)) byPlugin.set(name, []);
+      byPlugin.get(name)!.push(event);
+    }
+
+    const result: InspectorPluginHealthEntry[] = [];
+    for (const [pluginName, events] of byPlugin) {
+      const durations = events.map((e) => e.durationMs).sort((a, b) => a - b);
+      const errors = events.filter((e) => e.isError);
+      const lastError = errors.length > 0 ? errors[0] : undefined;
+      const totalRequests = events.length;
+      const errorCount = errors.length;
+
+      result.push({
+        pluginName,
+        totalRequests,
+        errorCount,
+        errorRate: totalRequests > 0 ? Math.round((errorCount / totalRequests) * 10000) / 100 : 0,
+        avgDurationMs: durations.length > 0
+          ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
+          : 0,
+        p95DurationMs: durations[Math.floor(durations.length * 0.95)] ?? 0,
+        maxDurationMs: durations[durations.length - 1] ?? 0,
+        lastError,
+      });
+    }
+
+    return result.sort((a, b) => b.totalRequests - a.totalRequests);
+  }
+
+  private getStreamDebugSnapshot() {
+    const plugins = this.getRuntimePlugins();
+    const streams: InspectorStreamDebugEntry[] = [];
+    let totalActive = 0;
+
+    for (const plugin of Object.values(plugins)) {
+      if (plugin.name === this.name) continue;
+      try {
+        const debugInfo = (plugin as any).getStreamDebugInfo?.();
+        if (!debugInfo?.streams) continue;
+
+        for (const stream of debugInfo.streams) {
+          if (!stream.isCompleted) totalActive++;
+          const agoMs = Date.now() - stream.lastAccess;
+          const agoSeconds = Math.floor(agoMs / 1000);
+          const lastAccessAgo = agoSeconds < 60
+            ? `${agoSeconds}s ago`
+            : `${Math.floor(agoSeconds / 60)}m ago`;
+          streams.push({
+            pluginName: plugin.name,
+            streamId: stream.streamId,
+            clientCount: stream.clientCount,
+            eventCount: stream.eventCount,
+            isCompleted: stream.isCompleted,
+            lastAccessAgo,
+            lastAccessMs: stream.lastAccess,
+          });
+        }
+      } catch {}
+    }
+
+    streams.sort((a, b) => b.lastAccessMs - a.lastAccessMs);
+    return { totalActive, streams };
+  }
+
+  recordQueryEvent(event: InspectorQueryEvent): void {
+    this.queryEvents.unshift(event);
+    if (this.queryEvents.length > InspectorPlugin.MAX_QUERY_EVENTS) {
+      this.queryEvents.length = InspectorPlugin.MAX_QUERY_EVENTS;
+    }
   }
 
 }

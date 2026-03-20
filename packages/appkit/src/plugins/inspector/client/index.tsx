@@ -5,6 +5,7 @@ import {
   checkActivation,
   getOrCreateSessionId,
 } from "./lib/config";
+import { interceptConsole } from "./lib/console-interceptor";
 import { interceptNetwork } from "./lib/network-interceptor";
 import { styles } from "./styles";
 import { App } from "./App";
@@ -17,6 +18,7 @@ import { App } from "./App";
 
   const sessionId = getOrCreateSessionId(config);
 
+  const consoleState = interceptConsole();
   const networkState = interceptNetwork(sessionId, config.sessionHeader);
 
   const host = document.createElement("div");
@@ -40,6 +42,7 @@ import { App } from "./App";
       config={config}
       sessionId={sessionId}
       networkState={networkState}
+      consoleState={consoleState}
       shadowRoot={shadow}
     />,
   );

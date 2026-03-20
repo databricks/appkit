@@ -244,6 +244,41 @@ AuthenticationError if user token is not available in request headers (productio
 
 ***
 
+### emitQueryEvent()
+
+```ts
+protected emitQueryEvent(event: {
+  cacheHit: boolean;
+  durationMs: number;
+  error?: string;
+  executorKey: string;
+  isObo: boolean;
+  parameters: Record<string, unknown>;
+  queryKey: string;
+  timestamp: string;
+}): void;
+```
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `event` | \{ `cacheHit`: `boolean`; `durationMs`: `number`; `error?`: `string`; `executorKey`: `string`; `isObo`: `boolean`; `parameters`: `Record`\<`string`, `unknown`\>; `queryKey`: `string`; `timestamp`: `string`; \} |
+| `event.cacheHit` | `boolean` |
+| `event.durationMs` | `number` |
+| `event.error?` | `string` |
+| `event.executorKey` | `string` |
+| `event.isObo` | `boolean` |
+| `event.parameters` | `Record`\<`string`, `unknown`\> |
+| `event.queryKey` | `string` |
+| `event.timestamp` | `string` |
+
+#### Returns
+
+`void`
+
+***
+
 ### execute()
 
 ```ts
@@ -429,6 +464,76 @@ BasePlugin.getSkipBodyParsingPaths
 
 ***
 
+### getStreamDebugInfo()
+
+```ts
+getStreamDebugInfo(): {
+  streams: {
+     clientCount: number;
+     eventCount: number;
+     isCompleted: boolean;
+     lastAccess: number;
+     streamId: string;
+  }[];
+};
+```
+
+#### Returns
+
+```ts
+{
+  streams: {
+     clientCount: number;
+     eventCount: number;
+     isCompleted: boolean;
+     lastAccess: number;
+     streamId: string;
+  }[];
+}
+```
+
+##### streams
+
+```ts
+streams: {
+  clientCount: number;
+  eventCount: number;
+  isCompleted: boolean;
+  lastAccess: number;
+  streamId: string;
+}[];
+```
+
+***
+
+### getStreamEvents()
+
+```ts
+getStreamEvents(streamId: string): {
+  data: string;
+  id: string;
+  timestamp: number;
+  type: string;
+}[];
+```
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `streamId` | `string` |
+
+#### Returns
+
+\{
+  `data`: `string`;
+  `id`: `string`;
+  `timestamp`: `number`;
+  `type`: `string`;
+\}[]
+
+***
+
 ### injectRoutes()
 
 ```ts
@@ -565,3 +670,36 @@ setup(): Promise<void>;
 ```ts
 BasePlugin.setup
 ```
+
+***
+
+### onQueryEvent()
+
+```ts
+static onQueryEvent(listener: (event: {
+  cacheHit: boolean;
+  durationMs: number;
+  error?: string;
+  executorKey: string;
+  isObo: boolean;
+  parameters: Record<string, unknown>;
+  queryKey: string;
+  timestamp: string;
+}) => void): () => void;
+```
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `listener` | (`event`: \{ `cacheHit`: `boolean`; `durationMs`: `number`; `error?`: `string`; `executorKey`: `string`; `isObo`: `boolean`; `parameters`: `Record`\<`string`, `unknown`\>; `queryKey`: `string`; `timestamp`: `string`; \}) => `void` |
+
+#### Returns
+
+```ts
+(): void;
+```
+
+##### Returns
+
+`void`

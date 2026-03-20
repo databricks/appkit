@@ -151,6 +151,14 @@ export class EventRingBuffer {
     return result;
   }
 
+  getSize(): number {
+    return this.buffer.getSize();
+  }
+
+  getAll(): BufferedEvent[] {
+    return this.buffer.getAll();
+  }
+
   clear(): void {
     this.buffer.clear();
   }

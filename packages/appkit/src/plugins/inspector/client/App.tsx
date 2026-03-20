@@ -1,5 +1,6 @@
 import React, { useEffect, useCallback, useRef } from "react";
 import type { InspectorConfig } from "./lib/config";
+import type { ConsoleState } from "./lib/console-interceptor";
 import type { NetworkState } from "./lib/network-interceptor";
 import type { InspectorApi } from "./lib/api";
 import { createApi } from "./lib/api";
@@ -14,10 +15,11 @@ interface AppProps {
   config: InspectorConfig;
   sessionId: string;
   networkState: NetworkState;
+  consoleState: ConsoleState;
   shadowRoot: ShadowRoot;
 }
 
-export function App({ config, sessionId, networkState, shadowRoot }: AppProps) {
+export function App({ config, sessionId, networkState, consoleState, shadowRoot }: AppProps) {
   const { state, dispatch } = useInspectorState();
   const apiRef = useRef<InspectorApi>(
     createApi(config.sessionHeader, sessionId),
@@ -71,6 +73,7 @@ export function App({ config, sessionId, networkState, shadowRoot }: AppProps) {
         : summarizeText(document.body?.innerText || "", 1600),
       network: hasPicked ? [] : networkState.recentNetwork.slice(0, 20),
       actions: hasPicked ? [] : networkState.recentActions.slice(0, 20),
+      console: consoleState.recentEntries.slice(0, 20),
     };
   }, [
     sessionId,
@@ -78,6 +81,7 @@ export function App({ config, sessionId, networkState, shadowRoot }: AppProps) {
     state.userPrompt,
     state.panelOpen,
     networkState,
+    consoleState,
     getSelectedText,
     getSelectedElement,
   ]);
@@ -92,7 +96,7 @@ export function App({ config, sessionId, networkState, shadowRoot }: AppProps) {
 
     if (!state.latestBundle) {
       try {
-        dispatch({ type: "SET_STATUS", status: "Collecting screen context\u2026" });
+        dispatch({ type: "SET_STATUS", status: "Collecting screen context…" });
         const bundle = await apiRef.current.requestJson(
           "/api/inspector/context",
           createSnapshot(),
@@ -119,9 +123,9 @@ export function App({ config, sessionId, networkState, shadowRoot }: AppProps) {
 
   const closePalette = useCallback(
     (preserveState = false) => {
-      dispatch({ type: "CLOSE_PALETTE", preserveState });
+      dispatch({ type: "CLOSE_PALETTE", preserveState: preserveState || state.docked });
     },
-    [dispatch],
+    [dispatch, state.docked],
   );
 
   const startPickMode = useCallback(() => {
@@ -170,7 +174,7 @@ export function App({ config, sessionId, networkState, shadowRoot }: AppProps) {
       if (!agent) return;
 
       try {
-        dispatch({ type: "SET_STATUS", status: "Preparing context\u2026" });
+        dispatch({ type: "SET_STATUS", status: "Preparing context…" });
         const promptResponse = await apiRef.current.requestJson(
           "/api/inspector/prompt",
           createSnapshot(),
@@ -277,6 +281,12 @@ export function App({ config, sessionId, networkState, shadowRoot }: AppProps) {
   useEffect(() => {
     const handler = async (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && key === "k") {
+        event.preventDefault();
+        dispatch({ type: "TOGGLE_DOCK" });
+        return;
+      }
+
       if ((event.metaKey || event.ctrlKey) && key === "k") {
         event.preventDefault();
         if (pickModeRef.current) pickModeRef.current = false;
@@ -287,7 +297,7 @@ export function App({ config, sessionId, networkState, shadowRoot }: AppProps) {
         }
       }
 
-      if (!state.panelOpen) return;
+      if (!state.panelOpen || state.docked) return;
 
       if (event.key === "Escape") {
         event.preventDefault();
@@ -296,7 +306,7 @@ export function App({ config, sessionId, networkState, shadowRoot }: AppProps) {
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [state.panelOpen, openPalette, closePalette]);
+  }, [state.panelOpen, state.docked, openPalette, closePalette]);
 
   useEffect(() => {
     const handler = () => {
@@ -341,6 +351,7 @@ export function App({ config, sessionId, networkState, shadowRoot }: AppProps) {
         dispatch={dispatch}
         config={config}
         networkState={networkState}
+        consoleState={consoleState}
         onStartPickMode={startPickMode}
         onSendToAgent={sendToAgent}
         onLoadBundle={loadBundle}

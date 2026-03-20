@@ -77,6 +77,13 @@ export interface InspectorClientAction {
   element?: InspectorElementReference;
 }
 
+export interface InspectorConsoleEntry {
+  level: "log" | "info" | "warn" | "error";
+  message: string;
+  timestamp: string;
+  stack?: string;
+}
+
 export interface InspectorClientSnapshot {
   sessionId: string;
   url: string;
@@ -89,6 +96,7 @@ export interface InspectorClientSnapshot {
   textExcerpt?: string;
   network?: InspectorClientNetworkEvent[];
   actions?: InspectorClientAction[];
+  console?: InspectorConsoleEntry[];
 }
 
 export interface InspectorPluginMatch extends InspectorPluginMetadata {
@@ -117,6 +125,7 @@ export interface InspectorContextBundle {
   plugin: InspectorPluginMatch | null;
   client: {
     recentNetwork: InspectorClientNetworkEvent[];
+    recentConsole: InspectorConsoleEntry[];
   };
   server: {
     recentEvents: InspectorRecentEvent[];
@@ -124,6 +133,48 @@ export interface InspectorContextBundle {
   runtime: {
     availablePlugins: InspectorPluginMetadata[];
   };
+}
+
+export interface InspectorPluginHealthEntry {
+  pluginName: string;
+  totalRequests: number;
+  errorCount: number;
+  errorRate: number;
+  avgDurationMs: number;
+  p95DurationMs: number;
+  maxDurationMs: number;
+  lastError?: InspectorRecentEvent;
+}
+
+export interface InspectorPerformanceEntry {
+  method: string;
+  path: string;
+  statusCode: number;
+  durationMs: number;
+  timestamp: string;
+  pluginName?: string;
+  isError: boolean;
+}
+
+export interface InspectorStreamDebugEntry {
+  pluginName: string;
+  streamId: string;
+  clientCount: number;
+  eventCount: number;
+  isCompleted: boolean;
+  lastAccessAgo: string;
+  lastAccessMs: number;
+}
+
+export interface InspectorQueryEvent {
+  queryKey: string;
+  parameters: Record<string, unknown>;
+  durationMs: number;
+  cacheHit: boolean;
+  isObo: boolean;
+  executorKey: string;
+  timestamp: string;
+  error?: string;
 }
 
 export interface InspectorPromptResponse {

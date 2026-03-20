@@ -1,6 +1,10 @@
 import { useReducer } from "react";
 import type { ElementDescription } from "../lib/dom-utils";
-import type { InspectorState, AgentInfo, PillState } from "../types";
+import type { InspectorState, AgentInfo, PerformanceData, PluginHealthEntry, StreamDebugData, QueryEventEntry } from "../types";
+
+const DOCK_STORAGE_KEY = "appkit:inspector:docked";
+const DOCK_WIDTH_KEY = "appkit:inspector:dock-width";
+const DEFAULT_DOCK_WIDTH = 400;
 
 type Action =
   | { type: "OPEN_PALETTE" }
@@ -17,10 +21,30 @@ type Action =
   | { type: "AGENT_FINISH" }
   | { type: "AGENT_ERROR"; message: string }
   | { type: "PILL_HIDE" }
+  | { type: "SET_PERFORMANCE"; data: PerformanceData }
+  | { type: "SET_HEALTH"; data: PluginHealthEntry[] }
+  | { type: "SET_STREAMS"; data: StreamDebugData }
+  | { type: "SET_QUERIES"; data: QueryEventEntry[] }
+  | { type: "TOGGLE_DOCK" }
+  | { type: "SET_DOCK_WIDTH"; width: number }
   | { type: "CLEAR_ALL" };
+
+function readDockedState(): boolean {
+  try { return localStorage.getItem(DOCK_STORAGE_KEY) === "1"; } catch { return false; }
+}
+
+function readDockedWidth(): number {
+  try {
+    const stored = localStorage.getItem(DOCK_WIDTH_KEY);
+    if (stored) { const n = Number(stored); if (n >= 280 && n <= 800) return n; }
+  } catch {}
+  return DEFAULT_DOCK_WIDTH;
+}
 
 const initialState: InspectorState = {
   panelOpen: false,
+  docked: readDockedState(),
+  dockedWidth: readDockedWidth(),
   view: "commands",
   pickedElement: undefined,
   userPrompt: "",
@@ -33,6 +57,10 @@ const initialState: InspectorState = {
   agentStreamLines: [],
   agents: [],
   pillState: null,
+  performanceData: null,
+  healthData: null,
+  streamsData: null,
+  queriesData: null,
 };
 
 function reducer(state: InspectorState, action: Action): InspectorState {
@@ -76,7 +104,7 @@ function reducer(state: InspectorState, action: Action): InspectorState {
         panelOpen: false,
         pillState: {
           label: action.label,
-          text: "Starting\u2026",
+          text: "Starting…",
           status: "running",
         },
       };
@@ -106,6 +134,24 @@ function reducer(state: InspectorState, action: Action): InspectorState {
       };
     case "PILL_HIDE":
       return { ...state, pillState: null };
+    case "SET_PERFORMANCE":
+      return { ...state, performanceData: action.data };
+    case "SET_HEALTH":
+      return { ...state, healthData: action.data };
+    case "SET_STREAMS":
+      return { ...state, streamsData: action.data };
+    case "SET_QUERIES":
+      return { ...state, queriesData: action.data };
+    case "TOGGLE_DOCK": {
+      const docked = !state.docked;
+      try { localStorage.setItem(DOCK_STORAGE_KEY, docked ? "1" : "0"); } catch {}
+      return { ...state, docked, panelOpen: true };
+    }
+    case "SET_DOCK_WIDTH": {
+      const width = Math.max(280, Math.min(800, action.width));
+      try { localStorage.setItem(DOCK_WIDTH_KEY, String(width)); } catch {}
+      return { ...state, dockedWidth: width };
+    }
     case "CLEAR_ALL":
       return {
         ...initialState,

@@ -221,6 +221,39 @@ export abstract class Plugin<
     this.streamManager.abortAll();
   }
 
+  getStreamDebugInfo() {
+    return this.streamManager.getDebugInfo();
+  }
+
+  getStreamEvents(streamId: string) {
+    return this.streamManager.getStreamEvents(streamId);
+  }
+
+  private static queryEventListeners: Array<(event: {
+    queryKey: string;
+    parameters: Record<string, unknown>;
+    durationMs: number;
+    cacheHit: boolean;
+    isObo: boolean;
+    executorKey: string;
+    timestamp: string;
+    error?: string;
+  }) => void> = [];
+
+  static onQueryEvent(listener: (typeof Plugin.queryEventListeners)[number]): () => void {
+    Plugin.queryEventListeners.push(listener);
+    return () => {
+      const idx = Plugin.queryEventListeners.indexOf(listener);
+      if (idx >= 0) Plugin.queryEventListeners.splice(idx, 1);
+    };
+  }
+
+  protected emitQueryEvent(event: Parameters<(typeof Plugin.queryEventListeners)[number]>[0]): void {
+    for (const listener of Plugin.queryEventListeners) {
+      try { listener(event); } catch {}
+    }
+  }
+
   /**
    * Returns the public exports for this plugin.
    * Override this to define a custom public API.

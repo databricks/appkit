@@ -11,7 +11,7 @@ import { WorkspaceClient } from "@databricks/sdk-experimental";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
-
+import path from "node:path";
 
 function createMockClient() {
   const client = new WorkspaceClient({
@@ -34,10 +34,11 @@ createApp({
     }),
     lakebaseExamples(),
     files(),
-    inspector({}),
+    inspector({ sourceRoot: path.join(process.cwd(), "client", "src") }),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
 }).then((appkit) => {
+
   appkit.server
     .extend((app) => {
       app.get("/sp", (_req, res) => {

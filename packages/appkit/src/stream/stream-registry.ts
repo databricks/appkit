@@ -41,6 +41,10 @@ export class StreamRegistry {
     return this.streams.getSize();
   }
 
+  getAll(): StreamEntry[] {
+    return this.streams.getAll();
+  }
+
   clear(): void {
     const allStreams = this.streams.getAll();
 

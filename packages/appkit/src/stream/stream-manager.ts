@@ -70,6 +70,33 @@ export class StreamManager {
     return this.activeOperations.size;
   }
 
+  getStreamEvents(streamId: string): Array<{ id: string; type: string; data: string; timestamp: number }> {
+    const entry = this.streamRegistry.get(streamId);
+    if (!entry) return [];
+    return entry.eventBuffer.getAll();
+  }
+
+  getDebugInfo(): {
+    streams: Array<{
+      streamId: string;
+      clientCount: number;
+      eventCount: number;
+      isCompleted: boolean;
+      lastAccess: number;
+    }>;
+  } {
+    const all = this.streamRegistry.getAll();
+    return {
+      streams: all.map((entry) => ({
+        streamId: entry.streamId,
+        clientCount: entry.clients.size,
+        eventCount: entry.eventBuffer.getSize(),
+        isCompleted: entry.isCompleted,
+        lastAccess: entry.lastAccess,
+      })),
+    };
+  }
+
   // attach to existing stream
   private async _attachToExistingStream(
     res: IAppResponse,
