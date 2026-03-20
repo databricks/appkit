@@ -756,6 +756,8 @@ export class InspectorPlugin extends Plugin<IInspectorConfig> {
   let latestBundle = null;
   let latestPrompt = "";
   let panelOpen = false;
+  let cachedSelectedText = "";
+  let cachedSelectedElement = undefined;
 
   const trimArray = (items) => {
     if (items.length > MAX_ITEMS) {
@@ -1511,8 +1513,8 @@ export class InspectorPlugin extends Plugin<IInspectorConfig> {
     url: window.location.href,
     title: document.title || "",
     route: window.location.pathname + window.location.search,
-    selectedText: selectedText(),
-    selectedElement: selectedElement(),
+    selectedText: panelOpen ? cachedSelectedText : selectedText(),
+    selectedElement: panelOpen ? cachedSelectedElement : selectedElement(),
     textExcerpt: pageText(),
     network: recentNetwork.slice(0, MAX_ITEMS),
     actions: recentActions.slice(0, MAX_ITEMS),
@@ -1528,6 +1530,9 @@ export class InspectorPlugin extends Plugin<IInspectorConfig> {
   let selectedCommandIndex = 0;
 
   const openPalette = async () => {
+    cachedSelectedText = selectedText();
+    cachedSelectedElement = selectedElement();
+
     panelOpen = true;
     shell.classList.add("open");
     commandInput.value = commandQuery;
@@ -1554,6 +1559,8 @@ export class InspectorPlugin extends Plugin<IInspectorConfig> {
     commandInput.value = "";
     selectedCommandIndex = 0;
     promptShellEl.classList.remove("visible");
+    cachedSelectedText = "";
+    cachedSelectedElement = undefined;
   };
 
   const commands = [
@@ -1612,6 +1619,8 @@ export class InspectorPlugin extends Plugin<IInspectorConfig> {
         recentActions.length = 0;
         latestBundle = null;
         latestPrompt = "";
+        cachedSelectedText = "";
+        cachedSelectedElement = undefined;
         promptEl.value = "";
         promptShellEl.classList.remove("visible");
         renderSummary();
@@ -1684,21 +1693,26 @@ export class InspectorPlugin extends Plugin<IInspectorConfig> {
       latestBundle && latestBundle.plugin
         ? latestBundle.plugin.displayName + " (" + latestBundle.plugin.name + ")"
         : "Unknown";
-    const selectedElementLabel =
-      latestBundle && latestBundle.page && latestBundle.page.selectedElement
-        ? summarizeText(
-            latestBundle.page.selectedElement.selector ||
-              latestBundle.page.selectedElement.domPath ||
-              latestBundle.page.selectedElement.tagName,
-            70,
-          )
-        : "None";
+
+    const bundleText = latestBundle && latestBundle.page && latestBundle.page.selectedText;
+    const resolvedText = bundleText || (panelOpen ? cachedSelectedText : selectedText());
+
+    const bundleElement = latestBundle && latestBundle.page && latestBundle.page.selectedElement;
+    const resolvedElement = bundleElement || (panelOpen ? cachedSelectedElement : undefined);
+
+    const selectedElementLabel = resolvedElement
+      ? summarizeText(
+          resolvedElement.selector || resolvedElement.domPath || resolvedElement.tagName,
+          70,
+        )
+      : "None";
+
     summaryEl.innerHTML = \`
       <div><strong>Route</strong>\${summarizeText(window.location.pathname + window.location.search, 90)}</div>
       <div><strong>Likely plugin</strong>\${summarizeText(pluginName, 90)}</div>
       <div><strong>Recent client calls</strong>\${recentNetwork.length}</div>
       <div><strong>Recent actions</strong>\${recentActions.length}</div>
-      <div><strong>Selected text</strong>\${summarizeText(selectedText(), 90) || "None"}</div>
+      <div><strong>Selected text</strong>\${summarizeText(resolvedText, 90) || "None"}</div>
       <div><strong>Selected element</strong>\${selectedElementLabel}</div>
     \`;
   };
