@@ -7,7 +7,7 @@ import { ServerError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { appKitTypesPlugin } from "../../type-generator/vite-plugin";
 import { BaseServer } from "./base-server";
-import type { PluginEndpoints } from "./utils";
+import type { ServerBootstrapPayload } from "./utils";
 
 const logger = createLogger("server:vite");
 
@@ -26,8 +26,15 @@ const logger = createLogger("server:vite");
 export class ViteDevServer extends BaseServer {
   private vite: ViteDevServerType | null;
 
-  constructor(app: express.Application, endpoints: PluginEndpoints = {}) {
-    super(app, endpoints);
+  constructor(
+    app: express.Application,
+    bootstrap: ServerBootstrapPayload = {
+      endpoints: {},
+      runtimeConfig: {},
+      contributions: [],
+    },
+  ) {
+    super(app, bootstrap);
     this.vite = null;
   }
 
@@ -96,7 +103,7 @@ export class ViteDevServer extends BaseServer {
       try {
         const indexPath = path.resolve(clientRoot, "index.html");
         let html = fs.readFileSync(indexPath, "utf-8");
-        html = html.replace("<body>", `<body>${this.getConfigScript()}`);
+        html = this.injectBootstrap(html);
         html = await vite.transformIndexHtml(req.originalUrl, html);
         res.status(200).set({ "Content-Type": "text/html" }).end(html);
       } catch (e) {

@@ -74,6 +74,16 @@
         "optional": []
       }
     },
+    "inspector": {
+      "name": "inspector",
+      "displayName": "Inspector Plugin",
+      "description": "Opt-in runtime inspector overlay for AppKit apps with prompt generation and localhost bridge forwarding",
+      "package": "@databricks/appkit",
+      "resources": {
+        "required": [],
+        "optional": []
+      }
+    },
     "lakebase": {
       "name": "lakebase",
       "displayName": "Lakebase",

@@ -1,5 +1,5 @@
 import type express from "express";
-import { getConfigScript, type PluginEndpoints } from "./utils";
+import { injectBootstrapIntoHtml, type ServerBootstrapPayload } from "./utils";
 
 /**
  * Base server for the AppKit.
@@ -10,18 +10,25 @@ import { getConfigScript, type PluginEndpoints } from "./utils";
  */
 export abstract class BaseServer {
   protected app: express.Application;
-  protected endpoints: PluginEndpoints;
+  protected bootstrap: ServerBootstrapPayload;
 
-  constructor(app: express.Application, endpoints: PluginEndpoints = {}) {
+  constructor(
+    app: express.Application,
+    bootstrap: ServerBootstrapPayload = {
+      endpoints: {},
+      runtimeConfig: {},
+      contributions: [],
+    },
+  ) {
     this.app = app;
-    this.endpoints = endpoints;
+    this.bootstrap = bootstrap;
   }
 
   abstract setup(): void | Promise<void>;
 
   async close(): Promise<void> {}
 
-  protected getConfigScript(): string {
-    return getConfigScript(this.endpoints);
+  protected injectBootstrap(html: string): string {
+    return injectBootstrapIntoHtml(html, this.bootstrap);
   }
 }

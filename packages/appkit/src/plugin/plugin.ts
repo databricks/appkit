@@ -7,7 +7,9 @@ import type {
   PluginExecuteConfig,
   PluginExecutionSettings,
   PluginPhase,
+  RuntimeConfigContribution,
   RouteConfig,
+  ServerBootstrapContribution,
   StreamExecuteHandler,
   StreamExecutionSettings,
 } from "shared";
@@ -48,10 +50,13 @@ const logger = createLogger("plugin");
 const EXCLUDED_FROM_PROXY = new Set([
   // Lifecycle methods
   "setup",
+  "injectServerMiddleware",
   "shutdown",
   "injectRoutes",
   "getEndpoints",
   "getSkipBodyParsingPaths",
+  "getBootstrapContributions",
+  "getRuntimeConfigContribution",
   "abortActiveOperations",
   // asUser itself - prevent chaining like .asUser().asUser()
   "asUser",
@@ -190,6 +195,10 @@ export abstract class Plugin<
     return;
   }
 
+  injectServerMiddleware(_: express.Application) {
+    return;
+  }
+
   async setup() {}
 
   getEndpoints(): PluginEndpointMap {
@@ -198,6 +207,14 @@ export abstract class Plugin<
 
   getSkipBodyParsingPaths(): ReadonlySet<string> {
     return this.skipBodyParsingPaths;
+  }
+
+  getBootstrapContributions(): ServerBootstrapContribution[] {
+    return [];
+  }
+
+  getRuntimeConfigContribution(): RuntimeConfigContribution {
+    return {};
   }
 
   abortActiveOperations(): void {

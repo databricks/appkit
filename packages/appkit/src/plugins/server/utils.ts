@@ -132,32 +132,122 @@ export function getQueries(configFolder: string) {
   );
 }
 
-import type { PluginEndpoints } from "shared";
+import type {
+  PluginEndpoints,
+  RuntimeConfigContribution,
+  ServerBootstrapContribution,
+} from "shared";
 
 export type { PluginEndpoints };
 
-interface RuntimeConfig {
+export interface RuntimeConfig {
   appName: string;
   queries: Record<string, string>;
   endpoints: PluginEndpoints;
+  [key: string]: unknown;
 }
 
-function getRuntimeConfig(endpoints: PluginEndpoints = {}): RuntimeConfig {
+export interface ServerBootstrapPayload {
+  endpoints: PluginEndpoints;
+  runtimeConfig: RuntimeConfigContribution;
+  contributions: ServerBootstrapContribution[];
+}
+
+function getRuntimeConfig(
+  endpoints: PluginEndpoints = {},
+  runtimeConfig: RuntimeConfigContribution = {},
+): RuntimeConfig {
   const configFolder = path.join(process.cwd(), "config");
 
   return {
     appName: process.env.DATABRICKS_APP_NAME || "",
     queries: getQueries(configFolder),
     endpoints,
+    ...runtimeConfig,
   };
 }
 
-export function getConfigScript(endpoints: PluginEndpoints = {}): string {
-  const config = getRuntimeConfig(endpoints);
+export function getConfigScript(
+  endpoints: PluginEndpoints = {},
+  runtimeConfig: RuntimeConfigContribution = {},
+): string {
+  const config = getRuntimeConfig(endpoints, runtimeConfig);
 
   return `
     <script>
       window.__CONFIG__ = ${JSON.stringify(config)};
     </script>
   `;
+}
+
+function insertAfterOpeningTag(
+  html: string,
+  tagName: "head" | "body",
+  content: string,
+): string {
+  const openingTag = new RegExp(`<${tagName}([^>]*)>`, "i");
+  const match = html.match(openingTag);
+
+  if (!match || match.index === undefined) {
+    return `${content}${html}`;
+  }
+
+  const insertAt = match.index + match[0].length;
+  return `${html.slice(0, insertAt)}${content}${html.slice(insertAt)}`;
+}
+
+function insertBeforeClosingTag(
+  html: string,
+  tagName: "head" | "body",
+  content: string,
+): string {
+  const closingTag = new RegExp(`</${tagName}>`, "i");
+  const match = html.match(closingTag);
+
+  if (!match || match.index === undefined) {
+    return `${html}${content}`;
+  }
+
+  return `${html.slice(0, match.index)}${content}${html.slice(match.index)}`;
+}
+
+export function injectBootstrapIntoHtml(
+  html: string,
+  bootstrap: ServerBootstrapPayload = {
+    endpoints: {},
+    runtimeConfig: {},
+    contributions: [],
+  },
+): string {
+  const contributions = bootstrap.contributions ?? [];
+  const headMarkup = contributions
+    .filter((entry) => entry.position === "head")
+    .map((entry) => entry.html)
+    .join("\n");
+  const bodyStartMarkup = [
+    getConfigScript(bootstrap.endpoints, bootstrap.runtimeConfig),
+    ...contributions
+      .filter((entry) => !entry.position || entry.position === "body-start")
+      .map((entry) => entry.html),
+  ].join("\n");
+  const bodyEndMarkup = contributions
+    .filter((entry) => entry.position === "body-end")
+    .map((entry) => entry.html)
+    .join("\n");
+
+  let injectedHtml = html;
+
+  if (headMarkup) {
+    injectedHtml = insertAfterOpeningTag(injectedHtml, "head", headMarkup);
+  }
+
+  if (bodyStartMarkup) {
+    injectedHtml = insertAfterOpeningTag(injectedHtml, "body", bodyStartMarkup);
+  }
+
+  if (bodyEndMarkup) {
+    injectedHtml = insertBeforeClosingTag(injectedHtml, "body", bodyEndMarkup);
+  }
+
+  return injectedHtml;
 }

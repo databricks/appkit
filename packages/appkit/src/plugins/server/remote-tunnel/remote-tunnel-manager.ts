@@ -9,8 +9,9 @@ import { WebSocketServer } from "ws";
 import { createLogger } from "../../../logging/logger";
 import {
   generateTunnelIdFromEmail,
-  getConfigScript,
+  injectBootstrapIntoHtml,
   parseCookies,
+  type ServerBootstrapPayload,
 } from "../utils";
 import { REMOTE_TUNNEL_ASSET_PREFIXES } from "./gate";
 
@@ -88,9 +89,18 @@ export class RemoteTunnelManager {
   private hmrWss: WebSocketServer;
   private server?: HTTPServer;
   private devFileReader: DevFileReader;
+  private bootstrap: ServerBootstrapPayload;
 
-  constructor(devFileReader: DevFileReader) {
+  constructor(
+    devFileReader: DevFileReader,
+    bootstrap: ServerBootstrapPayload = {
+      endpoints: {},
+      runtimeConfig: {},
+      contributions: [],
+    },
+  ) {
     this.devFileReader = devFileReader;
+    this.bootstrap = bootstrap;
     this.wss = new WebSocketServer({ noServer: true, path: "/dev-tunnel" });
     this.hmrWss = new WebSocketServer({ noServer: true, path: "/dev-hmr" });
 
@@ -214,7 +224,7 @@ export class RemoteTunnelManager {
 
       const indexPath = path.join(__dirname, "index.html");
       let html = fs.readFileSync(indexPath, "utf-8");
-      html = html.replace("<body>", `<body>${getConfigScript()}`);
+      html = injectBootstrapIntoHtml(html, this.bootstrap);
 
       res.send(html);
     };

@@ -17,11 +17,24 @@ export interface BasePlugin {
 
   setup(): Promise<void>;
 
+  injectServerMiddleware?(app: express.Application): void;
+
   injectRoutes(router: express.Router): void;
 
   getEndpoints(): PluginEndpointMap;
 
   getSkipBodyParsingPaths?(): ReadonlySet<string>;
+
+  /**
+   * Optional HTML snippets the server should inject into rendered HTML.
+   * Used for lightweight bootstraps such as opt-in overlays.
+   */
+  getBootstrapContributions?(): ServerBootstrapContribution[];
+
+  /**
+   * Optional runtime config additions exposed to `window.__CONFIG__`.
+   */
+  getRuntimeConfigContribution?(): RuntimeConfigContribution;
 
   exports?(): unknown;
 }
@@ -215,6 +228,16 @@ export type PluginEndpointMap = Record<string, string>;
 
 /** Map of plugin names to their endpoint maps */
 export type PluginEndpoints = Record<string, PluginEndpointMap>;
+
+export type ServerBootstrapPosition = "head" | "body-start" | "body-end";
+
+export interface ServerBootstrapContribution {
+  id: string;
+  html: string;
+  position?: ServerBootstrapPosition;
+}
+
+export type RuntimeConfigContribution = Record<string, unknown>;
 
 export interface QuerySchemas {
   [key: string]: unknown;

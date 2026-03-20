@@ -2,6 +2,7 @@ import type { Server as HTTPServer } from "node:http";
 import type express from "express";
 import { createLogger } from "../../../logging/logger";
 import type { DevFileReader } from "../../../plugin/dev-reader";
+import type { ServerBootstrapPayload } from "../utils";
 import {
   hasDevQuery,
   isLocalDev,
@@ -22,13 +23,15 @@ const logger = createLogger("server:remote-tunnel:controller");
  */
 export class RemoteTunnelController {
   private devFileReader: DevFileReader;
+  private bootstrap: ServerBootstrapPayload;
   private server?: HTTPServer;
   private manager: RemoteTunnelManager | null;
   private initPromise: Promise<RemoteTunnelManager | null> | null;
   private wsReady: boolean;
 
-  constructor(devFileReader: DevFileReader) {
+  constructor(devFileReader: DevFileReader, bootstrap: ServerBootstrapPayload) {
     this.devFileReader = devFileReader;
+    this.bootstrap = bootstrap;
     this.manager = null;
     this.initPromise = null;
     this.wsReady = false;
@@ -121,6 +124,7 @@ export class RemoteTunnelController {
       const mod = await import("./remote-tunnel-manager");
       const remoteTunnelManager = new mod.RemoteTunnelManager(
         this.devFileReader,
+        this.bootstrap,
       );
       this.manager = remoteTunnelManager;
 

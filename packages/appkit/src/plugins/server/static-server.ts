@@ -3,7 +3,7 @@ import path from "node:path";
 import type express from "express";
 import expressStatic from "express";
 import { BaseServer } from "./base-server";
-import type { PluginEndpoints } from "./utils";
+import type { ServerBootstrapPayload } from "./utils";
 
 /**
  * Static server for the AppKit.
@@ -23,9 +23,13 @@ export class StaticServer extends BaseServer {
   constructor(
     app: express.Application,
     staticPath: string,
-    endpoints: PluginEndpoints = {},
+    bootstrap: ServerBootstrapPayload = {
+      endpoints: {},
+      runtimeConfig: {},
+      contributions: [],
+    },
   ) {
-    super(app, endpoints);
+    super(app, bootstrap);
     this.staticPath = staticPath;
   }
 
@@ -55,7 +59,7 @@ export class StaticServer extends BaseServer {
     }
 
     let html = fs.readFileSync(indexPath, "utf-8");
-    html = html.replace("<body>", `<body>${this.getConfigScript()}`);
+    html = this.injectBootstrap(html);
     res.send(html);
   }
 }

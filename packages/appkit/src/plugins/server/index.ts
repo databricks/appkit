@@ -13,7 +13,7 @@ import manifest from "./manifest.json";
 import { RemoteTunnelController } from "./remote-tunnel/remote-tunnel-controller";
 import { StaticServer } from "./static-server";
 import type { ServerConfig } from "./types";
-import { getRoutes, type PluginEndpoints, printRoutes } from "./utils";
+import { getRoutes, printRoutes, type ServerBootstrapPayload } from "./utils";
 import { ViteDevServer } from "./vite-dev-server";
 
 dotenv.config({ path: path.resolve(process.cwd(), "./.env") });
@@ -107,7 +107,7 @@ export class ServerPlugin extends Plugin {
       }),
     );
 
-    const endpoints = await this.extendRoutes();
+    const bootstrap = await this.extendRoutes();
 
     for (const extension of this.serverExtensions) {
       extension(this.serverApplication);
@@ -116,10 +116,11 @@ export class ServerPlugin extends Plugin {
     // register remote tunnel controller (before static/vite)
     this.remoteTunnelController = new RemoteTunnelController(
       this.devFileReader,
+      bootstrap,
     );
     this.serverApplication.use(this.remoteTunnelController.middleware);
 
-    await this.setupFrontend(endpoints);
+    await this.setupFrontend(bootstrap);
 
     const server = this.serverApplication.listen(
       this.config.port ?? ServerPlugin.DEFAULT_CONFIG.port,
@@ -182,12 +183,16 @@ export class ServerPlugin extends Plugin {
    * Setup the routes with the plugins.
    *
    * This method goes through all the plugins and injects the routes into the server application.
-   * Returns a map of plugin names to their registered named endpoints.
+   * Returns named endpoints plus runtime bootstrap contributions.
    */
-  private async extendRoutes(): Promise<PluginEndpoints> {
-    const endpoints: PluginEndpoints = {};
+  private async extendRoutes(): Promise<ServerBootstrapPayload> {
+    const bootstrap: ServerBootstrapPayload = {
+      endpoints: {},
+      runtimeConfig: {},
+      contributions: [],
+    };
 
-    if (!this.config.plugins) return endpoints;
+    if (!this.config.plugins) return bootstrap;
 
     this.serverApplication.get("/health", (_, res) => {
       res.status(200).json({ status: "ok" });
@@ -196,6 +201,13 @@ export class ServerPlugin extends Plugin {
 
     for (const plugin of Object.values(this.config.plugins)) {
       if (EXCLUDED_PLUGINS.includes(plugin.name)) continue;
+
+      if (
+        plugin.injectServerMiddleware &&
+        typeof plugin.injectServerMiddleware === "function"
+      ) {
+        plugin.injectServerMiddleware(this.serverApplication);
+      }
 
       if (plugin?.injectRoutes && typeof plugin.injectRoutes === "function") {
         const router = express.Router();
@@ -206,7 +218,7 @@ export class ServerPlugin extends Plugin {
         this.serverApplication.use(basePath, router);
 
         // Collect named endpoints from the plugin
-        endpoints[plugin.name] = plugin.getEndpoints();
+        bootstrap.endpoints[plugin.name] = plugin.getEndpoints();
 
         // Collect paths that should skip body parsing
         if (
@@ -218,9 +230,26 @@ export class ServerPlugin extends Plugin {
           }
         }
       }
+
+      if (
+        plugin.getBootstrapContributions &&
+        typeof plugin.getBootstrapContributions === "function"
+      ) {
+        bootstrap.contributions.push(...plugin.getBootstrapContributions());
+      }
+
+      if (
+        plugin.getRuntimeConfigContribution &&
+        typeof plugin.getRuntimeConfigContribution === "function"
+      ) {
+        Object.assign(
+          bootstrap.runtimeConfig,
+          plugin.getRuntimeConfigContribution(),
+        );
+      }
     }
 
-    return endpoints;
+    return bootstrap;
   }
 
   /**
@@ -229,7 +258,7 @@ export class ServerPlugin extends Plugin {
    * - Dev mode (no staticPath): Vite for HMR
    * - Production (no staticPath): Static files auto-detected
    */
-  private async setupFrontend(endpoints: PluginEndpoints) {
+  private async setupFrontend(bootstrap: ServerBootstrapPayload) {
     const isDev = process.env.NODE_ENV === "development";
     const hasExplicitStaticPath = this.config.staticPath !== undefined;
 
@@ -238,7 +267,7 @@ export class ServerPlugin extends Plugin {
       const staticServer = new StaticServer(
         this.serverApplication,
         this.config.staticPath as string,
-        endpoints,
+        bootstrap,
       );
       staticServer.setup();
       return;
@@ -246,7 +275,7 @@ export class ServerPlugin extends Plugin {
 
     // auto-detection based on environment
     if (isDev) {
-      this.viteDevServer = new ViteDevServer(this.serverApplication, endpoints);
+      this.viteDevServer = new ViteDevServer(this.serverApplication, bootstrap);
       await this.viteDevServer.setup();
       return;
     }
@@ -257,7 +286,7 @@ export class ServerPlugin extends Plugin {
       const staticServer = new StaticServer(
         this.serverApplication,
         staticPath,
-        endpoints,
+        bootstrap,
       );
 
       staticServer.setup();

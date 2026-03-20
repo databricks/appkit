@@ -26,6 +26,12 @@ vi.mock("./remote-tunnel-manager", () => ({
 import { RemoteTunnelController } from "./remote-tunnel-controller";
 import { RemoteTunnelManager } from "./remote-tunnel-manager";
 
+const emptyBootstrap = {
+  endpoints: {},
+  runtimeConfig: {},
+  contributions: [],
+};
+
 describe("RemoteTunnelController", () => {
   const originalEnv = { ...process.env };
   const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -44,7 +50,7 @@ describe("RemoteTunnelController", () => {
     process.env.NODE_ENV = "development";
     process.env.DATABRICKS_CLIENT_SECRET = "x";
 
-    const ctrl = new RemoteTunnelController({} as any);
+    const ctrl = new RemoteTunnelController({} as any, emptyBootstrap);
     const next = vi.fn();
 
     await ctrl.middleware(
@@ -62,7 +68,7 @@ describe("RemoteTunnelController", () => {
     process.env.NODE_ENV = "production";
     delete process.env.DATABRICKS_CLIENT_SECRET;
 
-    const ctrl = new RemoteTunnelController({} as any);
+    const ctrl = new RemoteTunnelController({} as any, emptyBootstrap);
     const next = vi.fn();
 
     await ctrl.middleware(
@@ -79,7 +85,7 @@ describe("RemoteTunnelController", () => {
     process.env.NODE_ENV = "production";
     process.env.DATABRICKS_CLIENT_SECRET = "x";
 
-    const ctrl = new RemoteTunnelController({} as any);
+    const ctrl = new RemoteTunnelController({} as any, emptyBootstrap);
     const next = vi.fn();
 
     await ctrl.middleware(
@@ -103,7 +109,7 @@ describe("RemoteTunnelController", () => {
     process.env.NODE_ENV = "production";
     process.env.DATABRICKS_CLIENT_SECRET = "x";
 
-    const ctrl = new RemoteTunnelController({} as any);
+    const ctrl = new RemoteTunnelController({} as any, emptyBootstrap);
     const next = vi.fn();
 
     await ctrl.middleware(
@@ -126,7 +132,7 @@ describe("RemoteTunnelController", () => {
     process.env.NODE_ENV = "production";
     process.env.DATABRICKS_CLIENT_SECRET = "x";
 
-    const ctrl = new RemoteTunnelController({} as any);
+    const ctrl = new RemoteTunnelController({} as any, emptyBootstrap);
     const server = {} as any;
     ctrl.setServer(server);
 
@@ -149,7 +155,7 @@ describe("RemoteTunnelController", () => {
     process.env.NODE_ENV = "production";
     process.env.DATABRICKS_CLIENT_SECRET = "x";
 
-    const ctrl = new RemoteTunnelController({} as any);
+    const ctrl = new RemoteTunnelController({} as any, emptyBootstrap);
 
     await ctrl.middleware(
       {

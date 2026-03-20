@@ -196,6 +196,11 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
+          id: "api/appkit/Variable.inspector",
+          label: "inspector"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Variable.sql",
           label: "sql"
         }

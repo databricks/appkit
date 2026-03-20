@@ -22,7 +22,7 @@ vi.mock("express", () => ({
   },
 }));
 
-// Mock getQueries and getConfigScript
+// Mock bootstrap HTML injection helpers
 vi.mock("../utils", () => ({
   getQueries: vi.fn().mockReturnValue({ query1: "SELECT 1" }),
   getConfigScript: vi.fn().mockReturnValue(`
@@ -30,12 +30,22 @@ vi.mock("../utils", () => ({
       window.__CONFIG__ = {"appName":"my-test-app","queries":{"query1":"query1"},"endpoints":{}};
     </script>
   `),
+  injectBootstrapIntoHtml: vi.fn((html: string) =>
+    html.replace(
+      "<body>",
+      `<body>
+    <script>
+      window.__CONFIG__ = {"appName":"my-test-app","queries":{"query1":"query1"},"endpoints":{}};
+    </script>
+  `,
+    ),
+  ),
 }));
 
 import fs from "node:fs";
 import express from "express";
 import { StaticServer } from "../static-server";
-import { getConfigScript } from "../utils";
+import { injectBootstrapIntoHtml } from "../utils";
 
 describe("StaticServer", () => {
   let mockApp: any;
@@ -179,7 +189,7 @@ describe("StaticServer", () => {
       const handler = mockApp.get.mock.calls[0][1];
       handler({ path: "/" }, mockRes, mockNext);
 
-      expect(getConfigScript).toHaveBeenCalled();
+      expect(injectBootstrapIntoHtml).toHaveBeenCalled();
       const sentHtml = mockRes.send.mock.calls[0][0];
       expect(sentHtml).toContain("query1");
     });

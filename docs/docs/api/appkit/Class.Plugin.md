@@ -352,6 +352,27 @@ BasePlugin.exports
 
 ***
 
+### getBootstrapContributions()
+
+```ts
+getBootstrapContributions(): ServerBootstrapContribution[];
+```
+
+Optional HTML snippets the server should inject into rendered HTML.
+Used for lightweight bootstraps such as opt-in overlays.
+
+#### Returns
+
+`ServerBootstrapContribution`[]
+
+#### Implementation of
+
+```ts
+BasePlugin.getBootstrapContributions
+```
+
+***
+
 ### getEndpoints()
 
 ```ts
@@ -366,6 +387,26 @@ getEndpoints(): PluginEndpointMap;
 
 ```ts
 BasePlugin.getEndpoints
+```
+
+***
+
+### getRuntimeConfigContribution()
+
+```ts
+getRuntimeConfigContribution(): RuntimeConfigContribution;
+```
+
+Optional runtime config additions exposed to `window.__CONFIG__`.
+
+#### Returns
+
+`RuntimeConfigContribution`
+
+#### Implementation of
+
+```ts
+BasePlugin.getRuntimeConfigContribution
 ```
 
 ***
@@ -408,6 +449,30 @@ injectRoutes(_: Router): void;
 
 ```ts
 BasePlugin.injectRoutes
+```
+
+***
+
+### injectServerMiddleware()
+
+```ts
+injectServerMiddleware(_: Application): void;
+```
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `_` | `Application` |
+
+#### Returns
+
+`void`
+
+#### Implementation of
+
+```ts
+BasePlugin.injectServerMiddleware
 ```
 
 ***
