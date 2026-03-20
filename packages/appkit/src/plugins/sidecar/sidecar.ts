@@ -1,4 +1,4 @@
-import { exec } from "node:child_process";
+import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { IAppRouter } from "shared";
 import { SidecarError } from "../../errors/sidecar";
@@ -19,6 +19,7 @@ import type {
 } from "./types";
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 const logger = createLogger("sidecar");
 
@@ -85,7 +86,23 @@ class SidecarPlugin extends Plugin {
       for (const cmd of def.setupCommands) {
         try {
           logger.info(`[${def.id}] Running setup command: ${cmd}`);
-          const { stdout, stderr } = await execAsync(cmd, { cwd: def.cwd });
+
+          let stdout: string;
+          let stderr: string;
+
+          if (def.setupShell) {
+            logger.warn(
+              `[${def.id}] Running setup command in shell mode (setupShell: true). Ensure commands are from trusted sources.`,
+            );
+            ({ stdout, stderr } = await execAsync(cmd, { cwd: def.cwd }));
+          } else {
+            const parts = cmd.split(/\s+/).filter(Boolean);
+            const [bin, ...args] = parts;
+            ({ stdout, stderr } = await execFileAsync(bin, args, {
+              cwd: def.cwd,
+            }));
+          }
+
           logger.info(`[${def.id}] Setup command "${cmd}" stdout: ${stdout}`);
           logger.info(`[${def.id}] Setup command "${cmd}" stderr: ${stderr}`);
         } catch (err) {

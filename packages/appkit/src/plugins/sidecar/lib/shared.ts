@@ -45,7 +45,11 @@ export interface ModeHandler {
     telemetry: ITelemetry,
     timeout: number,
   ): Promise<void>;
-  startHealthChecks(inst: SidecarInstance, timeout: number): void;
+  startHealthChecks(
+    inst: SidecarInstance,
+    timeout: number,
+    telemetry: ITelemetry,
+  ): void;
   injectRoutes(
     router: IAppRouter,
     inst: SidecarInstance,

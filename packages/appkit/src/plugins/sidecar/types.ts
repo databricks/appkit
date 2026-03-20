@@ -88,6 +88,14 @@ export interface SidecarDefinition {
   restart?: RestartConfig;
   /** Shell commands to run before spawning the sidecar process. */
   setupCommands?: string[];
+  /**
+   * When true, setup commands run in a shell (supports pipes, redirects, globbing, etc.).
+   * When false or omitted, commands are split on whitespace and executed directly with
+   * `execFile` (no shell) — safer against command injection.
+   *
+   * @default false
+   */
+  setupShell?: boolean;
 
   // --- HTTP mode only ---
   /** Port the child process listens on. 0 or omitted for auto-assign. */

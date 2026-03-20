@@ -66,6 +66,9 @@ vi.mock("../proxy", () => ({
 
 vi.mock("node:child_process", () => ({
   exec: vi.fn((_cmd: string, _opts: any, cb: any) => cb?.(null, "", "")),
+  execFile: vi.fn((_bin: string, _args: any, _opts: any, cb: any) =>
+    cb?.(null, "", ""),
+  ),
 }));
 
 vi.mock("node:util", () => ({

@@ -51,12 +51,12 @@ export const stdioHandler: ModeHandler = {
 
     processManager.setHealthy();
 
-    stdioHandler.startHealthChecks(inst, timeout);
+    stdioHandler.startHealthChecks(inst, timeout, telemetry);
 
     logger.info("[%s] Sidecar ready (stdio mode)", def.id);
   },
 
-  startHealthChecks(inst, timeout) {
+  startHealthChecks(inst, timeout, _telemetry) {
     const { definition: def, processManager } = inst;
     const state = narrowStdio(inst);
 

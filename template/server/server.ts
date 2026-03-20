@@ -21,9 +21,12 @@ createApp({
 {{- end}}
 {{- if .plugins.sidecar}}
     sidecar({
-      command: 'python3',
-      args: ['main.py'],
-      cwd: './sidecar',
+      sidecars: [{
+        id: 'sidecar',
+        command: 'python3',
+        args: ['main.py'],
+        cwd: './sidecar',
+      }],
     }),
 {{- end}}
   ],

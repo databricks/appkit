@@ -38,14 +38,14 @@ export const httpHandler: ModeHandler = {
 
     processManager.setHealthy();
 
-    httpHandler.startHealthChecks(inst, timeout);
+    httpHandler.startHealthChecks(inst, timeout, telemetry);
 
     state.proxy = new SidecarProxy(port, telemetry, def.proxy);
 
     logger.info("[%s] Sidecar ready on port %d", def.id, port);
   },
 
-  startHealthChecks(inst, timeout) {
+  startHealthChecks(inst, timeout, telemetry) {
     const { definition: def, processManager } = inst;
     const state = narrowHttp(inst);
 
@@ -61,6 +61,11 @@ export const httpHandler: ModeHandler = {
           // Stop health checks during restart to avoid overlapping restarts
           state.healthChecker?.stop();
           await processManager.restart();
+
+          // Port may have changed after restart (auto-assign)
+          const newPort = processManager.port;
+          state.healthChecker = new HealthChecker(newPort, def.healthCheck);
+          state.proxy = new SidecarProxy(newPort, telemetry, def.proxy);
 
           // Wait for the restarted process to become healthy before resuming checks
           const ready = await state.healthChecker?.waitForReady(timeout);
@@ -94,10 +99,15 @@ export const httpHandler: ModeHandler = {
     if (!state.proxy) return;
 
     const { definition: def, processManager } = inst;
-    const proxyMiddleware = state.proxy.middleware(() => processManager.status);
 
     const subRouter = Router();
-    subRouter.all("/*", proxyMiddleware);
+    subRouter.all("/*", (req, res) => {
+      if (!state.proxy) {
+        res.status(503).json({ error: "Sidecar proxy not ready" });
+        return;
+      }
+      state.proxy.middleware(() => processManager.status)(req, res);
+    });
     router.use(`/${def.id}`, subRouter);
 
     const fullPath = `/api/${helpers.pluginName}/${def.id}/*`;

@@ -29,6 +29,16 @@
           "type": "number",
           "default": 30000,
           "description": "Timeout in ms to wait for child process readiness"
+        },
+        "setupCommands": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Commands to run before spawning the sidecar process"
+        },
+        "setupShell": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, setup commands run in a shell (supports pipes, redirects). When false (default), commands use execFile for security."
         }
       }
     }
