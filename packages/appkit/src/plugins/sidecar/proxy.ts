@@ -177,9 +177,7 @@ export class SidecarProxy {
             proxyReq.on("error", (err) => {
               logger.error("Proxy request failed: %s", err.message);
               if (!res.headersSent) {
-                if (
-                  (err as NodeJS.ErrnoException).code === "ECONNREFUSED"
-                ) {
+                if ((err as NodeJS.ErrnoException).code === "ECONNREFUSED") {
                   res
                     .status(502)
                     .json({ error: "Sidecar process is unavailable" });

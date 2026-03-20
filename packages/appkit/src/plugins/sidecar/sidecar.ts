@@ -1,17 +1,16 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { Router } from "express";
-import type { IAppRequest, IAppRouter } from "shared";
+import type { IAppRouter } from "shared";
 import { SidecarError } from "../../errors/sidecar";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
-import { HealthChecker } from "./health-checker";
+import { httpHandler } from "./lib/http";
+import type { ModeHandler, SidecarInstance } from "./lib/shared";
+import { DEFAULT_STARTUP_TIMEOUT } from "./lib/shared";
+import { stdioHandler } from "./lib/stdio";
 import manifest from "./manifest.json";
 import { ProcessManager } from "./process-manager";
-import { SidecarProxy } from "./proxy";
-import { StdioBridge } from "./stdio-bridge";
-import { stdioRequestSchema } from "./stdio-schema";
 import type {
   ISidecarConfig,
   SidecarDefinition,
@@ -23,32 +22,16 @@ const execAsync = promisify(exec);
 
 const logger = createLogger("sidecar");
 
-const DEFAULT_STARTUP_TIMEOUT = 30_000;
-
-function extractAuthHeaders(req: IAppRequest): Record<string, string> {
-  const headers: Record<string, string> = {};
-  const user = req.headers["x-forwarded-user"];
-  if (typeof user === "string") headers["x-forwarded-user"] = user;
-  const token = req.headers["x-forwarded-access-token"];
-  if (typeof token === "string") headers["x-forwarded-access-token"] = token;
-  return headers;
-}
-
-interface SidecarInstance {
-  definition: SidecarDefinition;
-  processManager: ProcessManager;
-  healthChecker: HealthChecker | null;
-  proxy: SidecarProxy | null;
-  stdioBridge: StdioBridge | null;
-  restarting: boolean;
-}
-
 function normalizeSidecars(config: ISidecarConfig): SidecarDefinition[] {
   if ("sidecars" in config && Array.isArray(config.sidecars)) {
     return config.sidecars;
   }
   const { name: _name, host: _host, telemetry: _telemetry, ...def } = config;
   return [def as SidecarDefinition];
+}
+
+function handlerForMode(mode: string | undefined): ModeHandler {
+  return mode === "stdio" ? stdioHandler : httpHandler;
 }
 
 class SidecarPlugin extends Plugin {
@@ -71,12 +54,17 @@ class SidecarPlugin extends Plugin {
       }
       ids.add(def.id);
 
+      const mode = def.mode ?? "http";
+      const handler = handlerForMode(mode);
+
       this.instances.set(def.id, {
         definition: def,
         processManager: new ProcessManager(def),
-        healthChecker: null,
-        proxy: null,
-        stdioBridge: null,
+        handler,
+        state:
+          mode === "stdio"
+            ? { mode: "stdio", stdioBridge: null }
+            : { mode: "http", healthChecker: null, proxy: null },
         restarting: false,
       });
     }
@@ -109,262 +97,28 @@ class SidecarPlugin extends Plugin {
       }
     }
 
-    const mode = def.mode ?? "http";
-    if (mode === "stdio") {
-      await this.setupStdio(inst);
-    } else {
-      await this.setupHttp(inst);
-    }
-  }
-
-  private async setupHttp(inst: SidecarInstance): Promise<void> {
-    const { definition: def, processManager } = inst;
-    await processManager.spawn();
-
-    const port = processManager.port;
     const timeout = def.startupTimeout ?? DEFAULT_STARTUP_TIMEOUT;
-
-    inst.healthChecker = new HealthChecker(port, def.healthCheck);
-
-    const ready = await inst.healthChecker.waitForReady(timeout);
-    if (!ready) {
-      await processManager.stop();
-      throw SidecarError.startupFailed(def.command, timeout);
-    }
-
-    processManager.setHealthy();
-
-    this.startHttpHealthChecks(inst, timeout);
-
-    inst.proxy = new SidecarProxy(port, this.telemetry, def.proxy);
-
-    logger.info("[%s] Sidecar ready on port %d", def.id, port);
-  }
-
-  private async setupStdio(inst: SidecarInstance): Promise<void> {
-    const { definition: def, processManager } = inst;
-    await processManager.spawn();
-
-    const timeout = def.startupTimeout ?? DEFAULT_STARTUP_TIMEOUT;
-
-    inst.stdioBridge = new StdioBridge(def.stdio ?? {}, this.telemetry);
-
-    const stdin = processManager.getStdin();
-    const stdout = processManager.getStdout();
-    if (!stdin || !stdout) {
-      await processManager.stop();
-      throw new SidecarError(
-        `[${def.id}] Failed to obtain stdio streams from child process`,
-        { isRetryable: false },
-      );
-    }
-
-    inst.stdioBridge.attach(stdin, stdout);
-
-    const ready = await inst.stdioBridge.waitForReady(timeout);
-    logger.info("[%s] Sidecar stdio ready: %s", def.id, ready);
-    if (!ready) {
-      inst.stdioBridge.destroy();
-      await processManager.stop();
-      throw SidecarError.startupFailed(def.command, timeout);
-    }
-
-    processManager.setHealthy();
-
-    this.startStdioHealthChecks(inst, timeout);
-
-    logger.info("[%s] Sidecar ready (stdio mode)", def.id);
-  }
-
-  private startHttpHealthChecks(
-    inst: SidecarInstance,
-    timeout: number,
-  ): void {
-    const { definition: def, processManager } = inst;
-
-    const callbacks = {
-      onHealthy: () => processManager.setHealthy(),
-      onUnhealthy: async () => {
-        if (inst.restarting) return;
-        inst.restarting = true;
-        try {
-          processManager.setUnhealthy();
-          logger.warn("[%s] Sidecar unhealthy, triggering restart", def.id);
-
-          // Stop health checks during restart to avoid overlapping restarts
-          inst.healthChecker?.stop();
-          await processManager.restart();
-
-          // Wait for the restarted process to become healthy before resuming checks
-          const ready = await inst.healthChecker?.waitForReady(timeout);
-          if (ready) {
-            processManager.setHealthy();
-          }
-
-          // Resume periodic health checking with the same callbacks
-          inst.healthChecker?.start(callbacks);
-        } catch (err) {
-          logger.error(
-            "[%s] Failed to restart sidecar: %s",
-            def.id,
-            (err as Error).message,
-          );
-        } finally {
-          inst.restarting = false;
-        }
-      },
-    };
-
-    inst.healthChecker?.start(callbacks);
-  }
-
-  private startStdioHealthChecks(
-    inst: SidecarInstance,
-    timeout: number,
-  ): void {
-    const { definition: def, processManager } = inst;
-
-    const callbacks = {
-      onHealthy: () => processManager.setHealthy(),
-      onUnhealthy: async () => {
-        if (inst.restarting) return;
-        inst.restarting = true;
-        try {
-          processManager.setUnhealthy();
-          logger.warn(
-            "[%s] Sidecar stdio unhealthy, triggering restart",
-            def.id,
-          );
-
-          const bridge = inst.stdioBridge;
-          if (bridge) {
-            // Stop health checks and detach before restarting
-            bridge.stopHealthCheck();
-            bridge.detach();
-            await processManager.restart();
-
-            const newStdin = processManager.getStdin();
-            const newStdout = processManager.getStdout();
-            if (newStdin && newStdout) {
-              bridge.attach(newStdin, newStdout);
-              const ready = await bridge.waitForReady(timeout);
-              if (ready) {
-                processManager.setHealthy();
-              }
-            }
-
-            // Resume health checking with the same callbacks
-            bridge.startHealthCheck(callbacks);
-          }
-        } catch (err) {
-          logger.error(
-            "[%s] Failed to restart sidecar: %s",
-            def.id,
-            (err as Error).message,
-          );
-        } finally {
-          inst.restarting = false;
-        }
-      },
-    };
-
-    inst.stdioBridge?.startHealthCheck(callbacks);
+    await inst.handler.setup(inst, this.telemetry, timeout);
   }
 
   injectRoutes(router: IAppRouter): void {
+    const helpers = {
+      pluginName: this.name,
+      addSkipBodyParsingPath: (path: string) =>
+        this.addSkipBodyParsingPath(path),
+      registerEndpoint: (name: string, path: string) =>
+        this.registerEndpoint(name, path),
+    };
+
     for (const inst of this.instances.values()) {
-      const mode = inst.definition.mode ?? "http";
-      if (mode === "stdio") {
-        this.injectStdioRoutes(router, inst);
-      } else {
-        this.injectHttpRoutes(router, inst);
-      }
+      inst.handler.injectRoutes(router, inst, helpers);
     }
-  }
-
-  private injectHttpRoutes(router: IAppRouter, inst: SidecarInstance): void {
-    if (!inst.proxy) return;
-
-    const { definition: def, processManager } = inst;
-    const proxyMiddleware = inst.proxy.middleware(() => processManager.status);
-
-    const subRouter = Router();
-    subRouter.all("/*", proxyMiddleware);
-    router.use(`/${def.id}`, subRouter);
-
-    const fullPath = `/api/${this.name}/${def.id}/*`;
-    logger.info("[%s] Injecting HTTP routes: %s", def.id, fullPath);
-    this.addSkipBodyParsingPath(fullPath);
-    this.registerEndpoint(`proxy:${def.id}`, fullPath);
-  }
-
-  private injectStdioRoutes(router: IAppRouter, inst: SidecarInstance): void {
-    if (!inst.stdioBridge) return;
-
-    const { definition: def, processManager } = inst;
-    const bridge = inst.stdioBridge;
-    const getStatus = () => processManager.status;
-
-    const subRouter = Router();
-    subRouter.all("/*", async (req: IAppRequest, res) => {
-      const status = getStatus();
-      if (status !== "healthy") {
-        res.status(503).json({ error: "Sidecar process is not ready", status });
-        return;
-      }
-
-      const parsed = stdioRequestSchema.safeParse({
-        path: req.path,
-        method: req.method,
-        body: req.body,
-      });
-
-      if (!parsed.success) {
-        res.status(400).json({
-          error: "Invalid request payload",
-          details: parsed.error.flatten(),
-        });
-        return;
-      }
-
-      const authHeaders = extractAuthHeaders(req);
-
-      try {
-        const result = await bridge.sendRequest({
-          ...parsed.data,
-          headers: authHeaders,
-        });
-
-        res.status(result.status ?? 200);
-        if (result.headers) {
-          for (const [k, v] of Object.entries(result.headers)) {
-            res.setHeader(k, v);
-          }
-        }
-        res.json(result.body);
-      } catch (err) {
-        if (err instanceof SidecarError) {
-          res.status(err.statusCode).json({ error: err.message });
-        } else {
-          res.status(502).json({ error: "Sidecar request failed" });
-        }
-      }
-    });
-    router.use(`/${def.id}`, subRouter);
-
-    const fullPath = `/api/${this.name}/${def.id}/*`;
-    this.registerEndpoint(`stdio:${def.id}`, fullPath);
   }
 
   abortActiveOperations(): void {
     super.abortActiveOperations();
     for (const inst of this.instances.values()) {
-      const mode = inst.definition.mode ?? "http";
-      if (mode === "stdio") {
-        inst.stdioBridge?.destroy();
-      } else {
-        inst.healthChecker?.stop();
-      }
+      inst.handler.teardown(inst);
       inst.processManager.stop(10_000).catch((err) => {
         logger.error(
           "[%s] Error stopping sidecar during shutdown: %s",

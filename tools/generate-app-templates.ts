@@ -110,8 +110,7 @@ const APP_TEMPLATES: AppTemplate[] = [
   {
     name: "appkit-sidecar",
     features: ["sidecar"],
-    description:
-      "Node.js app with a Python sidecar process managed by AppKit",
+    description: "Node.js app with a Python sidecar process managed by AppKit",
   },
 ];
 
