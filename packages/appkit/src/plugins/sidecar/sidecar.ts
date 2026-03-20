@@ -134,26 +134,7 @@ class SidecarPlugin extends Plugin {
 
     processManager.setHealthy();
 
-    inst.healthChecker.start({
-      onHealthy: () => processManager.setHealthy(),
-      onUnhealthy: async () => {
-        if (inst.restarting) return;
-        inst.restarting = true;
-        try {
-          processManager.setUnhealthy();
-          logger.warn("[%s] Sidecar unhealthy, triggering restart", def.id);
-          await processManager.restart();
-        } catch (err) {
-          logger.error(
-            "[%s] Failed to restart sidecar: %s",
-            def.id,
-            (err as Error).message,
-          );
-        } finally {
-          inst.restarting = false;
-        }
-      },
-    });
+    this.startHttpHealthChecks(inst, timeout);
 
     inst.proxy = new SidecarProxy(port, this.telemetry, def.proxy);
 
@@ -190,7 +171,60 @@ class SidecarPlugin extends Plugin {
 
     processManager.setHealthy();
 
-    inst.stdioBridge.startHealthCheck({
+    this.startStdioHealthChecks(inst, timeout);
+
+    logger.info("[%s] Sidecar ready (stdio mode)", def.id);
+  }
+
+  private startHttpHealthChecks(
+    inst: SidecarInstance,
+    timeout: number,
+  ): void {
+    const { definition: def, processManager } = inst;
+
+    const callbacks = {
+      onHealthy: () => processManager.setHealthy(),
+      onUnhealthy: async () => {
+        if (inst.restarting) return;
+        inst.restarting = true;
+        try {
+          processManager.setUnhealthy();
+          logger.warn("[%s] Sidecar unhealthy, triggering restart", def.id);
+
+          // Stop health checks during restart to avoid overlapping restarts
+          inst.healthChecker?.stop();
+          await processManager.restart();
+
+          // Wait for the restarted process to become healthy before resuming checks
+          const ready = await inst.healthChecker?.waitForReady(timeout);
+          if (ready) {
+            processManager.setHealthy();
+          }
+
+          // Resume periodic health checking with the same callbacks
+          inst.healthChecker?.start(callbacks);
+        } catch (err) {
+          logger.error(
+            "[%s] Failed to restart sidecar: %s",
+            def.id,
+            (err as Error).message,
+          );
+        } finally {
+          inst.restarting = false;
+        }
+      },
+    };
+
+    inst.healthChecker?.start(callbacks);
+  }
+
+  private startStdioHealthChecks(
+    inst: SidecarInstance,
+    timeout: number,
+  ): void {
+    const { definition: def, processManager } = inst;
+
+    const callbacks = {
       onHealthy: () => processManager.setHealthy(),
       onUnhealthy: async () => {
         if (inst.restarting) return;
@@ -204,6 +238,8 @@ class SidecarPlugin extends Plugin {
 
           const bridge = inst.stdioBridge;
           if (bridge) {
+            // Stop health checks and detach before restarting
+            bridge.stopHealthCheck();
             bridge.detach();
             await processManager.restart();
 
@@ -211,8 +247,14 @@ class SidecarPlugin extends Plugin {
             const newStdout = processManager.getStdout();
             if (newStdin && newStdout) {
               bridge.attach(newStdin, newStdout);
-              await bridge.waitForReady(timeout);
+              const ready = await bridge.waitForReady(timeout);
+              if (ready) {
+                processManager.setHealthy();
+              }
             }
+
+            // Resume health checking with the same callbacks
+            bridge.startHealthCheck(callbacks);
           }
         } catch (err) {
           logger.error(
@@ -224,9 +266,9 @@ class SidecarPlugin extends Plugin {
           inst.restarting = false;
         }
       },
-    });
+    };
 
-    logger.info("[%s] Sidecar ready (stdio mode)", def.id);
+    inst.stdioBridge?.startHealthCheck(callbacks);
   }
 
   injectRoutes(router: IAppRouter): void {

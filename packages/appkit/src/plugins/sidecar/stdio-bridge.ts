@@ -142,14 +142,35 @@ export class StdioBridge {
       },
       async (span) => {
         try {
+          const deadline = Date.now() + timeout;
+
+          // Poll with ping in a loop (like HTTP health checker), while also
+          // listening for a "ready" notification from the sidecar process.
+          const notificationPromise = new Promise<"notification">((resolve) => {
+            this.readyResolve = () => resolve("notification");
+          });
+
+          const pingPollPromise = (async (): Promise<"ping"> => {
+            const pingTimeout = Math.min(5_000, timeout);
+            const pollInterval = Math.min(1_000, pingTimeout);
+            while (Date.now() < deadline) {
+              if (this.ready) return "ping";
+              const ok = await this.ping(pingTimeout);
+              if (ok) return "ping";
+              await new Promise((r) => setTimeout(r, pollInterval));
+            }
+            // Should not reach here if timeout promise wins, but just in case
+            throw new Error("ping poll expired");
+          })();
+
+          const timeoutPromise = new Promise<null>((resolve) =>
+            setTimeout(() => resolve(null), timeout),
+          );
+
           const result = await Promise.race([
-            new Promise<"notification">((resolve) => {
-              this.readyResolve = () => resolve("notification");
-            }),
-            this.ping(5_000).then((ok) => (ok ? ("ping" as const) : null)),
-            new Promise<null>((resolve) =>
-              setTimeout(() => resolve(null), timeout),
-            ),
+            notificationPromise,
+            pingPollPromise.catch(() => null as null),
+            timeoutPromise,
           ]);
 
           const readySignal = result ?? "timeout";
@@ -308,6 +329,14 @@ export class StdioBridge {
         }
       }
     }, this.config.pingInterval);
+  }
+
+  stopHealthCheck(): void {
+    if (this.healthInterval) {
+      clearInterval(this.healthInterval);
+      this.healthInterval = null;
+    }
+    this.consecutiveFailures = 0;
   }
 
   destroy(): void {
