@@ -11,14 +11,15 @@ Run non-Node.js workloads as managed child processes alongside the AppKit server
 - **Automatic process lifecycle**: spawn, health monitoring, restart on crash, graceful shutdown
 - **Port auto-assignment**: no port conflicts in HTTP mode
 - **Auth context forwarding**: Databricks user identity (`x-forwarded-user`, `x-forwarded-access-token`) is passed to the sidecar
-- **OpenTelemetry instrumentation**: spans and metrics for every request (stdio mode)
+- **OpenTelemetry instrumentation**: spans and metrics for every proxied and stdio request
+- **Multiple sidecars**: run several child processes from a single plugin instance
 - **Security hardening**: command validation, path traversal prevention, header filtering
 
 ## Quick start
 
 ### HTTP mode (default)
 
-The child process runs its own HTTP server. AppKit proxies all requests under `/api/sidecar/*` to it.
+The child process runs its own HTTP server. AppKit proxies all requests under `/api/sidecar/{id}/*` to it.
 
 ```ts
 import { createApp, sidecar, server } from "@databricks/appkit";
@@ -27,15 +28,20 @@ await createApp({
   plugins: [
     server(),
     sidecar({
-      command: "python3",
-      args: ["-m", "uvicorn", "main:app", "--host", "0.0.0.0"],
-      cwd: "./python-api",
-      port: 0, // auto-assign
-      healthCheck: { path: "/health" },
+      sidecars: [
+        {
+          id: "python-api",
+          command: "python3",
+          args: ["-m", "uvicorn", "main:app", "--host", "0.0.0.0"],
+          cwd: "./python-api",
+          port: 0, // auto-assign
+          healthCheck: { path: "/health" },
+        },
+      ],
     }),
   ],
 });
-// GET /api/sidecar/users -> proxied to Python at http://localhost:{auto-port}/users
+// GET /api/sidecar/python-api/users -> proxied to Python at http://localhost:{auto-port}/users
 ```
 
 ### stdio mode
@@ -49,18 +55,23 @@ await createApp({
   plugins: [
     server(),
     sidecar({
-      mode: "stdio",
-      command: "python3",
-      args: ["inference.py"],
-      cwd: "./ml-model",
-      stdio: {
-        requestTimeout: 60_000,
-        maxConcurrency: 10,
-      },
+      sidecars: [
+        {
+          id: "ml-model",
+          mode: "stdio",
+          command: "python3",
+          args: ["inference.py"],
+          cwd: "./ml-model",
+          stdio: {
+            requestTimeout: 60_000,
+            maxConcurrency: 10,
+          },
+        },
+      ],
     }),
   ],
 });
-// POST /api/sidecar/predict -> JSON-RPC over stdin -> Python responds on stdout
+// POST /api/sidecar/ml-model/predict -> JSON-RPC over stdin -> Python responds on stdout
 ```
 
 ## Configuration reference
@@ -146,7 +157,7 @@ stdio mode only. Controls the JSON-RPC communication layer.
 1. AppKit spawns the child process with `PORT` and `SIDECAR_PORT` environment variables set to the assigned port.
 2. The child process starts its own HTTP server on that port.
 3. AppKit polls the health check endpoint until it responds with a 2xx status.
-4. Once healthy, all requests to `/api/sidecar/*` are proxied to `http://localhost:{port}/*`.
+4. Once healthy, all requests to `/api/sidecar/{id}/*` are proxied to `http://localhost:{port}/*`.
 5. Periodic health checks continue. If the threshold is exceeded, the process is restarted.
 
 ### Port assignment
@@ -202,11 +213,14 @@ if __name__ == "__main__":
 
 ```ts
 sidecar({
-  command: "python3",
-  args: ["main.py"],
-  cwd: "./python-api",
-  port: 0,
-  healthCheck: { path: "/health" },
+  sidecars: [{
+    id: "flask-api",
+    command: "python3",
+    args: ["main.py"],
+    cwd: "./python-api",
+    port: 0,
+    healthCheck: { path: "/health" },
+  }],
 })
 ```
 
@@ -232,11 +246,14 @@ def predict(input: dict):
 
 ```ts
 sidecar({
-  command: "python3",
-  args: ["-m", "uvicorn", "main:app", "--host", "0.0.0.0"],
-  cwd: "./python-api",
-  port: 0,
-  healthCheck: { path: "/health" },
+  sidecars: [{
+    id: "fastapi",
+    command: "python3",
+    args: ["-m", "uvicorn", "main:app", "--host", "0.0.0.0"],
+    cwd: "./python-api",
+    port: 0,
+    healthCheck: { path: "/health" },
+  }],
 })
 ```
 
@@ -280,11 +297,14 @@ func main() {
 
 ```ts
 sidecar({
-  command: "go",
-  args: ["run", "main.go"],
-  cwd: "./go-api",
-  port: 0,
-  healthCheck: { path: "/health" },
+  sidecars: [{
+    id: "go-api",
+    command: "go",
+    args: ["run", "main.go"],
+    cwd: "./go-api",
+    port: 0,
+    healthCheck: { path: "/health" },
+  }],
 })
 ```
 
@@ -294,7 +314,7 @@ sidecar({
 
 1. AppKit spawns the child process with `stdin`, `stdout`, and `stderr` all piped.
 2. The child signals readiness by sending a `ready` notification on stdout, or by responding to a `ping` request.
-3. All requests to `/api/sidecar/*` are translated into JSON-RPC 2.0 messages written to the child's stdin.
+3. All requests to `/api/sidecar/{id}/*` are translated into JSON-RPC 2.0 messages written to the child's stdin.
 4. The child processes the request and writes a JSON-RPC response to stdout.
 5. Periodic ping/pong health checks monitor liveness.
 
@@ -479,15 +499,18 @@ if __name__ == "__main__":
 
 ```ts
 sidecar({
-  mode: "stdio",
-  command: "python3",
-  args: ["inference.py"],
-  cwd: "./ml-model",
-  stdio: {
-    requestTimeout: 60_000,  // ML inference can be slow
-    maxConcurrency: 10,
-  },
-  restart: { enabled: true, maxRestarts: 3 },
+  sidecars: [{
+    id: "inference",
+    mode: "stdio",
+    command: "python3",
+    args: ["inference.py"],
+    cwd: "./ml-model",
+    stdio: {
+      requestTimeout: 60_000,  // ML inference can be slow
+      maxConcurrency: 10,
+    },
+    restart: { enabled: true, maxRestarts: 3 },
+  }],
 })
 ```
 
@@ -513,11 +536,12 @@ If the child process is slow to read from stdin, Node.js buffers writes internal
 
 ### Startup sequence
 
-1. **Spawn**: The child process is spawned via `child_process.spawn()` with `shell: false`.
-2. **Readiness check**:
+1. **Setup commands**: If `setupCommands` is provided, each command is executed sequentially in the sidecar's `cwd` before spawning. If any command fails, startup is aborted.
+2. **Spawn**: The child process is spawned via `child_process.spawn()` with `shell: false`.
+3. **Readiness check**:
    - **HTTP mode**: Polls `GET http://localhost:{port}{healthCheck.path}` until a 2xx response.
    - **stdio mode**: Waits for a `ready` notification or a successful `ping` response. Whichever comes first.
-3. **Health monitoring begins**: Periodic checks (HTTP polling or ping/pong) start after readiness is confirmed.
+4. **Health monitoring begins**: Periodic checks (HTTP polling or ping/pong) start after readiness is confirmed.
 
 If the process does not become ready within `startupTimeout` (default: 30 seconds), the process is killed and a `SidecarError` with code `SIDECAR_ERROR` is thrown. This halts `createApp()`.
 
@@ -582,7 +606,17 @@ All messages written to stdin use `JSON.stringify()`, which escapes newline char
 
 ## Telemetry
 
-### OpenTelemetry spans (stdio mode)
+### OpenTelemetry spans
+
+#### HTTP mode
+
+| Span name | Kind | When | Key attributes |
+| --- | --- | --- | --- |
+| `sidecar.proxy.request` | `CLIENT` | Each proxied HTTP request | `path`, `method`, `target_port`, `duration_ms`, `response_status` |
+
+Span events include `sidecar.proxy.request_forwarded` (when the upstream response arrives) and error details on failure.
+
+#### stdio mode
 
 | Span name | Kind | When | Key attributes |
 | --- | --- | --- | --- |
@@ -591,7 +625,18 @@ All messages written to stdin use `JSON.stringify()`, which escapes newline char
 
 Span events include `sidecar.stdio.message_sent` (when a message is written to stdin) and error details on failure.
 
-### Metrics (stdio mode)
+### Metrics
+
+#### HTTP mode
+
+| Metric | Type | Description |
+| --- | --- | --- |
+| `sidecar.proxy.request.count` | Counter | Total proxied requests, labeled by `path`, `method`, `status`. |
+| `sidecar.proxy.request.duration` | Histogram | Round-trip latency in ms, labeled by `path`, `method`. |
+| `sidecar.proxy.error.count` | Counter | Errors, labeled by `path`, `error_type`. |
+| `sidecar.proxy.pending` | UpDownCounter | Currently in-flight proxied request count. |
+
+#### stdio mode
 
 | Metric | Type | Description |
 | --- | --- | --- |
@@ -702,7 +747,7 @@ All sidecar routes are mounted at `/api/{sidecar.id}/*`. In HTTP mode, the route
 
 ### Request format (stdio mode)
 
-Clients send HTTP requests to `/api/sidecar/{path}`. The route handler:
+Clients send HTTP requests to `/api/sidecar/{id}/{path}`. The route handler:
 
 1. Validates the request with Zod (`path` must be non-empty, `method` must be a valid HTTP method).
 2. Extracts auth headers from the incoming request.
@@ -756,14 +801,17 @@ sidecar({ id: "python-api", command: "python3", args: ["api.py"], cwd: "./python
 
 ```ts
 sidecar({
-  command: "python3",
-  args: ["main.py"],
-  cwd: "./python-api",
-  env: {
-    MODEL_PATH: "/mnt/models/v2",
-    LOG_LEVEL: "debug",
-    DATABASE_URL: process.env.DATABASE_URL ?? "",
-  },
+  sidecars: [{
+    id: "python-api",
+    command: "python3",
+    args: ["main.py"],
+    cwd: "./python-api",
+    env: {
+      MODEL_PATH: "/mnt/models/v2",
+      LOG_LEVEL: "debug",
+      DATABASE_URL: process.env.DATABASE_URL ?? "",
+    },
+  }],
 })
 ```
 
@@ -813,17 +861,20 @@ notify("progress", {"taskId": "abc", "percent": 50})
 
 ```ts
 sidecar({
-  mode: "stdio",
-  command: "python3",
-  args: ["worker.py"],
-  stdio: {
-    onNotification: (method, params) => {
-      if (method === "progress") {
-        const { taskId, percent } = params as { taskId: string; percent: number };
-        console.log(`Task ${taskId}: ${percent}%`);
-      }
+  sidecars: [{
+    id: "worker",
+    mode: "stdio",
+    command: "python3",
+    args: ["worker.py"],
+    stdio: {
+      onNotification: (method, params) => {
+        if (method === "progress") {
+          const { taskId, percent } = params as { taskId: string; percent: number };
+          console.log(`Task ${taskId}: ${percent}%`);
+        }
+      },
     },
-  },
+  }],
 })
 ```
 
@@ -838,7 +889,7 @@ sidecar({
 - In HTTP mode, ensure the child binds to `0.0.0.0` (not `127.0.0.1` or `localhost`) on the port from the `PORT` environment variable.
 - In stdio mode, ensure the child writes the `ready` notification to stdout (or responds to `ping`) before the timeout.
 - Increase `startupTimeout` for slow-starting processes (e.g., loading ML models).
-- Check recent output with `appkit.sidecar.getOutput()` for error messages from the child.
+- Check recent output with `appkit.sidecar.getOutput("your-id")` for error messages from the child.
 
 ### stdout pollution breaks stdio mode
 
@@ -857,7 +908,7 @@ The stdio protocol requires that **only valid JSON-RPC messages** appear on stdo
 - Check health check configuration. The `path` must return a 2xx status (HTTP mode).
 - In stdio mode, ensure the child responds to `ping` requests promptly.
 - Increase `healthCheck.unhealthyThreshold` or `stdio.pingFailureThreshold` if the child occasionally takes longer to respond.
-- Check if the child process is crashing. Use `appkit.sidecar.getOutput()` to read stderr logs.
+- Check if the child process is crashing. Use `appkit.sidecar.getOutput("your-id")` to read stderr logs.
 
 ### Port conflicts (HTTP mode)
 
