@@ -18,6 +18,7 @@
 
 import { spawnSync } from "node:child_process";
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -167,9 +168,15 @@ console.log(
 function postProcess(appDir: string, app: AppTemplate): void {
   console.log(`  Post-processing ${app.name}...`);
 
-  // 1. Delete .env — end users get it from `databricks apps init`, but published
-  //    templates should not ship credentials from the generator's environment.
+  // 1. Delete .env (contains resolved credentials from the generator's CLI profile)
+  //    and copy .env.tmpl / .env.example.tmpl so that `databricks apps init` can
+  //    render them for end users when they scaffold from the published template.
   rmSync(join(appDir, ".env"), { force: true });
+  copyFileSync(join(TEMPLATE_PATH, ".env.tmpl"), join(appDir, ".env.tmpl"));
+  copyFileSync(
+    join(TEMPLATE_PATH, ".env.example.tmpl"),
+    join(appDir, ".env.example.tmpl"),
+  );
 
   // 2. Sync appkit.plugins.json based on server imports (discovers available plugins
   //    and marks the ones used in the plugins array as required).
