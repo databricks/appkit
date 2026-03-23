@@ -245,12 +245,21 @@ export function CommandPalette({
           },
           body: JSON.stringify({ bundle }),
         }).then((r) => r.json());
-        dispatch({
-          type: "SET_STATUS",
-          status: response?.ok
-            ? "Context sent to local bridge."
-            : "Bridge did not accept the payload.",
-        });
+        if (response?.ok) {
+          networkState.recentNetwork.length = 0;
+          networkState.recentActions.length = 0;
+          consoleState.recentEntries.length = 0;
+          dispatch({ type: "CLEAR_ALL" });
+          dispatch({
+            type: "SET_STATUS",
+            status: "Context sent to local bridge. Recordings cleared.",
+          });
+        } else {
+          dispatch({
+            type: "SET_STATUS",
+            status: "Bridge did not accept the payload.",
+          });
+        }
       },
     },
     {
