@@ -18,7 +18,7 @@ jobs:
     name: Conventional Commit Title
     steps:
       - name: Validate PR title
-        uses: ytanikin/pr-conventional-commits@1.5.1
+        uses: ytanikin/pr-conventional-commits@fda730cb152c05a849d6d84325e50c6182d9d1e9 # 1.5.1
         with:
           task_types: '["feat","fix","docs","test","ci","refactor","perf","chore","revert","style","build"]'
           add_label: 'false'
