@@ -19,7 +19,9 @@ export function Header({
   return (
     <div className="mb-8">
       <div className="flex items-center gap-3 mb-2">
-        <h1 className={titleClassName ?? "text-3xl font-bold text-foreground"}>{title}</h1>
+        <h1 className={titleClassName ?? "text-3xl font-bold text-foreground"}>
+          {title}
+        </h1>
         <Tooltip>
           <TooltipTrigger>
             <InfoIcon className="w-5 h-5" />

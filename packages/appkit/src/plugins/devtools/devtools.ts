@@ -183,8 +183,10 @@ export class DevtoolsPlugin extends Plugin<IDevtoolsConfig> {
           const response = await this.forwardBundleToBridge(bundle, prompt);
           res.json(response);
         } catch (error) {
-          logger.debug("Bridge forward skipped: %s",
-            error instanceof Error ? error.message : "unknown error");
+          logger.debug(
+            "Bridge forward skipped: %s",
+            error instanceof Error ? error.message : "unknown error",
+          );
           res.json({
             ok: true,
             bridgeForwarded: false,
@@ -245,8 +247,7 @@ export class DevtoolsPlugin extends Plugin<IDevtoolsConfig> {
       path: "/component-map",
       handler: async (_req, res) => {
         const cwd = process.cwd();
-        const srcDir =
-          this.config.sourceRoot || join(cwd, "client", "src");
+        const srcDir = this.config.sourceRoot || join(cwd, "client", "src");
         const map = buildComponentMap(srcDir);
         const result: Record<string, { file: string; line: number }> = {};
         for (const [name, loc] of map) {
@@ -270,7 +271,8 @@ export class DevtoolsPlugin extends Plugin<IDevtoolsConfig> {
       method: "post",
       path: "/agent/run",
       handler: async (req, res) => {
-        const agentId = typeof req.body?.agentId === "string" ? req.body.agentId : "";
+        const agentId =
+          typeof req.body?.agentId === "string" ? req.body.agentId : "";
         const provider = this.agentProviders.find((p) => p.id === agentId);
 
         if (!provider) {
@@ -288,11 +290,14 @@ export class DevtoolsPlugin extends Plugin<IDevtoolsConfig> {
         }
 
         if (!provider.run || !provider.available) {
-          res.status(400).json({ error: `Agent "${agentId}" is not available` });
+          res
+            .status(400)
+            .json({ error: `Agent "${agentId}" is not available` });
           return;
         }
 
-        const prompt = typeof req.body?.prompt === "string" ? req.body.prompt : "";
+        const prompt =
+          typeof req.body?.prompt === "string" ? req.body.prompt : "";
         if (!prompt) {
           res.status(400).json({ error: "No prompt provided" });
           return;
@@ -329,11 +334,21 @@ export class DevtoolsPlugin extends Plugin<IDevtoolsConfig> {
 
         try {
           const cwd = process.cwd();
-          logger.info("Running agent %s (mode=%s) cwd=%s", agentId, provider.mode, cwd);
+          logger.info(
+            "Running agent %s (mode=%s) cwd=%s",
+            agentId,
+            provider.mode,
+            cwd,
+          );
           logger.info("Prompt length: %d chars", prompt.length);
 
           for await (const message of provider.run(prompt, cwd, signal)) {
-            logger.info("Agent %s >> type=%s content=%s", agentId, message.type, (message.content || "").slice(0, 100));
+            logger.info(
+              "Agent %s >> type=%s content=%s",
+              agentId,
+              message.type,
+              (message.content || "").slice(0, 100),
+            );
             if (signal.aborted || connectionClosed) break;
             sendEvent(message);
           }
@@ -347,7 +362,9 @@ export class DevtoolsPlugin extends Plugin<IDevtoolsConfig> {
         } finally {
           sendEvent({ type: "done", content: "" });
           if (!connectionClosed) {
-            try { res.end(); } catch {}
+            try {
+              res.end();
+            } catch {}
           }
           if (this.activeAgentAbort?.signal === signal) {
             this.activeAgentAbort = null;
@@ -407,15 +424,19 @@ export class DevtoolsPlugin extends Plugin<IDevtoolsConfig> {
       method: "get",
       path: "/stream-events",
       handler: async (req, res) => {
-        const pluginName = typeof req.query.plugin === "string" ? req.query.plugin : "";
-        const streamId = typeof req.query.streamId === "string" ? req.query.streamId : "";
+        const pluginName =
+          typeof req.query.plugin === "string" ? req.query.plugin : "";
+        const streamId =
+          typeof req.query.streamId === "string" ? req.query.streamId : "";
         if (!pluginName || !streamId) {
           res.json({ events: [] });
           return;
         }
 
         const plugins = this.getRuntimePlugins();
-        const plugin = Object.values(plugins).find((p) => p.name === pluginName);
+        const plugin = Object.values(plugins).find(
+          (p) => p.name === pluginName,
+        );
         if (!plugin) {
           res.json({ events: [] });
           return;
@@ -425,7 +446,11 @@ export class DevtoolsPlugin extends Plugin<IDevtoolsConfig> {
           const events = (plugin as any).getStreamEvents?.(streamId) ?? [];
           const safe = events.map((e: any) => {
             let parsed: unknown;
-            try { parsed = JSON.parse(e.data); } catch { parsed = e.data; }
+            try {
+              parsed = JSON.parse(e.data);
+            } catch {
+              parsed = e.data;
+            }
             return {
               id: e.id,
               type: e.type,
@@ -652,9 +677,7 @@ export class DevtoolsPlugin extends Plugin<IDevtoolsConfig> {
         selectedElement: this.normalizeElementReference(
           snapshot?.selectedElement,
         ),
-        pickedElement: this.normalizeElementReference(
-          snapshot?.pickedElement,
-        ),
+        pickedElement: this.normalizeElementReference(snapshot?.pickedElement),
         userPrompt: this.trimText(snapshot?.userPrompt || "", 500),
         textExcerpt: this.trimText(snapshot?.textExcerpt || "", 1600),
         recentActions: (snapshot?.actions ?? [])
@@ -783,14 +806,17 @@ export class DevtoolsPlugin extends Plugin<IDevtoolsConfig> {
           .join("\n")
       : "- none recorded";
 
-    const hasUserPrompt = bundle.page.userPrompt && bundle.page.userPrompt.trim();
+    const hasUserPrompt =
+      bundle.page.userPrompt && bundle.page.userPrompt.trim();
     const hasPickedElement = bundle.page.pickedElement;
 
     if (hasPickedElement) {
       return this.buildPickedElementPrompt(bundle, hasUserPrompt);
     }
 
-    const consoleSection = this.formatConsoleSection(bundle.client.recentConsole);
+    const consoleSection = this.formatConsoleSection(
+      bundle.client.recentConsole,
+    );
 
     return [
       "You are helping inspect a Databricks AppKit screen.",
@@ -891,19 +917,25 @@ export class DevtoolsPlugin extends Plugin<IDevtoolsConfig> {
   }
 
   private formatConsoleSection(entries: DevtoolsConsoleEntry[]): string {
-    const errors = entries.filter((e) => e.level === "error" || e.level === "warn");
+    const errors = entries.filter(
+      (e) => e.level === "error" || e.level === "warn",
+    );
     if (errors.length === 0 && entries.length === 0) {
       return "Recent console output:\n- none recorded";
     }
 
     const relevant = errors.length > 0 ? errors : entries;
-    const lines = relevant
-      .slice(0, 10)
-      .map((e) => {
-        const prefix = e.level === "error" ? "ERROR" : e.level === "warn" ? "WARN" : e.level.toUpperCase();
-        const msg = e.message.length > 200 ? `${e.message.slice(0, 200)}…` : e.message;
-        return `- [${prefix}] ${msg}`;
-      });
+    const lines = relevant.slice(0, 10).map((e) => {
+      const prefix =
+        e.level === "error"
+          ? "ERROR"
+          : e.level === "warn"
+            ? "WARN"
+            : e.level.toUpperCase();
+      const msg =
+        e.message.length > 200 ? `${e.message.slice(0, 200)}…` : e.message;
+      return `- [${prefix}] ${msg}`;
+    });
 
     return ["Recent console output:", ...lines].join("\n");
   }
@@ -1180,7 +1212,9 @@ export class DevtoolsPlugin extends Plugin<IDevtoolsConfig> {
     return this.devtoolsClientBundle;
   }
 
-  private sanitizeConsoleEntry(entry: DevtoolsConsoleEntry): DevtoolsConsoleEntry {
+  private sanitizeConsoleEntry(
+    entry: DevtoolsConsoleEntry,
+  ): DevtoolsConsoleEntry {
     return {
       level: entry.level,
       message: this.trimText(entry.message || "", 500),
@@ -1224,14 +1258,17 @@ export class DevtoolsPlugin extends Plugin<IDevtoolsConfig> {
       errorCount,
       slowRequests,
       thresholdMs,
-      timing: durations.length > 0
-        ? {
-            avg: Math.round(durations.reduce((a, b) => a + b, 0) / durations.length),
-            p50: durations[Math.floor(durations.length * 0.5)] ?? 0,
-            p95: durations[Math.floor(durations.length * 0.95)] ?? 0,
-            max: durations[durations.length - 1] ?? 0,
-          }
-        : null,
+      timing:
+        durations.length > 0
+          ? {
+              avg: Math.round(
+                durations.reduce((a, b) => a + b, 0) / durations.length,
+              ),
+              p50: durations[Math.floor(durations.length * 0.5)] ?? 0,
+              p95: durations[Math.floor(durations.length * 0.95)] ?? 0,
+              max: durations[durations.length - 1] ?? 0,
+            }
+          : null,
     };
   }
 
@@ -1257,10 +1294,16 @@ export class DevtoolsPlugin extends Plugin<IDevtoolsConfig> {
         pluginName,
         totalRequests,
         errorCount,
-        errorRate: totalRequests > 0 ? Math.round((errorCount / totalRequests) * 10000) / 100 : 0,
-        avgDurationMs: durations.length > 0
-          ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
-          : 0,
+        errorRate:
+          totalRequests > 0
+            ? Math.round((errorCount / totalRequests) * 10000) / 100
+            : 0,
+        avgDurationMs:
+          durations.length > 0
+            ? Math.round(
+                durations.reduce((a, b) => a + b, 0) / durations.length,
+              )
+            : 0,
         p95DurationMs: durations[Math.floor(durations.length * 0.95)] ?? 0,
         maxDurationMs: durations[durations.length - 1] ?? 0,
         lastError,
@@ -1285,9 +1328,10 @@ export class DevtoolsPlugin extends Plugin<IDevtoolsConfig> {
           if (!stream.isCompleted) totalActive++;
           const agoMs = Date.now() - stream.lastAccess;
           const agoSeconds = Math.floor(agoMs / 1000);
-          const lastAccessAgo = agoSeconds < 60
-            ? `${agoSeconds}s ago`
-            : `${Math.floor(agoSeconds / 60)}m ago`;
+          const lastAccessAgo =
+            agoSeconds < 60
+              ? `${agoSeconds}s ago`
+              : `${Math.floor(agoSeconds / 60)}m ago`;
           streams.push({
             pluginName: plugin.name,
             streamId: stream.streamId,
@@ -1311,7 +1355,6 @@ export class DevtoolsPlugin extends Plugin<IDevtoolsConfig> {
       this.queryEvents.length = DevtoolsPlugin.MAX_QUERY_EVENTS;
     }
   }
-
 }
 
 export const devtools = toPlugin(DevtoolsPlugin);

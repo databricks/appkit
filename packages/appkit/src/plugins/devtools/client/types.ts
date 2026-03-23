@@ -16,7 +16,16 @@ export interface Command {
   run: () => Promise<void>;
 }
 
-export type DevtoolsView = "commands" | "picked" | "performance" | "health" | "waterfall" | "streams" | "queries" | "console" | "hidden";
+export type DevtoolsView =
+  | "commands"
+  | "picked"
+  | "performance"
+  | "health"
+  | "waterfall"
+  | "streams"
+  | "queries"
+  | "console"
+  | "hidden";
 
 export interface PerformanceData {
   totalRequests: number;

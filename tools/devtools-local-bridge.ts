@@ -44,7 +44,10 @@ function summarizeBundle(bundle: unknown) {
     appName: b.app?.appName,
     route: b.page?.route,
     plugin: b.plugin?.name,
-    pickedElement: b.page?.pickedElement?.selector || b.page?.pickedElement?.tagName || undefined,
+    pickedElement:
+      b.page?.pickedElement?.selector ||
+      b.page?.pickedElement?.tagName ||
+      undefined,
     userPrompt: b.page?.userPrompt || undefined,
     recentActions: Array.isArray(b.page?.recentActions)
       ? b.page.recentActions.length
@@ -95,21 +98,38 @@ const server = createServer(async (req, res) => {
 
   if (req.method === "GET" && url.pathname === "/last") {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ bundle: lastBundle, prompt: lastPrompt, receivedAt: lastReceivedAt }, null, 2));
+    res.end(
+      JSON.stringify(
+        { bundle: lastBundle, prompt: lastPrompt, receivedAt: lastReceivedAt },
+        null,
+        2,
+      ),
+    );
     return;
   }
 
   if (req.method === "GET" && url.pathname === "/last-summary") {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(
-      JSON.stringify({ summary: summarizeBundle(lastBundle), hasPrompt: !!lastPrompt, receivedAt: lastReceivedAt }, null, 2),
+      JSON.stringify(
+        {
+          summary: summarizeBundle(lastBundle),
+          hasPrompt: !!lastPrompt,
+          receivedAt: lastReceivedAt,
+        },
+        null,
+        2,
+      ),
     );
     return;
   }
 
   if (req.method === "GET" && url.pathname === "/last-prompt") {
     res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
-    res.end(lastPrompt || "No prompt available. Pick an element in the devtools first.");
+    res.end(
+      lastPrompt ||
+        "No prompt available. Pick an element in the devtools first.",
+    );
     return;
   }
 
@@ -156,7 +176,5 @@ server.listen(port, host, () => {
   console.log(
     `[devtools-bridge] endpoints: GET /last | /last-summary | /last-prompt | /health`,
   );
-  console.log(
-    `[devtools-bridge] log mode: ${logMode}`,
-  );
+  console.log(`[devtools-bridge] log mode: ${logMode}`);
 });

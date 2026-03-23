@@ -3,7 +3,11 @@ import { createCursorProvider } from "./cursor";
 import { createStoredProvider } from "./stored";
 import type { DevtoolsAgentInfo, DevtoolsAgentProvider } from "./types";
 
-export type { DevtoolsAgentInfo, DevtoolsAgentMessage, DevtoolsAgentProvider } from "./types";
+export type {
+  DevtoolsAgentInfo,
+  DevtoolsAgentMessage,
+  DevtoolsAgentProvider,
+} from "./types";
 
 export function createAgentProviders(): DevtoolsAgentProvider[] {
   return [
@@ -14,7 +18,9 @@ export function createAgentProviders(): DevtoolsAgentProvider[] {
   ];
 }
 
-export function getAgentInfo(providers: DevtoolsAgentProvider[]): DevtoolsAgentInfo[] {
+export function getAgentInfo(
+  providers: DevtoolsAgentProvider[],
+): DevtoolsAgentInfo[] {
   return providers.map(({ id, label, mode, available }) => ({
     id,
     label,

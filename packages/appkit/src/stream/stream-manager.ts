@@ -70,7 +70,9 @@ export class StreamManager {
     return this.activeOperations.size;
   }
 
-  getStreamEvents(streamId: string): Array<{ id: string; type: string; data: string; timestamp: number }> {
+  getStreamEvents(
+    streamId: string,
+  ): Array<{ id: string; type: string; data: string; timestamp: number }> {
     const entry = this.streamRegistry.get(streamId);
     if (!entry) return [];
     return entry.eventBuffer.getAll();

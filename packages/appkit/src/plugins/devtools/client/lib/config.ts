@@ -10,7 +10,9 @@ export interface DevtoolsConfig {
 
 export function readConfig(): DevtoolsConfig | null {
   const win = window as any;
-  return win.__APPKIT_DEVTOOLS_SERVER_CONFIG__ ?? win.__CONFIG__?.devtools ?? null;
+  return (
+    win.__APPKIT_DEVTOOLS_SERVER_CONFIG__ ?? win.__CONFIG__?.devtools ?? null
+  );
 }
 
 export function checkActivation(config: DevtoolsConfig): boolean {
@@ -26,7 +28,8 @@ export function checkActivation(config: DevtoolsConfig): boolean {
   return (
     queryValue === "1" ||
     (queryValue !== "0" &&
-      (localStorage.getItem(config.persistKey) === "1" || config.enabledByDefault))
+      (localStorage.getItem(config.persistKey) === "1" ||
+        config.enabledByDefault))
   );
 }
 

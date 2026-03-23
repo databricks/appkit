@@ -176,7 +176,7 @@ describe("DevtoolsPlugin", () => {
 
     await handler(req, res);
 
-      expect(res.json).toHaveBeenCalledWith(
+    expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: "session-1",
         plugin: expect.objectContaining({

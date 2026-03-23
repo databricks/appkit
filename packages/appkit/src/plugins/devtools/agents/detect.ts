@@ -5,7 +5,8 @@ const cache = new Map<string, string | null>();
 export function whichBinary(name: string): string | null {
   if (cache.has(name)) return cache.get(name)!;
 
-  const command = process.platform === "win32" ? `where ${name}` : `which ${name}`;
+  const command =
+    process.platform === "win32" ? `where ${name}` : `which ${name}`;
   try {
     const result = execSync(command, { encoding: "utf8", timeout: 3000 })
       .trim()

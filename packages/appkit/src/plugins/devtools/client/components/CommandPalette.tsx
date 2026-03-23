@@ -44,7 +44,8 @@ const ICONS = {
   clipboard:
     "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><rect x='4' y='4' width='8' height='10' rx='1.5'/><path d='M6 4V2.5A1.5 1.5 0 0 1 7.5 1h1A1.5 1.5 0 0 1 10 2.5V4'/></svg>",
   dock: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><rect x='1' y='1' width='14' height='14' rx='2'/><path d='M10 1v14'/></svg>",
-  undock: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='3' width='10' height='10' rx='2'/></svg>",
+  undock:
+    "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='3' width='10' height='10' rx='2'/></svg>",
 };
 
 const AGENT_LOGOS: Record<string, string> = {
@@ -67,7 +68,9 @@ export function CommandPalette({
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [expandedStream, setExpandedStream] = useState<string | null>(null);
-  const [streamEvents, setStreamEvents] = useState<Array<{ id: string; type: string; data: unknown; timestamp: number }>>([]);
+  const [streamEvents, setStreamEvents] = useState<
+    Array<{ id: string; type: string; data: unknown; timestamp: number }>
+  >([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const promptInputRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<HTMLDivElement>(null);
@@ -104,11 +107,7 @@ export function CommandPalette({
         inputRef.current?.select();
       });
     }
-    if (
-      state.panelOpen &&
-      state.view === "picked" &&
-      promptInputRef.current
-    ) {
+    if (state.panelOpen && state.view === "picked" && promptInputRef.current) {
       requestAnimationFrame(() => promptInputRef.current?.focus());
     }
   }, [state.panelOpen, state.view]);
@@ -121,28 +120,33 @@ export function CommandPalette({
 
   useEffect(() => {
     if (!commandListRef.current || state.view !== "commands") return;
-    const active = commandListRef.current.children[selectedIndex] as HTMLElement | undefined;
+    const active = commandListRef.current.children[selectedIndex] as
+      | HTMLElement
+      | undefined;
     active?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex, state.view]);
 
-  const toggleStreamExpand = useCallback(async (pluginName: string, streamId: string) => {
-    const key = `${pluginName}:${streamId}`;
-    if (expandedStream === key) {
-      setExpandedStream(null);
-      setStreamEvents([]);
-      return;
-    }
-    setExpandedStream(key);
-    try {
-      const data = await fetch(
-        `/api/devtools/stream-events?plugin=${encodeURIComponent(pluginName)}&streamId=${encodeURIComponent(streamId)}`,
-        { headers: { [config.sessionHeader]: "" } },
-      ).then((r) => r.json());
-      setStreamEvents(data.events || []);
-    } catch {
-      setStreamEvents([]);
-    }
-  }, [expandedStream, config.sessionHeader]);
+  const toggleStreamExpand = useCallback(
+    async (pluginName: string, streamId: string) => {
+      const key = `${pluginName}:${streamId}`;
+      if (expandedStream === key) {
+        setExpandedStream(null);
+        setStreamEvents([]);
+        return;
+      }
+      setExpandedStream(key);
+      try {
+        const data = await fetch(
+          `/api/devtools/stream-events?plugin=${encodeURIComponent(pluginName)}&streamId=${encodeURIComponent(streamId)}`,
+          { headers: { [config.sessionHeader]: "" } },
+        ).then((r) => r.json());
+        setStreamEvents(data.events || []);
+      } catch {
+        setStreamEvents([]);
+      }
+    },
+    [expandedStream, config.sessionHeader],
+  );
 
   useEffect(() => {
     if (!expandedStream || state.view !== "streams") {
@@ -224,8 +228,8 @@ export function CommandPalette({
           type: "SET_STATUS",
           status: "Preparing prompt to copy…",
         });
-        if (!state.latestPrompt) await onLoadPrompt();
-        await navigator.clipboard.writeText(state.latestPrompt);
+        const promptText = state.latestPrompt || (await onLoadPrompt()).prompt;
+        await navigator.clipboard.writeText(promptText);
         dispatch({
           type: "SET_STATUS",
           status: "Prompt copied to clipboard.",
@@ -275,8 +279,7 @@ export function CommandPalette({
       icon: ICONS.pick,
       tag: "Element",
       title: "Pick an element",
-      subtitle:
-        "Select a UI element to inspect or send to your coding agent.",
+      subtitle: "Select a UI element to inspect or send to your coding agent.",
       run: async () => {
         onStartPickMode();
       },
@@ -286,8 +289,7 @@ export function CommandPalette({
       icon: ICONS.perf,
       tag: "Perf",
       title: "Performance spotlight",
-      subtitle:
-        "Show slow requests, latency percentiles, and error counts.",
+      subtitle: "Show slow requests, latency percentiles, and error counts.",
       run: async () => {
         dispatch({ type: "SET_STATUS", status: "Loading performance data…" });
         try {
@@ -298,7 +300,10 @@ export function CommandPalette({
           dispatch({ type: "SET_VIEW", view: "performance" });
           dispatch({ type: "SET_STATUS", status: "" });
         } catch {
-          dispatch({ type: "SET_STATUS", status: "Failed to load performance data." });
+          dispatch({
+            type: "SET_STATUS",
+            status: "Failed to load performance data.",
+          });
         }
       },
     },
@@ -319,7 +324,10 @@ export function CommandPalette({
           dispatch({ type: "SET_VIEW", view: "health" });
           dispatch({ type: "SET_STATUS", status: "" });
         } catch {
-          dispatch({ type: "SET_STATUS", status: "Failed to load health data." });
+          dispatch({
+            type: "SET_STATUS",
+            status: "Failed to load health data.",
+          });
         }
       },
     },
@@ -328,8 +336,7 @@ export function CommandPalette({
       icon: ICONS.waterfall,
       tag: "Network",
       title: "Network waterfall",
-      subtitle:
-        "Visual timeline of recent client-side HTTP requests.",
+      subtitle: "Visual timeline of recent client-side HTTP requests.",
       run: async () => {
         dispatch({ type: "SET_VIEW", view: "waterfall" });
         dispatch({ type: "SET_STATUS", status: "" });
@@ -340,8 +347,7 @@ export function CommandPalette({
       icon: ICONS.streams,
       tag: "SSE",
       title: "SSE stream debugger",
-      subtitle:
-        "View active Server-Sent Event streams across all plugins.",
+      subtitle: "View active Server-Sent Event streams across all plugins.",
       run: async () => {
         dispatch({ type: "SET_STATUS", status: "Loading stream data…" });
         try {
@@ -352,7 +358,10 @@ export function CommandPalette({
           dispatch({ type: "SET_VIEW", view: "streams" });
           dispatch({ type: "SET_STATUS", status: "" });
         } catch {
-          dispatch({ type: "SET_STATUS", status: "Failed to load stream data." });
+          dispatch({
+            type: "SET_STATUS",
+            status: "Failed to load stream data.",
+          });
         }
       },
     },
@@ -373,7 +382,10 @@ export function CommandPalette({
           dispatch({ type: "SET_VIEW", view: "queries" });
           dispatch({ type: "SET_STATUS", status: "" });
         } catch {
-          dispatch({ type: "SET_STATUS", status: "Failed to load query data." });
+          dispatch({
+            type: "SET_STATUS",
+            status: "Failed to load query data.",
+          });
         }
       },
     },
@@ -382,8 +394,7 @@ export function CommandPalette({
       icon: ICONS.clear,
       tag: "Reset",
       title: "Clear context",
-      subtitle:
-        "Reset recorded network calls, actions, and cached prompts.",
+      subtitle: "Reset recorded network calls, actions, and cached prompts.",
       run: async () => {
         networkState.recentNetwork.length = 0;
         networkState.recentActions.length = 0;
@@ -510,7 +521,9 @@ export function CommandPalette({
               className="dock-btn"
               title={state.docked ? "Undock to center" : "Dock to right side"}
               onClick={() => dispatch({ type: "TOGGLE_DOCK" })}
-              dangerouslySetInnerHTML={{ __html: state.docked ? ICONS.undock : ICONS.dock }}
+              dangerouslySetInnerHTML={{
+                __html: state.docked ? ICONS.undock : ICONS.dock,
+              }}
             />
           </div>
           {state.view === "commands" && (
@@ -598,19 +611,23 @@ export function CommandPalette({
                 ) : (
                   <span className="picked-tag">
                     &lt;{state.pickedElement.tagName}&gt;{" "}
-                    {state.pickedElement.selector || state.pickedElement.domPath || ""}
+                    {state.pickedElement.selector ||
+                      state.pickedElement.domPath ||
+                      ""}
                   </span>
                 )}
                 {state.pickedElement.source && (
                   <span className="picked-detail" style={{ color: "#818cf8" }}>
-                    {state.pickedElement.source.fileName}:{state.pickedElement.source.lineNumber}
+                    {state.pickedElement.source.fileName}:
+                    {state.pickedElement.source.lineNumber}
                   </span>
                 )}
-                {state.pickedElement.componentStack && state.pickedElement.componentStack.length > 0 && (
-                  <span className="picked-detail">
-                    {state.pickedElement.componentStack.join(" > ")}
-                  </span>
-                )}
+                {state.pickedElement.componentStack &&
+                  state.pickedElement.componentStack.length > 0 && (
+                    <span className="picked-detail">
+                      {state.pickedElement.componentStack.join(" > ")}
+                    </span>
+                  )}
                 {state.pickedElement.text && (
                   <span className="picked-detail">
                     "{summarizeText(state.pickedElement.text, 80)}"
@@ -648,7 +665,10 @@ export function CommandPalette({
                       } else if (e.key === "Escape") {
                         e.preventDefault();
                         dispatch({ type: "SET_VIEW", view: "commands" });
-                        dispatch({ type: "SET_PICKED_ELEMENT", element: undefined });
+                        dispatch({
+                          type: "SET_PICKED_ELEMENT",
+                          element: undefined,
+                        });
                         dispatch({ type: "SET_USER_PROMPT", prompt: "" });
                       }
                     }}
@@ -670,9 +690,14 @@ export function CommandPalette({
                           title={`${agent.label}${isDefault ? " (Enter)" : ""}`}
                         >
                           {logo ? (
-                            <span className="agent-icon-svg" dangerouslySetInnerHTML={{ __html: logo }} />
+                            <span
+                              className="agent-icon-svg"
+                              dangerouslySetInnerHTML={{ __html: logo }}
+                            />
                           ) : (
-                            <span className="agent-icon-fallback">{agent.label[0]}</span>
+                            <span className="agent-icon-fallback">
+                              {agent.label[0]}
+                            </span>
                           )}
                         </button>
                       );
@@ -693,7 +718,9 @@ export function CommandPalette({
                 <button
                   type="button"
                   className="perf-back-btn"
-                  onClick={() => dispatch({ type: "SET_VIEW", view: "commands" })}
+                  onClick={() =>
+                    dispatch({ type: "SET_VIEW", view: "commands" })
+                  }
                 >
                   <span dangerouslySetInnerHTML={{ __html: ICONS.back }} /> Back
                 </button>
@@ -706,7 +733,11 @@ export function CommandPalette({
                 </div>
                 <div className="perf-stat">
                   <strong>Errors</strong>
-                  <span className={state.performanceData.errorCount > 0 ? "perf-error" : ""}>
+                  <span
+                    className={
+                      state.performanceData.errorCount > 0 ? "perf-error" : ""
+                    }
+                  >
                     {String(state.performanceData.errorCount)}
                   </span>
                 </div>
@@ -722,13 +753,25 @@ export function CommandPalette({
                     </div>
                     <div className="perf-stat">
                       <strong>p95</strong>
-                      <span className={state.performanceData.timing.p95 > 500 ? "perf-warn" : ""}>
+                      <span
+                        className={
+                          state.performanceData.timing.p95 > 500
+                            ? "perf-warn"
+                            : ""
+                        }
+                      >
                         {state.performanceData.timing.p95}ms
                       </span>
                     </div>
                     <div className="perf-stat">
                       <strong>Max</strong>
-                      <span className={state.performanceData.timing.max > 1000 ? "perf-error" : ""}>
+                      <span
+                        className={
+                          state.performanceData.timing.max > 1000
+                            ? "perf-error"
+                            : ""
+                        }
+                      >
                         {state.performanceData.timing.max}ms
                       </span>
                     </div>
@@ -743,11 +786,18 @@ export function CommandPalette({
                   </div>
                   <div className="perf-list">
                     {state.performanceData.slowRequests.map((req) => (
-                      <div key={`${req.method}-${req.path}-${req.timestamp}`} className={`perf-row${req.isError ? " perf-row-error" : ""}`}>
+                      <div
+                        key={`${req.method}-${req.path}-${req.timestamp}`}
+                        className={`perf-row${req.isError ? " perf-row-error" : ""}`}
+                      >
                         <span className="perf-method">{req.method}</span>
-                        <span className="perf-path">{summarizeText(req.path, 40)}</span>
+                        <span className="perf-path">
+                          {summarizeText(req.path, 40)}
+                        </span>
                         <span className="perf-status">{req.statusCode}</span>
-                        <span className={`perf-duration${req.durationMs > 1000 ? " perf-error" : " perf-warn"}`}>
+                        <span
+                          className={`perf-duration${req.durationMs > 1000 ? " perf-error" : " perf-warn"}`}
+                        >
                           {req.durationMs}ms
                         </span>
                       </div>
@@ -768,7 +818,9 @@ export function CommandPalette({
                 <button
                   type="button"
                   className="perf-back-btn"
-                  onClick={() => dispatch({ type: "SET_VIEW", view: "commands" })}
+                  onClick={() =>
+                    dispatch({ type: "SET_VIEW", view: "commands" })
+                  }
                 >
                   <span dangerouslySetInnerHTML={{ __html: ICONS.back }} /> Back
                 </button>
@@ -782,7 +834,9 @@ export function CommandPalette({
                     <div key={plugin.pluginName} className="health-card">
                       <div className="health-header">
                         <span className="health-name">{plugin.pluginName}</span>
-                        <span className={`health-badge${plugin.errorRate > 5 ? " health-badge-error" : plugin.errorRate > 0 ? " health-badge-warn" : ""}`}>
+                        <span
+                          className={`health-badge${plugin.errorRate > 5 ? " health-badge-error" : plugin.errorRate > 0 ? " health-badge-warn" : ""}`}
+                        >
                           {plugin.errorRate}% errors
                         </span>
                       </div>
@@ -794,7 +848,9 @@ export function CommandPalette({
                       </div>
                       {plugin.lastError && (
                         <div className="health-last-error">
-                          Last error: {plugin.lastError.method} {plugin.lastError.path} → {plugin.lastError.statusCode}
+                          Last error: {plugin.lastError.method}{" "}
+                          {plugin.lastError.path} →{" "}
+                          {plugin.lastError.statusCode}
                         </div>
                       )}
                     </div>
@@ -810,14 +866,18 @@ export function CommandPalette({
                 <button
                   type="button"
                   className="perf-back-btn"
-                  onClick={() => dispatch({ type: "SET_VIEW", view: "commands" })}
+                  onClick={() =>
+                    dispatch({ type: "SET_VIEW", view: "commands" })
+                  }
                 >
                   <span dangerouslySetInnerHTML={{ __html: ICONS.back }} /> Back
                 </button>
               </div>
               <div className="section-label">Network Waterfall</div>
               {networkState.recentNetwork.length === 0 ? (
-                <div className="empty-state">No network requests recorded yet.</div>
+                <div className="empty-state">
+                  No network requests recorded yet.
+                </div>
               ) : (
                 <div className="wf-container">
                   {(() => {
@@ -831,24 +891,37 @@ export function CommandPalette({
                     const globalEnd = Math.max(...times.map((t) => t.end));
                     const range = globalEnd - globalStart || 1;
                     return events.map((evt, i) => {
-                      const left = ((times[i].start - globalStart) / range) * 100;
-                      const width = Math.max(((times[i].end - times[i].start) / range) * 100, 0.5);
-                      const statusClass = !evt.status ? "wf-bar-error"
-                        : evt.status >= 500 ? "wf-bar-error"
-                        : evt.status >= 400 ? "wf-bar-warn"
-                        : "";
+                      const left =
+                        ((times[i].start - globalStart) / range) * 100;
+                      const width = Math.max(
+                        ((times[i].end - times[i].start) / range) * 100,
+                        0.5,
+                      );
+                      const statusClass = !evt.status
+                        ? "wf-bar-error"
+                        : evt.status >= 500
+                          ? "wf-bar-error"
+                          : evt.status >= 400
+                            ? "wf-bar-warn"
+                            : "";
                       return (
                         <div key={evt.id} className="wf-row">
                           <span className="wf-method">{evt.method}</span>
-                          <span className="wf-path">{summarizeText(evt.path, 28)}</span>
+                          <span className="wf-path">
+                            {summarizeText(evt.path, 28)}
+                          </span>
                           <div className="wf-track">
                             <div
                               className={`wf-bar ${statusClass}`}
                               style={{ left: `${left}%`, width: `${width}%` }}
                             />
                           </div>
-                          <span className="wf-duration">{evt.durationMs ?? "?"}ms</span>
-                          <span className={`wf-status ${statusClass}`}>{evt.status ?? "ERR"}</span>
+                          <span className="wf-duration">
+                            {evt.durationMs ?? "?"}ms
+                          </span>
+                          <span className={`wf-status ${statusClass}`}>
+                            {evt.status ?? "ERR"}
+                          </span>
                         </div>
                       );
                     });
@@ -864,7 +937,9 @@ export function CommandPalette({
                 <button
                   type="button"
                   className="perf-back-btn"
-                  onClick={() => dispatch({ type: "SET_VIEW", view: "commands" })}
+                  onClick={() =>
+                    dispatch({ type: "SET_VIEW", view: "commands" })
+                  }
                 >
                   <span dangerouslySetInnerHTML={{ __html: ICONS.back }} /> Back
                 </button>
@@ -884,13 +959,25 @@ export function CommandPalette({
                     const streamKey = `${stream.pluginName}:${stream.streamId}`;
                     const isExpanded = expandedStream === streamKey;
                     return (
-                      <div key={streamKey} className={`health-card${isExpanded ? " stream-expanded" : ""}`}>
+                      <div
+                        key={streamKey}
+                        className={`health-card${isExpanded ? " stream-expanded" : ""}`}
+                      >
                         <div
                           className="health-header stream-clickable"
-                          onClick={() => toggleStreamExpand(stream.pluginName, stream.streamId)}
+                          onClick={() =>
+                            toggleStreamExpand(
+                              stream.pluginName,
+                              stream.streamId,
+                            )
+                          }
                         >
-                          <span className="health-name">{stream.pluginName}</span>
-                          <span className={`health-badge${stream.isCompleted ? " health-badge-warn" : ""}`}>
+                          <span className="health-name">
+                            {stream.pluginName}
+                          </span>
+                          <span
+                            className={`health-badge${stream.isCompleted ? " health-badge-warn" : ""}`}
+                          >
                             {stream.isCompleted ? "completed" : "active"}
                           </span>
                         </div>
@@ -903,14 +990,20 @@ export function CommandPalette({
                         {isExpanded && (
                           <div className="stream-events">
                             {streamEvents.length === 0 ? (
-                              <div className="stream-event-empty">No buffered events</div>
+                              <div className="stream-event-empty">
+                                No buffered events
+                              </div>
                             ) : (
                               streamEvents.map((evt) => (
                                 <div key={evt.id} className="stream-event">
                                   <div className="stream-event-header">
-                                    <span className="stream-event-type">{evt.type}</span>
+                                    <span className="stream-event-type">
+                                      {evt.type}
+                                    </span>
                                     <span className="stream-event-time">
-                                      {new Date(evt.timestamp).toLocaleTimeString()}
+                                      {new Date(
+                                        evt.timestamp,
+                                      ).toLocaleTimeString()}
                                     </span>
                                   </div>
                                   <div className="stream-event-data">
@@ -937,7 +1030,9 @@ export function CommandPalette({
                 <button
                   type="button"
                   className="perf-back-btn"
-                  onClick={() => dispatch({ type: "SET_VIEW", view: "commands" })}
+                  onClick={() =>
+                    dispatch({ type: "SET_VIEW", view: "commands" })
+                  }
                 >
                   <span dangerouslySetInnerHTML={{ __html: ICONS.back }} /> Back
                 </button>
@@ -948,29 +1043,47 @@ export function CommandPalette({
               ) : (
                 <div className="health-list">
                   {state.queriesData.map((q, i) => (
-                    <div key={`${q.queryKey}-${q.timestamp}-${i}`} className="query-card">
+                    <div
+                      key={`${q.queryKey}-${q.timestamp}-${i}`}
+                      className="query-card"
+                    >
                       <div className="query-header">
                         <span className="query-key">{q.queryKey}</span>
                         <div className="query-badges">
-                          <span className={`health-badge${q.cacheHit ? "" : " health-badge-warn"}`}>
+                          <span
+                            className={`health-badge${q.cacheHit ? "" : " health-badge-warn"}`}
+                          >
                             {q.cacheHit ? "cache hit" : "cache miss"}
                           </span>
                           {q.isObo && <span className="health-badge">OBO</span>}
-                          {q.error && <span className="health-badge health-badge-error">error</span>}
+                          {q.error && (
+                            <span className="health-badge health-badge-error">
+                              error
+                            </span>
+                          )}
                         </div>
                       </div>
                       <div className="health-stats">
                         <span>{q.durationMs}ms</span>
                         <span>{q.executorKey}</span>
-                        <span>{new Date(q.timestamp).toLocaleTimeString()}</span>
+                        <span>
+                          {new Date(q.timestamp).toLocaleTimeString()}
+                        </span>
                       </div>
                       {Object.keys(q.parameters).length > 0 && (
                         <div className="query-params">
                           {Object.entries(q.parameters).map(([k, v]) => {
-                            const display = v && typeof v === "object" && "value" in (v as Record<string, unknown>)
-                              ? String((v as Record<string, unknown>).value)
-                              : String(v);
-                            return <span key={k} className="query-param">{k}={display}</span>;
+                            const display =
+                              v &&
+                              typeof v === "object" &&
+                              "value" in (v as Record<string, unknown>)
+                                ? String((v as Record<string, unknown>).value)
+                                : String(v);
+                            return (
+                              <span key={k} className="query-param">
+                                {k}={display}
+                              </span>
+                            );
                           })}
                         </div>
                       )}
@@ -990,7 +1103,9 @@ export function CommandPalette({
                 <button
                   type="button"
                   className="perf-back-btn"
-                  onClick={() => dispatch({ type: "SET_VIEW", view: "commands" })}
+                  onClick={() =>
+                    dispatch({ type: "SET_VIEW", view: "commands" })
+                  }
                 >
                   <span dangerouslySetInnerHTML={{ __html: ICONS.back }} /> Back
                 </button>
@@ -1001,9 +1116,14 @@ export function CommandPalette({
               ) : (
                 <div className="console-list">
                   {consoleState.recentEntries.map((entry, i) => (
-                    <div key={`${entry.timestamp}-${i}`} className={`console-entry console-${entry.level}`}>
+                    <div
+                      key={`${entry.timestamp}-${i}`}
+                      className={`console-entry console-${entry.level}`}
+                    >
                       <div className="console-entry-header">
-                        <span className={`console-level console-level-${entry.level}`}>
+                        <span
+                          className={`console-level console-level-${entry.level}`}
+                        >
                           {entry.level.toUpperCase()}
                         </span>
                         <span className="console-time">
@@ -1048,9 +1168,16 @@ export function CommandPalette({
             >
               <strong>Console entries</strong>
               {String(consoleState.recentEntries.length)}
-              {consoleState.recentEntries.filter((e) => e.level === "error").length > 0 && (
+              {consoleState.recentEntries.filter((e) => e.level === "error")
+                .length > 0 && (
                 <span style={{ color: "#f87171", marginLeft: 4 }}>
-                  ({consoleState.recentEntries.filter((e) => e.level === "error").length} errors)
+                  (
+                  {
+                    consoleState.recentEntries.filter(
+                      (e) => e.level === "error",
+                    ).length
+                  }{" "}
+                  errors)
                 </span>
               )}
             </div>
@@ -1061,9 +1188,7 @@ export function CommandPalette({
           </div>
           {state.status && (
             <div className="status">
-              {state.status.includes("…") && (
-                <span className="status-dot" />
-              )}
+              {state.status.includes("…") && <span className="status-dot" />}
               {state.status}
             </div>
           )}
@@ -1090,7 +1215,9 @@ export function CommandPalette({
               <kbd>{"\u21B5"}</kbd> Run
             </span>
             <span className="hint">
-              <kbd>{"\u2318"}</kbd><kbd>{"⇧"}</kbd><kbd>K</kbd> {state.docked ? "Undock" : "Dock"}
+              <kbd>{"\u2318"}</kbd>
+              <kbd>{"⇧"}</kbd>
+              <kbd>K</kbd> {state.docked ? "Undock" : "Dock"}
             </span>
             <span className="hint">
               <kbd>esc</kbd> Close

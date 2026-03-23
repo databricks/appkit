@@ -1,6 +1,11 @@
 /// <reference lib="dom" />
 
-import { describeElement, isSameOrigin, summarizeText, toPath } from "./dom-utils";
+import {
+  describeElement,
+  isSameOrigin,
+  summarizeText,
+  toPath,
+} from "./dom-utils";
 
 const MAX_ITEMS = 50;
 
@@ -36,7 +41,10 @@ function trimArray<T>(items: T[]) {
   if (items.length > MAX_ITEMS) items.length = MAX_ITEMS;
 }
 
-export function interceptNetwork(sessionId: string, sessionHeader: string): NetworkState {
+export function interceptNetwork(
+  sessionId: string,
+  sessionHeader: string,
+): NetworkState {
   const state: NetworkState = {
     recentNetwork: [],
     recentActions: [],
@@ -73,7 +81,9 @@ export function interceptNetwork(sessionId: string, sessionHeader: string): Netw
               : String(input || "");
       const requestMethod =
         init?.method ||
-        (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET");
+        (typeof Request !== "undefined" && input instanceof Request
+          ? input.method
+          : "GET");
       const startedAt = performance.now();
 
       let finalInput = input;
@@ -81,10 +91,15 @@ export function interceptNetwork(sessionId: string, sessionHeader: string): Netw
 
       if (isSameOrigin(requestUrl)) {
         if (typeof Request !== "undefined" && input instanceof Request) {
-          finalInput = new Request(input, { headers: withSessionHeader(input.headers) });
+          finalInput = new Request(input, {
+            headers: withSessionHeader(input.headers),
+          });
           finalInit = init;
         } else {
-          finalInit = { ...(init || {}), headers: withSessionHeader(init?.headers) };
+          finalInit = {
+            ...(init || {}),
+            headers: withSessionHeader(init?.headers),
+          };
         }
       }
 
@@ -134,7 +149,9 @@ export function interceptNetwork(sessionId: string, sessionHeader: string): Netw
       return originalOpen.call(this, method, url, ...rest);
     };
 
-    XMLHttpRequest.prototype.send = function (body?: Document | XMLHttpRequestBodyInit | null) {
+    XMLHttpRequest.prototype.send = function (
+      body?: Document | XMLHttpRequestBodyInit | null,
+    ) {
       const meta = (this as any).__appkitDevtoolsMeta;
       const startedAt = performance.now();
       if (meta && isSameOrigin(meta.url)) {

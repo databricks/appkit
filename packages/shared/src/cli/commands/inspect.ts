@@ -14,9 +14,7 @@ function getBridgeUrl(): string {
   return `http://127.0.0.1:${DEFAULT_BRIDGE_PORT}`;
 }
 
-async function tryFetch(
-  url: string,
-): Promise<Response | null> {
+async function tryFetch(url: string): Promise<Response | null> {
   try {
     const response = await fetch(url);
     if (response.ok) return response;

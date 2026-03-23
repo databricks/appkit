@@ -1,6 +1,13 @@
 import { useReducer } from "react";
 import type { ElementDescription } from "../lib/dom-utils";
-import type { DevtoolsState, AgentInfo, PerformanceData, PluginHealthEntry, StreamDebugData, QueryEventEntry } from "../types";
+import type {
+  DevtoolsState,
+  AgentInfo,
+  PerformanceData,
+  PluginHealthEntry,
+  StreamDebugData,
+  QueryEventEntry,
+} from "../types";
 
 const DOCK_STORAGE_KEY = "appkit:devtools:docked";
 const DOCK_WIDTH_KEY = "appkit:devtools:dock-width";
@@ -30,13 +37,20 @@ type Action =
   | { type: "CLEAR_ALL" };
 
 function readDockedState(): boolean {
-  try { return localStorage.getItem(DOCK_STORAGE_KEY) === "1"; } catch { return false; }
+  try {
+    return localStorage.getItem(DOCK_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
 }
 
 function readDockedWidth(): number {
   try {
     const stored = localStorage.getItem(DOCK_WIDTH_KEY);
-    if (stored) { const n = Number(stored); if (n >= 280 && n <= 800) return n; }
+    if (stored) {
+      const n = Number(stored);
+      if (n >= 280 && n <= 800) return n;
+    }
   } catch {}
   return DEFAULT_DOCK_WIDTH;
 }
@@ -144,12 +158,16 @@ function reducer(state: DevtoolsState, action: Action): DevtoolsState {
       return { ...state, queriesData: action.data };
     case "TOGGLE_DOCK": {
       const docked = !state.docked;
-      try { localStorage.setItem(DOCK_STORAGE_KEY, docked ? "1" : "0"); } catch {}
+      try {
+        localStorage.setItem(DOCK_STORAGE_KEY, docked ? "1" : "0");
+      } catch {}
       return { ...state, docked, panelOpen: true };
     }
     case "SET_DOCK_WIDTH": {
       const width = Math.max(280, Math.min(800, action.width));
-      try { localStorage.setItem(DOCK_WIDTH_KEY, String(width)); } catch {}
+      try {
+        localStorage.setItem(DOCK_WIDTH_KEY, String(width));
+      } catch {}
       return { ...state, dockedWidth: width };
     }
     case "CLEAR_ALL":
@@ -167,6 +185,4 @@ export function useDevtoolsState() {
   return { state, dispatch };
 }
 
-export type DevtoolsDispatch = ReturnType<
-  typeof useDevtoolsState
->["dispatch"];
+export type DevtoolsDispatch = ReturnType<typeof useDevtoolsState>["dispatch"];

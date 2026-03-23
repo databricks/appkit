@@ -38,7 +38,6 @@ createApp({
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
 }).then((appkit) => {
-
   appkit.server
     .extend((app) => {
       app.get("/sp", (_req, res) => {

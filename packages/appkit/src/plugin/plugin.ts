@@ -229,18 +229,22 @@ export abstract class Plugin<
     return this.streamManager.getStreamEvents(streamId);
   }
 
-  private static queryEventListeners: Array<(event: {
-    queryKey: string;
-    parameters: Record<string, unknown>;
-    durationMs: number;
-    cacheHit: boolean;
-    isObo: boolean;
-    executorKey: string;
-    timestamp: string;
-    error?: string;
-  }) => void> = [];
+  private static queryEventListeners: Array<
+    (event: {
+      queryKey: string;
+      parameters: Record<string, unknown>;
+      durationMs: number;
+      cacheHit: boolean;
+      isObo: boolean;
+      executorKey: string;
+      timestamp: string;
+      error?: string;
+    }) => void
+  > = [];
 
-  static onQueryEvent(listener: (typeof Plugin.queryEventListeners)[number]): () => void {
+  static onQueryEvent(
+    listener: (typeof Plugin.queryEventListeners)[number],
+  ): () => void {
     Plugin.queryEventListeners.push(listener);
     return () => {
       const idx = Plugin.queryEventListeners.indexOf(listener);
@@ -248,9 +252,13 @@ export abstract class Plugin<
     };
   }
 
-  protected emitQueryEvent(event: Parameters<(typeof Plugin.queryEventListeners)[number]>[0]): void {
+  protected emitQueryEvent(
+    event: Parameters<(typeof Plugin.queryEventListeners)[number]>[0],
+  ): void {
     for (const listener of Plugin.queryEventListeners) {
-      try { listener(event); } catch {}
+      try {
+        listener(event);
+      } catch {}
     }
   }
 

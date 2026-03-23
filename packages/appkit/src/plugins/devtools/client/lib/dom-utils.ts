@@ -1,7 +1,9 @@
 /// <reference lib="dom" />
 
 export function summarizeText(value: string, maxLength: number): string {
-  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  const normalized = String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!normalized) return "";
   if (normalized.length <= maxLength) return normalized;
   return normalized.slice(0, maxLength - 1) + "…";
@@ -19,7 +21,11 @@ export function createDomPath(element: Element): string {
   if (!(element instanceof Element)) return "";
   const segments: string[] = [];
   let current: Element | null = element;
-  while (current && current.nodeType === Node.ELEMENT_NODE && segments.length < 6) {
+  while (
+    current &&
+    current.nodeType === Node.ELEMENT_NODE &&
+    segments.length < 6
+  ) {
     let segment = current.tagName.toLowerCase();
     if (current.id) {
       segment += "#" + current.id;
@@ -48,17 +54,29 @@ export function createSelectorHint(element: Element): string {
   if (!(element instanceof Element)) return "";
   if (element.id) return "#" + escapeCssIdentifier(element.id);
   const dataTestId =
-    element.getAttribute("data-testid") || element.getAttribute("data-test") || element.getAttribute("data-cy");
+    element.getAttribute("data-testid") ||
+    element.getAttribute("data-test") ||
+    element.getAttribute("data-cy");
   if (dataTestId) {
     return '[data-testid="' + dataTestId.replace(/"/g, '\\"') + '"]';
   }
   const nameAttr = element.getAttribute("name");
   if (nameAttr) {
-    return element.tagName.toLowerCase() + '[name="' + nameAttr.replace(/"/g, '\\"') + '"]';
+    return (
+      element.tagName.toLowerCase() +
+      '[name="' +
+      nameAttr.replace(/"/g, '\\"') +
+      '"]'
+    );
   }
   const roleAttr = element.getAttribute("role");
   if (roleAttr) {
-    return element.tagName.toLowerCase() + '[role="' + roleAttr.replace(/"/g, '\\"') + '"]';
+    return (
+      element.tagName.toLowerCase() +
+      '[role="' +
+      roleAttr.replace(/"/g, '\\"') +
+      '"]'
+    );
   }
   return element.tagName.toLowerCase();
 }
@@ -88,7 +106,10 @@ export interface ElementDescription {
 function getReactFiber(element: Element): any | null {
   const keys = Object.keys(element);
   for (const key of keys) {
-    if (key.startsWith("__reactFiber$") || key.startsWith("__reactInternalInstance$")) {
+    if (
+      key.startsWith("__reactFiber$") ||
+      key.startsWith("__reactInternalInstance$")
+    ) {
       return (element as any)[key];
     }
   }
@@ -101,7 +122,9 @@ function getComponentName(fiber: any): string | undefined {
   return fiber.type.displayName || fiber.type.name || undefined;
 }
 
-function extractSourceFromFiber(fiber: any): { fileName: string; lineNumber: number; columnNumber?: number } | null {
+function extractSourceFromFiber(
+  fiber: any,
+): { fileName: string; lineNumber: number; columnNumber?: number } | null {
   if (fiber._debugSource?.fileName && fiber._debugSource?.lineNumber) {
     return fiber._debugSource;
   }
@@ -111,13 +134,21 @@ function extractSourceFromFiber(fiber: any): { fileName: string; lineNumber: num
       if (entry.fileName && entry.lineNumber) return entry;
       if (entry.stack) {
         const match = String(entry.stack).match(/\((.+?):(\d+):(\d+)\)/);
-        if (match) return { fileName: match[1], lineNumber: Number(match[2]), columnNumber: Number(match[3]) };
+        if (match)
+          return {
+            fileName: match[1],
+            lineNumber: Number(match[2]),
+            columnNumber: Number(match[3]),
+          };
       }
     }
   }
 
   if (fiber._debugOwner) {
-    if (fiber._debugOwner._debugSource?.fileName && fiber._debugOwner._debugSource?.lineNumber) {
+    if (
+      fiber._debugOwner._debugSource?.fileName &&
+      fiber._debugOwner._debugSource?.lineNumber
+    ) {
       return fiber._debugOwner._debugSource;
     }
     if (Array.isArray(fiber._debugOwner._debugInfo)) {
@@ -130,7 +161,9 @@ function extractSourceFromFiber(fiber: any): { fileName: string; lineNumber: num
   return null;
 }
 
-function findSourceLocation(element: Element): { source: SourceLocation; componentStack: string[] } | null {
+function findSourceLocation(
+  element: Element,
+): { source: SourceLocation; componentStack: string[] } | null {
   let fiber = getReactFiber(element);
   if (!fiber) return null;
 
@@ -150,7 +183,8 @@ function findSourceLocation(element: Element): { source: SourceLocation; compone
           fileName: ds.fileName,
           lineNumber: ds.lineNumber,
           columnNumber: ds.columnNumber || undefined,
-          componentName: name || getComponentName(fiber._debugOwner) || undefined,
+          componentName:
+            name || getComponentName(fiber._debugOwner) || undefined,
         };
       }
     }
@@ -166,7 +200,9 @@ function findSourceLocation(element: Element): { source: SourceLocation; compone
   };
 }
 
-export function describeElement(element: Element | null): ElementDescription | undefined {
+export function describeElement(
+  element: Element | null,
+): ElementDescription | undefined {
   if (!element || !(element instanceof Element)) return undefined;
   const textSource =
     "innerText" in element && (element as HTMLElement).innerText
@@ -186,11 +222,15 @@ export function describeElement(element: Element | null): ElementDescription | u
         : undefined,
     role: element.getAttribute("role") || undefined,
     name: element.getAttribute("name") || undefined,
-    type: "type" in element ? element.getAttribute("type") || undefined : undefined,
-    href: element instanceof HTMLAnchorElement ? toPath(element.href) : undefined,
+    type:
+      "type" in element ? element.getAttribute("type") || undefined : undefined,
+    href:
+      element instanceof HTMLAnchorElement ? toPath(element.href) : undefined,
     text: summarizeText(textSource, 160),
     source: reactInfo?.source || undefined,
-    componentStack: reactInfo?.componentStack.length ? reactInfo.componentStack : undefined,
+    componentStack: reactInfo?.componentStack.length
+      ? reactInfo.componentStack
+      : undefined,
   };
 }
 

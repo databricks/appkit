@@ -18,7 +18,14 @@ const COMPONENT_PATTERNS = [
 ];
 
 const EXTENSIONS = new Set([".tsx", ".jsx", ".ts", ".js"]);
-const IGNORE_DIRS = new Set(["node_modules", "dist", ".git", ".next", ".vite", "__pycache__"]);
+const IGNORE_DIRS = new Set([
+  "node_modules",
+  "dist",
+  ".git",
+  ".next",
+  ".vite",
+  "__pycache__",
+]);
 
 function walkDir(dir: string, files: string[]) {
   let entries: string[];
@@ -74,7 +81,9 @@ function scanFile(filePath: string): Map<string, number> {
 let cachedMap: Map<string, ComponentLocation> | null = null;
 let cachedRoot: string | null = null;
 
-export function buildComponentMap(rootDir: string): Map<string, ComponentLocation> {
+export function buildComponentMap(
+  rootDir: string,
+): Map<string, ComponentLocation> {
   if (cachedMap && cachedRoot === rootDir) return cachedMap;
 
   logger.info("Scanning %s for React components…", rootDir);

@@ -6,7 +6,10 @@ import type { DevtoolsAgentMessage, DevtoolsAgentProvider } from "./types";
 const logger = createLogger("devtools:cursor");
 
 export function createCursorProvider(): DevtoolsAgentProvider {
-  const binaryPath = whichBinary("cursor-agent") || whichBinary("agent") || whichBinary("cursor");
+  const binaryPath =
+    whichBinary("cursor-agent") ||
+    whichBinary("agent") ||
+    whichBinary("cursor");
   logger.info("Cursor CLI detection: %s", binaryPath || "not found");
 
   let lastSessionId: string | null = null;
@@ -23,7 +26,10 @@ export function createCursorProvider(): DevtoolsAgentProvider {
       signal: AbortSignal,
     ): AsyncGenerator<DevtoolsAgentMessage> {
       if (!binaryPath) {
-        yield { type: "error", content: "Cursor CLI not found. Install from cursor.com/download" };
+        yield {
+          type: "error",
+          content: "Cursor CLI not found. Install from cursor.com/download",
+        };
         yield { type: "done", content: "" };
         return;
       }
@@ -31,9 +37,11 @@ export function createCursorProvider(): DevtoolsAgentProvider {
       const args = [
         "agent",
         "--print",
-        "--output-format", "stream-json",
+        "--output-format",
+        "stream-json",
         "--trust",
-        "--workspace", cwd,
+        "--workspace",
+        cwd,
       ];
 
       if (lastSessionId) {
@@ -103,7 +111,10 @@ export function createCursorProvider(): DevtoolsAgentProvider {
             eventCount++;
             logger.info("EVENT #%d type=%s", eventCount, event.type);
 
-            if (event.type === "system" && typeof event.session_id === "string") {
+            if (
+              event.type === "system" &&
+              typeof event.session_id === "string"
+            ) {
               lastSessionId = event.session_id;
               logger.info("Captured session_id: %s", lastSessionId);
             }
@@ -143,16 +154,32 @@ export function createCursorProvider(): DevtoolsAgentProvider {
       });
 
       child.on("close", (code, sig) => {
-        logger.info("=== Cursor exited: code=%s signal=%s events=%d ===", code, sig, eventCount);
+        logger.info(
+          "=== Cursor exited: code=%s signal=%s events=%d ===",
+          code,
+          sig,
+          eventCount,
+        );
         const stderr = stderrChunks.join("");
         if (stderr.trim()) {
           logger.warn("Full stderr:\n%s", stderr.trim());
           if (eventCount === 0) {
-            push({ type: "error", content: "cursor-agent exited with no output. stderr: " + stderr.trim().slice(0, 300) });
+            push({
+              type: "error",
+              content:
+                "cursor-agent exited with no output. stderr: " +
+                stderr.trim().slice(0, 300),
+            });
           }
         }
         if (eventCount === 0 && !stderr.trim()) {
-          push({ type: "error", content: "cursor-agent exited immediately with code " + code + " and no output" });
+          push({
+            type: "error",
+            content:
+              "cursor-agent exited immediately with code " +
+              code +
+              " and no output",
+          });
         }
         processExited = true;
         notifyReady?.();
@@ -163,7 +190,9 @@ export function createCursorProvider(): DevtoolsAgentProvider {
           if (messages.length > 0) {
             yield messages.shift()!;
           } else {
-            await new Promise<void>((r) => { notifyReady = r; });
+            await new Promise<void>((r) => {
+              notifyReady = r;
+            });
             notifyReady = null;
           }
         }

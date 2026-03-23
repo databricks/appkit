@@ -19,7 +19,13 @@ interface AppProps {
   shadowRoot: ShadowRoot;
 }
 
-export function App({ config, sessionId, networkState, consoleState, shadowRoot }: AppProps) {
+export function App({
+  config,
+  sessionId,
+  networkState,
+  consoleState,
+  shadowRoot,
+}: AppProps) {
   const { state, dispatch } = useDevtoolsState();
   const apiRef = useRef<DevtoolsApi>(
     createApi(config.sessionHeader, sessionId),
@@ -35,9 +41,7 @@ export function App({ config, sessionId, networkState, consoleState, shadowRoot 
     return selection ? summarizeText(selection.toString(), 280) : "";
   }, []);
 
-  const getSelectedElement = useCallback(():
-    | ElementDescription
-    | undefined => {
+  const getSelectedElement = useCallback((): ElementDescription | undefined => {
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) return undefined;
     const anchorNode = selection.anchorNode || selection.focusNode;
@@ -107,9 +111,7 @@ export function App({ config, sessionId, networkState, consoleState, shadowRoot 
         dispatch({
           type: "SET_STATUS",
           status:
-            error instanceof Error
-              ? error.message
-              : "Failed to load context.",
+            error instanceof Error ? error.message : "Failed to load context.",
         });
       }
     }
@@ -123,7 +125,10 @@ export function App({ config, sessionId, networkState, consoleState, shadowRoot 
 
   const closePalette = useCallback(
     (preserveState = false) => {
-      dispatch({ type: "CLOSE_PALETTE", preserveState: preserveState || state.docked });
+      dispatch({
+        type: "CLOSE_PALETTE",
+        preserveState: preserveState || state.docked,
+      });
     },
     [dispatch, state.docked],
   );
@@ -262,9 +267,7 @@ export function App({ config, sessionId, networkState, consoleState, shadowRoot 
         dispatch({
           type: "AGENT_ERROR",
           message:
-            error instanceof Error
-              ? error.message
-              : "Failed to send to agent.",
+            error instanceof Error ? error.message : "Failed to send to agent.",
         });
       }
     },
@@ -331,10 +334,9 @@ export function App({ config, sessionId, networkState, consoleState, shadowRoot 
 
   const loadPrompt = useCallback(async () => {
     const bundle = await loadBundle();
-    const response = await apiRef.current.requestJson(
-      "/api/devtools/prompt",
-      { bundle },
-    );
+    const response = await apiRef.current.requestJson("/api/devtools/prompt", {
+      bundle,
+    });
     dispatch({
       type: "SET_BUNDLE",
       bundle: response.bundle,
