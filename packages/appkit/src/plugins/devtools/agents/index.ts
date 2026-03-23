@@ -7,9 +7,9 @@ export type { DevtoolsAgentInfo, DevtoolsAgentMessage, DevtoolsAgentProvider } f
 
 export function createAgentProviders(): DevtoolsAgentProvider[] {
   return [
+    createCursorProvider(),
     createClaudeCodeProvider(),
     createIsaacProvider(),
-    createCursorProvider(),
     createStoredProvider("clipboard", "Copy prompt"),
   ];
 }

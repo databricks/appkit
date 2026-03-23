@@ -493,44 +493,88 @@ kbd {
   gap: 10px;
   padding: 0 4px;
 }
-.agent-buttons {
-  display: flex;
-  gap: 6px;
-  padding: 4px;
-  flex-wrap: wrap;
+.prompt-textarea {
+  width: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: #fafafa;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  padding: 8px 0;
+  caret-color: #818cf8;
+  resize: none;
+  overflow: hidden;
+  min-height: 36px;
+  max-height: 120px;
+  line-height: 1.5;
+  font-family: inherit;
 }
-.agent-btn {
+.prompt-textarea::placeholder {
+  color: rgba(255, 255, 255, 0.25);
+}
+.prompt-send-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px;
+}
+.prompt-send-input {
   flex: 1;
   min-width: 0;
+}
+.agent-icons {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.agent-icon-btn {
+  width: 36px;
   height: 36px;
-  padding: 0 14px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.04);
-  color: #e4e4e7;
-  font-size: 12px;
-  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
   cursor: pointer;
-  transition: background 100ms ease, border-color 100ms ease;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background 100ms ease, border-color 100ms ease, color 100ms ease, box-shadow 100ms ease;
 }
-.agent-btn:hover {
-  background: rgba(129, 140, 248, 0.1);
-  border-color: rgba(129, 140, 248, 0.3);
+.agent-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #e4e4e7;
 }
-.agent-btn.primary {
-  background: #818cf8;
-  border-color: #818cf8;
-  color: #fff;
+.agent-icon-default {
+  border-color: rgba(129, 140, 248, 0.4);
+  color: #a5b4fc;
+  box-shadow: 0 0 0 1px rgba(129, 140, 248, 0.15), 0 0 12px rgba(129, 140, 248, 0.1);
 }
-.agent-btn.primary:hover {
-  background: #6366f1;
+.agent-icon-default:hover {
+  background: rgba(129, 140, 248, 0.12);
+  border-color: rgba(129, 140, 248, 0.5);
+  color: #c7d2fe;
 }
-.agent-btn:disabled {
-  opacity: 0.4;
+.agent-icon-btn:disabled {
+  opacity: 0.3;
   cursor: not-allowed;
+}
+.agent-icon-svg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.agent-icon-svg svg {
+  width: 20px;
+  height: 20px;
+}
+.agent-icon-fallback {
+  font-size: 14px;
+  font-weight: 700;
+  font-family: ui-monospace, "SF Mono", monospace;
 }
 .agent-stream-output {
   max-height: 120px;

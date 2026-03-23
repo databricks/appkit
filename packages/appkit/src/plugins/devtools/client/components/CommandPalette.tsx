@@ -5,6 +5,7 @@ import type { DevtoolsConfig } from "../lib/config";
 import type { ConsoleState } from "../lib/console-interceptor";
 import type { NetworkState } from "../lib/network-interceptor";
 import { summarizeText } from "../lib/dom-utils";
+import { agentLogos } from "../icons";
 
 interface Props {
   state: DevtoolsState;
@@ -40,8 +41,15 @@ const ICONS = {
   search:
     "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'/><line x1='21' y1='21' x2='16.65' y2='16.65'/></svg>",
   back: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M10 2L4 8l6 6'/></svg>",
+  clipboard:
+    "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><rect x='4' y='4' width='8' height='10' rx='1.5'/><path d='M6 4V2.5A1.5 1.5 0 0 1 7.5 1h1A1.5 1.5 0 0 1 10 2.5V4'/></svg>",
   dock: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><rect x='1' y='1' width='14' height='14' rx='2'/><path d='M10 1v14'/></svg>",
   undock: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='3' width='10' height='10' rx='2'/></svg>",
+};
+
+const AGENT_LOGOS: Record<string, string> = {
+  ...agentLogos,
+  clipboard: ICONS.clipboard,
 };
 
 export function CommandPalette({
@@ -612,37 +620,64 @@ export function CommandPalette({
               <div className="section-label" style={{ marginTop: 6 }}>
                 What should change?
               </div>
-              <div className="prompt-input-row">
-                <input
-                  ref={promptInputRef}
-                  className="command-input"
-                  type="text"
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder="e.g. make this button larger, fix the alignment…"
-                  value={state.userPrompt}
-                  onChange={(e) =>
-                    dispatch({
-                      type: "SET_USER_PROMPT",
-                      prompt: e.target.value,
-                    })
-                  }
-                  onKeyDown={handlePromptKeyDown}
-                />
-              </div>
-              <div className="agent-buttons">
-                {state.agents
-                  .filter((a) => a.available)
-                  .map((agent) => (
-                    <button
-                      key={agent.id}
-                      className={`agent-btn${agent.mode === "spawn" ? " primary" : ""}`}
-                      disabled={state.agentRunning}
-                      onClick={() => onSendToAgent(agent.id)}
-                    >
-                      {agent.label}
-                    </button>
-                  ))}
+              <div className="prompt-send-row">
+                <div className="prompt-send-input">
+                  <textarea
+                    ref={promptInputRef as React.RefObject<HTMLTextAreaElement>}
+                    className="prompt-textarea"
+                    autoComplete="off"
+                    spellCheck={false}
+                    rows={1}
+                    placeholder="e.g. make this button larger, fix the alignment…"
+                    value={state.userPrompt}
+                    onChange={(e) => {
+                      dispatch({
+                        type: "SET_USER_PROMPT",
+                        prompt: e.target.value,
+                      });
+                      e.target.style.height = "auto";
+                      e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        const spawnAgent = state.agents.find(
+                          (a) => a.mode === "spawn" && a.available,
+                        );
+                        onSendToAgent(spawnAgent ? spawnAgent.id : "clipboard");
+                      } else if (e.key === "Escape") {
+                        e.preventDefault();
+                        dispatch({ type: "SET_VIEW", view: "commands" });
+                        dispatch({ type: "SET_PICKED_ELEMENT", element: undefined });
+                        dispatch({ type: "SET_USER_PROMPT", prompt: "" });
+                      }
+                    }}
+                  />
+                </div>
+                <div className="agent-icons">
+                  {state.agents
+                    .filter((a) => a.available)
+                    .map((agent, i) => {
+                      const logo = AGENT_LOGOS[agent.id];
+                      const isDefault = i === 0 && agent.mode === "spawn";
+                      return (
+                        <button
+                          key={agent.id}
+                          type="button"
+                          className={`agent-icon-btn${isDefault ? " agent-icon-default" : ""}`}
+                          disabled={state.agentRunning}
+                          onClick={() => onSendToAgent(agent.id)}
+                          title={`${agent.label}${isDefault ? " (Enter)" : ""}`}
+                        >
+                          {logo ? (
+                            <span className="agent-icon-svg" dangerouslySetInnerHTML={{ __html: logo }} />
+                          ) : (
+                            <span className="agent-icon-fallback">{agent.label[0]}</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                </div>
               </div>
               {state.agentStreamLines.length > 0 && (
                 <div className="agent-stream-output" ref={streamRef}>
