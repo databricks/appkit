@@ -227,10 +227,10 @@ export function CommandPalette({
     {
       id: "bridge",
       icon: ICONS.bridge,
-      tag: "Localhost",
-      title: "Send to local bridge",
+      tag: "Agent",
+      title: "Send to agent",
       subtitle:
-        "Forward the redacted context bundle to your localhost bridge.",
+        "Export screen context to your local agent bridge for AI-assisted debugging.",
       run: async () => {
         dispatch({
           type: "SET_STATUS",
