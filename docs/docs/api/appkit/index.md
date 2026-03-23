@@ -60,7 +60,7 @@ plugin architecture, and React integration.
 
 | Variable | Description |
 | ------ | ------ |
-| [inspector](Variable.inspector.md) | - |
+| [devtools](Variable.devtools.md) | - |
 | [sql](Variable.sql.md) | SQL helper namespace |
 
 ## Functions

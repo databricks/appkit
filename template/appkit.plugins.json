@@ -26,6 +26,16 @@
         "optional": []
       }
     },
+    "devtools": {
+      "name": "devtools",
+      "displayName": "DevTools",
+      "description": "Opt-in runtime devtools overlay for AppKit apps with prompt generation and localhost bridge forwarding",
+      "package": "@databricks/appkit",
+      "resources": {
+        "required": [],
+        "optional": []
+      }
+    },
     "files": {
       "name": "files",
       "displayName": "Files Plugin",
@@ -71,16 +81,6 @@
             }
           }
         ],
-        "optional": []
-      }
-    },
-    "inspector": {
-      "name": "inspector",
-      "displayName": "Inspector Plugin",
-      "description": "Opt-in runtime inspector overlay for AppKit apps with prompt generation and localhost bridge forwarding",
-      "package": "@databricks/appkit",
-      "resources": {
-        "required": [],
         "optional": []
       }
     },

@@ -196,8 +196,8 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
-          id: "api/appkit/Variable.inspector",
-          label: "inspector"
+          id: "api/appkit/Variable.devtools",
+          label: "devtools"
         },
         {
           type: "doc",

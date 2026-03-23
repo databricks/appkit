@@ -40,8 +40,8 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build:inspector-client": "vite build --config src/plugins/inspector/client.vite.config.ts",
-    "build:package": "pnpm build:inspector-client && pnpm exec tsx ../../tools/generate-registry-types.ts && tsdown --config tsdown.config.ts",
+    "build:devtools-client": "vite build --config src/plugins/devtools/client.vite.config.ts",
+    "build:package": "pnpm build:devtools-client && pnpm exec tsx ../../tools/generate-registry-types.ts && tsdown --config tsdown.config.ts",
     "build:watch": "tsdown --config tsdown.config.ts --watch",
     "clean:full": "rm -rf dist node_modules tmp",
     "clean": "rm -rf dist tmp",

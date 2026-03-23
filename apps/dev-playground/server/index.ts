@@ -4,7 +4,7 @@ import {
   createApp,
   files,
   genie,
-  inspector,
+  devtools,
   server,
 } from "@databricks/appkit";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
@@ -34,7 +34,7 @@ createApp({
     }),
     lakebaseExamples(),
     files(),
-    inspector({ sourceRoot: path.join(process.cwd(), "client", "src") }),
+    devtools({ sourceRoot: path.join(process.cwd(), "client", "src") }),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
 }).then((appkit) => {

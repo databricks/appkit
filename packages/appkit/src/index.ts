@@ -52,7 +52,7 @@ export {
   analytics,
   files,
   genie,
-  inspector,
+  devtools,
   lakebase,
   server,
 } from "./plugins";

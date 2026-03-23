@@ -4,10 +4,10 @@ const DEFAULT_APP_PORT = 8000;
 const DEFAULT_BRIDGE_PORT = 55107;
 
 function getAppUrl(): string {
-  if (process.env.INSPECTOR_URL) return process.env.INSPECTOR_URL;
+  if (process.env.DEVTOOLS_URL) return process.env.DEVTOOLS_URL;
   const port =
     process.env.DATABRICKS_APP_PORT || process.env.PORT || DEFAULT_APP_PORT;
-  return `http://localhost:${port}/api/inspector`;
+  return `http://localhost:${port}/api/devtools`;
 }
 
 function getBridgeUrl(): string {
@@ -36,12 +36,12 @@ async function resolveEndpoint(path: string): Promise<Response> {
   if (bridgeResponse) return bridgeResponse;
 
   console.error(
-    `Could not connect to the inspector.\n\n` +
+    `Could not connect to the devtools.\n\n` +
       `The CLI tried:\n` +
-      `  1. AppKit server at ${appUrl} (set INSPECTOR_URL to override)\n` +
+      `  1. AppKit server at ${appUrl} (set DEVTOOLS_URL to override)\n` +
       `  2. Standalone bridge at ${bridgeUrl}\n\n` +
-      `Make sure your AppKit app is running with the inspector() plugin,\n` +
-      `or start the standalone bridge: npx tsx tools/inspector-local-bridge.ts`,
+      `Make sure your AppKit app is running with the devtools() plugin,\n` +
+      `or start the standalone bridge: npx tsx tools/devtools-local-bridge.ts`,
   );
   process.exit(1);
 }
@@ -60,7 +60,7 @@ async function runContext() {
 
   if (!data.bundle) {
     console.error(
-      "No context available yet. Open the inspector in your browser (Cmd+K) and send context first.",
+      "No context available yet. Open the devtools in your browser (Cmd+K) and send context first.",
     );
     process.exit(1);
   }
@@ -103,7 +103,7 @@ async function runSummary() {
 
 export const inspectCommand = new Command("inspect")
   .description(
-    "Read live context from the AppKit inspector (auto-discovers the running app server)",
+    "Read live context from AppKit DevTools (auto-discovers the running app server)",
   )
   .action(runSummary);
 
