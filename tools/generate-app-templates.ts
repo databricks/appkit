@@ -174,8 +174,7 @@ function postProcess(appDir: string, app: AppTemplate): void {
 
   const envTmplHeader = [
     "# This file is a Go template processed by `databricks apps init --template <path>`.",
-    "# When the command is run pointing to this template, variables like",
-    "# {{.workspaceHost}} are substituted and the result is written as .env.",
+    "# Template variables are substituted and the result is written as .env.",
     "",
   ].join("\n");
   const envTmplBody = readFileSync(join(TEMPLATE_PATH, ".env.tmpl"), "utf-8");
