@@ -1,0 +1,22 @@
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "name": "vector-search",
+  "displayName": "Vector Search Plugin",
+  "description": "Query Databricks Vector Search indexes with built-in hybrid search, reranking, and pagination",
+  "resources": {
+    "required": [],
+    "optional": []
+  },
+  "config": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "timeout": {
+          "type": "number",
+          "default": 30000,
+          "description": "Query execution timeout in milliseconds"
+        }
+      }
+    }
+  }
+}

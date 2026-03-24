@@ -4,3 +4,4 @@ export * from "./genie";
 export * from "./lakebase";
 export * from "./server";
 export * from "./serving";
+export * from "./vector-search";
