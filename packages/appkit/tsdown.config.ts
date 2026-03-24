@@ -28,4 +28,21 @@ export default defineConfig([
     },
     tsconfig: "./tsconfig.json",
   },
+  {
+    name: "channel-server",
+    entry: "src/plugins/devtools/channel-server.ts",
+    outDir: "dist/plugins/devtools",
+    hash: false,
+    format: "esm",
+    platform: "node",
+    minify: false,
+    dts: false,
+    sourcemap: false,
+    clean: false,
+    unbundle: false,
+    outExtensions: () => ({
+      js: ".js",
+    }),
+    tsconfig: "./tsconfig.json",
+  },
 ]);

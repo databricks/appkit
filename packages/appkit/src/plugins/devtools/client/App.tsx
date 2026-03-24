@@ -214,6 +214,19 @@ export function App({
           return;
         }
 
+        if (agent.mode === "channel") {
+          await apiRef.current.requestJson("/api/devtools/agent/run", {
+            agentId,
+            prompt: promptResponse.prompt,
+            bundle: promptResponse.bundle,
+          });
+          dispatch({
+            type: "SET_STATUS",
+            status: `Context sent — check your ${agent.label} session.`,
+          });
+          return;
+        }
+
         dispatch({ type: "AGENT_START", label: agent.label });
 
         const response = await fetch("/api/devtools/agent/run", {

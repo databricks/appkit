@@ -289,6 +289,15 @@ export class DevtoolsPlugin extends Plugin<IDevtoolsConfig> {
           return;
         }
 
+        if (provider.mode === "channel") {
+          this.storeLatest(
+            this.resolveBundleFromBody(req.body),
+            typeof req.body?.prompt === "string" ? req.body.prompt : "",
+          );
+          res.json({ ok: true, mode: "channel" });
+          return;
+        }
+
         if (!provider.run || !provider.available) {
           res
             .status(400)

@@ -459,10 +459,10 @@ export function CommandPalette({
     async (e: React.KeyboardEvent) => {
       if (e.key === "Enter") {
         e.preventDefault();
-        const spawnAgent = state.agents.find(
-          (a) => a.mode === "spawn" && a.available,
-        );
-        await onSendToAgent(spawnAgent ? spawnAgent.id : "clipboard");
+        const defaultAgent =
+          state.agents.find((a) => a.mode === "channel" && a.available) ||
+          state.agents.find((a) => a.mode === "spawn" && a.available);
+        await onSendToAgent(defaultAgent ? defaultAgent.id : "clipboard");
       } else if (e.key === "Escape") {
         e.preventDefault();
         dispatch({ type: "SET_VIEW", view: "commands" });
@@ -658,10 +658,16 @@ export function CommandPalette({
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
-                        const spawnAgent = state.agents.find(
-                          (a) => a.mode === "spawn" && a.available,
+                        const defaultAgent =
+                          state.agents.find(
+                            (a) => a.mode === "channel" && a.available,
+                          ) ||
+                          state.agents.find(
+                            (a) => a.mode === "spawn" && a.available,
+                          );
+                        onSendToAgent(
+                          defaultAgent ? defaultAgent.id : "clipboard",
                         );
-                        onSendToAgent(spawnAgent ? spawnAgent.id : "clipboard");
                       } else if (e.key === "Escape") {
                         e.preventDefault();
                         dispatch({ type: "SET_VIEW", view: "commands" });

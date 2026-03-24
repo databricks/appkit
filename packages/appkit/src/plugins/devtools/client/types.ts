@@ -3,7 +3,7 @@ import type { ElementDescription } from "./lib/dom-utils";
 export interface AgentInfo {
   id: string;
   label: string;
-  mode: "spawn" | "stored";
+  mode: "spawn" | "stored" | "channel";
   available: boolean;
 }
 

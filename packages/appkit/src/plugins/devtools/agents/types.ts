@@ -6,7 +6,7 @@ export interface DevtoolsAgentMessage {
 export interface DevtoolsAgentProvider {
   id: string;
   label: string;
-  mode: "spawn" | "stored";
+  mode: "spawn" | "stored" | "channel";
   available: boolean;
   run?(
     prompt: string,
@@ -18,6 +18,6 @@ export interface DevtoolsAgentProvider {
 export interface DevtoolsAgentInfo {
   id: string;
   label: string;
-  mode: "spawn" | "stored";
+  mode: "spawn" | "stored" | "channel";
   available: boolean;
 }

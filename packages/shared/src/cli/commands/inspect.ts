@@ -1,3 +1,5 @@
+import { execSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { Command } from "commander";
 
 const DEFAULT_APP_PORT = 8000;
@@ -119,3 +121,80 @@ inspectCommand
   .command("summary")
   .description("Print a one-line summary of the latest context")
   .action(runSummary);
+
+function whichBinary(name: string): string | null {
+  const command =
+    process.platform === "win32" ? `where ${name}` : `which ${name}`;
+  try {
+    return (
+      execSync(command, { encoding: "utf8", timeout: 3000 })
+        .trim()
+        .split("\n")[0] || null
+    );
+  } catch {
+    return null;
+  }
+}
+
+function resolveChannelServerPath(): string | null {
+  try {
+    const require = createRequire(import.meta.url);
+    const appkitPkg = require.resolve("@databricks/appkit/package.json");
+    const distDir = appkitPkg.replace(/package\.json$/, "dist");
+    return `${distDir}/plugins/devtools/channel-server.js`;
+  } catch {
+    return null;
+  }
+}
+
+async function runChannelSetup() {
+  const serverPath = resolveChannelServerPath();
+  if (!serverPath) {
+    console.error(
+      "Could not resolve the channel server path.\n" +
+        "Make sure @databricks/appkit is installed.",
+    );
+    process.exit(1);
+  }
+
+  const agents: { name: string; binary: string | null }[] = [
+    { name: "Claude Code", binary: whichBinary("claude") },
+    { name: "Isaac", binary: whichBinary("isaac") },
+  ];
+
+  const available = agents.filter((a) => a.binary);
+
+  if (available.length === 0) {
+    console.error(
+      "No supported agent CLI found.\n" +
+        "Install Claude Code (claude) or Isaac (isaac) first.",
+    );
+    process.exit(1);
+  }
+
+  console.log("AppKit DevTools — Channel Setup\n");
+  console.log(`Channel server: ${serverPath}\n`);
+
+  for (const agent of available) {
+    console.log(`── ${agent.name} (${agent.binary}) ──\n`);
+    console.log("1. Register the MCP server:\n");
+    console.log(
+      `   ${agent.binary} mcp add --scope user --transport stdio appkit-devtools -- node ${serverPath}\n`,
+    );
+    console.log("2. Start with channel support:\n");
+    console.log(
+      `   ${agent.binary} --dangerously-load-development-channels server:appkit-devtools\n`,
+    );
+  }
+
+  console.log(
+    "Tip: Set DATABRICKS_APP_PORT or DEVTOOLS_URL if your app runs on a non-default port.",
+  );
+}
+
+inspectCommand
+  .command("channel-setup")
+  .description(
+    "Print registration commands for the MCP channel server (Claude Code / Isaac)",
+  )
+  .action(runChannelSetup);

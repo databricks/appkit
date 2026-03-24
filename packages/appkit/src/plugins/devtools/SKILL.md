@@ -75,6 +75,48 @@ Target element: div.chart-container | role=img | "Revenue by Quarter"
 
 You would then search for the chart component, find the color palette, and update it with accessible colors.
 
+## Channel mode (experimental)
+
+Channel mode pushes devtools context directly into your active Claude Code or Isaac session via the MCP channel protocol. Instead of spawning a new agent process, the prompt arrives in your already-running session.
+
+### Setup
+
+Run the setup command to get registration instructions:
+
+```bash
+npx appkit inspect channel-setup
+```
+
+This prints commands tailored to whichever agent CLIs you have installed. The general steps are:
+
+1. Register the MCP server (once):
+
+```bash
+claude mcp add --scope user --transport stdio appkit-devtools -- node <path>/channel-server.js
+```
+
+2. Start your agent with channel support:
+
+```bash
+claude --dangerously-load-development-channels server:appkit-devtools
+```
+
+### How it works
+
+The channel server polls `GET /api/devtools/last` every second. When the user picks an element in the browser and submits a prompt, the channel server detects the new context and pushes the prompt directly into the active session.
+
+### MCP tools (pull fallback)
+
+Even without channel mode, the MCP server exposes two tools you can call on demand:
+
+- `get_devtools_context` — fetches the latest context bundle
+- `get_devtools_prompt` — fetches the latest AI prompt text
+
+### Environment variables
+
+- `DEVTOOLS_URL` — full URL to the devtools API (e.g. `http://localhost:9000/api/devtools`)
+- `DATABRICKS_APP_PORT` — port number (defaults to 8000)
+
 ## HTTP endpoints (advanced)
 
 If you need to hit the server directly:

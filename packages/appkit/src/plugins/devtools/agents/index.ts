@@ -1,3 +1,4 @@
+import { createChannelProvider } from "./channel";
 import { createClaudeCodeProvider, createIsaacProvider } from "./claude-code";
 import { createCursorProvider } from "./cursor";
 import { createStoredProvider } from "./stored";
@@ -11,6 +12,8 @@ export type {
 
 export function createAgentProviders(): DevtoolsAgentProvider[] {
   return [
+    createChannelProvider("claude-channel", "Claude Code"),
+    createChannelProvider("isaac-channel", "Isaac"),
     createCursorProvider(),
     createClaudeCodeProvider(),
     createIsaacProvider(),
