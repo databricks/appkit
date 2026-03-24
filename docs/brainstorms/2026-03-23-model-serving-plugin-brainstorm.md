@@ -115,6 +115,29 @@ const response = await appkit.serving.asUser(req).chat({ messages: [...] });
 
 **Validation:** At least one endpoint must be configured. Calling `chat()` without a chat endpoint or `embed()` without an embedding endpoint throws a clear error.
 
+## Demo & Template Strategy
+
+### Dev-Playground: "Paste & Ask" RAG Page
+
+A demo page that showcases both `chatStream()` and `embed()` working together:
+1. User pastes text chunks into a text area
+2. App embeds them via `embed()`, stores vectors in-memory (per-session, server-side `Map`)
+3. User asks a question in a chat box
+4. App embeds the question, finds top-K similar chunks via cosine similarity
+5. Sends context + question to `chatStream()`, streams the answer with sources
+
+**Why:** Demonstrates plugin composition, both APIs in action, and a real use case (RAG). More compelling than another chat box (which Genie already covers).
+
+### Template: Simple Streaming Chat Page
+
+A minimal chat page with streaming responses — conditionally included when the serving plugin is selected. No RAG, no embeddings — just `chatStream()` with conversation history on the frontend.
+
+**Why:** Templates should be minimal starting points. RAG can be added by referencing the dev-playground pattern.
+
+### Future Enhancement: Lakebase pgvector
+
+The in-memory vector store could be swapped for Lakebase with pgvector extension for persistence and larger doc sets. A `VectorStore` interface abstraction would make this a drop-in upgrade. Deferred for now.
+
 ## Open Questions
 
 _(None — all key decisions resolved during brainstorm)_

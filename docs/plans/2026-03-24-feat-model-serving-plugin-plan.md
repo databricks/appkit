@@ -464,6 +464,8 @@ const app = await createApp({
 - [ ] URL construction via `new URL()` with `encodeURIComponent()`
 - [ ] Exported via `toPlugin(ServingPlugin)` as `serving`, registered in `plugins/index.ts` and `src/index.ts`
 - [ ] Unit tests covering: route registration, chat request/response, streaming, embeddings, OBO, endpoint validation errors, error passthrough, parameter filtering
+- [ ] Dev-playground: "Paste & Ask" RAG page demonstrating `embed()` + `chatStream()` composition
+- [ ] Template: conditional `ServingPage.tsx` with simple streaming chat (included when serving plugin is selected)
 
 ## Implementation Phases
 
@@ -500,6 +502,45 @@ const app = await createApp({
 #### Research Insights
 
 **Phase simplification (from simplicity review):** Collapsed from 4 phases to 2. Non-streaming chat and embeddings share the same `_invoke()` fetch pattern and differ only in request body and response type — no reason to separate them. Streaming is the genuinely different piece (SSE parsing, `executeStream()`, abort handling).
+
+### Phase 3: Demo & Template Integration
+
+#### Dev-Playground: "Paste & Ask" RAG Page
+
+A new route (`/model-serving.route.tsx`) demonstrating both `chatStream()` and `embed()` composing into a RAG workflow:
+
+1. **UI:** Split layout — left panel for pasting text chunks, right panel for chat
+2. **Ingest flow:** User pastes text → app calls `POST /api/serving/embeddings` → vectors stored in-memory on server (per-session `Map<sessionId, { chunks: string[], embeddings: number[][] }>`)
+3. **Query flow:** User asks a question → embed the query → cosine similarity against stored vectors → top-K chunks as context → `POST /api/serving/chat/stream` with system prompt containing context → stream response with source references
+4. **Server-side:** Add a custom route (or a thin wrapper in the plugin demo) for the RAG orchestration:
+   - `POST /api/rag/ingest` — accepts text, chunks it, embeds chunks, stores per session
+   - `POST /api/rag/query` — embeds question, retrieves context, streams chat response
+   - In-memory `Map` for vector storage, cosine similarity helper (~15 LOC)
+5. **Frontend:** React page with:
+   - Text area + "Add to knowledge base" button
+   - Chat input + streaming message display
+   - "Sources" accordion under each answer showing which chunks were used
+
+**Why not just a chat page:** Genie already demonstrates chat with streaming. This RAG demo shows plugin composition (`embed()` + `chatStream()`) and a real use case that's unique to model serving.
+
+#### Template: Simple Streaming Chat Page
+
+Add a conditional `ServingPage.tsx` to the template (included when serving plugin is selected):
+
+1. **UI:** Simple chat interface with message history and streaming responses
+2. **Backend:** Single route calling `chatStream()` with conversation history from the frontend
+3. **No RAG, no embeddings** — template stays minimal. A code comment points to the dev-playground RAG pattern for extension
+4. **Template files:**
+   - `template/client/src/pages/ServingPage.tsx` — chat UI with streaming
+   - Conditional imports in `template/client/src/App.tsx`
+   - Plugin wiring in `template/server/server.ts`
+
+#### Future Enhancement: Lakebase pgvector
+
+Document (but don't implement) swapping the in-memory vector store for Lakebase with pgvector:
+- `VectorStore` interface abstraction for drop-in replacement
+- pgvector table schema: `doc_chunks(id, session_id, content, embedding vector(1024))`
+- Similarity search: `ORDER BY embedding <-> $query LIMIT $k`
 
 ## System-Wide Impact
 
