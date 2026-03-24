@@ -169,11 +169,34 @@ export class AppKit<TPlugins extends InputPluginMap> {
       client?: WorkspaceClient;
     } = {},
   ): Promise<PluginMap<T>> {
-    // Initialize core services
-    TelemetryManager.initialize(config?.telemetry);
-    await CacheManager.getInstance(config?.cache);
-
     const rawPlugins = config.plugins as T;
+
+    // Collect plugin-contributed trace exporter headers before telemetry init
+    const traceExporterHeaders: Record<string, string> = {
+      ...config?.telemetry?.traceExporterHeaders,
+    };
+    for (const entry of rawPlugins) {
+      if (typeof entry.plugin.appendTraceHeaders === "function") {
+        Object.assign(
+          traceExporterHeaders,
+          entry.plugin.appendTraceHeaders(
+            entry.config as Parameters<
+              typeof entry.plugin.appendTraceHeaders
+            >[0],
+          ),
+        );
+      }
+    }
+
+    // Initialize core services
+    await TelemetryManager.initialize({
+      ...config?.telemetry,
+      traceExporterHeaders:
+        Object.keys(traceExporterHeaders).length > 0
+          ? traceExporterHeaders
+          : undefined,
+    });
+    await CacheManager.getInstance(config?.cache);
 
     // Collect manifest resources via registry
     const registry = new ResourceRegistry();

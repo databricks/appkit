@@ -51,6 +51,8 @@ describe("TelemetryManager", () => {
 
   beforeEach(() => {
     originalEnv = { ...process.env };
+    // Prevent TelemetryManager from attempting Databricks auth during tests
+    delete process.env.DATABRICKS_HOST;
     vi.clearAllMocks();
     // @ts-expect-error - accessing private static property for testing
     TelemetryManager.instance = undefined;
@@ -75,7 +77,7 @@ describe("TelemetryManager", () => {
     const { detectResources } = await import("@opentelemetry/resources");
     vi.clearAllMocks();
 
-    TelemetryManager.initialize({
+    await TelemetryManager.initialize({
       serviceName: "test-service-config",
     });
 
@@ -85,7 +87,7 @@ describe("TelemetryManager", () => {
   test("should initialize providers and create telemetry instances", async () => {
     process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:4318";
 
-    TelemetryManager.initialize({
+    await TelemetryManager.initialize({
       serviceName: "integration-test",
       serviceVersion: "1.0.0",
     });
@@ -118,7 +120,7 @@ describe("TelemetryManager", () => {
   test("should support disabled telemetry config", async () => {
     process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "";
 
-    TelemetryManager.initialize({
+    await TelemetryManager.initialize({
       serviceName: "disabled-test",
       serviceVersion: "1.0.0",
     });
@@ -161,7 +163,7 @@ describe("TelemetryManager", () => {
     );
     vi.clearAllMocks();
 
-    TelemetryManager.initialize({
+    await TelemetryManager.initialize({
       headers: {
         Authorization: "Bearer token",
         "Custom-Header": "value",
@@ -182,7 +184,7 @@ describe("TelemetryManager", () => {
     test("should create and execute spans with real tracer", async () => {
       process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:4318";
 
-      TelemetryManager.initialize({
+      await TelemetryManager.initialize({
         serviceName: "span-test",
         serviceVersion: "1.0.0",
       });
@@ -207,7 +209,7 @@ describe("TelemetryManager", () => {
     test("should handle span errors", async () => {
       process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:4318";
 
-      TelemetryManager.initialize({
+      await TelemetryManager.initialize({
         serviceName: "error-test",
         serviceVersion: "1.0.0",
       });

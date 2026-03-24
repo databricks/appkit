@@ -9,6 +9,12 @@ export interface TelemetryConfig {
   instrumentations?: Instrumentation[];
   exportIntervalMs?: number;
   headers?: Record<string, string>;
+  /**
+   * Additional headers to include on the OTLP **trace** exporter only.
+   * Merged on top of `headers` and any auto-resolved Databricks auth.
+   * Typically populated automatically by plugins via `appendTraceHeaders`.
+   */
+  traceExporterHeaders?: Record<string, string>;
 }
 
 /**
