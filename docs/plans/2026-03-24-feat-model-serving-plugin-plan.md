@@ -65,7 +65,7 @@ packages/appkit/src/plugins/serving/
 
 #### Research Insights
 
-**Simplification (from simplicity review):** Dropped the separate `connectors/serving/` directory. The serving connector is a thin `fetch()` wrapper (~30 LOC per method). Inline the fetch logic as private methods in `serving.ts`, or extract a single `_invoke()` helper. If complexity grows later, split then.
+**Simplification (from simplicity review):** Dropped the separate `connectors/serving/` directory. The serving connector is a thin `fetch()` wrapper (~30 LOC per method). Inline the fetch logic as private methods in `serving.ts`, or extract a single `_invoke()` helper. If complexity grows later, split into a connector then. Note: the architecture review recommended keeping the connector for pattern consistency — this is a conscious trade-off favoring simplicity for a thin proxy.
 
 **Pattern compliance (from pattern review):**
 - Config interface must be named `IServingConfig` (not `ServingConfig`) — all existing configs use the `I` prefix
@@ -205,7 +205,7 @@ const servingAgent = new Agent({
 const response = await fetch(url, { dispatcher: servingAgent, signal, ... });
 ```
 
-Consider separate pools for streaming (long-lived) vs. non-streaming (short-lived) to prevent head-of-line blocking.
+Consider separate pools for streaming (long-lived) vs. non-streaming (short-lived) to prevent head-of-line blocking. Note: connection pool tuning is a v2 optimization — default `fetch()` is sufficient for v1 with <20 concurrent users. Add a `// TODO` comment for high-concurrency scenarios.
 
 ### Request Validation
 
