@@ -1,5 +1,8 @@
+import type { TelemetryOptions } from "shared";
+
 export interface VectorSearchConnectorConfig {
   timeout?: number;
+  telemetry?: TelemetryOptions;
 }
 
 export interface VsQueryParams {

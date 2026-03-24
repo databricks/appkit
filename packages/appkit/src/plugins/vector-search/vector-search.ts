@@ -6,12 +6,10 @@ import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import type { VsRawResponse } from "../../connectors/vector-search/types";
-import { vectorSearchDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import type {
   IVectorSearchConfig,
   IndexConfig,
-  SearchFilters,
   SearchRequest,
   SearchResponse,
 } from "./types";
@@ -30,7 +28,10 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
   constructor(config: IVectorSearchConfig) {
     super(config);
     this.config = config;
-    this.connector = new VectorSearchConnector({ timeout: config.timeout });
+    this.connector = new VectorSearchConnector({
+      timeout: config.timeout,
+      telemetry: config.telemetry,
+    });
   }
 
   async setup(): Promise<void> {
@@ -171,38 +172,33 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
       body.columns ?? indexConfig.columns,
     );
 
-    const result = await this.execute(
-      async (signal) => {
-        const workspaceClient = getWorkspaceClient();
-        const raw = await this.connector.query(
-          workspaceClient,
-          {
-            indexName: indexConfig.indexName,
-            queryText,
-            queryVector,
-            columns: body.columns ?? indexConfig.columns,
-            numResults: body.numResults ?? indexConfig.numResults ?? 20,
-            queryType,
-            filters: body.filters,
-            reranker: rerankerConfig,
-          },
-          signal,
-        );
-        return this._parseResponse(raw, queryType);
-      },
-      { default: vectorSearchDefaults },
-    );
-
-    if (!result) {
-      res.status(500).json({
-        code: "INTERNAL",
-        message: "Query execution failed",
-        statusCode: 500,
+    try {
+      const workspaceClient = getWorkspaceClient();
+      const raw = await this.connector.query(
+        workspaceClient,
+        {
+          indexName: indexConfig.indexName,
+          queryText,
+          queryVector,
+          columns: body.columns ?? indexConfig.columns,
+          numResults: body.numResults ?? indexConfig.numResults ?? 20,
+          queryType,
+          filters: body.filters,
+          reranker: rerankerConfig,
+        },
+      );
+      res.json(this._parseResponse(raw, queryType));
+    } catch (error) {
+      logger.error("Vector search query failed: %O", error);
+      const statusCode =
+        (error as { statusCode?: number }).statusCode ?? 500;
+      res.status(statusCode).json({
+        code: (error as { code?: string }).code ?? "INTERNAL",
+        message:
+          error instanceof Error ? error.message : "Query execution failed",
+        statusCode,
       });
-      return;
     }
-
-    res.json(result);
   }
 
   async _handleNextPage(
@@ -229,33 +225,28 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
       return;
     }
 
-    const result = await this.execute(
-      async (signal) => {
-        const workspaceClient = getWorkspaceClient();
-        const raw = await this.connector.queryNextPage(
-          workspaceClient,
-          {
-            indexName: indexConfig.indexName,
-            endpointName: indexConfig.endpointName!,
-            pageToken,
-          },
-          signal,
-        );
-        return this._parseResponse(raw, "hybrid");
-      },
-      { default: vectorSearchDefaults },
-    );
-
-    if (!result) {
-      res.status(500).json({
-        code: "INTERNAL",
-        message: "Next-page query failed",
-        statusCode: 500,
+    try {
+      const workspaceClient = getWorkspaceClient();
+      const raw = await this.connector.queryNextPage(
+        workspaceClient,
+        {
+          indexName: indexConfig.indexName,
+          endpointName: indexConfig.endpointName!,
+          pageToken,
+        },
+      );
+      res.json(this._parseResponse(raw, "hybrid"));
+    } catch (error) {
+      logger.error("Vector search next-page query failed: %O", error);
+      const statusCode =
+        (error as { statusCode?: number }).statusCode ?? 500;
+      res.status(statusCode).json({
+        code: (error as { code?: string }).code ?? "INTERNAL",
+        message:
+          error instanceof Error ? error.message : "Next-page query failed",
+        statusCode,
       });
-      return;
     }
-
-    res.json(result);
   }
 
   /**
