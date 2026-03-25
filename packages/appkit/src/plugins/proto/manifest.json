@@ -1,0 +1,26 @@
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "name": "proto",
+  "displayName": "Proto Plugin",
+  "description": "Protobuf serialization and typed UC Volume I/O for cross-language pipeline data contracts",
+  "resources": {
+    "required": [],
+    "optional": []
+  },
+  "config": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "defaultVolume": {
+          "type": "string",
+          "description": "Default UC Volume path for proto binary I/O"
+        },
+        "timeout": {
+          "type": "number",
+          "default": 60000,
+          "description": "Timeout for volume operations in milliseconds"
+        }
+      }
+    }
+  }
+}

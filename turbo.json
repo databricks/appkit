@@ -3,6 +3,11 @@
   "globalPassThroughEnv": ["DEBUG"],
   "ui": "tui",
   "tasks": {
+    "proto:generate": {
+      "inputs": ["proto/**/*.proto", "proto/buf.gen.yaml"],
+      "outputs": ["packages/shared/src/proto/**"],
+      "cache": true
+    },
     "build:watch": {
       "cache": false,
       "persistent": true
