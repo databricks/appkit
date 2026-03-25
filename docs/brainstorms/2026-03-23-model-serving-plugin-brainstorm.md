@@ -18,7 +18,7 @@ A **Model Serving plugin** for AppKit that provides authenticated access to Data
 ### Out of Scope (for v1)
 
 - Custom ML model scoring (dataframe_split/inputs format)
-- ChatAgent / ResponsesAgent endpoint types (natural future extension — see `app-templates/e2e-chatbot-app` for reference patterns)
+- ChatAgent / ResponsesAgent endpoint types (natural future extension — see `app-templates/e2e-chatbot-app` for reference patterns and [PR #166: Agent plugin](https://github.com/databricks/appkit/pull/166))
 - Endpoint management (create/update/delete/start/stop)
 - Conversation/session management
 - Response normalization or custom abstractions
@@ -153,9 +153,11 @@ A minimal chat page with streaming responses — conditionally included when the
 
 **Why:** Templates should be minimal starting points. RAG can be added by referencing the dev-playground pattern.
 
-### Future Enhancement: Lakebase pgvector
+### Future Enhancement: Persistent Vector Storage
 
-The in-memory vector store could be swapped for Lakebase with pgvector extension for persistence and larger doc sets. A `VectorStore` interface abstraction would make this a drop-in upgrade. Deferred for now.
+The in-memory vector store could be upgraded to a persistent solution:
+- **Vector Search plugin** ([PR #200](https://github.com/databricks/appkit/pull/200)) — native Databricks Vector Search with REST API client, OBO auth, and React components. A natural complement for RAG use cases combining `embed()` from serving with Vector Search for retrieval.
+- **Lakebase pgvector** — Lakebase with pgvector extension for persistence and larger doc sets. A `VectorStore` interface abstraction would make either option a drop-in upgrade.
 
 ## Open Questions
 
@@ -169,3 +171,5 @@ _(None — all key decisions resolved during brainstorm)_
 - [Query chat models](https://docs.databricks.com/aws/en/machine-learning/model-serving/query-chat-models)
 - [Databricks Apps: Model Serving integration](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/model-serving)
 - Existing plugin patterns: Analytics, Files, Genie, Lakebase
+- [PR #166: Agent plugin](https://github.com/databricks/appkit/pull/166) — ChatAgent/ResponsesAgent future extension
+- [PR #200: Vector Search plugin](https://github.com/databricks/appkit/pull/200) — Vector search for RAG use cases (complement to serving embeddings)
