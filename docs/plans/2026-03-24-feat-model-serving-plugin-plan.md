@@ -19,7 +19,7 @@ deepened: 2026-03-24
 ### Key Improvements
 1. **Type safety hardened** — removed unsafe index signature, added string literal unions for roles, fully specified response types
 2. **Security hardened** — parameter allowlist (v1 excludes `tools`, `tool_choice`, `logit_bias`, `user`), endpoint name validation, input size limits, error sanitization, `n` capped at 5, `user` set server-side
-3. **Performance grounded** — connection pool in v1 (undici Agent, 50 connections), proper SSE frame parser, AbortSignal chain, LRU cache bounds (2K entries, ~20-30MB)
+3. **Performance grounded** — connection pool in v1 (undici Agent, 100 connections), proper SSE frame parser, AbortSignal chain, embedding cache uses shared global `CacheManager` (default `maxSize: 1000`)
 4. **Simplified** — collapsed to 2 implementation phases, dropped separate connector directory, generic error passthrough instead of per-code mapping
 5. **SDK confirmed** — `@databricks/sdk-experimental` does NOT support streaming for serving endpoints; raw `fetch()` is required
 6. **Streaming clarified** — programmatic `chat()` returns raw `AsyncGenerator` (like Genie's `sendMessage`), HTTP route uses `executeStream(res, ...)`. Non-streaming `chatCollect()` and `POST /chat` call Databricks without `stream: true` directly
@@ -89,15 +89,15 @@ packages/appkit/src/plugins/serving/
 
 | Operation | Timeout | Retry | Cache |
 |-----------|---------|-------|-------|
-| `chatCollect()` / `POST /chat` (non-streaming) | 30s | disabled (non-deterministic) | disabled |
+| `chatCollect()` / `POST /chat` (non-streaming) | 30s | `retryOn: [503]`, 2 attempts (cold-start resilience) | disabled |
 | `chat()` / `POST /chat/stream` (streaming) | 120s | disabled (stateful connection, non-deterministic) | disabled |
-| `embed()` / `POST /embeddings` | 30s | 3 attempts with backoff (idempotent, cheap) | TTL 3600s, maxEntries: 2000 |
+| `embed()` / `POST /embeddings` | 30s | 3 attempts with backoff (idempotent, cheap) | TTL 3600s (shared global CacheManager pool) |
 
 #### Research Insights
 
 **Naming convention (from pattern review + code review):** Existing plugins use two conventions: Files uses SCREAMING_SNAKE_CASE (`FILES_READ_DEFAULTS`), while Genie (`genieStreamDefaults`) and Analytics (`queryDefaults`) use camelCase. Follow the majority convention: `servingChatDefaults`, `servingChatStreamDefaults`, `servingEmbedDefaults`.
 
-**Cache bounds (from performance review + code review):** Add `maxEntries: 2000` with LRU eviction to the embedding cache. At ~10-15KB per cached response, 2K entries ≈ 20-30MB heap. The existing `InMemoryStorage` defaults to `maxSize: 1000`; 2K is a modest increase that balances hit rate with memory usage. For higher cache needs, consider the persistent Lakebase cache storage. Note: LRU eviction in the current `InMemoryStorage` is O(n) per eviction — at 2K entries this is negligible, but would become measurable at 10K+. Cache key uses `crypto.createHash('sha256')` on `JSON.stringify(input)` — deterministic, handles array ordering, O(n) in input size.
+**Cache infrastructure (from performance review + code review):** The embedding cache uses AppKit's shared `CacheManager` singleton with global `maxSize` (default 1000). There is no per-plugin `maxEntries` config — `CacheInterceptor` only passes `cacheKey` and `ttl`. Embedding cache entries compete with all other cached data (analytics queries, etc.) in the same pool. This is acceptable for v1; per-plugin cache partitioning would require infrastructure changes. LRU eviction in `InMemoryStorage` is O(n) per eviction — negligible at current `maxSize: 1000`, but would need a doubly-linked list at 10K+. Cache key uses `crypto.createHash('sha256')` on `JSON.stringify(input)` — deterministic, handles array ordering, O(n) in input size.
 
 **Cache key:** `["serving:embed", endpointName, sha256(JSON.stringify(input)), executorKey]` — includes executor key to prevent cross-user cache leaks in OBO mode. Note: `embed({ input: 'hello' })` and `embed({ input: ['hello'] })` produce different cache keys. This is intentional — callers should use a consistent format.
 
@@ -106,6 +106,8 @@ packages/appkit/src/plugins/serving/
 The plugin has two distinct code paths for chat:
 
 **Non-streaming (`chatCollect()` / `POST /chat`):** Calls `_invoke()` without `stream: true`. Databricks returns a single `ChatCompletionResponse` JSON body. Simple request-response — no SSE parsing needed. This is implemented in Phase 1.
+
+**Internal method separation (from code review — error contract):** Private `_chatCollect(params, signal)` does validation + `_invoke()` and returns `Promise<ChatCompletionResponse>`. The HTTP handler `_handleChat(req, res)` wraps this with `execute()` (for interceptors + error swallowing). The programmatic `exports().chatCollect` delegates to `_chatCollect()` directly — errors propagate to the caller. Same pattern for `_embed(params, signal)`. This matches how Genie's `sendMessage` calls the connector directly while the HTTP handler uses `executeStream()`. **Consequence: interceptors (cache, retry, timeout, telemetry) only apply to HTTP routes, not programmatic API.** Programmatic callers requiring caching/retry for `embed()` should implement their own or use HTTP routes.
 
 **Streaming (`chat()` / `POST /chat/stream`):** The plugin's `_streamChat()` method:
 1. Sends `POST /serving-endpoints/{name}/invocations` with `stream: true` to Databricks
@@ -159,9 +161,10 @@ async function* parseSSEStream(
 }
 ```
 
+**Buffer safety:** Add a max buffer size check (~1MB). If the upstream Databricks endpoint returns a malformed non-SSE response (e.g., a large error page without `\n\n`), the buffer grows without bound. Abort the stream if the buffer exceeds the limit.
+
 **Anti-patterns to avoid:**
 - Do NOT assume 1 `read()` = 1 SSE event
-- Do NOT use string concatenation for partial buffers in hot loops (use array fragments + join for very long streams)
 - Do NOT throw on individual malformed JSON chunks — log and continue
 
 **AbortSignal chain (from performance + streaming research):**
@@ -219,7 +222,7 @@ const servingAgent = new Agent({
 const response = await fetch(url, { dispatcher: servingAgent, signal, ... });
 ```
 
-Consider separate pools for streaming (long-lived) vs. non-streaming (short-lived) to prevent head-of-line blocking — this is a v2 optimization. For v1, include a single undici `Agent` with `connections: 50` (configurable via `IServingConfig.connectionPoolSize`). Default `fetch()` only allows ~10 connections per origin, which saturates with just 10 concurrent streaming users — each streaming request holds a TCP connection for the full LLM response duration (30-120s). The 6-line `Agent` config prevents this at near-zero cost. Add a `// TODO: separate pools for streaming vs non-streaming` comment for v2.
+Consider separate pools for streaming (long-lived) vs. non-streaming (short-lived) to prevent head-of-line blocking — this is a v2 optimization. For v1, include a single undici `Agent` with `connections: 100` (configurable via `IServingConfig.connectionPoolSize`). Default `fetch()` only allows ~10 connections per origin, which saturates with just 10 concurrent streaming users — each streaming request holds a TCP connection for the full LLM response duration (30-120s). The 6-line `Agent` config prevents this at near-zero cost (undici idle connection overhead is ~1KB memory). 100 provides headroom for mixed streaming + non-streaming workloads (at 40 concurrent streaming users, 60 remain for embeddings). Add a `// TODO: separate pools for streaming vs non-streaming` comment for v2.
 
 ### Request Validation
 
@@ -231,7 +234,7 @@ Minimal validation with security guardrails:
 
 ```typescript
 const ALLOWED_CHAT_PARAMS = new Set([
-  'messages', 'temperature', 'max_tokens', 'top_p', 'stop',
+  'messages', 'model', 'temperature', 'max_tokens', 'top_p', 'stop',
   'n', 'presence_penalty', 'frequency_penalty',
   'response_format', 'seed',
 ]);
@@ -243,13 +246,17 @@ const ALLOWED_CHAT_PARAMS = new Set([
 - `user` — allows impersonation in Databricks audit logs. Instead, strip from client requests and set server-side to the authenticated user's identity.
 
 **Additional validation:**
+- `model`: included as optional allowed parameter — Foundation Model API endpoints accept/require it. Typically unnecessary for dedicated endpoints, but stripping it would break certain endpoint types
 - `n`: cap at max 5 to prevent compute cost amplification
-- `response_format.type`: validate against known set (`"text" | "json_object" | "json_schema"`)
+- `stop`: cap at 4 entries, each max 256 chars (matches OpenAI spec)
+- `response_format.type`: validate against `"text" | "json_object"` only for v1. The `json_schema` type requires an unbounded nested JSON Schema sub-object that could enable payload amplification (deeply nested schemas, huge `enum` arrays). Add in v2 with a max serialized size (~8KB) on the `response_format` object
+- `role`: validate at runtime against known set (`system`, `user`, `assistant`, `tool`). The TypeScript `(string & {})` escape hatch is for future roles only — runtime validation must reject unexpected values to prevent prototype pollution if role is used as object key
+- Each `messages` array element must be validated as an object with `role` (string) and `content` (string) properties. Reject malformed elements like `null`, numbers, or bare strings with 400
 
 **Input bounds (from security review):**
 - `messages`: non-empty array, max 256 messages, each content max 128K chars
 - `input` (embeddings): must be present, max 100 items if array, each max 32K chars
-- Express body-parser size limit: set to 1MB for serving routes (chat with long history can exceed 100KB default)
+- Express body-parser size limit: set to 1MB for serving routes via per-route middleware (`express.json({ limit: '1mb' })`) — not global. Note: 1MB body-parser is the actual enforcer; per-field limits (256 messages x 128K chars) are secondary defense and exceed the body-parser limit in aggregate
 
 **Endpoint name validation (from security review + Databricks docs — defense in depth):**
 ```typescript
@@ -299,9 +306,17 @@ private resolveEmbeddingEndpoint(): string {
 }
 ```
 
+### Startup Behavior
+
+`setup()` is called by AppKit after construction. If `DATABRICKS_SERVING_ENDPOINT` is unset or fails regex validation, `setup()` throws — hard failure at startup. This is the correct behavior for a "required" resource: no endpoint means nothing works, and failing early prevents confusing runtime errors. Note: no existing plugin (Genie, Files, Analytics) overrides `setup()` — they do initialization in the constructor. Verify the base `Plugin` class invokes `setup()` during initialization; if not, move this logic to the constructor.
+
 ### Shutdown Behavior
 
-On SIGTERM/SIGINT: call `this.streamManager.abortAll()` to cancel in-flight streaming requests (matching Genie plugin pattern). The AbortSignal propagates to upstream `fetch()` calls, cancelling TCP connections.
+Implement `shutdown()` (matching Genie/Analytics/Files pattern):
+1. Call `this.streamManager.abortAll()` to cancel in-flight streaming requests
+2. Close the undici `Agent` via `this.servingAgent.close()` to release connection pool resources and prevent dangling connections blocking process exit
+
+The AbortSignal propagates to upstream `fetch()` calls, cancelling TCP connections.
 
 **SSE reconnection security (from code review):** StreamManager uses `crypto.randomUUID()` for connection IDs (verified in `stream-manager.ts`), making ID guessing infeasible. Ring buffer replay is scoped to the connection ID, providing adequate session isolation for streaming chat data.
 
@@ -321,16 +336,20 @@ interface ChatMessage {
 
 interface ChatCompletionRequest {
   messages: ChatMessage[];
+  /** Optional — typically unnecessary for dedicated endpoints, but required by Foundation Model API endpoints. */
+  model?: string;
   temperature?: number;
   max_tokens?: number;
   top_p?: number;
+  /** Max 4 entries, each max 256 chars (matches OpenAI spec). */
   stop?: string | string[];
   /** Capped at max 5 to prevent compute cost amplification. */
   n?: number;
   presence_penalty?: number;
   frequency_penalty?: number;
   seed?: number;
-  response_format?: { type: 'text' | 'json_object' | 'json_schema' };
+  /** v1: only 'text' | 'json_object'. json_schema deferred to v2 (unbounded sub-object risk). */
+  response_format?: { type: 'text' | 'json_object' };
   // Excluded from v1 allowlist (security): tools, tool_choice, logit_bias, user
   // - tools/tool_choice: opaque blobs, potential indirect SSRF — add in v2 with structural validation
   // - logit_bias: unbounded map, payload amplification — add in v2 with entry/value bounds
@@ -496,19 +515,20 @@ const app = await createApp({
 
 - [ ] Plugin class `ServingPlugin extends Plugin` with `protected declare config: IServingConfig` and `static manifest = manifest as PluginManifest<"serving">`
 - [ ] `manifest.json` with `$schema` field, `config` section, one required `serving_endpoint` (chat) and one optional (embedding)
-- [ ] `setup()` validates endpoint name format with regex, initializes undici `Agent` connection pool
+- [ ] `setup()` validates endpoint name format with regex (throws on missing/invalid required endpoint), initializes undici `Agent` connection pool
+- [ ] `shutdown()` calls `streamManager.abortAll()` and closes undici `Agent`
 - [ ] **Chat (non-streaming):** `POST /api/serving/chat` calls Databricks without `stream: true`, returns `ChatCompletionResponse`
 - [ ] **Chat (streaming):** `POST /api/serving/chat/stream` returns SSE stream of `ChatCompletionChunk` via `this.executeStream(res, ...)`
 - [ ] **Embeddings:** `POST /api/serving/embeddings` proxies to Databricks, returns `EmbeddingResponse`
-- [ ] Programmatic API: `exports()` returns `{ chat, chatCollect, embed }` — `chat()` returns raw `AsyncGenerator` (like Genie's `sendMessage`), `chatCollect()` returns `Promise<ChatCompletionResponse>`
+- [ ] Programmatic API: `exports()` returns `{ chat, chatCollect, embed }` — `chat()` returns raw `AsyncGenerator` (like Genie's `sendMessage`), `chatCollect()` returns `Promise<ChatCompletionResponse>`. Programmatic methods call internal methods directly (errors propagate), HTTP handlers use `execute()`/`executeStream()` (interceptors apply)
 - [ ] OBO: HTTP routes use `asUser(req)`, programmatic API supports `.asUser(req)`
 - [ ] `embed()` uses `DATABRICKS_SERVING_ENDPOINT_EMBEDDING` if configured, falls back to `DATABRICKS_SERVING_ENDPOINT`
-- [ ] Interceptor defaults: chat non-streaming (30s timeout), chat streaming (120s timeout), embeddings (30s timeout, 3 retries, 1hr cache with 2K LRU)
-- [ ] Connection pool: undici `Agent` with `connections: 50` (configurable via `IServingConfig.connectionPoolSize`)
+- [ ] Interceptor defaults: chat non-streaming (30s timeout, retry on 503), chat streaming (120s timeout), embeddings (30s timeout, 3 retries, 1hr cache via shared CacheManager)
+- [ ] Connection pool: undici `Agent` with `connections: 100` (configurable via `IServingConfig.connectionPoolSize`)
 - [ ] Generic error passthrough: forward upstream status code, sanitize error messages (truncate to 200 chars, generic message for 5xx). Apply same sanitization to mid-stream SSE error events
 - [ ] Stream cancellation: `AbortSignal.any()` combining client disconnect + timeout, propagated to upstream `fetch()`
-- [ ] SSE parser: buffer across TCP chunks, split on `\n\n`, handle `[DONE]` sentinel, skip malformed JSON
-- [ ] Request validation: parameter allowlist (v1: excludes `tools`, `tool_choice`, `logit_bias`, `user`), cap `n` at 5, set `user` server-side, message array bounds, input bounds, body size limit 1MB
+- [ ] SSE parser: extracted to `packages/appkit/src/stream/sse-parser.ts`, buffer across TCP chunks (1MB max buffer), split on `\n\n`, handle `[DONE]` sentinel, skip malformed JSON
+- [ ] Request validation: parameter allowlist (v1: excludes `tools`, `tool_choice`, `logit_bias`, `user`; includes `model`), cap `n` at 5, cap `stop` at 4 entries, validate `role` against known set, validate `response_format.type` against `text`/`json_object` (no `json_schema` in v1), validate message element shape, set `user` server-side, body size limit 1MB via per-route middleware
 - [ ] URL construction via `new URL()` with `encodeURIComponent()`
 - [ ] Exported via `toPlugin(ServingPlugin)` as `serving`, registered in `plugins/index.ts` and `src/index.ts`
 - [ ] Unit tests covering: route registration, chat request/response (both streaming and non-streaming), embeddings, OBO, endpoint validation errors, error passthrough, parameter filtering, `chatCollect()`, allowlist enforcement
@@ -526,12 +546,15 @@ const app = await createApp({
 5. Write `serving.ts`:
    - `ServingPlugin` class extending `Plugin` (bare, no generic) with `protected declare config: IServingConfig`
    - `static manifest = manifest as PluginManifest<"serving">`
-   - `setup()` — read endpoint names from env vars, validate name format with regex, initialize undici `Agent` with `connections: 50` (configurable via `config.connectionPoolSize`)
+   - `setup()` — read endpoint names from env vars, validate name format with regex (throw on missing/invalid `DATABRICKS_SERVING_ENDPOINT`), initialize undici `Agent` with `connections: 100` (configurable via `config.connectionPoolSize`)
+   - `shutdown()` — call `this.streamManager.abortAll()` + `this.servingAgent.close()`
    - Private `_invoke()` helper — raw `fetch()` with `new URL()`, SDK auth, AbortSignal, undici dispatcher
-   - `_handleChat()` — validate messages (allowlist, bounds, cap `n` at 5, set `user` server-side), call `_invoke()` without `stream: true`, return `ChatCompletionResponse`
-   - `_handleEmbed()` — validate input (bounds), call `_invoke()` with cache interceptor, return response
-   - `injectRoutes()` — register `POST /chat`, `POST /embeddings` with OBO
-   - `exports()` — return `{ chat, chatCollect, embed }` methods (`chatCollect` wraps `_handleChat`, `chat` is a placeholder that throws "streaming not yet implemented" until Phase 2)
+   - Private `_chatCollect(params, signal)` — validate messages (allowlist, bounds, cap `n` at 5, cap `stop` at 4 entries, validate `role` against known set, set `user` server-side), call `_invoke()` without `stream: true`, return `ChatCompletionResponse`. Errors propagate (not swallowed)
+   - Private `_embed(params, signal)` — validate input (bounds), call `_invoke()`, return response. Errors propagate
+   - HTTP handler `_handleChat(req, res)` — wraps `_chatCollect()` via `this.execute()` for interceptors + error safety
+   - HTTP handler `_handleEmbed(req, res)` — wraps `_embed()` via `this.execute()` for interceptors (cache, retry) + error safety
+   - `injectRoutes()` — register `POST /chat`, `POST /embeddings` with OBO, per-route `express.json({ limit: '1mb' })` middleware
+   - `exports()` — return `{ chat, chatCollect, embed }` methods. `chatCollect` delegates to `_chatCollect()` directly (errors propagate to caller, no interceptors). `embed` delegates to `_embed()` directly. `chat` is a placeholder that throws "streaming not yet implemented" until Phase 2
    - `/** @internal */ export const serving = toPlugin(ServingPlugin)`
 6. Write `index.ts` — `export * from "./serving"; export * from "./types"; export * from "./defaults";`
 7. Register in `plugins/index.ts` and `packages/appkit/src/index.ts`
@@ -539,7 +562,7 @@ const app = await createApp({
 
 ### Phase 2: Streaming Chat + Polish
 
-1. Add `_parseSSEStream()` — AsyncGenerator that parses upstream SSE response body, buffers across TCP chunks, yields `ChatCompletionChunk`. Candidate for future extraction to `packages/appkit/src/stream/sse-parser.ts` if other plugins need SSE proxy capabilities
+1. Add `parseSSEStream()` as a generic utility in `packages/appkit/src/stream/sse-parser.ts` — AsyncGenerator that parses any upstream SSE response body, buffers across TCP chunks (with 1MB max buffer size), yields parsed JSON objects. Re-export from `packages/appkit/src/stream/index.ts`. This is the natural complement to the existing `sse-writer.ts` in the `stream/` directory and enables isolated unit testing
 2. Add `_streamChat()` — internal async generator that calls upstream with `stream: true` and `yield*` delegates to `_parseSSEStream()`
 3. Add `_handleChatStream()` — validate messages, use `this.executeStream(res, () => this._streamChat(...), streamSettings)` for HTTP route
 4. Wire `exports().chat` to return raw `AsyncGenerator` via `yield*` from `_streamChat()` (like Genie's `sendMessage` — no `executeStream()` for programmatic API)
@@ -604,7 +627,7 @@ Document (but don't implement) swapping the in-memory vector store for Lakebase 
 
 ## System-Wide Impact
 
-- **New SSE parser utility:** The upstream SSE parser (`parseSSEStream`) is generic (parses any SSE stream into JSON objects) and should be extracted to `packages/appkit/src/stream/sse-parser.ts` if any other plugin needs SSE proxy capabilities. Initially lives in the serving plugin as a private method.
+- **New SSE parser utility:** `parseSSEStream()` extracted to `packages/appkit/src/stream/sse-parser.ts` in Phase 2 — generic utility (parses any SSE stream into JSON objects), natural complement to existing `sse-writer.ts`.
 - **No existing code modified:** This is purely additive — new plugin directory, new exports. No changes to base classes, stream infrastructure, or other plugins.
 - **Type generation:** The `appKitTypesPlugin` Vite plugin will auto-generate types for `appkit.serving.chat()` etc. at build time.
 
@@ -614,8 +637,12 @@ Document (but don't implement) swapping the in-memory vector store for Lakebase 
 - ChatAgent and ResponsesAgent endpoint types not supported (natural future extension — see `app-templates/e2e-chatbot-app` for reference patterns).
 - No config-level default model parameters (e.g., default temperature). Callers pass all params per request.
 - No model metadata endpoint (e.g., "which model is configured").
+- `json_schema` response format excluded from v1 (unbounded sub-object risk). Only `text` and `json_object` are allowed.
+- Programmatic API (`chatCollect()`, `embed()`, `chat()`) does not go through the interceptor chain (matching Genie/Analytics pattern). Caching and retry only apply to HTTP routes.
+- Embedding cache shares the global `CacheManager` pool (default `maxSize: 1000`) — no per-plugin capacity guarantee.
 - No plugin-level rate limiting (relies on Databricks 429 responses).
 - No backpressure handling on downstream SSE writes (existing AppKit StreamManager gap, not blocking for v1).
+- No endpoint readiness check — frontends should handle 503 reactively. A `GET /api/serving/status` endpoint could be a v2 addition.
 - OBO tokens close to expiry may cause mid-stream failures on long completions. The SSE parser handles unexpected stream termination gracefully (finally block releases the reader). No automatic token refresh during streaming for v1.
 
 ## Success Metrics
@@ -624,7 +651,7 @@ Document (but don't implement) swapping the in-memory vector store for Lakebase 
 - Streaming chat completions render in real-time on the frontend
 - Embedding results are cached correctly (same input returns cached result)
 - OBO auth passes the user's token to Databricks
-- No connection starvation under 50+ concurrent requests (with configured connection pool)
+- No connection starvation under 50+ concurrent requests (with configured 100-connection pool)
 
 ## Dependencies & Risks
 
@@ -638,18 +665,22 @@ From security review + code review — implement during corresponding phase:
 
 - [ ] Endpoint names validated against `/^[a-zA-Z0-9_-]{1,128}$/` and must not start with `databricks-` prefix (platform restriction) at setup
 - [ ] URL constructed using `new URL()` + `encodeURIComponent()` to prevent path traversal
-- [ ] Request body fields filtered through parameter allowlist (v1 excludes: `tools`, `tool_choice`, `logit_bias`, `user`)
+- [ ] Request body fields filtered through parameter allowlist (v1 excludes: `tools`, `tool_choice`, `logit_bias`, `user`; includes `model`)
 - [ ] `n` parameter capped at max 5
+- [ ] `stop` parameter capped at 4 entries, each max 256 chars
+- [ ] `role` validated at runtime against known set (`system`, `user`, `assistant`, `tool`)
+- [ ] Each message element validated as object with `role` (string) and `content` (string)
 - [ ] `user` field stripped from client requests; set server-side to authenticated user identity for audit log integrity
-- [ ] `response_format.type` validated against known set (`"text" | "json_object" | "json_schema"`)
+- [ ] `response_format.type` validated against `"text" | "json_object"` only (no `json_schema` in v1)
 - [ ] `content` field enforced as string (not array/object) for v1 (text-only, no multimodal)
 - [ ] Error responses sanitized: truncate to 200 chars, generic message for 5xx. Same sanitization applied to mid-stream SSE error events
-- [ ] Message array: max 256 messages, content max 128K chars, role validated
+- [ ] Message array: max 256 messages, content max 128K chars
 - [ ] Embedding input: max 100 items if array, each max 32K chars
-- [ ] Express body-parser limit set to 1MB for serving routes
+- [ ] Express body-parser limit set to 1MB via per-route middleware for serving routes
+- [ ] SSE parser buffer capped at 1MB to prevent OOM from malformed upstream responses
 - [ ] Cache key uses SHA-256 hash, includes executor key for OBO isolation
 - [ ] AbortSignal propagated to upstream fetch on client disconnect
-- [ ] Connection pool configured via undici `Agent` (default 50 connections, prevents connection starvation)
+- [ ] Connection pool configured via undici `Agent` (default 100 connections, prevents connection starvation)
 
 ## Sources & References
 
