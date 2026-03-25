@@ -49,21 +49,23 @@ A **Model Serving plugin** for AppKit that provides authenticated access to Data
 ### Programmatic API (exports)
 
 ```typescript
-// Chat streaming (always streams, like Genie's sendMessage)
+// Streaming chat — returns chunks as they arrive
 const stream = appkit.serving.chat({
   messages: [{ role: "user", content: "Hello" }],
   temperature: 0.7,
   max_tokens: 256,
 });
 for await (const chunk of stream) {
-  // process chunk.choices[0].delta.content
+  process.stdout.write(chunk.choices[0].delta.content ?? "");
 }
 
-// Chat non-streaming (convenience for server-side callers)
+// Non-streaming chat — returns the full response
 const response = await appkit.serving.chatCollect({
   messages: [{ role: "user", content: "Hello" }],
+  temperature: 0.7,
+  max_tokens: 256,
 });
-// response.choices[0].message.content
+console.log(response.choices[0].message.content);
 
 // Embeddings
 const embeddings = await appkit.serving.embed({
@@ -72,6 +74,7 @@ const embeddings = await appkit.serving.embed({
 
 // OBO (on-behalf-of user)
 const stream = appkit.serving.asUser(req).chat({ messages: [...] });
+const response = await appkit.serving.asUser(req).chatCollect({ messages: [...] });
 ```
 
 ### HTTP Routes
