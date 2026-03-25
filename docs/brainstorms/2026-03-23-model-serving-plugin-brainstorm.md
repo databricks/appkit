@@ -34,7 +34,7 @@ A **Model Serving plugin** for AppKit that provides authenticated access to Data
 
 ## Key Decisions
 
-1. **One required + one optional endpoint** — The plugin requires `DATABRICKS_SERVING_ENDPOINT` for chat/LLM completions (the primary use case). Optionally, `DATABRICKS_SERVING_EMBEDDING_ENDPOINT` enables the embeddings API for RAG use cases. This aligns with the Databricks Apps resource model (`valueFrom` maps one resource → one env var) and the CLI `apps init` flow (one required prompt, one optional "Configure Embedding Endpoint?" prompt). Chat is always available; embeddings are available when the optional endpoint is configured.
+1. **One required + one optional endpoint** — The plugin requires `DATABRICKS_SERVING_ENDPOINT` as the primary endpoint for all operations (chat, embeddings, or agent). Optionally, `DATABRICKS_SERVING_ENDPOINT_EMBEDDING` overrides the endpoint used for embeddings when a separate model is needed (e.g., `databricks-gte-large-en` for embeddings while using `databricks-meta-llama-3-3-70b-instruct` for chat). `chat()`/`chatStream()` always uses the primary. `embed()` uses the embedding override if set, otherwise falls back to the primary. This supports chat-only, embedding-only, and chat+separate-embedding use cases. Aligns with Databricks Apps `valueFrom` pattern and CLI `apps init` flow.
 
 2. **OpenAI-compatible passthrough** — Request and response formats match the Databricks chat completions API (which is OpenAI-compatible). No custom request/response types beyond what's needed for TypeScript typing.
 
@@ -88,7 +88,7 @@ const response = await appkit.serving.asUser(req).chat({ messages: [...] });
       "type": "serving_endpoint",
       "alias": "Serving Endpoint",
       "resourceKey": "serving-endpoint",
-      "description": "Databricks serving endpoint for chat/LLM completions",
+      "description": "Your primary model endpoint (chat, embeddings, or agent)",
       "permission": "CAN_QUERY",
       "fields": {
         "name": {
@@ -101,13 +101,13 @@ const response = await appkit.serving.asUser(req).chat({ messages: [...] });
   "optional": [
     {
       "type": "serving_endpoint",
-      "alias": "Embedding Endpoint",
-      "resourceKey": "serving-embedding-endpoint",
-      "description": "Databricks serving endpoint for embeddings (for RAG use cases)",
+      "alias": "Separate Embedding Endpoint",
+      "resourceKey": "serving-endpoint-embedding",
+      "description": "Only needed if you use a different model for embeddings than your primary endpoint",
       "permission": "CAN_QUERY",
       "fields": {
         "name": {
-          "env": "DATABRICKS_SERVING_EMBEDDING_ENDPOINT",
+          "env": "DATABRICKS_SERVING_ENDPOINT_EMBEDDING",
           "description": "Name of the embedding serving endpoint"
         }
       }
@@ -116,7 +116,7 @@ const response = await appkit.serving.asUser(req).chat({ messages: [...] });
 }
 ```
 
-**Validation:** `chat()`/`chatStream()` always works (required resource). `embed()` throws a clear error if the optional embedding endpoint is not configured.
+**Behavior:** `chat()`/`chatStream()` always uses the primary endpoint. `embed()` uses `DATABRICKS_SERVING_ENDPOINT_EMBEDDING` if configured, otherwise falls back to `DATABRICKS_SERVING_ENDPOINT`.
 
 ## CLI Integration (`apps init`)
 
