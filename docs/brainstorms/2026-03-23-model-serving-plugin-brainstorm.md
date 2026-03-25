@@ -11,7 +11,7 @@ A **Model Serving plugin** for AppKit that provides authenticated access to Data
 
 - **Chat/LLM completions** (OpenAI-compatible `messages` format)
 - **Embeddings** (same serving infrastructure, `input` format)
-- **Both streaming (SSE) and non-streaming** responses for chat
+- **Streaming-by-default** for chat (like Genie's `sendMessage`), with non-streaming HTTP route that collects the full response
 - **One required endpoint** (chat/LLM) + **one optional endpoint** (embeddings)
 - **Programmatic API** (`exports()`) for server-side use + **HTTP routes** for frontend consumption
 
@@ -49,17 +49,15 @@ A **Model Serving plugin** for AppKit that provides authenticated access to Data
 ### Programmatic API (exports)
 
 ```typescript
-// Non-streaming
-const response = await appkit.serving.chat({
+// Chat (always streams, like Genie's sendMessage)
+const stream = appkit.serving.chat({
   messages: [{ role: "user", content: "Hello" }],
   temperature: 0.7,
   max_tokens: 256,
 });
-
-// Streaming
-const stream = appkit.serving.chatStream({
-  messages: [{ role: "user", content: "Hello" }],
-});
+for await (const chunk of stream) {
+  // process chunk.choices[0].delta.content
+}
 
 // Embeddings
 const embeddings = await appkit.serving.embed({
@@ -67,7 +65,7 @@ const embeddings = await appkit.serving.embed({
 });
 
 // OBO (on-behalf-of user)
-const response = await appkit.serving.asUser(req).chat({ messages: [...] });
+const stream = appkit.serving.asUser(req).chat({ messages: [...] });
 ```
 
 ### HTTP Routes
