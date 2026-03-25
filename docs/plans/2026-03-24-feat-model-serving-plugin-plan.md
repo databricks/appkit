@@ -42,7 +42,7 @@ A `serving` plugin following the established plugin patterns (Genie for streamin
 
 ### Design Decisions (from brainstorm)
 
-1. **One required + one optional endpoint** — `DATABRICKS_SERVING_ENDPOINT` (required, chat/LLM) and `DATABRICKS_SERVING_EMBEDDING_ENDPOINT` (optional, embeddings). Aligns with CLI `apps init` flow and Databricks Apps `valueFrom` resource pattern. _(see brainstorm: Key Decision 1)_
+1. **One required + one optional endpoint** — `DATABRICKS_SERVING_ENDPOINT` (required) is the primary endpoint for all operations (chat, embeddings, or agent). `DATABRICKS_SERVING_ENDPOINT_EMBEDDING` (optional) overrides the endpoint for embeddings when a separate model is needed. `chat()` always uses primary; `embed()` uses override if set, falls back to primary. Aligns with CLI `apps init` flow and Databricks Apps `valueFrom` resource pattern. _(see brainstorm: Key Decision 1)_
 2. **OpenAI-compatible passthrough** — no custom request/response types beyond TypeScript typing. _(see brainstorm: Key Decision 2)_
 3. **Streaming via AppKit's executeStream()** — connector returns `AsyncGenerator<ChatCompletionChunk>`, consumed by StreamManager. Matches Genie plugin pattern. _(see brainstorm: Key Decision 3)_
 4. **OBO by default for HTTP routes** — matching Genie and Files plugin conventions. Programmatic API uses service principal by default, with `asUser(req)` for OBO. _(see brainstorm: Key Decision 4, refined by SpecFlow)_
@@ -264,15 +264,10 @@ if (response.status >= 500) {
 
 ### Per-Method Endpoint Validation
 
-The chat endpoint is always available (required resource). The embedding endpoint needs validation at call time:
+The chat endpoint is always available (required resource). The embedding endpoint falls back to the primary:
 ```typescript
-private ensureEmbeddingEndpoint(): string {
-  if (!this.embeddingEndpointName) {
-    throw new ConfigurationError(
-      'Embedding endpoint not configured. Set DATABRICKS_SERVING_EMBEDDING_ENDPOINT.',
-    );
-  }
-  return this.embeddingEndpointName;
+private resolveEmbeddingEndpoint(): string {
+  return this.embeddingEndpointName ?? this.endpointName;
 }
 ```
 
@@ -413,7 +408,7 @@ const app = await createApp({
         "type": "serving_endpoint",
         "alias": "Serving Endpoint",
         "resourceKey": "serving-endpoint",
-        "description": "Databricks serving endpoint for chat/LLM completions",
+        "description": "Your primary model endpoint (chat, embeddings, or agent)",
         "permission": "CAN_QUERY",
         "fields": {
           "name": {
@@ -426,13 +421,13 @@ const app = await createApp({
     "optional": [
       {
         "type": "serving_endpoint",
-        "alias": "Embedding Endpoint",
-        "resourceKey": "serving-embedding-endpoint",
-        "description": "Databricks serving endpoint for embeddings (for RAG use cases)",
+        "alias": "Separate Embedding Endpoint",
+        "resourceKey": "serving-endpoint-embedding",
+        "description": "Only needed if you use a different model for embeddings than your primary endpoint",
         "permission": "CAN_QUERY",
         "fields": {
           "name": {
-            "env": "DATABRICKS_SERVING_EMBEDDING_ENDPOINT",
+            "env": "DATABRICKS_SERVING_ENDPOINT_EMBEDDING",
             "description": "Name of the embedding serving endpoint"
           }
         }
@@ -444,7 +439,7 @@ const app = await createApp({
 
 #### Research Insights
 
-**Resource validation (from architecture + simplicity reviews):** One required resource (chat endpoint) + one optional (embedding endpoint). This matches the standard manifest pattern — required resource is always present, optional is prompted with "Configure X? (optional)" by the CLI. No `getResourceRequirements()` needed. `setup()` only validates the optional embedding endpoint name format if configured.
+**Resource validation (from architecture + simplicity reviews):** One required resource (primary endpoint) + one optional (embedding override). This matches the standard manifest pattern — required resource is always present, optional is prompted with "Configure Separate Embedding Endpoint? (optional)" by the CLI. No `getResourceRequirements()` needed. `embed()` falls back to the primary endpoint when the override is not configured.
 
 ## Acceptance Criteria
 
@@ -456,7 +451,7 @@ const app = await createApp({
 - [ ] **Embeddings:** `POST /api/serving/embeddings` proxies to Databricks, returns `EmbeddingResponse`
 - [ ] Programmatic API: `exports()` returns `{ chat, chatStream, embed }`
 - [ ] OBO: HTTP routes use `asUser(req)`, programmatic API supports `.asUser(req)`
-- [ ] Embedding endpoint validation with clear error message when `embed()` called without `DATABRICKS_SERVING_EMBEDDING_ENDPOINT`
+- [ ] `embed()` uses `DATABRICKS_SERVING_ENDPOINT_EMBEDDING` if configured, falls back to `DATABRICKS_SERVING_ENDPOINT`
 - [ ] Interceptor defaults: chat (120s timeout, no retry, no cache), embeddings (30s timeout, 3 retries, 1hr cache with LRU)
 - [ ] Generic error passthrough: forward upstream status code, sanitize error messages (truncate to 200 chars, generic message for 5xx)
 - [ ] Stream cancellation: `AbortSignal.any()` combining client disconnect + timeout, propagated to upstream `fetch()`
