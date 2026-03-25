@@ -44,7 +44,7 @@ A `serving` plugin following the established plugin patterns (Genie for streamin
 
 1. **One required + one optional endpoint** — `DATABRICKS_SERVING_ENDPOINT` (required) is the primary endpoint for all operations (chat, embeddings, or agent). `DATABRICKS_SERVING_ENDPOINT_EMBEDDING` (optional) overrides the endpoint for embeddings when a separate model is needed. `chat()` always uses primary; `embed()` uses override if set, falls back to primary. Aligns with CLI `apps init` flow and Databricks Apps `valueFrom` resource pattern. _(see brainstorm: Key Decision 1)_
 2. **OpenAI-compatible passthrough** — no custom request/response types beyond TypeScript typing. _(see brainstorm: Key Decision 2)_
-3. **Streaming via AppKit's executeStream()** — connector returns `AsyncGenerator<ChatCompletionChunk>`, consumed by StreamManager. Matches Genie plugin pattern. _(see brainstorm: Key Decision 3)_
+3. **Streaming-by-default (like Genie)** — `chat()` always streams, returning `AsyncGenerator<ChatCompletionChunk>` via `executeStream()`. No separate `chat()` method. The non-streaming HTTP route (`POST /chat`) collects the full stream internally before returning JSON. This matches Genie's `sendMessage` pattern where streaming is implicit. _(see brainstorm: Key Decision 3)_
 4. **OBO by default for HTTP routes** — matching Genie and Files plugin conventions. Programmatic API uses service principal by default, with `asUser(req)` for OBO. _(see brainstorm: Key Decision 4, refined by SpecFlow)_
 5. **Embeddings included** — minimal extra code, enables "agents on apps" / RAG use cases. _(see brainstorm: Key Decision 5)_
 
@@ -82,13 +82,12 @@ packages/appkit/src/plugins/serving/
 
 | Operation | Timeout | Retry | Cache |
 |-----------|---------|-------|-------|
-| `chat()` | 120s | disabled (expensive, non-deterministic) | disabled |
-| `chatStream()` | 120s | disabled (stateful connection) | disabled |
+| `chat()` (always streams) | 120s | disabled (stateful connection, non-deterministic) | disabled |
 | `embed()` | 30s | 3 attempts with backoff (idempotent, cheap) | TTL 3600s, maxEntries: 10000 |
 
 #### Research Insights
 
-**Naming convention (from pattern review):** Follow the Files plugin convention for defaults naming: `SERVING_CHAT_DEFAULTS`, `SERVING_STREAM_DEFAULTS`, `SERVING_EMBED_DEFAULTS` (SCREAMING_SNAKE_CASE with plugin prefix).
+**Naming convention (from pattern review):** Follow the Files plugin convention for defaults naming: `SERVING_CHAT_DEFAULTS`, `SERVING_EMBED_DEFAULTS` (SCREAMING_SNAKE_CASE with plugin prefix). Only two configs needed since `chat()` always streams.
 
 **Cache bounds (from performance review):** Add `maxEntries: 10000` with LRU eviction to the embedding cache. Without bounds, unique user inputs accumulate stale entries for the full TTL hour. Cache key uses `crypto.createHash('sha256')` on `JSON.stringify(input)` — deterministic, handles array ordering, O(n) in input size.
 
@@ -358,8 +357,8 @@ interface EmbeddingResponse {
 }
 
 interface ServingExports {
-  chat(params: ChatCompletionRequest): Promise<ChatCompletionResponse>;
-  chatStream(params: ChatCompletionRequest): AsyncGenerator<ChatCompletionChunk, void, undefined>;
+  /** Always streams (like Genie's sendMessage). Returns AsyncGenerator of chunks. */
+  chat(params: ChatCompletionRequest): AsyncGenerator<ChatCompletionChunk, void, undefined>;
   embed(params: EmbeddingRequest): Promise<EmbeddingResponse>;
 }
 ```
@@ -449,7 +448,7 @@ const app = await createApp({
 - [ ] **Chat (non-streaming):** `POST /api/serving/chat` proxies to Databricks, returns `ChatCompletionResponse`
 - [ ] **Chat (streaming):** `POST /api/serving/chat/stream` returns SSE stream of `ChatCompletionChunk` via `executeStream()`
 - [ ] **Embeddings:** `POST /api/serving/embeddings` proxies to Databricks, returns `EmbeddingResponse`
-- [ ] Programmatic API: `exports()` returns `{ chat, chatStream, embed }`
+- [ ] Programmatic API: `exports()` returns `{ chat, embed }` — `chat()` always streams (like Genie's `sendMessage`)
 - [ ] OBO: HTTP routes use `asUser(req)`, programmatic API supports `.asUser(req)`
 - [ ] `embed()` uses `DATABRICKS_SERVING_ENDPOINT_EMBEDDING` if configured, falls back to `DATABRICKS_SERVING_ENDPOINT`
 - [ ] Interceptor defaults: chat (120s timeout, no retry, no cache), embeddings (30s timeout, 3 retries, 1hr cache with LRU)
@@ -460,7 +459,7 @@ const app = await createApp({
 - [ ] URL construction via `new URL()` with `encodeURIComponent()`
 - [ ] Exported via `toPlugin(ServingPlugin)` as `serving`, registered in `plugins/index.ts` and `src/index.ts`
 - [ ] Unit tests covering: route registration, chat request/response, streaming, embeddings, OBO, endpoint validation errors, error passthrough, parameter filtering
-- [ ] Dev-playground: "Paste & Ask" RAG page demonstrating `embed()` + `chatStream()` composition
+- [ ] Dev-playground: "Paste & Ask" RAG page demonstrating `embed()` + `chat()` composition
 - [ ] Template: conditional `ServingPage.tsx` with simple streaming chat (included when serving plugin is selected)
 
 ## Implementation Phases
@@ -491,8 +490,7 @@ const app = await createApp({
 2. Add `_handleChatStream()` — validate messages, call upstream with `stream: true`, use `executeStream()` with the SSE parser generator
 3. Add `POST /api/serving/chat/stream` route using `executeStream()`
 4. Wire AbortSignal chain: `AbortSignal.any([clientDisconnect, timeout])` → upstream fetch + generator
-5. Add `chatStream()` to `exports()`
-6. Add unit tests for streaming (mock SSE response, verify chunk parsing, test abort propagation)
+5. Add unit tests for streaming (mock SSE response, verify chunk parsing, test abort propagation) (mock SSE response, verify chunk parsing, test abort propagation)
 7. Verify end-to-end with dev-playground (optional)
 
 #### Research Insights
@@ -503,7 +501,7 @@ const app = await createApp({
 
 #### Dev-Playground: "Paste & Ask" RAG Page
 
-A new route (`/model-serving.route.tsx`) demonstrating both `chatStream()` and `embed()` composing into a RAG workflow:
+A new route (`/model-serving.route.tsx`) demonstrating both `chat()` and `embed()` composing into a RAG workflow:
 
 1. **UI:** Split layout — left panel for pasting text chunks, right panel for chat
 2. **Ingest flow:** User pastes text → app calls `POST /api/serving/embeddings` → vectors stored in-memory on server (per-session `Map<sessionId, { chunks: string[], embeddings: number[][] }>`)
@@ -517,14 +515,14 @@ A new route (`/model-serving.route.tsx`) demonstrating both `chatStream()` and `
    - Chat input + streaming message display
    - "Sources" accordion under each answer showing which chunks were used
 
-**Why not just a chat page:** Genie already demonstrates chat with streaming. This RAG demo shows plugin composition (`embed()` + `chatStream()`) and a real use case that's unique to model serving.
+**Why not just a chat page:** Genie already demonstrates chat with streaming. This RAG demo shows plugin composition (`embed()` + `chat()`) and a real use case that's unique to model serving.
 
 #### Template: Simple Streaming Chat Page
 
 Add a conditional `ServingPage.tsx` to the template (included when serving plugin is selected):
 
 1. **UI:** Simple chat interface with message history and streaming responses
-2. **Backend:** Single route calling `chatStream()` with conversation history from the frontend
+2. **Backend:** Single route calling `chat()` with conversation history from the frontend
 3. **No RAG, no embeddings** — template stays minimal. A code comment points to the dev-playground RAG pattern for extension
 4. **Template files:**
    - `template/client/src/pages/ServingPage.tsx` — chat UI with streaming
