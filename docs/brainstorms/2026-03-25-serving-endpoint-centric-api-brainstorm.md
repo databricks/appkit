@@ -17,13 +17,6 @@ The key insight: every Databricks serving endpoint exposes its own **OpenAPI sch
 - **Default mode** (zero config) + **named mode** (multiple endpoints with aliases)
 - **Programmatic API** (`exports()`) for server-side use + **HTTP routes** for frontend consumption
 
-### Out of Scope (for v1)
-
-- Endpoint management (create/update/delete/start/stop)
-- Conversation/session management
-- Response normalization or custom abstractions
-- High-level streaming helpers (events, `finalContent()`, etc.) — raw AsyncGenerator only
-
 ## Why This Approach
 
 ### Why endpoint-centric (not semantic methods)
