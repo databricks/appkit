@@ -1,11 +1,11 @@
 name: Release @databricks/lakebase
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'packages/lakebase/**'
+  # push:
+  #   branches:
+  #     - main
+  #   paths:
+  #     - 'packages/lakebase/**'
   workflow_dispatch:
     inputs:
       dry-run:
