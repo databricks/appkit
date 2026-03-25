@@ -32,7 +32,7 @@ These gaps were identified by SpecFlow analysis and resolved here:
 
 1. **HTTP route OBO policy:** All HTTP routes use `this.asUser(req)` (same as Genie). LLM calls should run as the user for billing/permissions. In local dev without OBO headers, falls back to service principal with warning (existing behavior).
 
-2. **Named mode exports shape:** Follow Genie's flat `exports()` pattern. Default mode returns `{ invoke, stream }`. Named mode returns `{ [alias]: { invoke, stream } }`. The base `Plugin.asUser()` proxy handles recursive proxying of nested objects automatically (via `EXCLUDED_FROM_PROXY` check — it proxies all non-excluded methods on nested objects).
+2. **Named mode exports shape:** Follow Genie's flat `exports()` pattern. Default mode returns `{ invoke, stream }`. Named mode returns `{ [alias]: { invoke, stream } }`. AppKit's `wrapWithAsUser()` (in `core/appkit.ts`) adds a top-level `asUser(req)` on the exports object. Calling it returns a new exports object where all methods — including those in nested alias objects — are recursively bound to the user-scoped plugin via `bindExportMethods()`. The correct call pattern is `appkit.serving.asUser(req).llm.invoke(...)`, NOT `appkit.serving.llm.asUser(req).invoke(...)` (alias objects have no `asUser()` method).
 
 3. **`stream: true` injection:** The plugin injects `"stream": true` into the request body automatically when routing through `stream()` / the stream HTTP route. Stripped from generated types so developers can't pass it.
 
@@ -46,9 +46,9 @@ These gaps were identified by SpecFlow analysis and resolved here:
 
 8. **Chunk type heuristic:** OpenAI-compatible if response schema has `choices` array where items have a `message` object property. Otherwise `chunk` is omitted → `stream()` returns `AsyncGenerator<unknown>`.
 
-9. **Connector approach:** Direct HTTP fetch using host/token from `WorkspaceClient` config. The SDK's serving endpoints client is for managing endpoints, not invoking them. The invocation URL is `POST /serving-endpoints/{name}/invocations` (or `/served-models/{model}/invocations` with `servedModel`).
+9. **Connector approach:** Direct HTTP fetch using `workspaceClient.config.authenticate(headers)` + native `fetch()`. The `@databricks/sdk-experimental` (v0.16.0) provides serving endpoint management APIs but no invocation method. This matches the Files connector pattern (`connectors/files/client.ts`). Authentication is handled by `client.config.authenticate(headers)` which adds the correct OAuth/PAT headers automatically. The invocation URL is `POST /serving-endpoints/{name}/invocations` (or `/served-models/{model}/invocations` with `servedModel`).
 
-10. **Error responses:** Follow existing pattern — `{ error: string }` with appropriate HTTP status. Streaming errors use SSE error events via `StreamManager`.
+10. **Error responses:** Map upstream Databricks errors to appropriate HTTP statuses: 400 (bad params) → 400 with upstream message, 401/403 (auth) → forward status + log warning, 404 (endpoint not found) → 404, 429 (rate limited) → 429 with `Retry-After` header forwarded, 503 (model loading/cold start) → 503, other 5xx → 502 (bad gateway). Streaming errors use SSE error events via `StreamManager` with `{ error: string, status: number }` payload.
 
 ---
 
@@ -64,11 +64,15 @@ The plugin, connector, manifest, routes, OBO, and `exports()`.
 - `invoke(workspaceClient, endpointName, body, options?)` → `Promise<unknown>`
 - `stream(workspaceClient, endpointName, body, options?)` → `AsyncGenerator<unknown>`
 - Constructs authenticated HTTP requests using host/token from `workspaceClient.config`
-- For `invoke`: POST to `/serving-endpoints/{name}/invocations`, return parsed JSON
-- For `stream`: POST with `"stream": true` injected, parse response as NDJSON (newline-delimited `data: {...}` SSE lines), yield each parsed chunk
+- The connector ALWAYS strips `stream` from the incoming body before forwarding, regardless of schema filter availability
+- For `invoke`: POST to `/serving-endpoints/{name}/invocations` (without `stream` in body), return parsed JSON
+- For `stream`: POST with `"stream": true` injected into body, parse response as NDJSON (newline-delimited `data: {...}` SSE lines), yield each parsed chunk
 - `servedModel` option switches URL to `/served-models/{model}/invocations`
 - Accepts `AbortSignal` for cancellation
-- Body size limit: 1MB when no schema filter active
+- Use `client.config.authenticate(headers)` for auth (same as Files connector at `connectors/files/client.ts:280`)
+- Use native `fetch()` (not axios or node-fetch)
+- No plugin-level body size limit — Express body parser config controls this at the app level
+- Map upstream error statuses per Design Decision 10 (400, 401/403, 404, 429 with Retry-After, 503, 5xx → 502)
 
 **`packages/appkit/src/connectors/serving/types.ts`** — Connector types
 - `ServingConnectorConfig` (timeout)
@@ -84,8 +88,8 @@ The plugin, connector, manifest, routes, OBO, and `exports()`.
 - `ServingEndpointRegistry {}` (empty base, augmented by type gen)
 
 **`packages/appkit/src/plugins/serving/manifest.json`** — Plugin manifest
-- Resource type: `serving_endpoint` (already in `ResourceType` enum)
-- Permission: `CAN_QUERY`
+- Include `"$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json"` (same as Files plugin at `plugins/files/manifest.json`)
+- Resource type: `ResourceType.SERVING_ENDPOINT` (`"serving_endpoint"`, confirmed in `registry/types.generated.ts`). Permission: `CAN_QUERY` (from `ServingEndpointPermission`)
 - Optional in static manifest; `getResourceRequirements(config)` makes entries required at runtime
 
 **`packages/appkit/src/plugins/serving/defaults.ts`** — Execution defaults
@@ -267,14 +271,41 @@ React hooks for consuming serving endpoints from the frontend.
 
 #### Files to Create
 
-**`packages/appkit-ui/src/react/hooks/use-serving-invoke.ts`** — Non-streaming hook
-- `useServingInvoke(alias?)` → `{ invoke, data, loading, error }`
+**`packages/appkit-ui/src/react/hooks/use-serving-invoke.ts`** — Non-streaming hook with registry-driven type inference
+```typescript
+// Registry-driven type inference (same pattern as useAnalyticsQuery)
+export function useServingInvoke<
+  K extends keyof ServingEndpointRegistry = "default",
+>(
+  body: ServingEndpointRegistry[K]["request"],
+  options?: { alias?: K },
+): {
+  invoke: () => void;
+  data: ServingEndpointRegistry[K]["response"] | null;
+  loading: boolean;
+  error: Error | null;
+}
+```
 - Uses `fetch` POST to `/api/serving/invoke` (default) or `/api/serving/{alias}/invoke` (named)
 - Manages `AbortController` for cleanup on unmount
+- Without schema-gen, `K` defaults to `"default"` and types fall back to `unknown`
 
-**`packages/appkit-ui/src/react/hooks/use-serving-stream.ts`** — Streaming hook
-- `useServingStream(alias?)` → `{ stream, chunks, streaming, error, reset }`
-- Uses `connectSSE` (existing at `packages/appkit-ui/src/js/sse/connect-sse.ts`) to POST to `/api/serving/stream` or `/api/serving/{alias}/stream`
+**`packages/appkit-ui/src/react/hooks/use-serving-stream.ts`** — Streaming hook with registry-driven type inference
+```typescript
+export function useServingStream<
+  K extends keyof ServingEndpointRegistry = "default",
+>(
+  body: ServingEndpointRegistry[K]["request"],
+  options?: { alias?: K },
+): {
+  stream: () => void;
+  chunks: ServingEndpointRegistry[K]["chunk"][];
+  streaming: boolean;
+  error: Error | null;
+  reset: () => void;
+}
+```
+- Uses `connectSSE` with POST payload (same pattern as `useGenieChat` at `appkit-ui/src/react/genie/use-genie-chat.ts:292`) to POST to `/api/serving/stream` or `/api/serving/{alias}/stream`
 - Accumulates chunks in state array
 - `reset()` clears chunks and aborts connection
 
@@ -333,10 +364,35 @@ Add serving as a selectable plugin in the `databricks apps init` template and ge
 
 #### Files to Modify
 
-**`template/appkit.plugins.json`** — Add serving plugin entry
-- Add `"serving"` plugin alongside analytics, files, genie, lakebase
-- Resource type: `serving_endpoint`, permission: `CAN_QUERY`
-- Field: `name` with env `DATABRICKS_SERVING_ENDPOINT`
+**`template/appkit.plugins.json`** — Add serving plugin entry:
+```json
+{
+  "serving": {
+    "name": "serving",
+    "displayName": "Model Serving Plugin",
+    "description": "Authenticated proxy to Databricks Model Serving endpoints",
+    "package": "@databricks/appkit",
+    "resources": {
+      "required": [
+        {
+          "type": "serving_endpoint",
+          "alias": "Serving Endpoint",
+          "resourceKey": "serving-endpoint",
+          "description": "Model Serving endpoint for inference",
+          "permission": "CAN_QUERY",
+          "fields": {
+            "name": {
+              "env": "DATABRICKS_SERVING_ENDPOINT",
+              "description": "Serving endpoint name"
+            }
+          }
+        }
+      ],
+      "optional": []
+    }
+  }
+}
+```
 - NOT `requiredByTemplate` (optional, like analytics/files/genie)
 
 **`template/server/server.ts`** — Add serving to Go template conditionals
@@ -361,6 +417,10 @@ Add serving as a selectable plugin in the `databricks apps init` template and ge
 **`template/README.md`** — Add serving section in Go template conditionals
 
 **`tools/generate-app-templates.ts`** — Add serving template variants
+- Add to `FEATURE_DEPENDENCIES`:
+  ```typescript
+  serving: "Serving Endpoint",
+  ```
 - Add `"appkit-serving"` to `APP_TEMPLATES[]`:
   ```typescript
   {
@@ -370,8 +430,11 @@ Add serving as a selectable plugin in the `databricks apps init` template and ge
     description: "Node.js app with Databricks Model Serving endpoint integration",
   }
   ```
-- Update `"appkit-all-in-one"` to include `"serving"` in features + set
-- Add to `FEATURE_DEPENDENCIES`: `serving: "Serving Endpoint"`
+- Update `"appkit-all-in-one"`:
+  ```typescript
+  features: ["analytics", "files", "genie", "lakebase", "serving"],
+  set: { ..., "serving.serving-endpoint.name": "placeholder" },
+  ```
 
 #### Verification
 ```bash

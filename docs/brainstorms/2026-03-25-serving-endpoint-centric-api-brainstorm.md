@@ -107,9 +107,9 @@ const embeddings = await appkit.serving.embedder.invoke({
   input: "Search query text",
 });
 
-// OBO (on-behalf-of user)
+// OBO (on-behalf-of user) — asUser() is always called on the plugin, not on nested alias objects
 const response = await appkit.serving.asUser(req).invoke({ messages: [...] });
-const response = await appkit.serving.llm.asUser(req).invoke({ messages: [...] });
+const response = await appkit.serving.asUser(req).llm.invoke({ messages: [...] });
 ```
 
 ### HTTP Routes
@@ -430,7 +430,38 @@ function filterRequest(body: Record<string, unknown>): Record<string, unknown> {
 
 The schema IS the allowlist — always up-to-date with what the endpoint actually accepts. No hand-maintained parameter lists needed.
 
-When schema-gen hasn't run (no cached schema), the plugin falls back to passthrough with a body size limit (1MB).
+**Note:** The `stream` property is handled at the connector level, not by the schema filter. The connector always strips `stream` from the incoming body and re-injects it based on which method was called (`invoke()` never sets it, `stream()` always injects `"stream": true`). This is enforced regardless of whether the schema filter is active.
+
+When schema-gen hasn't run (no cached schema), the plugin falls back to full passthrough — the request body is forwarded as-is. Express's built-in body parser limits apply (default 100KB, configurable per-app).
+
+## Error Handling
+
+### Upstream Error Mapping
+
+| Databricks Status | Meaning | Plugin Behavior |
+|---|---|---|
+| 400 | Invalid request (bad params) | Return 400 with upstream error message |
+| 401/403 | Auth failure | Return 401/403, log warning |
+| 404 | Endpoint not found | Return 404 with `Endpoint '{name}' not found` |
+| 429 | Rate limited | Return 429, forward `Retry-After` header if present |
+| 503 | Model loading (cold start) | Return 503 with `Endpoint loading, retry shortly` |
+| 5xx | Server error | Return 502 (bad gateway) |
+
+### Streaming Errors
+
+Mid-stream errors use SSE error events via StreamManager (existing pattern). The SSE event includes `{ error: string, status: number }`.
+
+### Retry Considerations
+
+Retry is disabled by default (`retry: { enabled: false }`) because LLM calls are not idempotent. However, developers can enable retry in config for idempotent use cases (e.g., embeddings):
+
+```typescript
+serving({
+  endpoints: {
+    embedder: { env: "...", retry: { maxRetries: 2, retryableStatuses: [429, 503] } },
+  },
+})
+```
 
 ## Key Decisions
 
@@ -478,7 +509,7 @@ _(None — all key decisions resolved during brainstorm)_
    })
    ```
 
-3. **Should `invoke()` strip unknown params at runtime?** → **Warn and strip.** When the schema is available, unknown params are stripped from the request body and a warning is logged (e.g., `[appkit:serving] Stripped unknown param 'bad' (not in endpoint schema)`). This catches developer mistakes without breaking at runtime. When no schema is cached (schema-gen hasn't run), the plugin falls back to passthrough with a body size limit (1MB).
+3. **Should `invoke()` strip unknown params at runtime?** → **Warn and strip.** When the schema is available, unknown params are stripped from the request body and a warning is logged (e.g., `[appkit:serving] Stripped unknown param 'bad' (not in endpoint schema)`). This catches developer mistakes without breaking at runtime. When no schema is cached (schema-gen hasn't run), the plugin falls back to full passthrough — the request body is forwarded as-is. Express's built-in body parser limits apply (default 100KB, configurable per-app).
 
 ## References
 
