@@ -1,0 +1,45 @@
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "name": "eval",
+  "displayName": "Eval Pipeline Plugin",
+  "description": "Structured eval pipeline for Databricks Apps with proto-defined data contracts for generation, evaluation, editing, and aggregation stages",
+  "resources": {
+    "required": [],
+    "optional": [
+      {
+        "type": "volume",
+        "alias": "Eval Volume",
+        "resourceKey": "eval-volume",
+        "description": "UC Volume for storing eval pipeline artifacts (zips, results, reports)",
+        "permission": "WRITE_VOLUME",
+        "fields": {
+          "path": {
+            "env": "DATABRICKS_VOLUME_EVAL",
+            "description": "Volume path for eval artifacts (e.g. /Volumes/main/default/apps_mcp_generated)"
+          }
+        }
+      }
+    ]
+  },
+  "config": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "appsVolume": {
+          "type": "string",
+          "description": "UC Volume path for eval artifacts"
+        },
+        "mlflowExperiment": {
+          "type": "string",
+          "default": "/Shared/apps-mcp-evaluations",
+          "description": "MLflow experiment path for logging"
+        },
+        "timeout": {
+          "type": "number",
+          "default": 60000,
+          "description": "Timeout for volume I/O operations in milliseconds"
+        }
+      }
+    }
+  }
+}

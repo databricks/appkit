@@ -1,0 +1,345 @@
+syntax = "proto3";
+
+package appkit.v1;
+
+import "google/protobuf/timestamp.proto";
+import "appkit/v1/common.proto";
+
+// --------------------------------------------------------------------------
+// Generation stage
+// --------------------------------------------------------------------------
+
+// Metrics from a single app generation run (Claude Agent SDK).
+message GenerationMetrics {
+  double cost_usd = 1;
+  int64 input_tokens = 2;
+  int64 output_tokens = 3;
+  int32 turns = 4;
+  double generation_time_sec = 5;
+  string app_dir = 6;
+  string generation_model = 7;
+  string cli_version = 8;
+  string skill_version = 9;
+}
+
+// Result of generating a single app.
+message GenerationResult {
+  string app_name = 1;
+  bool success = 2;
+  GenerationMetrics metrics = 3;
+  string error = 4;
+}
+
+// --------------------------------------------------------------------------
+// Evaluation stage
+// --------------------------------------------------------------------------
+
+// Detailed evaluation metrics for a generated/edited app.
+// Mirrors EvalMetrics dataclass from eval_single_app.py.
+message EvalMetrics {
+  bool build_success = 1;
+  bool unit_tests_pass = 2;
+  bool smoke_tests_pass = 3;
+  bool type_safety_pass = 4;
+  bool apps_validate_pass = 5;
+  double local_runability = 6;       // 0.0-1.0 fraction
+  double runability_score = 7;       // numerator
+  int32 runability_checks = 8;       // denominator
+  bool has_package_json = 9;
+  bool has_server = 10;
+  bool has_client = 11;
+  double build_time_sec = 12;
+  double appeval_100 = 13;           // composite 0-1 score
+  string test_output = 14;
+  string build_output = 15;
+  string app_type = 16;              // "appkit", "python", or "unknown"
+}
+
+// Complete evaluation result for a single app.
+message EvalResult {
+  string app_name = 1;
+  string app_dir = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  EvalMetrics metrics = 4;
+  repeated string issues = 5;
+  GenerationMetrics generation_metrics = 6;
+  string appkit_version = 7;
+  string tags = 8;
+}
+
+// --------------------------------------------------------------------------
+// Edit stage
+// --------------------------------------------------------------------------
+
+// Metrics from a single edit operation.
+message EditMetrics {
+  double cost_usd = 1;
+  int64 input_tokens = 2;
+  int64 output_tokens = 3;
+  int32 turns = 4;
+  double edit_time_sec = 5;
+  string edit_model = 6;
+  string edit_name = 7;
+  string app_name = 8;
+  string no_change_reason = 9;
+}
+
+// Result of applying an edit to an app.
+message EditResult {
+  string edit_name = 1;
+  string app_name = 2;
+  bool success = 3;
+  int32 files_changed = 4;
+  EditMetrics metrics = 5;
+  string error = 6;
+  bool no_change = 7;
+}
+
+// Regression analysis comparing pre-edit vs post-edit metrics.
+message RegressionAnalysis {
+  bool build_regressed = 1;
+  bool unit_tests_regressed = 2;
+  bool smoke_tests_regressed = 3;
+  bool type_safety_regressed = 4;
+  bool tests_regressed = 5;         // unit OR smoke regressed
+  double appeval_delta = 6;          // post_score - pre_score
+  double pre_appeval_100 = 7;
+  double post_appeval_100 = 8;
+  bool no_changes_made = 9;
+  string no_change_reason = 10;
+}
+
+// UI verification result from Playwright + Claude vision.
+message UIVerification {
+  bool skipped = 1;
+  bool ui_check_pass = 2;
+  map<string, string> verification_result = 3;
+}
+
+// Code complexity metrics for pre/post comparison.
+message CodeComplexity {
+  int32 total_lines = 1;
+  int32 total_files = 2;
+  int32 tsx_files = 3;
+  int32 ts_files = 4;
+  int32 component_count = 5;
+  int32 import_count = 6;
+  int32 type_annotation_lines = 7;
+}
+
+// Complete complexity comparison between pre and post edit.
+message ComplexityComparison {
+  CodeComplexity pre = 1;
+  CodeComplexity post = 2;
+  CodeComplexity delta = 3;
+  bool lines_reduced = 4;
+  bool components_reduced = 5;
+  double simplification_score = 6;   // 0-1
+}
+
+// Full edit evaluation result including regression and UI analysis.
+message EditEvalResult {
+  string app_name = 1;
+  string edit_name = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  EvalMetrics post_edit_metrics = 4;
+  EvalMetrics pre_edit_metrics = 5;
+  EditMetrics edit_metrics = 6;
+  RegressionAnalysis regression = 7;
+  UIVerification ui_verification = 8;
+  ComplexityComparison complexity = 9;
+  repeated string issues = 10;
+}
+
+// --------------------------------------------------------------------------
+// Trajectory
+// --------------------------------------------------------------------------
+
+// A single tool call made by the agent.
+message ToolCall {
+  string id = 1;
+  string name = 2;
+  string arguments_json = 3;         // JSON-encoded arguments
+}
+
+// Result returned from a tool execution.
+message ToolResult {
+  string tool_call_id = 1;
+  string content = 2;
+  bool is_error = 3;
+}
+
+// A single message in an agent trajectory.
+message TrajectoryMessage {
+  string role = 1;                   // "assistant" or "tool"
+  string content = 2;
+  repeated ToolCall tool_calls = 3;
+  repeated ToolResult tool_results = 4;
+  google.protobuf.Timestamp timestamp = 5;
+}
+
+// Complete agent trajectory for a single generation/edit run.
+message Trajectory {
+  string app_name = 1;
+  repeated TrajectoryMessage messages = 2;
+  Metadata metadata = 3;
+}
+
+// --------------------------------------------------------------------------
+// Aggregation
+// --------------------------------------------------------------------------
+
+// Aggregate metrics across all apps in a pipeline run.
+message AggregateMetrics {
+  // Counts
+  int32 total_expected_apps = 1;
+  int32 total_generated = 2;
+  int32 total_apps = 3;
+  int32 generation_failures = 4;
+
+  // Eval scores
+  double avg_appeval_100 = 5;
+  int32 build_success_count = 6;
+  int32 unit_tests_pass_count = 7;
+  int32 smoke_tests_pass_count = 8;
+  int32 type_safety_pass_count = 9;
+  int32 apps_validate_pass_count = 10;
+  double local_runability_avg = 11;
+
+  // Generation cost
+  double avg_eff_units = 12;         // tokens per app
+  double avg_gen_turns = 13;
+  double total_gen_cost_usd = 14;
+  double avg_gen_cost_usd = 15;
+  int64 total_gen_tokens = 16;
+  double avg_gen_time_sec = 17;
+  double avg_build_time_sec = 18;
+
+  // Edit metrics
+  double appedit_100 = 19;           // (total - regressions) / total
+  int32 total_edits = 20;
+  int32 edit_build_regressions = 21;
+  int32 edit_test_regressions = 22;
+  double avg_edit_appeval_delta = 23;
+  int32 edit_no_change_count = 24;
+  double total_edit_cost_usd = 25;
+  double avg_edit_cost_usd = 26;
+  double avg_edit_time_sec = 27;
+  double avg_edit_turns = 28;
+
+  // UI & complexity
+  int32 edit_ui_checks_run = 29;
+  int32 edit_ui_checks_pass = 30;
+  double edit_ui_check_rate = 31;
+  double edit_avg_simplification_score = 32;
+}
+
+// Full aggregate report for a pipeline run.
+message AggregateReport {
+  string run_id = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  AggregateMetrics metrics = 3;
+  repeated EvalResult app_results = 4;
+  repeated EditEvalResult edit_results = 5;
+  Metadata tags = 6;                  // framework, model, versions, etc.
+}
+
+// --------------------------------------------------------------------------
+// Pipeline inputs
+// --------------------------------------------------------------------------
+
+// A single prompt input for the generation for_each task.
+message EvalPrompt {
+  string app_name = 1;
+  string tags = 2;                   // "databricks_v2", "cookbook", "genie"
+  string prompt = 3;
+}
+
+// A single edit input for the edit for_each task.
+message EditInput {
+  string edit_name = 1;
+  string app_name = 2;
+}
+
+// Complete pipeline configuration.
+message PipelineConfig {
+  string run_id = 1;
+  repeated EvalPrompt prompts = 2;
+  repeated EditInput edit_inputs = 3;
+  string apps_volume = 4;
+  string mlflow_experiment = 5;
+  string appkit_version = 6;
+  string appkit_branch = 7;
+  string skills_branch = 8;
+  int32 generation_parallelism = 9;
+  int32 eval_parallelism = 10;
+  bool run_lakebase = 11;
+}
+
+// --------------------------------------------------------------------------
+// Eval gRPC service
+// --------------------------------------------------------------------------
+
+// Service for managing eval pipeline data.
+service EvalService {
+  // Submit a generation result from a pipeline task.
+  rpc SubmitGenerationResult(SubmitGenerationResultRequest) returns (SubmitGenerationResultResponse);
+
+  // Submit an eval result from a pipeline task.
+  rpc SubmitEvalResult(SubmitEvalResultRequest) returns (SubmitEvalResultResponse);
+
+  // Submit an edit eval result from a pipeline task.
+  rpc SubmitEditEvalResult(SubmitEditEvalResultRequest) returns (SubmitEditEvalResultResponse);
+
+  // Get the aggregate report for a pipeline run.
+  rpc GetAggregateReport(GetAggregateReportRequest) returns (AggregateReport);
+
+  // Stream eval results as they complete.
+  rpc StreamEvalResults(StreamEvalResultsRequest) returns (stream EvalResult);
+
+  // Get pipeline configuration.
+  rpc GetPipelineConfig(GetPipelineConfigRequest) returns (PipelineConfig);
+}
+
+message SubmitGenerationResultRequest {
+  string run_id = 1;
+  GenerationResult result = 2;
+}
+
+message SubmitGenerationResultResponse {
+  bool accepted = 1;
+  Error error = 2;
+}
+
+message SubmitEvalResultRequest {
+  string run_id = 1;
+  EvalResult result = 2;
+}
+
+message SubmitEvalResultResponse {
+  bool accepted = 1;
+  Error error = 2;
+}
+
+message SubmitEditEvalResultRequest {
+  string run_id = 1;
+  EditEvalResult result = 2;
+}
+
+message SubmitEditEvalResultResponse {
+  bool accepted = 1;
+  Error error = 2;
+}
+
+message GetAggregateReportRequest {
+  string run_id = 1;
+}
+
+message StreamEvalResultsRequest {
+  string run_id = 1;
+  google.protobuf.Timestamp since = 2;
+}
+
+message GetPipelineConfigRequest {
+  string run_id = 1;
+}
