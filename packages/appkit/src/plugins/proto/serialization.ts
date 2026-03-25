@@ -7,6 +7,7 @@ import {
   toJson,
 } from "@bufbuild/protobuf";
 import type { JsonValue } from "@bufbuild/protobuf";
+import { FilesConnector } from "../../connectors/files";
 import { getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging/logger";
 
@@ -18,8 +19,21 @@ const logger = createLogger("proto:serialization");
  * Wraps @bufbuild/protobuf's binary and JSON serialization with
  * convenience methods for reading/writing proto-encoded files
  * to Databricks Unity Catalog Volumes.
+ *
+ * Volume I/O uses the FilesConnector from the files plugin infrastructure,
+ * which provides the upload SDK bug workaround, path validation,
+ * and per-operation telemetry tracing.
  */
 export class ProtoSerializer {
+  private filesConnector: FilesConnector;
+
+  constructor(defaultVolume?: string) {
+    this.filesConnector = new FilesConnector({
+      defaultVolume,
+      telemetry: true,
+    });
+  }
+
   /**
    * Serialize a protobuf message to binary format.
    */
@@ -63,7 +77,8 @@ export class ProtoSerializer {
   /**
    * Write a protobuf message as binary to a Databricks UC Volume path.
    *
-   * Uses the Databricks SDK Files API to upload the serialized bytes.
+   * Uses the FilesConnector (same as files plugin) which works around
+   * SDK upload bugs and provides telemetry tracing.
    *
    * @param schema - The protobuf message descriptor
    * @param message - The message instance to serialize
@@ -83,20 +98,21 @@ export class ProtoSerializer {
       bytes.byteLength,
     );
 
-    const readableStream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(bytes);
-        controller.close();
-      },
-    });
-
-    await client.files.upload(volumePath, readableStream, { overwrite: true });
+    await this.filesConnector.upload(
+      client,
+      volumePath,
+      Buffer.from(bytes),
+      { overwrite: true },
+    );
 
     logger.debug("Proto written to volume: path=%s", volumePath);
   }
 
   /**
    * Read and deserialize a protobuf message from a Databricks UC Volume path.
+   *
+   * Uses the FilesConnector (same as files plugin) for download with
+   * path validation and telemetry.
    *
    * @param schema - The protobuf message descriptor to deserialize into
    * @param volumePath - Full UC Volume path (e.g. /Volumes/catalog/schema/volume/file.pb)
@@ -110,7 +126,7 @@ export class ProtoSerializer {
 
     logger.debug("Reading proto from volume: path=%s", volumePath);
 
-    const response = await client.files.download(volumePath);
+    const response = await this.filesConnector.download(client, volumePath);
     const chunks: Uint8Array[] = [];
 
     if (response.contents) {

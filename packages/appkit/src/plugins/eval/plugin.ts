@@ -1,6 +1,7 @@
 import type { DescMessage, MessageShape } from "@bufbuild/protobuf";
 import type express from "express";
 import type { IAppRouter, PluginExecutionSettings } from "shared";
+import { FilesConnector } from "../../connectors/files";
 import { getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
@@ -25,6 +26,10 @@ const logger = createLogger("eval");
  * contracts. Replaces JSON file I/O in the Python eval pipeline with
  * typed protobuf serialization for clean interfaces between stages.
  *
+ * Uses the FilesConnector (same infrastructure as the files plugin) for
+ * UC Volume I/O, which provides the SDK upload bug workaround, path
+ * validation, and per-operation telemetry tracing.
+ *
  * Pipeline stages:
  * 1. Generation → writes GenerationResult.pb
  * 2. Evaluation → reads app zip, writes EvalResult.pb
@@ -38,15 +43,20 @@ export class EvalPlugin extends Plugin<IEvalConfig> {
   protected declare config: IEvalConfig;
 
   private serializer: ProtoSerializer;
+  private filesConnector: FilesConnector;
   private paths: EvalArtifactPaths;
 
   constructor(config: IEvalConfig) {
     super(config);
     this.config = config;
-    this.serializer = new ProtoSerializer();
-    this.paths = createArtifactPaths(
-      config.appsVolume ?? DEFAULT_APPS_VOLUME,
-    );
+
+    const volume = config.appsVolume ?? DEFAULT_APPS_VOLUME;
+    this.serializer = new ProtoSerializer(volume);
+    this.filesConnector = new FilesConnector({
+      defaultVolume: volume,
+      telemetry: config.telemetry,
+    });
+    this.paths = createArtifactPaths(volume);
   }
 
   /**
@@ -99,7 +109,6 @@ export class EvalPlugin extends Plugin<IEvalConfig> {
    * Filters by pattern: run_{runId}_*_eval.pb
    */
   async listRunResults(runId: string): Promise<string[]> {
-    const client = getWorkspaceClient();
     const volume = this.config.appsVolume ?? DEFAULT_APPS_VOLUME;
 
     const settings: PluginExecutionSettings = {
@@ -107,23 +116,20 @@ export class EvalPlugin extends Plugin<IEvalConfig> {
     };
 
     const entries = await this.execute(async () => {
-      return client.files.listDirectoryContents(volume);
+      return this.filesConnector.list(getWorkspaceClient());
     }, settings);
 
     if (!entries) return [];
 
     const prefix = `run_${runId}_`;
     const suffix = "_eval.pb";
-    const results: string[] = [];
 
-    for await (const entry of entries) {
-      const name = entry.name ?? "";
-      if (name.startsWith(prefix) && name.endsWith(suffix)) {
-        results.push(`${volume}/${name}`);
-      }
-    }
-
-    return results;
+    return entries
+      .filter((entry) => {
+        const name = entry.name ?? "";
+        return name.startsWith(prefix) && name.endsWith(suffix);
+      })
+      .map((entry) => `${volume}/${entry.name}`);
   }
 
   /**
