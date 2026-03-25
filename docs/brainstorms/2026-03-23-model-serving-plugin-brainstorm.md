@@ -12,7 +12,7 @@ A **Model Serving plugin** for AppKit that provides authenticated access to Data
 - **Chat/LLM completions** (OpenAI-compatible `messages` format)
 - **Embeddings** (same serving infrastructure, `input` format)
 - **Both streaming (SSE) and non-streaming** responses for chat
-- **Two optional endpoint configs** — one for chat, one for embeddings (at least one required)
+- **One required endpoint** (chat/LLM) + **one optional endpoint** (embeddings)
 - **Programmatic API** (`exports()`) for server-side use + **HTTP routes** for frontend consumption
 
 ### Out of Scope (for v1)
@@ -34,7 +34,7 @@ A **Model Serving plugin** for AppKit that provides authenticated access to Data
 
 ## Key Decisions
 
-1. **Two optional endpoint env vars** — The plugin supports two optional env vars: `DATABRICKS_SERVING_CHAT_ENDPOINT` and `DATABRICKS_SERVING_EMBEDDING_ENDPOINT`. Each enables its respective API surface (`chat`/`chatStream` and `embed`). At least one must be configured. This avoids forcing multi-instance registration when a single app needs both chat and embeddings (the common "agents on apps" case).
+1. **One required + one optional endpoint** — The plugin requires `DATABRICKS_SERVING_ENDPOINT` for chat/LLM completions (the primary use case). Optionally, `DATABRICKS_SERVING_EMBEDDING_ENDPOINT` enables the embeddings API for RAG use cases. This aligns with the Databricks Apps resource model (`valueFrom` maps one resource → one env var) and the CLI `apps init` flow (one required prompt, one optional "Configure Embedding Endpoint?" prompt). Chat is always available; embeddings are available when the optional endpoint is configured.
 
 2. **OpenAI-compatible passthrough** — Request and response formats match the Databricks chat completions API (which is OpenAI-compatible). No custom request/response types beyond what's needed for TypeScript typing.
 
@@ -83,25 +83,28 @@ const response = await appkit.serving.asUser(req).chat({ messages: [...] });
 **Manifest resources:**
 ```json
 {
-  "required": [],
-  "optional": [
+  "required": [
     {
       "type": "serving_endpoint",
-      "alias": "Chat Endpoint",
-      "resourceKey": "serving-chat-endpoint",
-      "description": "Databricks serving endpoint for chat completions",
+      "alias": "Serving Endpoint",
+      "resourceKey": "serving-endpoint",
+      "description": "Databricks serving endpoint for chat/LLM completions",
+      "permission": "CAN_QUERY",
       "fields": {
         "name": {
-          "env": "DATABRICKS_SERVING_CHAT_ENDPOINT",
-          "description": "Name of the chat serving endpoint"
+          "env": "DATABRICKS_SERVING_ENDPOINT",
+          "description": "Name of the serving endpoint"
         }
       }
-    },
+    }
+  ],
+  "optional": [
     {
       "type": "serving_endpoint",
       "alias": "Embedding Endpoint",
       "resourceKey": "serving-embedding-endpoint",
-      "description": "Databricks serving endpoint for embeddings",
+      "description": "Databricks serving endpoint for embeddings (for RAG use cases)",
+      "permission": "CAN_QUERY",
       "fields": {
         "name": {
           "env": "DATABRICKS_SERVING_EMBEDDING_ENDPOINT",
@@ -113,7 +116,19 @@ const response = await appkit.serving.asUser(req).chat({ messages: [...] });
 }
 ```
 
-**Validation:** At least one endpoint must be configured. Calling `chat()` without a chat endpoint or `embed()` without an embedding endpoint throws a clear error.
+**Validation:** `chat()`/`chatStream()` always works (required resource). `embed()` throws a clear error if the optional embedding endpoint is not configured.
+
+## CLI Integration (`apps init`)
+
+The serving plugin integrates seamlessly with the CLI `apps init` flow — no CLI code changes needed:
+
+1. **Plugin selection:** User selects "serving" from the feature list
+2. **Required resource prompt:** "Select Serving Endpoint" — user picks from workspace endpoints (paged dropdown)
+3. **Optional resource prompt:** "Configure Embedding Endpoint? (optional)" — user can skip or pick a second endpoint
+4. **Bundle generation:** CLI generates `databricks.yml` with resource entries and `app.yaml` with `valueFrom` env var mapping
+5. **Template generation:** `.env` populated with endpoint names, `.env.example` shows both vars (optional one commented out)
+
+The CLI's existing `serving_endpoint` support (`PromptForServingEndpoint`, `ListServingEndpoints`, prefetching, bundle generation) handles all of this automatically when the manifest declares the resources correctly.
 
 ## Demo & Template Strategy
 
