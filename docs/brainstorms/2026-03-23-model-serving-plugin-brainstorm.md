@@ -165,6 +165,20 @@ The in-memory vector store could be upgraded to a persistent solution:
 - **Vector Search plugin** ([PR #200](https://github.com/databricks/appkit/pull/200)) — native Databricks Vector Search with REST API client, OBO auth, and React components. A natural complement for RAG use cases combining `embed()` from serving with Vector Search for retrieval.
 - **Lakebase pgvector** — Lakebase with pgvector extension for persistence and larger doc sets. A `VectorStore` interface abstraction would make either option a drop-in upgrade.
 
+## Follow-Up: Schema-Driven Type Generation
+
+Every Databricks serving endpoint exposes its own OpenAPI schema via `GET /api/2.0/serving-endpoints/{name}/openapi` (CLI: `databricks serving-endpoints get-open-api <name>`). The schema is built from the model's MLflow signature at deploy time — each endpoint can have a different schema.
+
+AppKit already has this exact pattern: the **query type generator** (`packages/appkit/src/type-generator/`) fetches SQL schemas via `DESCRIBE QUERY` at build/dev time, generates TypeScript declarations (`.d.ts`), caches by content hash, and integrates with Vite via `appKitTypesPlugin`.
+
+**Approach:** Build a serving-endpoint equivalent that:
+1. Fetches the endpoint's OpenAPI schema at build/dev time (gated on `DATABRICKS_SERVING_ENDPOINT` env var, same as query typegen is gated on `DATABRICKS_WAREHOUSE_ID`)
+2. Generates typed request/response interfaces from the schema
+3. Augments `appkit.serving.chat()` / `appkit.serving.embed()` exports so the programmatic API is fully typed per-endpoint
+4. The schema replaces both hand-written types AND the parameter allowlist — the schema is the source of truth for what the endpoint accepts and what gets forwarded
+
+**Why not v1:** The generic OpenAI-compatible types work for Foundation Model API endpoints. Schema-driven generation becomes essential when custom model endpoints (with custom MLflow signatures) are in scope.
+
 ## Open Questions
 
 _(None — all key decisions resolved during brainstorm)_
@@ -182,3 +196,4 @@ _(None — all key decisions resolved during brainstorm)_
 - Existing plugin patterns: Analytics, Files, Genie, Lakebase
 - [PR #166: Agent plugin](https://github.com/databricks/appkit/pull/166) — ChatAgent/ResponsesAgent future extension
 - [PR #200: Vector Search plugin](https://github.com/databricks/appkit/pull/200) — Vector search for RAG use cases (complement to serving embeddings)
+- [Serving Endpoints OpenAPI Schema](https://docs.databricks.com/api/workspace/servingendpoints/get-open-api) — per-endpoint OpenAPI spec from MLflow model signature (follow-up: schema-driven type generation)
