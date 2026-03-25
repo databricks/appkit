@@ -22,6 +22,9 @@ A **Model Serving plugin** for AppKit that provides authenticated access to Data
 - Endpoint management (create/update/delete/start/stop)
 - Conversation/session management
 - Response normalization or custom abstractions
+- **Vision/multimodal inputs** — `content` is text-only (`string`) for v1. Vision models require content arrays with `image_url` parts. Add in v2 with content part type validation
+- **Extended reasoning parameters** — `reasoning_effort` (GPT-5, Gemini 3.x) is included in v1. `thinking`/`budget_tokens` (Claude, Gemini 2.5) deferred to v2 (nested object validation needed)
+- **Function calling** — `tools`/`tool_choice` excluded from v1 (security: requires structural validation). See plan for v2 upgrade path
 
 ## Why This Approach
 
@@ -172,6 +175,9 @@ _(None — all key decisions resolved during brainstorm)_
 - [Create and manage serving endpoints](https://docs.databricks.com/aws/en/machine-learning/model-serving/create-manage-serving-endpoints)
 - [Model Serving glossary](https://docs.databricks.com/aws/en/machine-learning/model-serving/glossary)
 - [Query chat models](https://docs.databricks.com/aws/en/machine-learning/model-serving/query-chat-models)
+- [Query vision models](https://docs.databricks.com/aws/en/machine-learning/model-serving/query-vision-models) — multimodal content arrays (v2)
+- [Query reasoning models](https://docs.databricks.com/aws/en/machine-learning/model-serving/query-reason-models) — `reasoning_effort` (v1), `thinking`/`budget_tokens` (v2)
+- [Function calling](https://docs.databricks.com/aws/en/machine-learning/model-serving/function-calling) — `tools`/`tool_choice` (v2)
 - [Databricks Apps: Model Serving integration](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/model-serving)
 - Existing plugin patterns: Analytics, Files, Genie, Lakebase
 - [PR #166: Agent plugin](https://github.com/databricks/appkit/pull/166) — ChatAgent/ResponsesAgent future extension

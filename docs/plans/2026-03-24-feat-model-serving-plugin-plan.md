@@ -15,10 +15,12 @@ deepened: 2026-03-24
 **Research agents used:** TypeScript reviewer, Performance oracle, Security sentinel, Architecture strategist, Code simplicity reviewer, Pattern recognition specialist, SSE streaming best practices researcher, Databricks SDK researcher
 **Code review on:** 2026-03-25
 **Code review agents used:** Architecture strategist, Security sentinel, Performance oracle, Spec flow analyzer, Pattern recognition specialist
+**Docs cross-reference review on:** 2026-03-25
+**Docs reviewed:** [Vision models](https://docs.databricks.com/aws/en/machine-learning/model-serving/query-vision-models), [Reasoning models](https://docs.databricks.com/aws/en/machine-learning/model-serving/query-reason-models), [Function calling](https://docs.databricks.com/aws/en/machine-learning/model-serving/function-calling)
 
 ### Key Improvements
 1. **Type safety hardened** — removed unsafe index signature, added string literal unions for roles, fully specified response types
-2. **Security hardened** — parameter allowlist (v1 excludes `tools`, `tool_choice`, `logit_bias`, `user`), endpoint name validation, input size limits, error sanitization, `n` capped at 5, `user` set server-side
+2. **Security hardened** — parameter allowlist (v1 excludes `tools`, `tool_choice`, `logit_bias`, `user`, `thinking`/`budget_tokens`; includes `reasoning_effort`), endpoint name validation, input size limits, error sanitization, `n` capped at 5, `user` set server-side
 3. **Performance grounded** — connection pool in v1 (undici Agent, 100 connections), proper SSE frame parser, AbortSignal chain, embedding cache uses shared global `CacheManager` (default `maxSize: 1000`)
 4. **Simplified** — collapsed to 2 implementation phases, dropped separate connector directory, generic error passthrough instead of per-code mapping
 5. **SDK confirmed** — `@databricks/sdk-experimental` does NOT support streaming for serving endpoints; raw `fetch()` is required
@@ -26,6 +28,9 @@ deepened: 2026-03-24
 7. **Pattern alignment verified** — bare `extends Plugin` (not generic), camelCase defaults, manifest `config` section, index re-exports defaults
 
 ### New Considerations Discovered
+- `reasoning_effort` added to v1 allowlist (GPT-5, Gemini 3.x, GPT OSS reasoning models — simple string enum, zero security risk)
+- `databricks-` prefix check removed from endpoint name validation — Foundation Model API endpoints all use this prefix (e.g., `databricks-claude-sonnet-4-5`)
+- Vision/multimodal, `thinking`/`budget_tokens` (Claude reasoning), and function calling explicitly documented as v2 considerations in Known Limitations
 - AppKit has no upstream SSE parser — need to create one for proxy scenarios
 - `SSEWriter.writeEvent()` doesn't handle backpressure (known gap, not blocking for v1)
 - Resource model simplified: one required (chat) + one optional (embedding) — aligns with CLI `apps init` flow and Databricks Apps `valueFrom` pattern
@@ -236,7 +241,7 @@ Minimal validation with security guardrails:
 const ALLOWED_CHAT_PARAMS = new Set([
   'messages', 'model', 'temperature', 'max_tokens', 'top_p', 'stop',
   'n', 'presence_penalty', 'frequency_penalty',
-  'response_format', 'seed',
+  'response_format', 'seed', 'reasoning_effort',
 ]);
 ```
 
@@ -246,6 +251,7 @@ const ALLOWED_CHAT_PARAMS = new Set([
 - `user` — allows impersonation in Databricks audit logs. Instead, strip from client requests and set server-side to the authenticated user's identity.
 
 **Additional validation:**
+- `reasoning_effort`: included — used by GPT-5, Gemini 3.x, and GPT OSS reasoning models. Simple string enum, validate against `"none" | "low" | "medium" | "high"`. Zero security risk (not an opaque blob). Silently stripping this would degrade reasoning model capability without any error
 - `model`: included as optional allowed parameter — Foundation Model API endpoints accept/require it. Typically unnecessary for dedicated endpoints, but stripping it would break certain endpoint types
 - `n`: cap at max 5 to prevent compute cost amplification
 - `stop`: cap at 4 entries, each max 256 chars (matches OpenAI spec)
@@ -258,14 +264,13 @@ const ALLOWED_CHAT_PARAMS = new Set([
 - `input` (embeddings): must be present, max 100 items if array, each max 32K chars
 - Express body-parser size limit: set to 1MB for serving routes via per-route middleware (`express.json({ limit: '1mb' })`) — not global. Note: 1MB body-parser is the actual enforcer; per-field limits (256 messages x 128K chars) are secondary defense and exceed the body-parser limit in aggregate
 
-**Endpoint name validation (from security review + Databricks docs — defense in depth):**
+**Endpoint name validation (from security review — defense in depth):**
 ```typescript
 const ENDPOINT_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,128}$/;
-// Databricks docs: "Endpoint names cannot use the databricks- prefix"
 const isValidEndpointName = (name: string) =>
-  ENDPOINT_NAME_PATTERN.test(name) && !name.startsWith('databricks-');
+  ENDPOINT_NAME_PATTERN.test(name);
 ```
-Validate at startup in `setup()`. Even though values come from env vars, this prevents SSRF if the pattern is ever extended. The `databricks-` prefix restriction comes from Databricks platform requirements.
+Validate at startup in `setup()`. Even though values come from env vars, this prevents SSRF if the pattern is ever extended. Note: the `databricks-` prefix restriction applies only to *creating* custom endpoints, not querying them. Foundation Model API pay-per-token endpoints all use the `databricks-` prefix (e.g., `databricks-claude-sonnet-4-5`, `databricks-meta-llama-3-3-70b-instruct`), so the serving plugin must NOT reject this prefix.
 
 ### Error Handling
 
@@ -350,10 +355,15 @@ interface ChatCompletionRequest {
   seed?: number;
   /** v1: only 'text' | 'json_object'. json_schema deferred to v2 (unbounded sub-object risk). */
   response_format?: { type: 'text' | 'json_object' };
+  /** Reasoning effort for GPT-5, Gemini 3.x, GPT OSS models. Simple string enum — no security risk. */
+  reasoning_effort?: 'none' | 'low' | 'medium' | 'high';
   // Excluded from v1 allowlist (security): tools, tool_choice, logit_bias, user
+  // Excluded from v1 allowlist (security):
   // - tools/tool_choice: opaque blobs, potential indirect SSRF — add in v2 with structural validation
   // - logit_bias: unbounded map, payload amplification — add in v2 with entry/value bounds
   // - user: set server-side to authenticated identity for audit log integrity
+  // - thinking/budget_tokens: nested object for Claude/Gemini 2.5 reasoning — add in v2 with structural validation
+  //   (type must be "enabled", budget_tokens must be positive integer ≤ max_tokens)
 }
 
 interface ChatCompletionResponse {
@@ -559,7 +569,7 @@ const app = await createApp({
 - [ ] Generic error passthrough: forward upstream status code, sanitize error messages (truncate to 200 chars, generic message for 5xx). Apply same sanitization to mid-stream SSE error events
 - [ ] Stream cancellation: `AbortSignal.any()` combining client disconnect + timeout, propagated to upstream `fetch()`
 - [ ] SSE parser: extracted to `packages/appkit/src/stream/sse-parser.ts`, buffer across TCP chunks (1MB max buffer), split on `\n\n`, handle `[DONE]` sentinel, skip malformed JSON
-- [ ] Request validation: parameter allowlist (v1: excludes `tools`, `tool_choice`, `logit_bias`, `user`; includes `model`), cap `n` at 5, cap `stop` at 4 entries, validate `role` against known set, validate `response_format.type` against `text`/`json_object` (no `json_schema` in v1), validate message element shape, set `user` server-side, body size limit 1MB via per-route middleware
+- [ ] Request validation: parameter allowlist (v1: excludes `tools`, `tool_choice`, `logit_bias`, `user`, `thinking`/`budget_tokens`; includes `model`, `reasoning_effort`), cap `n` at 5, cap `stop` at 4 entries, validate `role` against known set, validate `reasoning_effort` against `"none" | "low" | "medium" | "high"`, validate `response_format.type` against `text`/`json_object` (no `json_schema` in v1), validate message element shape, set `user` server-side, body size limit 1MB via per-route middleware
 - [ ] URL construction via `new URL()` with `encodeURIComponent()`
 - [ ] Exported via `toPlugin(ServingPlugin)` as `serving`, registered in `plugins/index.ts` and `src/index.ts`
 - [ ] Unit tests covering: route registration, chat request/response (both streaming and non-streaming), embeddings, OBO, endpoint validation errors, error passthrough, parameter filtering, `chatCollect()`, allowlist enforcement
@@ -572,7 +582,7 @@ const app = await createApp({
 
 1. Create `packages/appkit/src/plugins/serving/` directory structure
 2. Write `manifest.json` with `$schema`, `config` section, one required and one optional `serving_endpoint` resource
-3. Write `types.ts` with `IServingConfig extends BasePluginConfig` + all OpenAI-compatible request/response types (v1 allowlist: excludes `tools`, `tool_choice`, `logit_bias`, `user`)
+3. Write `types.ts` with `IServingConfig extends BasePluginConfig` + all OpenAI-compatible request/response types (v1 allowlist: excludes `tools`, `tool_choice`, `logit_bias`, `user`, `thinking`/`budget_tokens`; includes `reasoning_effort`)
 4. Write `defaults.ts` with `servingChatDefaults`, `servingChatStreamDefaults`, `servingEmbedDefaults` (camelCase, matching Genie/Analytics convention)
 5. Write `serving.ts`:
    - `ServingPlugin` class extending `Plugin` (bare, no generic) with `protected declare config: IServingConfig`
@@ -675,6 +685,9 @@ Document (but don't implement) swapping the in-memory vector store for Lakebase 
 - No backpressure handling on downstream SSE writes (existing AppKit StreamManager gap, not blocking for v1).
 - No endpoint readiness check — frontends should handle 503 reactively. A `GET /api/serving/status` endpoint could be a v2 addition.
 - OBO tokens close to expiry may cause mid-stream failures on long completions. The SSE parser handles unexpected stream termination gracefully (finally block releases the reader). No automatic token refresh during streaming for v1.
+- **Vision/multimodal:** `content` is enforced as `string` for v1 (text-only). Vision models require `content` as an array of content parts (`{type: "text", text: "..."}`, `{type: "image_url", image_url: {...}}`). Multimodal content arrays will be rejected by v1 validation. Add in v2 with structural validation for content part types.
+- **Reasoning models (partial support):** `reasoning_effort` (GPT-5, Gemini 3.x, GPT OSS) is supported in v1. `thinking`/`budget_tokens` (Claude, Gemini 2.5) is excluded — requires nested object validation. Claude reasoning responses return `content` as an array of blocks (`[{type: "thinking", ...}, {type: "text", ...}]`) rather than a plain string. The thin proxy SSE parser passes these through without type checking, so streaming works. Non-streaming `chatCollect()` response types assume `content: string` — reasoning model responses may not fully type-check but will be passed through as-is.
+- **Function calling:** `tools` and `tool_choice` excluded from v1 (security: opaque blobs, potential indirect SSRF). Add in v2 with structural validation. Note: during Databricks Public Preview, function calling is "optimized for single turn" and parallel function calling is not supported.
 
 ## Success Metrics
 
@@ -694,9 +707,9 @@ Document (but don't implement) swapping the in-memory vector store for Lakebase 
 
 From security review + code review — implement during corresponding phase:
 
-- [ ] Endpoint names validated against `/^[a-zA-Z0-9_-]{1,128}$/` and must not start with `databricks-` prefix (platform restriction) at setup
+- [ ] Endpoint names validated against `/^[a-zA-Z0-9_-]{1,128}$/` at setup (no `databricks-` prefix restriction — Foundation Model API endpoints use this prefix)
 - [ ] URL constructed using `new URL()` + `encodeURIComponent()` to prevent path traversal
-- [ ] Request body fields filtered through parameter allowlist (v1 excludes: `tools`, `tool_choice`, `logit_bias`, `user`; includes `model`)
+- [ ] Request body fields filtered through parameter allowlist (v1 excludes: `tools`, `tool_choice`, `logit_bias`, `user`, `thinking`/`budget_tokens`; includes `model`, `reasoning_effort`)
 - [ ] `n` parameter capped at max 5
 - [ ] `stop` parameter capped at 4 entries, each max 256 chars
 - [ ] `role` validated at runtime against known set (`system`, `user`, `assistant`, `tool`)
@@ -736,6 +749,9 @@ From security review + code review — implement during corresponding phase:
 - [Create and manage serving endpoints](https://docs.databricks.com/aws/en/machine-learning/model-serving/create-manage-serving-endpoints)
 - [Model Serving glossary](https://docs.databricks.com/aws/en/machine-learning/model-serving/glossary)
 - [Query chat models](https://docs.databricks.com/aws/en/machine-learning/model-serving/query-chat-models)
+- [Query vision models](https://docs.databricks.com/aws/en/machine-learning/model-serving/query-vision-models) — multimodal content arrays (v2 consideration)
+- [Query reasoning models](https://docs.databricks.com/aws/en/machine-learning/model-serving/query-reason-models) — `reasoning_effort` (v1), `thinking`/`budget_tokens` (v2)
+- [Function calling](https://docs.databricks.com/aws/en/machine-learning/model-serving/function-calling) — `tools`/`tool_choice` (v2 consideration)
 - [Databricks Apps: Model Serving integration](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/model-serving)
 - [OpenAI Chat Completions API reference](https://platform.openai.com/docs/api-reference/chat)
 - [OpenAI Streaming Responses Guide](https://developers.openai.com/api/docs/guides/streaming-responses)
