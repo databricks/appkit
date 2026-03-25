@@ -20,7 +20,6 @@ function run(cmd: string, args: string[], opts: { cwd?: string } = {}): number {
   const result = spawnSync(cmd, args, {
     cwd: opts.cwd ?? ROOT,
     stdio: "inherit",
-    shell: true,
   });
   return result.status ?? 1;
 }
@@ -76,11 +75,8 @@ if (installExit !== 0) {
 // 3. Git add, commit, tag, push
 const commands: [string, string[]][] = [
   ["git", ["add", "template/package.json", "template/package-lock.json"]],
-  ["git", ["commit", "-m", `"chore: sync template to v${version} [skip ci]"`]],
-  [
-    "git",
-    ["tag", "-a", `template-v${version}`, "-m", `"Template v${version}"`],
-  ],
+  ["git", ["commit", "-m", `chore: sync template to v${version} [skip ci]`]],
+  ["git", ["tag", "-a", `template-v${version}`, "-m", `Template v${version}`]],
   ["git", ["push", "origin", "main", "--follow-tags"]],
 ];
 

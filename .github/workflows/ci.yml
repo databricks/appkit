@@ -9,7 +9,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
 
 permissions:
-  id-token: write
   contents: read
   pull-requests: read
 
@@ -156,7 +155,7 @@ jobs:
 
       - name: Install template dependencies
         working-directory: pr-template
-        run: npm install
+        run: npm ci
 
       - name: Create zip artifact
         working-directory: pr-template

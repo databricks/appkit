@@ -10,7 +10,7 @@
     "build": "npm run build:app",
     "build:app": "tsdown --out-dir build server/index.ts && cd client && npm run build",
     "build:server": "tsdown --out-dir build server/index.ts",
-    "install": "cd client && npm install && cd ..",
+    "install": "cd client && npm ci && cd ..",
     "preview": "vite preview",
     "check": "tsc",
     "clean": "rm -rf build && cd client && rm -rf dist",
@@ -25,17 +25,17 @@
   "description": "",
   "dependencies": {
     "@databricks/appkit": "workspace:*",
-    "drizzle-orm": "^0.45.1",
-    "reflect-metadata": "^0.2.0",
-    "sequelize": "^6.37.7",
-    "typeorm": "^0.3.20"
+    "drizzle-orm": "0.45.1",
+    "reflect-metadata": "0.2.2",
+    "sequelize": "6.37.7",
+    "typeorm": "0.3.28"
   },
   "devDependencies": {
-    "@playwright/test": "^1.58.1",
-    "@types/node": "^20.0.0",
-    "dotenv": "^16.0.0",
-    "tsdown": "^0.20.3",
-    "tsx": "^4.20.6",
+    "@playwright/test": "1.58.1",
+    "@types/node": "20.19.21",
+    "dotenv": "16.6.1",
+    "tsdown": "0.20.3",
+    "tsx": "4.20.6",
     "vite": "npm:rolldown-vite@7.1.14"
   },
   "overrides": {
