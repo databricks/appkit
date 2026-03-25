@@ -251,11 +251,14 @@ const ALLOWED_CHAT_PARAMS = new Set([
 - `input` (embeddings): must be present, max 100 items if array, each max 32K chars
 - Express body-parser size limit: set to 1MB for serving routes (chat with long history can exceed 100KB default)
 
-**Endpoint name validation (from security review — defense in depth):**
+**Endpoint name validation (from security review + Databricks docs — defense in depth):**
 ```typescript
 const ENDPOINT_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,128}$/;
+// Databricks docs: "Endpoint names cannot use the databricks- prefix"
+const isValidEndpointName = (name: string) =>
+  ENDPOINT_NAME_PATTERN.test(name) && !name.startsWith('databricks-');
 ```
-Validate at startup in `setup()`. Even though values come from env vars, this prevents SSRF if the pattern is ever extended.
+Validate at startup in `setup()`. Even though values come from env vars, this prevents SSRF if the pattern is ever extended. The `databricks-` prefix restriction comes from Databricks platform requirements.
 
 ### Error Handling
 
@@ -633,7 +636,7 @@ Document (but don't implement) swapping the in-memory vector store for Lakebase 
 
 From security review + code review — implement during corresponding phase:
 
-- [ ] Endpoint names validated against `/^[a-zA-Z0-9_-]{1,128}$/` at setup (required + optional if configured)
+- [ ] Endpoint names validated against `/^[a-zA-Z0-9_-]{1,128}$/` and must not start with `databricks-` prefix (platform restriction) at setup
 - [ ] URL constructed using `new URL()` + `encodeURIComponent()` to prevent path traversal
 - [ ] Request body fields filtered through parameter allowlist (v1 excludes: `tools`, `tool_choice`, `logit_bias`, `user`)
 - [ ] `n` parameter capped at max 5
@@ -667,8 +670,11 @@ From security review + code review — implement during corresponding phase:
 
 ### External References
 
-- [Databricks Model Serving docs](https://docs.databricks.com/aws/en/machine-learning/model-serving/create-manage-serving-endpoints)
-- [Foundation model REST API reference](https://docs.databricks.com/aws/en/machine-learning/foundation-model-apis/api-reference)
+- [Databricks Model Serving overview](https://docs.databricks.com/aws/en/machine-learning/model-serving/)
+- [Create and manage serving endpoints](https://docs.databricks.com/aws/en/machine-learning/model-serving/create-manage-serving-endpoints)
+- [Model Serving glossary](https://docs.databricks.com/aws/en/machine-learning/model-serving/glossary)
+- [Query chat models](https://docs.databricks.com/aws/en/machine-learning/model-serving/query-chat-models)
+- [Databricks Apps: Model Serving integration](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/model-serving)
 - [OpenAI Chat Completions API reference](https://platform.openai.com/docs/api-reference/chat)
 - [OpenAI Streaming Responses Guide](https://developers.openai.com/api/docs/guides/streaming-responses)
 - [Node.js Backpressuring in Streams](https://nodejs.org/en/learn/modules/backpressuring-in-streams)
