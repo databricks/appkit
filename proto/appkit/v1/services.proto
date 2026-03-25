@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package appkit.v1;
+
+import "google/protobuf/timestamp.proto";
+import "appkit/v1/common.proto";
+import "appkit/v1/pipeline.proto";
+
+// Service for retrieving pipeline job results.
+service JobDataService {
+  // Get the result of a specific job run.
+  rpc GetJobResult(GetJobResultRequest) returns (JobResult);
+
+  // Stream job results as they complete.
+  rpc StreamJobResults(StreamJobResultsRequest) returns (stream JobResult);
+
+  // Submit a batch of data to a pipeline stage.
+  rpc SubmitBatch(SubmitBatchRequest) returns (SubmitBatchResponse);
+}
+
+// Service for pipeline stage coordination.
+service PipelineService {
+  // Get the schema for a pipeline stage.
+  rpc GetStageSchema(GetStageSchemaRequest) returns (StageSchema);
+
+  // List available pipeline stages.
+  rpc ListStages(ListStagesRequest) returns (ListStagesResponse);
+}
+
+message GetJobResultRequest {
+  string job_run_id = 1;
+}
+
+message StreamJobResultsRequest {
+  string job_id = 1;
+  google.protobuf.Timestamp since = 2;
+  int32 max_results = 3;
+}
+
+message SubmitBatchRequest {
+  DataBatch batch = 1;
+}
+
+message SubmitBatchResponse {
+  bool accepted = 1;
+  string batch_id = 2;
+  Error error = 3;
+}
+
+message GetStageSchemaRequest {
+  string stage_name = 1;
+}
+
+message ListStagesRequest {
+  PageRequest pagination = 1;
+}
+
+message ListStagesResponse {
+  repeated StageSchema stages = 1;
+  PageResponse pagination = 2;
+}

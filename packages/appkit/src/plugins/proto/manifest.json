@@ -1,0 +1,31 @@
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "name": "proto",
+  "displayName": "Proto/gRPC Plugin",
+  "description": "Protobuf serialization and gRPC server/client for inter-service communication and pipeline data contracts",
+  "resources": {
+    "required": [],
+    "optional": []
+  },
+  "config": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "grpcPort": {
+          "type": "number",
+          "description": "Port for standalone gRPC server. If not set, gRPC services share the Express HTTP port via Connect protocol."
+        },
+        "standalone": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run gRPC server on a separate HTTP/2 port (required for native gRPC clients like Python grpcio)"
+        },
+        "timeout": {
+          "type": "number",
+          "default": 30000,
+          "description": "Default timeout for gRPC calls in milliseconds"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,6 @@
+version: v2
+plugins:
+  - local: protoc-gen-es
+    out: ../packages/shared/src/proto
+    opt:
+      - target=ts
