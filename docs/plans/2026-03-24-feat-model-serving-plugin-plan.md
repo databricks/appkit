@@ -17,6 +17,8 @@ deepened: 2026-03-24
 **Code review agents used:** Architecture strategist, Security sentinel, Performance oracle, Spec flow analyzer, Pattern recognition specialist
 **Docs cross-reference review on:** 2026-03-25
 **Docs reviewed:** [Vision models](https://docs.databricks.com/aws/en/machine-learning/model-serving/query-vision-models), [Reasoning models](https://docs.databricks.com/aws/en/machine-learning/model-serving/query-reason-models), [Function calling](https://docs.databricks.com/aws/en/machine-learning/model-serving/function-calling)
+**API spec cross-reference on:** 2026-03-25
+**Sources reviewed:** [Databricks Query API](https://docs.databricks.com/api/workspace/servingendpoints/query), OpenAI SDK v6.32, Anthropic SDK
 
 ### Key Improvements
 1. **Type safety hardened** — removed unsafe index signature, added string literal unions for roles, fully specified response types
@@ -31,6 +33,10 @@ deepened: 2026-03-24
 - `reasoning_effort` added to v1 allowlist (GPT-5, Gemini 3.x, GPT OSS reasoning models — simple string enum, zero security risk)
 - `databricks-` prefix check removed from endpoint name validation — Foundation Model API endpoints all use this prefix (e.g., `databricks-claude-sonnet-4-5`)
 - Vision/multimodal, `thinking`/`budget_tokens` (Claude reasoning), and function calling explicitly documented as v2 considerations in Known Limitations
+- Plan types sourced from OpenAI conventions, not the Databricks API spec (which only documents 7 chat params + `extra_params` catch-all)
+- `id` can be `null` in Databricks responses (fixed in types)
+- `served-model-name` response header available for telemetry
+- `extra_params` is the Databricks-blessed pattern for extended params, but top-level fields also work via OpenAI compat layer
 - AppKit has no upstream SSE parser — need to create one for proxy scenarios
 - `SSEWriter.writeEvent()` doesn't handle backpressure (known gap, not blocking for v1)
 - Resource model simplified: one required (chat) + one optional (embedding) — aligns with CLI `apps init` flow and Databricks Apps `valueFrom` pattern
@@ -229,9 +235,42 @@ const response = await fetch(url, { dispatcher: servingAgent, signal, ... });
 
 Consider separate pools for streaming (long-lived) vs. non-streaming (short-lived) to prevent head-of-line blocking — this is a v2 optimization. For v1, include a single undici `Agent` with `connections: 100` (configurable via `IServingConfig.connectionPoolSize`). Default `fetch()` only allows ~10 connections per origin, which saturates with just 10 concurrent streaming users — each streaming request holds a TCP connection for the full LLM response duration (30-120s). The 6-line `Agent` config prevents this at near-zero cost (undici idle connection overhead is ~1KB memory). 100 provides headroom for mixed streaming + non-streaming workloads (at 40 concurrent streaming users, 60 remain for embeddings). Add a `// TODO: separate pools for streaming vs non-streaming` comment for v2.
 
+### Type Sourcing & API Compatibility
+
+The plugin's request/response types follow **OpenAI conventions**, not the Databricks API spec. The [official Databricks spec](https://docs.databricks.com/api/workspace/servingendpoints/query) is a generic endpoint that documents only 7 chat parameters; everything else passes through the OpenAI-compatible layer. Neither the `openai` nor `@anthropic-ai/sdk` packages are in AppKit's dependencies.
+
+**Type sourcing options:**
+
+| Option | Pros | Cons |
+|--------|------|------|
+| **A. `import type` from `openai`** | Maintained by OpenAI, comprehensive (tools, vision, reasoning, streaming chunks), great autocomplete, zero runtime cost (dev dep only) | Adds a dependency; `openai` is NOT currently in AppKit |
+| **B. Hand-write types (current)** | No new dependency, can restrict to exactly what the allowlist permits | Must be manually maintained, sourced against actual API docs |
+| **C. `@databricks/sdk-experimental`** | Already a dependency | Missing `ChatCompletionChunk`, streaming types, and OpenAI-compatible response shapes |
+
+**Decision:** Hand-write types for v1 (Option B), explicitly sourced against the [OpenAI API reference](https://platform.openai.com/docs/api-reference/chat) and [Databricks API spec](https://docs.databricks.com/api/workspace/servingendpoints/query). Revisit Option A if type drift becomes a maintenance burden. The types define AppKit's security boundary (what the proxy accepts), not the full upstream API.
+
+**SDK comparison — how AppKit maps to alternative SDKs:**
+
+| Aspect | OpenAI SDK | Anthropic SDK | AppKit |
+|--------|-----------|---------------|--------|
+| **Non-streaming** | `client.chat.completions.create()` → `ChatCompletion` | `client.messages.create()` → `Message` | `appkit.serving.chatCollect()` → `ChatCompletionResponse` |
+| **Streaming** | `create({stream:true})` → `Stream<ChatCompletionChunk>` (AsyncIterable) | `create({stream:true})` → `RawMessageStreamEvent` | `chat()` → `AsyncGenerator<ChatCompletionChunk>` |
+| **Streaming (high-level)** | `.stream()` → `ChatCompletionStream` (events + `finalContent()`) | `.stream()` → `MessageStream` (events + `finalText()`) | None — raw AsyncGenerator only |
+| **Embeddings** | `client.embeddings.create()` → `CreateEmbeddingResponse` | N/A | `appkit.serving.embed()` → `EmbeddingResponse` |
+| **Auth** | `apiKey` + `baseURL` | `apiKey` | `WorkspaceClient.config.authenticate()` — SP/OBO |
+| **Content** | `string \| ContentPart[]` (text, image_url, audio, file) | `string \| ContentBlock[]` (text, image, document) | `string` only (v1) |
+| **Reasoning** | `reasoning_effort` enum | `thinking: {type, budget_tokens}` | `reasoning_effort` (v1); `thinking` (v2) |
+| **Tools** | `tools[]` + `tool_choice` + `runTools()` | `tools[]` + `tool_choice` + `zodTool()` | Excluded v1 |
+
+**Key architectural distinction:** OpenAI/Anthropic SDKs are *clients* — they construct requests for one provider. AppKit is a *server-side proxy* — it receives frontend requests, forwards to Databricks (OpenAI-compatible), and streams back. The types define a security boundary, not a client API.
+
+**`served-model-name` response header:** Databricks returns the actual model that served the request in a `served-model-name` response header. Capture this for telemetry spans (e.g., `serving.served_model_name` attribute) — useful when endpoints have traffic splitting across multiple models.
+
 ### Request Validation
 
-Minimal validation with security guardrails:
+Minimal validation with security guardrails.
+
+**Note on `extra_params` (from API spec cross-reference):** The [official Databricks API spec](https://docs.databricks.com/api/workspace/servingendpoints/query) only documents 7 chat parameters (`messages`, `max_tokens`, `n`, `stop`, `stream`, `temperature`, `input`) and provides `extra_params` as a catch-all `object` field for "completions, chat, and embeddings" endpoints. Parameters like `top_p`, `model`, `reasoning_effort`, etc. are NOT in the official spec — they pass through the OpenAI-compatible layer. We send them as top-level fields (matching how the OpenAI SDK sends them) rather than using `extra_params`, because the OpenAI compat layer accepts both approaches and top-level is the convention for OpenAI-compatible clients.
 
 #### Research Insights
 
@@ -367,7 +406,8 @@ interface ChatCompletionRequest {
 }
 
 interface ChatCompletionResponse {
-  id: string;
+  /** Can be `null` for some Databricks models (confirmed in API spec sample). */
+  id: string | null;
   object: 'chat.completion';
   created: number;
   model: string;
@@ -384,7 +424,7 @@ interface ChatCompletionResponse {
 }
 
 interface ChatCompletionChunk {
-  id: string;
+  id: string | null;
   object: 'chat.completion.chunk';
   created: number;
   model: string;
@@ -753,6 +793,7 @@ From security review + code review — implement during corresponding phase:
 - [Query reasoning models](https://docs.databricks.com/aws/en/machine-learning/model-serving/query-reason-models) — `reasoning_effort` (v1), `thinking`/`budget_tokens` (v2)
 - [Function calling](https://docs.databricks.com/aws/en/machine-learning/model-serving/function-calling) — `tools`/`tool_choice` (v2 consideration)
 - [Databricks Apps: Model Serving integration](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/model-serving)
-- [OpenAI Chat Completions API reference](https://platform.openai.com/docs/api-reference/chat)
+- [Serving Endpoints Query API spec](https://docs.databricks.com/api/workspace/servingendpoints/query) — official spec (7 chat params + `extra_params` catch-all; plan types follow OpenAI format instead)
+- [OpenAI Chat Completions API reference](https://platform.openai.com/docs/api-reference/chat) — the actual source for plan types (OpenAI-compatible format)
 - [OpenAI Streaming Responses Guide](https://developers.openai.com/api/docs/guides/streaming-responses)
 - [Node.js Backpressuring in Streams](https://nodejs.org/en/learn/modules/backpressuring-in-streams)
