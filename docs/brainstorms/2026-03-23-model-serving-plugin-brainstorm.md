@@ -34,7 +34,7 @@ A **Model Serving plugin** for AppKit that provides authenticated access to Data
 
 ## Key Decisions
 
-1. **One required + one optional endpoint** — The plugin requires `DATABRICKS_SERVING_ENDPOINT` as the primary endpoint for all operations (chat, embeddings, or agent). Optionally, `DATABRICKS_SERVING_ENDPOINT_EMBEDDING` overrides the endpoint used for embeddings when a separate model is needed (e.g., `databricks-gte-large-en` for embeddings while using `databricks-meta-llama-3-3-70b-instruct` for chat). `chat()`/`chatStream()` always uses the primary. `embed()` uses the embedding override if set, otherwise falls back to the primary. This supports chat-only, embedding-only, and chat+separate-embedding use cases. Aligns with Databricks Apps `valueFrom` pattern and CLI `apps init` flow.
+1. **One required + one optional endpoint** — The plugin requires `DATABRICKS_SERVING_ENDPOINT` as the primary endpoint for all operations (chat, embeddings, or agent). Optionally, `DATABRICKS_SERVING_ENDPOINT_EMBEDDING` overrides the endpoint used for embeddings when a separate model is needed (e.g., `databricks-gte-large-en` for embeddings while using `databricks-meta-llama-3-3-70b-instruct` for chat). `chat()`/`chat()` always uses the primary. `embed()` uses the embedding override if set, otherwise falls back to the primary. This supports chat-only, embedding-only, and chat+separate-embedding use cases. Aligns with Databricks Apps `valueFrom` pattern and CLI `apps init` flow.
 
 2. **OpenAI-compatible passthrough** — Request and response formats match the Databricks chat completions API (which is OpenAI-compatible). No custom request/response types beyond what's needed for TypeScript typing.
 
@@ -120,7 +120,7 @@ const stream = appkit.serving.asUser(req).chat({ messages: [...] });
 }
 ```
 
-**Behavior:** `chat()`/`chatStream()` always uses the primary endpoint. `embed()` uses `DATABRICKS_SERVING_ENDPOINT_EMBEDDING` if configured, otherwise falls back to `DATABRICKS_SERVING_ENDPOINT`.
+**Behavior:** `chat()`/`chat()` always uses the primary endpoint. `embed()` uses `DATABRICKS_SERVING_ENDPOINT_EMBEDDING` if configured, otherwise falls back to `DATABRICKS_SERVING_ENDPOINT`.
 
 ## CLI Integration (`apps init`)
 
@@ -138,18 +138,18 @@ The CLI's existing `serving_endpoint` support (`PromptForServingEndpoint`, `List
 
 ### Dev-Playground: "Paste & Ask" RAG Page
 
-A demo page that showcases both `chatStream()` and `embed()` working together:
+A demo page that showcases both `chat()` and `embed()` working together:
 1. User pastes text chunks into a text area
 2. App embeds them via `embed()`, stores vectors in-memory (per-session, server-side `Map`)
 3. User asks a question in a chat box
 4. App embeds the question, finds top-K similar chunks via cosine similarity
-5. Sends context + question to `chatStream()`, streams the answer with sources
+5. Sends context + question to `chat()`, streams the answer with sources
 
 **Why:** Demonstrates plugin composition, both APIs in action, and a real use case (RAG). More compelling than another chat box (which Genie already covers).
 
 ### Template: Simple Streaming Chat Page
 
-A minimal chat page with streaming responses — conditionally included when the serving plugin is selected. No RAG, no embeddings — just `chatStream()` with conversation history on the frontend.
+A minimal chat page with streaming responses — conditionally included when the serving plugin is selected. No RAG, no embeddings — just `chat()` with conversation history on the frontend.
 
 **Why:** Templates should be minimal starting points. RAG can be added by referencing the dev-playground pattern.
 
