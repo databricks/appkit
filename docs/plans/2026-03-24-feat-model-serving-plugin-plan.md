@@ -24,7 +24,7 @@ deepened: 2026-03-24
 ### New Considerations Discovered
 - AppKit has no upstream SSE parser — need to create one for proxy scenarios
 - `SSEWriter.writeEvent()` doesn't handle backpressure (known gap, not blocking for v1)
-- First plugin with all-optional resources in manifest — intentional deviation, validated with `setup()` guard
+- Resource model simplified: one required (chat) + one optional (embedding) — aligns with CLI `apps init` flow and Databricks Apps `valueFrom` pattern
 
 ---
 
@@ -42,7 +42,7 @@ A `serving` plugin following the established plugin patterns (Genie for streamin
 
 ### Design Decisions (from brainstorm)
 
-1. **Two optional endpoint env vars** — `DATABRICKS_SERVING_CHAT_ENDPOINT` and `DATABRICKS_SERVING_EMBEDDING_ENDPOINT`. At least one must be configured. _(see brainstorm: Key Decision 1)_
+1. **One required + one optional endpoint** — `DATABRICKS_SERVING_ENDPOINT` (required, chat/LLM) and `DATABRICKS_SERVING_EMBEDDING_ENDPOINT` (optional, embeddings). Aligns with CLI `apps init` flow and Databricks Apps `valueFrom` resource pattern. _(see brainstorm: Key Decision 1)_
 2. **OpenAI-compatible passthrough** — no custom request/response types beyond TypeScript typing. _(see brainstorm: Key Decision 2)_
 3. **Streaming via AppKit's executeStream()** — connector returns `AsyncGenerator<ChatCompletionChunk>`, consumed by StreamManager. Matches Genie plugin pattern. _(see brainstorm: Key Decision 3)_
 4. **OBO by default for HTTP routes** — matching Genie and Files plugin conventions. Programmatic API uses service principal by default, with `asUser(req)` for OBO. _(see brainstorm: Key Decision 4, refined by SpecFlow)_
@@ -264,15 +264,15 @@ if (response.status >= 500) {
 
 ### Per-Method Endpoint Validation
 
-Each method validates its endpoint is configured at call time:
+The chat endpoint is always available (required resource). The embedding endpoint needs validation at call time:
 ```typescript
-private ensureChatEndpoint(): string {
-  if (!this.chatEndpointName) {
+private ensureEmbeddingEndpoint(): string {
+  if (!this.embeddingEndpointName) {
     throw new ConfigurationError(
-      'Chat endpoint not configured. Set DATABRICKS_SERVING_CHAT_ENDPOINT.',
+      'Embedding endpoint not configured. Set DATABRICKS_SERVING_EMBEDDING_ENDPOINT.',
     );
   }
-  return this.chatEndpointName;
+  return this.embeddingEndpointName;
 }
 ```
 
@@ -408,26 +408,27 @@ const app = await createApp({
   "displayName": "Model Serving Plugin",
   "description": "Chat completions and embeddings via Databricks Model Serving endpoints",
   "resources": {
-    "required": [],
-    "optional": [
+    "required": [
       {
         "type": "serving_endpoint",
-        "alias": "Chat Endpoint",
-        "resourceKey": "serving-chat-endpoint",
-        "description": "Databricks serving endpoint for chat completions",
+        "alias": "Serving Endpoint",
+        "resourceKey": "serving-endpoint",
+        "description": "Databricks serving endpoint for chat/LLM completions",
         "permission": "CAN_QUERY",
         "fields": {
           "name": {
-            "env": "DATABRICKS_SERVING_CHAT_ENDPOINT",
-            "description": "Name of the chat serving endpoint"
+            "env": "DATABRICKS_SERVING_ENDPOINT",
+            "description": "Name of the serving endpoint"
           }
         }
-      },
+      }
+    ],
+    "optional": [
       {
         "type": "serving_endpoint",
         "alias": "Embedding Endpoint",
         "resourceKey": "serving-embedding-endpoint",
-        "description": "Databricks serving endpoint for embeddings",
+        "description": "Databricks serving endpoint for embeddings (for RAG use cases)",
         "permission": "CAN_QUERY",
         "fields": {
           "name": {
@@ -443,19 +444,19 @@ const app = await createApp({
 
 #### Research Insights
 
-**Resource validation (from architecture + simplicity reviews):** Both resources are `optional` in the static manifest (first plugin to do this — intentional). The `setup()` constructor guard validates "at least one configured" at runtime. Skip `getResourceRequirements()` for v1 — the static manifest plus `setup()` validation is sufficient. Add it later only if Databricks Apps resource provisioning needs it.
+**Resource validation (from architecture + simplicity reviews):** One required resource (chat endpoint) + one optional (embedding endpoint). This matches the standard manifest pattern — required resource is always present, optional is prompted with "Configure X? (optional)" by the CLI. No `getResourceRequirements()` needed. `setup()` only validates the optional embedding endpoint name format if configured.
 
 ## Acceptance Criteria
 
 - [ ] Plugin class `ServingPlugin` extends `Plugin<IServingConfig>` with `static manifest = manifest as PluginManifest<"serving">`
-- [ ] `manifest.json` with `$schema` field and two optional `serving_endpoint` resources
-- [ ] `setup()` validates at least one endpoint is configured, validates endpoint names with regex
+- [ ] `manifest.json` with `$schema` field, one required `serving_endpoint` (chat) and one optional (embedding)
+- [ ] `setup()` validates endpoint name format with regex
 - [ ] **Chat (non-streaming):** `POST /api/serving/chat` proxies to Databricks, returns `ChatCompletionResponse`
 - [ ] **Chat (streaming):** `POST /api/serving/chat/stream` returns SSE stream of `ChatCompletionChunk` via `executeStream()`
 - [ ] **Embeddings:** `POST /api/serving/embeddings` proxies to Databricks, returns `EmbeddingResponse`
 - [ ] Programmatic API: `exports()` returns `{ chat, chatStream, embed }`
 - [ ] OBO: HTTP routes use `asUser(req)`, programmatic API supports `.asUser(req)`
-- [ ] Per-method endpoint validation with clear error messages
+- [ ] Embedding endpoint validation with clear error message when `embed()` called without `DATABRICKS_SERVING_EMBEDDING_ENDPOINT`
 - [ ] Interceptor defaults: chat (120s timeout, no retry, no cache), embeddings (30s timeout, 3 retries, 1hr cache with LRU)
 - [ ] Generic error passthrough: forward upstream status code, sanitize error messages (truncate to 200 chars, generic message for 5xx)
 - [ ] Stream cancellation: `AbortSignal.any()` combining client disconnect + timeout, propagated to upstream `fetch()`
@@ -478,7 +479,7 @@ const app = await createApp({
 5. Write `serving.ts`:
    - `ServingPlugin` class extending `Plugin<IServingConfig>`
    - `static manifest = manifest as PluginManifest<"serving">`
-   - `setup()` — validate at least one endpoint configured, validate endpoint name format
+   - `setup()` — read endpoint names from env vars, validate name format with regex
    - Private `_invoke()` helper — raw `fetch()` with `new URL()`, SDK auth, AbortSignal
    - `_handleChat()` — validate messages (allowlist, bounds), call `_invoke()`, return response
    - `_handleEmbed()` — validate input (bounds), call `_invoke()` with cache interceptor, return response
@@ -535,6 +536,16 @@ Add a conditional `ServingPage.tsx` to the template (included when serving plugi
    - Conditional imports in `template/client/src/App.tsx`
    - Plugin wiring in `template/server/server.ts`
 
+#### CLI/Template Integration
+
+No CLI code changes needed — the existing `serving_endpoint` resource support handles everything:
+
+1. Add `serving` plugin entry to template's `appkit.plugins.json` with the manifest resources
+2. Add conditional `ServingPage.tsx` to template client
+3. Add conditional plugin import/wiring in template `server.ts`
+4. Add `DATABRICKS_SERVING_ENDPOINT` to `.env.tmpl` / `.env.example.tmpl`
+5. The CLI's `PromptForServingEndpoint`, `ListServingEndpoints`, prefetching, and bundle generation work automatically with the manifest
+
 #### Future Enhancement: Lakebase pgvector
 
 Document (but don't implement) swapping the in-memory vector store for Lakebase with pgvector:
@@ -575,7 +586,7 @@ Document (but don't implement) swapping the in-memory vector store for Lakebase 
 
 From security review — implement during corresponding phase:
 
-- [ ] Endpoint name validated against `/^[a-zA-Z0-9_-]{1,128}$/` at setup
+- [ ] Endpoint names validated against `/^[a-zA-Z0-9_-]{1,128}$/` at setup (required + optional if configured)
 - [ ] URL constructed using `new URL()` + `encodeURIComponent()` to prevent path traversal
 - [ ] Request body fields filtered through parameter allowlist (no open `[key: string]: unknown`)
 - [ ] Error responses sanitized: truncate to 200 chars, generic message for 5xx
