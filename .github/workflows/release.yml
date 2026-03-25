@@ -1,11 +1,11 @@
 name: Release
 
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - 'packages/lakebase/**'
+  # push:
+  #   branches:
+  #     - main
+  #   paths-ignore:
+  #     - 'packages/lakebase/**'
   workflow_dispatch:
     inputs:
       dry-run:
