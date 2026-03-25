@@ -1,3 +1,4 @@
+import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { useMemo } from "react";
 import { cn } from "../lib/utils";
@@ -43,7 +44,10 @@ export function GenieChatMessage({
   const isUser = message.role === "user";
   const queryAttachments = message.attachments.filter(isQueryAttachment);
   const html = useMemo(
-    () => (message.content ? (marked.parse(message.content) as string) : ""),
+    () =>
+      message.content
+        ? DOMPurify.sanitize(marked.parse(message.content) as string)
+        : "",
     [message.content],
   );
 
