@@ -11,7 +11,7 @@ A **Model Serving plugin** for AppKit that provides authenticated access to Data
 
 - **Chat/LLM completions** (OpenAI-compatible `messages` format)
 - **Embeddings** (same serving infrastructure, `input` format)
-- **Streaming-by-default** for chat (like Genie's `sendMessage`), with non-streaming HTTP route that collects the full response
+- **Streaming for programmatic API, both modes for HTTP** — `chat()` always streams (like Genie's `sendMessage`), `chatCollect()` provides non-streaming access. Non-streaming HTTP route calls Databricks without `stream: true` directly
 - **One required endpoint** (chat/LLM) + **one optional endpoint** (embeddings)
 - **Programmatic API** (`exports()`) for server-side use + **HTTP routes** for frontend consumption
 
@@ -38,7 +38,7 @@ A **Model Serving plugin** for AppKit that provides authenticated access to Data
 
 2. **OpenAI-compatible passthrough** — Request and response formats match the Databricks chat completions API (which is OpenAI-compatible). No custom request/response types beyond what's needed for TypeScript typing.
 
-3. **Streaming via AppKit's StreamManager** — SSE streaming uses the existing `executeStream()` infrastructure. The plugin proxies the upstream SSE stream from the serving endpoint to the client.
+3. **Streaming via AppKit's StreamManager** — The programmatic `chat()` API returns a raw `AsyncGenerator` via `yield*` (like Genie's `sendMessage`). The HTTP streaming route uses `executeStream(res, ...)` to proxy through AppKit's StreamManager. The non-streaming HTTP route (`POST /chat`) calls Databricks without `stream: true` directly — no SSE parsing needed.
 
 4. **Auth: service principal by default, OBO supported** — Like other plugins, default execution uses the app's service principal. `asUser(req)` enables on-behalf-of execution where the user's token is forwarded.
 
@@ -49,7 +49,7 @@ A **Model Serving plugin** for AppKit that provides authenticated access to Data
 ### Programmatic API (exports)
 
 ```typescript
-// Chat (always streams, like Genie's sendMessage)
+// Chat streaming (always streams, like Genie's sendMessage)
 const stream = appkit.serving.chat({
   messages: [{ role: "user", content: "Hello" }],
   temperature: 0.7,
@@ -58,6 +58,12 @@ const stream = appkit.serving.chat({
 for await (const chunk of stream) {
   // process chunk.choices[0].delta.content
 }
+
+// Chat non-streaming (convenience for server-side callers)
+const response = await appkit.serving.chatCollect({
+  messages: [{ role: "user", content: "Hello" }],
+});
+// response.choices[0].message.content
 
 // Embeddings
 const embeddings = await appkit.serving.embed({
