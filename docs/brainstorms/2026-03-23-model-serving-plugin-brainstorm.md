@@ -120,7 +120,7 @@ const stream = appkit.serving.asUser(req).chat({ messages: [...] });
 }
 ```
 
-**Behavior:** `chat()`/`chat()` always uses the primary endpoint. `embed()` uses `DATABRICKS_SERVING_ENDPOINT_EMBEDDING` if configured, otherwise falls back to `DATABRICKS_SERVING_ENDPOINT`.
+**Behavior:** `chat()` always uses the primary endpoint. `embed()` uses `DATABRICKS_SERVING_ENDPOINT_EMBEDDING` if configured, otherwise falls back to `DATABRICKS_SERVING_ENDPOINT`.
 
 ## CLI Integration (`apps init`)
 
@@ -163,6 +163,9 @@ _(None — all key decisions resolved during brainstorm)_
 
 ## References
 
-- [Databricks Model Serving docs](https://docs.databricks.com/aws/en/machine-learning/model-serving/create-manage-serving-endpoints)
-- [Foundation model REST API reference](https://docs.databricks.com/aws/en/machine-learning/foundation-model-apis/api-reference)
+- [Databricks Model Serving overview](https://docs.databricks.com/aws/en/machine-learning/model-serving/)
+- [Create and manage serving endpoints](https://docs.databricks.com/aws/en/machine-learning/model-serving/create-manage-serving-endpoints)
+- [Model Serving glossary](https://docs.databricks.com/aws/en/machine-learning/model-serving/glossary)
+- [Query chat models](https://docs.databricks.com/aws/en/machine-learning/model-serving/query-chat-models)
+- [Databricks Apps: Model Serving integration](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/model-serving)
 - Existing plugin patterns: Analytics, Files, Genie, Lakebase
