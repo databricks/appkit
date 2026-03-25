@@ -37,6 +37,9 @@ deepened: 2026-03-24
 - `id` can be `null` in Databricks responses (fixed in types)
 - `served-model-name` response header available for telemetry
 - `extra_params` is the Databricks-blessed pattern for extended params, but top-level fields also work via OpenAI compat layer
+- Per-endpoint OpenAPI schema available via `GET /api/2.0/serving-endpoints/{name}/openapi` (CLI: `databricks serving-endpoints get-open-api <name>`) — built from MLflow model signature
+- Schema-driven type generation planned as follow-up (same pattern as query type generator in `packages/appkit/src/type-generator/`)
+- Schema will replace both hand-written types and parameter allowlist — the schema IS the filter
 - AppKit has no upstream SSE parser — need to create one for proxy scenarios
 - `SSEWriter.writeEvent()` doesn't handle backpressure (known gap, not blocking for v1)
 - Resource model simplified: one required (chat) + one optional (embedding) — aligns with CLI `apps init` flow and Databricks Apps `valueFrom` pattern
@@ -247,7 +250,9 @@ The plugin's request/response types follow **OpenAI conventions**, not the Datab
 | **B. Hand-write types (current)** | No new dependency, can restrict to exactly what the allowlist permits | Must be manually maintained, sourced against actual API docs |
 | **C. `@databricks/sdk-experimental`** | Already a dependency | Missing `ChatCompletionChunk`, streaming types, and OpenAI-compatible response shapes |
 
-**Decision:** Hand-write types for v1 (Option B), explicitly sourced against the [OpenAI API reference](https://platform.openai.com/docs/api-reference/chat) and [Databricks API spec](https://docs.databricks.com/api/workspace/servingendpoints/query). Revisit Option A if type drift becomes a maintenance burden. The types define AppKit's security boundary (what the proxy accepts), not the full upstream API.
+| **D. Generate from per-endpoint OpenAPI schema (follow-up)** | Authoritative per-endpoint types from MLflow signature, replaces hand-written types AND allowlist, same Vite plugin pattern as query typegen | Not for v1 — requires build-time schema fetch infrastructure. See "Follow-Up: Schema-Driven Type Generation" section below |
+
+**Decision:** Hand-write types for v1 (Option B), explicitly sourced against the [OpenAI API reference](https://platform.openai.com/docs/api-reference/chat) and [Databricks API spec](https://docs.databricks.com/api/workspace/servingendpoints/query). **Planned evolution: Option D** — schema-driven type generation from per-endpoint OpenAPI spec, replacing both hand-written types and the parameter allowlist. See "Follow-Up: Schema-Driven Type Generation" section.
 
 **SDK comparison — how AppKit maps to alternative SDKs:**
 
@@ -367,6 +372,8 @@ The AbortSignal propagates to upstream `fetch()` calls, cancelling TCP connectio
 ## API Surface
 
 ### Programmatic API (exports)
+
+**v1 type scope:** These types are **chat/embeddings-specific** — they cover OpenAI-compatible chat completions and embeddings only. They do NOT handle custom ML model endpoints (dataframe_split, instances, tensors), completions (prompt-based), vision (multimodal content arrays), or reasoning model response formats (content block arrays). The schema-driven type generation follow-up (see "Follow-Up: Schema-Driven Type Generation" section) will replace these with per-endpoint types derived from the actual OpenAPI schema.
 
 ```typescript
 // packages/appkit/src/plugins/serving/types.ts
@@ -706,6 +713,28 @@ Document (but don't implement) swapping the in-memory vector store for Lakebase 
 - pgvector table schema: `doc_chunks(id, session_id, content, embedding vector(1024))`
 - Similarity search: `ORDER BY embedding <-> $query LIMIT $k`
 
+## Follow-Up: Schema-Driven Type Generation
+
+Every Databricks serving endpoint exposes its own OpenAPI schema via `GET /api/2.0/serving-endpoints/{name}/openapi` (CLI: `databricks serving-endpoints get-open-api <name>`). The schema is built from the model's MLflow signature at deploy time — each endpoint can have a different schema.
+
+**Existing pattern:** AppKit's query type generator (`packages/appkit/src/type-generator/`) already does this for SQL:
+- `appKitTypesPlugin` (Vite plugin) runs at `buildStart` in both dev and build modes
+- Fetches schemas via `DESCRIBE QUERY` using `WorkspaceClient`
+- Generates `.d.ts` with module augmentation (extends `QueryRegistry`)
+- Caches by MD5 hash in `.appkit-types-cache.json`
+- Watches for `.sql` file changes in dev mode
+- Gated on `DATABRICKS_WAREHOUSE_ID` env var
+
+**Serving equivalent:**
+- **Trigger:** Gated on `DATABRICKS_SERVING_ENDPOINT` env var (same pattern)
+- **Fetch:** `GET /api/2.0/serving-endpoints/{name}/openapi` using `WorkspaceClient`
+- **Generate:** Typed request/response interfaces from the OpenAPI schema
+- **Augment:** Module augmentation so `appkit.serving.chat()` params/return types match the actual endpoint schema
+- **Cache:** Hash the schema content, invalidate on change
+- **Schema as filter:** At runtime, the OpenAPI schema replaces the hand-coded `ALLOWED_CHAT_PARAMS` — only params in the schema are forwarded to Databricks. The schema is the source of truth for what the endpoint accepts
+
+**Why not v1:** The generic OpenAI-compatible types work for Foundation Model API endpoints. Schema-driven generation becomes essential when custom model endpoints (with custom MLflow signatures) are in scope.
+
 ## System-Wide Impact
 
 - **New SSE parser utility:** `parseSSEStream()` extracted to `packages/appkit/src/stream/sse-parser.ts` in Phase 2 — generic utility (parses any SSE stream into JSON objects), natural complement to existing `sse-writer.ts`.
@@ -794,6 +823,7 @@ From security review + code review — implement during corresponding phase:
 - [Function calling](https://docs.databricks.com/aws/en/machine-learning/model-serving/function-calling) — `tools`/`tool_choice` (v2 consideration)
 - [Databricks Apps: Model Serving integration](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/model-serving)
 - [Serving Endpoints Query API spec](https://docs.databricks.com/api/workspace/servingendpoints/query) — official spec (7 chat params + `extra_params` catch-all; plan types follow OpenAI format instead)
+- [Serving Endpoints OpenAPI Schema](https://docs.databricks.com/api/workspace/servingendpoints/get-open-api) — per-endpoint OpenAPI spec from MLflow model signature (follow-up: schema-driven type generation)
 - [OpenAI Chat Completions API reference](https://platform.openai.com/docs/api-reference/chat) — the actual source for plan types (OpenAI-compatible format)
 - [OpenAI Streaming Responses Guide](https://developers.openai.com/api/docs/guides/streaming-responses)
 - [Node.js Backpressuring in Streams](https://nodejs.org/en/learn/modules/backpressuring-in-streams)
