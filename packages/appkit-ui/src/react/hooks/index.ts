@@ -15,3 +15,13 @@ export {
   useChartData,
 } from "./use-chart-data";
 export { usePluginClientConfig } from "./use-plugin-config";
+export {
+  type UseServingInvokeOptions,
+  type UseServingInvokeResult,
+  useServingInvoke,
+} from "./use-serving-invoke";
+export {
+  type UseServingStreamOptions,
+  type UseServingStreamResult,
+  useServingStream,
+} from "./use-serving-stream";

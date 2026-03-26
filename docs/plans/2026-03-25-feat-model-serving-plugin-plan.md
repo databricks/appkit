@@ -492,8 +492,8 @@ Phase 6 can start after Phase 1 (plugin exists) but the serving page template ne
 - [x] Vite plugin generates `.d.ts` with `ServingEndpointRegistry` from OpenAPI schemas
 - [x] Generated types include `request`, `response`, and `chunk` (when OpenAI-compatible)
 - [x] Runtime schema filter warns and strips unknown params
-- [ ] Frontend hooks: `useServingInvoke()` and `useServingStream()`
-- [ ] Dev playground demo page working with real endpoint
+- [x] Frontend hooks: `useServingInvoke()` and `useServingStream()`
+- [x] Dev playground demo page working with real endpoint
 - [ ] Template: `appkit.plugins.json` includes serving plugin entry
 - [ ] Template: `databricks apps init --features serving` generates a working app
 - [ ] Template: `tools/generate-app-templates.ts` produces `appkit-serving` and updated `appkit-all-in-one`
