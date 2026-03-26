@@ -7,7 +7,6 @@ import {
 } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ServiceContext } from "../../../context/service-context";
-import { Plugin } from "../../../plugin";
 import { ServingPlugin, serving } from "../serving";
 import type { IServingConfig } from "../types";
 
