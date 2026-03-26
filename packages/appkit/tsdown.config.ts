@@ -27,5 +27,12 @@ export default defineConfig([
       return /^[^./]/.test(id) || id.includes("/node_modules/");
     },
     tsconfig: "./tsconfig.json",
+    copy: [
+      {
+        from: "src/plugins/server/remote-tunnel/*.html",
+        to: "dist/plugins/server/remote-tunnel",
+        flatten: true,
+      },
+    ],
   },
 ]);

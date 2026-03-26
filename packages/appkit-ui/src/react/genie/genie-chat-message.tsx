@@ -10,7 +10,7 @@ import type { GenieAttachmentResponse, GenieMessageItem } from "./types";
 /**
  * Using `marked` instead of `react-markdown` because `react-markdown` depends on
  * `micromark-util-symbol` which has broken ESM exports with `rolldown-vite`.
- * Content comes from our own Genie API so `dangerouslySetInnerHTML` is safe.
+ * Output is sanitized with DOMPurify before being passed to `dangerouslySetInnerHTML`.
  */
 marked.setOptions({ breaks: true, gfm: true });
 
