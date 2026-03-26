@@ -2,6 +2,16 @@
   "$schema": "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
   "version": "1.0",
   "plugins": {
+    "agent": {
+      "name": "agent",
+      "displayName": "Agent Plugin",
+      "description": "Framework-agnostic AI agent with auto-tool-discovery from all registered plugins",
+      "package": "@databricks/appkit",
+      "resources": {
+        "required": [],
+        "optional": []
+      }
+    },
     "analytics": {
       "name": "analytics",
       "displayName": "Analytics Plugin",

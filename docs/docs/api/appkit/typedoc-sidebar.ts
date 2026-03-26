@@ -84,6 +84,26 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
+          id: "api/appkit/Interface.AgentAdapter",
+          label: "AgentAdapter"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.AgentInput",
+          label: "AgentInput"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.AgentRunContext",
+          label: "AgentRunContext"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.AgentToolDefinition",
+          label: "AgentToolDefinition"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.BasePluginConfig",
           label: "BasePluginConfig"
         },
@@ -111,6 +131,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.LakebasePoolConfig",
           label: "LakebasePoolConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.Message",
+          label: "Message"
         },
         {
           type: "doc",
@@ -154,6 +179,21 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.Thread",
+          label: "Thread"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ThreadStore",
+          label: "ThreadStore"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ToolProvider",
+          label: "ToolProvider"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.ValidationResult",
           label: "ValidationResult"
         }
@@ -163,6 +203,11 @@ const typedocSidebar: SidebarsConfig = {
       type: "category",
       label: "Type Aliases",
       items: [
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.AgentEvent",
+          label: "AgentEvent"
+        },
         {
           type: "doc",
           id: "api/appkit/TypeAlias.ConfigSchema",

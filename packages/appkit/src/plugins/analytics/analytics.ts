@@ -1,10 +1,12 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type express from "express";
 import type {
+  AgentToolDefinition,
   IAppRouter,
   PluginExecuteConfig,
   SQLTypeMarker,
   StreamExecutionSettings,
+  ToolProvider,
 } from "shared";
 import { SQLWarehouseConnector } from "../../connectors";
 import {
@@ -26,7 +28,7 @@ import type {
 
 const logger = createLogger("analytics");
 
-export class AnalyticsPlugin extends Plugin {
+export class AnalyticsPlugin extends Plugin implements ToolProvider {
   /** Plugin manifest declaring metadata and resource requirements */
   static manifest = manifest as PluginManifest<"analytics">;
 
@@ -265,6 +267,40 @@ export class AnalyticsPlugin extends Plugin {
 
   async shutdown(): Promise<void> {
     this.streamManager.abortAll();
+  }
+
+  getAgentTools(): AgentToolDefinition[] {
+    return [
+      {
+        name: "query",
+        description:
+          "Execute a SQL query against the Databricks SQL warehouse. Returns the query results as JSON.",
+        parameters: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "The SQL query to execute",
+            },
+          },
+          required: ["query"],
+        },
+        annotations: {
+          readOnly: true,
+          requiresUserContext: true,
+        },
+      },
+    ];
+  }
+
+  async executeAgentTool(
+    name: string,
+    args: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    if (name !== "query") throw new Error(`Unknown tool: ${name}`);
+    const { query } = args as { query: string };
+    return this.query(query, undefined, undefined, signal);
   }
 
   /**

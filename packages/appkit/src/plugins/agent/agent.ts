@@ -1,0 +1,398 @@
+import { randomUUID } from "node:crypto";
+import type express from "express";
+import type {
+  AgentAdapter,
+  AgentEvent,
+  AgentToolDefinition,
+  IAppRouter,
+  Message,
+  PluginPhase,
+  ToolProvider,
+} from "shared";
+import { createLogger } from "../../logging/logger";
+import { Plugin, toPlugin } from "../../plugin";
+import type { PluginManifest } from "../../registry";
+import { agentStreamDefaults } from "./defaults";
+import manifest from "./manifest.json";
+import { InMemoryThreadStore } from "./thread-store";
+import type { AgentPluginConfig, RegisteredAgent, ToolEntry } from "./types";
+
+const logger = createLogger("agent");
+
+function isToolProvider(obj: unknown): obj is ToolProvider {
+  return (
+    typeof obj === "object" &&
+    obj !== null &&
+    "getAgentTools" in obj &&
+    typeof (obj as any).getAgentTools === "function" &&
+    "executeAgentTool" in obj &&
+    typeof (obj as any).executeAgentTool === "function"
+  );
+}
+
+export class AgentPlugin extends Plugin {
+  static manifest = manifest as PluginManifest<"agent">;
+  static phase: PluginPhase = "deferred";
+
+  protected declare config: AgentPluginConfig;
+
+  private agents = new Map<string, RegisteredAgent>();
+  private defaultAgentName: string | null = null;
+  private toolIndex = new Map<string, ToolEntry>();
+  private threadStore;
+  private activeStreams = new Map<string, AbortController>();
+
+  constructor(config: AgentPluginConfig) {
+    super(config);
+    this.config = config;
+    this.threadStore = config.threadStore ?? new InMemoryThreadStore();
+  }
+
+  async setup() {
+    this.collectTools();
+
+    if (this.config.agents) {
+      const entries = Object.entries(this.config.agents);
+      const resolved = await Promise.all(
+        entries.map(async ([name, adapterOrPromise]) => ({
+          name,
+          adapter: await adapterOrPromise,
+        })),
+      );
+      for (const { name, adapter } of resolved) {
+        this.agents.set(name, { name, adapter });
+        if (!this.defaultAgentName) {
+          this.defaultAgentName = name;
+        }
+      }
+    }
+
+    if (this.config.defaultAgent) {
+      this.defaultAgentName = this.config.defaultAgent;
+    }
+  }
+
+  private collectTools() {
+    const plugins = this.config.plugins;
+    if (!plugins) return;
+
+    for (const [pluginName, pluginInstance] of Object.entries(plugins)) {
+      if (pluginName === "agent") continue;
+      if (!isToolProvider(pluginInstance)) continue;
+
+      const tools = (pluginInstance as ToolProvider).getAgentTools();
+      for (const tool of tools) {
+        const qualifiedName = `${pluginName}.${tool.name}`;
+        this.toolIndex.set(qualifiedName, {
+          plugin: pluginInstance as ToolProvider & { asUser(req: any): any },
+          def: { ...tool, name: qualifiedName },
+          localName: tool.name,
+        });
+      }
+
+      logger.info(
+        "Collected %d tools from plugin %s",
+        tools.length,
+        pluginName,
+      );
+    }
+
+    logger.info("Total agent tools: %d", this.toolIndex.size);
+  }
+
+  injectRoutes(router: IAppRouter) {
+    this.route(router, {
+      name: "chat",
+      method: "post",
+      path: "/chat",
+      handler: async (req, res) => this._handleChat(req, res),
+    });
+
+    this.route(router, {
+      name: "cancel",
+      method: "post",
+      path: "/cancel",
+      handler: async (req, res) => this._handleCancel(req, res),
+    });
+
+    this.route(router, {
+      name: "threads",
+      method: "get",
+      path: "/threads",
+      handler: async (req, res) => this._handleListThreads(req, res),
+    });
+
+    this.route(router, {
+      name: "thread",
+      method: "get",
+      path: "/threads/:threadId",
+      handler: async (req, res) => this._handleGetThread(req, res),
+    });
+
+    this.route(router, {
+      name: "deleteThread",
+      method: "delete",
+      path: "/threads/:threadId",
+      handler: async (req, res) => this._handleDeleteThread(req, res),
+    });
+
+    this.route(router, {
+      name: "tools",
+      method: "get",
+      path: "/tools",
+      handler: async (req, res) => this._handleListTools(req, res),
+    });
+
+    this.route(router, {
+      name: "agents",
+      method: "get",
+      path: "/agents",
+      handler: async (_req, res) => {
+        res.json({
+          agents: Array.from(this.agents.keys()),
+          default: this.defaultAgentName,
+        });
+      },
+    });
+  }
+
+  private async _handleChat(
+    req: express.Request,
+    res: express.Response,
+  ): Promise<void> {
+    const {
+      message,
+      threadId,
+      agent: agentName,
+    } = req.body as {
+      message?: string;
+      threadId?: string;
+      agent?: string;
+    };
+
+    if (!message) {
+      res.status(400).json({ error: "message is required" });
+      return;
+    }
+
+    const resolvedAgent = this.resolveAgent(agentName);
+    if (!resolvedAgent) {
+      res.status(400).json({
+        error: agentName
+          ? `Agent "${agentName}" not found`
+          : "No agent registered",
+      });
+      return;
+    }
+
+    const userId = this.resolveUserId(req);
+
+    let thread = threadId ? await this.threadStore.get(threadId, userId) : null;
+
+    if (threadId && !thread) {
+      res.status(404).json({ error: `Thread ${threadId} not found` });
+      return;
+    }
+
+    if (!thread) {
+      thread = await this.threadStore.create(userId);
+    }
+
+    const userMessage: Message = {
+      id: randomUUID(),
+      role: "user",
+      content: message,
+      createdAt: new Date(),
+    };
+    await this.threadStore.addMessage(thread.id, userId, userMessage);
+
+    const tools = this.getAllToolDefinitions();
+    const abortController = new AbortController();
+    const signal = abortController.signal;
+
+    const executeTool = async (
+      qualifiedName: string,
+      args: unknown,
+    ): Promise<unknown> => {
+      const entry = this.toolIndex.get(qualifiedName);
+      if (!entry) throw new Error(`Unknown tool: ${qualifiedName}`);
+
+      const target = entry.def.annotations?.requiresUserContext
+        ? (entry.plugin as any).asUser(req)
+        : entry.plugin;
+
+      return (target as ToolProvider).executeAgentTool(
+        entry.localName,
+        args,
+        signal,
+      );
+    };
+
+    const requestId = randomUUID();
+    this.activeStreams.set(requestId, abortController);
+
+    const self = this;
+
+    await this.executeStream<AgentEvent>(
+      res,
+      async function* () {
+        try {
+          yield { type: "metadata" as const, data: { threadId: thread.id } };
+
+          const stream = resolvedAgent.adapter.run(
+            {
+              messages: [...thread.messages],
+              tools,
+              threadId: thread.id,
+              signal,
+            },
+            { executeTool, signal },
+          );
+
+          let fullContent = "";
+
+          for await (const event of stream) {
+            if (signal.aborted) break;
+
+            if (event.type === "message_delta") {
+              fullContent += event.content;
+            }
+
+            yield event;
+          }
+
+          if (fullContent) {
+            const assistantMessage: Message = {
+              id: randomUUID(),
+              role: "assistant",
+              content: fullContent,
+              createdAt: new Date(),
+            };
+            await self.threadStore.addMessage(
+              thread.id,
+              userId,
+              assistantMessage,
+            );
+          }
+
+          yield { type: "status" as const, status: "complete" as const };
+        } catch (error) {
+          if (signal.aborted) return;
+          logger.error("Agent chat error: %O", error);
+          throw error;
+        } finally {
+          self.activeStreams.delete(requestId);
+        }
+      },
+      {
+        ...agentStreamDefaults,
+        stream: {
+          ...agentStreamDefaults.stream,
+          streamId: requestId,
+        },
+      },
+    );
+  }
+
+  private async _handleCancel(
+    req: express.Request,
+    res: express.Response,
+  ): Promise<void> {
+    const { streamId } = req.body as { streamId?: string };
+    if (!streamId) {
+      res.status(400).json({ error: "streamId is required" });
+      return;
+    }
+    const controller = this.activeStreams.get(streamId);
+    if (controller) {
+      controller.abort("Cancelled by user");
+      this.activeStreams.delete(streamId);
+    }
+    res.json({ cancelled: true });
+  }
+
+  private async _handleListThreads(
+    req: express.Request,
+    res: express.Response,
+  ): Promise<void> {
+    const userId = this.resolveUserId(req);
+    const threads = await this.threadStore.list(userId);
+    res.json({ threads });
+  }
+
+  private async _handleGetThread(
+    req: express.Request,
+    res: express.Response,
+  ): Promise<void> {
+    const userId = this.resolveUserId(req);
+    const thread = await this.threadStore.get(req.params.threadId, userId);
+    if (!thread) {
+      res.status(404).json({ error: "Thread not found" });
+      return;
+    }
+    res.json(thread);
+  }
+
+  private async _handleDeleteThread(
+    req: express.Request,
+    res: express.Response,
+  ): Promise<void> {
+    const userId = this.resolveUserId(req);
+    const deleted = await this.threadStore.delete(req.params.threadId, userId);
+    if (!deleted) {
+      res.status(404).json({ error: "Thread not found" });
+      return;
+    }
+    res.json({ deleted: true });
+  }
+
+  private async _handleListTools(
+    _req: express.Request,
+    res: express.Response,
+  ): Promise<void> {
+    res.json({ tools: this.getAllToolDefinitions() });
+  }
+
+  private resolveAgent(name?: string): RegisteredAgent | null {
+    if (name) return this.agents.get(name) ?? null;
+    if (this.defaultAgentName) {
+      return this.agents.get(this.defaultAgentName) ?? null;
+    }
+    const first = this.agents.values().next();
+    return first.done ? null : first.value;
+  }
+
+  private getAllToolDefinitions(): AgentToolDefinition[] {
+    return Array.from(this.toolIndex.values()).map((e) => e.def);
+  }
+
+  exports() {
+    return {
+      registerAgent: (name: string, adapter: AgentAdapter) => {
+        this.agents.set(name, { name, adapter });
+        if (!this.defaultAgentName) {
+          this.defaultAgentName = name;
+        }
+      },
+      registerTool: (
+        pluginName: string,
+        tool: AgentToolDefinition,
+        provider: ToolProvider & { asUser(req: any): any },
+      ) => {
+        const qualifiedName = `${pluginName}.${tool.name}`;
+        this.toolIndex.set(qualifiedName, {
+          plugin: provider,
+          def: { ...tool, name: qualifiedName },
+          localName: tool.name,
+        });
+      },
+      getTools: () => this.getAllToolDefinitions(),
+      getThreads: (userId: string) => this.threadStore.list(userId),
+    };
+  }
+}
+
+/**
+ * @internal
+ */
+export const agent = toPlugin(AgentPlugin);

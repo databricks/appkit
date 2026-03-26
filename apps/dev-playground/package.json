@@ -36,6 +36,8 @@
     "dotenv": "16.6.1",
     "tsdown": "0.20.3",
     "tsx": "4.20.6",
+    "@ai-sdk/openai": "1.0.0",
+    "ai": "4.0.0",
     "vite": "npm:rolldown-vite@7.1.14"
   },
   "overrides": {

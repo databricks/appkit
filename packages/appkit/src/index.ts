@@ -7,11 +7,20 @@
 
 // Types from shared
 export type {
+  AgentAdapter,
+  AgentEvent,
+  AgentInput,
+  AgentRunContext,
+  AgentToolDefinition,
   BasePluginConfig,
   CacheConfig,
   IAppRouter,
+  Message,
   PluginData,
   StreamExecutionSettings,
+  Thread,
+  ThreadStore,
+  ToolProvider,
 } from "shared";
 export { isSQLTypeMarker, sql } from "shared";
 export { CacheManager } from "./cache";
@@ -48,7 +57,7 @@ export {
 } from "./errors";
 // Plugin authoring
 export { Plugin, type ToPlugin, toPlugin } from "./plugin";
-export { analytics, files, genie, lakebase, server } from "./plugins";
+export { agent, analytics, files, genie, lakebase, server } from "./plugins";
 // Registry types and utilities for plugin manifests
 export type {
   ConfigSchema,

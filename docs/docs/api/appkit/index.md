@@ -30,12 +30,17 @@ plugin architecture, and React integration.
 
 | Interface | Description |
 | ------ | ------ |
+| [AgentAdapter](Interface.AgentAdapter.md) | - |
+| [AgentInput](Interface.AgentInput.md) | - |
+| [AgentRunContext](Interface.AgentRunContext.md) | - |
+| [AgentToolDefinition](Interface.AgentToolDefinition.md) | - |
 | [BasePluginConfig](Interface.BasePluginConfig.md) | Base configuration interface for AppKit plugins |
 | [CacheConfig](Interface.CacheConfig.md) | Configuration for the CacheInterceptor. Controls TTL, size limits, storage backend, and probabilistic cleanup. |
 | [DatabaseCredential](Interface.DatabaseCredential.md) | Database credentials with OAuth token for Postgres connection |
 | [GenerateDatabaseCredentialRequest](Interface.GenerateDatabaseCredentialRequest.md) | Request parameters for generating database OAuth credentials |
 | [ITelemetry](Interface.ITelemetry.md) | Plugin-facing interface for OpenTelemetry instrumentation. Provides a thin abstraction over OpenTelemetry APIs for plugins. |
 | [LakebasePoolConfig](Interface.LakebasePoolConfig.md) | Configuration for creating a Lakebase connection pool |
+| [Message](Interface.Message.md) | - |
 | [PluginManifest](Interface.PluginManifest.md) | Plugin manifest that declares metadata and resource requirements. Attached to plugin classes as a static property. Extends the shared PluginManifest with strict resource types. |
 | [RequestedClaims](Interface.RequestedClaims.md) | Optional claims for fine-grained Unity Catalog table permissions When specified, the returned token will be scoped to only the requested tables |
 | [RequestedResource](Interface.RequestedResource.md) | Resource to request permissions for in Unity Catalog |
@@ -44,12 +49,16 @@ plugin architecture, and React integration.
 | [ResourceRequirement](Interface.ResourceRequirement.md) | Declares a resource requirement for a plugin. Can be defined statically in a manifest or dynamically via getResourceRequirements(). Narrows the generated base: type → ResourceType enum, permission → ResourcePermission union. |
 | [StreamExecutionSettings](Interface.StreamExecutionSettings.md) | Execution settings for streaming endpoints. Extends PluginExecutionSettings with SSE stream configuration. |
 | [TelemetryConfig](Interface.TelemetryConfig.md) | OpenTelemetry configuration for AppKit applications |
+| [Thread](Interface.Thread.md) | - |
+| [ThreadStore](Interface.ThreadStore.md) | - |
+| [ToolProvider](Interface.ToolProvider.md) | - |
 | [ValidationResult](Interface.ValidationResult.md) | Result of validating all registered resources against the environment. |
 
 ## Type Aliases
 
 | Type Alias | Description |
 | ------ | ------ |
+| [AgentEvent](TypeAlias.AgentEvent.md) | - |
 | [ConfigSchema](TypeAlias.ConfigSchema.md) | Configuration schema definition for plugin config. Re-exported from the standard JSON Schema Draft 7 types. |
 | [IAppRouter](TypeAlias.IAppRouter.md) | Express router type for plugin route registration |
 | [PluginData](TypeAlias.PluginData.md) | Tuple of plugin class, config, and name. Created by `toPlugin()` and passed to `createApp()`. |

@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type express from "express";
-import type { IAppRouter, StreamExecutionSettings } from "shared";
+import type {
+  AgentToolDefinition,
+  IAppRouter,
+  StreamExecutionSettings,
+  ToolProvider,
+} from "shared";
 import { GenieConnector } from "../../connectors";
 import { getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging";
@@ -17,7 +22,7 @@ import type {
 
 const logger = createLogger("genie");
 
-export class GeniePlugin extends Plugin {
+export class GeniePlugin extends Plugin implements ToolProvider {
   static manifest = manifest as PluginManifest<"genie">;
 
   protected static description =
@@ -223,6 +228,90 @@ export class GeniePlugin extends Plugin {
 
   async shutdown(): Promise<void> {
     this.streamManager.abortAll();
+  }
+
+  getAgentTools(): AgentToolDefinition[] {
+    const spaces = Object.keys(this.config.spaces ?? {});
+    const tools: AgentToolDefinition[] = [];
+
+    for (const alias of spaces) {
+      tools.push({
+        name: `${alias}.sendMessage`,
+        description: `Send a natural language question to the Genie space "${alias}" and get data analysis results`,
+        parameters: {
+          type: "object",
+          properties: {
+            content: {
+              type: "string",
+              description: "The natural language question to ask",
+            },
+            conversationId: {
+              type: "string",
+              description:
+                "Optional conversation ID to continue an existing conversation",
+            },
+          },
+          required: ["content"],
+        },
+        annotations: {
+          requiresUserContext: true,
+        },
+      });
+
+      tools.push({
+        name: `${alias}.getConversation`,
+        description: `Retrieve the conversation history from the Genie space "${alias}"`,
+        parameters: {
+          type: "object",
+          properties: {
+            conversationId: {
+              type: "string",
+              description: "The conversation ID to retrieve",
+            },
+          },
+          required: ["conversationId"],
+        },
+        annotations: {
+          readOnly: true,
+          requiresUserContext: true,
+        },
+      });
+    }
+
+    return tools;
+  }
+
+  async executeAgentTool(name: string, args: unknown): Promise<unknown> {
+    const parts = name.split(".");
+    if (parts.length !== 2) throw new Error(`Invalid tool name: ${name}`);
+
+    const [alias, method] = parts;
+
+    switch (method) {
+      case "sendMessage": {
+        const { content, conversationId } = args as {
+          content: string;
+          conversationId?: string;
+        };
+        const events: GenieStreamEvent[] = [];
+        for await (const event of this.sendMessage(
+          alias,
+          content,
+          conversationId,
+        )) {
+          events.push(event);
+        }
+        return events;
+      }
+
+      case "getConversation": {
+        const { conversationId } = args as { conversationId: string };
+        return this.getConversation(alias, conversationId);
+      }
+
+      default:
+        throw new Error(`Unknown method: ${method}`);
+    }
   }
 
   exports() {

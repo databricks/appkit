@@ -218,6 +218,25 @@ function IndexRoute() {
               </Button>
             </div>
           </Card>
+
+          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
+            <div className="flex flex-col h-full">
+              <h3 className="text-2xl font-semibold text-foreground mb-3">
+                Custom Agent
+              </h3>
+              <p className="text-muted-foreground mb-6 flex-grow">
+                AI agent powered by Databricks Model Serving with
+                auto-discovered tools from all AppKit plugins. Chat with your
+                data using natural language.
+              </p>
+              <Button
+                onClick={() => navigate({ to: "/agent" })}
+                className="w-full"
+              >
+                Chat with Agent
+              </Button>
+            </div>
+          </Card>
         </div>
 
         <div className="text-center pt-12 border-t border-border">

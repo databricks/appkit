@@ -1,7 +1,12 @@
 import { Readable } from "node:stream";
 import { ApiError } from "@databricks/sdk-experimental";
 import type express from "express";
-import type { IAppRouter, PluginExecutionSettings } from "shared";
+import type {
+  AgentToolDefinition,
+  IAppRouter,
+  PluginExecutionSettings,
+  ToolProvider,
+} from "shared";
 import {
   contentTypeFromPath,
   FilesConnector,
@@ -33,7 +38,7 @@ import type {
 
 const logger = createLogger("files");
 
-export class FilesPlugin extends Plugin {
+export class FilesPlugin extends Plugin implements ToolProvider {
   name = "files";
 
   /** Plugin manifest declaring metadata and resource requirements. */
@@ -906,6 +911,137 @@ export class FilesPlugin extends Plugin {
       res.json(result);
     } catch (error) {
       this._handleApiError(res, error, "Delete failed");
+    }
+  }
+
+  getAgentTools(): AgentToolDefinition[] {
+    const tools: AgentToolDefinition[] = [];
+
+    for (const volumeKey of this.volumeKeys) {
+      tools.push({
+        name: `${volumeKey}.list`,
+        description: `List files and directories in the "${volumeKey}" volume`,
+        parameters: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description:
+                "Directory path to list (optional, defaults to root)",
+            },
+          },
+        },
+        annotations: { readOnly: true, requiresUserContext: true },
+      });
+
+      tools.push({
+        name: `${volumeKey}.read`,
+        description: `Read a text file from the "${volumeKey}" volume`,
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "File path to read" },
+          },
+          required: ["path"],
+        },
+        annotations: { readOnly: true, requiresUserContext: true },
+      });
+
+      tools.push({
+        name: `${volumeKey}.exists`,
+        description: `Check if a file or directory exists in the "${volumeKey}" volume`,
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Path to check" },
+          },
+          required: ["path"],
+        },
+        annotations: { readOnly: true, requiresUserContext: true },
+      });
+
+      tools.push({
+        name: `${volumeKey}.metadata`,
+        description: `Get metadata (size, type, last modified) for a file in the "${volumeKey}" volume`,
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "File path" },
+          },
+          required: ["path"],
+        },
+        annotations: { readOnly: true, requiresUserContext: true },
+      });
+
+      tools.push({
+        name: `${volumeKey}.upload`,
+        description: `Upload a text file to the "${volumeKey}" volume`,
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Destination file path" },
+            contents: {
+              type: "string",
+              description: "File contents as a string",
+            },
+            overwrite: {
+              type: "boolean",
+              description: "Whether to overwrite existing file",
+            },
+          },
+          required: ["path", "contents"],
+        },
+        annotations: { destructive: true, requiresUserContext: true },
+      });
+
+      tools.push({
+        name: `${volumeKey}.delete`,
+        description: `Delete a file from the "${volumeKey}" volume`,
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "File path to delete" },
+          },
+          required: ["path"],
+        },
+        annotations: { destructive: true, requiresUserContext: true },
+      });
+    }
+
+    return tools;
+  }
+
+  async executeAgentTool(name: string, args: unknown): Promise<unknown> {
+    const dotIdx = name.indexOf(".");
+    if (dotIdx === -1) throw new Error(`Invalid tool name: ${name}`);
+
+    const volumeKey = name.slice(0, dotIdx);
+    const method = name.slice(dotIdx + 1);
+
+    if (!this.volumeKeys.includes(volumeKey)) {
+      throw new Error(`Unknown volume: ${volumeKey}`);
+    }
+
+    const api = this.createVolumeAPI(volumeKey);
+    const params = args as Record<string, any>;
+
+    switch (method) {
+      case "list":
+        return api.list(params.path);
+      case "read":
+        return api.read(params.path);
+      case "exists":
+        return api.exists(params.path);
+      case "metadata":
+        return api.metadata(params.path);
+      case "upload":
+        return api.upload(params.path, params.contents, {
+          overwrite: params.overwrite,
+        });
+      case "delete":
+        return api.delete(params.path);
+      default:
+        throw new Error(`Unknown method: ${method}`);
     }
   }
 
