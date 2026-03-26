@@ -484,11 +484,11 @@ Phase 6 can start after Phase 1 (plugin exists) but the serving page template ne
 
 ## Acceptance Criteria
 
-- [ ] `serving()` works with zero config (reads `DATABRICKS_SERVING_ENDPOINT`)
-- [ ] `serving({ endpoints: {...} })` supports multiple named endpoints
-- [ ] `appkit.serving.invoke()` and `appkit.serving.stream()` work programmatically
-- [ ] HTTP routes: `POST /api/serving/invoke`, `POST /api/serving/stream` (+ `/:alias/` variants)
-- [ ] OBO: `this.asUser(req)` on all HTTP routes
+- [x] `serving()` works with zero config (reads `DATABRICKS_SERVING_ENDPOINT`)
+- [x] `serving({ endpoints: {...} })` supports multiple named endpoints
+- [x] `appkit.serving.invoke()` and `appkit.serving.stream()` work programmatically
+- [x] HTTP routes: `POST /api/serving/invoke`, `POST /api/serving/stream` (+ `/:alias/` variants)
+- [x] OBO: `this.asUser(req)` on all HTTP routes
 - [ ] Vite plugin generates `.d.ts` with `ServingEndpointRegistry` from OpenAPI schemas
 - [ ] Generated types include `request`, `response`, and `chunk` (when OpenAI-compatible)
 - [ ] Runtime schema filter warns and strips unknown params
