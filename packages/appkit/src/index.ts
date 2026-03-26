@@ -76,6 +76,6 @@ export {
   SpanStatusCode,
   type TelemetryConfig,
 } from "./telemetry";
-
+export { appKitServingTypesPlugin } from "./type-generator/serving/vite-plugin";
 // Vite plugin and type generation
 export { appKitTypesPlugin } from "./type-generator/vite-plugin";
