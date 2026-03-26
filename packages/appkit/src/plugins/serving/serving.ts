@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import type express from "express";
 import type {
   IAppRouter,
@@ -13,6 +14,7 @@ import type { PluginManifest, ResourceRequirement } from "../../registry";
 import { ResourceType } from "../../registry";
 import { servingInvokeDefaults, servingStreamDefaults } from "./defaults";
 import manifest from "./manifest.json";
+import { filterRequestBody, loadEndpointSchemas } from "./schema-filter";
 import type { EndpointConfig, IServingConfig } from "./types";
 
 const logger = createLogger("serving");
@@ -31,6 +33,7 @@ export class ServingPlugin extends Plugin {
 
   private readonly endpoints: Record<string, EndpointConfig>;
   private readonly isNamedMode: boolean;
+  private schemaAllowlists = new Map<string, Set<string>>();
 
   constructor(config: IServingConfig) {
     super(config);
@@ -44,6 +47,23 @@ export class ServingPlugin extends Plugin {
         default: { env: "DATABRICKS_SERVING_ENDPOINT" },
       };
       this.isNamedMode = false;
+    }
+  }
+
+  async setup(): Promise<void> {
+    const cacheFile = path.join(
+      process.cwd(),
+      "node_modules",
+      ".databricks",
+      "appkit",
+      ".appkit-serving-types-cache.json",
+    );
+    this.schemaAllowlists = await loadEndpointSchemas(cacheFile);
+    if (this.schemaAllowlists.size > 0) {
+      logger.debug(
+        "Loaded schema allowlists for %d endpoint(s)",
+        this.schemaAllowlists.size,
+      );
     }
   }
 
@@ -141,7 +161,8 @@ export class ServingPlugin extends Plugin {
       return;
     }
 
-    const body = req.body as Record<string, unknown>;
+    const rawBody = req.body as Record<string, unknown>;
+    const body = filterRequestBody(rawBody, this.schemaAllowlists, alias);
     const timeout = this.config.timeout ?? 120_000;
     const workspaceClient = getWorkspaceClient();
 
@@ -175,7 +196,8 @@ export class ServingPlugin extends Plugin {
       return;
     }
 
-    const body = req.body as Record<string, unknown>;
+    const rawBody = req.body as Record<string, unknown>;
+    const body = filterRequestBody(rawBody, this.schemaAllowlists, alias);
     const timeout = this.config.timeout ?? 120_000;
     const requestId =
       (typeof req.query.requestId === "string" && req.query.requestId) ||
@@ -211,6 +233,7 @@ export class ServingPlugin extends Plugin {
       throw new Error(`Unknown endpoint alias: ${alias}`);
     }
 
+    const filteredBody = filterRequestBody(body, this.schemaAllowlists, alias);
     const workspaceClient = getWorkspaceClient();
     const timeout = this.config.timeout ?? 120_000;
 
@@ -223,7 +246,7 @@ export class ServingPlugin extends Plugin {
 
     return this.execute(
       () =>
-        servingConnector.invoke(workspaceClient, endpoint.name, body, {
+        servingConnector.invoke(workspaceClient, endpoint.name, filteredBody, {
           servedModel: endpoint.servedModel,
         }),
       executeSettings,
@@ -239,11 +262,15 @@ export class ServingPlugin extends Plugin {
       throw new Error(`Unknown endpoint alias: ${alias}`);
     }
 
+    const filteredBody = filterRequestBody(body, this.schemaAllowlists, alias);
     const workspaceClient = getWorkspaceClient();
 
-    yield* servingConnector.stream(workspaceClient, endpoint.name, body, {
-      servedModel: endpoint.servedModel,
-    });
+    yield* servingConnector.stream(
+      workspaceClient,
+      endpoint.name,
+      filteredBody,
+      { servedModel: endpoint.servedModel },
+    );
   }
 
   async shutdown(): Promise<void> {

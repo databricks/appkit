@@ -489,9 +489,9 @@ Phase 6 can start after Phase 1 (plugin exists) but the serving page template ne
 - [x] `appkit.serving.invoke()` and `appkit.serving.stream()` work programmatically
 - [x] HTTP routes: `POST /api/serving/invoke`, `POST /api/serving/stream` (+ `/:alias/` variants)
 - [x] OBO: `this.asUser(req)` on all HTTP routes
-- [ ] Vite plugin generates `.d.ts` with `ServingEndpointRegistry` from OpenAPI schemas
-- [ ] Generated types include `request`, `response`, and `chunk` (when OpenAI-compatible)
-- [ ] Runtime schema filter warns and strips unknown params
+- [x] Vite plugin generates `.d.ts` with `ServingEndpointRegistry` from OpenAPI schemas
+- [x] Generated types include `request`, `response`, and `chunk` (when OpenAI-compatible)
+- [x] Runtime schema filter warns and strips unknown params
 - [ ] Frontend hooks: `useServingInvoke()` and `useServingStream()`
 - [ ] Dev playground demo page working with real endpoint
 - [ ] Template: `appkit.plugins.json` includes serving plugin entry
