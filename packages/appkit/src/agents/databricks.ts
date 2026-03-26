@@ -450,7 +450,6 @@ export async function createDatabricksModel(
 ): Promise<any> {
   let createOpenAI: any;
   try {
-    // @ts-expect-error -- optional peer dependency, may not be installed
     const mod = await import("@ai-sdk/openai");
     createOpenAI = mod.createOpenAI;
   } catch {

@@ -89,6 +89,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.AgentHandle",
+          label: "AgentHandle"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.AgentInput",
           label: "AgentInput"
         },
@@ -111,6 +116,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.CacheConfig",
           label: "CacheConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.CreateAgentConfig",
+          label: "CreateAgentConfig"
         },
         {
           type: "doc",
@@ -254,6 +264,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.appKitTypesPlugin",
           label: "appKitTypesPlugin"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.createAgent",
+          label: "createAgent"
         },
         {
           type: "doc",

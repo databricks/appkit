@@ -1,3 +1,1 @@
-export {  agent } from "./agent";
-;
-;
+export { agent } from "./agent";

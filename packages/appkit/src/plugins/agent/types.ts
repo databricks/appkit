@@ -26,9 +26,6 @@ export type RegisteredAgent = {
 
 export type {
   AgentAdapter,
-  
-  
-  
   AgentToolDefinition,
   ToolProvider,
 } from "shared";

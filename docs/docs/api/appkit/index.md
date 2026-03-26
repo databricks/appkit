@@ -31,11 +31,13 @@ plugin architecture, and React integration.
 | Interface | Description |
 | ------ | ------ |
 | [AgentAdapter](Interface.AgentAdapter.md) | - |
+| [AgentHandle](Interface.AgentHandle.md) | - |
 | [AgentInput](Interface.AgentInput.md) | - |
 | [AgentRunContext](Interface.AgentRunContext.md) | - |
 | [AgentToolDefinition](Interface.AgentToolDefinition.md) | - |
 | [BasePluginConfig](Interface.BasePluginConfig.md) | Base configuration interface for AppKit plugins |
 | [CacheConfig](Interface.CacheConfig.md) | Configuration for the CacheInterceptor. Controls TTL, size limits, storage backend, and probabilistic cleanup. |
+| [CreateAgentConfig](Interface.CreateAgentConfig.md) | - |
 | [DatabaseCredential](Interface.DatabaseCredential.md) | Database credentials with OAuth token for Postgres connection |
 | [GenerateDatabaseCredentialRequest](Interface.GenerateDatabaseCredentialRequest.md) | Request parameters for generating database OAuth credentials |
 | [ITelemetry](Interface.ITelemetry.md) | Plugin-facing interface for OpenTelemetry instrumentation. Provides a thin abstraction over OpenTelemetry APIs for plugins. |
@@ -76,6 +78,7 @@ plugin architecture, and React integration.
 | Function | Description |
 | ------ | ------ |
 | [appKitTypesPlugin](Function.appKitTypesPlugin.md) | Vite plugin to generate types for AppKit queries. Calls generateFromEntryPoint under the hood. |
+| [createAgent](Function.createAgent.md) | Creates an agent-powered app with batteries included. |
 | [createApp](Function.createApp.md) | Bootstraps AppKit with the provided configuration. |
 | [createLakebasePool](Function.createLakebasePool.md) | Create a Lakebase pool with appkit's logger integration. Telemetry automatically uses appkit's OpenTelemetry configuration via global registry. |
 | [generateDatabaseCredential](Function.generateDatabaseCredential.md) | Generate OAuth credentials for Postgres database connection using the proper Postgres API. |

@@ -18,6 +18,7 @@
     "clean:full": "rm -rf node_modules dist coverage && pnpm -r clean:full",
     "clean": "pnpm -r clean",
     "dev": "pnpm build && NODE_ENV=development turbo watch build:watch dev",
+    "dev:agent": "pnpm build && NODE_ENV=development pnpm --filter=agent-app dev",
     "dev:inspect": "NODE_ENV=development pnpm --filter=dev-playground dev:inspect",
     "docs:dev": "pnpm --filter=docs dev",
     "docs:build": "pnpm --filter=docs build",

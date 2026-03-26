@@ -35,7 +35,6 @@ export class LangChainAdapter implements AgentAdapter {
     input: AgentInput,
     context: AgentRunContext,
   ): AsyncGenerator<AgentEvent, void, unknown> {
-    // @ts-expect-error -- optional peer dependency, may not be installed
     const lcTools = await import("@langchain/core/tools");
     const DynamicStructuredTool = lcTools.DynamicStructuredTool;
     const zodModule: any = await import("zod");
