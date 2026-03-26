@@ -84,7 +84,7 @@ describe("Serving Connector", () => {
         temperature: 0.7,
       });
 
-      const body = JSON.parse(fetchSpy.mock.calls[0][1]!.body as string);
+      const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
       expect(body).toEqual({ messages: [], temperature: 0.7 });
       expect(body.stream).toBeUndefined();
     });
@@ -159,7 +159,7 @@ describe("Serving Connector", () => {
         { signal: controller.signal },
       );
 
-      expect(fetchSpy.mock.calls[0][1]!.signal).toBe(controller.signal);
+      expect(fetchSpy.mock.calls[0][1]?.signal).toBe(controller.signal);
     });
 
     test("throws when host is not configured", async () => {
@@ -192,7 +192,7 @@ describe("Serving Connector", () => {
 
   describe("stream", () => {
     function createSSEResponse(chunks: string[]) {
-      const body = chunks.join("\n") + "\n";
+      const body = `${chunks.join("\n")}\n`;
       return new Response(body, {
         status: 200,
         headers: { "Content-Type": "text/event-stream" },
@@ -235,7 +235,7 @@ describe("Serving Connector", () => {
         // noop
       }
 
-      const body = JSON.parse(fetchSpy.mock.calls[0][1]!.body as string);
+      const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
       expect(body.stream).toBe(true);
     });
 
@@ -252,7 +252,7 @@ describe("Serving Connector", () => {
         // noop
       }
 
-      const body = JSON.parse(fetchSpy.mock.calls[0][1]!.body as string);
+      const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
       expect(body.stream).toBe(true);
     });
 
