@@ -155,7 +155,7 @@ jobs:
 
       - name: Install template dependencies
         working-directory: pr-template
-        run: npm ci
+        run: npm install
 
       - name: Create zip artifact
         working-directory: pr-template
