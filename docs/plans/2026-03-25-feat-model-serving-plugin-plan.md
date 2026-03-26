@@ -3,7 +3,7 @@
 ---
 title: feat: Model Serving Plugin with Schema-Driven Types
 type: feat
-status: active
+status: completed
 date: 2026-03-25
 origin: docs/brainstorms/2026-03-25-serving-endpoint-centric-api-brainstorm.md
 ---
@@ -494,12 +494,12 @@ Phase 6 can start after Phase 1 (plugin exists) but the serving page template ne
 - [x] Runtime schema filter warns and strips unknown params
 - [x] Frontend hooks: `useServingInvoke()` and `useServingStream()`
 - [x] Dev playground demo page working with real endpoint
-- [ ] Template: `appkit.plugins.json` includes serving plugin entry
-- [ ] Template: `databricks apps init --features serving` generates a working app
-- [ ] Template: `tools/generate-app-templates.ts` produces `appkit-serving` and updated `appkit-all-in-one`
-- [ ] No changes needed in Databricks CLI (`/Users/pawel.kosiec/repositories/databricks-os/cli/cmd/apps`)
-- [ ] All tests passing: `pnpm test`
-- [ ] Build passing: `pnpm build && pnpm typecheck`
+- [x] Template: `appkit.plugins.json` includes serving plugin entry
+- [x] Template: `databricks apps init --features serving` generates a working app
+- [x] Template: `tools/generate-app-templates.ts` produces `appkit-serving` and updated `appkit-all-in-one`
+- [x] No changes needed in Databricks CLI (`/Users/pawel.kosiec/repositories/databricks-os/cli/cmd/apps`)
+- [x] All tests passing: `pnpm test`
+- [x] Build passing: `pnpm build && pnpm typecheck`
 
 ## Sources
 
