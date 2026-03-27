@@ -157,15 +157,18 @@ vi.mock("node:fs", async (importOriginal) => {
 vi.mock("../utils", () => ({
   getRoutes: vi.fn().mockReturnValue([]),
   printRoutes: vi.fn(),
+}));
+
+vi.mock("../client-config-sanitizer", () => ({
   sanitizeClientConfig: vi.fn((_name: string, config: any) => config),
 }));
 
 import fs from "node:fs";
 import express from "express";
+import { sanitizeClientConfig } from "../client-config-sanitizer";
 import { ServerPlugin } from "../index";
 import { RemoteTunnelController } from "../remote-tunnel/remote-tunnel-controller";
 import { StaticServer } from "../static-server";
-import { sanitizeClientConfig } from "../utils";
 import { ViteDevServer } from "../vite-dev-server";
 
 describe("ServerPlugin", () => {
@@ -425,10 +428,11 @@ describe("ServerPlugin", () => {
     test("extendRoutes logs and skips invalid clientConfig instead of crashing", async () => {
       process.env.NODE_ENV = "production";
       vi.mocked(fs.existsSync).mockReturnValue(true);
-      const actualUtils =
-        await vi.importActual<typeof import("../utils")>("../utils");
+      const actualSanitizer = await vi.importActual<
+        typeof import("../client-config-sanitizer")
+      >("../client-config-sanitizer");
       vi.mocked(sanitizeClientConfig).mockImplementationOnce(
-        actualUtils.sanitizeClientConfig,
+        actualSanitizer.sanitizeClientConfig,
       );
 
       const plugins: any = {

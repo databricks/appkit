@@ -9,16 +9,12 @@ import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import { instrumentations } from "../../telemetry";
+import { sanitizeClientConfig } from "./client-config-sanitizer";
 import manifest from "./manifest.json";
 import { RemoteTunnelController } from "./remote-tunnel/remote-tunnel-controller";
 import { StaticServer } from "./static-server";
 import type { ServerConfig } from "./types";
-import {
-  getRoutes,
-  type PluginEndpoints,
-  printRoutes,
-  sanitizeClientConfig,
-} from "./utils";
+import { getRoutes, type PluginEndpoints, printRoutes } from "./utils";
 import { ViteDevServer } from "./vite-dev-server";
 
 dotenv.config({ path: path.resolve(process.cwd(), "./.env") });
