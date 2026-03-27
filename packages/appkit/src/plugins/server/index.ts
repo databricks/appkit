@@ -229,12 +229,20 @@ export class ServerPlugin extends Plugin {
       }
 
       if (typeof plugin.clientConfig === "function") {
-        const raw = plugin.clientConfig();
-        if (raw != null) {
-          const sanitized = sanitizeClientConfig(plugin.name, raw);
-          if (Object.keys(sanitized).length > 0) {
-            pluginConfigs[plugin.name] = sanitized;
+        try {
+          const raw = plugin.clientConfig();
+          if (raw != null) {
+            const sanitized = sanitizeClientConfig(plugin.name, raw);
+            if (Object.keys(sanitized).length > 0) {
+              pluginConfigs[plugin.name] = sanitized;
+            }
           }
+        } catch (error) {
+          logger.error(
+            "Plugin '%s' clientConfig() failed, skipping its config: %O",
+            plugin.name,
+            error,
+          );
         }
       }
     }

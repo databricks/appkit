@@ -422,7 +422,7 @@ describe("ServerPlugin", () => {
       );
     });
 
-    test("extendRoutes validates any defined clientConfig return value", async () => {
+    test("extendRoutes logs and skips invalid clientConfig instead of crashing", async () => {
       process.env.NODE_ENV = "production";
       vi.mocked(fs.existsSync).mockReturnValue(true);
       const actualUtils =
@@ -441,8 +441,11 @@ describe("ServerPlugin", () => {
       };
 
       const plugin = new ServerPlugin({ autoStart: false, plugins });
-      await expect(plugin.start()).rejects.toThrow(
-        "Plugin 'plugin-a' clientConfig() must return a plain object.",
+      await expect(plugin.start()).resolves.toBeDefined();
+      expect(mockLoggerError).toHaveBeenCalledWith(
+        "Plugin '%s' clientConfig() failed, skipping its config: %O",
+        "plugin-a",
+        expect.any(Error),
       );
     });
 

@@ -22,7 +22,7 @@ const EMPTY_CONFIG: AppKitClientConfig = Object.freeze({
 });
 
 function normalizeClientConfig(config: unknown): AppKitClientConfig {
-  if (!config || typeof config !== "object") {
+  if (!config || typeof config !== "object" || Array.isArray(config)) {
     return EMPTY_CONFIG;
   }
 
@@ -36,21 +36,21 @@ function normalizeClientConfig(config: unknown): AppKitClientConfig {
   };
 }
 
-function readClientConfigFromDom(): AppKitClientConfig {
+function readClientConfigFromDom(): AppKitClientConfig | undefined {
   if (typeof document === "undefined") {
-    return EMPTY_CONFIG;
+    return undefined;
   }
 
   const configScript = document.getElementById(APPKIT_CONFIG_SCRIPT_ID);
   if (!configScript?.textContent) {
-    return EMPTY_CONFIG;
+    return undefined;
   }
 
   try {
     return normalizeClientConfig(JSON.parse(configScript.textContent));
   } catch (error) {
     console.warn("[appkit] Failed to parse config from DOM:", error);
-    return EMPTY_CONFIG;
+    return undefined;
   }
 }
 
@@ -69,7 +69,8 @@ export function getClientConfig(): AppKitClientConfig {
   }
 
   if (!_cache) {
-    _cache = window.__appkit__ ?? readClientConfigFromDom();
+    _cache =
+      readClientConfigFromDom() ?? normalizeClientConfig(window.__appkit__);
   }
 
   return _cache;

@@ -213,17 +213,22 @@ function serializeRuntimeConfig(config: RuntimeConfig): string {
  * and a Set of public env var values for overlap resolution.
  */
 function getEnvValueSets(): {
-  nonPublic: Map<string, string>;
+  nonPublic: Map<string, string[]>;
   publicValues: Set<string>;
 } {
-  const nonPublic = new Map<string, string>();
+  const nonPublic = new Map<string, string[]>();
   const publicValues = new Set<string>();
   for (const [key, value] of Object.entries(process.env)) {
     if (!value) continue;
     if (key.startsWith("PUBLIC_APPKIT_")) {
       publicValues.add(value);
     } else {
-      nonPublic.set(value, key);
+      const existing = nonPublic.get(value);
+      if (existing) {
+        existing.push(key);
+      } else {
+        nonPublic.set(value, [key]);
+      }
     }
   }
   return { nonPublic, publicValues };
@@ -415,13 +420,13 @@ function validateClientConfig(
  */
 function redactLeakedString(
   value: string,
-  nonPublicValues: Map<string, string>,
+  nonPublicValues: Map<string, string[]>,
   publicValues: Set<string>,
   leakedVars: Set<string>,
 ): string {
-  for (const [envValue, envKey] of nonPublicValues) {
+  for (const [envValue, envKeys] of nonPublicValues) {
     if (value === envValue && !publicValues.has(envValue)) {
-      leakedVars.add(envKey);
+      for (const k of envKeys) leakedVars.add(k);
       return REDACTED_CLIENT_CONFIG_VALUE;
     }
     if (
@@ -429,7 +434,7 @@ function redactLeakedString(
       value.includes(envValue) &&
       !isSecretCoveredByPublicValue(value, envValue, publicValues)
     ) {
-      leakedVars.add(envKey);
+      for (const k of envKeys) leakedVars.add(k);
       return REDACTED_CLIENT_CONFIG_VALUE;
     }
   }
@@ -439,7 +444,7 @@ function redactLeakedString(
 
 function redactLeakedValues(
   obj: unknown,
-  nonPublicValues: Map<string, string>,
+  nonPublicValues: Map<string, string[]>,
   publicValues: Set<string>,
   leakedVars: Set<string>,
 ): unknown {
