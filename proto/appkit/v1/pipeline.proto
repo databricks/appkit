@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package appkit.v1;
+
+import "google/protobuf/timestamp.proto";
+import "appkit/v1/common.proto";
+
+// Status of a pipeline job execution.
+enum JobStatus {
+  JOB_STATUS_UNSPECIFIED = 0;
+  JOB_STATUS_PENDING = 1;
+  JOB_STATUS_RUNNING = 2;
+  JOB_STATUS_SUCCESS = 3;
+  JOB_STATUS_FAILED = 4;
+  JOB_STATUS_CANCELLED = 5;
+}
+
+// A single row of structured data produced by a pipeline stage.
+message DataRow {
+  map<string, Value> fields = 1;
+}
+
+// Result of a pipeline job execution.
+message JobResult {
+  string job_run_id = 1;
+  string job_id = 2;
+  JobStatus status = 3;
+  google.protobuf.Timestamp started_at = 4;
+  google.protobuf.Timestamp completed_at = 5;
+  repeated DataRow rows = 6;
+  Metadata metadata = 7;
+  Error error = 8;
+}
+
+// A batch of rows for efficient bulk transfer between pipeline stages.
+message DataBatch {
+  string batch_id = 1;
+  string source_stage = 2;
+  string target_stage = 3;
+  repeated DataRow rows = 4;
+  Metadata metadata = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+// Schema definition for a pipeline stage's input or output.
+message StageSchema {
+  string stage_name = 1;
+  repeated FieldDescriptor fields = 2;
+}
+
+// Describes a single field in a stage schema.
+message FieldDescriptor {
+  string name = 1;
+  FieldType type = 2;
+  bool required = 3;
+  string description = 4;
+}
+
+// Supported field types for stage schemas.
+enum FieldType {
+  FIELD_TYPE_UNSPECIFIED = 0;
+  FIELD_TYPE_STRING = 1;
+  FIELD_TYPE_NUMBER = 2;
+  FIELD_TYPE_BOOLEAN = 3;
+  FIELD_TYPE_BYTES = 4;
+  FIELD_TYPE_INTEGER = 5;
+  FIELD_TYPE_TIMESTAMP = 6;
+}
