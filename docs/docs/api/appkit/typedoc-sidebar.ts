@@ -144,6 +144,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.ServingEndpointRegistry",
+          label: "ServingEndpointRegistry"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.StreamExecutionSettings",
           label: "StreamExecutionSettings"
         },
@@ -205,6 +210,11 @@ const typedocSidebar: SidebarsConfig = {
       type: "category",
       label: "Functions",
       items: [
+        {
+          type: "doc",
+          id: "api/appkit/Function.appKitServingTypesPlugin",
+          label: "appKitServingTypesPlugin"
+        },
         {
           type: "doc",
           id: "api/appkit/Function.appKitTypesPlugin",
