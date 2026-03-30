@@ -1,6 +1,6 @@
 import { useServingStream } from "@databricks/appkit-ui/react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 export const Route = createFileRoute("/serving")({
   component: ServingRoute,
@@ -24,6 +24,19 @@ function ServingRoute() {
   const assistantContent = chunks
     .map((chunk: any) => chunk?.choices?.[0]?.delta?.content ?? "")
     .join("");
+
+  // Persist assistant response to message history when streaming completes
+  const prevStreamingRef = useRef(false);
+  useEffect(() => {
+    if (prevStreamingRef.current && !streaming && assistantContent) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: assistantContent },
+      ]);
+      reset();
+    }
+    prevStreamingRef.current = streaming;
+  }, [streaming, assistantContent, reset]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
