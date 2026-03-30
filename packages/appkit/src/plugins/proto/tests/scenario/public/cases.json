@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "description": "View all products",
+      "action": "load",
+      "filter": "all",
+      "expectedCount": 6,
+      "expectedIds": ["P001", "P002", "P003", "P004", "P005", "P006"]
+    },
+    {
+      "description": "Filter by Electronics",
+      "action": "filter",
+      "filter": "Electronics",
+      "expectedCount": 3,
+      "expectedIds": ["P001", "P002", "P003"]
+    },
+    {
+      "description": "Filter by Furniture",
+      "action": "filter",
+      "filter": "Furniture",
+      "expectedCount": 2,
+      "expectedIds": ["P004", "P005"]
+    },
+    {
+      "description": "Health check returns proto plugin status",
+      "action": "api",
+      "endpoint": "/api/health",
+      "expectedBody": { "status": "ok", "plugin": "proto" }
+    },
+    {
+      "description": "API returns snake_case field names (proto convention)",
+      "action": "api",
+      "endpoint": "/api/products/P001",
+      "expectedFields": ["id", "name", "category", "price", "stock", "in_stock"]
+    }
+  ]
+}

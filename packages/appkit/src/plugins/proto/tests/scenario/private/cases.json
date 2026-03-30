@@ -1,0 +1,61 @@
+{
+  "cases": [
+    {
+      "description": "Filter by Stationery shows single product",
+      "action": "filter",
+      "filter": "Stationery",
+      "expectedCount": 1,
+      "expectedIds": ["P006"]
+    },
+    {
+      "description": "Out of stock products show correct status",
+      "action": "filter",
+      "filter": "Electronics",
+      "expectedOutOfStock": ["P003"],
+      "expectedInStock": ["P001", "P002"]
+    },
+    {
+      "description": "Product detail API returns all proto fields",
+      "action": "api",
+      "endpoint": "/api/products/P004",
+      "expectedBody": {
+        "id": "P004",
+        "name": "Standing Desk",
+        "category": "Furniture",
+        "price": 499.99,
+        "stock": 12,
+        "in_stock": true
+      }
+    },
+    {
+      "description": "Non-existent product returns 404",
+      "action": "api",
+      "endpoint": "/api/products/P999",
+      "expectedStatus": 404
+    },
+    {
+      "description": "Proto binary endpoint sets correct content type",
+      "action": "api",
+      "endpoint": "/api/products.bin",
+      "expectedContentType": "application/x-protobuf"
+    },
+    {
+      "description": "All categories filter returns full catalog",
+      "action": "filter",
+      "filter": "all",
+      "expectedCount": 6
+    },
+    {
+      "description": "UI status text updates after filter",
+      "action": "filter",
+      "filter": "Furniture",
+      "expectedStatusText": "Showing 2 products"
+    },
+    {
+      "description": "Table has correct column headers",
+      "action": "load",
+      "filter": "all",
+      "expectedColumns": ["ID", "Name", "Category", "Price", "Stock", "In Stock"]
+    }
+  ]
+}

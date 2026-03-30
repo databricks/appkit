@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package catalog.v1;
+
+message Product {
+  string id = 1;
+  string name = 2;
+  string category = 3;
+  double price = 4;
+  int32 stock = 5;
+  bool in_stock = 6;
+}
+
+message ProductList {
+  repeated Product products = 1;
+  int32 total = 2;
+}
