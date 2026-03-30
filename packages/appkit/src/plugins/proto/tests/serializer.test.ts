@@ -8,18 +8,6 @@ vi.mock("@bufbuild/protobuf", () => ({
   fromJson: vi.fn((_s: any, json: any) => json),
 }));
 
-vi.mock("../../../connectors/files", () => ({
-  FilesConnector: vi.fn().mockImplementation(() => ({
-    upload: vi.fn(),
-    download: vi.fn(),
-    exists: vi.fn(),
-  })),
-}));
-
-vi.mock("../../../context", () => ({
-  getWorkspaceClient: vi.fn(() => ({})),
-}));
-
 describe("ProtoSerializer", () => {
   const schema = { typeName: "test.Message" } as any;
   const message = { name: "test", value: 42 };

@@ -1,30 +1,20 @@
 import type { DescMessage, JsonValue, MessageShape } from "@bufbuild/protobuf";
+import { create } from "@bufbuild/protobuf";
 import type express from "express";
-import type { IAppRouter, PluginExecutionSettings } from "shared";
-import { createLogger } from "../../logging/logger";
+import type { IAppRouter } from "shared";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import manifest from "./manifest.json";
 import { ProtoSerializer } from "./serializer";
 import type { IProtoConfig } from "./types";
 
-const logger = createLogger("proto");
-
-const volumeDefaults: PluginExecutionSettings = {
-  default: {
-    cache: { enabled: false },
-    retry: { enabled: true, attempts: 3, initialDelay: 1000 },
-    timeout: 60000,
-  },
-};
-
 /**
  * Proto plugin for AppKit.
  *
- * Provides protobuf serialization and typed UC Volume I/O for
- * cross-language pipeline data contracts. Proto definitions in
- * proto/appkit/v1/ generate TypeScript types shared by frontend
- * and backend, and can generate Python types for Databricks Jobs.
+ * Typed data contracts for AppKit applications.
+ *
+ * Provides protobuf-based serialization so plugins, routes, and
+ * jobs share a single schema definition.
  */
 export class ProtoPlugin extends Plugin<IProtoConfig> {
   static manifest = manifest as PluginManifest<"proto">;
@@ -34,7 +24,12 @@ export class ProtoPlugin extends Plugin<IProtoConfig> {
   constructor(config: IProtoConfig) {
     super(config);
     this.config = config;
-    this.serializer = new ProtoSerializer(config.defaultVolume);
+    this.serializer = new ProtoSerializer();
+  }
+
+  /** Create a new proto message with optional initial values. */
+  create<T extends DescMessage>(schema: T, init?: Partial<MessageShape<T>>): MessageShape<T> {
+    return create(schema, init as MessageShape<T>);
   }
 
   /** Serialize a protobuf message to binary. */
@@ -47,7 +42,7 @@ export class ProtoPlugin extends Plugin<IProtoConfig> {
     return this.serializer.deserialize(schema, data);
   }
 
-  /** Convert a protobuf message to JSON. */
+  /** Convert a protobuf message to JSON (snake_case field names). */
   toJSON<T extends DescMessage>(schema: T, message: MessageShape<T>): JsonValue {
     return this.serializer.toJSON(schema, message);
   }
@@ -57,50 +52,13 @@ export class ProtoPlugin extends Plugin<IProtoConfig> {
     return this.serializer.fromJSON(schema, json);
   }
 
-  /**
-   * Write a protobuf message to a UC Volume.
-   * Uses the interceptor chain for retry/timeout/telemetry.
-   */
-  async writeToVolume<T extends DescMessage>(
-    schema: T,
-    message: MessageShape<T>,
-    path: string,
-  ): Promise<void> {
-    await this.execute(
-      async () => this.serializer.writeToVolume(schema, message, path),
-      volumeDefaults,
-    );
-  }
-
-  /**
-   * Read a protobuf message from a UC Volume.
-   * Uses the interceptor chain for retry/timeout/telemetry.
-   */
-  async readFromVolume<T extends DescMessage>(
-    schema: T,
-    path: string,
-  ): Promise<MessageShape<T> | undefined> {
-    return this.execute(
-      async () => this.serializer.readFromVolume(schema, path),
-      volumeDefaults,
-    );
-  }
-
-  /** Check if a proto file exists on a UC Volume. */
-  async exists(path: string): Promise<boolean | undefined> {
-    return this.execute(async () => this.serializer.exists(path), volumeDefaults);
-  }
-
   injectRoutes(router: IAppRouter): void {
     this.route(router, {
       name: "health",
       method: "get",
       path: "/health",
       handler: async (_req: express.Request, res: express.Response) => {
-        res.json({
-          status: "ok",
-          defaultVolume: this.config.defaultVolume ?? null,
-        });
+        res.json({ status: "ok" });
       },
     });
   }
@@ -111,13 +69,11 @@ export class ProtoPlugin extends Plugin<IProtoConfig> {
 
   exports() {
     return {
+      create: this.create.bind(this),
       serialize: this.serialize.bind(this),
       deserialize: this.deserialize.bind(this),
       toJSON: this.toJSON.bind(this),
       fromJSON: this.fromJSON.bind(this),
-      writeToVolume: this.writeToVolume.bind(this),
-      readFromVolume: this.readFromVolume.bind(this),
-      exists: this.exists.bind(this),
     };
   }
 }

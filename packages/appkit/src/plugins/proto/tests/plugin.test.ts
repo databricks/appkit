@@ -69,39 +69,32 @@ describe("ProtoPlugin", () => {
 
   test("injectRoutes registers health endpoint", () => {
     const plugin = new ProtoPlugin({});
-    const { handlers } = createMockRouter();
-    plugin.injectRoutes(createMockRouter().router);
-    // Verify via a fresh router
     const { router, getHandler } = createMockRouter();
     plugin.injectRoutes(router);
     expect(getHandler("GET", "/health")).toBeDefined();
   });
 
-  test("health endpoint returns config", async () => {
-    const plugin = new ProtoPlugin({ defaultVolume: "/Volumes/test" });
+  test("health endpoint returns ok", async () => {
+    const plugin = new ProtoPlugin({});
     const { router, getHandler } = createMockRouter();
     plugin.injectRoutes(router);
 
     const res = createMockResponse();
     await getHandler("GET", "/health")(createMockRequest(), res);
 
-    expect(res.json).toHaveBeenCalledWith({
-      status: "ok",
-      defaultVolume: "/Volumes/test",
-    });
+    expect(res.json).toHaveBeenCalledWith({ status: "ok" });
   });
 
-  test("exports returns expected API surface", () => {
+  test("exports returns serialization API only", () => {
     const api = new ProtoPlugin({}).exports();
+    expect(typeof api.create).toBe("function");
     expect(typeof api.serialize).toBe("function");
     expect(typeof api.deserialize).toBe("function");
     expect(typeof api.toJSON).toBe("function");
     expect(typeof api.fromJSON).toBe("function");
-    expect(typeof api.writeToVolume).toBe("function");
-    expect(typeof api.readFromVolume).toBe("function");
-    expect(typeof api.exists).toBe("function");
-    // No gRPC methods
-    expect((api as any).createClient).toBeUndefined();
-    expect((api as any).registerService).toBeUndefined();
+    // No file I/O — that belongs in the Files plugin
+    expect((api as any).writeToVolume).toBeUndefined();
+    expect((api as any).readFromVolume).toBeUndefined();
+    expect((api as any).exists).toBeUndefined();
   });
 });
