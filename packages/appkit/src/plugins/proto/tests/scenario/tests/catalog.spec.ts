@@ -1,6 +1,6 @@
-import { test, expect } from "@playwright/test";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { expect, test } from "@playwright/test";
 
 interface TaskCase {
   description: string;
@@ -25,11 +25,16 @@ interface CasesFile {
 
 function resolveCasesPath(): string {
   const envPath = process.env.TASK_CASES_PATH;
-  if (envPath) return path.isAbsolute(envPath) ? envPath : path.resolve(process.cwd(), envPath);
+  if (envPath)
+    return path.isAbsolute(envPath)
+      ? envPath
+      : path.resolve(process.cwd(), envPath);
   return path.join(__dirname, "..", "public", "cases.json");
 }
 
-const casesFile: CasesFile = JSON.parse(fs.readFileSync(resolveCasesPath(), "utf8"));
+const casesFile: CasesFile = JSON.parse(
+  fs.readFileSync(resolveCasesPath(), "utf8"),
+);
 const cases = casesFile.cases || [];
 const appUrl = process.env.APP_URL || "http://localhost:3000";
 
@@ -43,7 +48,9 @@ test.describe("product catalog — proto plugin scenario", () => {
           await page.waitForLoadState("networkidle");
 
           if (c.action === "filter" && c.filter && c.filter !== "all") {
-            await page.getByRole("combobox", { name: "Category" }).selectOption(c.filter);
+            await page
+              .getByRole("combobox", { name: "Category" })
+              .selectOption(c.filter);
             await page.getByRole("button", { name: "Filter" }).click();
             await page.waitForLoadState("networkidle");
           }
@@ -55,7 +62,9 @@ test.describe("product catalog — proto plugin scenario", () => {
           }
 
           if (c.expectedStatusText) {
-            await expect(page.getByRole("status")).toHaveText(c.expectedStatusText);
+            await expect(page.getByRole("status")).toHaveText(
+              c.expectedStatusText,
+            );
           }
 
           if (c.expectedIds) {
@@ -68,7 +77,9 @@ test.describe("product catalog — proto plugin scenario", () => {
           if (c.expectedColumns) {
             const table = page.getByRole("table", { name: "Products" });
             for (const col of c.expectedColumns) {
-              await expect(table.getByRole("columnheader", { name: col })).toBeVisible();
+              await expect(
+                table.getByRole("columnheader", { name: col, exact: true }),
+              ).toBeVisible();
             }
           }
 
@@ -101,7 +112,9 @@ test.describe("product catalog — proto plugin scenario", () => {
           expect(response.ok()).toBeTruthy();
 
           if (c.expectedContentType) {
-            expect(response.headers()["content-type"]).toContain(c.expectedContentType);
+            expect(response.headers()["content-type"]).toContain(
+              c.expectedContentType,
+            );
           }
 
           if (c.expectedBody) {
