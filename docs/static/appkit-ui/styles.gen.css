@@ -1906,6 +1906,9 @@
   .\[--cell-size\:--spacing\(8\)\] {
     --cell-size: calc(var(--spacing) * 8);
   }
+  .\[appkit\:serving\] {
+    appkit: serving;
+  }
   .running {
     animation-play-state: running;
   }
