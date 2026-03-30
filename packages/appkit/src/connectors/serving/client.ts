@@ -15,9 +15,10 @@ function buildInvocationUrl(
   servedModel?: string,
 ): string {
   const base = host.startsWith("http") ? host : `https://${host}`;
+  const encodedName = encodeURIComponent(endpointName);
   const path = servedModel
-    ? `/serving-endpoints/${endpointName}/served-models/${servedModel}/invocations`
-    : `/serving-endpoints/${endpointName}/invocations`;
+    ? `/serving-endpoints/${encodedName}/served-models/${encodeURIComponent(servedModel)}/invocations`
+    : `/serving-endpoints/${encodedName}/invocations`;
   return new URL(path, base).toString();
 }
 

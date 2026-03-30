@@ -1,11 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type express from "express";
-import type {
-  IAppRouter,
-  PluginExecutionSettings,
-  StreamExecutionSettings,
-} from "shared";
+import type { IAppRouter, StreamExecutionSettings } from "shared";
 import * as servingConnector from "../../connectors/serving/client";
 import { getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging";
@@ -107,6 +103,18 @@ export class ServingPlugin extends Plugin {
     return { name, servedModel: config.servedModel };
   }
 
+  private resolveAndFilter(
+    alias: string,
+    body: Record<string, unknown>,
+  ): { endpoint: ResolvedEndpoint; filteredBody: Record<string, unknown> } {
+    const endpoint = this.resolveEndpoint(alias);
+    if (!endpoint) {
+      throw new Error(`Unknown endpoint alias: ${alias}`);
+    }
+    const filteredBody = filterRequestBody(body, this.schemaAllowlists, alias);
+    return { endpoint, filteredBody };
+  }
+
   injectRoutes(router: IAppRouter) {
     if (this.isNamedMode) {
       this.route(router, {
@@ -154,34 +162,21 @@ export class ServingPlugin extends Plugin {
     res: express.Response,
   ): Promise<void> {
     const { alias } = req.params;
-    const endpoint = this.resolveEndpoint(alias);
-
-    if (!endpoint) {
-      res.status(404).json({ error: `Unknown endpoint alias: ${alias}` });
-      return;
-    }
-
     const rawBody = req.body as Record<string, unknown>;
-    const body = filterRequestBody(rawBody, this.schemaAllowlists, alias);
-    const timeout = this.config.timeout ?? 120_000;
-    const workspaceClient = getWorkspaceClient();
 
-    const executeSettings: PluginExecutionSettings = {
-      default: {
-        ...servingInvokeDefaults,
-        timeout,
-      },
-    };
-
-    const result = await this.execute(
-      () =>
-        servingConnector.invoke(workspaceClient, endpoint.name, body, {
-          servedModel: endpoint.servedModel,
-        }),
-      executeSettings,
-    );
-
-    res.json(result);
+    try {
+      const result = await this.invoke(alias, rawBody);
+      res.json(result);
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        err.message.startsWith("Unknown endpoint alias:")
+      ) {
+        res.status(404).json({ error: err.message });
+        return;
+      }
+      throw err;
+    }
   }
 
   async _handleStream(
@@ -189,15 +184,23 @@ export class ServingPlugin extends Plugin {
     res: express.Response,
   ): Promise<void> {
     const { alias } = req.params;
-    const endpoint = this.resolveEndpoint(alias);
+    const rawBody = req.body as Record<string, unknown>;
 
-    if (!endpoint) {
-      res.status(404).json({ error: `Unknown endpoint alias: ${alias}` });
-      return;
+    let endpoint: ResolvedEndpoint;
+    let filteredBody: Record<string, unknown>;
+    try {
+      ({ endpoint, filteredBody } = this.resolveAndFilter(alias, rawBody));
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        err.message.startsWith("Unknown endpoint alias:")
+      ) {
+        res.status(404).json({ error: err.message });
+        return;
+      }
+      throw err;
     }
 
-    const rawBody = req.body as Record<string, unknown>;
-    const body = filterRequestBody(rawBody, this.schemaAllowlists, alias);
     const timeout = this.config.timeout ?? 120_000;
     const requestId =
       (typeof req.query.requestId === "string" && req.query.requestId) ||
@@ -220,7 +223,7 @@ export class ServingPlugin extends Plugin {
     await this.executeStream(
       res,
       () =>
-        servingConnector.stream(workspaceClient, endpoint.name, body, {
+        servingConnector.stream(workspaceClient, endpoint.name, filteredBody, {
           servedModel: endpoint.servedModel,
         }),
       streamSettings,
@@ -228,28 +231,21 @@ export class ServingPlugin extends Plugin {
   }
 
   async invoke(alias: string, body: Record<string, unknown>): Promise<unknown> {
-    const endpoint = this.resolveEndpoint(alias);
-    if (!endpoint) {
-      throw new Error(`Unknown endpoint alias: ${alias}`);
-    }
-
-    const filteredBody = filterRequestBody(body, this.schemaAllowlists, alias);
+    const { endpoint, filteredBody } = this.resolveAndFilter(alias, body);
     const workspaceClient = getWorkspaceClient();
     const timeout = this.config.timeout ?? 120_000;
-
-    const executeSettings: PluginExecutionSettings = {
-      default: {
-        ...servingInvokeDefaults,
-        timeout,
-      },
-    };
 
     return this.execute(
       () =>
         servingConnector.invoke(workspaceClient, endpoint.name, filteredBody, {
           servedModel: endpoint.servedModel,
         }),
-      executeSettings,
+      {
+        default: {
+          ...servingInvokeDefaults,
+          timeout,
+        },
+      },
     );
   }
 
@@ -257,12 +253,7 @@ export class ServingPlugin extends Plugin {
     alias: string,
     body: Record<string, unknown>,
   ): AsyncGenerator<unknown> {
-    const endpoint = this.resolveEndpoint(alias);
-    if (!endpoint) {
-      throw new Error(`Unknown endpoint alias: ${alias}`);
-    }
-
-    const filteredBody = filterRequestBody(body, this.schemaAllowlists, alias);
+    const { endpoint, filteredBody } = this.resolveAndFilter(alias, body);
     const workspaceClient = getWorkspaceClient();
 
     yield* servingConnector.stream(
