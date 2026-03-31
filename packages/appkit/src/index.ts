@@ -15,6 +15,7 @@ export type {
 } from "shared";
 export { isSQLTypeMarker, sql } from "shared";
 export { CacheManager } from "./cache";
+export type { JobsConnectorConfig } from "./connectors/jobs";
 export type {
   DatabaseCredential,
   GenerateDatabaseCredentialRequest,
@@ -48,7 +49,17 @@ export {
 } from "./errors";
 // Plugin authoring
 export { Plugin, type ToPlugin, toPlugin } from "./plugin";
-export { analytics, files, genie, lakebase, proto, server } from "./plugins";
+export {
+  analytics,
+  files,
+  genie,
+  jobs,
+  lakebase,
+  proto,
+  server,
+} from "./plugins";
+export type { IJobsConfig } from "./plugins/jobs";
+export { ProtoSerializer } from "./plugins/proto/serializer";
 // Registry types and utilities for plugin manifests
 export type {
   ConfigSchema,

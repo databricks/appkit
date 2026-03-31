@@ -1,6 +1,7 @@
 export * from "./analytics";
 export * from "./files";
 export * from "./genie";
+export * from "./jobs";
 export * from "./lakebase";
 export * from "./proto";
 export * from "./server";

@@ -15,7 +15,8 @@
     "**/*.example.tsx",
     "template/**",
     "tools/**",
-    "docs/**"
+    "docs/**",
+    "**/tests/scenario/**"
   ],
   "ignoreBinaries": ["tarball"]
 }

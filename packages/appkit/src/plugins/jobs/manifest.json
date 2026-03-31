@@ -1,0 +1,27 @@
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "name": "jobs",
+  "displayName": "Jobs Plugin",
+  "description": "Databricks Jobs API integration for submitting, monitoring, and managing job runs",
+  "resources": {
+    "required": [],
+    "optional": []
+  },
+  "config": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "timeout": {
+          "type": "number",
+          "default": 60000,
+          "description": "Default timeout for Jobs API calls in milliseconds"
+        },
+        "pollIntervalMs": {
+          "type": "number",
+          "default": 5000,
+          "description": "Poll interval for waiting on run completion in milliseconds"
+        }
+      }
+    }
+  }
+}
