@@ -1,0 +1,7 @@
+{
+  "appCommand": "npx tsx app/server.ts",
+  "appUrl": "http://localhost:3001",
+  "timeoutMs": 30000,
+  "casesFile": "{variant}/cases.json",
+  "resources": []
+}

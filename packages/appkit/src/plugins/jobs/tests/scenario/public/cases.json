@@ -1,0 +1,33 @@
+{
+  "cases": [
+    {
+      "description": "Health check returns ok",
+      "action": "api",
+      "endpoint": "/api/health",
+      "expectedBody": { "status": "ok", "plugin": "jobs" }
+    },
+    {
+      "description": "Submit a run returns run_id",
+      "action": "api",
+      "method": "POST",
+      "endpoint": "/api/jobs/submit",
+      "body": {
+        "run_name": "public-test-run",
+        "tasks": [{ "task_key": "main" }]
+      },
+      "expectedFields": ["run_id"]
+    },
+    {
+      "description": "List runs shows submitted run",
+      "action": "api",
+      "endpoint": "/api/jobs/runs",
+      "expectedFields": ["runs"]
+    },
+    {
+      "description": "Dashboard loads",
+      "action": "load",
+      "url": "/",
+      "expectedTextContains": ["Jobs Dashboard"]
+    }
+  ]
+}

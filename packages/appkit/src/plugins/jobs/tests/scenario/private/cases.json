@@ -1,0 +1,84 @@
+{
+  "cases": [
+    {
+      "description": "Get run returns lifecycle state",
+      "action": "api",
+      "setup": {
+        "method": "POST",
+        "endpoint": "/api/jobs/submit",
+        "body": { "run_name": "private-test", "tasks": [{ "task_key": "etl" }] }
+      },
+      "endpoint": "/api/jobs/runs/1000",
+      "expectedFields": ["run_id", "run_name", "state"]
+    },
+    {
+      "description": "Cancel run transitions to CANCELED",
+      "action": "api",
+      "setup": {
+        "method": "POST",
+        "endpoint": "/api/jobs/submit",
+        "body": { "run_name": "cancel-test", "tasks": [{ "task_key": "main" }] }
+      },
+      "method": "POST",
+      "endpoint": "/api/jobs/runs/1001/cancel",
+      "expectedStatus": 200
+    },
+    {
+      "description": "Get non-existent run returns 404",
+      "action": "api",
+      "endpoint": "/api/jobs/runs/99999",
+      "expectedStatus": 404
+    },
+    {
+      "description": "Run completes with SUCCESS after polling",
+      "action": "api",
+      "setup": {
+        "method": "POST",
+        "endpoint": "/api/jobs/submit",
+        "body": {
+          "run_name": "poll-test",
+          "tasks": [{ "task_key": "analysis" }]
+        },
+        "waitMs": 700
+      },
+      "endpoint": "/api/jobs/runs/1002",
+      "expectedBody": {
+        "state": {
+          "life_cycle_state": "TERMINATED",
+          "result_state": "SUCCESS",
+          "state_message": "Run completed successfully"
+        }
+      }
+    },
+    {
+      "description": "Multi-task run tracks all tasks",
+      "action": "api",
+      "setup": {
+        "method": "POST",
+        "endpoint": "/api/jobs/submit",
+        "body": {
+          "run_name": "multi-task",
+          "tasks": [
+            { "task_key": "extract" },
+            { "task_key": "transform" },
+            { "task_key": "load" }
+          ]
+        }
+      },
+      "endpoint": "/api/jobs/runs/1003",
+      "expectedFields": ["tasks"]
+    },
+    {
+      "description": "Dashboard shows run count",
+      "action": "load",
+      "url": "/",
+      "expectedTextContains": ["Total runs"]
+    },
+    {
+      "description": "Dashboard table has correct columns",
+      "action": "load",
+      "url": "/",
+      "expectedTextContains": ["Run ID", "Name", "State", "Result", "Tasks"]
+    }
+  ]
+}

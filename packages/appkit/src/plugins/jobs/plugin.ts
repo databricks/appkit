@@ -40,7 +40,7 @@ const logger = createLogger("jobs");
  * console.log(run.state?.result_state); // "SUCCESS"
  * ```
  */
-class JobsPlugin extends Plugin {
+export class JobsPlugin extends Plugin {
   static manifest = manifest as PluginManifest<"jobs">;
 
   protected declare config: IJobsConfig;
