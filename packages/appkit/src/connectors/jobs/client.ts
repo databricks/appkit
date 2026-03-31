@@ -18,6 +18,8 @@ import type { JobsConnectorConfig } from "./types";
 
 const logger = createLogger("connectors:jobs");
 
+const TERMINAL_STATES = new Set(["TERMINATED", "SKIPPED", "INTERNAL_ERROR"]);
+
 export class JobsConnector {
   private readonly name = "jobs";
   private readonly config: JobsConnectorConfig;
@@ -174,6 +176,8 @@ export class JobsConnector {
       async (span: Span) => {
         try {
           let pollCount = 0;
+          let currentInterval = pollIntervalMs;
+          const maxInterval = Math.max(pollIntervalMs * 6, 30_000);
 
           while (true) {
             pollCount++;
@@ -202,11 +206,7 @@ export class JobsConnector {
 
             const lifeCycleState = run.state?.life_cycle_state;
 
-            if (
-              lifeCycleState === "TERMINATED" ||
-              lifeCycleState === "SKIPPED" ||
-              lifeCycleState === "INTERNAL_ERROR"
-            ) {
+            if (lifeCycleState && TERMINAL_STATES.has(lifeCycleState)) {
               span.setAttribute("jobs.final_state", lifeCycleState);
               span.setAttribute(
                 "jobs.result_state",
@@ -217,7 +217,11 @@ export class JobsConnector {
               return run;
             }
 
-            await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+            // Exponential backoff with jitter
+            const jitter = Math.random() * 0.2 * currentInterval;
+            const delay = Math.min(currentInterval + jitter, maxInterval);
+            currentInterval = Math.min(currentInterval * 1.5, maxInterval);
+            await new Promise((resolve) => setTimeout(resolve, delay));
           }
         } catch (error) {
           span.recordException(error as Error);
@@ -277,11 +281,11 @@ export class JobsConnector {
           span.end();
           this.telemetryMetrics.apiCallCount.add(1, {
             operation,
-            success: success.toString(),
+            success,
           });
           this.telemetryMetrics.apiCallDuration.record(duration, {
             operation,
-            success: success.toString(),
+            success,
           });
 
           logger.event()?.setContext("jobs", {

@@ -2,6 +2,18 @@ import { createMockRouter, setupDatabricksEnv } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { JobsPlugin, jobs } from "../plugin";
 
+vi.mock("../../../cache", () => ({
+  CacheManager: {
+    getInstanceSync: vi.fn(() => ({
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      getOrExecute: vi.fn(async (_k: any, fn: any) => fn()),
+      generateKey: vi.fn((p: any, u: any) => `${u}:${JSON.stringify(p)}`),
+    })),
+  },
+}));
+
 vi.mock("@databricks/sdk-experimental", () => ({
   WorkspaceClient: vi.fn(),
 }));

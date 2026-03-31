@@ -1,9 +1,7 @@
-import type {
-  jobs as jobsTypes,
-  WorkspaceClient,
-} from "@databricks/sdk-experimental";
+import type { jobs as jobsTypes } from "@databricks/sdk-experimental";
 import { JobsConnector } from "../../connectors/jobs";
 import { getWorkspaceClient } from "../../context";
+import { InitializationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
@@ -11,6 +9,9 @@ import manifest from "./manifest.json";
 import type { IJobsConfig } from "./types";
 
 const logger = createLogger("jobs");
+
+const DEFAULT_TIMEOUT = 60_000;
+const DEFAULT_WAIT_TIMEOUT = 600_000;
 
 /**
  * AppKit plugin for Databricks Jobs API.
@@ -45,12 +46,14 @@ export class JobsPlugin extends Plugin {
 
   protected declare config: IJobsConfig;
   private connector: JobsConnector;
+  private readonly defaultTimeout: number;
 
   constructor(config: IJobsConfig) {
     super(config);
     this.config = config;
+    this.defaultTimeout = config.timeout ?? DEFAULT_TIMEOUT;
     this.connector = new JobsConnector({
-      timeout: config.timeout ?? 60000,
+      timeout: this.defaultTimeout,
       telemetry: config.telemetry,
     });
   }
@@ -58,9 +61,15 @@ export class JobsPlugin extends Plugin {
   async setup() {
     const client = getWorkspaceClient();
     if (!client) {
-      throw new Error("Jobs plugin requires a configured workspace client");
+      throw new InitializationError(
+        "Jobs plugin requires a configured workspace client",
+      );
     }
     logger.info("Jobs plugin initialized");
+  }
+
+  private get executeOptions() {
+    return { timeout: this.defaultTimeout };
   }
 
   /**
@@ -75,7 +84,7 @@ export class JobsPlugin extends Plugin {
     return this.execute(
       (sig) =>
         this.connector.submitRun(getWorkspaceClient(), request, sig ?? signal),
-      { timeout: this.config.timeout ?? 60000 },
+      this.executeOptions,
     ) as Promise<jobsTypes.SubmitRunResponse>;
   }
 
@@ -91,7 +100,7 @@ export class JobsPlugin extends Plugin {
     return this.execute(
       (sig) =>
         this.connector.runNow(getWorkspaceClient(), request, sig ?? signal),
-      { timeout: this.config.timeout ?? 60000 },
+      this.executeOptions,
     ) as Promise<jobsTypes.RunNowResponse>;
   }
 
@@ -108,7 +117,7 @@ export class JobsPlugin extends Plugin {
           { run_id: runId },
           sig ?? signal,
         ),
-      { timeout: this.config.timeout ?? 60000 },
+      this.executeOptions,
     ) as Promise<jobsTypes.Run>;
   }
 
@@ -128,7 +137,7 @@ export class JobsPlugin extends Plugin {
           { run_id: runId },
           sig ?? signal,
         ),
-      { timeout: this.config.timeout ?? 60000 },
+      this.executeOptions,
     ) as Promise<jobsTypes.RunOutput>;
   }
 
@@ -145,7 +154,7 @@ export class JobsPlugin extends Plugin {
           { run_id: runId },
           sig ?? signal,
         ),
-      { timeout: this.config.timeout ?? 60000 },
+      this.executeOptions,
     );
   }
 
@@ -161,7 +170,7 @@ export class JobsPlugin extends Plugin {
     return this.execute(
       (sig) =>
         this.connector.listRuns(getWorkspaceClient(), request, sig ?? signal),
-      { timeout: this.config.timeout ?? 60000 },
+      this.executeOptions,
     ) as Promise<jobsTypes.BaseRun[]>;
   }
 
@@ -178,7 +187,7 @@ export class JobsPlugin extends Plugin {
           { job_id: jobId },
           sig ?? signal,
         ),
-      { timeout: this.config.timeout ?? 60000 },
+      this.executeOptions,
     ) as Promise<jobsTypes.Job>;
   }
 
@@ -194,44 +203,26 @@ export class JobsPlugin extends Plugin {
     return this.execute(
       (sig) =>
         this.connector.createJob(getWorkspaceClient(), request, sig ?? signal),
-      { timeout: this.config.timeout ?? 60000 },
+      this.executeOptions,
     ) as Promise<jobsTypes.CreateResponse>;
   }
 
   /**
    * Polls a run until it reaches a terminal state (TERMINATED, SKIPPED, or INTERNAL_ERROR).
-   *
-   * @param runId - The run ID to wait for
-   * @param timeoutMs - Maximum time to wait (defaults to config.timeout or 600000ms)
-   * @returns The final run state
    */
   async waitForRun(
     runId: number,
-    timeoutMs?: number,
-    signal?: AbortSignal,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
   ): Promise<jobsTypes.Run> {
     return this.connector.waitForRun(
       getWorkspaceClient(),
       runId,
       this.config.pollIntervalMs ?? 5000,
-      timeoutMs ?? this.config.timeout ?? 600000,
-      signal,
+      options?.timeoutMs ?? this.config.timeout ?? DEFAULT_WAIT_TIMEOUT,
+      options?.signal,
     );
   }
 
-  /**
-   * Returns the plugin's public API, accessible via `AppKit.jobs`.
-   *
-   * - `submitRun` — Submit a one-time run
-   * - `runNow` — Trigger an existing job
-   * - `getRun` — Get run metadata
-   * - `getRunOutput` — Get task output
-   * - `cancelRun` — Cancel a run
-   * - `listRuns` — List runs for a job
-   * - `getJob` — Get job details
-   * - `createJob` — Create a new job
-   * - `waitForRun` — Poll until terminal state
-   */
   exports() {
     return {
       submitRun: this.submitRun.bind(this),
