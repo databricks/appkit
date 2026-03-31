@@ -47,9 +47,9 @@ export const DEFAULT_FIELDS_BY_TYPE: Record<
     id: { env: "DATABRICKS_JOB_ID", description: "Job ID" },
   },
   serving_endpoint: {
-    id: {
-      env: "DATABRICKS_SERVING_ENDPOINT_ID",
-      description: "Serving endpoint ID",
+    name: {
+      env: "DATABRICKS_SERVING_ENDPOINT",
+      description: "Serving endpoint name",
     },
   },
   volume: {
