@@ -75,8 +75,7 @@
     "semver": "7.7.3",
     "shared": "workspace:*",
     "vite": "npm:rolldown-vite@7.1.14",
-    "ws": "8.18.3",
-    "@bufbuild/protobuf": "^2.3.0"
+    "ws": "8.18.3"
   },
   "devDependencies": {
     "@types/express": "4.17.25",
