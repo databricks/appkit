@@ -21,8 +21,9 @@
   },
   "npm": false,
   "hooks": {
+    "before:init": "pnpm audit --audit-level=high --prod",
     "after:bump": "npm version ${version} --no-git-tag-version --allow-same-version",
-    "before:release": "pnpm build:package && pnpm dist",
+    "before:release": "pnpm build:package && pnpm dist && pnpm release:sbom",
     "after:release": "npm publish ./tmp --access public --provenance"
   },
   "plugins": {

@@ -208,7 +208,8 @@ export class RemoteTunnelManager {
       }
 
       res.cookie("dev-tunnel-id", tunnelId, {
-        httpOnly: false,
+        httpOnly: true,
+        secure: true,
         sameSite: "lax",
       });
 

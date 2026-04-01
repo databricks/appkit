@@ -20,7 +20,7 @@ The easiest way to get started with the Lakebase plugin is to use the Databricks
 ### Prerequisites
 
 - [Node.js](https://nodejs.org) v22+ environment with `npm`
-- Databricks CLI (v0.287.0 or higher): install and configure it according to the [official tutorial](https://docs.databricks.com/aws/en/dev-tools/cli/tutorial).
+- Databricks CLI (v0.295.0 or higher): install and configure it according to the [official tutorial](https://docs.databricks.com/aws/en/dev-tools/cli/tutorial).
 - A new Databricks app with AppKit installed. See [Bootstrap a new Databricks app](../index.md#quick-start-options) for more details.
 
 ### Steps

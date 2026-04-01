@@ -167,9 +167,18 @@ console.log(
 function postProcess(appDir: string, app: AppTemplate): void {
   console.log(`  Post-processing ${app.name}...`);
 
-  // 1. Delete .env — end users get it from `databricks apps init`, but published
-  //    templates should not ship credentials from the generator's environment.
+  // 1. Delete .env (contains resolved credentials from the generator's CLI profile)
+  //    and write .env.tmpl with a header comment so that `databricks apps init`
+  //    can render it for end users when they scaffold from the published template.
   rmSync(join(appDir, ".env"), { force: true });
+
+  const envTmplHeader = [
+    "# This file is a Go template processed by `databricks apps init --template <path>`.",
+    "# Template variables are substituted and the result is written as .env.",
+    "",
+  ].join("\n");
+  const envTmplBody = readFileSync(join(TEMPLATE_PATH, ".env.tmpl"), "utf-8");
+  writeFileSync(join(appDir, ".env.tmpl"), envTmplHeader + envTmplBody);
 
   // 2. Sync appkit.plugins.json based on server imports (discovers available plugins
   //    and marks the ones used in the plugins array as required).

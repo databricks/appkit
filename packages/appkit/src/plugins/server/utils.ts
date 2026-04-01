@@ -3,6 +3,7 @@ import fs from "node:fs";
 import type http from "node:http";
 import path from "node:path";
 import pc from "picocolors";
+import type { PluginClientConfigs, PluginEndpoints } from "shared";
 
 export function parseCookies(
   req: http.IncomingMessage,
@@ -132,32 +133,67 @@ export function getQueries(configFolder: string) {
   );
 }
 
-import type { PluginEndpoints } from "shared";
-
-export type { PluginEndpoints };
+export type { PluginClientConfigs, PluginEndpoints };
 
 interface RuntimeConfig {
   appName: string;
   queries: Record<string, string>;
   endpoints: PluginEndpoints;
+  plugins: PluginClientConfigs;
 }
 
-function getRuntimeConfig(endpoints: PluginEndpoints = {}): RuntimeConfig {
+const APPKIT_CONFIG_SCRIPT_ID = "__appkit__";
+const EMPTY_RUNTIME_CONFIG: RuntimeConfig = {
+  appName: "",
+  queries: {},
+  endpoints: {},
+  plugins: {},
+};
+const EMPTY_RUNTIME_CONFIG_JSON = JSON.stringify(EMPTY_RUNTIME_CONFIG);
+const JSON_SCRIPT_ESCAPE_MAP: Record<string, string> = {
+  "<": "\\u003c",
+  ">": "\\u003e",
+  "&": "\\u0026",
+  "\u2028": "\\u2028",
+  "\u2029": "\\u2029",
+};
+
+export function getRuntimeConfig(
+  endpoints: PluginEndpoints = {},
+  pluginConfigs: PluginClientConfigs = {},
+): RuntimeConfig {
   const configFolder = path.join(process.cwd(), "config");
 
   return {
     appName: process.env.DATABRICKS_APP_NAME || "",
     queries: getQueries(configFolder),
     endpoints,
+    plugins: pluginConfigs,
   };
 }
 
-export function getConfigScript(endpoints: PluginEndpoints = {}): string {
-  const config = getRuntimeConfig(endpoints);
+export function getConfigScript(
+  endpoints: PluginEndpoints = {},
+  pluginConfigs: PluginClientConfigs = {},
+): string {
+  const config = getRuntimeConfig(endpoints, pluginConfigs);
 
   return `
+    <script id="${APPKIT_CONFIG_SCRIPT_ID}" type="application/json">
+      ${serializeRuntimeConfig(config)}
+    </script>
     <script>
-      window.__CONFIG__ = ${JSON.stringify(config)};
+      window.__appkit__ = JSON.parse(
+        document.getElementById("${APPKIT_CONFIG_SCRIPT_ID}")?.textContent ||
+          '${EMPTY_RUNTIME_CONFIG_JSON}',
+      );
     </script>
   `;
+}
+
+function serializeRuntimeConfig(config: RuntimeConfig): string {
+  return JSON.stringify(config).replace(
+    /[<>&\u2028\u2029]/g,
+    (char) => JSON_SCRIPT_ESCAPE_MAP[char] ?? char,
+  );
 }

@@ -24,6 +24,8 @@ export interface BasePlugin {
   getSkipBodyParsingPaths?(): ReadonlySet<string>;
 
   exports?(): unknown;
+
+  clientConfig?(): Record<string, unknown>;
 }
 
 /** Base configuration interface for AppKit plugins */
@@ -215,6 +217,9 @@ export type PluginEndpointMap = Record<string, string>;
 
 /** Map of plugin names to their endpoint maps */
 export type PluginEndpoints = Record<string, PluginEndpointMap>;
+
+/** Map of plugin names to their client-exposed config */
+export type PluginClientConfigs = Record<string, Record<string, unknown>>;
 
 export interface QuerySchemas {
   [key: string]: unknown;

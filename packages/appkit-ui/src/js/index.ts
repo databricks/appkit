@@ -10,5 +10,6 @@ export {
   sql,
 } from "shared";
 export * from "./arrow";
+export * from "./config";
 export * from "./constants";
 export * from "./sse";

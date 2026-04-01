@@ -976,6 +976,10 @@ export class FilesPlugin extends Plugin {
 
     return filesExport;
   }
+
+  clientConfig(): Record<string, unknown> {
+    return { volumes: this.volumeKeys };
+  }
 }
 
 /**

@@ -14,8 +14,10 @@ vi.mock("node:fs", () => ({
 
 import {
   generateTunnelIdFromEmail,
+  getConfigScript,
   getQueries,
   getRoutes,
+  getRuntimeConfig,
   parseCookies,
 } from "../utils";
 
@@ -89,5 +91,58 @@ describe("server/utils", () => {
     mockReaddirSync.mockReturnValue(["a.sql", "b.txt", "c.sql"]);
 
     expect(getQueries("/cfg")).toEqual({ a: "a", c: "c" });
+  });
+
+  describe("getRuntimeConfig", () => {
+    test("includes empty plugins by default", () => {
+      mockExistsSync.mockReturnValue(false);
+      const config = getRuntimeConfig();
+      expect(config.plugins).toEqual({});
+    });
+
+    test("includes plugin configs when provided", () => {
+      mockExistsSync.mockReturnValue(false);
+      const pluginConfigs = {
+        analytics: { trackingId: "UA-123" },
+        genie: { spaceId: "space-1" },
+      };
+      const config = getRuntimeConfig({}, pluginConfigs);
+      expect(config.plugins).toEqual(pluginConfigs);
+    });
+  });
+
+  describe("getConfigScript", () => {
+    test("serializes plugin configs into inert JSON script tag", () => {
+      mockExistsSync.mockReturnValue(false);
+      const pluginConfigs = { myPlugin: { key: "value" } };
+      const script = getConfigScript({}, pluginConfigs);
+
+      expect(script).toContain('type="application/json"');
+      expect(script).toContain('"myPlugin"');
+      expect(script).toContain('"key":"value"');
+    });
+
+    test("produces valid JSON with empty plugin configs", () => {
+      mockExistsSync.mockReturnValue(false);
+      const script = getConfigScript();
+
+      expect(script).toContain('"plugins":{}');
+    });
+
+    test("escapes script-breaking characters in runtime config JSON", () => {
+      mockExistsSync.mockReturnValue(false);
+      const script = getConfigScript(
+        {},
+        {
+          myPlugin: {
+            message: "</script><script>alert('xss')</script>",
+          },
+        },
+      );
+
+      expect(script).toContain("\\u003c/script\\u003e");
+      expect(script).not.toContain("</script><script>alert('xss')</script>");
+      expect(script).toContain("window.__appkit__ = JSON.parse");
+    });
   });
 });

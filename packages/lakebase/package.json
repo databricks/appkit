@@ -25,7 +25,8 @@
     "dist",
     "README.md",
     "LICENSE",
-    "DCO"
+    "DCO",
+    "sbom.cdx.json"
   ],
   "exports": {
     ".": {
@@ -45,15 +46,16 @@
     "typecheck": "tsc --noEmit",
     "release": "release-it",
     "release:dry": "release-it --dry-run",
-    "release:ci": "release-it --ci"
+    "release:ci": "release-it --ci",
+    "release:sbom": "pnpm exec cdxgen -t js --no-recurse --required-only -o tmp/sbom.cdx.json ."
   },
   "dependencies": {
-    "@databricks/sdk-experimental": "^0.16.0",
-    "pg": "^8.18.0",
-    "@opentelemetry/api": "^1.9.0"
+    "@databricks/sdk-experimental": "0.16.0",
+    "pg": "8.18.0",
+    "@opentelemetry/api": "1.9.0"
   },
   "devDependencies": {
-    "@types/pg": "^8.16.0"
+    "@types/pg": "8.16.0"
   },
   "module": "./dist/index.js",
   "publishConfig": {
