@@ -240,7 +240,7 @@ ValidationResult with validity status, missing resources, and all resources
 #### Example
 
 ```typescript
-const registry = new ResourceRegistry();
+const registry = ResourceRegistry.getInstance();
 const result = registry.validate();
 
 if (!result.valid) {
