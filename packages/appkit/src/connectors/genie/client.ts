@@ -183,7 +183,7 @@ export class GenieConnector {
     spaceId: string,
     content: string,
     conversationId: string | undefined,
-    options?: { timeout?: number },
+    options?: { timeout?: number; signal?: AbortSignal },
   ): AsyncGenerator<GenieStreamEvent> {
     try {
       const {
@@ -289,6 +289,7 @@ export class GenieConnector {
       includeQueryResults?: boolean;
       pageSize?: number;
       pageToken?: string;
+      signal?: AbortSignal;
     },
   ): AsyncGenerator<GenieStreamEvent> {
     const includeQueryResults = options?.includeQueryResults !== false;
@@ -391,16 +392,16 @@ export class GenieConnector {
     spaceId: string,
     conversationId: string,
     messageId: string,
-    options?: { timeout?: number; pollInterval?: number },
+    options?: { timeout?: number; pollInterval?: number; signal?: AbortSignal },
   ): AsyncGenerator<GenieStreamEvent> {
-    const timeout = options?.timeout ?? this.config.timeout;
     const pollInterval = options?.pollInterval ?? 3_000;
-    const deadline =
-      timeout > 0 ? Date.now() + timeout : Number.POSITIVE_INFINITY;
+    const signal = options?.signal;
     let lastStatus = "";
 
     try {
       while (true) {
+        if (signal?.aborted) return;
+
         const message = await workspaceClient.genie.getMessage({
           space_id: spaceId,
           conversation_id: conversationId,
@@ -427,14 +428,20 @@ export class GenieConnector {
           return;
         }
 
-        if (Date.now() >= deadline) {
-          yield { type: "error", error: "Message polling timed out" };
-          return;
-        }
-
-        await new Promise((r) => setTimeout(r, pollInterval));
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, pollInterval);
+          signal?.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(timer);
+              resolve();
+            },
+            { once: true },
+          );
+        });
       }
     } catch (error) {
+      if (signal?.aborted) return;
       logger.error(
         "Genie getMessage poll error (spaceId=%s, conversationId=%s, messageId=%s): %O",
         spaceId,

@@ -7,6 +7,8 @@ export type {
   GenieStreamEvent,
 } from "shared";
 
+export const TERMINAL_STATUSES = new Set(["COMPLETED", "FAILED"]);
+
 export type GenieChatStatus =
   | "idle"
   | "loading-history"

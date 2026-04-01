@@ -4,7 +4,11 @@ import { ScrollArea } from "../ui/scroll-area";
 import { Skeleton } from "../ui/skeleton";
 import { Spinner } from "../ui/spinner";
 import { GenieChatMessage } from "./genie-chat-message";
-import type { GenieChatStatus, GenieMessageItem } from "./types";
+import {
+  type GenieChatStatus,
+  type GenieMessageItem,
+  TERMINAL_STATUSES,
+} from "./types";
 
 interface GenieChatMessageListProps {
   /** Array of messages to display */
@@ -25,8 +29,6 @@ const STATUS_LABELS: Record<string, string> = {
   FILTERING_RESULTS: "Filtering results...",
   COMPLETED: "Done",
 };
-
-const TERMINAL_STATUSES = new Set(["COMPLETED", "FAILED"]);
 
 function formatStatus(status: string): string {
   return STATUS_LABELS[status] ?? status.replace(/_/g, " ").toLowerCase();

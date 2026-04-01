@@ -123,13 +123,13 @@ export class GeniePlugin extends Plugin {
 
     await this.executeStream<GenieStreamEvent>(
       res,
-      () =>
+      (signal) =>
         this.genieConnector.streamSendMessage(
           workspaceClient,
           spaceId,
           content,
           conversationId,
-          { timeout },
+          { timeout, signal },
         ),
       streamSettings,
     );
@@ -175,12 +175,12 @@ export class GeniePlugin extends Plugin {
 
     await this.executeStream<GenieStreamEvent>(
       res,
-      () =>
+      (signal) =>
         this.genieConnector.streamConversation(
           workspaceClient,
           spaceId,
           conversationId,
-          { includeQueryResults, pageToken },
+          { includeQueryResults, pageToken, signal },
         ),
       streamSettings,
     );
@@ -227,13 +227,13 @@ export class GeniePlugin extends Plugin {
 
     await this.executeStream<GenieStreamEvent>(
       res,
-      () =>
+      (signal) =>
         this.genieConnector.streamGetMessage(
           workspaceClient,
           spaceId,
           conversationId,
           messageId,
-          { timeout },
+          { timeout, signal },
         ),
       streamSettings,
     );

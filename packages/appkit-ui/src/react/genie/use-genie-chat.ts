@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { connectSSE } from "@/js";
-import type {
-  GenieChatStatus,
-  GenieMessageItem,
-  GenieMessageResponse,
-  GenieStreamEvent,
-  UseGenieChatOptions,
-  UseGenieChatReturn,
+import {
+  type GenieChatStatus,
+  type GenieMessageItem,
+  type GenieMessageResponse,
+  type GenieStreamEvent,
+  TERMINAL_STATUSES,
+  type UseGenieChatOptions,
+  type UseGenieChatReturn,
 } from "./types";
 
 function getUrlParam(name: string): string | null {
@@ -62,8 +63,6 @@ function makeAssistantItem(msg: GenieMessageResponse): GenieMessageItem {
     error: msg.error,
   };
 }
-
-const TERMINAL_STATUSES = new Set(["COMPLETED", "FAILED"]);
 
 /**
  * The API bundles user question (content) and AI answer (attachments) in one message.
@@ -191,6 +190,9 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
   const conversationIdRef = useRef<string | null>(null);
   const nextPageTokenRef = useRef<string | null>(null);
   const isLoadingOlderRef = useRef(false);
+  const processStreamEventRef = useRef<(event: GenieStreamEvent) => void>(
+    () => {},
+  );
 
   useEffect(() => {
     conversationIdRef.current = conversationId;
@@ -221,19 +223,12 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
         }
 
         case "message_result": {
-          const msg = event.message;
-          const hasAttachments = (msg.attachments?.length ?? 0) > 0;
-
-          const item = makeAssistantItem(msg);
+          const item = makeAssistantItem(event.message);
           setMessages((prev) => {
             const last = prev[prev.length - 1];
             if (!last || last.role !== "assistant") return prev;
 
-            if (last.id === msg.messageId) {
-              return [...prev.slice(0, -1), item];
-            }
-
-            if (last.id === "" && hasAttachments) {
+            if (last.id === event.message.messageId || last.id === "") {
               return [...prev.slice(0, -1), item];
             }
 
@@ -277,6 +272,8 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
     },
     [persistInUrl, urlParamName],
   );
+
+  processStreamEventRef.current = processStreamEvent;
 
   const sendMessage = useCallback(
     (content: string) => {
@@ -322,7 +319,9 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
         signal: abortController.signal,
         onMessage: async (message) => {
           try {
-            processStreamEvent(JSON.parse(message.data) as GenieStreamEvent);
+            processStreamEventRef.current(
+              JSON.parse(message.data) as GenieStreamEvent,
+            );
           } catch {
             // Malformed SSE data
           }
@@ -342,13 +341,19 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
               : prev;
           });
         },
-      }).then(() => {
-        if (!abortController.signal.aborted) {
-          setStatus((prev) => (prev === "error" ? "error" : "idle"));
-        }
-      });
+      })
+        .then(() => {
+          if (!abortController.signal.aborted) {
+            setStatus((prev) => (prev === "error" ? "error" : "idle"));
+          }
+        })
+        .catch(() => {
+          if (abortController.signal.aborted) return;
+          setError("Connection error. Please try again.");
+          setStatus("error");
+        });
     },
-    [alias, basePath, processStreamEvent],
+    [alias, basePath],
   );
 
   /** Creates an AbortController, stores it in the given ref, and fetches a conversation page. */
@@ -404,7 +409,9 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
         signal: parentAbortController.signal,
         onMessage: async (message) => {
           try {
-            processStreamEvent(JSON.parse(message.data) as GenieStreamEvent);
+            processStreamEventRef.current(
+              JSON.parse(message.data) as GenieStreamEvent,
+            );
           } catch {
             // Malformed SSE data
           }
@@ -418,13 +425,19 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
           );
           setStatus("error");
         },
-      }).then(() => {
-        if (!parentAbortController.signal.aborted) {
-          setStatus((prev) => (prev === "error" ? "error" : "idle"));
-        }
-      });
+      })
+        .then(() => {
+          if (!parentAbortController.signal.aborted) {
+            setStatus((prev) => (prev === "error" ? "error" : "idle"));
+          }
+        })
+        .catch(() => {
+          if (parentAbortController.signal.aborted) return;
+          setError("Failed to poll pending message.");
+          setStatus("error");
+        });
     },
-    [alias, basePath, processStreamEvent],
+    [alias, basePath],
   );
 
   const loadHistory = useCallback(
