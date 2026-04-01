@@ -49,6 +49,12 @@ class SidecarPlugin extends Plugin<NormalizedSidecarConfig> {
     const definitions = normalizeSidecars(config);
     const ids = new Set<string>();
     for (const def of definitions) {
+      if (!def.id || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(def.id)) {
+        throw new SidecarError(
+          `Invalid sidecar id: "${def.id}". Must be lowercase alphanumeric with optional hyphens (e.g., "my-sidecar").`,
+          { isRetryable: false },
+        );
+      }
       if (ids.has(def.id)) {
         throw new SidecarError(`Duplicate sidecar id: "${def.id}"`, {
           isRetryable: false,
@@ -110,7 +116,10 @@ class SidecarPlugin extends Plugin<NormalizedSidecarConfig> {
           logger.error(
             `[${def.id}] Failed to run setup command "${cmd}": ${(err as Error).message}`,
           );
-          throw SidecarError.startupFailed(cmd, 0);
+          throw new SidecarError(`Setup command failed: "${cmd}"`, {
+            isRetryable: false,
+            context: { command: cmd },
+          });
         }
       }
     }
