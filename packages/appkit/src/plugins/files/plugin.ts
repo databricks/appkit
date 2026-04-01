@@ -117,9 +117,7 @@ export class FilesPlugin extends Plugin {
       );
       return { id: getCurrentUserId() };
     }
-    throw AuthenticationError.missingToken(
-      "Missing x-forwarded-user header. Cannot resolve user ID.",
-    );
+    throw AuthenticationError.missingUserId();
   }
 
   /**

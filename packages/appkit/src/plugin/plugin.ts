@@ -246,9 +246,7 @@ export abstract class Plugin<
     const userId = req.header("x-forwarded-user");
     if (userId) return userId;
     if (process.env.NODE_ENV === "development") return getCurrentUserId();
-    throw AuthenticationError.missingToken(
-      "Missing x-forwarded-user header. Cannot resolve user ID.",
-    );
+    throw AuthenticationError.missingUserId();
   }
 
   /**
