@@ -204,3 +204,39 @@ jobs:
             exit 1
           fi
 
+  artifact-scan:
+    name: Artifact Security Scan
+    needs: detect-changes
+    if: needs.detect-changes.outputs.appkit == 'true'
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build and dist
+        run: |
+          pnpm build
+          pnpm --filter=@databricks/appkit dist
+          pnpm --filter=@databricks/appkit-ui dist
+      - name: Security scan (appkit)
+        uses: databricks/gh-action-scan@1c260de6986f77d8c505975ce434830a7afdb95f
+        with:
+          artifact-path: packages/appkit/tmp
+          artifact-name: appkit-pr-test
+      - name: Security scan (appkit-ui)
+        uses: databricks/gh-action-scan@1c260de6986f77d8c505975ce434830a7afdb95f
+        with:
+          artifact-path: packages/appkit-ui/tmp
+          artifact-name: appkit-ui-pr-test
+

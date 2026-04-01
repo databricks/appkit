@@ -1,11 +1,11 @@
 name: Release
 
 on:
-  # push:
-  #   branches:
-  #     - main
-  #   paths-ignore:
-  #     - 'packages/lakebase/**'
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'packages/lakebase/**'
   workflow_dispatch:
     inputs:
       dry-run:
@@ -82,13 +82,47 @@ jobs:
             echo "No releasable version detected"
           fi
 
-      - name: Release
+      - name: Release (build + tag locally, no push)
         run: |
           if [ "${{ steps.mode.outputs.dry_run }}" == "true" ]; then
             pnpm release:dry
           else
-            pnpm release:ci
+            pnpm exec release-it --ci --no-git.push --no-github.release
           fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Security scan (appkit)
+        if: steps.mode.outputs.dry_run != 'true' && steps.version.outputs.version != ''
+        uses: databricks-eng/gh-action-scan@1c260de6986f77d8c505975ce434830a7afdb95f
+        with:
+          artifact-path: packages/appkit/tmp
+          artifact-name: appkit-${{ steps.version.outputs.version }}
+
+      - name: Security scan (appkit-ui)
+        if: steps.mode.outputs.dry_run != 'true' && steps.version.outputs.version != ''
+        uses: databricks-eng/gh-action-scan@1c260de6986f77d8c505975ce434830a7afdb95f
+        with:
+          artifact-path: packages/appkit-ui/tmp
+          artifact-name: appkit-ui-${{ steps.version.outputs.version }}
+
+      - name: Push tag and create GitHub release
+        if: steps.mode.outputs.dry_run != 'true' && steps.version.outputs.version != ''
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push --follow-tags
+          NOTES=$(awk '/^## \[/{if(p) exit; p=1} p' CHANGELOG.md)
+          gh release create "v${VERSION}" \
+            --title "AppKit v${VERSION}" \
+            --notes "$NOTES"
+
+      - name: Publish to npm
+        if: steps.mode.outputs.dry_run != 'true' && steps.version.outputs.version != ''
+        run: |
+          npm publish packages/appkit/tmp --access public --provenance
+          npm publish packages/appkit-ui/tmp --access public --provenance
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

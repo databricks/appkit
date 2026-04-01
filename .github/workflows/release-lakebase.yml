@@ -1,11 +1,11 @@
 name: Release @databricks/lakebase
 
 on:
-  # push:
-  #   branches:
-  #     - main
-  #   paths:
-  #     - 'packages/lakebase/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'packages/lakebase/**'
   workflow_dispatch:
     inputs:
       dry-run:
@@ -61,13 +61,38 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Release
+      - name: Release (build + tag locally)
         working-directory: packages/lakebase
         run: |
           if [ "$DRY_RUN" == "true" ]; then
             pnpm release:dry
           else
-            pnpm release:ci
+            pnpm exec release-it --ci --no-git.push --no-github.release
           fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Security scan
+        if: env.DRY_RUN != 'true'
+        uses: databricks-eng/gh-action-scan@1c260de6986f77d8c505975ce434830a7afdb95f
+        with:
+          artifact-path: packages/lakebase/tmp
+          artifact-name: lakebase
+
+      - name: Push tag and create GitHub release
+        if: env.DRY_RUN != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./packages/lakebase/package.json').version")
+          git push --follow-tags
+          NOTES=$(awk '/^## \[/{if(p) exit; p=1} p' packages/lakebase/CHANGELOG.md)
+          gh release create "lakebase-v${VERSION}" \
+            --title "@databricks/lakebase v${VERSION}" \
+            --notes "$NOTES"
+
+      - name: Publish to npm
+        if: env.DRY_RUN != 'true'
+        run: npm publish packages/lakebase/tmp --access public --provenance
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
