@@ -313,14 +313,16 @@ BasePlugin.clientConfig
 protected execute<T>(
    fn: (signal?: AbortSignal) => Promise<T>, 
    options: PluginExecutionSettings, 
-userKey?: string): Promise<T | undefined>;
+userKey?: string): Promise<ExecutionResult<T>>;
 ```
 
 Execute a function with the plugin's interceptor chain.
 
-All errors are caught and `undefined` is returned (production-safe).
-Route handlers should check for `undefined` and respond with an
-appropriate error status.
+Returns an [ExecutionResult](TypeAlias.ExecutionResult.md) discriminated union:
+- `{ ok: true, data: T }` on success
+- `{ ok: false, status: number, message: string }` on failure
+
+Errors are never thrown — the method is production-safe.
 
 #### Type Parameters
 
@@ -338,7 +340,7 @@ appropriate error status.
 
 #### Returns
 
-`Promise`\<`T` \| `undefined`\>
+`Promise`\<[`ExecutionResult`](TypeAlias.ExecutionResult.md)\<`T`\>\>
 
 ***
 

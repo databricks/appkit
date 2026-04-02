@@ -831,9 +831,6 @@
   .max-w-\[calc\(100\%-2rem\)\] {
     max-width: calc(100% - 2rem);
   }
-  .max-w-full {
-    max-width: 100%;
-  }
   .max-w-max {
     max-width: max-content;
   }
@@ -4514,6 +4511,11 @@
       width: calc(var(--spacing) * 5);
     }
   }
+  .\[\&_\[data-slot\=scroll-area-viewport\]\>div\]\:\!block {
+    & [data-slot=scroll-area-viewport]>div {
+      display: block !important;
+    }
+  }
   .\[\&_a\]\:underline {
     & a {
       text-decoration-line: underline;
@@ -4637,9 +4639,24 @@
       color: var(--muted-foreground);
     }
   }
+  .\[\&_table\]\:block {
+    & table {
+      display: block;
+    }
+  }
+  .\[\&_table\]\:max-w-full {
+    & table {
+      max-width: 100%;
+    }
+  }
   .\[\&_table\]\:border-collapse {
     & table {
       border-collapse: collapse;
+    }
+  }
+  .\[\&_table\]\:overflow-x-auto {
+    & table {
+      overflow-x: auto;
     }
   }
   .\[\&_table\]\:text-xs {
@@ -4849,6 +4866,11 @@
   .\[\&\>\*\]\:w-full {
     &>* {
       width: 100%;
+    }
+  }
+  .\[\&\>\*\]\:min-w-0 {
+    &>* {
+      min-width: calc(var(--spacing) * 0);
     }
   }
   .\[\&\>\*\]\:focus-visible\:relative {

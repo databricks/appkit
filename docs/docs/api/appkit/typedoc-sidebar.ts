@@ -170,6 +170,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.ExecutionResult",
+          label: "ExecutionResult"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.IAppRouter",
           label: "IAppRouter"
         },
