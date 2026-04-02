@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as TypeSafetyRouteRouteImport } from './routes/type-safety.route'
 import { Route as TelemetryRouteRouteImport } from './routes/telemetry.route'
 import { Route as SqlHelpersRouteRouteImport } from './routes/sql-helpers.route'
+import { Route as ServingRouteRouteImport } from './routes/serving.route'
 import { Route as ReconnectRouteRouteImport } from './routes/reconnect.route'
 import { Route as LakebaseRouteRouteImport } from './routes/lakebase.route'
 import { Route as GenieRouteRouteImport } from './routes/genie.route'
@@ -35,6 +36,11 @@ const TelemetryRouteRoute = TelemetryRouteRouteImport.update({
 const SqlHelpersRouteRoute = SqlHelpersRouteRouteImport.update({
   id: '/sql-helpers',
   path: '/sql-helpers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ServingRouteRoute = ServingRouteRouteImport.update({
+  id: '/serving',
+  path: '/serving',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ReconnectRouteRoute = ReconnectRouteRouteImport.update({
@@ -93,6 +99,7 @@ export interface FileRoutesByFullPath {
   '/genie': typeof GenieRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
+  '/serving': typeof ServingRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
   '/type-safety': typeof TypeSafetyRouteRoute
@@ -107,6 +114,7 @@ export interface FileRoutesByTo {
   '/genie': typeof GenieRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
+  '/serving': typeof ServingRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
   '/type-safety': typeof TypeSafetyRouteRoute
@@ -122,6 +130,7 @@ export interface FileRoutesById {
   '/genie': typeof GenieRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
+  '/serving': typeof ServingRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
   '/type-safety': typeof TypeSafetyRouteRoute
@@ -138,6 +147,7 @@ export interface FileRouteTypes {
     | '/genie'
     | '/lakebase'
     | '/reconnect'
+    | '/serving'
     | '/sql-helpers'
     | '/telemetry'
     | '/type-safety'
@@ -152,6 +162,7 @@ export interface FileRouteTypes {
     | '/genie'
     | '/lakebase'
     | '/reconnect'
+    | '/serving'
     | '/sql-helpers'
     | '/telemetry'
     | '/type-safety'
@@ -166,6 +177,7 @@ export interface FileRouteTypes {
     | '/genie'
     | '/lakebase'
     | '/reconnect'
+    | '/serving'
     | '/sql-helpers'
     | '/telemetry'
     | '/type-safety'
@@ -181,6 +193,7 @@ export interface RootRouteChildren {
   GenieRouteRoute: typeof GenieRouteRoute
   LakebaseRouteRoute: typeof LakebaseRouteRoute
   ReconnectRouteRoute: typeof ReconnectRouteRoute
+  ServingRouteRoute: typeof ServingRouteRoute
   SqlHelpersRouteRoute: typeof SqlHelpersRouteRoute
   TelemetryRouteRoute: typeof TelemetryRouteRoute
   TypeSafetyRouteRoute: typeof TypeSafetyRouteRoute
@@ -207,6 +220,13 @@ declare module '@tanstack/react-router' {
       path: '/sql-helpers'
       fullPath: '/sql-helpers'
       preLoaderRoute: typeof SqlHelpersRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/serving': {
+      id: '/serving'
+      path: '/serving'
+      fullPath: '/serving'
+      preLoaderRoute: typeof ServingRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/reconnect': {
@@ -285,6 +305,7 @@ const rootRouteChildren: RootRouteChildren = {
   GenieRouteRoute: GenieRouteRoute,
   LakebaseRouteRoute: LakebaseRouteRoute,
   ReconnectRouteRoute: ReconnectRouteRoute,
+  ServingRouteRoute: ServingRouteRoute,
   SqlHelpersRouteRoute: SqlHelpersRouteRoute,
   TelemetryRouteRoute: TelemetryRouteRoute,
   TypeSafetyRouteRoute: TypeSafetyRouteRoute,
