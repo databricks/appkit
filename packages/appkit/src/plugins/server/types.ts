@@ -1,4 +1,7 @@
 import type { BasePluginConfig } from "shared";
+import type { SecurityConfig } from "./security/types";
+
+export type { SecurityConfig } from "./security/types";
 
 export interface ServerConfig extends BasePluginConfig {
   port?: number;
@@ -15,4 +18,6 @@ export interface ServerConfig extends BasePluginConfig {
    * your app routinely posts larger JSON bodies.
    */
   bodyLimit?: string;
+  /** Security configuration. Secure defaults applied when omitted. */
+  security?: SecurityConfig;
 }

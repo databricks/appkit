@@ -24,6 +24,75 @@
         "staticPath": {
           "type": "string",
           "description": "Path to static files directory (auto-detected if not provided)"
+        },
+        "bodyLimit": {
+          "type": "string",
+          "description": "JSON body size limit (e.g. '100kb', '1mb'). Default: '100kb'"
+        },
+        "security": {
+          "type": "object",
+          "description": "Security configuration. Secure defaults applied when omitted.",
+          "properties": {
+            "csrf": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "allowedOrigins": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "Additional trusted origins for CSRF validation"
+                    }
+                  }
+                },
+                { "const": false }
+              ]
+            },
+            "helmet": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "description": "HelmetOptions — fully replaces defaults"
+                },
+                { "const": false }
+              ]
+            },
+            "cors": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "allowedOrigins": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    },
+                    "credentials": { "type": "boolean" },
+                    "maxAge": { "type": "number" },
+                    "allowedMethods": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    },
+                    "allowedHeaders": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    }
+                  }
+                },
+                { "const": false }
+              ]
+            },
+            "errorHandler": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "includeErrorCode": { "type": "boolean" }
+                  }
+                },
+                { "const": false }
+              ]
+            }
+          }
         }
       }
     }
