@@ -8,6 +8,4 @@ coverage
 
 *.tsbuildinfo
 
-.claude/ralph-state.md
-
 .turbo
