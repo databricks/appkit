@@ -96,6 +96,11 @@ pnpm check:fix        # Auto-fix with Biome
 pnpm typecheck        # TypeScript type checking across all packages
 ```
 
+### After Making Changes
+After completing code changes, always run:
+1. **Build and generate docs:** `pnpm build && pnpm docs:build`
+2. **Lint fix and typecheck:** `pnpm check:fix && pnpm -r typecheck`
+
 ### AppKit CLI
 When using the published SDK or running from the monorepo (after `pnpm build`), the `appkit` CLI is available:
 
