@@ -105,6 +105,9 @@ export const policy = {
    * AND — all policies must allow. Short-circuits on first denial.
    */
   all(...policies: FilePolicy[]): FilePolicy {
+    if (policies.length === 0) {
+      throw new Error("policy.all() requires at least one policy");
+    }
     return async (action, resource, user) => {
       for (const p of policies) {
         if (!(await p(action, resource, user))) return false;
@@ -117,6 +120,9 @@ export const policy = {
    * OR — at least one policy must allow. Short-circuits on first allow.
    */
   any(...policies: FilePolicy[]): FilePolicy {
+    if (policies.length === 0) {
+      throw new Error("policy.any() requires at least one policy");
+    }
     return async (action, resource, user) => {
       for (const p of policies) {
         if (await p(action, resource, user)) return true;
@@ -133,11 +139,6 @@ export const policy = {
   /** Allow all read actions (list, read, download, raw, exists, metadata, preview). */
   publicRead(): FilePolicy {
     return (action) => READ_ACTIONS.has(action);
-  },
-
-  /** Alias for `publicRead()` — included for discoverability. */
-  publicReadAndList(): FilePolicy {
-    return policy.publicRead();
   },
 
   /** Deny every action. */

@@ -85,6 +85,12 @@ describe("policy.all()", () => {
     expect(await p("list", resource, user)).toBe(false);
     expect(secondCalled).toBe(false);
   });
+
+  test("throws when called with no policies", () => {
+    expect(() => policy.all()).toThrow(
+      "policy.all() requires at least one policy",
+    );
+  });
 });
 
 describe("policy.any()", () => {
@@ -101,6 +107,12 @@ describe("policy.any()", () => {
     });
     expect(await p("list", resource, user)).toBe(true);
     expect(secondCalled).toBe(false);
+  });
+
+  test("throws when called with no policies", () => {
+    expect(() => policy.any()).toThrow(
+      "policy.any() requires at least one policy",
+    );
   });
 });
 

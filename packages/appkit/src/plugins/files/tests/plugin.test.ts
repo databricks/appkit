@@ -1273,6 +1273,134 @@ describe("FilesPlugin", () => {
         delete process.env.DATABRICKS_VOLUME_SPIED;
       }
     });
+
+    test("denyAll() volume → read denied with 403", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "get", "/read");
+      const res = mockRes();
+
+      await handler(mockReq("locked", { query: { path: "/test.txt" } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+        }),
+      );
+    });
+
+    test("publicRead() volume → read allowed", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "get", "/read");
+      const res = mockRes();
+
+      mockClient.files.download.mockResolvedValue({
+        contents: new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("file content"));
+            controller.close();
+          },
+        }),
+      });
+
+      await handler(mockReq("public", { query: { path: "/test.txt" } }), res);
+
+      const statusCodes = (res.status.mock.calls as number[][]).map(
+        (c) => c[0],
+      );
+      expect(statusCodes).not.toContain(401);
+      expect(statusCodes).not.toContain(403);
+    });
+
+    test("denyAll() volume → download denied with 403", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "get", "/download");
+      const res = mockRes();
+
+      await handler(mockReq("locked", { query: { path: "/test.bin" } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+        }),
+      );
+    });
+
+    test("denyAll() volume → raw denied with 403", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "get", "/raw");
+      const res = mockRes();
+
+      await handler(mockReq("locked", { query: { path: "/test.txt" } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+        }),
+      );
+    });
+
+    test("denyAll() volume → exists denied with 403", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "get", "/exists");
+      const res = mockRes();
+
+      await handler(mockReq("locked", { query: { path: "/test.txt" } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+        }),
+      );
+    });
+
+    test("denyAll() volume → metadata denied with 403", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "get", "/metadata");
+      const res = mockRes();
+
+      await handler(mockReq("locked", { query: { path: "/test.txt" } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+        }),
+      );
+    });
+
+    test("denyAll() volume → preview denied with 403", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "get", "/preview");
+      const res = mockRes();
+
+      await handler(mockReq("locked", { query: { path: "/test.txt" } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+        }),
+      );
+    });
+
+    test("denyAll() volume → delete denied with 403", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "delete", "/:volumeKey");
+      const res = mockRes();
+
+      await handler(mockReq("locked", { query: { path: "/test.txt" } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+        }),
+      );
+    });
   });
 
   describe("Upload Stream Size Limiter", () => {
