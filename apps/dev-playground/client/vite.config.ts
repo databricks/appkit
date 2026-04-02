@@ -3,6 +3,7 @@ import { appKitServingTypesPlugin } from "@databricks/appkit";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { servingEndpoints } from "../config/serving-endpoints";
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -12,7 +13,7 @@ export default defineConfig({
       target: "react",
       autoCodeSplitting: process.env.NODE_ENV !== "development",
     }),
-    appKitServingTypesPlugin(),
+    appKitServingTypesPlugin({ endpoints: servingEndpoints }),
   ],
   server: {
     hmr: {

@@ -18,6 +18,10 @@ import { fetchOpenApiSchema } from "./fetcher";
 
 const logger = createLogger("type-generator:serving");
 
+const GENERIC_REQUEST = "Record<string, unknown>";
+const GENERIC_RESPONSE = "unknown";
+const GENERIC_CHUNK = "unknown";
+
 interface GenerateServingTypesOptions {
   outFile: string;
   endpoints?: Record<string, EndpointConfig>;
@@ -53,17 +57,23 @@ export async function generateServingTypes(
   const logEntries: Array<{
     alias: string;
     status: "HIT" | "MISS";
-    failed?: boolean;
     error?: string;
   }> = [];
 
   for (const [alias, config] of Object.entries(endpoints)) {
     const endpointName = process.env[config.env];
     if (!endpointName) {
+      registryEntries.push(
+        buildRegistryEntry(
+          alias,
+          GENERIC_REQUEST,
+          GENERIC_RESPONSE,
+          GENERIC_CHUNK,
+        ),
+      );
       logEntries.push({
         alias,
         status: "MISS",
-        failed: true,
         error: `env ${config.env} not set`,
       });
       continue;
@@ -75,10 +85,17 @@ export async function generateServingTypes(
       config.servedModel,
     );
     if (!result) {
+      registryEntries.push(
+        buildRegistryEntry(
+          alias,
+          GENERIC_REQUEST,
+          GENERIC_RESPONSE,
+          GENERIC_CHUNK,
+        ),
+      );
       logEntries.push({
         alias,
         status: "MISS",
-        failed: true,
         error: "schema fetch failed",
       });
       continue;
@@ -138,29 +155,21 @@ export async function generateServingTypes(
     );
     console.log(`  ${separator}`);
     for (const entry of logEntries) {
-      const tag = entry.failed
-        ? pc.bold(pc.red("ERROR"))
-        : entry.status === "HIT"
+      const tag =
+        entry.status === "HIT"
           ? `cache ${pc.bold(pc.green("HIT  "))}`
           : `cache ${pc.bold(pc.yellow("MISS "))}`;
       const rawName = entry.alias.padEnd(maxNameLen);
-      const name = entry.failed ? pc.dim(pc.strikethrough(rawName)) : rawName;
       const reason = entry.error ? `  ${pc.dim(entry.error)}` : "";
-      console.log(`  ${tag}  ${name}${reason}`);
+      console.log(`  ${tag}  ${rawName}${reason}`);
     }
     const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
-    const newCount = logEntries.filter(
-      (e) => e.status === "MISS" && !e.failed,
-    ).length;
-    const cacheCount = logEntries.filter(
-      (e) => e.status === "HIT" && !e.failed,
-    ).length;
-    const errorCount = logEntries.filter((e) => e.failed).length;
+    const newCount = logEntries.filter((e) => e.status === "MISS").length;
+    const cacheCount = logEntries.filter((e) => e.status === "HIT").length;
     console.log(`  ${separator}`);
-    const parts = [`${newCount} new`, `${cacheCount} from cache`];
-    if (errorCount > 0)
-      parts.push(`${errorCount} ${errorCount === 1 ? "error" : "errors"}`);
-    console.log(`  ${parts.join(", ")}. ${pc.dim(`${elapsed}s`)}`);
+    console.log(
+      `  ${newCount} new, ${cacheCount} from cache. ${pc.dim(`${elapsed}s`)}`,
+    );
     console.log("");
   }
 

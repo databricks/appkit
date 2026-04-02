@@ -99,6 +99,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.EndpointConfig",
+          label: "EndpointConfig"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.GenerateDatabaseCredentialRequest",
           label: "GenerateDatabaseCredentialRequest"
         },
@@ -141,6 +146,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.ResourceRequirement",
           label: "ResourceRequirement"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ServingEndpointEntry",
+          label: "ServingEndpointEntry"
         },
         {
           type: "doc",
@@ -187,6 +197,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.ResourcePermission",
           label: "ResourcePermission"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.ServingFactory",
+          label: "ServingFactory"
         },
         {
           type: "doc",

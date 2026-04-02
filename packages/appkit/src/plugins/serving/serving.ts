@@ -11,7 +11,7 @@ import { ResourceType } from "../../registry";
 import { servingInvokeDefaults, servingStreamDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import { filterRequestBody, loadEndpointSchemas } from "./schema-filter";
-import type { EndpointConfig, IServingConfig } from "./types";
+import type { EndpointConfig, IServingConfig, ServingFactory } from "./types";
 
 const logger = createLogger("serving");
 
@@ -84,23 +84,6 @@ export class ServingPlugin extends Plugin {
       },
       required: true,
     }));
-  }
-
-  private resolveEndpoint(alias: string): ResolvedEndpoint | null {
-    const config = this.endpoints[alias];
-    if (!config) return null;
-
-    const name = process.env[config.env];
-    if (!name) {
-      logger.warn(
-        "Endpoint alias '%s' configured but env var '%s' is not set",
-        alias,
-        config.env,
-      );
-      return null;
-    }
-
-    return { name, servedModel: config.servedModel };
   }
 
   private resolveAndFilter(
@@ -276,13 +259,13 @@ export class ServingPlugin extends Plugin {
     this.streamManager.abortAll();
   }
 
-  exports() {
-    return (alias?: string) => ({
+  exports(): ServingFactory {
+    return ((alias?: string) => ({
       invoke: (body: Record<string, unknown>) =>
         this.invoke(alias ?? "default", body),
       stream: (body: Record<string, unknown>) =>
         this.stream(alias ?? "default", body),
-    });
+    })) as ServingFactory;
   }
 }
 

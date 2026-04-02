@@ -150,7 +150,7 @@ describe("generateServingTypes", () => {
     expect(output).not.toMatch(/\bstream\??\s*:/);
   });
 
-  test("skips generation when env var is not set", async () => {
+  test("emits generic types when env var is not set", async () => {
     delete process.env.TEST_SERVING_ENDPOINT;
 
     await generateServingTypes({
@@ -160,7 +160,9 @@ describe("generateServingTypes", () => {
     });
 
     expect(mockFetchOpenApiSchema).not.toHaveBeenCalled();
-    expect(fs.writeFile).not.toHaveBeenCalled();
+    const output = vi.mocked(fs.writeFile).mock.calls[0][1] as string;
+    expect(output).toContain("llm:");
+    expect(output).toContain("Record<string, unknown>");
   });
 
   test("skips generation when no endpoints configured and no env var", async () => {
@@ -173,7 +175,7 @@ describe("generateServingTypes", () => {
     expect(fs.writeFile).not.toHaveBeenCalled();
   });
 
-  test("skips endpoint when schema fetch returns null", async () => {
+  test("emits generic types when schema fetch returns null", async () => {
     mockFetchOpenApiSchema.mockResolvedValue(null);
 
     await generateServingTypes({
@@ -182,7 +184,9 @@ describe("generateServingTypes", () => {
       noCache: true,
     });
 
-    expect(fs.writeFile).not.toHaveBeenCalled();
+    const output = vi.mocked(fs.writeFile).mock.calls[0][1] as string;
+    expect(output).toContain("llm:");
+    expect(output).toContain("Record<string, unknown>");
   });
 
   test("resolves default endpoint from DATABRICKS_SERVING_ENDPOINT", async () => {
