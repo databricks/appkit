@@ -8,7 +8,6 @@ const policy: {
   denyAll: FilePolicy;
   not: FilePolicy;
   publicRead: FilePolicy;
-  publicReadAndList: FilePolicy;
 };
 ```
 
@@ -101,18 +100,6 @@ readonly publicRead(): FilePolicy;
 ```
 
 Allow all read actions (list, read, download, raw, exists, metadata, preview).
-
-#### Returns
-
-`FilePolicy`
-
-### publicReadAndList()
-
-```ts
-readonly publicReadAndList(): FilePolicy;
-```
-
-Alias for `publicRead()` — included for discoverability.
 
 #### Returns
 

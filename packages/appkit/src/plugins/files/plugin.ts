@@ -246,7 +246,16 @@ export class FilesPlugin extends Plugin {
 
   /**
    * Creates a VolumeAPI for a specific volume key.
-   * All operations execute as the service principal.
+   * All operations execute as the service principal without policy checks.
+   *
+   * Not used internally — `_createPolicyWrappedAPI` handles all current
+   * call sites. Kept as a `protected` extension point so subclasses can
+   * override `exports()` or build custom APIs with raw connector access,
+   * e.g. background jobs or migrations that should bypass user-facing policies.
+   *
+   * @security This method skips all policy enforcement. Do not expose its
+   * return value to HTTP routes or end-user-facing code paths — use
+   * `_createPolicyWrappedAPI` for anything that serves user requests.
    */
   protected createVolumeAPI(volumeKey: string): VolumeAPI {
     const connector = this.volumeConnectors[volumeKey];
