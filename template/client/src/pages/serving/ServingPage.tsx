@@ -1,48 +1,50 @@
 {{if .plugins.serving -}}
-import { useServingStream } from '@databricks/appkit-ui/react';
+import { useServingInvoke } from '@databricks/appkit-ui/react';
+// For streaming endpoints (e.g. chat models), use useServingStream instead:
+// import { useServingStream } from '@databricks/appkit-ui/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 export function ServingPage() {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<
-    Array<{ role: string; content: string }>
+    Array<{ role: 'user' | 'assistant'; content: string }>
   >([]);
 
   const body = useMemo(
     () => ({
-      messages: [...messages, { role: 'user', content: input }],
+      messages: [...messages, { role: 'user' as const, content: input }],
     }),
     [messages, input],
   );
 
-  const { stream, chunks, streaming, error, reset } = useServingStream(body);
+  const { invoke, data, loading, error } = useServingInvoke(body);
+  // For streaming endpoints (e.g. chat models), use useServingStream:
+  // const { stream, chunks, streaming, error, reset } = useServingStream(body);
+  // Then accumulate chunks: chunks.map(c => c?.choices?.[0]?.delta?.content ?? '').join('')
 
-  const assistantContent = chunks
-    .map((chunk: any) => chunk?.choices?.[0]?.delta?.content ?? '')
-    .join('');
-
-  // Persist assistant response to message history when streaming completes
-  const prevStreamingRef = useRef(false);
+  // Persist assistant response to message history when response arrives
+  const prevLoadingRef = useRef(false);
   useEffect(() => {
-    if (prevStreamingRef.current && !streaming && assistantContent) {
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: assistantContent },
-      ]);
-      reset();
+    if (prevLoadingRef.current && !loading && data) {
+      const content =
+        (data as Record<string, unknown>)?.choices != null
+          ? String(
+              ((data as any).choices as any[])?.[0]?.message?.content ?? '',
+            )
+          : JSON.stringify(data);
+      setMessages((prev) => [...prev, { role: 'assistant', content }]);
     }
-    prevStreamingRef.current = streaming;
-  }, [streaming, assistantContent, reset]);
+    prevLoadingRef.current = loading;
+  }, [loading, data]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!input.trim() || streaming) return;
+    if (!input.trim() || loading) return;
 
-    const userMessage = { role: 'user', content: input.trim() };
+    const userMessage = { role: 'user' as const, content: input.trim() };
     setMessages((prev) => [...prev, userMessage]);
     setInput('');
-    reset();
-    setTimeout(() => stream(), 0);
+    setTimeout(() => invoke(), 0);
   }
 
   return (
@@ -73,12 +75,10 @@ export function ServingPage() {
             </div>
           ))}
 
-          {(streaming || assistantContent) && (
+          {loading && (
             <div className="flex justify-start">
               <div className="max-w-[80%] rounded-lg px-4 py-2 bg-muted">
-                <p className="text-sm whitespace-pre-wrap">
-                  {assistantContent || '...'}
-                </p>
+                <p className="text-sm whitespace-pre-wrap">...</p>
               </div>
             </div>
           )}
@@ -97,14 +97,14 @@ export function ServingPage() {
             onChange={(e) => setInput(e.target.value)}
             placeholder="Send a message..."
             className="flex-1 rounded-md border px-3 py-2 text-sm bg-background"
-            disabled={streaming}
+            disabled={loading}
           />
           <button
             type="submit"
-            disabled={streaming || !input.trim()}
+            disabled={loading || !input.trim()}
             className="rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50"
           >
-            {streaming ? 'Streaming...' : 'Send'}
+            {loading ? 'Loading...' : 'Send'}
           </button>
         </form>
       </div>

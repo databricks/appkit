@@ -9,12 +9,12 @@ export const Route = createFileRoute("/serving")({
 function ServingRoute() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<
-    Array<{ role: string; content: string }>
+    Array<{ role: "user" | "assistant"; content: string }>
   >([]);
 
   const body = useMemo(
     () => ({
-      messages: [...messages, { role: "user", content: input }],
+      messages: [...messages, { role: "user" as const, content: input }],
     }),
     [messages, input],
   );
@@ -22,7 +22,7 @@ function ServingRoute() {
   const { stream, chunks, streaming, error, reset } = useServingStream(body);
 
   const assistantContent = chunks
-    .map((chunk: any) => chunk?.choices?.[0]?.delta?.content ?? "")
+    .map((chunk) => chunk?.choices?.[0]?.delta?.content ?? "")
     .join("");
 
   // Persist assistant response to message history when streaming completes
@@ -42,7 +42,7 @@ function ServingRoute() {
     e.preventDefault();
     if (!input.trim() || streaming) return;
 
-    const userMessage = { role: "user", content: input.trim() };
+    const userMessage = { role: "user" as const, content: input.trim() };
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
     reset();
