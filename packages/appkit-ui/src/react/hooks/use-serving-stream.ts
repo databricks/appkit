@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { connectSSE } from "@/js";
-import type { ServingAlias } from "./types";
+import type {
+  InferServingChunk,
+  InferServingRequest,
+  ServingAlias,
+} from "./types";
 
-export interface UseServingStreamOptions {
+export interface UseServingStreamOptions<
+  K extends ServingAlias = ServingAlias,
+> {
   /** Endpoint alias for named mode. Omit for default mode. */
-  alias?: ServingAlias;
+  alias?: K;
   /** If true, starts streaming automatically on mount. Default: false */
   autoStart?: boolean;
 }
@@ -26,20 +32,24 @@ export interface UseServingStreamResult<T = unknown> {
  * Hook for streaming invocation of a serving endpoint via SSE.
  * Calls `POST /api/serving/stream` (default) or `POST /api/serving/{alias}/stream` (named).
  * Accumulates parsed chunks in state.
+ *
+ * When the type generator has populated `ServingEndpointRegistry`, the chunk type
+ * is automatically inferred from the endpoint's OpenAPI schema.
  */
-export function useServingStream<T = unknown>(
-  body: Record<string, unknown>,
-  options: UseServingStreamOptions = {},
-): UseServingStreamResult<T> {
+export function useServingStream<K extends ServingAlias = ServingAlias>(
+  body: InferServingRequest<K>,
+  options: UseServingStreamOptions<K> = {} as UseServingStreamOptions<K>,
+): UseServingStreamResult<InferServingChunk<K>> {
+  type TChunk = InferServingChunk<K>;
   const { alias, autoStart = false } = options;
 
-  const [chunks, setChunks] = useState<T[]>([]);
+  const [chunks, setChunks] = useState<TChunk[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const urlSuffix = alias
-    ? `/api/serving/${encodeURIComponent(alias)}/stream`
+    ? `/api/serving/${encodeURIComponent(alias as string)}/stream`
     : "/api/serving/stream";
 
   const reset = useCallback(() => {
@@ -79,7 +89,7 @@ export function useServingStream<T = unknown>(
             return;
           }
 
-          setChunks((prev) => [...prev, parsed as T]);
+          setChunks((prev) => [...prev, parsed as TChunk]);
         } catch {
           // Skip malformed messages
         }

@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ServingAlias } from "./types";
+import type {
+  InferServingRequest,
+  InferServingResponse,
+  ServingAlias,
+} from "./types";
 
-export interface UseServingInvokeOptions {
+export interface UseServingInvokeOptions<
+  K extends ServingAlias = ServingAlias,
+> {
   /** Endpoint alias for named mode. Omit for default mode. */
-  alias?: ServingAlias;
+  alias?: K;
   /** If false, does not invoke automatically on mount. Default: false */
   autoStart?: boolean;
 }
@@ -22,20 +28,24 @@ export interface UseServingInvokeResult<T = unknown> {
 /**
  * Hook for non-streaming invocation of a serving endpoint.
  * Calls `POST /api/serving/invoke` (default) or `POST /api/serving/{alias}/invoke` (named).
+ *
+ * When the type generator has populated `ServingEndpointRegistry`, the response type
+ * is automatically inferred from the endpoint's OpenAPI schema.
  */
-export function useServingInvoke<T = unknown>(
-  body: Record<string, unknown>,
-  options: UseServingInvokeOptions = {},
-): UseServingInvokeResult<T> {
+export function useServingInvoke<K extends ServingAlias = ServingAlias>(
+  body: InferServingRequest<K>,
+  options: UseServingInvokeOptions<K> = {} as UseServingInvokeOptions<K>,
+): UseServingInvokeResult<InferServingResponse<K>> {
+  type TResponse = InferServingResponse<K>;
   const { alias, autoStart = false } = options;
 
-  const [data, setData] = useState<T | null>(null);
+  const [data, setData] = useState<TResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const urlSuffix = alias
-    ? `/api/serving/${encodeURIComponent(alias)}/invoke`
+    ? `/api/serving/${encodeURIComponent(alias as string)}/invoke`
     : "/api/serving/invoke";
 
   const bodyJson = JSON.stringify(body);
@@ -65,7 +75,7 @@ export function useServingInvoke<T = unknown>(
         }
         return res.json();
       })
-      .then((result: T) => {
+      .then((result: TResponse) => {
         if (abortController.signal.aborted) return;
         setData(result);
         setLoading(false);

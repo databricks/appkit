@@ -80,6 +80,10 @@ Generated types provide:
 
 If an endpoint's OpenAPI schema is unavailable (not deployed, env var not set), the plugin generates generic fallback types. The endpoint is still usable — just without typed request/response.
 
+:::note
+Endpoints that don't define a streaming response schema in their OpenAPI spec will have `chunk: unknown`. For these endpoints, use `useServingInvoke` instead of `useServingStream` — the `response` type will still be properly typed.
+:::
+
 ## Environment variables
 
 | Variable | Description |

@@ -161,3 +161,27 @@ export type ServingAlias =
   AugmentedRegistry<ServingEndpointRegistry> extends never
     ? string
     : AugmentedRegistry<ServingEndpointRegistry>;
+
+/** Infers chunk type from registry when alias is a known key */
+export type InferServingChunk<K> =
+  K extends AugmentedRegistry<ServingEndpointRegistry>
+    ? ServingEndpointRegistry[K] extends { chunk: infer C }
+      ? C
+      : unknown
+    : unknown;
+
+/** Infers response type from registry when alias is a known key */
+export type InferServingResponse<K> =
+  K extends AugmentedRegistry<ServingEndpointRegistry>
+    ? ServingEndpointRegistry[K] extends { response: infer R }
+      ? R
+      : unknown
+    : unknown;
+
+/** Infers request type from registry when alias is a known key */
+export type InferServingRequest<K> =
+  K extends AugmentedRegistry<ServingEndpointRegistry>
+    ? ServingEndpointRegistry[K] extends { request: infer Req }
+      ? Req
+      : Record<string, unknown>
+    : Record<string, unknown>;
