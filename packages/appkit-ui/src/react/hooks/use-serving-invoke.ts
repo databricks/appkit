@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { ServingAlias } from "./types";
 
 export interface UseServingInvokeOptions {
   /** Endpoint alias for named mode. Omit for default mode. */
-  alias?: string;
+  alias?: ServingAlias;
   /** If false, does not invoke automatically on mount. Default: false */
   autoStart?: boolean;
 }

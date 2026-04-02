@@ -4,6 +4,8 @@ export type {
   InferRowType,
   PluginRegistry,
   QueryRegistry,
+  ServingAlias,
+  ServingEndpointRegistry,
   TypedArrowTable,
   UseAnalyticsQueryOptions,
   UseAnalyticsQueryResult,

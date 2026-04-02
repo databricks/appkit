@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { connectSSE } from "@/js";
+import type { ServingAlias } from "./types";
 
 export interface UseServingStreamOptions {
   /** Endpoint alias for named mode. Omit for default mode. */
-  alias?: string;
+  alias?: ServingAlias;
   /** If true, starts streaming automatically on mount. Default: false */
   autoStart?: boolean;
 }
