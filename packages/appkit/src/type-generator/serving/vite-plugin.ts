@@ -64,8 +64,8 @@ export function appKitServingTypesPlugin(
       );
     },
 
-    buildStart() {
-      generate();
+    async buildStart() {
+      await generate();
     },
 
     // No configureServer / watcher — schemas change on endpoint redeploy, not on file edit

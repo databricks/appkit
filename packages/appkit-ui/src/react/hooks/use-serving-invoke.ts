@@ -37,6 +37,8 @@ export function useServingInvoke<T = unknown>(
     ? `/api/serving/${encodeURIComponent(alias)}/invoke`
     : "/api/serving/invoke";
 
+  const bodyJson = JSON.stringify(body);
+
   const invoke = useCallback(() => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -52,7 +54,7 @@ export function useServingInvoke<T = unknown>(
     fetch(urlSuffix, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: bodyJson,
       signal: abortController.signal,
     })
       .then(async (res) => {
@@ -63,6 +65,7 @@ export function useServingInvoke<T = unknown>(
         return res.json();
       })
       .then((result: T) => {
+        if (abortController.signal.aborted) return;
         setData(result);
         setLoading(false);
       })
@@ -71,7 +74,7 @@ export function useServingInvoke<T = unknown>(
         setError(err.message || "Request failed");
         setLoading(false);
       });
-  }, [urlSuffix, body]);
+  }, [urlSuffix, bodyJson]);
 
   useEffect(() => {
     if (autoStart) {

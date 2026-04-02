@@ -170,7 +170,7 @@ describe("Serving Plugin", () => {
       expect(res.json).toHaveBeenCalledWith({ choices: [] });
     });
 
-    test("_handleInvoke returns 404 when env var is not set", async () => {
+    test("_handleInvoke returns 400 with descriptive message when env var is not set", async () => {
       delete process.env.DATABRICKS_SERVING_ENDPOINT;
 
       const plugin = new ServingPlugin({});
@@ -182,7 +182,67 @@ describe("Serving Plugin", () => {
 
       await plugin._handleInvoke(req as any, res as any);
 
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({
+        error:
+          "Endpoint 'default' is not configured: env var 'DATABRICKS_SERVING_ENDPOINT' is not set",
+      });
+    });
+
+    test("_handleInvoke does not throw when connector fails", async () => {
+      mockInvoke.mockRejectedValue(new Error("Connection refused"));
+
+      const plugin = new ServingPlugin({});
+      const req = createMockRequest({
+        params: { alias: "default" },
+        body: { messages: [] },
+      });
+      const res = createMockResponse();
+
+      // Should not throw — execute() handles the error internally
+      await expect(
+        plugin._handleInvoke(req as any, res as any),
+      ).resolves.not.toThrow();
+    });
+
+    test("_handleStream returns 404 for unknown alias", async () => {
+      const plugin = new ServingPlugin({
+        endpoints: { llm: { env: "DATABRICKS_SERVING_ENDPOINT" } },
+      });
+
+      const req = createMockRequest({
+        params: { alias: "unknown" },
+        body: { messages: [] },
+        query: {},
+      });
+      const res = createMockResponse();
+
+      await plugin._handleStream(req as any, res as any);
+
       expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({
+        error: "Unknown endpoint alias: unknown",
+      });
+    });
+
+    test("_handleStream returns 400 when env var is not set", async () => {
+      delete process.env.DATABRICKS_SERVING_ENDPOINT;
+
+      const plugin = new ServingPlugin({});
+      const req = createMockRequest({
+        params: { alias: "default" },
+        body: { messages: [] },
+        query: {},
+      });
+      const res = createMockResponse();
+
+      await plugin._handleStream(req as any, res as any);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({
+        error:
+          "Endpoint 'default' is not configured: env var 'DATABRICKS_SERVING_ENDPOINT' is not set",
+      });
     });
   });
 

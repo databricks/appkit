@@ -107,10 +107,22 @@ export class ServingPlugin extends Plugin {
     alias: string,
     body: Record<string, unknown>,
   ): { endpoint: ResolvedEndpoint; filteredBody: Record<string, unknown> } {
-    const endpoint = this.resolveEndpoint(alias);
-    if (!endpoint) {
+    const config = this.endpoints[alias];
+    if (!config) {
       throw new Error(`Unknown endpoint alias: ${alias}`);
     }
+
+    const name = process.env[config.env];
+    if (!name) {
+      throw new Error(
+        `Endpoint '${alias}' is not configured: env var '${config.env}' is not set`,
+      );
+    }
+
+    const endpoint: ResolvedEndpoint = {
+      name,
+      servedModel: config.servedModel,
+    };
     const filteredBody = filterRequestBody(body, this.schemaAllowlists, alias);
     return { endpoint, filteredBody };
   }
@@ -168,14 +180,14 @@ export class ServingPlugin extends Plugin {
       const result = await this.invoke(alias, rawBody);
       res.json(result);
     } catch (err) {
-      if (
-        err instanceof Error &&
-        err.message.startsWith("Unknown endpoint alias:")
-      ) {
-        res.status(404).json({ error: err.message });
-        return;
+      const message = err instanceof Error ? err.message : "Invocation failed";
+      if (message.startsWith("Unknown endpoint alias:")) {
+        res.status(404).json({ error: message });
+      } else if (message.includes("is not configured:")) {
+        res.status(400).json({ error: message });
+      } else {
+        res.status(502).json({ error: message });
       }
-      throw err;
     }
   }
 
@@ -191,14 +203,10 @@ export class ServingPlugin extends Plugin {
     try {
       ({ endpoint, filteredBody } = this.resolveAndFilter(alias, rawBody));
     } catch (err) {
-      if (
-        err instanceof Error &&
-        err.message.startsWith("Unknown endpoint alias:")
-      ) {
-        res.status(404).json({ error: err.message });
-        return;
-      }
-      throw err;
+      const message = err instanceof Error ? err.message : "Invalid request";
+      const status = message.startsWith("Unknown endpoint alias:") ? 404 : 400;
+      res.status(status).json({ error: message });
+      return;
     }
 
     const timeout = this.config.timeout ?? 120_000;

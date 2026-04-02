@@ -144,9 +144,7 @@ export async function generateServingTypes(
           ? `cache ${pc.bold(pc.green("HIT  "))}`
           : `cache ${pc.bold(pc.yellow("MISS "))}`;
       const rawName = entry.alias.padEnd(maxNameLen);
-      const name = entry.failed
-        ? pc.dim(pc.strikethrough(rawName))
-        : rawName;
+      const name = entry.failed ? pc.dim(pc.strikethrough(rawName)) : rawName;
       const reason = entry.error ? `  ${pc.dim(entry.error)}` : "";
       console.log(`  ${tag}  ${name}${reason}`);
     }

@@ -49,6 +49,8 @@ export function useServingStream<T = unknown>(
     setError(null);
   }, []);
 
+  const bodyJson = JSON.stringify(body);
+
   const stream = useCallback(() => {
     // Abort any existing stream
     abortControllerRef.current?.abort();
@@ -62,9 +64,10 @@ export function useServingStream<T = unknown>(
 
     connectSSE({
       url: urlSuffix,
-      payload: JSON.stringify(body),
+      payload: bodyJson,
       signal: abortController.signal,
       onMessage: async (message) => {
+        if (abortController.signal.aborted) return;
         try {
           const parsed = JSON.parse(message.data);
 
@@ -86,10 +89,11 @@ export function useServingStream<T = unknown>(
         setError(err instanceof Error ? err.message : "Streaming failed");
       },
     }).then(() => {
+      if (abortController.signal.aborted) return;
       // Stream completed
       setStreaming(false);
     });
-  }, [urlSuffix, body]);
+  }, [urlSuffix, bodyJson]);
 
   useEffect(() => {
     if (autoStart) {

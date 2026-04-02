@@ -169,6 +169,8 @@ export async function* stream(
 
   try {
     while (true) {
+      if (options?.signal?.aborted) break;
+
       const { done, value } = await reader.read();
       if (done) break;
 
@@ -196,7 +198,7 @@ export async function* stream(
     }
 
     // Process any remaining data in the buffer
-    if (buffer.trim()) {
+    if (buffer.trim() && !options?.signal?.aborted) {
       const trimmed = buffer.trim();
       if (trimmed.startsWith("data: ") && trimmed !== "data: [DONE]") {
         try {
@@ -207,6 +209,7 @@ export async function* stream(
       }
     }
   } finally {
+    reader.cancel().catch(() => {});
     reader.releaseLock();
   }
 }
