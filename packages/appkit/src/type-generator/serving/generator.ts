@@ -126,7 +126,6 @@ export async function generateServingTypes(
       logEntries.push({
         alias,
         status: "MISS",
-        failed: true,
         error: "no POST operation",
       });
       continue;

@@ -247,6 +247,16 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.extractServingEndpoints",
+          label: "extractServingEndpoints"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.findServerFile",
+          label: "findServerFile"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.generateDatabaseCredential",
           label: "generateDatabaseCredential"
         },

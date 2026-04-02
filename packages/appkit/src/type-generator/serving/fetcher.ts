@@ -74,21 +74,25 @@ export async function fetchOpenApiSchema(
     });
 
     if (!res.ok) {
+      const body = await res.text().catch(() => "");
       if (res.status === 404) {
         logger.warn(
-          "Endpoint '%s' not found, skipping type generation",
+          "Endpoint '%s' not found, skipping type generation%s",
           endpointName,
+          body ? `: ${body}` : "",
         );
       } else if (res.status === 403) {
         logger.warn(
-          "Access denied to endpoint '%s' schema, skipping type generation",
+          "Access denied to endpoint '%s' schema, skipping type generation%s",
           endpointName,
+          body ? `: ${body}` : "",
         );
       } else {
         logger.warn(
-          "Failed to fetch schema for '%s' (HTTP %d), skipping",
+          "Failed to fetch schema for '%s' (HTTP %d), skipping%s",
           endpointName,
           res.status,
+          body ? `: ${body}` : "",
         );
       }
       return null;

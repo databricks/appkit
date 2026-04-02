@@ -8,7 +8,6 @@ import {
   serving,
 } from "@databricks/appkit";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
-import { servingEndpoints } from "../config/serving-endpoints";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
@@ -34,14 +33,13 @@ createApp({
     }),
     lakebaseExamples(),
     files(),
-    serving({ endpoints: servingEndpoints }),
+    serving(),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
 }).then((appkit) => {
   appkit.server
     .extend((app) => {
       app.get("/sp", (_req, res) => {
-        appkit.serving("second").invoke({ messages: [] });
         appkit.analytics
           .query("SELECT * FROM samples.nyctaxi.trips;")
           .then((result) => {
