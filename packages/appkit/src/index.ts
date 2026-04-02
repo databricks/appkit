@@ -47,7 +47,12 @@ export {
   ValidationError,
 } from "./errors";
 // Plugin authoring
-export { Plugin, type ToPlugin, toPlugin } from "./plugin";
+export {
+  type ExecutionResult,
+  Plugin,
+  type ToPlugin,
+  toPlugin,
+} from "./plugin";
 export { analytics, files, genie, lakebase, server } from "./plugins";
 // Registry types and utilities for plugin manifests
 export type {
