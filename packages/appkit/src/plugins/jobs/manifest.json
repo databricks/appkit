@@ -1,0 +1,41 @@
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "name": "jobs",
+  "displayName": "Jobs Plugin",
+  "description": "Trigger and monitor Databricks Lakeflow Jobs scoped to configured job resources",
+  "resources": {
+    "required": [
+      {
+        "type": "job",
+        "alias": "Job",
+        "resourceKey": "job",
+        "description": "A Databricks job to trigger and monitor",
+        "permission": "CAN_MANAGE_RUN",
+        "fields": {
+          "id": {
+            "env": "DATABRICKS_JOB_ID",
+            "description": "Job ID (numeric). Obtain from the Jobs UI or `databricks jobs list`."
+          }
+        }
+      }
+    ],
+    "optional": []
+  },
+  "config": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "timeout": {
+          "type": "number",
+          "default": 60000,
+          "description": "Default timeout for Jobs API calls in milliseconds"
+        },
+        "pollIntervalMs": {
+          "type": "number",
+          "default": 5000,
+          "description": "Poll interval for waiting on run completion in milliseconds"
+        }
+      }
+    }
+  }
+}
