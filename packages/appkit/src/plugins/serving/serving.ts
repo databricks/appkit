@@ -106,7 +106,12 @@ export class ServingPlugin extends Plugin {
       name,
       servedModel: config.servedModel,
     };
-    const filteredBody = filterRequestBody(body, this.schemaAllowlists, alias);
+    const filteredBody = filterRequestBody(
+      body,
+      this.schemaAllowlists,
+      alias,
+      this.config.filterMode,
+    );
     return { endpoint, filteredBody };
   }
 
@@ -161,12 +166,19 @@ export class ServingPlugin extends Plugin {
 
     try {
       const result = await this.invoke(alias, rawBody);
+      if (result === undefined) {
+        res.status(502).json({ error: "Invocation returned no result" });
+        return;
+      }
       res.json(result);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Invocation failed";
       if (message.startsWith("Unknown endpoint alias:")) {
         res.status(404).json({ error: message });
-      } else if (message.includes("is not configured:")) {
+      } else if (
+        message.includes("is not configured:") ||
+        message.startsWith("Unknown request parameters:")
+      ) {
         res.status(400).json({ error: message });
       } else {
         res.status(502).json({ error: message });
@@ -210,6 +222,10 @@ export class ServingPlugin extends Plugin {
     };
 
     const workspaceClient = getWorkspaceClient();
+    if (!workspaceClient.config.host) {
+      res.status(500).json({ error: "Databricks host not configured" });
+      return;
+    }
 
     await this.executeStream(
       res,

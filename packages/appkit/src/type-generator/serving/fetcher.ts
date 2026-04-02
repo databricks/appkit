@@ -98,7 +98,20 @@ export async function fetchOpenApiSchema(
       return null;
     }
 
-    const spec = (await res.json()) as OpenApiSpec;
+    const rawSpec: unknown = await res.json();
+    if (
+      typeof rawSpec !== "object" ||
+      rawSpec === null ||
+      !("paths" in rawSpec) ||
+      typeof (rawSpec as OpenApiSpec).paths !== "object"
+    ) {
+      logger.warn(
+        "Invalid OpenAPI schema structure for '%s', skipping",
+        endpointName,
+      );
+      return null;
+    }
+    const spec = rawSpec as OpenApiSpec;
 
     // Find the right path key
     const pathKeys = Object.keys(spec.paths ?? {});

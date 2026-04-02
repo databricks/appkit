@@ -1,8 +1,24 @@
-import { renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-// Mock connectSSE
-const mockConnectSSE = vi.fn().mockResolvedValue(undefined);
+// Mock connectSSE — capture callbacks so we can simulate SSE events
+let capturedCallbacks: {
+  onMessage?: (msg: { data: string }) => void;
+  onError?: (err: Error) => void;
+  signal?: AbortSignal;
+} = {};
+
+const mockConnectSSE = vi.fn().mockImplementation((opts: any) => {
+  capturedCallbacks = {
+    onMessage: opts.onMessage,
+    onError: opts.onError,
+    signal: opts.signal,
+  };
+  return new Promise<void>((resolve) => {
+    // Resolve after a tick to simulate async stream completion
+    setTimeout(resolve, 0);
+  });
+});
 
 vi.mock("@/js", () => ({
   connectSSE: (...args: unknown[]) => mockConnectSSE(...args),
@@ -12,6 +28,7 @@ import { useServingStream } from "../use-serving-stream";
 
 describe("useServingStream", () => {
   afterEach(() => {
+    capturedCallbacks = {};
     vi.clearAllMocks();
   });
 
@@ -28,7 +45,9 @@ describe("useServingStream", () => {
   test("calls connectSSE with correct URL on stream", () => {
     const { result } = renderHook(() => useServingStream({ messages: [] }));
 
-    result.current.stream();
+    act(() => {
+      result.current.stream();
+    });
 
     expect(mockConnectSSE).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -43,12 +62,161 @@ describe("useServingStream", () => {
       useServingStream({ messages: [] }, { alias: "embedder" }),
     );
 
-    result.current.stream();
+    act(() => {
+      result.current.stream();
+    });
 
     expect(mockConnectSSE).toHaveBeenCalledWith(
       expect.objectContaining({
         url: "/api/serving/embedder/stream",
       }),
     );
+  });
+
+  test("sets streaming to true when stream() is called", () => {
+    const { result } = renderHook(() => useServingStream({ messages: [] }));
+
+    act(() => {
+      result.current.stream();
+    });
+
+    expect(result.current.streaming).toBe(true);
+  });
+
+  test("accumulates chunks from onMessage", async () => {
+    const { result } = renderHook(() => useServingStream({ messages: [] }));
+
+    act(() => {
+      result.current.stream();
+    });
+
+    act(() => {
+      capturedCallbacks.onMessage?.({ data: JSON.stringify({ id: 1 }) });
+    });
+
+    act(() => {
+      capturedCallbacks.onMessage?.({ data: JSON.stringify({ id: 2 }) });
+    });
+
+    expect(result.current.chunks).toEqual([{ id: 1 }, { id: 2 }]);
+  });
+
+  test("sets error from SSE error event in message", async () => {
+    const { result } = renderHook(() => useServingStream({ messages: [] }));
+
+    act(() => {
+      result.current.stream();
+    });
+
+    act(() => {
+      capturedCallbacks.onMessage?.({
+        data: JSON.stringify({ error: "Model overloaded" }),
+      });
+    });
+
+    expect(result.current.error).toBe("Model overloaded");
+    expect(result.current.streaming).toBe(false);
+  });
+
+  test("sets error from onError callback", async () => {
+    const { result } = renderHook(() => useServingStream({ messages: [] }));
+
+    act(() => {
+      result.current.stream();
+    });
+
+    act(() => {
+      capturedCallbacks.onError?.(new Error("Connection lost"));
+    });
+
+    expect(result.current.error).toBe("Connection lost");
+    expect(result.current.streaming).toBe(false);
+  });
+
+  test("silently skips malformed JSON messages", () => {
+    const { result } = renderHook(() => useServingStream({ messages: [] }));
+
+    act(() => {
+      result.current.stream();
+    });
+
+    act(() => {
+      capturedCallbacks.onMessage?.({ data: "not valid json{" });
+    });
+
+    // No chunks added, no error set
+    expect(result.current.chunks).toEqual([]);
+    expect(result.current.error).toBeNull();
+  });
+
+  test("reset() clears state and aborts active stream", () => {
+    const { result } = renderHook(() => useServingStream({ messages: [] }));
+
+    act(() => {
+      result.current.stream();
+    });
+
+    act(() => {
+      capturedCallbacks.onMessage?.({ data: JSON.stringify({ id: 1 }) });
+    });
+
+    expect(result.current.chunks).toHaveLength(1);
+    expect(result.current.streaming).toBe(true);
+
+    act(() => {
+      result.current.reset();
+    });
+
+    expect(result.current.chunks).toEqual([]);
+    expect(result.current.streaming).toBe(false);
+    expect(result.current.error).toBeNull();
+  });
+
+  test("autoStart triggers stream on mount", async () => {
+    renderHook(() => useServingStream({ messages: [] }, { autoStart: true }));
+
+    await waitFor(() => {
+      expect(mockConnectSSE).toHaveBeenCalled();
+    });
+  });
+
+  test("passes abort signal to connectSSE", () => {
+    const { result } = renderHook(() => useServingStream({ messages: [] }));
+
+    act(() => {
+      result.current.stream();
+    });
+
+    expect(capturedCallbacks.signal).toBeDefined();
+    expect(capturedCallbacks.signal?.aborted).toBe(false);
+  });
+
+  test("aborts stream on unmount", () => {
+    const { result, unmount } = renderHook(() =>
+      useServingStream({ messages: [] }),
+    );
+
+    act(() => {
+      result.current.stream();
+    });
+
+    const signal = capturedCallbacks.signal;
+    expect(signal?.aborted).toBe(false);
+
+    unmount();
+
+    expect(signal?.aborted).toBe(true);
+  });
+
+  test("sets streaming to false when connectSSE resolves", async () => {
+    const { result } = renderHook(() => useServingStream({ messages: [] }));
+
+    act(() => {
+      result.current.stream();
+    });
+
+    await waitFor(() => {
+      expect(result.current.streaming).toBe(false);
+    });
   });
 });

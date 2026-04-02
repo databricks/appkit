@@ -1,8 +1,22 @@
 import fs from "node:fs/promises";
 import { createLogger } from "../../logging/logger";
-import type { ServingCache } from "../../type-generator/serving/cache";
+import {
+  CACHE_VERSION,
+  type ServingCache,
+} from "../../type-generator/serving/cache";
 
 const logger = createLogger("serving:schema-filter");
+
+function isValidCache(data: unknown): data is ServingCache {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    "version" in data &&
+    (data as ServingCache).version === CACHE_VERSION &&
+    "endpoints" in data &&
+    typeof (data as ServingCache).endpoints === "object"
+  );
+}
 
 /**
  * Loads endpoint schemas from the type generation cache file.
@@ -15,7 +29,12 @@ export async function loadEndpointSchemas(
 
   try {
     const raw = await fs.readFile(cacheFile, "utf8");
-    const cache = JSON.parse(raw) as ServingCache;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isValidCache(parsed)) {
+      logger.warn("Serving types cache has invalid structure, skipping");
+      return allowlists;
+    }
+    const cache = parsed;
 
     for (const [alias, entry] of Object.entries(cache.endpoints)) {
       // Extract property keys from the requestType string
@@ -67,6 +86,7 @@ export function filterRequestBody(
   body: Record<string, unknown>,
   allowlists: Map<string, Set<string>>,
   alias: string,
+  filterMode: "strip" | "reject" = "strip",
 ): Record<string, unknown> {
   const allowed = allowlists.get(alias);
   if (!allowed) return body;
@@ -83,6 +103,9 @@ export function filterRequestBody(
   }
 
   if (stripped.length > 0) {
+    if (filterMode === "reject") {
+      throw new Error(`Unknown request parameters: ${stripped.join(", ")}`);
+    }
     logger.warn(
       "Stripped unknown params from '%s': %s",
       alias,

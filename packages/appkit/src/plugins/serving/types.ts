@@ -12,6 +12,8 @@ export interface IServingConfig extends BasePluginConfig {
   endpoints?: Record<string, EndpointConfig>;
   /** Request timeout in ms. Default: 120000 (2 min) */
   timeout?: number;
+  /** How to handle unknown request parameters. 'strip' silently removes them (default). 'reject' returns 400. */
+  filterMode?: "strip" | "reject";
 }
 
 /**

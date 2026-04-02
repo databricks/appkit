@@ -51,11 +51,10 @@ function mapUpstreamError(
       return new ApiError(message, "NOT_FOUND", 404, undefined, []);
     case status === 429: {
       const retryAfter = headers.get("retry-after");
-      const error = new ApiError(message, "RATE_LIMITED", 429, undefined, []);
-      if (retryAfter) {
-        (error as any).retryAfter = retryAfter;
-      }
-      return error;
+      const retryMessage = retryAfter
+        ? `${message} (retry-after: ${retryAfter})`
+        : message;
+      return new ApiError(retryMessage, "RATE_LIMITED", 429, undefined, []);
     }
     case status === 503:
       return new ApiError(

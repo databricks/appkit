@@ -172,13 +172,17 @@ export async function generateServingTypes(
     console.log("");
   }
 
-  if (registryEntries.length === 0) {
-    return;
-  }
-
   const output = generateTypeDeclarations(registryEntries);
   await fs.writeFile(outFile, output, "utf-8");
-  logger.debug("Wrote serving types to %s", outFile);
+
+  if (registryEntries.length === 0) {
+    logger.debug(
+      "Wrote empty serving types to %s (no endpoints resolved)",
+      outFile,
+    );
+  } else {
+    logger.debug("Wrote serving types to %s", outFile);
+  }
 
   if (updated) {
     await saveServingCache(cache as ServingCache);

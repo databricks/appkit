@@ -55,6 +55,47 @@ describe("schema-filter", () => {
 
       expect(result).toEqual({ a: 1, b: 2, c: 3 });
     });
+
+    test("throws in reject mode when unknown keys are present", () => {
+      const allowlists = new Map([["default", new Set(["messages"])]]);
+
+      expect(() =>
+        filterRequestBody(
+          { messages: [], unknown_param: true },
+          allowlists,
+          "default",
+          "reject",
+        ),
+      ).toThrow("Unknown request parameters: unknown_param");
+    });
+
+    test("does not throw in reject mode when all keys are allowed", () => {
+      const allowlists = new Map([
+        ["default", new Set(["messages", "temperature"])],
+      ]);
+
+      const result = filterRequestBody(
+        { messages: [], temperature: 0.7 },
+        allowlists,
+        "default",
+        "reject",
+      );
+
+      expect(result).toEqual({ messages: [], temperature: 0.7 });
+    });
+
+    test("strips in default mode (strip)", () => {
+      const allowlists = new Map([["default", new Set(["messages"])]]);
+
+      const result = filterRequestBody(
+        { messages: [], extra: true },
+        allowlists,
+        "default",
+        "strip",
+      );
+
+      expect(result).toEqual({ messages: [] });
+    });
   });
 
   describe("loadEndpointSchemas", () => {
