@@ -282,6 +282,189 @@ describe("LakebaseV1Connector", () => {
 
       expect(mockClient.release).toHaveBeenCalled();
     });
+
+    test("should use retryClient (not original) for BEGIN/COMMIT on auth error retry", async () => {
+      const originalClient = {
+        query: vi.fn().mockResolvedValue({ rows: [] }),
+        release: vi.fn(),
+      };
+      const retryClient = {
+        query: vi.fn().mockResolvedValue({ rows: [] }),
+        release: vi.fn(),
+      };
+
+      mockConnect
+        .mockResolvedValueOnce(originalClient)
+        .mockResolvedValueOnce(retryClient);
+
+      const authError = new Error("auth failed") as any;
+      authError.code = "28P01";
+
+      let callCount = 0;
+      const result = await connector.transaction(async (client) => {
+        callCount++;
+        if (callCount === 1) throw authError;
+        await client.query("INSERT INTO test VALUES (1)");
+        return "retried";
+      });
+
+      expect(result).toBe("retried");
+      // retryClient should handle BEGIN and COMMIT
+      expect(retryClient.query).toHaveBeenCalledWith("BEGIN");
+      expect(retryClient.query).toHaveBeenCalledWith("COMMIT");
+      // original client should NOT have been used for retry BEGIN/COMMIT
+      const originalBeginCalls = originalClient.query.mock.calls.filter(
+        ([sql]: [string]) => sql === "BEGIN",
+      );
+      const originalCommitCalls = originalClient.query.mock.calls.filter(
+        ([sql]: [string]) => sql === "COMMIT",
+      );
+      expect(originalBeginCalls).toHaveLength(1); // only the initial BEGIN
+      expect(originalCommitCalls).toHaveLength(0); // COMMIT only on retryClient
+      expect(retryClient.release).toHaveBeenCalled();
+    });
+
+    test("should rollback retryClient when auth retry callback fails", async () => {
+      const originalClient = {
+        query: vi.fn().mockResolvedValue({ rows: [] }),
+        release: vi.fn(),
+      };
+      const retryClient = {
+        query: vi.fn().mockResolvedValue({ rows: [] }),
+        release: vi.fn(),
+      };
+
+      mockConnect
+        .mockResolvedValueOnce(originalClient)
+        .mockResolvedValueOnce(retryClient);
+
+      const authError = new Error("auth failed") as any;
+      authError.code = "28P01";
+      const retryError = new Error("still broken");
+
+      await expect(
+        connector.transaction(async () => {
+          throw authError;
+        }),
+      ).rejects.toThrow("auth failed");
+
+      // Verify ROLLBACK was attempted on retryClient
+      expect(retryClient.query).toHaveBeenCalledWith("ROLLBACK");
+      expect(retryClient.release).toHaveBeenCalled();
+    });
+
+    test("should retry transaction on transient error via recursion", async () => {
+      const firstClient = {
+        query: vi.fn().mockResolvedValue({ rows: [] }),
+        release: vi.fn(),
+      };
+      const secondClient = {
+        query: vi.fn().mockResolvedValue({ rows: [] }),
+        release: vi.fn(),
+      };
+
+      mockConnect
+        .mockResolvedValueOnce(firstClient)
+        .mockResolvedValueOnce(secondClient);
+
+      const transientError = new Error("connection reset") as any;
+      transientError.code = "ECONNRESET";
+
+      let callCount = 0;
+      const result = await connector.transaction(async (client) => {
+        callCount++;
+        if (callCount === 1) throw transientError;
+        await client.query("INSERT INTO test VALUES (1)");
+        return "recovered";
+      });
+
+      expect(result).toBe("recovered");
+      expect(callCount).toBe(2);
+      // Both clients should be connected and released
+      expect(mockConnect).toHaveBeenCalledTimes(2);
+      expect(firstClient.release).toHaveBeenCalledTimes(1);
+      expect(secondClient.release).toHaveBeenCalledTimes(1);
+    });
+
+    test("should not retry transient error more than once in transaction", async () => {
+      const transientError = new Error("connection reset") as any;
+      transientError.code = "ECONNRESET";
+
+      const firstClient = {
+        query: vi.fn().mockResolvedValue({ rows: [] }),
+        release: vi.fn(),
+      };
+      const secondClient = {
+        query: vi.fn().mockResolvedValue({ rows: [] }),
+        release: vi.fn(),
+      };
+
+      mockConnect
+        .mockResolvedValueOnce(firstClient)
+        .mockResolvedValueOnce(secondClient);
+
+      await expect(
+        connector.transaction(async () => {
+          throw transientError;
+        }),
+      ).rejects.toThrow();
+
+      expect(mockConnect).toHaveBeenCalledTimes(2);
+    });
+
+    test("should release original client exactly once on auth error retry", async () => {
+      const originalClient = {
+        query: vi.fn().mockResolvedValue({ rows: [] }),
+        release: vi.fn(),
+      };
+      const retryClient = {
+        query: vi.fn().mockResolvedValue({ rows: [] }),
+        release: vi.fn(),
+      };
+
+      mockConnect
+        .mockResolvedValueOnce(originalClient)
+        .mockResolvedValueOnce(retryClient);
+
+      const authError = new Error("auth failed") as any;
+      authError.code = "28P01";
+
+      let callCount = 0;
+      await connector.transaction(async (client) => {
+        callCount++;
+        if (callCount === 1) throw authError;
+        return "ok";
+      });
+
+      expect(originalClient.release).toHaveBeenCalledTimes(1);
+    });
+
+    test("should release original client exactly once on transient error retry", async () => {
+      const firstClient = {
+        query: vi.fn().mockResolvedValue({ rows: [] }),
+        release: vi.fn(),
+      };
+      const secondClient = {
+        query: vi.fn().mockResolvedValue({ rows: [] }),
+        release: vi.fn(),
+      };
+
+      mockConnect
+        .mockResolvedValueOnce(firstClient)
+        .mockResolvedValueOnce(secondClient);
+
+      const transientError = new Error("connection reset") as any;
+      transientError.code = "ECONNRESET";
+
+      let callCount = 0;
+      await connector.transaction(async (client) => {
+        callCount++;
+        if (callCount === 1) throw transientError;
+        return "ok";
+      });
+
+      expect(firstClient.release).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("healthCheck", () => {
