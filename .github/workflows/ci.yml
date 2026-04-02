@@ -11,6 +11,7 @@ concurrency:
 permissions:
   contents: read
   pull-requests: read
+  id-token: write
 
 jobs:
   detect-changes:
@@ -47,6 +48,8 @@ jobs:
         with:
           node-version: 24
           cache: 'pnpm'
+      - name: Setup JFrog npm
+        uses: ./.github/actions/setup-jfrog-npm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Check generated types are up to date
@@ -85,6 +88,8 @@ jobs:
         with:
           node-version: 24
           cache: 'pnpm'
+      - name: Setup JFrog npm
+        uses: ./.github/actions/setup-jfrog-npm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Run Tests
@@ -105,6 +110,8 @@ jobs:
         with:
           node-version: 24
           cache: 'pnpm'
+      - name: Setup JFrog npm
+        uses: ./.github/actions/setup-jfrog-npm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Install Playwright Browsers
@@ -133,6 +140,8 @@ jobs:
         with:
           node-version: 24
           cache: 'pnpm'
+      - name: Setup JFrog npm
+        uses: ./.github/actions/setup-jfrog-npm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -182,6 +191,8 @@ jobs:
         with:
           node-version: 24
           cache: 'pnpm'
+      - name: Setup JFrog npm
+        uses: ./.github/actions/setup-jfrog-npm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Build Docs

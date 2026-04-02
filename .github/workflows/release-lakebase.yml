@@ -55,6 +55,11 @@ jobs:
           registry-url: "https://registry.npmjs.org"
           cache: "pnpm"
 
+      - name: Setup JFrog npm
+        uses: ./.github/actions/setup-jfrog-npm
+        with:
+          npmrc-path: .npmrc
+
       - name: Update npm
         run: npm install -g npm@11.12.0
 

@@ -30,6 +30,8 @@ jobs:
         with:
           node-version: 24
           cache: 'pnpm'
+      - name: Setup JFrog npm
+        uses: ./.github/actions/setup-jfrog-npm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Build Docs
