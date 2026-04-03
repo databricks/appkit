@@ -14,6 +14,7 @@ import {
   convertRequestSchema,
   convertResponseSchema,
   deriveChunkType,
+  extractRequestKeys,
 } from "./converter";
 import { fetchOpenApiSchema } from "./fetcher";
 
@@ -51,7 +52,7 @@ export async function generateServingTypes(
     ? { version: CACHE_VERSION, endpoints: {} }
     : await loadServingCache();
 
-  const client = new WorkspaceClient({});
+  let client: WorkspaceClient | undefined;
   let updated = false;
 
   const registryEntries: string[] = [];
@@ -80,6 +81,7 @@ export async function generateServingTypes(
       continue;
     }
 
+    client ??= new WorkspaceClient({});
     const result = await fetchOpenApiSchema(
       client,
       endpointName,
@@ -135,10 +137,12 @@ export async function generateServingTypes(
     let requestType: string;
     let responseType: string;
     let chunkType: string | null;
+    let requestKeys: string[];
     try {
       requestType = convertRequestSchema(operation);
       responseType = convertResponseSchema(operation);
       chunkType = deriveChunkType(operation);
+      requestKeys = extractRequestKeys(operation);
     } catch (convErr) {
       logger.warn(
         "Schema conversion failed for '%s': %s",
@@ -161,7 +165,13 @@ export async function generateServingTypes(
       continue;
     }
 
-    cache.endpoints[alias] = { hash, requestType, responseType, chunkType };
+    cache.endpoints[alias] = {
+      hash,
+      requestType,
+      responseType,
+      chunkType,
+      requestKeys,
+    };
     updated = true;
 
     registryEntries.push(

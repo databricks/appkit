@@ -19,6 +19,7 @@ export interface ServingCacheEntry {
   requestType: string;
   responseType: string;
   chunkType: string | null;
+  requestKeys: string[];
 }
 
 export interface ServingCache {

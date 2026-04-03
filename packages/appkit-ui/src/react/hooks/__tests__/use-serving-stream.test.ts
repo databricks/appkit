@@ -61,6 +61,26 @@ describe("useServingStream", () => {
     );
   });
 
+  test("uses override body when passed to stream()", () => {
+    const { result } = renderHook(() =>
+      useServingStream({ messages: [{ role: "user", content: "old" }] }),
+    );
+
+    const overrideBody = {
+      messages: [{ role: "user" as const, content: "new" }],
+    };
+
+    act(() => {
+      result.current.stream(overrideBody);
+    });
+
+    expect(mockConnectSSE).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: JSON.stringify(overrideBody),
+      }),
+    );
+  });
+
   test("uses alias in URL when provided", () => {
     const { result } = renderHook(() =>
       useServingStream({ messages: [] }, { alias: "embedder" }),

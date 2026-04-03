@@ -53,6 +53,7 @@ describe("serving cache", () => {
             requestType: "{ messages: string[] }",
             responseType: "{ model: string }",
             chunkType: null,
+            requestKeys: ["messages"],
           },
         },
       };
@@ -91,6 +92,7 @@ describe("serving cache", () => {
             requestType: "{}",
             responseType: "{}",
             chunkType: null,
+            requestKeys: [],
           },
         },
       };

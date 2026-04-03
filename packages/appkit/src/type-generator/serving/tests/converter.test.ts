@@ -3,6 +3,7 @@ import {
   convertRequestSchema,
   convertResponseSchema,
   deriveChunkType,
+  extractRequestKeys,
 } from "../converter";
 import type { OpenApiOperation, OpenApiSchema } from "../fetcher";
 
@@ -273,6 +274,35 @@ describe("converter", () => {
     test("returns null for missing response", () => {
       const op: OpenApiOperation = {};
       expect(deriveChunkType(op)).toBeNull();
+    });
+  });
+
+  describe("extractRequestKeys", () => {
+    test("extracts top-level property keys excluding stream", () => {
+      const op = makeOperation({
+        messages: { type: "array", items: { type: "string" } },
+        temperature: { type: "number" },
+        stream: { type: "boolean", nullable: true },
+      });
+      expect(extractRequestKeys(op)).toEqual(["messages", "temperature"]);
+    });
+
+    test("returns empty array for missing schema", () => {
+      const op: OpenApiOperation = {};
+      expect(extractRequestKeys(op)).toEqual([]);
+    });
+
+    test("returns empty array for schema without properties", () => {
+      const op: OpenApiOperation = {
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: { type: "object" },
+            },
+          },
+        },
+      };
+      expect(extractRequestKeys(op)).toEqual([]);
     });
   });
 });

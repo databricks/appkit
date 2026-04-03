@@ -54,6 +54,16 @@ function schemaToTypeString(schema: OpenApiSchema, indent = 0): string {
 }
 
 /**
+ * Extracts the top-level property keys from the request schema.
+ * Strips the `stream` property (plugin-controlled).
+ */
+export function extractRequestKeys(operation: OpenApiOperation): string[] {
+  const schema = operation.requestBody?.content?.["application/json"]?.schema;
+  if (!schema?.properties) return [];
+  return Object.keys(schema.properties).filter((k) => k !== "stream");
+}
+
+/**
  * Extracts and converts the request schema from an OpenAPI path operation.
  * Strips the `stream` property from the request type.
  */

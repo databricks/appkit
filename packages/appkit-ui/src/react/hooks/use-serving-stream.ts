@@ -18,9 +18,12 @@ export interface UseServingStreamOptions<
   onComplete?: (chunks: T[]) => void;
 }
 
-export interface UseServingStreamResult<T = unknown> {
-  /** Trigger the streaming invocation. */
-  stream: () => void;
+export interface UseServingStreamResult<
+  T = unknown,
+  TBody = Record<string, unknown>,
+> {
+  /** Trigger the streaming invocation. Pass an optional body override for this invocation. */
+  stream: (overrideBody?: TBody) => void;
   /** Accumulated chunks received so far. */
   chunks: T[];
   /** Whether streaming is in progress. */
@@ -42,7 +45,7 @@ export interface UseServingStreamResult<T = unknown> {
 export function useServingStream<K extends ServingAlias = ServingAlias>(
   body: InferServingRequest<K>,
   options: UseServingStreamOptions<K> = {} as UseServingStreamOptions<K>,
-): UseServingStreamResult<InferServingChunk<K>> {
+): UseServingStreamResult<InferServingChunk<K>, InferServingRequest<K>> {
   type TChunk = InferServingChunk<K>;
   const { alias, autoStart = false, onComplete } = options;
 
@@ -69,45 +72,50 @@ export function useServingStream<K extends ServingAlias = ServingAlias>(
 
   const bodyJson = JSON.stringify(body);
 
-  const stream = useCallback(() => {
-    // Abort any existing stream
-    abortControllerRef.current?.abort();
+  const stream = useCallback(
+    (overrideBody?: InferServingRequest<K>) => {
+      // Abort any existing stream
+      abortControllerRef.current?.abort();
 
-    setStreaming(true);
-    setError(null);
-    setChunks([]);
-    chunksRef.current = [];
+      setStreaming(true);
+      setError(null);
+      setChunks([]);
+      chunksRef.current = [];
 
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
 
-    connectSSE({
-      url: urlSuffix,
-      payload: bodyJson,
-      signal: abortController.signal,
-      onMessage: async (message) => {
+      const payload = overrideBody ? JSON.stringify(overrideBody) : bodyJson;
+
+      connectSSE({
+        url: urlSuffix,
+        payload,
+        signal: abortController.signal,
+        onMessage: async (message) => {
+          if (abortController.signal.aborted) return;
+          try {
+            const parsed = JSON.parse(message.data);
+
+            chunksRef.current = [...chunksRef.current, parsed as TChunk];
+            setChunks(chunksRef.current);
+          } catch {
+            // Skip malformed messages
+          }
+        },
+        onError: (err) => {
+          if (abortController.signal.aborted) return;
+          setStreaming(false);
+          setError(err instanceof Error ? err.message : "Streaming failed");
+        },
+      }).then(() => {
         if (abortController.signal.aborted) return;
-        try {
-          const parsed = JSON.parse(message.data);
-
-          chunksRef.current = [...chunksRef.current, parsed as TChunk];
-          setChunks(chunksRef.current);
-        } catch {
-          // Skip malformed messages
-        }
-      },
-      onError: (err) => {
-        if (abortController.signal.aborted) return;
+        // Stream completed
         setStreaming(false);
-        setError(err instanceof Error ? err.message : "Streaming failed");
-      },
-    }).then(() => {
-      if (abortController.signal.aborted) return;
-      // Stream completed
-      setStreaming(false);
-      onCompleteRef.current?.(chunksRef.current);
-    });
-  }, [urlSuffix, bodyJson]);
+        onCompleteRef.current?.(chunksRef.current);
+      });
+    },
+    [urlSuffix, bodyJson],
+  );
 
   useEffect(() => {
     if (autoStart) {
