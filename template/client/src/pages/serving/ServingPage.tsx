@@ -2,7 +2,7 @@
 import { useServingInvoke } from '@databricks/appkit-ui/react';
 // For streaming endpoints (e.g. chat models), use useServingStream instead:
 // import { useServingStream } from '@databricks/appkit-ui/react';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 
 interface ChatChoice {
   message?: { content?: string };
@@ -27,29 +27,30 @@ export function ServingPage() {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
 
-  const body = useMemo(
-    () => ({
-      messages: [...messages, { role: 'user' as const, content: input }],
-    }),
-    [messages, input],
-  );
-
-  const { invoke, loading, error } = useServingInvoke(body);
-  // For streaming endpoints (e.g. chat models), use useServingStream:
-  // const { stream, chunks, streaming, error, reset } = useServingStream(body);
+  const { invoke, loading, error } = useServingInvoke({ messages: [] });
+  // For streaming endpoints (e.g. chat models), use useServingStream instead:
+  // const { stream, chunks, streaming, error, reset } = useServingStream({ messages: [] });
   // Then accumulate chunks: chunks.map(c => c?.choices?.[0]?.delta?.content ?? '').join('')
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!input.trim() || loading) return;
 
-    setMessages((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), role: 'user', content: input.trim() },
-    ]);
+    const userMessage: Message = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: input.trim(),
+    };
+
+    const fullMessages = [
+      ...messages.map(({ role, content }) => ({ role, content })),
+      { role: 'user' as const, content: userMessage.content },
+    ];
+
+    setMessages((prev) => [...prev, userMessage]);
     setInput('');
 
-    void invoke().then((result) => {
+    void invoke({ messages: fullMessages }).then((result) => {
       if (result) {
         setMessages((prev) => [
           ...prev,
