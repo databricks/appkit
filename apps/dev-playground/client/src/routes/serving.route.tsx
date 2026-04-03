@@ -57,7 +57,7 @@ function ServingRoute() {
     };
 
     const fullMessages = [
-      ...messages,
+      ...messages.map(({ role, content }) => ({ role, content })),
       { role: "user" as const, content: userMessage.content },
     ];
 
