@@ -525,6 +525,110 @@ describe("Analytics Plugin", () => {
       );
     });
 
+    test("/query/:query_key should pass INLINE + ARROW_STREAM format parameters when format is ARROW_STREAM", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+
+      const executeMock = vi.fn().mockResolvedValue({
+        result: { data: [{ id: 1 }] },
+      });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {}, format: "ARROW_STREAM" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(executeMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          statement: "SELECT * FROM test",
+          warehouse_id: "test-warehouse-id",
+          disposition: "INLINE",
+          format: "ARROW_STREAM",
+        }),
+        expect.any(AbortSignal),
+      );
+    });
+
+    test("/query/:query_key should pass EXTERNAL_LINKS + ARROW_STREAM format parameters when format is ARROW", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+
+      const executeMock = vi.fn().mockResolvedValue({
+        result: { data: [{ id: 1 }] },
+      });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {}, format: "ARROW" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(executeMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          statement: "SELECT * FROM test",
+          warehouse_id: "test-warehouse-id",
+          disposition: "EXTERNAL_LINKS",
+          format: "ARROW_STREAM",
+        }),
+        expect.any(AbortSignal),
+      );
+    });
+
+    test("/query/:query_key should not pass format parameters when format is JSON (default)", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+
+      const executeMock = vi.fn().mockResolvedValue({
+        result: { data: [{ id: 1 }] },
+      });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {} },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      const callArgs = executeMock.mock.calls[0][1];
+      expect(callArgs).not.toHaveProperty("disposition");
+      expect(callArgs).not.toHaveProperty("format");
+    });
+
     test("should return 404 when query file is not found", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
