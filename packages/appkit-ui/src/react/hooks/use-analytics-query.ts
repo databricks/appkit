@@ -54,13 +54,13 @@ function getArrowStreamUrl(id: string) {
 export function useAnalyticsQuery<
   T = unknown,
   K extends QueryKey = QueryKey,
-  F extends AnalyticsFormat = "JSON",
+  F extends AnalyticsFormat = "ARROW_STREAM",
 >(
   queryKey: K,
   parameters?: InferParams<K> | null,
   options: UseAnalyticsQueryOptions<F> = {} as UseAnalyticsQueryOptions<F>,
 ): UseAnalyticsQueryResult<InferResultByFormat<T, K, F>> {
-  const format = options?.format ?? "JSON";
+  const format = options?.format ?? "ARROW_STREAM";
   const maxParametersSize = options?.maxParametersSize ?? 100 * 1024;
   const autoStart = options?.autoStart ?? true;
 
