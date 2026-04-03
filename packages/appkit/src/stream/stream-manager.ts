@@ -3,10 +3,13 @@ import { context } from "@opentelemetry/api";
 import type { IAppResponse, StreamConfig } from "shared";
 import { EventRingBuffer } from "./buffers";
 import { streamDefaults } from "./defaults";
+import { createLogger } from "../logging/logger";
 import { SSEWriter } from "./sse-writer";
 import { StreamRegistry } from "./stream-registry";
 import { SSEErrorCode, type StreamEntry, type StreamOperation } from "./types";
 import { StreamValidator } from "./validator";
+
+const logger = createLogger("stream");
 
 // main entry point for Server-Sent events streaming
 export class StreamManager {
@@ -259,6 +262,8 @@ export class StreamManager {
           error instanceof Error ? error.message : "Internal server error";
         const errorEventId = randomUUID();
         const errorCode = this._categorizeError(error);
+
+        logger.error("Stream execution failed: %s (code=%s)", errorMsg, errorCode);
 
         // buffer error event
         streamEntry.eventBuffer.add({
