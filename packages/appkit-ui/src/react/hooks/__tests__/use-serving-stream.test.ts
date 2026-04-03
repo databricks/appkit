@@ -105,7 +105,7 @@ describe("useServingStream", () => {
     expect(result.current.chunks).toEqual([{ id: 1 }, { id: 2 }]);
   });
 
-  test("sets error from SSE error event in message", async () => {
+  test("accumulates chunks with error field as normal data", async () => {
     const { result } = renderHook(() => useServingStream({ messages: [] }));
 
     act(() => {
@@ -118,8 +118,11 @@ describe("useServingStream", () => {
       });
     });
 
-    expect(result.current.error).toBe("Model overloaded");
-    expect(result.current.streaming).toBe(false);
+    // Chunks with an `error` field are treated as data, not stream errors.
+    // Transport-level errors are delivered via onError callback instead.
+    expect(result.current.chunks).toEqual([{ error: "Model overloaded" }]);
+    expect(result.current.error).toBeNull();
+    expect(result.current.streaming).toBe(true);
   });
 
   test("sets error from onError callback", async () => {

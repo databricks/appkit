@@ -165,6 +165,7 @@ export async function* stream(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  const MAX_BUFFER_SIZE = 1024 * 1024; // 1 MB
 
   try {
     while (true) {
@@ -174,6 +175,14 @@ export async function* stream(
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
+
+      if (buffer.length > MAX_BUFFER_SIZE) {
+        logger.warn(
+          "Stream buffer exceeded %d bytes, discarding incomplete data",
+          MAX_BUFFER_SIZE,
+        );
+        buffer = "";
+      }
 
       // Process complete lines from the buffer
       const lines = buffer.split("\n");

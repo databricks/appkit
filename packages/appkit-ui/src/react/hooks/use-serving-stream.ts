@@ -55,7 +55,7 @@ export function useServingStream<K extends ServingAlias = ServingAlias>(
   onCompleteRef.current = onComplete;
 
   const urlSuffix = alias
-    ? `/api/serving/${encodeURIComponent(alias as string)}/stream`
+    ? `/api/serving/${encodeURIComponent(String(alias))}/stream`
     : "/api/serving/stream";
 
   const reset = useCallback(() => {
@@ -89,13 +89,6 @@ export function useServingStream<K extends ServingAlias = ServingAlias>(
         if (abortController.signal.aborted) return;
         try {
           const parsed = JSON.parse(message.data);
-
-          // Handle SSE error events from StreamManager
-          if (parsed.error) {
-            setError(parsed.error);
-            setStreaming(false);
-            return;
-          }
 
           chunksRef.current = [...chunksRef.current, parsed as TChunk];
           setChunks(chunksRef.current);

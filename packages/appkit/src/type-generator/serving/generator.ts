@@ -4,6 +4,7 @@ import pc from "picocolors";
 import { createLogger } from "../../logging/logger";
 import type { EndpointConfig } from "../../plugins/serving/types";
 import {
+  CACHE_VERSION,
   hashSchema,
   loadServingCache,
   type ServingCache,
@@ -47,7 +48,7 @@ export async function generateServingTypes(
   const startTime = performance.now();
 
   const cache = noCache
-    ? { version: "1", endpoints: {} }
+    ? { version: CACHE_VERSION, endpoints: {} }
     : await loadServingCache();
 
   const client = new WorkspaceClient({});
@@ -131,9 +132,34 @@ export async function generateServingTypes(
       continue;
     }
 
-    const requestType = convertRequestSchema(operation);
-    const responseType = convertResponseSchema(operation);
-    const chunkType = deriveChunkType(operation);
+    let requestType: string;
+    let responseType: string;
+    let chunkType: string | null;
+    try {
+      requestType = convertRequestSchema(operation);
+      responseType = convertResponseSchema(operation);
+      chunkType = deriveChunkType(operation);
+    } catch (convErr) {
+      logger.warn(
+        "Schema conversion failed for '%s': %s",
+        alias,
+        (convErr as Error).message,
+      );
+      registryEntries.push(
+        buildRegistryEntry(
+          alias,
+          GENERIC_REQUEST,
+          GENERIC_RESPONSE,
+          GENERIC_CHUNK,
+        ),
+      );
+      logEntries.push({
+        alias,
+        status: "MISS",
+        error: "schema conversion failed",
+      });
+      continue;
+    }
 
     cache.endpoints[alias] = { hash, requestType, responseType, chunkType };
     updated = true;

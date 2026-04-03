@@ -45,7 +45,7 @@ export function useServingInvoke<K extends ServingAlias = ServingAlias>(
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const urlSuffix = alias
-    ? `/api/serving/${encodeURIComponent(alias as string)}/invoke`
+    ? `/api/serving/${encodeURIComponent(String(alias))}/invoke`
     : "/api/serving/invoke";
 
   const bodyJson = JSON.stringify(body);

@@ -111,8 +111,8 @@ describe("fetchOpenApiSchema", () => {
       "ep",
     );
     expect(result).not.toBeNull();
-    expect(result!.pathKey).toBe("/serving-endpoints/ep/invocations");
-    expect(result!.spec.openapi).toBe("3.0.0");
+    expect(result?.pathKey).toBe("/serving-endpoints/ep/invocations");
+    expect(result?.spec.openapi).toBe("3.0.0");
   });
 
   test("matches servedModel path when provided", async () => {
@@ -129,7 +129,7 @@ describe("fetchOpenApiSchema", () => {
       "ep",
       "gpt4",
     );
-    expect(result!.pathKey).toBe(
+    expect(result?.pathKey).toBe(
       "/serving-endpoints/ep/served-models/gpt4/invocations",
     );
   });
@@ -147,7 +147,7 @@ describe("fetchOpenApiSchema", () => {
       "ep",
       "nonexistent-model",
     );
-    expect(result!.pathKey).toBe("/serving-endpoints/ep/invocations");
+    expect(result?.pathKey).toBe("/serving-endpoints/ep/invocations");
   });
 
   test("returns null for invalid spec structure (missing paths)", async () => {

@@ -1,10 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-// biome-ignore lint/suspicious/noExplicitAny: test mock
 const mockGenerateServingTypes = vi.fn<any>(async () => {});
-// biome-ignore lint/suspicious/noExplicitAny: test mock
 const mockFindServerFile = vi.fn<any>((): string | null => null);
-// biome-ignore lint/suspicious/noExplicitAny: test mock
 const mockExtractServingEndpoints = vi.fn<any>(
   (): Record<string, { env: string }> | null => null,
 );

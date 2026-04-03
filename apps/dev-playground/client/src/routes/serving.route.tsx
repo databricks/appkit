@@ -12,6 +12,13 @@ interface Message {
   content: string;
 }
 
+function extractContent(chunk: unknown): string {
+  return (
+    (chunk as { choices?: { delta?: { content?: string } }[] })?.choices?.[0]
+      ?.delta?.content ?? ""
+  );
+}
+
 function ServingRoute() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -23,36 +30,21 @@ function ServingRoute() {
     [messages, input],
   );
 
-  const onComplete = useCallback(
-    (chunks: unknown[]) => {
-      const content = chunks
-        .map(
-          (chunk) =>
-            (chunk as { choices?: { delta?: { content?: string } }[] })
-              ?.choices?.[0]?.delta?.content ?? "",
-        )
-        .join("");
-      if (content) {
-        setMessages((prev) => [
-          ...prev,
-          { id: crypto.randomUUID(), role: "assistant", content },
-        ]);
-      }
-    },
-    [],
-  );
+  const onComplete = useCallback((chunks: unknown[]) => {
+    const content = chunks.map(extractContent).join("");
+    if (content) {
+      setMessages((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), role: "assistant", content },
+      ]);
+    }
+  }, []);
 
   const { stream, chunks, streaming, error, reset } = useServingStream(body, {
     onComplete,
   });
 
-  const assistantContent = chunks
-    .map(
-      (chunk) =>
-        (chunk as { choices?: { delta?: { content?: string } }[] })
-          ?.choices?.[0]?.delta?.content ?? "",
-    )
-    .join("");
+  const assistantContent = chunks.map(extractContent).join("");
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

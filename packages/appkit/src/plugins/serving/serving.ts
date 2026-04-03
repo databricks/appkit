@@ -15,6 +15,20 @@ import type { EndpointConfig, IServingConfig, ServingFactory } from "./types";
 
 const logger = createLogger("serving");
 
+class EndpointNotFoundError extends Error {
+  constructor(alias: string) {
+    super(`Unknown endpoint alias: ${alias}`);
+  }
+}
+
+class EndpointNotConfiguredError extends Error {
+  constructor(alias: string, envVar: string) {
+    super(
+      `Endpoint '${alias}' is not configured: env var '${envVar}' is not set`,
+    );
+  }
+}
+
 interface ResolvedEndpoint {
   name: string;
   servedModel?: string;
@@ -92,14 +106,12 @@ export class ServingPlugin extends Plugin {
   ): { endpoint: ResolvedEndpoint; filteredBody: Record<string, unknown> } {
     const config = this.endpoints[alias];
     if (!config) {
-      throw new Error(`Unknown endpoint alias: ${alias}`);
+      throw new EndpointNotFoundError(alias);
     }
 
     const name = process.env[config.env];
     if (!name) {
-      throw new Error(
-        `Endpoint '${alias}' is not configured: env var '${config.env}' is not set`,
-      );
+      throw new EndpointNotConfiguredError(alias, config.env);
     }
 
     const endpoint: ResolvedEndpoint = {
@@ -173,10 +185,10 @@ export class ServingPlugin extends Plugin {
       res.json(result);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Invocation failed";
-      if (message.startsWith("Unknown endpoint alias:")) {
+      if (err instanceof EndpointNotFoundError) {
         res.status(404).json({ error: message });
       } else if (
-        message.includes("is not configured:") ||
+        err instanceof EndpointNotConfiguredError ||
         message.startsWith("Unknown request parameters:")
       ) {
         res.status(400).json({ error: message });
@@ -199,7 +211,7 @@ export class ServingPlugin extends Plugin {
       ({ endpoint, filteredBody } = this.resolveAndFilter(alias, rawBody));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Invalid request";
-      const status = message.startsWith("Unknown endpoint alias:") ? 404 : 400;
+      const status = err instanceof EndpointNotFoundError ? 404 : 400;
       res.status(status).json({ error: message });
       return;
     }
