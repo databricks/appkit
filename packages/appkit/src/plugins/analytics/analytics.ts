@@ -159,9 +159,17 @@ export class AnalyticsPlugin extends Plugin {
             },
             type: "arrow",
           }
-        : {
-            type: "result",
-          };
+        : format === "ARROW_STREAM"
+          ? {
+              formatParameters: {
+                disposition: "INLINE",
+                format: "ARROW_STREAM",
+              },
+              type: "result",
+            }
+          : {
+              type: "result",
+            };
 
     const hashedQuery = this.queryProcessor.hashQuery(query);
 
