@@ -73,10 +73,10 @@ function resolveFormat(
       return "ARROW";
     }
 
-    return "JSON";
+    return "ARROW_STREAM";
   }
 
-  return "JSON";
+  return "ARROW_STREAM";
 }
 
 // ============================================================================
