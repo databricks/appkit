@@ -5,7 +5,7 @@ import type { Table } from "apache-arrow";
 // ============================================================================
 
 /** Supported response formats for analytics queries */
-export type AnalyticsFormat = "JSON" | "ARROW";
+export type AnalyticsFormat = "JSON" | "ARROW" | "ARROW_STREAM";
 
 /**
  * Typed Arrow Table - preserves row type information for type inference.
