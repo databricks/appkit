@@ -9,3 +9,6 @@ coverage
 *.tsbuildinfo
 
 .turbo
+
+# AppKit type generator caches
+.databricks

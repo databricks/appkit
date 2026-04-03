@@ -2,11 +2,20 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'node:path';
+{{- if .plugins.serving}}
+import { appKitServingTypesPlugin } from '@databricks/appkit';
+{{- end}}
 
 // https://vite.dev/config/
 export default defineConfig({
   root: __dirname,
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    tailwindcss(),
+{{- if .plugins.serving}}
+    appKitServingTypesPlugin(),
+{{- end}}
+  ],
   server: {
     middlewareMode: true,
   },

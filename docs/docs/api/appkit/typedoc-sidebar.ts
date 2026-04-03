@@ -99,6 +99,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.EndpointConfig",
+          label: "EndpointConfig"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.GenerateDatabaseCredentialRequest",
           label: "GenerateDatabaseCredentialRequest"
         },
@@ -144,6 +149,16 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.ServingEndpointEntry",
+          label: "ServingEndpointEntry"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ServingEndpointRegistry",
+          label: "ServingEndpointRegistry"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.StreamExecutionSettings",
           label: "StreamExecutionSettings"
         },
@@ -185,6 +200,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.ServingFactory",
+          label: "ServingFactory"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.ToPlugin",
           label: "ToPlugin"
         }
@@ -207,6 +227,11 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
+          id: "api/appkit/Function.appKitServingTypesPlugin",
+          label: "appKitServingTypesPlugin"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.appKitTypesPlugin",
           label: "appKitTypesPlugin"
         },
@@ -219,6 +244,16 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.createLakebasePool",
           label: "createLakebasePool"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.extractServingEndpoints",
+          label: "extractServingEndpoints"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.findServerFile",
+          label: "findServerFile"
         },
         {
           type: "doc",

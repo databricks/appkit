@@ -1,5 +1,12 @@
 import "reflect-metadata";
-import { analytics, createApp, files, genie, server } from "@databricks/appkit";
+import {
+  analytics,
+  createApp,
+  files,
+  genie,
+  server,
+  serving,
+} from "@databricks/appkit";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
@@ -26,6 +33,7 @@ createApp({
     }),
     lakebaseExamples(),
     files(),
+    serving(),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
 }).then((appkit) => {
