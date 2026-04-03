@@ -599,7 +599,7 @@ describe("Analytics Plugin", () => {
       );
     });
 
-    test("/query/:query_key should not pass format parameters when format is JSON (default)", async () => {
+    test("/query/:query_key should use INLINE + ARROW_STREAM by default when no format specified", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -619,6 +619,41 @@ describe("Analytics Plugin", () => {
       const mockReq = createMockRequest({
         params: { query_key: "test_query" },
         body: { parameters: {} },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(executeMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          disposition: "INLINE",
+          format: "ARROW_STREAM",
+        }),
+        expect.any(AbortSignal),
+      );
+    });
+
+    test("/query/:query_key should not pass format parameters when format is explicitly JSON", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+
+      const executeMock = vi.fn().mockResolvedValue({
+        result: { data: [{ id: 1 }] },
+      });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {}, format: "JSON" },
       });
       const mockRes = createMockResponse();
 

@@ -119,7 +119,8 @@ export class AnalyticsPlugin extends Plugin {
     res: express.Response,
   ): Promise<void> {
     const { query_key } = req.params;
-    const { parameters, format = "JSON" } = req.body as IAnalyticsQueryRequest;
+    const { parameters, format = "ARROW_STREAM" } =
+      req.body as IAnalyticsQueryRequest;
 
     // Request-scoped logging with WideEvent tracking
     logger.debug(req, "Executing query: %s (format=%s)", query_key, format);
