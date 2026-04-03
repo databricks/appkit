@@ -241,9 +241,10 @@ export class ServingPlugin extends Plugin {
 
     await this.executeStream(
       res,
-      () =>
+      (signal) =>
         servingConnector.stream(workspaceClient, endpoint.name, filteredBody, {
           servedModel: endpoint.servedModel,
+          signal,
         }),
       streamSettings,
     );
