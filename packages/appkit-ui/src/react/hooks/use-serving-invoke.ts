@@ -1,0 +1,103 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import type {
+  InferServingRequest,
+  InferServingResponse,
+  ServingAlias,
+} from "./types";
+
+export interface UseServingInvokeOptions<
+  K extends ServingAlias = ServingAlias,
+> {
+  /** Endpoint alias for named mode. Omit for default mode. */
+  alias?: K;
+  /** If false, does not invoke automatically on mount. Default: false */
+  autoStart?: boolean;
+}
+
+export interface UseServingInvokeResult<T = unknown> {
+  /** Trigger the invocation. Returns the response data, or null on error/abort. */
+  invoke: () => Promise<T | null>;
+  /** Response data, null until loaded. */
+  data: T | null;
+  /** Whether a request is in progress. */
+  loading: boolean;
+  /** Error message, if any. */
+  error: string | null;
+}
+
+/**
+ * Hook for non-streaming invocation of a serving endpoint.
+ * Calls `POST /api/serving/invoke` (default) or `POST /api/serving/{alias}/invoke` (named).
+ *
+ * When the type generator has populated `ServingEndpointRegistry`, the response type
+ * is automatically inferred from the endpoint's OpenAPI schema.
+ */
+export function useServingInvoke<K extends ServingAlias = ServingAlias>(
+  body: InferServingRequest<K>,
+  options: UseServingInvokeOptions<K> = {} as UseServingInvokeOptions<K>,
+): UseServingInvokeResult<InferServingResponse<K>> {
+  type TResponse = InferServingResponse<K>;
+  const { alias, autoStart = false } = options;
+
+  const [data, setData] = useState<TResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const urlSuffix = alias
+    ? `/api/serving/${encodeURIComponent(String(alias))}/invoke`
+    : "/api/serving/invoke";
+
+  const bodyJson = JSON.stringify(body);
+
+  const invoke = useCallback((): Promise<TResponse | null> => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    setLoading(true);
+    setError(null);
+    setData(null);
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    return fetch(urlSuffix, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: bodyJson,
+      signal: abortController.signal,
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const errorBody = await res.json().catch(() => null);
+          throw new Error(errorBody?.error || `HTTP ${res.status}`);
+        }
+        return res.json();
+      })
+      .then((result: TResponse) => {
+        if (abortController.signal.aborted) return null;
+        setData(result);
+        setLoading(false);
+        return result;
+      })
+      .catch((err: Error) => {
+        if (abortController.signal.aborted) return null;
+        setError(err.message || "Request failed");
+        setLoading(false);
+        return null;
+      });
+  }, [urlSuffix, bodyJson]);
+
+  useEffect(() => {
+    if (autoStart) {
+      invoke();
+    }
+
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, [invoke, autoStart]);
+
+  return { invoke, data, loading, error };
+}

@@ -1,19 +1,9 @@
 import fs from "node:fs/promises";
 import { createLogger } from "../../logging/logger";
-
-const CACHE_VERSION = "1";
-
-interface ServingCacheEntry {
-  hash: string;
-  requestType: string;
-  responseType: string;
-  chunkType: string | null;
-}
-
-interface ServingCache {
-  version: string;
-  endpoints: Record<string, ServingCacheEntry>;
-}
+import {
+  CACHE_VERSION,
+  type ServingCache,
+} from "../../type-generator/serving/cache";
 
 const logger = createLogger("serving:schema-filter");
 
