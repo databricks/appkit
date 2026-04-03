@@ -723,6 +723,159 @@ describe("Analytics Plugin", () => {
       expect(callArgs).not.toHaveProperty("format");
     });
 
+    test("/query/:query_key should fall back from ARROW_STREAM to JSON when warehouse rejects ARROW_STREAM", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+
+      const executeMock = vi
+        .fn()
+        .mockRejectedValueOnce(
+          new Error(
+            "INVALID_PARAMETER_VALUE: Inline disposition only supports JSON_ARRAY format",
+          ),
+        )
+        .mockResolvedValueOnce({
+          result: { data: [{ id: 1 }] },
+        });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {} },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      // First call: ARROW_STREAM (rejected)
+      expect(executeMock.mock.calls[0][1]).toMatchObject({
+        disposition: "INLINE",
+        format: "ARROW_STREAM",
+      });
+      // Second call: JSON (no format params, uses defaults)
+      const secondCallArgs = executeMock.mock.calls[1][1];
+      expect(secondCallArgs).not.toHaveProperty("disposition");
+      expect(secondCallArgs).not.toHaveProperty("format");
+    });
+
+    test("/query/:query_key should fall back through all formats when each is rejected", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+
+      const executeMock = vi
+        .fn()
+        .mockRejectedValueOnce(
+          new Error("INVALID_PARAMETER_VALUE: only supports JSON_ARRAY"),
+        )
+        .mockRejectedValueOnce(
+          new Error("INVALID_PARAMETER_VALUE: only supports ARROW_STREAM"),
+        )
+        .mockResolvedValueOnce({
+          result: { data: [{ id: 1 }] },
+        });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {} },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(executeMock).toHaveBeenCalledTimes(3);
+      // Third call: ARROW (EXTERNAL_LINKS)
+      expect(executeMock.mock.calls[2][1]).toMatchObject({
+        disposition: "EXTERNAL_LINKS",
+        format: "ARROW_STREAM",
+      });
+    });
+
+    test("/query/:query_key should not fall back for non-format errors", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+
+      const executeMock = vi
+        .fn()
+        .mockRejectedValue(new Error("PERMISSION_DENIED: no access"));
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {} },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      // All calls use same format (ARROW_STREAM) — no format fallback occurred.
+      // (executeStream's retry interceptor may retry, but always with the same format.)
+      for (const call of executeMock.mock.calls) {
+        expect(call[1]).toMatchObject({
+          disposition: "INLINE",
+          format: "ARROW_STREAM",
+        });
+      }
+    });
+
+    test("/query/:query_key should not fall back when format is explicitly JSON", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+
+      const executeMock = vi
+        .fn()
+        .mockRejectedValue(
+          new Error("INVALID_PARAMETER_VALUE: only supports ARROW_STREAM"),
+        );
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {}, format: "JSON" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      // All calls have no disposition/format — explicit JSON uses defaults, no fallback.
+      for (const call of executeMock.mock.calls) {
+        expect(call[1]).not.toHaveProperty("disposition");
+        expect(call[1]).not.toHaveProperty("format");
+      }
+    });
+
     test("should return 404 when query file is not found", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();

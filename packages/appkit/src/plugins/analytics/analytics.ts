@@ -15,6 +15,7 @@ import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import { QueryProcessor } from "./query";
 import type {
+  AnalyticsFormat,
   AnalyticsQueryResponse,
   IAnalyticsConfig,
   IAnalyticsQueryRequest,
@@ -151,27 +152,6 @@ export class AnalyticsPlugin extends Plugin {
     const executor = isAsUser ? this.asUser(req) : this;
     const executorKey = isAsUser ? this.resolveUserId(req) : "global";
 
-    const queryParameters =
-      format === "ARROW"
-        ? {
-            formatParameters: {
-              disposition: "EXTERNAL_LINKS",
-              format: "ARROW_STREAM",
-            },
-            type: "arrow",
-          }
-        : format === "ARROW_STREAM"
-          ? {
-              formatParameters: {
-                disposition: "INLINE",
-                format: "ARROW_STREAM",
-              },
-              type: "result",
-            }
-          : {
-              type: "result",
-            };
-
     const hashedQuery = this.queryProcessor.hashQuery(query);
 
     const defaultConfig: PluginExecuteConfig = {
@@ -201,18 +181,113 @@ export class AnalyticsPlugin extends Plugin {
           parameters,
         );
 
-        const result = await executor.query(
+        return this._executeWithFormatFallback(
+          executor,
           query,
           processedParams,
-          queryParameters.formatParameters,
+          format,
           signal,
         );
-
-        return { type: queryParameters.type, ...result };
       },
       streamExecutionSettings,
       executorKey,
     );
+  }
+
+  /** Format configurations in fallback order. */
+  private static readonly FORMAT_CONFIGS = {
+    ARROW_STREAM: {
+      formatParameters: { disposition: "INLINE", format: "ARROW_STREAM" },
+      type: "result" as const,
+    },
+    JSON: {
+      formatParameters: undefined,
+      type: "result" as const,
+    },
+    ARROW: {
+      formatParameters: {
+        disposition: "EXTERNAL_LINKS",
+        format: "ARROW_STREAM",
+      },
+      type: "arrow" as const,
+    },
+  };
+
+  /**
+   * Execute a query with automatic format fallback.
+   *
+   * For the default ARROW_STREAM format, tries formats in order until one
+   * succeeds: ARROW_STREAM → JSON → ARROW. This handles warehouses that
+   * only support a subset of format/disposition combinations.
+   *
+   * Explicit format requests (JSON, ARROW) are not retried.
+   */
+  private async _executeWithFormatFallback(
+    executor: AnalyticsPlugin,
+    query: string,
+    processedParams:
+      | Record<string, SQLTypeMarker | null | undefined>
+      | undefined,
+    requestedFormat: AnalyticsFormat,
+    signal?: AbortSignal,
+  ): Promise<{ type: string; [key: string]: any }> {
+    // Explicit format — no fallback.
+    if (requestedFormat === "JSON" || requestedFormat === "ARROW") {
+      const config = AnalyticsPlugin.FORMAT_CONFIGS[requestedFormat];
+      const result = await executor.query(
+        query,
+        processedParams,
+        config.formatParameters,
+        signal,
+      );
+      return { type: config.type, ...result };
+    }
+
+    // Default (ARROW_STREAM) — try each format in order.
+    const fallbackOrder: AnalyticsFormat[] = ["ARROW_STREAM", "JSON", "ARROW"];
+
+    for (let i = 0; i < fallbackOrder.length; i++) {
+      const fmt = fallbackOrder[i];
+      const config = AnalyticsPlugin.FORMAT_CONFIGS[fmt];
+      try {
+        const result = await executor.query(
+          query,
+          processedParams,
+          config.formatParameters,
+          signal,
+        );
+        if (i > 0) {
+          logger.info(
+            "Query succeeded with fallback format %s (preferred %s was rejected)",
+            fmt,
+            fallbackOrder[0],
+          );
+        }
+        return { type: config.type, ...result };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const isFormatError =
+          msg.includes("ARROW_STREAM") ||
+          msg.includes("JSON_ARRAY") ||
+          msg.includes("EXTERNAL_LINKS") ||
+          msg.includes("INVALID_PARAMETER_VALUE") ||
+          msg.includes("NOT_IMPLEMENTED");
+
+        if (!isFormatError || i === fallbackOrder.length - 1) {
+          throw err;
+        }
+
+        logger.warn(
+          "Format %s rejected by warehouse, falling back to %s: %s",
+          fmt,
+          fallbackOrder[i + 1],
+          msg,
+        );
+      }
+    }
+
+    // Unreachable — last format in fallbackOrder throws on failure.
+    throw new Error("All format fallbacks exhausted");
   }
 
   /**
