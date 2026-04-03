@@ -107,12 +107,18 @@ export function useServingStream<K extends ServingAlias = ServingAlias>(
           setStreaming(false);
           setError(err instanceof Error ? err.message : "Streaming failed");
         },
-      }).then(() => {
-        if (abortController.signal.aborted) return;
-        // Stream completed
-        setStreaming(false);
-        onCompleteRef.current?.(chunksRef.current);
-      });
+      })
+        .then(() => {
+          if (abortController.signal.aborted) return;
+          // Stream completed
+          setStreaming(false);
+          onCompleteRef.current?.(chunksRef.current);
+        })
+        .catch(() => {
+          if (abortController.signal.aborted) return;
+          setStreaming(false);
+          setError("Connection error");
+        });
     },
     [urlSuffix, bodyJson],
   );
