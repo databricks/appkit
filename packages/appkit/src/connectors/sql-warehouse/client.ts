@@ -236,6 +236,8 @@ export class SQLWarehouseConnector {
               code: SpanStatusCode.ERROR,
               message: error instanceof Error ? error.message : String(error),
             });
+
+            logger.error("Statement execution failed: %O", error);
           }
 
           if (error instanceof AppKitError) {
@@ -376,6 +378,8 @@ export class SQLWarehouseConnector {
             code: SpanStatusCode.ERROR,
             message: error instanceof Error ? error.message : String(error),
           });
+
+          logger.error("Statement polling failed for %s: %O", statementId, error);
 
           if (error instanceof AppKitError) {
             throw error;

@@ -158,6 +158,8 @@ export class LakebaseV1Connector {
           span.recordException(error as Error);
           span.setStatus({ code: SpanStatusCode.ERROR });
 
+          logger.error("Query execution failed: %O", error);
+
           if (error instanceof AppKitError) {
             throw error;
           }
@@ -244,6 +246,8 @@ export class LakebaseV1Connector {
           }
           span.recordException(error as Error);
           span.setStatus({ code: SpanStatusCode.ERROR });
+
+          logger.error("Transaction execution failed: %O", error);
 
           if (error instanceof AppKitError) {
             throw error;
