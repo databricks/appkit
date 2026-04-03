@@ -71,7 +71,12 @@ export async function generateFromEntryPoint(options: {
   if (failedQueries.length > 0) {
     const names = failedQueries.map((q) => q.name).join(", ");
     throw new Error(
-      `Type generation failed: ${failedQueries.length} ${failedQueries.length === 1 ? "query" : "queries"} produced unknown result types: ${names}. Fix the underlying query errors and retry.`,
+      [
+        `Type generation failed: ${failedQueries.length} ${failedQueries.length === 1 ? "query" : "queries"} could not be described: ${names}.`,
+        `DESCRIBE QUERY failed for these queries — see the error codes above for details.`,
+        `Common causes: SQL syntax errors, missing tables/views, or warehouse format incompatibilities.`,
+        `To debug: run the failing query directly in a SQL editor against warehouse ${warehouseId}.`,
+      ].join("\n"),
     );
   }
 
