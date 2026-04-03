@@ -288,41 +288,4 @@ describe("useServingStream", () => {
 
     expect(onComplete).toHaveBeenCalledWith([{ id: 1 }, { id: 2 }]);
   });
-
-  test("clears chunks after stream completes", async () => {
-    // Use a controllable mock so stream doesn't auto-resolve
-    mockConnectSSE.mockImplementationOnce((opts: any) => {
-      capturedCallbacks = {
-        onMessage: opts.onMessage,
-        onError: opts.onError,
-        signal: opts.signal,
-      };
-      return new Promise<void>((resolve) => {
-        resolveStream = resolve;
-      });
-    });
-
-    const { result } = renderHook(() => useServingStream({ messages: [] }));
-
-    act(() => {
-      result.current.stream();
-    });
-
-    // Send a chunk
-    act(() => {
-      capturedCallbacks.onMessage?.({ data: JSON.stringify({ id: 1 }) });
-    });
-
-    expect(result.current.chunks).toEqual([{ id: 1 }]);
-
-    // Complete the stream
-    await act(async () => {
-      resolveStream?.();
-      await new Promise((r) => setTimeout(r, 0));
-    });
-
-    // Chunks should be cleared after completion
-    expect(result.current.chunks).toEqual([]);
-    expect(result.current.streaming).toBe(false);
-  });
 });

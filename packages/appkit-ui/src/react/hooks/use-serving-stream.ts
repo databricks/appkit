@@ -109,11 +109,9 @@ export function useServingStream<K extends ServingAlias = ServingAlias>(
         },
       }).then(() => {
         if (abortController.signal.aborted) return;
-        // Stream completed — let onComplete consume chunks, then clear them
+        // Stream completed
         setStreaming(false);
         onCompleteRef.current?.(chunksRef.current);
-        chunksRef.current = [];
-        setChunks([]);
       });
     },
     [urlSuffix, bodyJson],
