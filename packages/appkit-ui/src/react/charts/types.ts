@@ -5,7 +5,7 @@ import type { Table } from "apache-arrow";
 // ============================================================================
 
 /** Supported data formats for analytics queries */
-export type DataFormat = "json" | "arrow" | "auto";
+export type DataFormat = "json" | "arrow" | "arrow_stream" | "auto";
 
 /** Chart orientation */
 export type Orientation = "vertical" | "horizontal";

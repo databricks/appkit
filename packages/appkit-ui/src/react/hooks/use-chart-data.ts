@@ -50,10 +50,11 @@ export interface UseChartDataResult {
 function resolveFormat(
   format: DataFormat,
   parameters?: Record<string, unknown>,
-): "JSON" | "ARROW" {
+): "JSON" | "ARROW" | "ARROW_STREAM" {
   // Explicit format selection
   if (format === "json") return "JSON";
   if (format === "arrow") return "ARROW";
+  if (format === "arrow_stream") return "ARROW_STREAM";
 
   // Auto-selection heuristics
   if (format === "auto") {

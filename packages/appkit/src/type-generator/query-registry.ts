@@ -266,10 +266,32 @@ export async function generateQueriesFromDescribe(
       sqlHash,
       cleanedSql,
     }: (typeof uncachedQueries)[number]): Promise<DescribeResult> => {
-      const result = (await client.statementExecution.executeStatement({
-        statement: `DESCRIBE QUERY ${cleanedSql}`,
-        warehouse_id: warehouseId,
-      })) as DatabricksStatementExecutionResponse;
+      let result: DatabricksStatementExecutionResponse;
+      try {
+        // Prefer JSON_ARRAY for predictable data_array parsing.
+        result = (await client.statementExecution.executeStatement({
+          statement: `DESCRIBE QUERY ${cleanedSql}`,
+          warehouse_id: warehouseId,
+          format: "JSON_ARRAY",
+          disposition: "INLINE",
+        })) as DatabricksStatementExecutionResponse;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("ARROW_STREAM") || msg.includes("JSON_ARRAY")) {
+          // Warehouse doesn't support JSON_ARRAY inline — retry with no format
+          // to let it use its default (typically ARROW_STREAM inline).
+          logger.debug(
+            "Warehouse rejected JSON_ARRAY for %s, retrying with default format",
+            queryName,
+          );
+          result = (await client.statementExecution.executeStatement({
+            statement: `DESCRIBE QUERY ${cleanedSql}`,
+            warehouse_id: warehouseId,
+          })) as DatabricksStatementExecutionResponse;
+        } else {
+          throw err;
+        }
+      }
 
       completed++;
       spinner.update(
