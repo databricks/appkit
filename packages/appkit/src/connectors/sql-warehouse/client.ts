@@ -237,7 +237,10 @@ export class SQLWarehouseConnector {
               message: error instanceof Error ? error.message : String(error),
             });
 
-            logger.error("Statement execution failed: %O", error);
+            logger.error(
+              "Statement execution failed: %s",
+              error instanceof Error ? error.message : String(error),
+            );
           }
 
           if (error instanceof AppKitError) {
@@ -379,7 +382,11 @@ export class SQLWarehouseConnector {
             message: error instanceof Error ? error.message : String(error),
           });
 
-          logger.error("Statement polling failed for %s: %O", statementId, error);
+          logger.error(
+            "Statement polling failed for %s: %s",
+            statementId,
+            error instanceof Error ? error.message : String(error),
+          );
 
           if (error instanceof AppKitError) {
             throw error;
