@@ -1,6 +1,6 @@
 import { useServingStream } from "@databricks/appkit-ui/react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 
 export const Route = createFileRoute("/serving")({
   component: ServingRoute,
@@ -23,13 +23,6 @@ function ServingRoute() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
 
-  const body = useMemo(
-    () => ({
-      messages: [...messages, { role: "user" as const, content: input }],
-    }),
-    [messages, input],
-  );
-
   const onComplete = useCallback((chunks: unknown[]) => {
     const content = chunks.map(extractContent).join("");
     if (content) {
@@ -40,9 +33,10 @@ function ServingRoute() {
     }
   }, []);
 
-  const { stream, chunks, streaming, error, reset } = useServingStream(body, {
-    onComplete,
-  });
+  const { stream, chunks, streaming, error, reset } = useServingStream(
+    { messages: [] },
+    { onComplete },
+  );
 
   const assistantContent = chunks.map(extractContent).join("");
 
@@ -50,14 +44,21 @@ function ServingRoute() {
     e.preventDefault();
     if (!input.trim() || streaming) return;
 
-    setMessages((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), role: "user", content: input.trim() },
-    ]);
+    const userMessage: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: input.trim(),
+    };
+
+    const fullMessages = [
+      ...messages,
+      { role: "user" as const, content: userMessage.content },
+    ];
+
+    setMessages((prev) => [...prev, userMessage]);
     setInput("");
     reset();
-    // Trigger stream after state update
-    setTimeout(() => stream(), 0);
+    stream({ messages: fullMessages });
   }
 
   return (
