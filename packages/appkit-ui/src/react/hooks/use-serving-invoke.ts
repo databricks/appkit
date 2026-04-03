@@ -14,9 +14,12 @@ export interface UseServingInvokeOptions<
   autoStart?: boolean;
 }
 
-export interface UseServingInvokeResult<T = unknown> {
-  /** Trigger the invocation. Returns the response data, or null on error/abort. */
-  invoke: () => Promise<T | null>;
+export interface UseServingInvokeResult<
+  T = unknown,
+  TBody = Record<string, unknown>,
+> {
+  /** Trigger the invocation. Pass an optional body override for this invocation. */
+  invoke: (overrideBody?: TBody) => Promise<T | null>;
   /** Response data, null until loaded. */
   data: T | null;
   /** Whether a request is in progress. */
@@ -35,7 +38,7 @@ export interface UseServingInvokeResult<T = unknown> {
 export function useServingInvoke<K extends ServingAlias = ServingAlias>(
   body: InferServingRequest<K>,
   options: UseServingInvokeOptions<K> = {} as UseServingInvokeOptions<K>,
-): UseServingInvokeResult<InferServingResponse<K>> {
+): UseServingInvokeResult<InferServingResponse<K>, InferServingRequest<K>> {
   type TResponse = InferServingResponse<K>;
   const { alias, autoStart = false } = options;
 
@@ -50,44 +53,49 @@ export function useServingInvoke<K extends ServingAlias = ServingAlias>(
 
   const bodyJson = JSON.stringify(body);
 
-  const invoke = useCallback((): Promise<TResponse | null> => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+  const invoke = useCallback(
+    (overrideBody?: InferServingRequest<K>): Promise<TResponse | null> => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
 
-    setLoading(true);
-    setError(null);
-    setData(null);
+      setLoading(true);
+      setError(null);
+      setData(null);
 
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
 
-    return fetch(urlSuffix, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: bodyJson,
-      signal: abortController.signal,
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const errorBody = await res.json().catch(() => null);
-          throw new Error(errorBody?.error || `HTTP ${res.status}`);
-        }
-        return res.json();
+      const payload = overrideBody ? JSON.stringify(overrideBody) : bodyJson;
+
+      return fetch(urlSuffix, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+        signal: abortController.signal,
       })
-      .then((result: TResponse) => {
-        if (abortController.signal.aborted) return null;
-        setData(result);
-        setLoading(false);
-        return result;
-      })
-      .catch((err: Error) => {
-        if (abortController.signal.aborted) return null;
-        setError(err.message || "Request failed");
-        setLoading(false);
-        return null;
-      });
-  }, [urlSuffix, bodyJson]);
+        .then(async (res) => {
+          if (!res.ok) {
+            const errorBody = await res.json().catch(() => null);
+            throw new Error(errorBody?.error || `HTTP ${res.status}`);
+          }
+          return res.json();
+        })
+        .then((result: TResponse) => {
+          if (abortController.signal.aborted) return null;
+          setData(result);
+          setLoading(false);
+          return result;
+        })
+        .catch((err: Error) => {
+          if (abortController.signal.aborted) return null;
+          setError(err.message || "Request failed");
+          setLoading(false);
+          return null;
+        });
+    },
+    [urlSuffix, bodyJson],
+  );
 
   useEffect(() => {
     if (autoStart) {
