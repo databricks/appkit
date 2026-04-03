@@ -1,6 +1,6 @@
 import { useServingStream } from "@databricks/appkit-ui/react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export const Route = createFileRoute("/serving")({
   component: ServingRoute,
@@ -23,22 +23,28 @@ function ServingRoute() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
 
-  const onComplete = useCallback((chunks: unknown[]) => {
-    const content = chunks.map(extractContent).join("");
-    if (content) {
+  const { stream, chunks, streaming, error, reset } = useServingStream({
+    messages: [],
+  });
+
+  const streamingContent = chunks.map(extractContent).join("");
+
+  // Commit assistant message when streaming transitions from true → false
+  const prevStreamingRef = useRef(false);
+  useEffect(() => {
+    if (prevStreamingRef.current && !streaming && streamingContent) {
       setMessages((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), role: "assistant", content },
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: streamingContent,
+        },
       ]);
+      reset();
     }
-  }, []);
-
-  const { stream, chunks, streaming, error, reset } = useServingStream(
-    { messages: [] },
-    { onComplete },
-  );
-
-  const assistantContent = chunks.map(extractContent).join("");
+    prevStreamingRef.current = streaming;
+  }, [streaming, streamingContent, reset]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -99,11 +105,11 @@ function ServingRoute() {
               ))}
 
               {/* Streaming response */}
-              {(streaming || assistantContent) && (
+              {streaming && (
                 <div className="flex justify-start">
                   <div className="max-w-[80%] rounded-lg px-4 py-2 bg-muted">
                     <p className="text-sm whitespace-pre-wrap">
-                      {assistantContent || "..."}
+                      {streamingContent || "..."}
                     </p>
                   </div>
                 </div>
