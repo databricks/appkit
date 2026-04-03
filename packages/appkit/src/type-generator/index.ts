@@ -65,6 +65,16 @@ export async function generateFromEntryPoint(options: {
       },
     );
 
+  const failedQueries = queryRegistry.filter((q) =>
+    q.type.includes("result: unknown"),
+  );
+  if (failedQueries.length > 0) {
+    const names = failedQueries.map((q) => q.name).join(", ");
+    throw new Error(
+      `Type generation failed: ${failedQueries.length} ${failedQueries.length === 1 ? "query" : "queries"} produced unknown result types: ${names}. Fix the underlying query errors and retry.`,
+    );
+  }
+
   const typeDeclarations = generateTypeDeclarations(queryRegistry);
 
   await fs.writeFile(outFile, typeDeclarations, "utf-8");
