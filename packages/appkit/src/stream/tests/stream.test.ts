@@ -277,6 +277,36 @@ describe("StreamManager", () => {
         0,
       );
     });
+
+    test("should not log the full error object (query redaction)", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const { mockRes } = createMockResponse();
+
+      const dbError = new Error('column "email" does not exist') as any;
+      dbError.query = "SELECT email, secret_token FROM users WHERE id = $1";
+      dbError.parameters = ["sensitive-id"];
+
+      async function* generator() {
+        yield { type: "start" };
+        throw dbError;
+      }
+
+      await streamManager.stream(mockRes as any, generator);
+
+      const loggedOutput = errorSpy.mock.calls
+        .map((call) => call.join(" "))
+        .join(" ");
+
+      // Should log the error message (contains column name, which is OK)
+      expect(loggedOutput).toContain('column "email" does not exist');
+
+      // Should NOT log the raw query or parameters from the error object
+      expect(loggedOutput).not.toContain("secret_token");
+      expect(loggedOutput).not.toContain("sensitive-id");
+
+      errorSpy.mockRestore();
+    });
   });
 
   describe("heartbeat", () => {

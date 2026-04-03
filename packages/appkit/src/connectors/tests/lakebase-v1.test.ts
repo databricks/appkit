@@ -221,6 +221,37 @@ describe("LakebaseV1Connector", () => {
       await expect(connector.query("SELEC 1")).rejects.toThrow("Query failed");
       expect(mockQuery).toHaveBeenCalledTimes(1);
     });
+
+    test("should not log the SQL query string on error", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const pgError = new Error('relation "users" does not exist') as any;
+      pgError.code = "42P01";
+      pgError.query = "SELECT secret_token FROM users WHERE id = $1";
+      pgError.parameters = ["sensitive-user-id-123"];
+
+      mockQuery.mockRejectedValue(pgError);
+
+      await expect(
+        connector.query("SELECT secret_token FROM users WHERE id = $1", [
+          "sensitive-user-id-123",
+        ]),
+      ).rejects.toThrow("Query failed");
+
+      const loggedOutput = errorSpy.mock.calls
+        .map((call) => call.join(" "))
+        .join(" ");
+
+      // Should log the error message and code (useful for debugging)
+      expect(loggedOutput).toContain('relation "users" does not exist');
+      expect(loggedOutput).toContain("42P01");
+
+      // Should NOT log the raw query or parameter values
+      expect(loggedOutput).not.toContain("secret_token");
+      expect(loggedOutput).not.toContain("sensitive-user-id-123");
+
+      errorSpy.mockRestore();
+    });
   });
 
   describe("transaction", () => {
@@ -281,6 +312,48 @@ describe("LakebaseV1Connector", () => {
       });
 
       expect(mockClient.release).toHaveBeenCalled();
+    });
+
+    test("should not log the SQL query string on transaction error", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const pgError = new Error("duplicate key value") as any;
+      pgError.code = "23505";
+      pgError.query = "INSERT INTO users (email, secret) VALUES ($1, $2)";
+      pgError.parameters = ["user@test.com", "super-secret-value"];
+
+      const failingClient = {
+        query: vi.fn().mockImplementation((sql: string) => {
+          if (sql === "BEGIN" || sql === "ROLLBACK") {
+            return Promise.resolve({ rows: [] });
+          }
+          return Promise.reject(pgError);
+        }),
+        release: vi.fn(),
+      };
+      mockConnect.mockResolvedValue(failingClient);
+
+      await expect(
+        connector.transaction(async (client) => {
+          await client.query(
+            "INSERT INTO users (email, secret) VALUES ($1, $2)",
+          );
+        }),
+      ).rejects.toThrow();
+
+      const loggedOutput = errorSpy.mock.calls
+        .map((call) => call.join(" "))
+        .join(" ");
+
+      // Should log the error message and code
+      expect(loggedOutput).toContain("duplicate key value");
+      expect(loggedOutput).toContain("23505");
+
+      // Should NOT log the raw query or parameter values
+      expect(loggedOutput).not.toContain("super-secret-value");
+      expect(loggedOutput).not.toContain("INSERT INTO users");
+
+      errorSpy.mockRestore();
     });
   });
 
