@@ -288,6 +288,20 @@ export async function generateQueriesFromDescribe(
           return defaultForType(parameterTypes[paramName]);
         },
       );
+
+      // Warn about unresolved parameters
+      const allParams = extractParameters(sql);
+      for (const param of allParams) {
+        if (SERVER_INJECTED_PARAMS.includes(param)) continue;
+        if (parameterTypes[param]) continue;
+        logger.warn(
+          '%s: parameter ":%s" has no type annotation or inference. Add %s to the query file.',
+          queryFiles[i],
+          param,
+          `-- @param ${param} <TYPE>`,
+        );
+      }
+
       const cleanedSql = sqlWithDefaults.trim().replace(/;\s*$/, "");
       uncachedQueries.push({ index: i, queryName, sql, sqlHash, cleanedSql });
     }
