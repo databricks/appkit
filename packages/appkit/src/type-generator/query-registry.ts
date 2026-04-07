@@ -173,6 +173,38 @@ export function defaultForType(sqlType: string | undefined): string {
 }
 
 /**
+ * Infer parameter types from positional context in SQL.
+ * V1 only infers NUMERIC from patterns like LIMIT, OFFSET, TOP,
+ * FETCH FIRST ... ROWS, and arithmetic operators.
+ * Parameters inside string literals or SQL comments are ignored.
+ */
+export function inferParameterTypes(sql: string): Record<string, string> {
+  const inferred: Record<string, string> = {};
+
+  // Strip string literals and single-line comments to avoid false matches
+  const stripped = sql
+    .replace(/'[^']*'/g, (match) => " ".repeat(match.length))
+    .replace(/--[^\n]*/g, (match) => " ".repeat(match.length));
+
+  const numericPatterns: RegExp[] = [
+    /\bLIMIT\s+:([a-zA-Z_]\w*)/gi,
+    /\bOFFSET\s+:([a-zA-Z_]\w*)/gi,
+    /\bTOP\s+:([a-zA-Z_]\w*)/gi,
+    /\bFETCH\s+FIRST\s+:([a-zA-Z_]\w*)\s+ROWS/gi,
+    /[+\-*/]\s*:([a-zA-Z_]\w*)/g,
+    /:([a-zA-Z_]\w*)\s*[+\-*/]/g,
+  ];
+
+  for (const pattern of numericPatterns) {
+    for (const match of stripped.matchAll(pattern)) {
+      inferred[match[1]] = "NUMERIC";
+    }
+  }
+
+  return inferred;
+}
+
+/**
  * Generate query schemas from a folder of SQL files
  * It uses DESCRIBE QUERY to get the schema without executing the query
  * @param queryFolder - the folder containing the SQL files
@@ -247,7 +279,9 @@ export async function generateQueriesFromDescribe(
       });
       logEntries.push({ queryName, status: "HIT" });
     } else {
-      const parameterTypes = extractParameterTypes(sql);
+      const annotatedTypes = extractParameterTypes(sql);
+      const inferredTypes = inferParameterTypes(sql);
+      const parameterTypes = { ...inferredTypes, ...annotatedTypes };
       const sqlWithDefaults = sql.replace(
         /:([a-zA-Z_]\w*)/g,
         (_match, paramName) => {
