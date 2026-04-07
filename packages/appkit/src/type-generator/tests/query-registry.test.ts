@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   convertToQueryType,
+  defaultForType,
   extractParameters,
   extractParameterTypes,
   normalizeTypeName,
@@ -146,6 +147,43 @@ SELECT 1`;
     expect(types.validString).toBe("STRING");
     expect(types.invalidParam).toBeUndefined();
     expect(Object.keys(types).length).toBe(2);
+  });
+});
+
+describe("defaultForType", () => {
+  test("returns '0' for NUMERIC", () => {
+    expect(defaultForType("NUMERIC")).toBe("0");
+  });
+
+  test("returns empty string literal for STRING", () => {
+    expect(defaultForType("STRING")).toBe("''");
+  });
+
+  test("returns 'true' for BOOLEAN", () => {
+    expect(defaultForType("BOOLEAN")).toBe("true");
+  });
+
+  test("returns date literal for DATE", () => {
+    expect(defaultForType("DATE")).toBe("'2000-01-01'");
+  });
+
+  test("returns timestamp literal for TIMESTAMP", () => {
+    expect(defaultForType("TIMESTAMP")).toBe("'2000-01-01T00:00:00Z'");
+  });
+
+  test("returns binary literal for BINARY", () => {
+    expect(defaultForType("BINARY")).toBe("X'00'");
+  });
+
+  test("returns empty string literal for undefined (unknown fallback)", () => {
+    expect(defaultForType(undefined)).toBe("''");
+  });
+
+  test("is case insensitive", () => {
+    expect(defaultForType("numeric")).toBe("0");
+    expect(defaultForType("Numeric")).toBe("0");
+    expect(defaultForType("boolean")).toBe("true");
+    expect(defaultForType("date")).toBe("'2000-01-01'");
   });
 });
 

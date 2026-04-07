@@ -153,6 +153,25 @@ export function extractParameterTypes(sql: string): Record<string, string> {
   return paramTypes;
 }
 
+export function defaultForType(sqlType: string | undefined): string {
+  switch (sqlType?.toUpperCase()) {
+    case "NUMERIC":
+      return "0";
+    case "STRING":
+      return "''";
+    case "BOOLEAN":
+      return "true";
+    case "DATE":
+      return "'2000-01-01'";
+    case "TIMESTAMP":
+      return "'2000-01-01T00:00:00Z'";
+    case "BINARY":
+      return "X'00'";
+    default:
+      return "''";
+  }
+}
+
 /**
  * Generate query schemas from a folder of SQL files
  * It uses DESCRIBE QUERY to get the schema without executing the query
@@ -228,7 +247,13 @@ export async function generateQueriesFromDescribe(
       });
       logEntries.push({ queryName, status: "HIT" });
     } else {
-      const sqlWithDefaults = sql.replace(/:([a-zA-Z_]\w*)/g, "''");
+      const parameterTypes = extractParameterTypes(sql);
+      const sqlWithDefaults = sql.replace(
+        /:([a-zA-Z_]\w*)/g,
+        (_match, paramName) => {
+          return defaultForType(parameterTypes[paramName]);
+        },
+      );
       const cleanedSql = sqlWithDefaults.trim().replace(/;\s*$/, "");
       uncachedQueries.push({ index: i, queryName, sql, sqlHash, cleanedSql });
     }
