@@ -27,6 +27,8 @@ If **neither** path exists, stop and output:
 > Error: Plugin "{PLUGIN_NAME}" not found. Checked:
 > - `packages/appkit/src/plugins/{PLUGIN_NAME}/`
 > - `packages/appkit/src/connectors/{PLUGIN_NAME}/`
+>
+> Available plugins can be listed with: `ls packages/appkit/src/plugins/`
 
 If at least one path exists, proceed.
 
@@ -64,14 +66,18 @@ Verify the following expected files exist inside `packages/appkit/src/plugins/{P
 
 Each missing file is a **MUST**-severity finding under the "Structural Completeness" category.
 
+> **Note:** The structural completeness check applies only to the `plugins/{PLUGIN_NAME}/` directory. Connector directories (`connectors/{PLUGIN_NAME}/`) serve a different architectural role and are read as supporting context for the best-practices review, not audited for structural completeness.
+
 ## Step 5: Full Best-Practices Review
+
+> **Deduplication:** If the same code issue is covered by guidelines in multiple categories, report it once under the most specific category and note that it also relates to the other category. Do not count it as separate findings in each category.
 
 Evaluate the plugin code against **all 9 categories** from the best-practices reference:
 
 1. **Manifest Design** — Check `manifest.json` against all NEVER/MUST/SHOULD rules
 2. **Plugin Class Structure** — Check the main plugin class against all NEVER/MUST/SHOULD rules
 3. **Route Design** — Check `injectRoutes()` and route handlers against all NEVER/MUST/SHOULD rules
-4. **Interceptor Usage** — Check `execute()`/`executeStream()` calls and `defaults.ts` against all NEVER/MUST/SHOULD rules
+4. **Interceptor Usage** — Check `execute()`/`executeStream()` calls and `defaults.ts` against all NEVER/MUST/SHOULD rules. **Important:** When evaluating cache configuration in `defaults.ts`, the codebase uses a two-stage pattern where `defaults.ts` defines partial cache config (e.g., `enabled: true, ttl: 3600`) and the `cacheKey` is injected at the call site in the plugin class. Before flagging a NEVER violation for missing `cacheKey`, trace the cache config through to `execute()`/`executeStream()` call sites to verify whether a `cacheKey` is provided there. Only flag as NEVER if no `cacheKey` is provided at any point in the execution path.
 5. **asUser / OBO Patterns** — Check OBO usage, cache key scoping, context enforcement against all NEVER/MUST/SHOULD rules
 6. **Client Config** — Check `clientConfig()` return value against all NEVER/MUST/SHOULD rules
 7. **SSE Streaming** — Check streaming usage and shutdown behavior against all NEVER/MUST/SHOULD rules
@@ -112,6 +118,7 @@ Where `{status}` is one of:
 - Pass — no findings
 - Warn — SHOULD-only findings
 - Fail — any NEVER or MUST findings
+- N/A — category does not apply to this plugin (e.g., SSE Streaming for a non-streaming plugin)
 
 And `{count}` is the number of findings (0 if pass).
 

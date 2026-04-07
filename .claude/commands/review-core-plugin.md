@@ -83,7 +83,7 @@ For each plugin detected in Step 3, review the changed code against the scoped g
 For each finding:
 - Identify the **severity** (NEVER, MUST, or SHOULD)
 - Identify the **category** (e.g., "Manifest Design", "Route Design")
-- Cite the specific guideline being violated or satisfied
+- Cite the specific guideline being violated or satisfied. **Important:** For Interceptor Usage findings (Category 4), when evaluating cache configuration, trace `cacheKey` through to `execute()`/`executeStream()` call sites before flagging. The codebase commonly defines partial cache config in `defaults.ts` and injects `cacheKey` at the call site. Only flag as NEVER if no `cacheKey` is provided anywhere in the execution path.
 - Reference the exact file and line(s) involved
 - Provide a concrete fix if it is a violation
 
