@@ -60,11 +60,13 @@ Verify the following expected files exist inside `packages/appkit/src/plugins/{P
 | `manifest.json` | MUST |
 | Main plugin class file (any `.ts` file containing a class extending `Plugin`) | MUST |
 | `types.ts` | MUST |
-| `defaults.ts` | MUST |
+| `defaults.ts` | SHOULD |
 | `index.ts` | MUST |
 | `tests/` directory with at least one `.test.ts` file | MUST |
 
-Each missing file is a **MUST**-severity finding under the "Structural Completeness" category.
+Treat each missing `MUST` file as a **MUST**-severity finding under the "Structural Completeness" category. Treat a missing `SHOULD` file as a **SHOULD**-severity finding.
+
+`defaults.ts` is not universally required for every plugin. It should be present when the plugin exposes execution settings or defines behavior that depends on `execute()` / `executeStream()` defaults, but its absence alone should not be reported as a MUST failure for plugins that do not use those defaults.
 
 > **Note:** The structural completeness check applies only to the `plugins/{PLUGIN_NAME}/` directory. Connector directories (`connectors/{PLUGIN_NAME}/`) serve a different architectural role and are read as supporting context for the best-practices review, not audited for structural completeness.
 

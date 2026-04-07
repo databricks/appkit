@@ -12,7 +12,7 @@ Reference guide for building AppKit plugins. Every guideline is prefixed with a 
 
 **MUST** include all four required top-level fields: `name`, `displayName`, `description`, `resources`.
 
-**MUST** use lowercase kebab-case for `name` (pattern: `^[a-z][a-z0-9-]*$`). This becomes the route prefix (`/api/{name}/`) and the key on the AppKit instance.
+**MUST** use lowercase kebab-case for `name` (pattern: `^[a-z][a-z0-9-]*$`). This becomes the route prefix (`/api/{name}`) and the key on the AppKit instance.
 
 **MUST** declare both `resources.required` and `resources.optional` arrays, even if empty.
 

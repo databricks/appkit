@@ -9,11 +9,22 @@ User input: $ARGUMENTS
 
 ## Step 0: Parse Input
 
-Parse `$ARGUMENTS` to determine:
+Parse `$ARGUMENTS` deterministically:
 
-- **Plugin name filter** — if `$ARGUMENTS` looks like a plugin name (kebab-case word, no slashes, not a branch name), use it to filter the diff to that specific plugin.
-- **Base branch** — if `$ARGUMENTS` looks like a branch name (contains `/` or matches known branch patterns like `main`, `develop`, `origin/*`), use it as the base branch. Otherwise default to `origin/main`.
-- If `$ARGUMENTS` is empty, review all plugins found in the diff against `origin/main`.
+- If `$ARGUMENTS` is empty:
+  - Use no plugin name filter.
+  - Use `origin/main` as the base branch.
+- Otherwise, check whether either of these paths exists:
+  - `packages/appkit/src/plugins/$ARGUMENTS`
+  - `packages/appkit/src/connectors/$ARGUMENTS`
+- If either path exists:
+  - Treat `$ARGUMENTS` as the **plugin name filter**.
+  - Use `origin/main` as the base branch.
+- Otherwise:
+  - Treat `$ARGUMENTS` as the **base branch**.
+  - Use no plugin name filter.
+
+Do not use a name-pattern heuristic such as "kebab-case with no slashes" to decide whether `$ARGUMENTS` is a plugin name, because common branch names like `feature-x` and `bugfix-foo` would be ambiguous.
 
 ## Step 1: Core Principles Review
 
