@@ -567,7 +567,7 @@ describe("Files Plugin Integration", () => {
 
       expect(response.status).toBe(500);
       const data = (await response.json()) as { error: string; plugin: string };
-      expect(data.error).toBe("Metadata fetch failed");
+      expect(data.error).toBe("Internal Server Error");
       expect(data.plugin).toBe("files");
     });
 
@@ -583,7 +583,7 @@ describe("Files Plugin Integration", () => {
 
       expect(response.status).toBe(500);
       const data = (await response.json()) as { error: string; plugin: string };
-      expect(data.error).toBe("List failed");
+      expect(data.error).toBe("Internal Server Error");
       expect(data.plugin).toBe("files");
     });
 
@@ -602,7 +602,7 @@ describe("Files Plugin Integration", () => {
         error: string;
         plugin: string;
       };
-      expect(data.error).toBe("Metadata fetch failed");
+      expect(data.error).toBe("Internal Server Error");
       expect(data.plugin).toBe("files");
     });
 
@@ -622,7 +622,7 @@ describe("Files Plugin Integration", () => {
         error: string;
         plugin: string;
       };
-      expect(data.error).toBe("Create directory failed");
+      expect(data.error).toBe("Internal Server Error");
       expect(data.plugin).toBe("files");
     });
   });
