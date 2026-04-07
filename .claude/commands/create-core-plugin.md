@@ -2,6 +2,16 @@
 
 User input: $ARGUMENTS
 
+## 0. Load Best Practices Reference
+
+Before making any scaffolding decisions, read the plugin best-practices reference:
+
+```
+.claude/references/plugin-best-practices.md
+```
+
+This document defines NEVER/MUST/SHOULD guidelines for manifest design, plugin class structure, route design, interceptor usage, asUser/OBO patterns, client config, SSE streaming, testing, and type safety. Apply these guidelines throughout the scaffolding process — especially when deciding interceptor defaults, cache key scoping, OBO enforcement, and route registration patterns.
+
 ## 1. Gather Requirements
 
 The user may have provided a plugin name and/or description above in `$ARGUMENTS`. Parse what was given.
