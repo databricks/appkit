@@ -424,3 +424,6 @@ Examples:
       process.exit(1);
     }),
   );
+
+/** Exported for testing. */
+export { buildResourceFromType, parseResourcesJson, parseResourcesShorthand };
