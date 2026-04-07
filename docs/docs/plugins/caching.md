@@ -19,7 +19,9 @@ await createApp({
 });
 ```
 
-Storage auto-selects **Lakebase V1 (Provisioned) persistent cache when healthy**, otherwise falls back to in-memory. Support for Lakebase Autoscaling coming soon.
+Storage auto-selects **Lakebase Autoscaling persistent cache when healthy**, otherwise falls back to in-memory.
+
+The database-backed cache requires the same Lakebase environment variables as the [Lakebase plugin](./lakebase.md#environment-variables) (`PGHOST`, `PGDATABASE`, `LAKEBASE_ENDPOINT`, `PGSSLMODE`).
 
 ## Plugin-level caching
 
