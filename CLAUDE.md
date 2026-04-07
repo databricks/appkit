@@ -28,16 +28,27 @@ Examples:
 /packages/
   /appkit/          - Core SDK with plugin architecture
   /appkit-ui/       - React components and JS utilities
-  /shared/           - Shared TypeScript types across packages
+  /lakebase/        - Standalone Lakebase (PostgreSQL) connector package
+  /shared/          - Shared TypeScript types across packages
 
 /apps/
-  /dev-playground/   - Reference application
-    /server/         - Node.js backend with AppKit
-    /client/         - React frontend (Vite + React 19)
+  /clean-app/       - Minimal standalone app template (Vite + React + Express)
+  /dev-playground/  - Reference application
+    /server/        - Node.js backend with AppKit
+    /client/        - React frontend (Vite + React 19)
+
+/docs/              - Docusaurus documentation site
+
+/template/          - App template used by `npx @databricks/appkit init`
 
 /tools/
-  - setup.sh         - Initial repository setup
-  - deploy-playground.ts - Deploy to Databricks workspace
+  - setup.sh                         - Initial repository setup
+  - playground/deploy-playground.ts  - Deploy dev-playground to Databricks workspace
+  - generate-registry-types.ts       - Generate plugin registry types
+  - generate-schema-types.ts         - Generate JSON schema TypeScript types
+  - generate-app-templates.ts        - Generate app templates
+  - check-licenses.ts                - License compliance checks
+  - build-notice.ts                  - Build NOTICE.md from dependencies
 ```
 
 ## Development Commands
@@ -95,6 +106,11 @@ pnpm check            # Run Biome check (lint + format)
 pnpm check:fix        # Auto-fix with Biome
 pnpm typecheck        # TypeScript type checking across all packages
 ```
+
+### After Making Changes
+After completing code changes, always run:
+1. **Build and generate docs:** `pnpm build && pnpm docs:build`
+2. **Lint fix and typecheck:** `pnpm check:fix && pnpm -r typecheck`
 
 ### AppKit CLI
 When using the published SDK or running from the monorepo (after `pnpm build`), the `appkit` CLI is available:
@@ -245,17 +261,12 @@ The AnalyticsPlugin provides SQL query execution:
 - Built-in caching with configurable TTL
 - Databricks SQL Warehouse connector for execution
 
-### Lakebase Autoscaling Connector
+### Lakebase Connector
 
-**Location:** `packages/appkit/src/connectors/lakebase/`
+Lakebase support is split into two layers:
 
-AppKit provides `createLakebasePool()` - a factory function that returns a standard `pg.Pool` configured with automatic OAuth token refresh for Databricks Lakebase (OLTP) databases.
-
-**Key Features:**
-- Returns standard `pg.Pool` (compatible with all ORMs)
-- Automatic OAuth token refresh (1-hour tokens, 2-minute buffer)
-- Token caching to minimize API calls
-- Battle-tested pattern (same as AWS RDS IAM authentication)
+1. **`@databricks/lakebase` package** (`packages/lakebase/`) - Standalone connector with OAuth token refresh, ORM helpers, and full API. See the [`@databricks/lakebase` README](https://github.com/databricks/appkit/blob/main/packages/lakebase/README.md).
+2. **AppKit integration** (`packages/appkit/src/connectors/lakebase/`) - Thin wrapper that adds AppKit logger integration and re-exports the standalone package.
 
 **Quick Example:**
 ```typescript
@@ -269,14 +280,7 @@ const result = await pool.query('SELECT * FROM users');
 ```
 
 **ORM Integration:**
-Works with Drizzle, Prisma, TypeORM - see the [`@databricks/lakebase` README](https://github.com/databricks/appkit/blob/main/packages/lakebase/README.md) for examples.
-
-**Architecture:**
-- Connector files: `packages/appkit/src/connectors/lakebase/`
-  - `pool.ts` - Pool factory with OAuth token refresh
-  - `types.ts` - TypeScript interfaces (`LakebasePoolConfig`)
-  - `utils.ts` - Helper functions (`generateDatabaseCredential`)
-  - `auth-types.ts` - Lakebase v2 API types
+Works with Drizzle, Sequelize, TypeORM - see the `@databricks/lakebase` README and `apps/dev-playground/server/lakebase-examples/` for examples.
 
 ### Frontend-Backend Interaction
 
@@ -347,7 +351,7 @@ Packages should:
 
 ### Type Generation
 
-`packages/appkit/src/utils/type-generator.ts` creates plugin registry types at build time. This enables:
+`tools/generate-registry-types.ts` creates plugin registry types at build time. This enables:
 ```typescript
 const AppKit = await createApp({ plugins: [...] });
 AppKit.myPlugin.method();  // Typed based on registered plugins
@@ -361,6 +365,9 @@ The reference app demonstrates AppKit usage:
 - `index.ts` - Creates AppKit with server, analytics, and custom plugins
 - `reconnect-plugin.ts` - Example plugin with SSE reconnection
 - `telemetry-example-plugin.ts` - Example plugin with telemetry
+- `config-demo-plugin.ts` - Example plugin with client config
+- `lakebase-examples-plugin.ts` - Lakebase ORM integration examples
+- `lakebase-examples/` - Drizzle, Sequelize, TypeORM, and raw driver examples
 
 **Frontend (`apps/dev-playground/client/`):**
 - Vite + React 19 + TypeScript
@@ -408,11 +415,8 @@ This project uses conventional commits (enforced by commitlint):
 
 ## Important Context
 
-### Current Branch: plugin/files
-This branch implements the multi-volume files plugin architecture.
-
 ### Key Dependencies
-- `@databricks/sdk-experimental` v0.15.0+ - Databricks services SDK
+- `@databricks/sdk-experimental` v0.16.0 - Databricks services SDK
 - `express` - HTTP server
 - `zod` - Runtime validation
 - `OpenTelemetry` - Observability (traces, metrics, logs)

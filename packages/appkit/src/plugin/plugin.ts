@@ -309,18 +309,18 @@ export abstract class Plugin<
    * @param req - The Express request containing the user token in headers
    * @returns A proxied plugin instance that executes as the user
    * @throws AuthenticationError if user token is not available in request headers (production only).
-   *   In development mode (`NODE_ENV=development`), falls back to the service principal instead of throwing.
+   *   In development mode (`NODE_ENV=development`), skips user impersonation instead of throwing.
    */
   asUser(req: express.Request): this {
     const token = req.header("x-forwarded-access-token");
     const userId = req.header("x-forwarded-user");
     const isDev = process.env.NODE_ENV === "development";
 
-    // In local development, fall back to service principal
+    // In local development, skip user impersonation
     // since there's no user token available
     if (!token && isDev) {
       logger.warn(
-        "asUser() called without user token in development mode. Using service principal.",
+        "asUser() called without user token in development mode. Skipping user impersonation.",
       );
 
       return this;
