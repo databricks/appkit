@@ -30,7 +30,7 @@ Reference guide for building AppKit plugins. Every guideline is prefixed with a 
 
 ## 2. Plugin Class Structure
 
-**MUST** extend `Plugin<TConfig>` where `TConfig extends BasePluginConfig`.
+**MUST** extend `Plugin` (the base class accepts an optional generic but core plugins use the plain form).
 
 **MUST** declare a static `manifest` property typed with `PluginManifest<"your-name">`:
 
@@ -38,10 +38,10 @@ Reference guide for building AppKit plugins. Every guideline is prefixed with a 
 static manifest = manifest as PluginManifest<"my-plugin">;
 ```
 
-**MUST** export a `toPlugin`-wrapped factory as the public API. The class itself is `@internal`:
+**MUST** export a `toPlugin`-wrapped factory as the public API. Mark the factory (not the class) as `@internal`:
 
 ```ts
-class MyPlugin extends Plugin { ... }
+export class MyPlugin extends Plugin { ... }
 
 /** @internal */
 export const myPlugin = toPlugin(MyPlugin);
@@ -105,13 +105,16 @@ cache: {
 
 **MUST** use `.obo.sql` file suffix for analytics queries that should execute as the user. The `_handleQueryRoute` method checks `isAsUser` and conditionally wraps with `this.asUser(req)`.
 
-**SHOULD** use `isInUserContext()` to detect whether the current call is running in a user context. Use this for audit logging or to enforce OBO-only access:
+**SHOULD** use `isInUserContext()` in the programmatic API to detect whether the call is running in a user context. Two patterns exist:
+
+- **File-naming convention** (analytics): Use `.obo.sql` suffix to determine whether a query runs as user or service principal. No runtime `isInUserContext()` check needed in route handlers.
+- **Runtime enforcement** (files programmatic API): Call `isInUserContext()` to warn or throw:
 
 ```ts
-// Warn pattern (analytics reads):
+// Warn pattern (read operations in route handlers):
 if (!isInUserContext()) { logger.warn("..."); }
 
-// Enforce pattern (file writes):
+// Enforce pattern (programmatic API, e.g. createVolumeAPI):
 if (!isInUserContext()) { throw new Error("...use OBO..."); }
 ```
 
