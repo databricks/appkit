@@ -4,6 +4,7 @@ import {
   defaultForType,
   extractParameters,
   extractParameterTypes,
+  getProtectedRanges,
   inferParameterTypes,
   normalizeTypeName,
   SERVER_INJECTED_PARAMS,
@@ -79,6 +80,28 @@ describe("extractParameters", () => {
 
     expect(params).toContain("startDate");
     expect(params).toContain("workspaceId");
+  });
+
+  test("skips parameters inside string literals", () => {
+    const sql = "SELECT * FROM t WHERE name = ':fake' AND id = :real";
+    const params = extractParameters(sql);
+
+    expect(params).toEqual(["real"]);
+  });
+
+  test("skips parameters inside single-line comments", () => {
+    const sql = "-- filter by :commented\nSELECT * FROM t WHERE id = :actual";
+    const params = extractParameters(sql);
+
+    expect(params).toEqual(["actual"]);
+  });
+
+  test("skips params in both strings and comments, keeps real ones", () => {
+    const sql = `-- :hidden
+SELECT * FROM t WHERE x = ':also_hidden' AND y = :visible`;
+    const params = extractParameters(sql);
+
+    expect(params).toEqual(["visible"]);
   });
 });
 
@@ -401,5 +424,85 @@ SELECT * FROM t LIMIT :count`;
     expect(inferParameterTypes("Select * From t Limit :x")).toEqual({
       x: "NUMERIC",
     });
+  });
+});
+
+describe("getProtectedRanges", () => {
+  test("returns ranges for string literals", () => {
+    const sql = "SELECT * FROM t WHERE name = 'hello'";
+    const ranges = getProtectedRanges(sql);
+
+    expect(ranges).toHaveLength(1);
+    expect(sql.slice(ranges[0][0], ranges[0][1])).toBe("'hello'");
+  });
+
+  test("returns ranges for single-line comments", () => {
+    const sql = "-- this is a comment\nSELECT 1";
+    const ranges = getProtectedRanges(sql);
+
+    expect(ranges).toHaveLength(1);
+    expect(sql.slice(ranges[0][0], ranges[0][1])).toBe("-- this is a comment");
+  });
+
+  test("returns ranges for both literals and comments", () => {
+    const sql = "-- comment\nSELECT * FROM t WHERE x = 'val'";
+    const ranges = getProtectedRanges(sql);
+
+    expect(ranges).toHaveLength(2);
+    const texts = ranges.map(([s, e]) => sql.slice(s, e));
+    expect(texts).toContain("-- comment");
+    expect(texts).toContain("'val'");
+  });
+
+  test("returns empty array when no literals or comments", () => {
+    expect(getProtectedRanges("SELECT 1")).toEqual([]);
+  });
+
+  test("handles multiple string literals", () => {
+    const sql = "SELECT * FROM t WHERE a = 'x' AND b = 'y'";
+    const ranges = getProtectedRanges(sql);
+
+    expect(ranges).toHaveLength(2);
+    const texts = ranges.map(([s, e]) => sql.slice(s, e));
+    expect(texts).toContain("'x'");
+    expect(texts).toContain("'y'");
+  });
+});
+
+describe("substitution skips protected ranges", () => {
+  test("does not substitute params inside string literals", () => {
+    const sql = "SELECT * FROM t WHERE x = ':fake' AND y = :real";
+    const ranges = getProtectedRanges(sql);
+    const result = sql.replace(
+      /:([a-zA-Z_]\w*)/g,
+      (original, _paramName, offset) => {
+        if (ranges.some(([s, e]) => offset >= s && offset < e)) {
+          return original;
+        }
+        return "''";
+      },
+    );
+
+    expect(result).toContain("':fake'");
+    expect(result).toContain("y = ''");
+    expect(result).not.toContain(":real");
+  });
+
+  test("does not substitute params inside comments", () => {
+    const sql = "-- :skip_me\nSELECT * FROM t WHERE id = :keep";
+    const ranges = getProtectedRanges(sql);
+    const result = sql.replace(
+      /:([a-zA-Z_]\w*)/g,
+      (original, _paramName, offset) => {
+        if (ranges.some(([s, e]) => offset >= s && offset < e)) {
+          return original;
+        }
+        return "''";
+      },
+    );
+
+    expect(result).toContain(":skip_me");
+    expect(result).not.toContain(":keep");
+    expect(result).toContain("id = ''");
   });
 });

@@ -15,6 +15,29 @@ import {
 const logger = createLogger("type-generator:query-registry");
 
 /**
+ * Returns an array of [start, end] ranges covering string literals
+ * and single-line comments in a SQL string.
+ * V1: no block-comment support (deferred to next PR).
+ */
+export function getProtectedRanges(sql: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  for (const m of sql.matchAll(/'[^']*'/g)) {
+    ranges.push([m.index, m.index + m[0].length]);
+  }
+  for (const m of sql.matchAll(/--[^\n]*/g)) {
+    ranges.push([m.index, m.index + m[0].length]);
+  }
+  return ranges;
+}
+
+function isInsideProtectedRange(
+  offset: number,
+  ranges: Array<[number, number]>,
+): boolean {
+  return ranges.some(([start, end]) => offset >= start && offset < end);
+}
+
+/**
  * Parse a raw API/SDK error into a structured code + message.
  * Handles Databricks-style JSON bodies embedded in the message string,
  * e.g. `Response from server (Bad Request) {"error_code":"...","message":"..."}`.
@@ -43,10 +66,13 @@ function parseError(raw: string): { code?: string; message: string } {
  * @returns an array of parameter names
  */
 export function extractParameters(sql: string): string[] {
+  const ranges = getProtectedRanges(sql);
   const matches = sql.matchAll(/:([a-zA-Z_]\w*)/g);
   const params = new Set<string>();
   for (const match of matches) {
-    params.add(match[1]);
+    if (!isInsideProtectedRange(match.index, ranges)) {
+      params.add(match[1]);
+    }
   }
   return Array.from(params);
 }
@@ -180,24 +206,25 @@ export function defaultForType(sqlType: string | undefined): string {
  */
 export function inferParameterTypes(sql: string): Record<string, string> {
   const inferred: Record<string, string> = {};
-
-  // Strip string literals and single-line comments to avoid false matches
-  const stripped = sql
-    .replace(/'[^']*'/g, (match) => " ".repeat(match.length))
-    .replace(/--[^\n]*/g, (match) => " ".repeat(match.length));
+  const ranges = getProtectedRanges(sql);
 
   const numericPatterns: RegExp[] = [
     /\bLIMIT\s+:([a-zA-Z_]\w*)/gi,
     /\bOFFSET\s+:([a-zA-Z_]\w*)/gi,
     /\bTOP\s+:([a-zA-Z_]\w*)/gi,
     /\bFETCH\s+FIRST\s+:([a-zA-Z_]\w*)\s+ROWS/gi,
+    // V1 limitation: arithmetic operators may false-positive for date
+    // expressions like `:start_date - INTERVAL '1 day'`. A smarter
+    // heuristic (e.g. look-ahead for INTERVAL) is deferred to a future PR.
     /[+\-*/]\s*:([a-zA-Z_]\w*)/g,
     /:([a-zA-Z_]\w*)\s*[+\-*/]/g,
   ];
 
   for (const pattern of numericPatterns) {
-    for (const match of stripped.matchAll(pattern)) {
-      inferred[match[1]] = "NUMERIC";
+    for (const match of sql.matchAll(pattern)) {
+      if (!isInsideProtectedRange(match.index, ranges)) {
+        inferred[match[1]] = "NUMERIC";
+      }
     }
   }
 
@@ -282,9 +309,13 @@ export async function generateQueriesFromDescribe(
       const annotatedTypes = extractParameterTypes(sql);
       const inferredTypes = inferParameterTypes(sql);
       const parameterTypes = { ...inferredTypes, ...annotatedTypes };
+      const protectedRanges = getProtectedRanges(sql);
       const sqlWithDefaults = sql.replace(
         /:([a-zA-Z_]\w*)/g,
-        (_match, paramName) => {
+        (original, paramName, offset) => {
+          if (isInsideProtectedRange(offset, protectedRanges)) {
+            return original;
+          }
           return defaultForType(parameterTypes[paramName]);
         },
       );
