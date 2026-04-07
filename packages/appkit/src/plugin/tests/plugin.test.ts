@@ -387,7 +387,7 @@ describe("Plugin", () => {
       }
     });
 
-    test("should return error result for ApiError (non-AppKitError)", async () => {
+    test("should preserve 404 statusCode from ApiError (non-AppKitError)", async () => {
       const plugin = new TestPlugin(config);
       const apiError = new MockApiError("Not found", 404);
       const mockFn = vi.fn().mockRejectedValue(apiError);
@@ -399,12 +399,12 @@ describe("Plugin", () => {
       );
       expect(result).toEqual({
         ok: false,
-        status: 500,
-        message: expect.any(String),
+        status: 404,
+        message: "Not found",
       });
     });
 
-    test("should return error result for ApiError 401 (non-AppKitError)", async () => {
+    test("should preserve 401 statusCode from ApiError (non-AppKitError)", async () => {
       const plugin = new TestPlugin(config);
       const apiError = new MockApiError("Unauthorized", 401);
       const mockFn = vi.fn().mockRejectedValue(apiError);
@@ -416,12 +416,12 @@ describe("Plugin", () => {
       );
       expect(result).toEqual({
         ok: false,
-        status: 500,
-        message: expect.any(String),
+        status: 401,
+        message: "Unauthorized",
       });
     });
 
-    test("should return error result for ApiError 403 (non-AppKitError)", async () => {
+    test("should preserve 403 statusCode from ApiError (non-AppKitError)", async () => {
       const plugin = new TestPlugin(config);
       const apiError = new MockApiError("Forbidden", 403);
       const mockFn = vi.fn().mockRejectedValue(apiError);
@@ -433,9 +433,72 @@ describe("Plugin", () => {
       );
       expect(result).toEqual({
         ok: false,
-        status: 500,
-        message: expect.any(String),
+        status: 403,
+        message: "Forbidden",
       });
+    });
+
+    test("should preserve 502 statusCode from non-AppKitError", async () => {
+      const plugin = new TestPlugin(config);
+      const apiError = new MockApiError("Bad gateway", 502);
+      const mockFn = vi.fn().mockRejectedValue(apiError);
+
+      const result = await (plugin as any).execute(
+        mockFn,
+        { default: {} },
+        false,
+      );
+      expect(result).toEqual({
+        ok: false,
+        status: 502,
+        message: "Bad gateway",
+      });
+    });
+
+    test("should redact message for 5xx statusCode errors in production", async () => {
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = "production";
+      try {
+        const plugin = new TestPlugin(config);
+        const apiError = new MockApiError("Internal upstream detail", 502);
+        const mockFn = vi.fn().mockRejectedValue(apiError);
+
+        const result = await (plugin as any).execute(
+          mockFn,
+          { default: {} },
+          false,
+        );
+        expect(result).toEqual({
+          ok: false,
+          status: 502,
+          message: "Server error",
+        });
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+      }
+    });
+
+    test("should preserve message for 4xx statusCode errors in production", async () => {
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = "production";
+      try {
+        const plugin = new TestPlugin(config);
+        const apiError = new MockApiError("Forbidden", 403);
+        const mockFn = vi.fn().mockRejectedValue(apiError);
+
+        const result = await (plugin as any).execute(
+          mockFn,
+          { default: {} },
+          false,
+        );
+        expect(result).toEqual({
+          ok: false,
+          status: 403,
+          message: "Forbidden",
+        });
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+      }
     });
 
     test("should map AuthenticationError to status 401", async () => {

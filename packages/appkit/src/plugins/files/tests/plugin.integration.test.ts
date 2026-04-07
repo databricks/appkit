@@ -587,7 +587,7 @@ describe("Files Plugin Integration", () => {
       expect(data.plugin).toBe("files");
     });
 
-    test("ApiError 404 is swallowed and returns 500", async () => {
+    test("ApiError 404 preserves upstream status code", async () => {
       mockFilesApi.getMetadata.mockRejectedValue(
         new MockApiError("Not found", 404),
       );
@@ -597,7 +597,7 @@ describe("Files Plugin Integration", () => {
         { headers: MOCK_AUTH_HEADERS },
       );
 
-      expect(response.status).toBe(500);
+      expect(response.status).toBe(404);
       const data = (await response.json()) as {
         error: string;
         plugin: string;
@@ -606,7 +606,7 @@ describe("Files Plugin Integration", () => {
       expect(data.plugin).toBe("files");
     });
 
-    test("ApiError 409 is swallowed and returns 500", async () => {
+    test("ApiError 409 preserves upstream status code", async () => {
       mockFilesApi.createDirectory.mockRejectedValue(
         new MockApiError("Conflict", 409),
       );
@@ -617,7 +617,7 @@ describe("Files Plugin Integration", () => {
         body: JSON.stringify({ path: "/Volumes/catalog/schema/vol/existing" }),
       });
 
-      expect(response.status).toBe(500);
+      expect(response.status).toBe(409);
       const data = (await response.json()) as {
         error: string;
         plugin: string;

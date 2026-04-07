@@ -42,6 +42,20 @@ import type {
 const logger = createLogger("plugin");
 
 /**
+ * Narrow an unknown thrown value to an Error that carries a numeric
+ * `statusCode` property (e.g. `ApiError` from `@databricks/sdk-experimental`).
+ */
+function hasHttpStatusCode(
+  error: unknown,
+): error is Error & { statusCode: number } {
+  return (
+    error instanceof Error &&
+    "statusCode" in error &&
+    typeof (error as Record<string, unknown>).statusCode === "number"
+  );
+}
+
+/**
  * Methods that should not be proxied by asUser().
  * These are lifecycle/internal methods that don't make sense
  * to execute in a user context.
@@ -474,6 +488,16 @@ export abstract class Plugin<
           ok: false,
           status: error.statusCode,
           message: error.message,
+        };
+      }
+
+      if (hasHttpStatusCode(error)) {
+        const isDev = process.env.NODE_ENV !== "production";
+        const isClientError = error.statusCode >= 400 && error.statusCode < 500;
+        return {
+          ok: false,
+          status: error.statusCode,
+          message: isDev || isClientError ? error.message : "Server error",
         };
       }
 
