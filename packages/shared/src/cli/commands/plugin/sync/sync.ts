@@ -689,7 +689,10 @@ async function runPluginsSync(options: {
         `\nNo manifest (${allowJsManifest ? "manifest.json or manifest.js" : "manifest.json"}) found in: ${options.pluginsDir}`,
       );
     } else {
-      console.log("\nMake sure you have plugin packages installed.");
+      console.log(
+        "\nMake sure you have plugin packages installed, or specify a directory:",
+      );
+      console.log("  appkit plugin sync --plugins-dir <path>");
     }
     process.exit(1);
   }

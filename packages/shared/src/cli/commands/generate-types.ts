@@ -33,14 +33,24 @@ async function runGenerateTypes(
           warehouseId: resolvedWarehouseId,
           noCache,
         });
+        console.log(`Generated query types: ${resolvedOutFile}`);
       }
+    } else {
+      console.error(
+        "Skipping query type generation: no warehouse ID. Set DATABRICKS_WAREHOUSE_ID or pass as argument.",
+      );
     }
 
     // Generate serving endpoint types (no warehouse required)
+    const servingOutFile = path.join(
+      process.cwd(),
+      "client/src/appKitServingTypes.d.ts",
+    );
     await typeGen.generateServingTypes({
-      outFile: path.join(process.cwd(), "client/src/appKitServingTypes.d.ts"),
+      outFile: servingOutFile,
       noCache,
     });
+    console.log(`Generated serving types: ${servingOutFile}`);
   } catch (error) {
     if (
       error instanceof Error &&

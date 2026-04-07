@@ -205,6 +205,9 @@ async function runPluginList(options: {
     );
     if (!fs.existsSync(manifestPath)) {
       console.error(`Manifest not found: ${manifestPath}`);
+      console.error(
+        "  appkit plugin list --manifest <path-to-manifest> or appkit plugin list --dir <plugins-directory>",
+      );
       process.exit(1);
     }
     try {

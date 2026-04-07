@@ -126,10 +126,10 @@ function runSetup(options: { write?: boolean }) {
 
   if (installed.length === 0) {
     console.log("No @databricks/appkit packages found in node_modules.");
-    console.log("\nMake sure you've installed at least one of:");
-    PACKAGES.forEach((pkg) => {
-      console.log(`  - ${pkg.name}`);
-    });
+    console.log("\nInstall at least one of:");
+    for (const pkg of PACKAGES) {
+      console.log(`  npm install ${pkg.name}`);
+    }
     process.exit(1);
   }
 
