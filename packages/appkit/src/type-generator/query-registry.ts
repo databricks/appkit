@@ -73,7 +73,7 @@ function parseError(raw: string): { code?: string; message: string } {
  */
 export function extractParameters(sql: string): string[] {
   const ranges = getProtectedRanges(sql);
-  const matches = sql.matchAll(/:([a-zA-Z_]\w*)/g);
+  const matches = sql.matchAll(/(?<!:):([a-zA-Z_]\w*)/g);
   const params = new Set<string>();
   for (const match of matches) {
     if (!isInsideProtectedRange(match.index, ranges)) {
@@ -317,7 +317,7 @@ export async function generateQueriesFromDescribe(
       const parameterTypes = { ...inferredTypes, ...annotatedTypes };
       const protectedRanges = getProtectedRanges(sql);
       const sqlWithDefaults = sql.replace(
-        /:([a-zA-Z_]\w*)/g,
+        /(?<!:):([a-zA-Z_]\w*)/g,
         (original, paramName, offset) => {
           if (isInsideProtectedRange(offset, protectedRanges)) {
             return original;
