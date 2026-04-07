@@ -127,6 +127,15 @@ export const pluginValidateCommand = new Command("validate")
     "--allow-js-manifest",
     "Allow reading manifest.js/manifest.cjs (executes code; use only with trusted plugins)",
   )
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ appkit plugin validate
+  $ appkit plugin validate plugins/my-plugin
+  $ appkit plugin validate plugins/my-plugin plugins/other
+  $ appkit plugin validate appkit.plugins.json`,
+  )
   .action((paths: string[], opts: { allowJsManifest?: boolean }) =>
     runPluginValidate(paths, opts).catch((err) => {
       console.error(err);

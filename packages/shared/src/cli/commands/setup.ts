@@ -182,4 +182,11 @@ function runSetup(options: { write?: boolean }) {
 export const setupCommand = new Command("setup")
   .description("Setup CLAUDE.md with AppKit package references")
   .option("-w, --write", "Create or update CLAUDE.md file in current directory")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ appkit setup
+  $ appkit setup --write`,
+  )
   .action(runSetup);

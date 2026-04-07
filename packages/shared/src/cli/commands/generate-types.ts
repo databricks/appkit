@@ -66,4 +66,13 @@ export const generateTypesCommand = new Command("generate-types")
   )
   .argument("[warehouseId]", "Databricks warehouse ID")
   .option("--no-cache", "Disable caching for type generation")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ appkit generate-types
+  $ appkit generate-types . client/src/types.d.ts
+  $ appkit generate-types . client/src/types.d.ts my-warehouse-id
+  $ appkit generate-types --no-cache`,
+  )
   .action(runGenerateTypes);

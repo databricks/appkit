@@ -802,6 +802,16 @@ export const pluginsSyncCommand = new Command("sync")
     "--allow-js-manifest",
     "Allow reading manifest.js/manifest.cjs (executes code; use only with trusted plugins)",
   )
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ appkit plugin sync
+  $ appkit plugin sync --write
+  $ appkit plugin sync --write --require-plugins server,analytics
+  $ appkit plugin sync --write --plugins-dir src/plugins --package-name @my/pkg
+  $ appkit plugin sync --silent`,
+  )
   .action((opts) =>
     runPluginsSync(opts).catch((err) => {
       console.error(err);

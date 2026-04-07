@@ -144,4 +144,14 @@ export const docsCommand = new Command("docs")
     "Section name (e.g. 'plugins') or path to a doc file (e.g. './docs.md')",
   )
   .option("--full", "Show complete index including all API reference entries")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ appkit docs
+  $ appkit docs plugins
+  $ appkit docs "appkit-ui API reference"
+  $ appkit docs ./docs/plugins/analytics.md
+  $ appkit docs --full`,
+  )
   .action(runDocs);

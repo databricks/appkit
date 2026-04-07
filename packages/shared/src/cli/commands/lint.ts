@@ -143,4 +143,10 @@ function runLint() {
 
 export const lintCommand = new Command("lint")
   .description("Run AST-based linting on TypeScript files")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ appkit lint`,
+  )
   .action(runLint);
