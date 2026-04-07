@@ -103,6 +103,20 @@ SELECT * FROM t WHERE x = ':also_hidden' AND y = :visible`;
 
     expect(params).toEqual(["visible"]);
   });
+
+  test("extracts params after a string containing --", () => {
+    const sql = "SELECT '--' AS marker, :id FROM t";
+    const params = extractParameters(sql);
+
+    expect(params).toEqual(["id"]);
+  });
+
+  test("handles escaped quotes in string literals", () => {
+    const sql = "SELECT * FROM t WHERE name = 'it''s fine' AND id = :userId";
+    const params = extractParameters(sql);
+
+    expect(params).toEqual(["userId"]);
+  });
 });
 
 describe("SERVER_INJECTED_PARAMS", () => {
@@ -466,6 +480,33 @@ describe("getProtectedRanges", () => {
     const texts = ranges.map(([s, e]) => sql.slice(s, e));
     expect(texts).toContain("'x'");
     expect(texts).toContain("'y'");
+  });
+
+  test("does not treat -- inside a string literal as a comment", () => {
+    const sql = "SELECT '--' AS marker, :id FROM t";
+    const ranges = getProtectedRanges(sql);
+
+    // Should only have the string literal, not a comment range
+    const texts = ranges.map(([s, e]) => sql.slice(s, e));
+    expect(texts).toEqual(["'--'"]);
+  });
+
+  test("does not treat apostrophes inside comments as string starts", () => {
+    const sql = "-- it's the user's filter\nSELECT * FROM t WHERE x = 'val'";
+    const ranges = getProtectedRanges(sql);
+
+    const texts = ranges.map(([s, e]) => sql.slice(s, e));
+    expect(texts).toContain("-- it's the user's filter");
+    expect(texts).toContain("'val'");
+    expect(ranges).toHaveLength(2);
+  });
+
+  test("handles escaped quotes (doubled single quotes)", () => {
+    const sql = "SELECT * FROM t WHERE name = 'it''s fine' AND id = :real";
+    const ranges = getProtectedRanges(sql);
+
+    const texts = ranges.map(([s, e]) => sql.slice(s, e));
+    expect(texts).toEqual(["'it''s fine'"]);
   });
 });
 

@@ -15,16 +15,22 @@ import {
 const logger = createLogger("type-generator:query-registry");
 
 /**
- * Returns an array of [start, end] ranges covering string literals
- * and single-line comments in a SQL string.
+ * Regex breakdown:
+ *   '(?:[^']|'')*'   — matches a SQL string literal, including escaped '' pairs
+ *   |                 — alternation: whichever branch matches first at a position wins
+ *   --[^\n]*          — matches a single-line SQL comment
+ *
+ * Because the regex engine scans left-to-right, a `'` is consumed as a string
+ * literal before any `--` inside it could match as a comment — giving us
+ * correct single-pass ordering without a manual state machine.
+ *
  * V1: no block-comment support (deferred to next PR).
  */
+const PROTECTED_RANGE_RE = /'(?:[^']|'')*'|--[^\n]*/g;
+
 export function getProtectedRanges(sql: string): Array<[number, number]> {
   const ranges: Array<[number, number]> = [];
-  for (const m of sql.matchAll(/'[^']*'/g)) {
-    ranges.push([m.index, m.index + m[0].length]);
-  }
-  for (const m of sql.matchAll(/--[^\n]*/g)) {
+  for (const m of sql.matchAll(PROTECTED_RANGE_RE)) {
     ranges.push([m.index, m.index + m[0].length]);
   }
   return ranges;
