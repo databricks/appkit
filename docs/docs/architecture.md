@@ -83,7 +83,7 @@ The Node.js backend layer built with `@databricks/appkit`:
 
 Integration with Databricks services:
 - **SQL Warehouses**: Execute analytical queries with Arrow or JSON format
-- **Lakebase V1 (Provisioned)**: Access data from Lakebase Provisioned. Support for Lakebase Autoscaling coming soon.
+- **Lakebase Autoscaling**: OLTP database access with automatic OAuth token refresh
 
 ## See also
 
