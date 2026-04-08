@@ -209,6 +209,7 @@ function AgentRoute() {
 
           try {
             const event: SSEEvent = JSON.parse(data);
+            if (!event.type) continue;
             setEvents((prev) => [...prev, event]);
 
             if (event.type === "appkit.metadata" && event.data?.threadId) {

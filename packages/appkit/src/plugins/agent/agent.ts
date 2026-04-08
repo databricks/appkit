@@ -325,7 +325,7 @@ export class AgentPlugin extends Plugin {
       const entry = self.toolIndex.get(qualifiedName);
       if (!entry) throw new Error(`Unknown tool: ${qualifiedName}`);
 
-      return self.execute(
+      const result = await self.execute(
         async (execSignal) => {
           switch (entry.source) {
             case "plugin": {
@@ -357,6 +357,18 @@ export class AgentPlugin extends Plugin {
           },
         },
       );
+
+      if (result === undefined) {
+        return `Error: Tool "${qualifiedName}" execution failed`;
+      }
+
+      const MAX_TOOL_RESULT_CHARS = 50_000;
+      const serialized =
+        typeof result === "string" ? result : JSON.stringify(result);
+      if (serialized.length > MAX_TOOL_RESULT_CHARS) {
+        return `${serialized.slice(0, MAX_TOOL_RESULT_CHARS)}\n\n[Result truncated: ${serialized.length} chars exceeds ${MAX_TOOL_RESULT_CHARS} limit]`;
+      }
+      return result;
     };
 
     const requestId = randomUUID();

@@ -13,6 +13,11 @@ export default defineConfig({
     ],
     exclude: ["@databricks/appkit-ui", "@databricks/appkit"],
   },
+  server: {
+    hmr: {
+      port: 24679,
+    },
+  },
   resolve: {
     dedupe: ["react", "react-dom"],
     preserveSymlinks: true,
