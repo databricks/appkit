@@ -88,7 +88,11 @@ if (installExit !== 0) {
 }
 
 // Lockfile diff check: verify only @databricks packages changed
-const ALLOWED_PACKAGES = ["@databricks/appkit", "@databricks/lakebase"];
+const ALLOWED_PACKAGES = [
+  "@databricks/appkit",
+  "@databricks/appkit-ui",
+  "@databricks/lakebase",
+];
 if (existsSync(lockfileBackup)) {
   const parsePkgs = (path: string): string[] => {
     const lock = JSON.parse(readFileSync(path, "utf-8"));
@@ -119,7 +123,10 @@ if (existsSync(lockfileBackup)) {
 // 3. Git add, commit, tag, push
 const commands: [string, string[]][] = [
   ["git", ["add", "template/package.json", "template/package-lock.json"]],
-  ["git", ["commit", "-m", `chore: sync template to v${version} [skip ci]`]],
+  [
+    "git",
+    ["commit", "-s", "-m", `chore: sync template to v${version} [skip ci]`],
+  ],
   ["git", ["tag", "-a", `template-v${version}`, "-m", `Template v${version}`]],
   ["git", ["push", "origin", "main", "--follow-tags"]],
 ];
