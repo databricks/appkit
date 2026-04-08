@@ -549,6 +549,10 @@ export class AgentPlugin extends Plugin {
       addTools: (tools: FunctionTool[]) => this.addTools(tools),
       getTools: () => this.getAllToolDefinitions(),
       getThreads: (userId: string) => this.threadStore.list(userId),
+      getAgents: () => ({
+        agents: Array.from(this.agents.keys()),
+        default: this.defaultAgentName,
+      }),
     };
   }
 }
