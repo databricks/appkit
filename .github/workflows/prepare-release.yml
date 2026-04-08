@@ -61,7 +61,7 @@ jobs:
           pnpm exec release-it ${{ steps.version.outputs.version }} --ci
       - name: Sync versions
         if: steps.version.outputs.version != ''
-        run: tsx tools/sync-versions.ts "${{ steps.version.outputs.version }}"
+        run: pnpm exec tsx tools/sync-versions.ts "${{ steps.version.outputs.version }}"
 
       - name: Build
         if: steps.version.outputs.version != ''
