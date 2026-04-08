@@ -1,12 +1,20 @@
 #!/usr/bin/env tsx
 /**
  * Syncs the template to the given version (with retry), then commits, tags
- * template-vX.X.X, and pushes. Used by the Release workflow (sync-template job
- * in .github/workflows/release.yml) and for manual runs.
+ * template-vX.X.X, and pushes.
+ *
+ * Used by the private secure release repo during the template-sync step.
+ * Changes here affect the release pipeline.
  */
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 
 const ROOT = process.cwd();
@@ -41,6 +49,8 @@ if (templateJson.dependencies) {
 // 2. npm install in template (with retry for registry propagation)
 const MAX_ATTEMPTS = 3;
 const templateDir = join(ROOT, "template");
+const lockfilePath = join(templateDir, "package-lock.json");
+const lockfileBackup = join(templateDir, "package-lock.json.before");
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -66,10 +76,43 @@ async function runNpmInstallWithRetry(): Promise<number> {
   return lastStatus;
 }
 
+// Save lockfile before install for diff check
+if (existsSync(lockfilePath)) {
+  copyFileSync(lockfilePath, lockfileBackup);
+}
+
 const installExit = await runNpmInstallWithRetry();
 if (installExit !== 0) {
   console.error(`npm install failed after ${MAX_ATTEMPTS} attempts`);
   process.exit(installExit);
+}
+
+// Lockfile diff check: verify only @databricks/appkit* packages changed
+if (existsSync(lockfileBackup)) {
+  const parsePkgs = (path: string): string[] => {
+    const lock = JSON.parse(readFileSync(path, "utf-8"));
+    return Object.keys(lock.packages ?? {}).sort();
+  };
+
+  const before = new Set(parsePkgs(lockfileBackup));
+  const after = new Set(parsePkgs(lockfilePath));
+
+  const added = [...after].filter((p) => !before.has(p));
+  const removed = [...before].filter((p) => !after.has(p));
+  const unexpected = [...added, ...removed].filter(
+    (p) => !p.includes("@databricks/appkit"),
+  );
+
+  if (unexpected.length > 0) {
+    console.error("Unexpected packages changed in lockfile:");
+    for (const pkg of unexpected) {
+      console.error(`  ${pkg}`);
+    }
+    unlinkSync(lockfileBackup);
+    process.exit(1);
+  }
+
+  unlinkSync(lockfileBackup);
 }
 
 // 3. Git add, commit, tag, push
