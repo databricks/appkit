@@ -1,3 +1,4 @@
+// TODO: remove this comment — added to trigger prepare-release test
 export { getUsernameWithApiLookup, getWorkspaceClient } from "./config";
 export { generateDatabaseCredential } from "./credentials";
 export { createLakebasePool } from "./pool";
