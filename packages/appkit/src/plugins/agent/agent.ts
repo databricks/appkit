@@ -15,6 +15,7 @@ import type { PluginManifest } from "../../registry";
 import { agentStreamDefaults } from "./defaults";
 import { AgentEventTranslator } from "./event-translator";
 import manifest from "./manifest.json";
+import { chatRequestSchema, invocationsRequestSchema } from "./schemas";
 import { InMemoryThreadStore } from "./thread-store";
 import {
   AppKitMcpClient,
@@ -264,20 +265,16 @@ export class AgentPlugin extends Plugin {
     req: express.Request,
     res: express.Response,
   ): Promise<void> {
-    const {
-      message,
-      threadId,
-      agent: agentName,
-    } = req.body as {
-      message?: string;
-      threadId?: string;
-      agent?: string;
-    };
-
-    if (!message) {
-      res.status(400).json({ error: "message is required" });
+    const parsed = chatRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "Invalid request",
+        details: parsed.error.flatten().fieldErrors,
+      });
       return;
     }
+
+    const { message, threadId, agent: agentName } = parsed.data;
 
     const resolvedAgent = this.resolveAgent(agentName);
     if (!resolvedAgent) {
@@ -434,27 +431,28 @@ export class AgentPlugin extends Plugin {
     req: express.Request,
     res: express.Response,
   ): Promise<void> {
-    const body = req.body as {
-      input?: string | Array<{ role?: string; content?: string }>;
-      stream?: boolean;
-      model?: string;
-    };
-
-    if (!body.input) {
-      res.status(400).json({ error: "input is required" });
+    const parsed = invocationsRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "Invalid request",
+        details: parsed.error.flatten().fieldErrors,
+      });
       return;
     }
 
+    const { input } = parsed.data;
+
     let userMessage: string;
-    if (typeof body.input === "string") {
-      userMessage = body.input;
+    if (typeof input === "string") {
+      userMessage = input;
     } else {
-      const last = [...body.input].reverse().find((m) => m.role === "user");
-      if (!last?.content) {
+      const last = [...input].reverse().find((m) => m.role === "user");
+      const content = last?.content;
+      if (!content || typeof content !== "string") {
         res.status(400).json({ error: "No user message found in input" });
         return;
       }
-      userMessage = last.content;
+      userMessage = content;
     }
 
     req.body = { message: userMessage };
