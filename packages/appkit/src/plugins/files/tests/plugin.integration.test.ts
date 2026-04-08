@@ -602,7 +602,7 @@ describe("Files Plugin Integration", () => {
         error: string;
         plugin: string;
       };
-      expect(data.error).toBe("Internal Server Error");
+      expect(data.error).toBe("Not Found");
       expect(data.plugin).toBe("files");
     });
 
@@ -622,7 +622,7 @@ describe("Files Plugin Integration", () => {
         error: string;
         plugin: string;
       };
-      expect(data.error).toBe("Internal Server Error");
+      expect(data.error).toBe("Conflict");
       expect(data.plugin).toBe("files");
     });
   });
