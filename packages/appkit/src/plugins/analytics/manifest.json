@@ -14,13 +14,28 @@
         "fields": {
           "id": {
             "env": "DATABRICKS_WAREHOUSE_ID",
-            "description": "SQL Warehouse ID"
+            "description": "SQL Warehouse ID",
+            "discovery": {
+              "cliCommand": "databricks warehouses list --profile <PROFILE> --output json",
+              "selectField": ".id",
+              "displayField": ".name"
+            }
           }
         }
       }
     ],
     "optional": []
   },
+  "postScaffold": [
+    {
+      "instruction": "Ensure your SQL Warehouse is running and accessible from your workspace.",
+      "required": true
+    },
+    {
+      "instruction": "Create a config/queries/ directory and add .sql files for your analytics queries.",
+      "required": false
+    }
+  ],
   "config": {
     "schema": {
       "type": "object",

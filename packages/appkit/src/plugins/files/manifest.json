@@ -14,13 +14,28 @@
         "fields": {
           "path": {
             "env": "DATABRICKS_VOLUME_FILES",
-            "description": "Volume path for file storage (e.g. /Volumes/catalog/schema/volume_name)"
+            "description": "Volume path for file storage (e.g. /Volumes/catalog/schema/volume_name)",
+            "discovery": {
+              "cliCommand": "databricks volumes list <CATALOG>.<SCHEMA> --profile <PROFILE> --output json",
+              "selectField": ".full_name",
+              "displayField": ".name"
+            }
           }
         }
       }
     ],
     "optional": []
   },
+  "postScaffold": [
+    {
+      "instruction": "Verify your Unity Catalog volume exists and you have WRITE_VOLUME permission.",
+      "required": true
+    },
+    {
+      "instruction": "Set the DATABRICKS_VOLUME_FILES environment variable to the full volume path (e.g. /Volumes/catalog/schema/volume_name).",
+      "required": true
+    }
+  ],
   "config": {
     "schema": {
       "type": "object",

@@ -15,13 +15,24 @@
         "fields": {
           "branch": {
             "description": "Full Lakebase Postgres branch resource name. Obtain by running `databricks postgres list-branches projects/{project-id}`, select the desired item from the output array and use its .name value.",
-            "examples": ["projects/{project-id}/branches/{branch-id}"]
+            "examples": ["projects/{project-id}/branches/{branch-id}"],
+            "discovery": {
+              "cliCommand": "databricks postgres list-branches --profile <PROFILE> --output json",
+              "selectField": ".name",
+              "displayField": ".name"
+            }
           },
           "database": {
             "description": "Full Lakebase Postgres database resource name. Obtain by running `databricks postgres list-databases {branch-name}`, select the desired item from the output array and use its .name value. Requires the branch resource name.",
             "examples": [
               "projects/{project-id}/branches/{branch-id}/databases/{database-id}"
-            ]
+            ],
+            "discovery": {
+              "cliCommand": "databricks postgres list-databases {branch} --profile <PROFILE> --output json",
+              "selectField": ".name",
+              "displayField": ".name",
+              "dependsOn": "branch"
+            }
           },
           "host": {
             "env": "PGHOST",
@@ -42,7 +53,13 @@
             "description": "Lakebase endpoint resource name. Auto-injected at runtime via app.yaml valueFrom: postgres. For local development, obtain by running `databricks postgres list-endpoints {branch-name}`, select the desired item from the output array and use its .name value.",
             "examples": [
               "projects/{project-id}/branches/{branch-id}/endpoints/{endpoint-id}"
-            ]
+            ],
+            "discovery": {
+              "cliCommand": "databricks postgres list-endpoints {branch} --profile <PROFILE> --output json",
+              "selectField": ".name",
+              "displayField": ".name",
+              "dependsOn": "branch"
+            }
           },
           "port": {
             "env": "PGPORT",
@@ -60,5 +77,15 @@
       }
     ],
     "optional": []
-  }
+  },
+  "postScaffold": [
+    {
+      "instruction": "Run database migrations to initialize your Lakebase schema.",
+      "required": true
+    },
+    {
+      "instruction": "Verify local connectivity to Lakebase using: PGHOST=<host> PGDATABASE=<db> PGPORT=5432 PGSSLMODE=require psql",
+      "required": false
+    }
+  ]
 }

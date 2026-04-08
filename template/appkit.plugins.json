@@ -19,13 +19,28 @@
               "id": {
                 "env": "DATABRICKS_WAREHOUSE_ID",
                 "description": "SQL Warehouse ID",
+                "discovery": {
+                  "cliCommand": "databricks warehouses list --profile <PROFILE> --output json",
+                  "selectField": ".id",
+                  "displayField": ".name"
+                },
                 "origin": "user"
               }
             }
           }
         ],
         "optional": []
-      }
+      },
+      "postScaffold": [
+        {
+          "instruction": "Ensure your SQL Warehouse is running and accessible from your workspace.",
+          "required": true
+        },
+        {
+          "instruction": "Create a config/queries/ directory and add .sql files for your analytics queries.",
+          "required": false
+        }
+      ]
     },
     "files": {
       "name": "files",
@@ -44,13 +59,28 @@
               "path": {
                 "env": "DATABRICKS_VOLUME_FILES",
                 "description": "Volume path for file storage (e.g. /Volumes/catalog/schema/volume_name)",
+                "discovery": {
+                  "cliCommand": "databricks volumes list <CATALOG>.<SCHEMA> --profile <PROFILE> --output json",
+                  "selectField": ".full_name",
+                  "displayField": ".name"
+                },
                 "origin": "user"
               }
             }
           }
         ],
         "optional": []
-      }
+      },
+      "postScaffold": [
+        {
+          "instruction": "Verify your Unity Catalog volume exists and you have WRITE_VOLUME permission.",
+          "required": true
+        },
+        {
+          "instruction": "Set the DATABRICKS_VOLUME_FILES environment variable to the full volume path (e.g. /Volumes/catalog/schema/volume_name).",
+          "required": true
+        }
+      ]
     },
     "genie": {
       "name": "genie",
@@ -69,13 +99,28 @@
               "id": {
                 "env": "DATABRICKS_GENIE_SPACE_ID",
                 "description": "Default Genie Space ID",
+                "discovery": {
+                  "cliCommand": "databricks genie list --profile <PROFILE> --output json",
+                  "selectField": ".id",
+                  "displayField": ".name"
+                },
                 "origin": "user"
               }
             }
           }
         ],
         "optional": []
-      }
+      },
+      "postScaffold": [
+        {
+          "instruction": "Configure the 'spaces' map in your plugin config with alias-to-Space-ID mappings.",
+          "required": true
+        },
+        {
+          "instruction": "Ensure your Genie Space(s) are configured with the appropriate data tables and instructions.",
+          "required": false
+        }
+      ]
     },
     "jobs": {
       "name": "jobs",
@@ -120,6 +165,11 @@
                 "examples": [
                   "projects/{project-id}/branches/{branch-id}"
                 ],
+                "discovery": {
+                  "cliCommand": "databricks postgres list-branches --profile <PROFILE> --output json",
+                  "selectField": ".name",
+                  "displayField": ".name"
+                },
                 "origin": "user"
               },
               "database": {
@@ -127,6 +177,12 @@
                 "examples": [
                   "projects/{project-id}/branches/{branch-id}/databases/{database-id}"
                 ],
+                "discovery": {
+                  "cliCommand": "databricks postgres list-databases {branch} --profile <PROFILE> --output json",
+                  "selectField": ".name",
+                  "displayField": ".name",
+                  "dependsOn": "branch"
+                },
                 "origin": "user"
               },
               "host": {
@@ -151,6 +207,12 @@
                 "examples": [
                   "projects/{project-id}/branches/{branch-id}/endpoints/{endpoint-id}"
                 ],
+                "discovery": {
+                  "cliCommand": "databricks postgres list-endpoints {branch} --profile <PROFILE> --output json",
+                  "selectField": ".name",
+                  "displayField": ".name",
+                  "dependsOn": "branch"
+                },
                 "origin": "cli"
               },
               "port": {
@@ -171,7 +233,17 @@
           }
         ],
         "optional": []
-      }
+      },
+      "postScaffold": [
+        {
+          "instruction": "Run database migrations to initialize your Lakebase schema.",
+          "required": true
+        },
+        {
+          "instruction": "Verify local connectivity to Lakebase using: PGHOST=<host> PGDATABASE=<db> PGPORT=5432 PGSSLMODE=require psql",
+          "required": false
+        }
+      ]
     },
     "server": {
       "name": "server",
