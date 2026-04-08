@@ -27,6 +27,14 @@ Human-readable description for this field
 
 ***
 
+### discovery?
+
+```ts
+optional discovery: DiscoveryDescriptor;
+```
+
+***
+
 ### env?
 
 ```ts

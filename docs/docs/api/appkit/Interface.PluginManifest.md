@@ -168,6 +168,22 @@ Omit.onSetupMessage
 
 ***
 
+### postScaffold?
+
+```ts
+optional postScaffold: PostScaffoldStep[];
+```
+
+Ordered list of post-scaffolding instructions shown to the user after project initialization. Array position determines display order.
+
+#### Inherited from
+
+```ts
+Omit.postScaffold
+```
+
+***
+
 ### repository?
 
 ```ts

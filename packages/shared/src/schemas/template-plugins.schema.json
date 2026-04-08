@@ -126,19 +126,260 @@
       "$ref": "plugin-manifest.schema.json#/$defs/resourceType"
     },
     "resourceFieldEntry": {
+      "type": "object",
+      "description": "Extends the plugin manifest resourceFieldEntry with a computed origin field for template manifests.",
+      "properties": {
+        "env": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "Environment variable name for this field"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description for this field"
+        },
+        "bundleIgnore": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, this field is excluded from Databricks bundle configuration (databricks.yml) generation."
+        },
+        "examples": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Example values showing the expected format for this field"
+        },
+        "localOnly": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, this field is only generated for local .env files. The Databricks Apps platform auto-injects it at deploy time."
+        },
+        "value": {
+          "type": "string",
+          "description": "Static value for this field."
+        },
+        "resolve": {
+          "type": "string",
+          "pattern": "^[a-z_]+:[a-zA-Z]+$",
+          "description": "Named resolver prefixed by resource type (e.g., 'postgres:host')."
+        },
+        "discovery": {
+          "$ref": "plugin-manifest.schema.json#/$defs/discoveryDescriptor",
+          "description": "How the CLI discovers values for this field via a Databricks CLI command."
+        },
+        "origin": {
+          "$ref": "#/$defs/origin"
+        }
+      },
+      "additionalProperties": false
+    },
+    "resourceRequirement": {
+      "type": "object",
+      "description": "Resource requirement with template-specific field entries (includes computed origin).",
+      "required": ["type", "alias", "resourceKey", "description", "permission"],
+      "properties": {
+        "type": {
+          "$ref": "plugin-manifest.schema.json#/$defs/resourceType"
+        },
+        "alias": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable label for UI/display only."
+        },
+        "resourceKey": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Stable key for machine use: deduplication, env naming, composite keys."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable description of why this resource is needed"
+        },
+        "permission": {
+          "type": "string",
+          "description": "Required permission level."
+        },
+        "fields": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/resourceFieldEntry"
+          },
+          "minProperties": 1,
+          "description": "Map of field name to field entry with computed origin."
+        }
+      },
+      "additionalProperties": false,
       "allOf": [
-        { "$ref": "plugin-manifest.schema.json#/$defs/resourceFieldEntry" },
         {
-          "properties": {
-            "origin": {
-              "$ref": "#/$defs/origin"
+          "if": {
+            "properties": { "type": { "const": "secret" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": {
+                "$ref": "plugin-manifest.schema.json#/$defs/secretPermission"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "job" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": {
+                "$ref": "plugin-manifest.schema.json#/$defs/jobPermission"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "sql_warehouse" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": {
+                "$ref": "plugin-manifest.schema.json#/$defs/sqlWarehousePermission"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "serving_endpoint" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": {
+                "$ref": "plugin-manifest.schema.json#/$defs/servingEndpointPermission"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "volume" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": {
+                "$ref": "plugin-manifest.schema.json#/$defs/volumePermission"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "vector_search_index" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": {
+                "$ref": "plugin-manifest.schema.json#/$defs/vectorSearchIndexPermission"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "uc_function" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": {
+                "$ref": "plugin-manifest.schema.json#/$defs/ucFunctionPermission"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "uc_connection" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": {
+                "$ref": "plugin-manifest.schema.json#/$defs/ucConnectionPermission"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "database" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": {
+                "$ref": "plugin-manifest.schema.json#/$defs/databasePermission"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "postgres" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": {
+                "$ref": "plugin-manifest.schema.json#/$defs/postgresPermission"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "genie_space" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": {
+                "$ref": "plugin-manifest.schema.json#/$defs/genieSpacePermission"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "experiment" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": {
+                "$ref": "plugin-manifest.schema.json#/$defs/experimentPermission"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "app" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "permission": {
+                "$ref": "plugin-manifest.schema.json#/$defs/appPermission"
+              }
             }
           }
         }
       ]
-    },
-    "resourceRequirement": {
-      "$ref": "plugin-manifest.schema.json#/$defs/resourceRequirement"
     },
     "origin": {
       "type": "string",
