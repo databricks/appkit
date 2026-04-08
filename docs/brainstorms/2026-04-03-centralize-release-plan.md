@@ -40,12 +40,16 @@ No `finalize-release` workflow on appkit. The secure repo does all post-publish 
 
 ### A1. `.github/workflows/prepare-release.yml` (new)
 
-Replaces the current `release.yml` release job. Triggers on push to `main`.
+Replaces the current `release.yml` release job.
+
+**Triggers:** push to `main` + cron fallback (`*/15 * * * *`).
+**Concurrency:** `group: prepare-release, cancel-in-progress: true` — only the latest run survives if multiple PRs merge quickly.
 
 **Steps:**
 1. Checkout with full history (`fetch-depth: 0`)
-2. Setup pnpm, Node.js, JFrog npm proxy
-3. Install dependencies (`pnpm install --frozen-lockfile`)
+2. Check for releasable commits since last tag → **exit early if none** (handles release commits with `[skip ci]` and cron runs with no new work)
+3. Setup pnpm, Node.js, JFrog npm proxy
+4. Install dependencies (`pnpm install --frozen-lockfile`)
 4. Determine version from conventional commits (e.g., `pnpm exec release-it --release-version --ci` or `conventional-recommended-bump`)
 5. Generate changelog diff (e.g., `conventional-changelog -p conventionalcommits`)
 6. Sync versions: `tsx tools/sync-versions.ts ${version}`
@@ -111,8 +115,9 @@ Update the Releasing section to describe the new two-workflow architecture.
 **`poll`** (only on schedule):
 - Uses `actions/create-github-app-token` to mint App token (`actions: read` on appkit)
 - Lists successful `prepare-release` workflow runs on appkit via REST API
-- For each run, extracts version from artifacts
-- Checks if tag `v{version}` exists on appkit → skip if yes
+- Finds the **latest** completed run
+- Checks if tag `v{version}` exists on appkit → skip if yes (already released)
+- Checks if a newer `prepare-release` run is in progress → wait/skip (avoid processing stale run)
 - Outputs: run ID, version, tag name
 
 **`build`** (needs poll or workflow_dispatch):
@@ -190,6 +195,10 @@ artifacts/appkit/.gitkeep
 | `tools/publish-template-tag.ts` | Template sync script (logic moves to secure repo) |
 | `tools/sync-versions.ts` | Version sync across packages |
 | `tools/dist-appkit.ts` | Dist package preparation |
+
+## Known Limitations
+
+**Cosmetic commit ordering race:** There is a small window (seconds) between the secure repo's staleness check and the release commit push. If a PR merges during that window, the release commit may appear after the new PR's commit in git history, even though the release doesn't include it. This is purely cosmetic — the published package, changelog, and tag are all correct. A merge queue would eliminate this but is considered unnecessary for the current release frequency.
 
 ## Verification
 
