@@ -72,6 +72,17 @@ jobs:
         run: pnpm run knip
       - name: Run License Check
         run: pnpm run check:licenses
+      - name: Check template deps are pinned
+        run: |
+          node -e "
+            const pkg = require('./template/package.json');
+            const deps = {...pkg.dependencies, ...pkg.devDependencies};
+            const unpinned = Object.entries(deps).filter(([,v]) => /^[~^>=*]/.test(v));
+            if (unpinned.length) {
+              console.error('Unpinned deps:', unpinned.map(([k,v]) => k + '@' + v).join(', '));
+              process.exit(1);
+            }
+          "
 
   test:
     name: Unit Tests
