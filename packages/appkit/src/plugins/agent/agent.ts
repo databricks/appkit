@@ -80,6 +80,27 @@ export class AgentPlugin extends Plugin {
     if (this.config.defaultAgent) {
       this.defaultAgentName = this.config.defaultAgent;
     }
+
+    this.mountInvocationsRoute();
+  }
+
+  private mountInvocationsRoute() {
+    const serverPlugin = this.config.plugins?.server as
+      | { extend?: (fn: (app: any) => void) => void }
+      | undefined;
+
+    if (!serverPlugin?.extend) return;
+
+    serverPlugin.extend((app: import("express").Application) => {
+      app.post(
+        "/invocations",
+        (req: express.Request, res: express.Response) => {
+          this._handleInvocations(req, res);
+        },
+      );
+    });
+
+    logger.info("Mounted POST /invocations route");
   }
 
   private async collectTools() {
@@ -407,6 +428,37 @@ export class AgentPlugin extends Plugin {
         },
       },
     );
+  }
+
+  private async _handleInvocations(
+    req: express.Request,
+    res: express.Response,
+  ): Promise<void> {
+    const body = req.body as {
+      input?: string | Array<{ role?: string; content?: string }>;
+      stream?: boolean;
+      model?: string;
+    };
+
+    if (!body.input) {
+      res.status(400).json({ error: "input is required" });
+      return;
+    }
+
+    let userMessage: string;
+    if (typeof body.input === "string") {
+      userMessage = body.input;
+    } else {
+      const last = [...body.input].reverse().find((m) => m.role === "user");
+      if (!last?.content) {
+        res.status(400).json({ error: "No user message found in input" });
+        return;
+      }
+      userMessage = last.content;
+    }
+
+    req.body = { message: userMessage };
+    return this._handleChat(req, res);
   }
 
   private async _handleCancel(
