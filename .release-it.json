@@ -9,6 +9,7 @@
     "requireCommits": true,
     "requireCommitsFail": false,
     "tagMatch": "v*",
+    "getLatestTagFromAllRefs": true,
     "commitsPath": "packages/appkit packages/appkit-ui packages/shared"
   },
   "github": {

@@ -10,6 +10,7 @@
     "requireCommitsFail": false,
     "tagMatch": "lakebase-v*",
     "tagName": "lakebase-v${version}",
+    "getLatestTagFromAllRefs": true,
     "commitsPath": "."
   },
   "github": {

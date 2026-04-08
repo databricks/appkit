@@ -49,7 +49,7 @@ jobs:
         id: version
         working-directory: packages/lakebase
         run: |
-          VERSION=$(pnpm exec release-it --release-version --ci 2>/dev/null) || true
+          VERSION=$(pnpm exec release-it --release-version --ci) || true
           if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "version=$VERSION" >> "$GITHUB_OUTPUT"
             echo "Next version: $VERSION"
