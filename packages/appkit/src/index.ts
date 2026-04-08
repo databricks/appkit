@@ -1,4 +1,3 @@
-// TODO: remove this comment — added to trigger prepare-release test
 /**
  * @packageDocumentation
  *

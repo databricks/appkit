@@ -27,6 +27,7 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
+          ref: ${{ github.head_ref || '' }} # TODO: remove before merging — needed for PR testing only
 
       - name: Setup JFrog npm
         uses: ./.github/actions/setup-jfrog-npm
