@@ -157,7 +157,6 @@ t=20: PR3 merged (commit D) → prepare-release fires → v0.22.1 with PR3 only 
 - **R4.** Must sync versions across packages, build, create dist packages, generate SBOMs, and run `npm pack`
 - **R5.** Must upload `.tgz` files, changelog diff, version number, and SHA256 digests as workflow artifacts
 - **R6.** Must NOT commit, tag, push, or create any GitHub Release
-- **R7.** Must include actor authorization check (admin/maintain role per SOP)
 
 ### Secure Repo Workflow
 
@@ -171,16 +170,18 @@ t=20: PR3 merged (commit D) → prepare-release fires → v0.22.1 with PR3 only 
 - **R15.** Must create a published GitHub Release on appkit via GitHub App
 - **R16.** After release, must run template sync: checkout fresh appkit `main`, `npm install` (public npm — JFrog proxy has 7-day propagation delay), commit + tag `template-v{version}`, push via GitHub App
 - **R17.** Must handle npm 403 "already exists" as success (idempotent retry)
-- **R18.** Must include actor authorization check (admin/maintain role per SOP)
-- **R19.** Must support `workflow_dispatch` with manual run ID input as fallback
+- **R18.** Must support `workflow_dispatch` with manual run ID input as fallback
+
+### Actor Authorization
+
+- **R19.** Both `prepare-release` (appkit) and the secure repo workflow must include an actor authorization check verifying admin/maintain role (per SOP)
 
 ### GitHub App
 
-- **R20.** A GitHub App must be created with `contents: write` and `actions: read` permissions on `databricks/appkit`
-- **R21.** `actions: write` is NOT required — no workflow triggering needed (secure repo does all git ops directly)
-- **R22.** The App's private key and ID must be stored only in the secure repo (private key as secret, app ID as variable)
-- **R23.** The App must be added to the branch protection bypass list on appkit's `main` branch (`GITHUB_TOKEN` cannot push to protected branches)
-- **R24.** The App must be used for: listing workflow runs, downloading artifacts, pushing commits/tags, creating releases, and template sync pushes
+- **R20.** A GitHub App must be created with `contents: write` and `actions: read` permissions on `databricks/appkit`. Note: `actions: write` is NOT required — the secure repo does all git operations directly via REST API, no workflow triggering needed.
+- **R21.** The App's private key and ID must be stored only in the secure repo (private key as secret, app ID as variable)
+- **R22.** The App must be added to the branch protection bypass list on appkit's `main` branch (`GITHUB_TOKEN` cannot push to protected branches)
+- **R23.** The App must be used for: listing workflow runs, downloading artifacts, pushing commits/tags, creating releases, and template sync pushes
 
 ### npm Trusted Publisher Configuration
 
@@ -260,7 +261,6 @@ The entire release pipeline (including `prepare-release`) could run in the secur
 
 ### Deferred to Planning
 
-- [Affects R8][Technical] How to handle multiple queued prepare-release runs (process oldest first, verified by tag check)
 - [Affects R13][Needs research] Whether `npm-oidc-publish.sh` handles multiple packages in one workflow run or needs separate publish jobs per package/environment
 - [Affects R37-R39][Technical] Exact conditional logic for manual vs automated mode
 

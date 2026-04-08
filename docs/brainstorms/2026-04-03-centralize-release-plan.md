@@ -50,7 +50,7 @@ Replaces the current `release.yml` release job.
 2. Check for releasable commits since last tag → **exit early if none** (handles release commits with `[skip ci]` and cron runs with no new work)
 3. Setup pnpm, Node.js, JFrog npm proxy
 4. Install dependencies (`pnpm install --frozen-lockfile`)
-4. Determine version from conventional commits (e.g., `pnpm exec release-it --release-version --ci` or `conventional-recommended-bump`)
+5. Determine version from conventional commits (e.g., `pnpm exec release-it --release-version --ci` or `conventional-recommended-bump`)
 5. Generate changelog diff (e.g., `conventional-changelog -p conventionalcommits`)
 6. Sync versions: `tsx tools/sync-versions.ts ${version}`
 7. Build: `pnpm build && pnpm --filter=docs build`
@@ -69,12 +69,13 @@ Replaces the current `release.yml` release job.
 - Keep as a manual `workflow_dispatch` for backward compatibility / dry-run purposes
 - Or remove entirely if `prepare-release.yml` fully replaces it
 
-### A3. `.release-it.json` (modify or deprecate)
+### A3. `.release-it.json` (simplify)
 
-- May be deprecated in favor of direct `conventional-changelog` + `conventional-recommended-bump` usage
-- If kept, only used for version calculation (`release-it --release-version`)
+- Keep release-it for version calculation only (`release-it --release-version --ci`)
 - Remove all hooks (`before:init`, `after:bump`, `before:release`, `after:release`)
-- Remove GitHub release config
+- Remove GitHub release config (`github.release: false`)
+- Remove npm config (`npm: false` — already set)
+- Alternative: replace release-it entirely with `conventional-recommended-bump` + `conventional-changelog` (evaluate during implementation)
 
 ### A4. `.github/workflows/ci.yml` (modify)
 
@@ -93,13 +94,21 @@ Add template dependency pinning lint step:
     "
 ```
 
-### A5. `CLAUDE.md` (modify)
+### A5. Lakebase handling
+
+Lakebase releases are independent (different version, different tag pattern `lakebase-v*`). Two options:
+- **Same `prepare-release.yml`** with conditional steps (detect which packages changed via path filters)
+- **Separate `prepare-release-lakebase.yml`** triggered on push to `main` with `paths: ['packages/lakebase/**']`
+
+The secure repo workflow already handles both via tag pattern detection (R10). On the appkit side, a separate workflow is cleaner since lakebase has different build commands (`pnpm build:package` in `packages/lakebase/` vs full monorepo build).
+
+### A6. `CLAUDE.md` (modify)
 
 Update the Releasing section to describe the new two-workflow architecture.
 
 ## Part B: Secure Repo Changes
 
-**Repo:** `/Users/pawel.kosiec/repositories/databricks-os/secure-public-registry-releases-eng`
+**Repo:** `databricks/secure-public-registry-releases-eng`
 **Branch:** `pkosiec/appkit-release`
 **Depends on:** PR #18 (for `npm-oidc-publish.sh`); worst case fork from that branch
 
@@ -120,7 +129,7 @@ Update the Releasing section to describe the new two-workflow architecture.
 - Checks if a newer `prepare-release` run is in progress → wait/skip (avoid processing stale run)
 - Outputs: run ID, version, tag name
 
-**`build`** (needs poll or workflow_dispatch):
+**`download-verify`** (needs poll or workflow_dispatch):
 - Downloads `.tgz` artifacts from appkit run via REST API (GitHub App token)
 - Downloads changelog diff, version, SHA256 digests
 - Verifies SHA256 digests match downloaded `.tgz` files
