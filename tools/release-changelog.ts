@@ -13,7 +13,7 @@
  */
 
 import { writeFileSync } from "node:fs";
-import ConventionalChangelog from "conventional-changelog";
+import { ConventionalChangelog } from "conventional-changelog";
 
 interface Args {
 	version: string;
@@ -77,17 +77,9 @@ async function main(): Promise<void> {
 	// Set writer options matching the previous release-it config
 	generator.writer({
 		groupBy: "scope",
-		commitGroupsSort: (a: { title: string }, b: { title: string }) => {
-			const order = ["appkit", "appkit-ui"];
-			const aIdx = order.indexOf(a.title);
-			const bIdx = order.indexOf(b.title);
-			if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
-			if (aIdx !== -1) return -1;
-			if (bIdx !== -1) return 1;
-			return a.title.localeCompare(b.title);
-		},
+		commitGroupsSort: "title",
 		commitsSort: ["type", "subject"],
-	});
+	} as Parameters<typeof generator.writer>[0]);
 
 	// Set the version context so the changelog header uses the right version
 	generator.context({ version });

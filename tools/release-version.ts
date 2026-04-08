@@ -15,7 +15,7 @@
  */
 
 import { Bumper } from "conventional-recommended-bump";
-import { ConventionalGitClient } from "@conventional-changelog/git-client";
+import { ConventionalGitClient, getSemverTags } from "@conventional-changelog/git-client";
 import { inc as semverInc } from "semver";
 
 interface Args {
@@ -45,10 +45,15 @@ async function main(): Promise<void> {
 	const cwd = process.cwd();
 	const gitClient = new ConventionalGitClient(cwd);
 
-	// Get the current version from the latest matching tag
-	const currentVersion = await gitClient.getVersionFromTags({
+	// Get the current version from the latest matching semver tag
+	let currentVersion: string | null = null;
+	for await (const tag of getSemverTags(gitClient, {
 		prefix: tagPrefix,
-	});
+		skipUnstable: true,
+	})) {
+		currentVersion = tag;
+		break; // getSemverTags yields in descending order, first is latest
+	}
 
 	const bumper = new Bumper(gitClient);
 
