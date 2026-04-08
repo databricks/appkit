@@ -2,6 +2,7 @@ import path from "node:path";
 import { Lang, parse } from "@ast-grep/napi";
 import { describe, expect, it } from "vitest";
 import {
+  computeOrigin,
   isWithinDirectory,
   parseImports,
   parsePluginUsages,
@@ -180,6 +181,50 @@ describe("plugin sync", () => {
     it("rejects untrusted package scopes by default", () => {
       expect(shouldAllowJsManifestForPackage("my-plugin")).toBe(false);
       expect(shouldAllowJsManifestForPackage("@acme/plugin")).toBe(false);
+    });
+  });
+
+  describe("computeOrigin", () => {
+    it("returns 'platform' when localOnly is true", () => {
+      expect(computeOrigin({ env: "PGHOST", localOnly: true })).toBe(
+        "platform",
+      );
+    });
+
+    it("returns 'platform' when localOnly is true even with resolve", () => {
+      expect(
+        computeOrigin({
+          env: "PGHOST",
+          localOnly: true,
+          resolve: "postgres:host",
+        }),
+      ).toBe("platform");
+    });
+
+    it("returns 'static' when value is present", () => {
+      expect(computeOrigin({ env: "PGPORT", value: "5432" })).toBe("static");
+    });
+
+    it("returns 'cli' when resolve is present", () => {
+      expect(
+        computeOrigin({
+          env: "LAKEBASE_ENDPOINT",
+          resolve: "postgres:endpointPath",
+        }),
+      ).toBe("cli");
+    });
+
+    it("returns 'user' for fields with no special properties", () => {
+      expect(
+        computeOrigin({
+          env: "DATABRICKS_WAREHOUSE_ID",
+          description: "Warehouse ID",
+        }),
+      ).toBe("user");
+    });
+
+    it("returns 'user' for minimal field with only env", () => {
+      expect(computeOrigin({ env: "MY_VAR" })).toBe("user");
     });
   });
 });

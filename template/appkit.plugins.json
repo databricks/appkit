@@ -1,6 +1,6 @@
 {
   "$schema": "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
-  "version": "1.1",
+  "version": "2.0",
   "plugins": {
     "analytics": {
       "name": "analytics",
@@ -18,7 +18,8 @@
             "fields": {
               "id": {
                 "env": "DATABRICKS_WAREHOUSE_ID",
-                "description": "SQL Warehouse ID"
+                "description": "SQL Warehouse ID",
+                "origin": "user"
               }
             }
           }
@@ -42,7 +43,8 @@
             "fields": {
               "path": {
                 "env": "DATABRICKS_VOLUME_FILES",
-                "description": "Volume path for file storage (e.g. /Volumes/catalog/schema/volume_name)"
+                "description": "Volume path for file storage (e.g. /Volumes/catalog/schema/volume_name)",
+                "origin": "user"
               }
             }
           }
@@ -66,7 +68,8 @@
             "fields": {
               "id": {
                 "env": "DATABRICKS_GENIE_SPACE_ID",
-                "description": "Default Genie Space ID"
+                "description": "Default Genie Space ID",
+                "origin": "user"
               }
             }
           }
@@ -116,25 +119,29 @@
                 "description": "Full Lakebase Postgres branch resource name. Obtain by running `databricks postgres list-branches projects/{project-id}`, select the desired item from the output array and use its .name value.",
                 "examples": [
                   "projects/{project-id}/branches/{branch-id}"
-                ]
+                ],
+                "origin": "user"
               },
               "database": {
                 "description": "Full Lakebase Postgres database resource name. Obtain by running `databricks postgres list-databases {branch-name}`, select the desired item from the output array and use its .name value. Requires the branch resource name.",
                 "examples": [
                   "projects/{project-id}/branches/{branch-id}/databases/{database-id}"
-                ]
+                ],
+                "origin": "user"
               },
               "host": {
                 "env": "PGHOST",
                 "localOnly": true,
                 "resolve": "postgres:host",
-                "description": "Postgres host for local development. Auto-injected by the platform at deploy time."
+                "description": "Postgres host for local development. Auto-injected by the platform at deploy time.",
+                "origin": "platform"
               },
               "databaseName": {
                 "env": "PGDATABASE",
                 "localOnly": true,
                 "resolve": "postgres:databaseName",
-                "description": "Postgres database name for local development. Auto-injected by the platform at deploy time."
+                "description": "Postgres database name for local development. Auto-injected by the platform at deploy time.",
+                "origin": "platform"
               },
               "endpointPath": {
                 "env": "LAKEBASE_ENDPOINT",
@@ -143,19 +150,22 @@
                 "description": "Lakebase endpoint resource name. Auto-injected at runtime via app.yaml valueFrom: postgres. For local development, obtain by running `databricks postgres list-endpoints {branch-name}`, select the desired item from the output array and use its .name value.",
                 "examples": [
                   "projects/{project-id}/branches/{branch-id}/endpoints/{endpoint-id}"
-                ]
+                ],
+                "origin": "cli"
               },
               "port": {
                 "env": "PGPORT",
                 "localOnly": true,
                 "value": "5432",
-                "description": "Postgres port. Auto-injected by the platform at deploy time."
+                "description": "Postgres port. Auto-injected by the platform at deploy time.",
+                "origin": "platform"
               },
               "sslmode": {
                 "env": "PGSSLMODE",
                 "localOnly": true,
                 "value": "require",
-                "description": "Postgres SSL mode. Auto-injected by the platform at deploy time."
+                "description": "Postgres SSL mode. Auto-injected by the platform at deploy time.",
+                "origin": "platform"
               }
             }
           }
@@ -197,6 +207,35 @@
         ],
         "optional": []
       }
+    }
+  },
+  "scaffolding": {
+    "command": "databricks apps init",
+    "flags": {
+      "--template-dir": {
+        "description": "Path to the template directory containing the app scaffold",
+        "required": true
+      },
+      "--config-dir": {
+        "description": "Path to the output directory for the initialized app",
+        "required": true
+      },
+      "--profile": {
+        "description": "Databricks CLI profile to use for authentication",
+        "required": false
+      }
+    },
+    "rules": {
+      "never": [
+        "Modify files inside the template directory",
+        "Skip resource configuration prompts",
+        "Hardcode workspace-specific values in template files"
+      ],
+      "must": [
+        "Use the template manifest (appkit.plugins.json) as the source of truth for available plugins",
+        "Respect requiredByTemplate flags when presenting plugin selection",
+        "Generate .env files with all required environment variables from selected plugins"
+      ]
     }
   }
 }
