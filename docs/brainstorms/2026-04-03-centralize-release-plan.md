@@ -124,15 +124,18 @@ Update the Releasing section to describe the new architecture.
 
 **Jobs:**
 
-**`poll`** (only on schedule):
+**`poll`** (only on schedule — skipped for `workflow_dispatch` and `pull_request`):
 - Uses `actions/create-github-app-token` to mint App token (`actions: read` on appkit)
 - Lists successful `prepare-release` workflow runs on appkit via REST API
 - Identifies release stream from the source workflow name: `prepare-release` → appkit release, `prepare-release-lakebase` → lakebase release. Uses this to determine which publish jobs to run and which tag pattern to check.
 - Finds the **latest** completed run
 - Checks if tag `v{version}` exists on appkit → skip if yes (already released)
 - Checks if a newer `prepare-release` run is in progress → wait/skip (avoid processing stale run)
-- Actor authorization: on `workflow_dispatch`, verify `github.actor` has admin/maintain role on the secure repo
 - Outputs: run ID, version, tag name, release stream
+
+**`actor-check`** (only on `workflow_dispatch`):
+- Verifies `github.actor` has admin/maintain role on the secure repo (per SOP)
+- Skipped for `schedule` and `pull_request` triggers (automated, no actor to check)
 
 **`download-verify`** (needs poll or workflow_dispatch):
 - Downloads `.tgz` artifacts from appkit run via REST API (GitHub App token)
@@ -175,6 +178,70 @@ Update the Releasing section to describe the new architecture.
 - Runs `npm install` in `template/` (public npm — packages available immediately)
 - Lockfile diff check: abort if unexpected packages changed
 - Git commit + tag `template-v{version}` + push via GitHub App
+
+#### Mode-switching conditional logic
+
+```yaml
+# Conditional logic in databricks-appkit.yml
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      run-id:
+        description: 'Appkit prepare-release workflow run ID'
+        required: true
+        type: string
+      dry-run:
+        description: 'Dry run (validate without publishing)'
+        required: false
+        type: boolean
+        default: false
+  pull_request:
+    paths: ['.github/workflows/databricks-appkit.yml']
+
+jobs:
+  poll:
+    if: github.event_name == 'schedule'
+    # Discovers run-id, version, tag, stream from API
+    # Skipped entirely for workflow_dispatch and pull_request
+    outputs:
+      run-id: ${{ steps.find-run.outputs.run-id }}
+      version: ${{ steps.find-run.outputs.version }}
+      tag: ${{ steps.find-run.outputs.tag }}
+      stream: ${{ steps.find-run.outputs.stream }}
+
+  download-verify:
+    needs: [poll]
+    if: always() && (needs.poll.result == 'success' || github.event_name == 'workflow_dispatch')
+    # Uses poll outputs (cron) OR workflow_dispatch inputs (manual)
+    env:
+      RUN_ID: ${{ needs.poll.outputs.run-id || inputs.run-id }}
+
+  scan:
+    needs: [download-verify]
+    # Runs after successful download-verify
+
+  publish-appkit:
+    needs: [scan]
+    if: needs.scan.result == 'success' && inputs.dry-run != true
+    # Skipped in dry-run mode; inputs context preserves boolean type
+
+  finalize:
+    needs: [publish-appkit, publish-appkit-ui]
+    if: needs.publish-appkit.result == 'success' && inputs.dry-run != true
+
+  template-sync:
+    needs: [finalize]
+    if: needs.finalize.result == 'success' && inputs.dry-run != true
+```
+
+**Key points:**
+- `poll` runs only on `schedule` — skipped entirely for `workflow_dispatch` and `pull_request`
+- `download-verify` accepts run ID from either source via `needs.poll.outputs.run-id || inputs.run-id`
+- `inputs.dry-run` (not `github.event.inputs.dry-run`) preserves the boolean type for clean conditionals
+- `dry-run` gates publish/finalize/template-sync — allows full pipeline validation without side effects
+- `pull_request` trigger runs only `download-verify` + `scan` (self-test, no publish)
 
 ### B2. `CODEOWNERS`
 

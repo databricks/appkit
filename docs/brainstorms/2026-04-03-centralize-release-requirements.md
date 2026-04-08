@@ -166,9 +166,9 @@ For commit ordering, race condition prevention, and reliability guarantees, see 
 
 ### Fallback: Manual Mode
 
-- **R41.** The secure repo must support `workflow_dispatch` with appkit run ID as input (no cron needed)
-- **R42.** In manual mode, the secure repo performs the full pipeline: download → verify → scan → publish → changelog → tag → release → template sync
-- **R43.** The transition from manual to automated mode should require only enabling the cron schedule
+- **R41.** The secure repo workflow must support `workflow_dispatch` with inputs: `run-id` (required, the appkit workflow run ID to process) and `dry-run` (optional boolean, default false). When triggered manually, the `poll` job is skipped entirely — the provided `run-id` feeds directly into `download-verify`.
+- **R42.** In manual mode (`workflow_dispatch`), the secure repo performs the full pipeline: download → verify → scan → publish → changelog → tag → release → template sync. The only difference from automated mode is the source of the run ID (user-provided vs poll-discovered). When `dry-run` is true, publish/finalize/template-sync jobs are skipped for validation without side effects.
+- **R43.** The transition from manual to automated mode requires only enabling the cron schedule trigger. No conditional logic changes — the `poll` job outputs the same `run-id` that `workflow_dispatch` provides directly.
 
 ## Success Criteria
 
@@ -212,20 +212,8 @@ The entire release pipeline (including `prepare-release`) could run in the secur
 - Infra team will create GitHub environments for Trusted Publishing when requested
 - Infra team will approve CODEOWNERS changes and GitHub App installation
 
-## Outstanding Questions
+## Resolved Questions
 
-### Resolve Before Planning
-
-- [Affects R21-R26][Infra team] Does the secure repo already have a GitHub App for cross-repo operations, or does one need to be created? Who should own it?
-
-### Deferred to Planning
-
-- [Affects R41-R43][Technical] Exact conditional logic for manual vs automated mode
-
-### Resolved
-
-- [Affects R13] `npm-oidc-publish.sh` handles **one package per invocation** — takes a single `.tgz` tarball, requests a fresh OIDC token per call, and requires a per-package GitHub environment (`npm-{package-name}`). This confirms the plan's design: separate publish jobs per package (`publish-appkit`, `publish-appkit-ui`, `publish-lakebase`), each with their own environment.
-
-## Next Steps
-
-→ Resolve the GitHub App question with the infra team, then proceed to implementation planning
+- **[R21-R26] GitHub App:** Requirements documented in R21-R26 and Part C of the implementation plan. Infra team owns creation; we document the exact permissions and scope needed.
+- **[R13] npm-oidc-publish.sh:** Handles one package per invocation — takes a single `.tgz` tarball, requests a fresh OIDC token per call, requires a per-package GitHub environment (`npm-{package-name}`). Confirmed from secure repo source. Plan uses separate publish jobs per package.
+- **[R41-R43] Manual vs automated mode:** Resolved — `poll` job runs only on `schedule`; `workflow_dispatch` provides `run-id` directly, skipping poll. Same pipeline logic for both modes, only run ID source differs. `dry-run` input gates publish/finalize/template-sync.
