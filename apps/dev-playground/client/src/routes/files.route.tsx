@@ -5,6 +5,7 @@ import {
   FileBreadcrumb,
   FilePreviewPanel,
   NewFolderInput,
+  usePluginClientConfig,
 } from "@databricks/appkit-ui/react";
 import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
 import { FolderPlus, Loader2, Upload } from "lucide-react";
@@ -36,8 +37,15 @@ export const Route = createFileRoute("/files")({
   },
 });
 
+interface FilesClientConfig {
+  volumes?: string[];
+}
+
+const EMPTY_VOLUMES: readonly string[] = Object.freeze([]);
+
 function FilesRoute() {
-  const [volumes, setVolumes] = useState<string[]>([]);
+  const { volumes = EMPTY_VOLUMES } =
+    usePluginClientConfig<FilesClientConfig>("files");
   const [volumeKey, setVolumeKey] = useState<string>(
     () => localStorage.getItem("appkit:files:volumeKey") ?? "",
   );
@@ -139,21 +147,14 @@ function FilesRoute() {
   );
 
   useEffect(() => {
-    fetch("/api/files/volumes")
-      .then((res) => res.json())
-      .then((data: { volumes: string[] }) => {
-        const list = data.volumes ?? [];
-        setVolumes(list);
-        if (!volumeKey || !list.includes(volumeKey)) {
-          const first = list[0];
-          if (first) {
-            setVolumeKey(first);
-            localStorage.setItem("appkit:files:volumeKey", first);
-          }
-        }
-      })
-      .catch(() => {});
-  }, [volumeKey]);
+    if (!volumeKey || !volumes.includes(volumeKey)) {
+      const first = volumes[0];
+      if (first) {
+        setVolumeKey(first);
+        localStorage.setItem("appkit:files:volumeKey", first);
+      }
+    }
+  }, [volumeKey, volumes]);
 
   // Load root directory when volume key is set
   useEffect(() => {

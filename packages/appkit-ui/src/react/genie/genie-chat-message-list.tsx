@@ -4,7 +4,11 @@ import { ScrollArea } from "../ui/scroll-area";
 import { Skeleton } from "../ui/skeleton";
 import { Spinner } from "../ui/spinner";
 import { GenieChatMessage } from "./genie-chat-message";
-import type { GenieChatStatus, GenieMessageItem } from "./types";
+import {
+  type GenieChatStatus,
+  type GenieMessageItem,
+  TERMINAL_STATUSES,
+} from "./types";
 
 interface GenieChatMessageListProps {
   /** Array of messages to display */
@@ -166,11 +170,18 @@ export function GenieChatMessageList({
   const showStreamingIndicator =
     status === "streaming" &&
     lastMessage?.role === "assistant" &&
-    lastMessage.id === "";
+    !lastMessage.content &&
+    !TERMINAL_STATUSES.has(lastMessage.status);
 
   return (
-    <ScrollArea ref={scrollRef} className={cn("flex-1 min-h-0 p-4", className)}>
-      <div className="flex flex-col gap-4">
+    <ScrollArea
+      ref={scrollRef}
+      className={cn(
+        "flex-1 min-h-0 p-4 [&_[data-slot=scroll-area-viewport]>div]:!block",
+        className,
+      )}
+    >
+      <div className="flex flex-col gap-4 min-w-0">
         {hasPreviousPage && <div ref={sentinelRef} className="h-px" />}
 
         {status === "loading-older" && (
@@ -192,7 +203,10 @@ export function GenieChatMessageList({
 
         {messages
           .filter(
-            (msg) => msg.role !== "assistant" || msg.id !== "" || msg.content,
+            (msg) =>
+              msg.role !== "assistant" ||
+              msg.content ||
+              (msg.id !== "" && TERMINAL_STATUSES.has(msg.status)),
           )
           .map((msg) => (
             <GenieChatMessage key={msg.id} message={msg} />

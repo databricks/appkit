@@ -601,6 +601,42 @@ describe("Plugin", () => {
     });
   });
 
+  describe("exports", () => {
+    test("should return empty object by default", () => {
+      const plugin = new TestPlugin(config);
+      const basePlugin = new (class extends Plugin<BasePluginConfig> {})(
+        config,
+      );
+
+      expect(basePlugin.exports()).toEqual({});
+      expect(plugin.exports()).toEqual({
+        customMethod: expect.any(Function),
+        syncMethod: expect.any(Function),
+      });
+    });
+  });
+
+  describe("clientConfig", () => {
+    test("should return empty object by default", () => {
+      const plugin = new TestPlugin(config);
+      expect(plugin.clientConfig()).toEqual({});
+    });
+
+    test("should allow overriding to expose custom data", () => {
+      class PluginWithClientConfig extends Plugin<BasePluginConfig> {
+        clientConfig() {
+          return { featureFlag: true, warehouseId: "abc-123" };
+        }
+      }
+
+      const plugin = new PluginWithClientConfig(config);
+      expect(plugin.clientConfig()).toEqual({
+        featureFlag: true,
+        warehouseId: "abc-123",
+      });
+    });
+  });
+
   describe("getSkipBodyParsingPaths", () => {
     test("should return empty set by default", () => {
       const plugin = new TestPlugin(config);

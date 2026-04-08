@@ -159,8 +159,13 @@ vi.mock("../utils", () => ({
   printRoutes: vi.fn(),
 }));
 
+vi.mock("../client-config-sanitizer", () => ({
+  sanitizeClientConfig: vi.fn((_name: string, config: any) => config),
+}));
+
 import fs from "node:fs";
 import express from "express";
+import { sanitizeClientConfig } from "../client-config-sanitizer";
 import { ServerPlugin } from "../index";
 import { RemoteTunnelController } from "../remote-tunnel/remote-tunnel-controller";
 import { StaticServer } from "../static-server";
@@ -354,6 +359,97 @@ describe("ServerPlugin", () => {
       expect(mockExpressApp.use).toHaveBeenCalledWith(
         "/api/test-plugin",
         routerInstance,
+      );
+    });
+
+    test("extendRoutes collects clientConfig from plugins", async () => {
+      process.env.NODE_ENV = "production";
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+
+      const plugins: any = {
+        "plugin-a": {
+          name: "plugin-a",
+          injectRoutes: vi.fn(),
+          getEndpoints: vi.fn().mockReturnValue({}),
+          clientConfig: vi.fn().mockReturnValue({ featureX: true }),
+        },
+        "plugin-b": {
+          name: "plugin-b",
+          injectRoutes: vi.fn(),
+          getEndpoints: vi.fn().mockReturnValue({}),
+          clientConfig: vi.fn().mockReturnValue({}),
+        },
+        "plugin-c": {
+          name: "plugin-c",
+          injectRoutes: vi.fn(),
+          getEndpoints: vi.fn().mockReturnValue({}),
+        },
+      };
+
+      const plugin = new ServerPlugin({ autoStart: false, plugins });
+      await plugin.start();
+
+      expect(plugins["plugin-a"].clientConfig).toHaveBeenCalled();
+      expect(plugins["plugin-b"].clientConfig).toHaveBeenCalled();
+
+      expect(StaticServer).toHaveBeenCalledWith(
+        mockExpressApp,
+        expect.any(String),
+        expect.any(Object),
+        expect.objectContaining({ "plugin-a": { featureX: true } }),
+      );
+    });
+
+    test("extendRoutes skips null clientConfig", async () => {
+      process.env.NODE_ENV = "production";
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+
+      const plugins: any = {
+        "plugin-null": {
+          name: "plugin-null",
+          injectRoutes: vi.fn(),
+          getEndpoints: vi.fn().mockReturnValue({}),
+          clientConfig: vi.fn().mockReturnValue(null),
+        },
+      };
+
+      const plugin = new ServerPlugin({ autoStart: false, plugins });
+      await plugin.start();
+
+      expect(plugins["plugin-null"].clientConfig).toHaveBeenCalled();
+      expect(StaticServer).toHaveBeenCalledWith(
+        mockExpressApp,
+        expect.any(String),
+        expect.any(Object),
+        {},
+      );
+    });
+
+    test("extendRoutes logs and skips invalid clientConfig instead of crashing", async () => {
+      process.env.NODE_ENV = "production";
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      const actualSanitizer = await vi.importActual<
+        typeof import("../client-config-sanitizer")
+      >("../client-config-sanitizer");
+      vi.mocked(sanitizeClientConfig).mockImplementationOnce(
+        actualSanitizer.sanitizeClientConfig,
+      );
+
+      const plugins: any = {
+        "plugin-a": {
+          name: "plugin-a",
+          injectRoutes: vi.fn(),
+          getEndpoints: vi.fn().mockReturnValue({}),
+          clientConfig: vi.fn().mockReturnValue(true),
+        },
+      };
+
+      const plugin = new ServerPlugin({ autoStart: false, plugins });
+      await expect(plugin.start()).resolves.toBeDefined();
+      expect(mockLoggerError).toHaveBeenCalledWith(
+        "Plugin '%s' clientConfig() failed, skipping its config: %O",
+        "plugin-a",
+        expect.any(Error),
       );
     });
 

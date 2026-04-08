@@ -10,6 +10,7 @@ vi.mock("node:fs", () => ({
         "<!DOCTYPE html><html><head></head><body><div id='root'></div></body></html>",
       ),
     existsSync: vi.fn().mockReturnValue(true),
+    readdirSync: vi.fn().mockReturnValue([]),
   },
 }));
 
@@ -26,8 +27,13 @@ vi.mock("express", () => ({
 vi.mock("../utils", () => ({
   getQueries: vi.fn().mockReturnValue({ query1: "SELECT 1" }),
   getConfigScript: vi.fn().mockReturnValue(`
+    <script id="__appkit__" type="application/json">
+      {"appName":"my-test-app","queries":{"query1":"query1"},"endpoints":{},"plugins":{}}
+    </script>
     <script>
-      window.__CONFIG__ = {"appName":"my-test-app","queries":{"query1":"query1"},"endpoints":{}};
+      window.__appkit__ = JSON.parse(
+        document.getElementById("__appkit__")?.textContent ?? "{}",
+      );
     </script>
   `),
 }));
@@ -152,12 +158,18 @@ describe("StaticServer", () => {
       handler({ path: "/" }, mockRes, mockNext);
 
       const sentHtml = mockRes.send.mock.calls[0][0];
-      expect(sentHtml).toContain("window.__CONFIG__");
-      expect(sentHtml).toContain("<script>");
+      expect(sentHtml).toContain('id="__appkit__"');
+      expect(sentHtml).toContain('type="application/json"');
+      expect(sentHtml).toContain("window.__appkit__ = JSON.parse");
     });
 
-    test("should include appName in config", () => {
+    test("should include appName in config", async () => {
       process.env.DATABRICKS_APP_NAME = "my-test-app";
+      const actualUtils =
+        await vi.importActual<typeof import("../utils")>("../utils");
+      vi.mocked(getConfigScript).mockImplementationOnce(
+        actualUtils.getConfigScript,
+      );
       const server = new StaticServer(mockApp, "/static");
 
       server.setup();

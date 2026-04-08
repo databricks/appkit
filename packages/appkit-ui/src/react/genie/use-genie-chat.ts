@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { connectSSE } from "@/js";
-import type {
-  GenieChatStatus,
-  GenieMessageItem,
-  GenieMessageResponse,
-  GenieStreamEvent,
-  UseGenieChatOptions,
-  UseGenieChatReturn,
+import {
+  type GenieChatStatus,
+  type GenieMessageItem,
+  type GenieMessageResponse,
+  type GenieStreamEvent,
+  TERMINAL_STATUSES,
+  type UseGenieChatOptions,
+  type UseGenieChatReturn,
 } from "./types";
 
 function getUrlParam(name: string): string | null {
@@ -66,10 +67,30 @@ function makeAssistantItem(msg: GenieMessageResponse): GenieMessageItem {
 /**
  * The API bundles user question (content) and AI answer (attachments) in one message.
  * Split into separate user + assistant items for display.
+ *
+ * When a message is still in-progress (non-terminal status) and has no
+ * attachments yet, we emit an empty assistant placeholder so the UI can
+ * show a loading indicator and later poll for the completed response.
  */
 function messageResultToItems(msg: GenieMessageResponse): GenieMessageItem[] {
   const hasAttachments = (msg.attachments?.length ?? 0) > 0;
-  if (!hasAttachments) return [makeUserItem(msg)];
+
+  if (!hasAttachments && TERMINAL_STATUSES.has(msg.status)) {
+    return [makeUserItem(msg)];
+  }
+  if (!hasAttachments) {
+    return [
+      makeUserItem(msg, "-user"),
+      {
+        id: msg.messageId,
+        role: "assistant",
+        content: "",
+        status: msg.status,
+        attachments: [],
+        queryResults: new Map(),
+      },
+    ];
+  }
   return [makeUserItem(msg, "-user"), makeAssistantItem(msg)];
 }
 
@@ -169,6 +190,9 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
   const conversationIdRef = useRef<string | null>(null);
   const nextPageTokenRef = useRef<string | null>(null);
   const isLoadingOlderRef = useRef(false);
+  const processStreamEventRef = useRef<(event: GenieStreamEvent) => void>(
+    () => {},
+  );
 
   useEffect(() => {
     conversationIdRef.current = conversationId;
@@ -199,22 +223,17 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
         }
 
         case "message_result": {
-          const msg = event.message;
-          const hasAttachments = (msg.attachments?.length ?? 0) > 0;
+          const item = makeAssistantItem(event.message);
+          setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (!last || last.role !== "assistant") return prev;
 
-          if (hasAttachments) {
-            // During streaming we already appended the user message locally,
-            // so only handle assistant results. Messages without attachments
-            // are the user-message echo from the API — skip those.
-            const item = makeAssistantItem(msg);
-            setMessages((prev) => {
-              const last = prev[prev.length - 1];
-              if (last?.role === "assistant" && last.id === "") {
-                return [...prev.slice(0, -1), item];
-              }
-              return [...prev, item];
-            });
-          }
+            if (last.id === event.message.messageId || last.id === "") {
+              return [...prev.slice(0, -1), item];
+            }
+
+            return prev;
+          });
           break;
         }
 
@@ -253,6 +272,8 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
     },
     [persistInUrl, urlParamName],
   );
+
+  processStreamEventRef.current = processStreamEvent;
 
   const sendMessage = useCallback(
     (content: string) => {
@@ -298,7 +319,9 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
         signal: abortController.signal,
         onMessage: async (message) => {
           try {
-            processStreamEvent(JSON.parse(message.data) as GenieStreamEvent);
+            processStreamEventRef.current(
+              JSON.parse(message.data) as GenieStreamEvent,
+            );
           } catch {
             // Malformed SSE data
           }
@@ -318,13 +341,19 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
               : prev;
           });
         },
-      }).then(() => {
-        if (!abortController.signal.aborted) {
-          setStatus((prev) => (prev === "error" ? "error" : "idle"));
-        }
-      });
+      })
+        .then(() => {
+          if (!abortController.signal.aborted) {
+            setStatus((prev) => (prev === "error" ? "error" : "idle"));
+          }
+        })
+        .catch(() => {
+          if (abortController.signal.aborted) return;
+          setError("Connection error. Please try again.");
+          setStatus("error");
+        });
     },
-    [alias, basePath, processStreamEvent],
+    [alias, basePath],
   );
 
   /** Creates an AbortController, stores it in the given ref, and fetches a conversation page. */
@@ -362,6 +391,55 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
     [alias, basePath],
   );
 
+  const pollPendingMessage = useCallback(
+    (
+      convId: string,
+      messageId: string,
+      parentAbortController: AbortController,
+    ) => {
+      setStatus("streaming");
+
+      const requestId = crypto.randomUUID();
+      const url =
+        `${basePath}/${encodeURIComponent(alias)}/conversations/${encodeURIComponent(convId)}` +
+        `/messages/${encodeURIComponent(messageId)}?requestId=${encodeURIComponent(requestId)}`;
+
+      connectSSE({
+        url,
+        signal: parentAbortController.signal,
+        onMessage: async (message) => {
+          try {
+            processStreamEventRef.current(
+              JSON.parse(message.data) as GenieStreamEvent,
+            );
+          } catch {
+            // Malformed SSE data
+          }
+        },
+        onError: (err) => {
+          if (parentAbortController.signal.aborted) return;
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Failed to poll pending message.",
+          );
+          setStatus("error");
+        },
+      })
+        .then(() => {
+          if (!parentAbortController.signal.aborted) {
+            setStatus((prev) => (prev === "error" ? "error" : "idle"));
+          }
+        })
+        .catch(() => {
+          if (parentAbortController.signal.aborted) return;
+          setError("Failed to poll pending message.");
+          setStatus("error");
+        });
+    },
+    [alias, basePath],
+  );
+
   const loadHistory = useCallback(
     (convId: string) => {
       paginationAbortRef.current?.abort();
@@ -376,13 +454,21 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
         { errorMessage: "Failed to load conversation history." },
       );
       promise.then((items) => {
-        if (!abortController.signal.aborted) {
-          setMessages(items);
+        if (abortController.signal.aborted) return;
+        setMessages(items);
+
+        const lastItem = items[items.length - 1];
+        if (
+          lastItem?.role === "assistant" &&
+          !TERMINAL_STATUSES.has(lastItem.status)
+        ) {
+          pollPendingMessage(convId, lastItem.id, abortController);
+        } else {
           setStatus((prev) => (prev === "error" ? "error" : "idle"));
         }
       });
     },
-    [fetchPage],
+    [fetchPage, pollPendingMessage],
   );
 
   const fetchPreviousPage = useCallback(() => {

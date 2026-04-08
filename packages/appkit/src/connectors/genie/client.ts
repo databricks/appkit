@@ -183,7 +183,7 @@ export class GenieConnector {
     spaceId: string,
     content: string,
     conversationId: string | undefined,
-    options?: { timeout?: number },
+    options?: { timeout?: number; signal?: AbortSignal },
   ): AsyncGenerator<GenieStreamEvent> {
     try {
       const {
@@ -289,6 +289,7 @@ export class GenieConnector {
       includeQueryResults?: boolean;
       pageSize?: number;
       pageToken?: string;
+      signal?: AbortSignal;
     },
   ): AsyncGenerator<GenieStreamEvent> {
     const includeQueryResults = options?.includeQueryResults !== false;
@@ -375,6 +376,77 @@ export class GenieConnector {
         "Genie getConversation error (spaceId=%s, conversationId=%s): %O",
         spaceId,
         conversationId,
+        error,
+      );
+      yield { type: "error", error: classifyGenieError(error) };
+    }
+  }
+
+  /**
+   * Polls a single message via `getMessage` until it reaches a terminal
+   * state (`COMPLETED` or `FAILED`). Yields the same event types as
+   * `streamSendMessage` so callers can reuse the same SSE processing logic.
+   */
+  async *streamGetMessage(
+    workspaceClient: WorkspaceClient,
+    spaceId: string,
+    conversationId: string,
+    messageId: string,
+    options?: { timeout?: number; pollInterval?: number; signal?: AbortSignal },
+  ): AsyncGenerator<GenieStreamEvent> {
+    const pollInterval = options?.pollInterval ?? 3_000;
+    const signal = options?.signal;
+    let lastStatus = "";
+
+    try {
+      while (true) {
+        if (signal?.aborted) return;
+
+        const message = await workspaceClient.genie.getMessage({
+          space_id: spaceId,
+          conversation_id: conversationId,
+          message_id: messageId,
+        });
+
+        if (message.status && message.status !== lastStatus) {
+          lastStatus = message.status;
+          yield { type: "status", status: message.status };
+        }
+
+        const isTerminal =
+          message.status === "COMPLETED" || message.status === "FAILED";
+        if (isTerminal) {
+          const messageResponse = toMessageResponse(message);
+          yield { type: "message_result", message: messageResponse };
+          yield* this.emitQueryResults(
+            workspaceClient,
+            spaceId,
+            conversationId,
+            messageId,
+            messageResponse,
+          );
+          return;
+        }
+
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, pollInterval);
+          signal?.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(timer);
+              resolve();
+            },
+            { once: true },
+          );
+        });
+      }
+    } catch (error) {
+      if (signal?.aborted) return;
+      logger.error(
+        "Genie getMessage poll error (spaceId=%s, conversationId=%s, messageId=%s): %O",
+        spaceId,
+        conversationId,
+        messageId,
         error,
       );
       yield { type: "error", error: classifyGenieError(error) };

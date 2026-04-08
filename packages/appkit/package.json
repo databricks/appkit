@@ -21,7 +21,8 @@
     "llms.txt",
     "README.md",
     "DCO",
-    "NOTICE.md"
+    "NOTICE.md",
+    "sbom.cdx.json"
   ],
   "exports": {
     ".": {

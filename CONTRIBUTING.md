@@ -100,17 +100,18 @@ export DATABRICKS_WORKSPACE_DIR=your-workspace-dir # The source workspace direct
 
 ## Generating App templates
 
-To generate app templates, run the following command:
+The single source template (`template/`) is used to generate app variants for the [`app-templates`](https://github.com/databricks/app-templates) repository. The variants and post-processing steps are defined in `tools/generate-app-templates.ts`.
 
 ```bash
 pnpm generate:app-templates
 ```
 
-By default, the command will generate app templates in the `../app-templates` directory, assuming that you have the [`app-templates`](https://github.com/databricks/app-templates) repository cloned in the same parent directory as this one.
+By default, this outputs to `../app-templates`, assuming the repo is cloned alongside this one.
 
-You can override the output directory by setting the `APP_TEMPLATES_OUTPUT_DIR` environment variable.
-
-By default, the command will use the `databricks` CLI to generate the app templates. You can override the CLI by setting the `DATABRICKS_CLI` environment variable to provide a different binary name or path.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `APP_TEMPLATES_OUTPUT_DIR` | `../app-templates` | Output directory |
+| `DATABRICKS_CLI` | `databricks` | CLI binary name or path |
 
 ## Contributing to AppKit documentation
 

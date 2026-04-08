@@ -1112,6 +1112,10 @@ export class FilesPlugin extends Plugin implements ToolProvider {
 
     return filesExport;
   }
+
+  clientConfig(): Record<string, unknown> {
+    return { volumes: this.volumeKeys };
+  }
 }
 
 /**

@@ -1,3 +1,4 @@
+import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { useMemo } from "react";
 import { cn } from "../lib/utils";
@@ -9,16 +10,17 @@ import type { GenieAttachmentResponse, GenieMessageItem } from "./types";
 /**
  * Using `marked` instead of `react-markdown` because `react-markdown` depends on
  * `micromark-util-symbol` which has broken ESM exports with `rolldown-vite`.
- * Content comes from our own Genie API so `dangerouslySetInnerHTML` is safe.
+ * Output is sanitized with DOMPurify before being passed to `dangerouslySetInnerHTML`.
  */
 marked.setOptions({ breaks: true, gfm: true });
 
 const markdownStyles = cn(
-  "text-sm",
+  "text-sm break-words",
   "[&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0",
   "[&_pre]:bg-background/50 [&_pre]:p-2 [&_pre]:rounded [&_pre]:text-xs [&_pre]:overflow-x-auto",
   "[&_code]:text-xs [&_code]:bg-background/50 [&_code]:px-1 [&_code]:rounded",
-  "[&_table]:text-xs [&_th]:px-2 [&_th]:py-1 [&_td]:px-2 [&_td]:py-1",
+  "[&_table]:text-xs [&_table]:block [&_table]:overflow-x-auto [&_table]:max-w-full",
+  "[&_th]:px-2 [&_th]:py-1 [&_td]:px-2 [&_td]:py-1",
   "[&_table]:border-collapse [&_th]:border [&_td]:border",
   "[&_th]:border-border [&_td]:border-border",
   "[&_a]:underline",
@@ -43,7 +45,10 @@ export function GenieChatMessage({
   const isUser = message.role === "user";
   const queryAttachments = message.attachments.filter(isQueryAttachment);
   const html = useMemo(
-    () => (message.content ? (marked.parse(message.content) as string) : ""),
+    () =>
+      message.content
+        ? DOMPurify.sanitize(marked.parse(message.content) as string)
+        : "",
     [message.content],
   );
 
@@ -66,15 +71,10 @@ export function GenieChatMessage({
         </AvatarFallback>
       </Avatar>
 
-      <div
-        className={cn(
-          "flex flex-col gap-2 max-w-[80%] min-w-0 overflow-hidden",
-          isUser ? "items-end" : "items-start",
-        )}
-      >
+      <div className="flex flex-col gap-2 max-w-[80%] min-w-0 overflow-hidden">
         <Card
           className={cn(
-            "px-4 py-3 max-w-full overflow-hidden",
+            "w-full px-4 py-3 overflow-hidden",
             isUser
               ? "bg-primary text-primary-foreground [&_*::selection]:bg-primary-foreground/30 [&::selection]:bg-primary-foreground/30"
               : "bg-muted",
@@ -122,7 +122,7 @@ export function GenieChatMessage({
                     </details>
                   </Card>
                   {queryResult != null && (
-                    <Card className="px-4 py-3 overflow-hidden">
+                    <Card className="w-full px-4 py-3 overflow-hidden">
                       <GenieQueryVisualization data={queryResult} />
                     </Card>
                   )}

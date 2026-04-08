@@ -103,7 +103,7 @@ describe("RemoteTunnelManager (light unit tests)", () => {
       expect.objectContaining({ sameSite: "lax" }),
     );
     expect(res.send).toHaveBeenCalledWith(
-      expect.stringContaining("window.__CONFIG__"),
+      expect.stringContaining("window.__appkit__"),
     );
   });
 

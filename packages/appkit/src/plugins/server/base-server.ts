@@ -1,5 +1,9 @@
 import type express from "express";
-import { getConfigScript, type PluginEndpoints } from "./utils";
+import {
+  getConfigScript,
+  type PluginClientConfigs,
+  type PluginEndpoints,
+} from "./utils";
 
 /**
  * Base server for the AppKit.
@@ -11,10 +15,16 @@ import { getConfigScript, type PluginEndpoints } from "./utils";
 export abstract class BaseServer {
   protected app: express.Application;
   protected endpoints: PluginEndpoints;
+  protected pluginConfigs: PluginClientConfigs;
 
-  constructor(app: express.Application, endpoints: PluginEndpoints = {}) {
+  constructor(
+    app: express.Application,
+    endpoints: PluginEndpoints = {},
+    pluginConfigs: PluginClientConfigs = {},
+  ) {
     this.app = app;
     this.endpoints = endpoints;
+    this.pluginConfigs = pluginConfigs;
   }
 
   abstract setup(): void | Promise<void>;
@@ -22,6 +32,6 @@ export abstract class BaseServer {
   async close(): Promise<void> {}
 
   protected getConfigScript(): string {
-    return getConfigScript(this.endpoints);
+    return getConfigScript(this.endpoints, this.pluginConfigs);
   }
 }
