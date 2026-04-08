@@ -87,7 +87,8 @@ if (installExit !== 0) {
   process.exit(installExit);
 }
 
-// Lockfile diff check: verify only @databricks/appkit* packages changed
+// Lockfile diff check: verify only @databricks packages changed
+const ALLOWED_PACKAGES = ["@databricks/appkit", "@databricks/lakebase"];
 if (existsSync(lockfileBackup)) {
   const parsePkgs = (path: string): string[] => {
     const lock = JSON.parse(readFileSync(path, "utf-8"));
@@ -100,7 +101,7 @@ if (existsSync(lockfileBackup)) {
   const added = [...after].filter((p) => !before.has(p));
   const removed = [...before].filter((p) => !after.has(p));
   const unexpected = [...added, ...removed].filter(
-    (p) => !p.includes("@databricks/appkit"),
+    (p) => !ALLOWED_PACKAGES.some((allowed) => p.includes(allowed)),
   );
 
   if (unexpected.length > 0) {
