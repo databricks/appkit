@@ -2,17 +2,18 @@ import { randomUUID } from "node:crypto";
 import type express from "express";
 import type {
   AgentAdapter,
-  AgentEvent,
   AgentToolDefinition,
   IAppRouter,
   Message,
   PluginPhase,
+  ResponseStreamEvent,
   ToolProvider,
 } from "shared";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import { agentStreamDefaults } from "./defaults";
+import { AgentEventTranslator } from "./event-translator";
 import manifest from "./manifest.json";
 import { InMemoryThreadStore } from "./thread-store";
 import type { AgentPluginConfig, RegisteredAgent, ToolEntry } from "./types";
@@ -233,11 +234,17 @@ export class AgentPlugin extends Plugin {
 
     const self = this;
 
-    await this.executeStream<AgentEvent>(
+    await this.executeStream<ResponseStreamEvent>(
       res,
       async function* () {
+        const translator = new AgentEventTranslator();
         try {
-          yield { type: "metadata" as const, data: { threadId: thread.id } };
+          for (const evt of translator.translate({
+            type: "metadata",
+            data: { threadId: thread.id },
+          })) {
+            yield evt;
+          }
 
           const stream = resolvedAgent.adapter.run(
             {
@@ -258,7 +265,9 @@ export class AgentPlugin extends Plugin {
               fullContent += event.content;
             }
 
-            yield event;
+            for (const translated of translator.translate(event)) {
+              yield translated;
+            }
           }
 
           if (fullContent) {
@@ -275,7 +284,9 @@ export class AgentPlugin extends Plugin {
             );
           }
 
-          yield { type: "status" as const, status: "complete" as const };
+          for (const evt of translator.finalize()) {
+            yield evt;
+          }
         } catch (error) {
           if (signal.aborted) return;
           logger.error("Agent chat error: %O", error);

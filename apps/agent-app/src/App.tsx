@@ -1,19 +1,27 @@
 import { TooltipProvider } from "@databricks/appkit-ui/react";
-import { useCallback, useEffect, useRef, useState } from "react";
 import { marked } from "marked";
+import { useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
 import { ThemeSelector } from "./components/theme-selector";
 
-interface AgentEvent {
+interface SSEEvent {
   type: string;
+  delta?: string;
+  item_id?: string;
+  item?: {
+    type?: string;
+    id?: string;
+    call_id?: string;
+    name?: string;
+    arguments?: string;
+    output?: string;
+    status?: string;
+  };
   content?: string;
-  callId?: string;
-  name?: string;
-  args?: unknown;
-  result?: unknown;
-  error?: string;
-  status?: string;
   data?: Record<string, unknown>;
+  error?: string;
+  sequence_number?: number;
+  output_index?: number;
 }
 
 interface ChatMessage {
@@ -24,7 +32,7 @@ interface ChatMessage {
 
 export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [events, setEvents] = useState<AgentEvent[]>([]);
+  const [events, setEvents] = useState<SSEEvent[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
@@ -98,14 +106,14 @@ export default function App() {
           const data = line.slice(6).trim();
           if (!data || data === "[DONE]") continue;
           try {
-            const event: AgentEvent = JSON.parse(data);
+            const event: SSEEvent = JSON.parse(data);
             setEvents((prev) => [...prev, event]);
 
-            if (event.type === "metadata" && event.data?.threadId) {
+            if (event.type === "appkit.metadata" && event.data?.threadId) {
               setThreadId(event.data.threadId as string);
             }
-            if (event.type === "message_delta" && event.content) {
-              content += event.content;
+            if (event.type === "response.output_text.delta" && event.delta) {
+              content += event.delta;
               setMessages((prev) => {
                 const updated = [...prev];
                 const last = updated[updated.length - 1];
@@ -238,22 +246,47 @@ export default function App() {
                 {events.length === 0 && (
                   <p className="event-empty">Events will appear here</p>
                 )}
-                {events.map((event, i) => (
-                  <div key={`${event.type}-${i}`} className="event-row">
-                    <span className="event-type">{event.type}</span>
-                    <span className="event-detail">
-                      {event.type === "message_delta"
-                        ? event.content?.slice(0, 60)
-                        : event.type === "tool_call"
-                          ? `${event.name}(${JSON.stringify(event.args).slice(0, 40)})`
-                          : event.type === "tool_result"
-                            ? `${String(event.result).slice(0, 60)}`
-                            : event.type === "status"
-                              ? event.status
-                              : JSON.stringify(event).slice(0, 60)}
-                    </span>
-                  </div>
-                ))}
+                {events.map((event, i) => {
+                  let detail: string;
+                  switch (event.type) {
+                    case "response.output_text.delta":
+                      detail = event.delta?.slice(0, 60) ?? "";
+                      break;
+                    case "response.output_item.added":
+                    case "response.output_item.done":
+                      detail =
+                        event.item?.type === "function_call"
+                          ? `${event.item.name}(${(event.item.arguments ?? "").slice(0, 40)})`
+                          : event.item?.type === "function_call_output"
+                            ? (event.item.output?.slice(0, 60) ?? "")
+                            : (event.item?.status ?? event.item?.type ?? "");
+                      break;
+                    case "response.completed":
+                      detail = "done";
+                      break;
+                    case "error":
+                      detail = event.error ?? "unknown";
+                      break;
+                    case "appkit.metadata":
+                      detail = JSON.stringify(event.data).slice(0, 60);
+                      break;
+                    case "appkit.thinking":
+                      detail = event.content?.slice(0, 60) ?? "";
+                      break;
+                    default:
+                      detail = JSON.stringify(event).slice(0, 60);
+                  }
+                  return (
+                    <div key={`${event.type}-${i}`} className="event-row">
+                      <span className="event-type">
+                        {event.type
+                          .replace("response.", "")
+                          .replace("appkit.", "")}
+                      </span>
+                      <span className="event-detail">{detail}</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>

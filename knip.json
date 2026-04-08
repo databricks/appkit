@@ -7,7 +7,9 @@
     "docs"
   ],
   "workspaces": {
-    "packages/appkit": {},
+    "packages/appkit": {
+      "ignoreDependencies": ["ai", "@ai-sdk/openai", "@langchain/core", "zod"]
+    },
     "packages/appkit-ui": {}
   },
   "ignore": [
