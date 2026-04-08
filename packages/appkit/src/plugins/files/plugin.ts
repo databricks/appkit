@@ -1,3 +1,4 @@
+import { STATUS_CODES } from "node:http";
 import { Readable } from "node:stream";
 import { ApiError } from "@databricks/sdk-experimental";
 import type express from "express";
@@ -424,6 +425,13 @@ export class FilesPlugin extends Plugin {
     res.status(500).json({ error: fallbackMessage, plugin: this.name });
   }
 
+  private _sendStatusError(res: express.Response, status: number): void {
+    res.status(status).json({
+      error: STATUS_CODES[status] ?? "Unknown Error",
+      plugin: this.name,
+    });
+  }
+
   private async _handleList(
     req: express.Request,
     res: express.Response,
@@ -446,9 +454,7 @@ export class FilesPlugin extends Plugin {
       );
 
       if (!result.ok) {
-        res
-          .status(result.status)
-          .json({ error: "List failed", plugin: this.name });
+        this._sendStatusError(res, result.status);
         return;
       }
       res.json(result.data);
@@ -484,9 +490,7 @@ export class FilesPlugin extends Plugin {
       );
 
       if (!result.ok) {
-        res
-          .status(result.status)
-          .json({ error: "Read failed", plugin: this.name });
+        this._sendStatusError(res, result.status);
         return;
       }
       res.type("text/plain").send(result.data);
@@ -550,9 +554,7 @@ export class FilesPlugin extends Plugin {
       }, settings);
 
       if (!response.ok) {
-        res
-          .status(response.status)
-          .json({ error: `${label} failed`, plugin: this.name });
+        this._sendStatusError(res, response.status);
         return;
       }
 
@@ -588,9 +590,7 @@ export class FilesPlugin extends Plugin {
         nodeStream.on("error", (err) => {
           logger.error("Stream error during %s: %O", opts.mode, err);
           if (!res.headersSent) {
-            res
-              .status(500)
-              .json({ error: `${label} failed`, plugin: this.name });
+            this._sendStatusError(res, 500);
           } else {
             res.destroy();
           }
@@ -631,9 +631,7 @@ export class FilesPlugin extends Plugin {
       );
 
       if (!result.ok) {
-        res
-          .status(result.status)
-          .json({ error: "Exists check failed", plugin: this.name });
+        this._sendStatusError(res, result.status);
         return;
       }
       res.json({ exists: result.data });
@@ -669,9 +667,7 @@ export class FilesPlugin extends Plugin {
       );
 
       if (!result.ok) {
-        res
-          .status(result.status)
-          .json({ error: "Metadata fetch failed", plugin: this.name });
+        this._sendStatusError(res, result.status);
         return;
       }
       res.json(result.data);
@@ -707,9 +703,7 @@ export class FilesPlugin extends Plugin {
       );
 
       if (!result.ok) {
-        res
-          .status(result.status)
-          .json({ error: "Preview failed", plugin: this.name });
+        this._sendStatusError(res, result.status);
         return;
       }
       res.json(result.data);
@@ -807,9 +801,7 @@ export class FilesPlugin extends Plugin {
           path,
           contentLength ?? 0,
         );
-        res
-          .status(result.status)
-          .json({ error: "Upload failed", plugin: this.name });
+        this._sendStatusError(res, result.status);
         return;
       }
 
@@ -862,9 +854,7 @@ export class FilesPlugin extends Plugin {
       );
 
       if (!result.ok) {
-        res
-          .status(result.status)
-          .json({ error: "Create directory failed", plugin: this.name });
+        this._sendStatusError(res, result.status);
         return;
       }
 
@@ -909,9 +899,7 @@ export class FilesPlugin extends Plugin {
       );
 
       if (!result.ok) {
-        res
-          .status(result.status)
-          .json({ error: "Delete failed", plugin: this.name });
+        this._sendStatusError(res, result.status);
         return;
       }
 
