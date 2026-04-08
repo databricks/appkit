@@ -246,25 +246,14 @@ export class AgentPlugin extends Plugin {
       path: "/threads/:threadId",
       handler: async (req, res) => this._handleDeleteThread(req, res),
     });
+  }
 
-    this.route(router, {
-      name: "tools",
-      method: "get",
-      path: "/tools",
-      handler: async (req, res) => this._handleListTools(req, res),
-    });
-
-    this.route(router, {
-      name: "agents",
-      method: "get",
-      path: "/agents",
-      handler: async (_req, res) => {
-        res.json({
-          agents: Array.from(this.agents.keys()),
-          default: this.defaultAgentName,
-        });
-      },
-    });
+  clientConfig(): Record<string, unknown> {
+    return {
+      tools: this.getAllToolDefinitions(),
+      agents: Array.from(this.agents.keys()),
+      defaultAgent: this.defaultAgentName,
+    };
   }
 
   private async _handleChat(
@@ -527,13 +516,6 @@ export class AgentPlugin extends Plugin {
       return;
     }
     res.json({ deleted: true });
-  }
-
-  private async _handleListTools(
-    _req: express.Request,
-    res: express.Response,
-  ): Promise<void> {
-    res.json({ tools: this.getAllToolDefinitions() });
   }
 
   private resolveAgent(name?: string): RegisteredAgent | null {

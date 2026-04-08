@@ -1,3 +1,4 @@
+import { getPluginClientConfig } from "@databricks/appkit-ui/js";
 import { TooltipProvider } from "@databricks/appkit-ui/react";
 import { marked } from "marked";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -36,16 +37,15 @@ export default function App() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
-  const [toolCount, setToolCount] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const idRef = useRef(0);
 
-  useEffect(() => {
-    fetch("/api/agent/tools")
-      .then((r) => r.json())
-      .then((data) => setToolCount(data.tools?.length ?? 0))
-      .catch(() => {});
-  }, []);
+  const agentConfig = getPluginClientConfig<{
+    tools?: Array<{ name: string }>;
+    agents?: string[];
+    defaultAgent?: string;
+  }>("agent");
+  const toolCount = agentConfig.tools?.length ?? 0;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on new messages
   useEffect(() => {

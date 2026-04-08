@@ -114,7 +114,7 @@ describe("AgentPlugin", () => {
     expect(tools).toEqual([]);
   });
 
-  test("injectRoutes registers all 6 routes", () => {
+  test("injectRoutes registers chat, cancel, and thread routes", () => {
     const plugin = new AgentPlugin({ name: "agent" });
     const { router, handlers } = createMockRouter();
 
@@ -125,7 +125,19 @@ describe("AgentPlugin", () => {
     expect(handlers["GET:/threads"]).toBeDefined();
     expect(handlers["GET:/threads/:threadId"]).toBeDefined();
     expect(handlers["DELETE:/threads/:threadId"]).toBeDefined();
-    expect(handlers["GET:/tools"]).toBeDefined();
+  });
+
+  test("clientConfig exposes tools and agents", async () => {
+    const plugin = new AgentPlugin({
+      name: "agent",
+      agents: { assistant: createMockAdapter() },
+    });
+    await plugin.setup();
+
+    const config = plugin.clientConfig();
+    expect(config.tools).toEqual([]);
+    expect(config.agents).toEqual(["assistant"]);
+    expect(config.defaultAgent).toBe("assistant");
   });
 
   test("exports().addTools adds function tools", () => {

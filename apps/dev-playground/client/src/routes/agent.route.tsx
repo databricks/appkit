@@ -1,3 +1,4 @@
+import { getPluginClientConfig } from "@databricks/appkit-ui/js";
 import { Button } from "@databricks/appkit-ui/react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -125,10 +126,15 @@ function AgentRoute() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
-  const [hasAutocomplete, setHasAutocomplete] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const msgIdCounter = useRef(0);
+
+  const agentConfig = getPluginClientConfig<{
+    agents?: string[];
+    defaultAgent?: string;
+  }>("agent");
+  const hasAutocomplete = (agentConfig.agents ?? []).includes("autocomplete");
 
   const {
     suggestion,
@@ -136,15 +142,6 @@ function AgentRoute() {
     requestSuggestion,
     clear: clearSuggestion,
   } = useAutocomplete(hasAutocomplete);
-
-  useEffect(() => {
-    fetch("/api/agent/agents")
-      .then((r) => r.json())
-      .then((data) => {
-        setHasAutocomplete((data.agents ?? []).includes("autocomplete"));
-      })
-      .catch(() => {});
-  }, []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on new messages
   useEffect(() => {
