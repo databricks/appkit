@@ -59,7 +59,13 @@ function sleep(ms: number): Promise<void> {
 async function runNpmInstallWithRetry(): Promise<number> {
   let lastStatus = 0;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const status = run("npm", ["install"], { cwd: templateDir });
+    // Use public npm registry — JFrog proxy has up to 7-day propagation delay
+    // for newly published packages
+    const status = run(
+      "npm",
+      ["install", "--registry", "https://registry.npmjs.org"],
+      { cwd: templateDir },
+    );
     lastStatus = status;
     if (status === 0) {
       console.log("✓ template/package-lock.json updated (npm install)");
