@@ -64,11 +64,9 @@ export {
 export { Plugin, type ToPlugin, toPlugin } from "./plugin";
 export { agent, analytics, files, genie, lakebase, server } from "./plugins";
 export { isFunctionTool, isHostedTool } from "./plugins/agent/tools";
-export type {
-  AgentTool,
-  FunctionTool,
-  HostedTool,
-} from "./plugins/agent/types";
+export type { FunctionTool } from "./plugins/agent/tools/function-tool";
+export type { HostedTool } from "./plugins/agent/tools/hosted-tools";
+export type { AgentTool } from "./plugins/agent/types";
 // Registry types and utilities for plugin manifests
 export type {
   ConfigSchema,

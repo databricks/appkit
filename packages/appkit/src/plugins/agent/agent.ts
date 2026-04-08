@@ -293,37 +293,50 @@ export class AgentPlugin extends Plugin {
     const abortController = new AbortController();
     const signal = abortController.signal;
 
+    const self = this;
     const executeTool = async (
       qualifiedName: string,
       args: unknown,
     ): Promise<unknown> => {
-      const entry = this.toolIndex.get(qualifiedName);
+      const entry = self.toolIndex.get(qualifiedName);
       if (!entry) throw new Error(`Unknown tool: ${qualifiedName}`);
 
-      switch (entry.source) {
-        case "plugin": {
-          const target = entry.def.annotations?.requiresUserContext
-            ? (entry.plugin as any).asUser(req)
-            : entry.plugin;
-          return (target as ToolProvider).executeAgentTool(
-            entry.localName,
-            args,
-            signal,
-          );
-        }
-        case "function":
-          return entry.functionTool.execute(args as Record<string, unknown>);
-        case "mcp": {
-          if (!this.mcpClient) throw new Error("MCP client not connected");
-          return this.mcpClient.callTool(entry.mcpToolName, args);
-        }
-      }
+      return self.execute(
+        async (execSignal) => {
+          switch (entry.source) {
+            case "plugin": {
+              const target = entry.def.annotations?.requiresUserContext
+                ? (entry.plugin as any).asUser(req)
+                : entry.plugin;
+              return (target as ToolProvider).executeAgentTool(
+                entry.localName,
+                args,
+                execSignal,
+              );
+            }
+            case "function":
+              return entry.functionTool.execute(
+                args as Record<string, unknown>,
+              );
+            case "mcp": {
+              if (!self.mcpClient) {
+                throw new Error("MCP client not connected");
+              }
+              return self.mcpClient.callTool(entry.mcpToolName, args);
+            }
+          }
+        },
+        {
+          default: {
+            telemetryInterceptor: { enabled: true },
+            timeout: 30_000,
+          },
+        },
+      );
     };
 
     const requestId = randomUUID();
     this.activeStreams.set(requestId, abortController);
-
-    const self = this;
 
     await this.executeStream<ResponseStreamEvent>(
       res,
