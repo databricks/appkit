@@ -590,9 +590,7 @@ export class FilesPlugin extends Plugin {
         nodeStream.on("error", (err) => {
           logger.error("Stream error during %s: %O", opts.mode, err);
           if (!res.headersSent) {
-            res
-              .status(500)
-              .json({ error: `${label} failed`, plugin: this.name });
+            this._sendStatusError(res, 500);
           } else {
             res.destroy();
           }
