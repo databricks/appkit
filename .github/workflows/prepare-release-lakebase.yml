@@ -9,6 +9,8 @@ on:
   pull_request:
     branches:
       - main
+    paths:
+      - 'packages/lakebase/**'
 
 concurrency:
   group: prepare-release-lakebase

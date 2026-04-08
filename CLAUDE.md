@@ -49,6 +49,7 @@ Examples:
   - generate-app-templates.ts        - Generate app templates
   - check-licenses.ts                - License compliance checks
   - build-notice.ts                  - Build NOTICE.md from dependencies
+  - check-template-deps.ts           - Validate template package.json dependencies are pinned
 ```
 
 ## Development Commands
@@ -147,7 +148,7 @@ This project uses a two-stage release pipeline. Both packages (`appkit` and `app
 #### Stage 1: Prepare (this repo)
 
 The `prepare-release` workflow runs automatically on push to `main`:
-1. Determines version from conventional commits using [release-it](https://github.com/release-it/release-it) with `.release-it.prepare.json`
+1. Determines version from conventional commits using [release-it](https://github.com/release-it/release-it) with `.release-it.json`
 2. Generates changelog diff
 3. Builds, packs, and uploads artifacts (`.tgz`, changelog, SHA256 digests)
 4. **Does NOT** commit, tag, push, or publish — only uploads artifacts
