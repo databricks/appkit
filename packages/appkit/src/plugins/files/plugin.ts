@@ -425,6 +425,13 @@ export class FilesPlugin extends Plugin {
     res.status(500).json({ error: fallbackMessage, plugin: this.name });
   }
 
+  private _sendStatusError(res: express.Response, status: number): void {
+    res.status(status).json({
+      error: STATUS_CODES[status] ?? "Unknown Error",
+      plugin: this.name,
+    });
+  }
+
   private async _handleList(
     req: express.Request,
     res: express.Response,
@@ -447,12 +454,7 @@ export class FilesPlugin extends Plugin {
       );
 
       if (!result.ok) {
-        res
-          .status(result.status)
-          .json({
-            error: STATUS_CODES[result.status] ?? "Unknown Error",
-            plugin: this.name,
-          });
+        this._sendStatusError(res, result.status);
         return;
       }
       res.json(result.data);
@@ -488,12 +490,7 @@ export class FilesPlugin extends Plugin {
       );
 
       if (!result.ok) {
-        res
-          .status(result.status)
-          .json({
-            error: STATUS_CODES[result.status] ?? "Unknown Error",
-            plugin: this.name,
-          });
+        this._sendStatusError(res, result.status);
         return;
       }
       res.type("text/plain").send(result.data);
@@ -557,12 +554,7 @@ export class FilesPlugin extends Plugin {
       }, settings);
 
       if (!response.ok) {
-        res
-          .status(response.status)
-          .json({
-            error: STATUS_CODES[response.status] ?? "Unknown Error",
-            plugin: this.name,
-          });
+        this._sendStatusError(res, response.status);
         return;
       }
 
@@ -641,12 +633,7 @@ export class FilesPlugin extends Plugin {
       );
 
       if (!result.ok) {
-        res
-          .status(result.status)
-          .json({
-            error: STATUS_CODES[result.status] ?? "Unknown Error",
-            plugin: this.name,
-          });
+        this._sendStatusError(res, result.status);
         return;
       }
       res.json({ exists: result.data });
@@ -682,12 +669,7 @@ export class FilesPlugin extends Plugin {
       );
 
       if (!result.ok) {
-        res
-          .status(result.status)
-          .json({
-            error: STATUS_CODES[result.status] ?? "Unknown Error",
-            plugin: this.name,
-          });
+        this._sendStatusError(res, result.status);
         return;
       }
       res.json(result.data);
@@ -723,12 +705,7 @@ export class FilesPlugin extends Plugin {
       );
 
       if (!result.ok) {
-        res
-          .status(result.status)
-          .json({
-            error: STATUS_CODES[result.status] ?? "Unknown Error",
-            plugin: this.name,
-          });
+        this._sendStatusError(res, result.status);
         return;
       }
       res.json(result.data);
@@ -826,12 +803,7 @@ export class FilesPlugin extends Plugin {
           path,
           contentLength ?? 0,
         );
-        res
-          .status(result.status)
-          .json({
-            error: STATUS_CODES[result.status] ?? "Unknown Error",
-            plugin: this.name,
-          });
+        this._sendStatusError(res, result.status);
         return;
       }
 
@@ -884,12 +856,7 @@ export class FilesPlugin extends Plugin {
       );
 
       if (!result.ok) {
-        res
-          .status(result.status)
-          .json({
-            error: STATUS_CODES[result.status] ?? "Unknown Error",
-            plugin: this.name,
-          });
+        this._sendStatusError(res, result.status);
         return;
       }
 
@@ -934,12 +901,7 @@ export class FilesPlugin extends Plugin {
       );
 
       if (!result.ok) {
-        res
-          .status(result.status)
-          .json({
-            error: STATUS_CODES[result.status] ?? "Unknown Error",
-            plugin: this.name,
-          });
+        this._sendStatusError(res, result.status);
         return;
       }
 
