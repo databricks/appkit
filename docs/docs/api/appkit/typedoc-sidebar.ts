@@ -129,6 +129,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.FunctionTool",
+          label: "FunctionTool"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.GenerateDatabaseCredentialRequest",
           label: "GenerateDatabaseCredentialRequest"
         },
@@ -220,8 +225,18 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.AgentTool",
+          label: "AgentTool"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.ConfigSchema",
           label: "ConfigSchema"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.HostedTool",
+          label: "HostedTool"
         },
         {
           type: "doc",
@@ -319,6 +334,16 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.getWorkspaceClient",
           label: "getWorkspaceClient"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.isFunctionTool",
+          label: "isFunctionTool"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.isHostedTool",
+          label: "isHostedTool"
         },
         {
           type: "doc",

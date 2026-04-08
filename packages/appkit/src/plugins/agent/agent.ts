@@ -87,12 +87,18 @@ export class AgentPlugin extends Plugin {
 
   private mountInvocationsRoute() {
     const serverPlugin = this.config.plugins?.server as
-      | { extend?: (fn: (app: any) => void) => void }
+      | { serverExtensions?: Array<(app: any) => void> }
       | undefined;
 
-    if (!serverPlugin?.extend) return;
+    if (!serverPlugin) return;
 
-    serverPlugin.extend((app: import("express").Application) => {
+    const extensions = (serverPlugin as any).serverExtensions as
+      | Array<(app: any) => void>
+      | undefined;
+
+    if (!extensions) return;
+
+    extensions.push((app: import("express").Application) => {
       app.post(
         "/invocations",
         (req: express.Request, res: express.Response) => {
