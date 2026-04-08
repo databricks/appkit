@@ -142,53 +142,46 @@ pnpm clean:full       # Remove build artifacts + node_modules
 
 ### Releasing
 
-This project uses [release-it](https://github.com/release-it/release-it) with [conventional-changelog](https://www.conventionalcommits.org/) for automated releases. Both packages (`appkit` and `appkit-ui`) are always released together with the same version.
+This project uses [conventional-changelog](https://www.conventionalcommits.org/) for automated releases. Both packages (`appkit` and `appkit-ui`) are always released together with the same version. `@databricks/lakebase` has an independent release cycle.
 
-#### GitHub Actions (Recommended)
+#### Automated Release Flow
 
-Releases are automated via GitHub Actions and trigger in two ways:
+Releases follow a two-stage pipeline for security compliance:
 
-**Automatic (on merge to main):**
-- When PRs are merged to `main`, the workflow automatically runs
-- Analyzes commits since last release using conventional commits
-- If there are `feat:` or `fix:` commits, both packages are released together
-- If no releasable commits, the release is skipped
+1. **`prepare-release` workflow** (this repo, on push to `main`):
+   - Determines the next version from conventional commits
+   - Generates changelog diff
+   - Builds, packs, and uploads `.tgz` artifacts with SHA256 digests
+   - Does **NOT** commit, tag, push, or publish
 
-**Manual (workflow_dispatch):**
-1. Go to **Actions → Release → Run workflow**
-2. Optionally enable "Dry run" to preview without publishing
-3. Click "Run workflow"
+2. **Secure repo cron** (`secure-public-registry-releases-eng`, every 15 min):
+   - Downloads and verifies artifact integrity (SHA256)
+   - Runs security scanning
+   - Publishes to npm via OIDC Trusted Publishing
+   - Applies changelog, bumps versions, commits, tags, and creates GitHub Release
+   - Runs template sync (`npm install` + `template-v{version}` tag)
 
-**Permissions (already configured, no secrets needed):**
-- `contents: write` - to push commits and tags
-- `id-token: write` - for npm OIDC/provenance publishing
+The secure repo also supports `workflow_dispatch` with a manual run ID as fallback.
 
-Both `GITHUB_TOKEN` and npm OIDC are provided automatically by GitHub Actions.
-
-The workflow automatically:
-- Builds all packages
-- Bumps version based on conventional commits
-- Updates `CHANGELOG.md`
-- Creates git tag and GitHub release
-- Publishes to npm
-
-#### Local Release (Alternative)
-
-**Prerequisites:**
-- Be on `main` branch with a clean working directory
-- Set `GITHUB_TOKEN` environment variable
-- Be logged in to npm (`npm login`)
+#### Local Preview
 
 ```bash
-# Dry run (preview what will happen without making changes)
+# Preview next version and changelog (no side effects)
 pnpm release:dry
 
-# Interactive release (prompts for version bump)
-pnpm release
+# Preview lakebase release
+pnpm release:dry -- --lakebase
 
-# CI release (non-interactive, for automation)
-pnpm release:ci
+# Just check the next version
+pnpm release:version
+
+# Just generate changelog preview
+pnpm release:changelog -- --version <version>
 ```
+
+#### Lakebase Release
+
+Lakebase has a separate `prepare-release-lakebase` workflow that triggers on pushes to `main` affecting `packages/lakebase/**`. It follows the same two-stage pipeline with `lakebase-v` tag prefix.
 
 #### Version Bumps (Conventional Commits)
 
