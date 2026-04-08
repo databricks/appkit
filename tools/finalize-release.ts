@@ -55,23 +55,23 @@ if (existsSync(changelogDiff)) {
 }
 
 // 2. Bump versions
-if (stream === "appkit") {
-  // Reuse sync-versions.ts logic for appkit + appkit-ui
-  const PACKAGES = ["packages/appkit", "packages/appkit-ui"];
-  for (const pkg of PACKAGES) {
-    const pkgJsonPath = join(ROOT, pkg, "package.json");
-    const pkgJson = JSON.parse(readFileSync(pkgJsonPath, "utf-8"));
-    pkgJson.version = version;
-    writeFileSync(pkgJsonPath, `${JSON.stringify(pkgJson, null, 2)}\n`);
-    console.log(`✓ ${pkg}/package.json → ${version}`);
-  }
-} else {
-  // Lakebase is a single package
-  const pkgJsonPath = join(ROOT, "packages/lakebase/package.json");
+const STREAM_PACKAGES: Record<string, string[]> = {
+  appkit: ["packages/appkit", "packages/appkit-ui"],
+  lakebase: ["packages/lakebase"],
+};
+
+const packages = STREAM_PACKAGES[stream];
+if (!packages) {
+  console.error(`Unknown stream: ${stream}`);
+  process.exit(1);
+}
+
+for (const pkg of packages) {
+  const pkgJsonPath = join(ROOT, pkg, "package.json");
   const pkgJson = JSON.parse(readFileSync(pkgJsonPath, "utf-8"));
   pkgJson.version = version;
   writeFileSync(pkgJsonPath, `${JSON.stringify(pkgJson, null, 2)}\n`);
-  console.log(`✓ packages/lakebase/package.json → ${version}`);
+  console.log(`✓ ${pkg}/package.json → ${version}`);
 }
 
 // 3. Copy NOTICE.md if present
