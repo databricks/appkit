@@ -44,9 +44,9 @@ export {
 export { getExecutionContext } from "./context";
 export { createApp } from "./core";
 export {
-  createAgent,
   type AgentHandle,
   type CreateAgentConfig,
+  createAgent,
 } from "./core/create-agent";
 // Errors
 export {
@@ -63,6 +63,12 @@ export {
 // Plugin authoring
 export { Plugin, type ToPlugin, toPlugin } from "./plugin";
 export { agent, analytics, files, genie, lakebase, server } from "./plugins";
+export { isFunctionTool, isHostedTool } from "./plugins/agent/tools";
+export type {
+  AgentTool,
+  FunctionTool,
+  HostedTool,
+} from "./plugins/agent/types";
 // Registry types and utilities for plugin manifests
 export type {
   ConfigSchema,

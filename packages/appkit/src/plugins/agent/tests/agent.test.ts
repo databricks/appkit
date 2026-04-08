@@ -128,22 +128,21 @@ describe("AgentPlugin", () => {
     expect(handlers["GET:/tools"]).toBeDefined();
   });
 
-  test("exports().registerTool adds external tools", () => {
+  test("exports().addTools adds function tools", () => {
     const plugin = new AgentPlugin({ name: "agent" });
-    const provider = createMockToolProvider([]);
 
-    plugin.exports().registerTool(
-      "custom",
+    plugin.exports().addTools([
       {
+        type: "function" as const,
         name: "myTool",
         description: "A custom tool",
-        parameters: { type: "object" },
+        parameters: { type: "object", properties: {} },
+        execute: async () => "result",
       },
-      provider,
-    );
+    ]);
 
     const tools = plugin.exports().getTools();
     expect(tools).toHaveLength(1);
-    expect(tools[0].name).toBe("custom.myTool");
+    expect(tools[0].name).toBe("myTool");
   });
 });

@@ -8,7 +8,8 @@
   ],
   "workspaces": {
     "packages/appkit": {
-      "ignoreDependencies": ["ai", "@ai-sdk/openai", "@langchain/core", "zod"]
+      "ignoreDependencies": ["ai", "@ai-sdk/openai", "@langchain/core", "zod"],
+      "entry": ["src/agents/*.ts"]
     },
     "packages/appkit-ui": {}
   },

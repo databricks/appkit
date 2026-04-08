@@ -16,6 +16,14 @@ import { agentStreamDefaults } from "./defaults";
 import { AgentEventTranslator } from "./event-translator";
 import manifest from "./manifest.json";
 import { InMemoryThreadStore } from "./thread-store";
+import {
+  AppKitMcpClient,
+  type FunctionTool,
+  functionToolToDefinition,
+  isFunctionTool,
+  isHostedTool,
+  resolveHostedTools,
+} from "./tools";
 import type { AgentPluginConfig, RegisteredAgent, ToolEntry } from "./types";
 
 const logger = createLogger("agent");
@@ -42,6 +50,7 @@ export class AgentPlugin extends Plugin {
   private toolIndex = new Map<string, ToolEntry>();
   private threadStore;
   private activeStreams = new Map<string, AbortController>();
+  private mcpClient: AppKitMcpClient | null = null;
 
   constructor(config: AgentPluginConfig) {
     super(config);
@@ -50,7 +59,7 @@ export class AgentPlugin extends Plugin {
   }
 
   async setup() {
-    this.collectTools();
+    await this.collectTools();
 
     if (this.config.agents) {
       const entries = Object.entries(this.config.agents);
@@ -73,32 +82,105 @@ export class AgentPlugin extends Plugin {
     }
   }
 
-  private collectTools() {
+  private async collectTools() {
+    // 1. Auto-discover from sibling ToolProvider plugins
     const plugins = this.config.plugins;
-    if (!plugins) return;
+    if (plugins) {
+      for (const [pluginName, pluginInstance] of Object.entries(plugins)) {
+        if (pluginName === "agent") continue;
+        if (!isToolProvider(pluginInstance)) continue;
 
-    for (const [pluginName, pluginInstance] of Object.entries(plugins)) {
-      if (pluginName === "agent") continue;
-      if (!isToolProvider(pluginInstance)) continue;
+        const tools = (pluginInstance as ToolProvider).getAgentTools();
+        for (const tool of tools) {
+          const qualifiedName = `${pluginName}.${tool.name}`;
+          this.toolIndex.set(qualifiedName, {
+            source: "plugin",
+            plugin: pluginInstance as ToolProvider & {
+              asUser(req: any): any;
+            },
+            def: { ...tool, name: qualifiedName },
+            localName: tool.name,
+          });
+        }
 
-      const tools = (pluginInstance as ToolProvider).getAgentTools();
-      for (const tool of tools) {
-        const qualifiedName = `${pluginName}.${tool.name}`;
-        this.toolIndex.set(qualifiedName, {
-          plugin: pluginInstance as ToolProvider & { asUser(req: any): any },
-          def: { ...tool, name: qualifiedName },
-          localName: tool.name,
-        });
+        logger.info(
+          "Collected %d tools from plugin %s",
+          tools.length,
+          pluginName,
+        );
+      }
+    }
+
+    // 2. Process explicit tools from config
+    if (this.config.tools) {
+      const hostedTools = this.config.tools.filter(isHostedTool);
+      const functionTools = this.config.tools.filter(isFunctionTool);
+
+      // 2a. Resolve HostedTools via MCP client
+      if (hostedTools.length > 0) {
+        await this.connectHostedTools(hostedTools);
       }
 
-      logger.info(
-        "Collected %d tools from plugin %s",
-        tools.length,
-        pluginName,
-      );
+      // 2b. Add FunctionTools
+      for (const ft of functionTools) {
+        this.addFunctionToolToIndex(ft);
+      }
     }
 
     logger.info("Total agent tools: %d", this.toolIndex.size);
+  }
+
+  private async connectHostedTools(
+    hostedTools: import("./tools/hosted-tools").HostedTool[],
+  ) {
+    const host = process.env.DATABRICKS_HOST;
+    if (!host) {
+      logger.warn(
+        "DATABRICKS_HOST not set — skipping %d hosted tools",
+        hostedTools.length,
+      );
+      return;
+    }
+
+    this.mcpClient = new AppKitMcpClient(
+      host,
+      async (): Promise<Record<string, string>> => {
+        const token = process.env.DATABRICKS_TOKEN;
+        if (token) return { Authorization: `Bearer ${token}` };
+        return {};
+      },
+    );
+
+    const endpoints = resolveHostedTools(hostedTools);
+    await this.mcpClient.connectAll(endpoints);
+
+    for (const def of this.mcpClient.getAllToolDefinitions()) {
+      this.toolIndex.set(def.name, {
+        source: "mcp",
+        mcpToolName: def.name,
+        def,
+      });
+    }
+  }
+
+  private addFunctionToolToIndex(ft: FunctionTool) {
+    const def = functionToolToDefinition(ft);
+    this.toolIndex.set(ft.name, {
+      source: "function",
+      functionTool: ft,
+      def,
+    });
+  }
+
+  addTools(tools: FunctionTool[]) {
+    for (const ft of tools) {
+      this.addFunctionToolToIndex(ft);
+    }
+    logger.info(
+      "Added %d function tools, total: %d",
+      tools.length,
+      this.toolIndex.size,
+    );
   }
 
   injectRoutes(router: IAppRouter) {
@@ -218,15 +300,24 @@ export class AgentPlugin extends Plugin {
       const entry = this.toolIndex.get(qualifiedName);
       if (!entry) throw new Error(`Unknown tool: ${qualifiedName}`);
 
-      const target = entry.def.annotations?.requiresUserContext
-        ? (entry.plugin as any).asUser(req)
-        : entry.plugin;
-
-      return (target as ToolProvider).executeAgentTool(
-        entry.localName,
-        args,
-        signal,
-      );
+      switch (entry.source) {
+        case "plugin": {
+          const target = entry.def.annotations?.requiresUserContext
+            ? (entry.plugin as any).asUser(req)
+            : entry.plugin;
+          return (target as ToolProvider).executeAgentTool(
+            entry.localName,
+            args,
+            signal,
+          );
+        }
+        case "function":
+          return entry.functionTool.execute(args as Record<string, unknown>);
+        case "mcp": {
+          if (!this.mcpClient) throw new Error("MCP client not connected");
+          return this.mcpClient.callTool(entry.mcpToolName, args);
+        }
+      }
     };
 
     const requestId = randomUUID();
@@ -377,6 +468,13 @@ export class AgentPlugin extends Plugin {
     return Array.from(this.toolIndex.values()).map((e) => e.def);
   }
 
+  async shutdown() {
+    if (this.mcpClient) {
+      await this.mcpClient.close();
+      this.mcpClient = null;
+    }
+  }
+
   exports() {
     return {
       registerAgent: (name: string, adapter: AgentAdapter) => {
@@ -385,18 +483,7 @@ export class AgentPlugin extends Plugin {
           this.defaultAgentName = name;
         }
       },
-      registerTool: (
-        pluginName: string,
-        tool: AgentToolDefinition,
-        provider: ToolProvider & { asUser(req: any): any },
-      ) => {
-        const qualifiedName = `${pluginName}.${tool.name}`;
-        this.toolIndex.set(qualifiedName, {
-          plugin: provider,
-          def: { ...tool, name: qualifiedName },
-          localName: tool.name,
-        });
-      },
+      addTools: (tools: FunctionTool[]) => this.addTools(tools),
       getTools: () => this.getAllToolDefinitions(),
       getThreads: (userId: string) => this.threadStore.list(userId),
     };
