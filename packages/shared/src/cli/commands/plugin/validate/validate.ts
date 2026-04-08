@@ -7,9 +7,16 @@ import {
   type ResolvedManifest,
   resolveManifestInDir,
 } from "../manifest-resolve";
+import type {
+  PluginManifest,
+  SemanticValidateResult,
+  ValidateResult,
+} from "./validate-manifest";
 import {
   detectSchemaType,
+  formatSemanticIssues,
   formatValidationErrors,
+  runSemanticValidation,
   validateManifest,
   validateTemplateManifest,
 } from "./validate-manifest";
@@ -92,7 +99,12 @@ async function runPluginValidate(
   }
 
   let hasFailure = false;
-  const jsonResults: { path: string; valid: boolean; errors?: string[] }[] = [];
+  const jsonResults: {
+    path: string;
+    valid: boolean;
+    errors?: string[];
+    warnings?: string[];
+  }[] = [];
 
   for (const { path: manifestPath, type } of manifestPaths) {
     const relativePath = path.relative(cwd, manifestPath);
@@ -116,16 +128,53 @@ async function runPluginValidate(
     }
 
     const schemaType = detectSchemaType(obj);
-    const result =
-      schemaType === "template-plugins"
-        ? validateTemplateManifest(obj)
-        : validateManifest(obj);
+    let result: ValidateResult;
+    let semanticResult: SemanticValidateResult | undefined;
+
+    if (schemaType === "template-plugins") {
+      result = validateTemplateManifest(obj);
+    } else {
+      result = validateManifest(obj);
+      if (result.valid && result.manifest) {
+        semanticResult = runSemanticValidation(result.manifest);
+      }
+    }
 
     if (result.valid) {
+      const hasSemanticErrors = Boolean(semanticResult?.errors.length);
+      const hasSemanticWarnings = Boolean(semanticResult?.warnings.length);
+
       if (options.json) {
-        jsonResults.push({ path: relativePath, valid: true });
+        const entry: (typeof jsonResults)[number] = {
+          path: relativePath,
+          valid: !hasSemanticErrors,
+        };
+        if (hasSemanticErrors) {
+          entry.errors = formatSemanticIssues(semanticResult!.errors)
+            .split("\n")
+            .filter(Boolean);
+        }
+        if (hasSemanticWarnings) {
+          entry.warnings = formatSemanticIssues(semanticResult!.warnings)
+            .split("\n")
+            .filter(Boolean);
+        }
+        jsonResults.push(entry);
       } else {
-        console.log(`✓ ${relativePath}`);
+        if (hasSemanticErrors) {
+          console.error(`✗ ${relativePath} (semantic errors)`);
+          console.error(formatSemanticIssues(semanticResult!.errors));
+        } else {
+          console.log(`✓ ${relativePath}`);
+        }
+        if (hasSemanticWarnings) {
+          console.warn("  warnings:");
+          console.warn(formatSemanticIssues(semanticResult!.warnings));
+        }
+      }
+
+      if (hasSemanticErrors) {
+        hasFailure = true;
       }
     } else {
       if (options.json) {
@@ -146,6 +195,28 @@ async function runPluginValidate(
         }
       }
       hasFailure = true;
+    }
+
+    if (schemaType === "template-plugins" && result.valid) {
+      const templateObj = obj as { plugins?: Record<string, unknown> };
+      if (templateObj.plugins) {
+        for (const [pluginName, plugin] of Object.entries(
+          templateObj.plugins,
+        )) {
+          const pluginSemantic = runSemanticValidation(
+            plugin as PluginManifest,
+          );
+          if (pluginSemantic.errors.length) {
+            console.error(`  ✗ plugin "${pluginName}" (semantic errors)`);
+            console.error(formatSemanticIssues(pluginSemantic.errors));
+            hasFailure = true;
+          }
+          if (pluginSemantic.warnings.length) {
+            console.warn(`  ⚠ plugin "${pluginName}" (warnings)`);
+            console.warn(formatSemanticIssues(pluginSemantic.warnings));
+          }
+        }
+      }
     }
   }
 

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import Ajv, { type ErrorObject } from "ajv";
 import addFormats from "ajv-formats";
 import type { PluginManifest } from "../manifest-types";
+import { computeOrigin } from "../sync/sync";
 
 export type { PluginManifest };
 
@@ -302,4 +303,196 @@ export function formatValidationErrors(
   }
 
   return lines.join("\n");
+}
+
+// ── Semantic validation (cross-field / cross-resource rules) ────────────
+
+export interface SemanticIssue {
+  level: "error" | "warning";
+  path: string;
+  message: string;
+}
+
+export interface SemanticValidateResult {
+  errors: SemanticIssue[];
+  warnings: SemanticIssue[];
+}
+
+function validateDependsOn(manifest: PluginManifest): SemanticIssue[] {
+  const issues: SemanticIssue[] = [];
+
+  for (const group of [
+    manifest.resources.required,
+    manifest.resources.optional,
+  ]) {
+    for (const resource of group) {
+      if (!resource.fields) continue;
+      const fieldNames = new Set(Object.keys(resource.fields));
+
+      // Check dangling references
+      const deps = new Map<string, string>();
+      for (const [name, field] of Object.entries(resource.fields)) {
+        const discovery = (field as Record<string, unknown>).discovery as
+          | { dependsOn?: string }
+          | undefined;
+        if (discovery?.dependsOn) {
+          if (!fieldNames.has(discovery.dependsOn)) {
+            issues.push({
+              level: "error",
+              path: `resources.${resource.resourceKey}.fields.${name}.discovery.dependsOn`,
+              message: `references non-existent sibling field '${discovery.dependsOn}'`,
+            });
+          }
+          deps.set(name, discovery.dependsOn);
+        }
+      }
+
+      // Detect cycles via DFS
+      const visited = new Set<string>();
+      const visiting = new Set<string>();
+
+      function dfs(node: string, chain: string[]): string[] | null {
+        if (visiting.has(node)) return [...chain, node];
+        if (visited.has(node)) return null;
+        visiting.add(node);
+        const next = deps.get(node);
+        if (next) {
+          const cycle = dfs(next, [...chain, node]);
+          if (cycle) return cycle;
+        }
+        visiting.delete(node);
+        visited.add(node);
+        return null;
+      }
+
+      for (const node of deps.keys()) {
+        if (!visited.has(node)) {
+          const cycle = dfs(node, []);
+          if (cycle) {
+            issues.push({
+              level: "error",
+              path: `resources.${resource.resourceKey}`,
+              message: `discovery.dependsOn creates a cycle: ${cycle.join(" \u2192 ")}`,
+            });
+            break; // one cycle error per resource is enough
+          }
+        }
+      }
+    }
+  }
+
+  return issues;
+}
+
+function validateDiscoveryProfile(manifest: PluginManifest): SemanticIssue[] {
+  const issues: SemanticIssue[] = [];
+
+  for (const group of [
+    manifest.resources.required,
+    manifest.resources.optional,
+  ]) {
+    for (const resource of group) {
+      if (!resource.fields) continue;
+      for (const [name, field] of Object.entries(resource.fields)) {
+        const discovery = (field as Record<string, unknown>).discovery as
+          | { cliCommand?: string }
+          | undefined;
+        if (
+          discovery?.cliCommand &&
+          !discovery.cliCommand.includes("<PROFILE>")
+        ) {
+          issues.push({
+            level: "error",
+            path: `resources.${resource.resourceKey}.fields.${name}.discovery.cliCommand`,
+            message: "must include <PROFILE> placeholder",
+          });
+        }
+      }
+    }
+  }
+
+  return issues;
+}
+
+function validateDiscoveryOrigin(manifest: PluginManifest): SemanticIssue[] {
+  const issues: SemanticIssue[] = [];
+
+  for (const group of [
+    manifest.resources.required,
+    manifest.resources.optional,
+  ]) {
+    for (const resource of group) {
+      if (!resource.fields) continue;
+      for (const [name, field] of Object.entries(resource.fields)) {
+        const discovery = (field as Record<string, unknown>).discovery;
+        if (!discovery) continue;
+        const origin = computeOrigin(field);
+        if (origin !== "user") {
+          issues.push({
+            level: "warning",
+            path: `resources.${resource.resourceKey}.fields.${name}`,
+            message: `has discovery but computed origin is '${origin}' (not 'user') \u2014 discovery may not be used`,
+          });
+        }
+      }
+    }
+  }
+
+  return issues;
+}
+
+function validatePostScaffold(manifest: PluginManifest): SemanticIssue[] {
+  const issues: SemanticIssue[] = [];
+  const { postScaffold } = manifest;
+  if (!postScaffold) return issues;
+
+  if (!Array.isArray(postScaffold)) {
+    issues.push({
+      level: "error",
+      path: "postScaffold",
+      message: "must be an array",
+    });
+    return issues;
+  }
+
+  for (let i = 0; i < postScaffold.length; i++) {
+    const step = postScaffold[i];
+    if (!step || typeof step !== "object") {
+      issues.push({
+        level: "error",
+        path: `postScaffold[${i}]`,
+        message: "must be an object",
+      });
+      continue;
+    }
+    if (typeof step.instruction !== "string" || step.instruction.length === 0) {
+      issues.push({
+        level: "error",
+        path: `postScaffold[${i}].instruction`,
+        message: "must be a non-empty string",
+      });
+    }
+  }
+
+  return issues;
+}
+
+export function runSemanticValidation(
+  manifest: PluginManifest,
+): SemanticValidateResult {
+  const allIssues = [
+    ...validateDependsOn(manifest),
+    ...validateDiscoveryProfile(manifest),
+    ...validateDiscoveryOrigin(manifest),
+    ...validatePostScaffold(manifest),
+  ];
+
+  return {
+    errors: allIssues.filter((i) => i.level === "error"),
+    warnings: allIssues.filter((i) => i.level === "warning"),
+  };
+}
+
+export function formatSemanticIssues(issues: SemanticIssue[]): string {
+  return issues.map((i) => `  ${i.path}: ${i.message}`).join("\n");
 }

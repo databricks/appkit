@@ -1,8 +1,11 @@
 import type { ErrorObject } from "ajv";
 import { describe, expect, it } from "vitest";
+import type { PluginManifest } from "./validate-manifest";
 import {
   detectSchemaType,
+  formatSemanticIssues,
   formatValidationErrors,
+  runSemanticValidation,
   validateManifest,
   validateTemplateManifest,
 } from "./validate-manifest";
@@ -386,6 +389,218 @@ describe("validate-manifest", () => {
       ];
       const output = formatValidationErrors(errors);
       expect(output).toContain('missing required property "name"');
+    });
+  });
+
+  describe("semantic validation", () => {
+    it("returns no issues for a valid manifest without discovery", () => {
+      const result = runSemanticValidation(
+        VALID_MANIFEST_WITH_RESOURCE as PluginManifest,
+      );
+      expect(result.errors).toHaveLength(0);
+      expect(result.warnings).toHaveLength(0);
+    });
+
+    it("detects dangling dependsOn reference", () => {
+      const manifest = {
+        ...VALID_MANIFEST,
+        resources: {
+          required: [
+            {
+              type: "postgres",
+              alias: "Postgres",
+              resourceKey: "postgres",
+              description: "test",
+              permission: "CAN_CONNECT_AND_CREATE",
+              fields: {
+                branch: {
+                  env: "BRANCH",
+                  description: "Branch name",
+                  discovery: {
+                    cliCommand:
+                      "databricks postgres list-branches --profile <PROFILE>",
+                    selectField: ".name",
+                    dependsOn: "nonexistent",
+                  },
+                },
+              },
+            },
+          ],
+          optional: [],
+        },
+      };
+      const result = runSemanticValidation(
+        manifest as unknown as PluginManifest,
+      );
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].message).toContain("non-existent sibling field");
+      expect(result.errors[0].message).toContain("nonexistent");
+    });
+
+    it("detects cyclic dependsOn chain", () => {
+      const manifest = {
+        ...VALID_MANIFEST,
+        resources: {
+          required: [
+            {
+              type: "postgres",
+              alias: "Postgres",
+              resourceKey: "postgres",
+              description: "test",
+              permission: "CAN_CONNECT_AND_CREATE",
+              fields: {
+                a: {
+                  env: "A",
+                  discovery: {
+                    cliCommand: "databricks cmd --profile <PROFILE>",
+                    selectField: ".id",
+                    dependsOn: "b",
+                  },
+                },
+                b: {
+                  env: "B",
+                  discovery: {
+                    cliCommand: "databricks cmd --profile <PROFILE>",
+                    selectField: ".id",
+                    dependsOn: "a",
+                  },
+                },
+              },
+            },
+          ],
+          optional: [],
+        },
+      };
+      const result = runSemanticValidation(
+        manifest as unknown as PluginManifest,
+      );
+      const cycleErrors = result.errors.filter((e) =>
+        e.message.includes("cycle"),
+      );
+      expect(cycleErrors.length).toBeGreaterThan(0);
+    });
+
+    it("detects missing <PROFILE> in cliCommand", () => {
+      const manifest = {
+        ...VALID_MANIFEST,
+        resources: {
+          required: [
+            {
+              type: "sql_warehouse",
+              alias: "SQL Warehouse",
+              resourceKey: "sql-warehouse",
+              description: "test",
+              permission: "CAN_USE",
+              fields: {
+                id: {
+                  env: "WAREHOUSE_ID",
+                  discovery: {
+                    cliCommand: "databricks warehouses list --output json",
+                    selectField: ".id",
+                  },
+                },
+              },
+            },
+          ],
+          optional: [],
+        },
+      };
+      const result = runSemanticValidation(
+        manifest as unknown as PluginManifest,
+      );
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].message).toContain("<PROFILE>");
+    });
+
+    it("warns when discovery is on non-user origin field", () => {
+      const manifest = {
+        ...VALID_MANIFEST,
+        resources: {
+          required: [
+            {
+              type: "postgres",
+              alias: "Postgres",
+              resourceKey: "postgres",
+              description: "test",
+              permission: "CAN_CONNECT_AND_CREATE",
+              fields: {
+                host: {
+                  env: "PGHOST",
+                  localOnly: true,
+                  discovery: {
+                    cliCommand: "databricks cmd --profile <PROFILE>",
+                    selectField: ".host",
+                  },
+                },
+              },
+            },
+          ],
+          optional: [],
+        },
+      };
+      const result = runSemanticValidation(
+        manifest as unknown as PluginManifest,
+      );
+      expect(result.errors).toHaveLength(0);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0].message).toContain("platform");
+    });
+
+    it("passes for valid manifest with all new fields", () => {
+      const manifest = {
+        ...VALID_MANIFEST,
+        postScaffold: [
+          { instruction: "Run migrations", required: true },
+          { instruction: "Verify connectivity" },
+        ],
+        resources: {
+          required: [
+            {
+              type: "sql_warehouse",
+              alias: "SQL Warehouse",
+              resourceKey: "sql-warehouse",
+              description: "test",
+              permission: "CAN_USE",
+              fields: {
+                id: {
+                  env: "WAREHOUSE_ID",
+                  description: "Warehouse ID",
+                  discovery: {
+                    cliCommand:
+                      "databricks warehouses list --profile <PROFILE> --output json",
+                    selectField: ".id",
+                    displayField: ".name",
+                  },
+                },
+              },
+            },
+          ],
+          optional: [],
+        },
+      };
+      const result = runSemanticValidation(
+        manifest as unknown as PluginManifest,
+      );
+      expect(result.errors).toHaveLength(0);
+      expect(result.warnings).toHaveLength(0);
+    });
+
+    it("formats semantic issues correctly", () => {
+      const issues = [
+        {
+          level: "error" as const,
+          path: "resources.postgres.fields.host",
+          message: "test error",
+        },
+        {
+          level: "warning" as const,
+          path: "postScaffold[0]",
+          message: "test warning",
+        },
+      ];
+      const output = formatSemanticIssues(issues);
+      expect(output).toContain("resources.postgres.fields.host: test error");
+      expect(output).toContain("postScaffold[0]: test warning");
     });
   });
 });
