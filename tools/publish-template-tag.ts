@@ -128,7 +128,7 @@ const commands: [string, string[]][] = [
     ["commit", "-s", "-m", `chore: sync template to v${version} [skip ci]`],
   ],
   ["git", ["tag", "-a", `template-v${version}`, "-m", `Template v${version}`]],
-  ["git", ["push", "origin", "HEAD", "--follow-tags"]], // TODO: revert to "main" after testing (or keep — HEAD == main in production)
+  ["git", ["push", "origin", "HEAD", "--follow-tags"]],
 ];
 
 for (const [command, args] of commands) {
