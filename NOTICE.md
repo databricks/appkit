@@ -58,6 +58,7 @@ This Software contains code from the following open source projects:
 | [clsx](https://www.npmjs.com/package/clsx) | 2.1.1 | MIT | https://github.com/lukeed/clsx#readme |
 | [cmdk](https://www.npmjs.com/package/cmdk) | 1.1.1 | MIT | https://github.com/pacocoursey/cmdk#readme |
 | [commander](https://www.npmjs.com/package/commander) | 2.20.3, 5.1.0, 7.2.0, 8.3.0, 10.0.1, 12.1.0 | MIT | https://github.com/tj/commander.js#readme |
+| [dompurify](https://www.npmjs.com/package/dompurify) | 3.3.3 | (MPL-2.0 OR Apache-2.0) | https://github.com/cure53/DOMPurify |
 | [dotenv](https://www.npmjs.com/package/dotenv) | 16.6.1 | BSD-2-Clause | https://github.com/motdotla/dotenv#readme |
 | [echarts](https://www.npmjs.com/package/echarts) | 6.0.0 | Apache-2.0 | https://echarts.apache.org |
 | [echarts-for-react](https://www.npmjs.com/package/echarts-for-react) | 3.0.5 | MIT | https://github.com/hustcc/echarts-for-react |
