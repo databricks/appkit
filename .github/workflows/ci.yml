@@ -73,7 +73,7 @@ jobs:
       - name: Run License Check
         run: pnpm run check:licenses
       - name: Check template deps are pinned
-        run: node tools/check-template-deps.js
+        run: tsx tools/check-template-deps.ts
 
   test:
     name: Unit Tests

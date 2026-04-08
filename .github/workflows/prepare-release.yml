@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
 
 concurrency:
   group: prepare-release
@@ -45,8 +48,7 @@ jobs:
       - name: Check for releasable commits
         id: version
         run: |
-          VERSION=$(pnpm exec release-it --release-version --ci \
-            -c .release-it.prepare.json 2>/dev/null) || true
+          VERSION=$(pnpm exec release-it --release-version --ci 2>/dev/null) || true
           if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "version=$VERSION" >> "$GITHUB_OUTPUT"
             echo "Next version: $VERSION"
@@ -94,6 +96,14 @@ jobs:
       - name: Write version file
         if: steps.version.outputs.version != ''
         run: echo "${{ steps.version.outputs.version }}" > VERSION
+
+      - name: Upload release metadata
+        if: steps.version.outputs.version != ''
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: appkit-release-meta-${{ github.run_number }}
+          retention-days: 7
+          path: VERSION
 
       - name: Upload release artifacts
         if: steps.version.outputs.version != ''
