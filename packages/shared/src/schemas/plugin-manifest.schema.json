@@ -101,6 +101,13 @@
       "enum": ["beta", "ga"],
       "default": "ga",
       "description": "Plugin stability level. Beta plugins may have breaking API changes between minor releases but are on a path to GA. GA (general availability) plugins follow semver strictly."
+    },
+    "postScaffold": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/postScaffoldStep"
+      },
+      "description": "Ordered list of post-scaffolding instructions shown to the user after project initialization. Array position determines display order."
     }
   },
   "additionalProperties": false,
@@ -226,6 +233,10 @@
           "type": "string",
           "pattern": "^[a-z_]+:[a-zA-Z]+$",
           "description": "Named resolver prefixed by resource type (e.g., 'postgres:host'). The CLI resolves this value during the init prompt flow."
+        },
+        "discovery": {
+          "$ref": "#/$defs/discoveryDescriptor",
+          "description": "How the CLI discovers values for this field via a Databricks CLI command."
         }
       },
       "additionalProperties": false
@@ -484,6 +495,60 @@
           "type": "boolean"
         }
       }
+    },
+    "discoveryDescriptor": {
+      "type": "object",
+      "description": "Describes how the CLI discovers values for a resource field via a Databricks CLI command.",
+      "required": ["cliCommand", "selectField"],
+      "properties": {
+        "cliCommand": {
+          "type": "string",
+          "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder.",
+          "examples": [
+            "databricks warehouses list --profile <PROFILE> --output json"
+          ]
+        },
+        "selectField": {
+          "type": "string",
+          "description": "jq-style path to the field used as the selected value (e.g., '.id', '.name').",
+          "examples": [".id", ".name", ".catalog_name"]
+        },
+        "displayField": {
+          "type": "string",
+          "description": "jq-style path to the field shown to the user in selection UI. Defaults to selectField if omitted.",
+          "examples": [".name", ".display_name"]
+        },
+        "dependsOn": {
+          "type": "string",
+          "description": "Name of a sibling field within the same resource that must be resolved first. Used to express ordering dependencies between resource fields.",
+          "examples": ["branch", "catalog"]
+        },
+        "shortcut": {
+          "type": "string",
+          "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+          "examples": [
+            "databricks warehouses get <ID> --profile <PROFILE> --output json"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "postScaffoldStep": {
+      "type": "object",
+      "description": "A post-scaffolding instruction shown to the user after project initialization.",
+      "required": ["instruction"],
+      "properties": {
+        "instruction": {
+          "type": "string",
+          "description": "Human-readable instruction for the user to follow after scaffolding."
+        },
+        "required": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this step is required for the plugin to function correctly."
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

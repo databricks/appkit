@@ -12,7 +12,7 @@
     },
     "version": {
       "type": "string",
-      "enum": ["1.0", "1.1"],
+      "enum": ["1.0", "1.1", "2.0"],
       "description": "Schema version for the template plugins manifest"
     },
     "plugins": {
@@ -21,9 +21,24 @@
       "additionalProperties": {
         "$ref": "#/$defs/templatePlugin"
       }
+    },
+    "scaffolding": {
+      "$ref": "#/$defs/scaffoldingDescriptor",
+      "description": "Describes the scaffolding command and its configuration for project initialization."
     }
   },
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": { "version": { "const": "2.0" } },
+        "required": ["version"]
+      },
+      "then": {
+        "required": ["version", "plugins", "scaffolding"]
+      }
+    }
+  ],
   "$defs": {
     "templatePlugin": {
       "type": "object",
@@ -75,6 +90,13 @@
           "default": "ga",
           "description": "Plugin stability level. Beta is heading to GA; APIs may change between minor releases. GA (general availability) follows semver."
         },
+        "postScaffold": {
+          "type": "array",
+          "items": {
+            "$ref": "plugin-manifest.schema.json#/$defs/postScaffoldStep"
+          },
+          "description": "Ordered list of post-scaffolding instructions propagated from the plugin manifest."
+        },
         "resources": {
           "type": "object",
           "required": ["required", "optional"],
@@ -104,10 +126,89 @@
       "$ref": "plugin-manifest.schema.json#/$defs/resourceType"
     },
     "resourceFieldEntry": {
-      "$ref": "plugin-manifest.schema.json#/$defs/resourceFieldEntry"
+      "allOf": [
+        { "$ref": "plugin-manifest.schema.json#/$defs/resourceFieldEntry" },
+        {
+          "properties": {
+            "origin": {
+              "$ref": "#/$defs/origin"
+            }
+          }
+        }
+      ]
     },
     "resourceRequirement": {
       "$ref": "plugin-manifest.schema.json#/$defs/resourceRequirement"
+    },
+    "origin": {
+      "type": "string",
+      "enum": ["user", "platform", "static", "cli"],
+      "description": "How the field value is determined. Computed during sync, not authored by plugin developers."
+    },
+    "scaffoldingFlag": {
+      "type": "object",
+      "description": "A flag for the scaffolding command.",
+      "required": ["description"],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the flag."
+        },
+        "required": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether this flag is required."
+        },
+        "pattern": {
+          "type": "string",
+          "description": "Regex pattern for validating the flag value."
+        },
+        "default": {
+          "type": "string",
+          "description": "Default value for this flag."
+        }
+      },
+      "additionalProperties": false
+    },
+    "scaffoldingRules": {
+      "type": "object",
+      "description": "Structured rules for scaffolding agents.",
+      "properties": {
+        "never": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Actions the scaffolding agent must never perform."
+        },
+        "must": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Actions the scaffolding agent must always perform."
+        }
+      },
+      "additionalProperties": false
+    },
+    "scaffoldingDescriptor": {
+      "type": "object",
+      "description": "Describes the scaffolding command, flags, and rules for project initialization.",
+      "required": ["command"],
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "The scaffolding command (e.g., 'databricks apps init')."
+        },
+        "flags": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/scaffoldingFlag"
+          },
+          "description": "Map of flag name to flag descriptor."
+        },
+        "rules": {
+          "$ref": "#/$defs/scaffoldingRules",
+          "description": "Structured rules for scaffolding agents."
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

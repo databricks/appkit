@@ -1,13 +1,15 @@
 import type express from "express";
 import type { JSONSchema7 } from "json-schema";
 import type {
+  DiscoveryDescriptor,
   PluginManifest as GeneratedPluginManifest,
   ResourceRequirement as GeneratedResourceRequirement,
+  PostScaffoldStep,
   ResourceFieldEntry,
 } from "./schemas/plugin-manifest.generated";
 
 // Re-export generated types as the shared canonical definitions.
-export type { ResourceFieldEntry };
+export type { ResourceFieldEntry, DiscoveryDescriptor, PostScaffoldStep };
 
 /** Base plugin interface. */
 export interface BasePlugin {
