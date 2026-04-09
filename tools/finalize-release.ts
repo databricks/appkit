@@ -36,10 +36,15 @@ function run(cmd: string, args: string[]): void {
 }
 
 // 1. Apply changelog diff
+const STREAM_CHANGELOG: Record<string, string> = {
+  appkit: "CHANGELOG.md",
+  lakebase: "packages/lakebase/CHANGELOG.md",
+};
+
 const changelogDiff = join(artifactsDir, "changelog-diff.md");
 if (existsSync(changelogDiff)) {
   const diff = readFileSync(changelogDiff, "utf-8");
-  const changelogPath = join(ROOT, "CHANGELOG.md");
+  const changelogPath = join(ROOT, STREAM_CHANGELOG[stream] ?? "CHANGELOG.md");
 
   if (existsSync(changelogPath)) {
     const existing = readFileSync(changelogPath, "utf-8");
