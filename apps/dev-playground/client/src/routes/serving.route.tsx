@@ -78,7 +78,7 @@ function ServingRoute() {
             <p className="text-muted-foreground mt-2">
               Chat with a Databricks Model Serving endpoint. Set{" "}
               <code className="text-sm bg-muted px-1 rounded">
-                DATABRICKS_SERVING_ENDPOINT
+                DATABRICKS_SERVING_ENDPOINT_NAME
               </code>{" "}
               to enable.
             </p>
