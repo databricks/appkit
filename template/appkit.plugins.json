@@ -74,6 +74,30 @@
         "optional": []
       }
     },
+    "jobs": {
+      "name": "jobs",
+      "displayName": "Jobs Plugin",
+      "description": "Trigger and monitor Databricks Lakeflow Jobs scoped to configured job resources",
+      "package": "@databricks/appkit",
+      "resources": {
+        "required": [
+          {
+            "type": "job",
+            "alias": "Job",
+            "resourceKey": "job",
+            "description": "A Databricks job to trigger and monitor",
+            "permission": "CAN_MANAGE_RUN",
+            "fields": {
+              "id": {
+                "env": "DATABRICKS_JOB_ID",
+                "description": "Job ID (numeric). Obtain from the Jobs UI or `databricks jobs list`."
+              }
+            }
+          }
+        ],
+        "optional": []
+      }
+    },
     "lakebase": {
       "name": "lakebase",
       "displayName": "Lakebase",
