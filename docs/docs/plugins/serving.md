@@ -43,7 +43,7 @@ Endpoint aliases let you reference multiple serving endpoints by name:
 serving({
   endpoints: {
     llm: { env: "DATABRICKS_SERVING_ENDPOINT_NAME" },
-    classifier: { env: "DATABRICKS_SERVING_ENDPOINT_NAME_CLASSIFIER" },
+    classifier: { env: "DATABRICKS_SERVING_ENDPOINT_CLASSIFIER" },
   },
 })
 ```
@@ -90,7 +90,7 @@ Endpoints that don't define a streaming response schema in their OpenAPI spec wi
 |----------|-------------|
 | `DATABRICKS_SERVING_ENDPOINT_NAME` | Default endpoint name (used when `endpoints` config is omitted) |
 
-When using named endpoints, define a custom environment variable per alias (e.g. `DATABRICKS_SERVING_ENDPOINT_NAME_CLASSIFIER`).
+When using named endpoints, define a custom environment variable per alias (e.g. `DATABRICKS_SERVING_ENDPOINT_CLASSIFIER`).
 
 ## Execution context
 
