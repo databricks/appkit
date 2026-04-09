@@ -28,6 +28,22 @@ const logger = createLogger("type-generator:query-registry");
  */
 const PROTECTED_RANGE_RE = /'(?:[^']|'')*'|--[^\n]*/g;
 
+/**
+ * Numeric-context patterns for positional type inference.
+ * Hoisted to module scope — safe because matchAll() clones the regex internally.
+ */
+const NUMERIC_PATTERNS: RegExp[] = [
+  /\bLIMIT\s+:([a-zA-Z_]\w*)/gi,
+  /\bOFFSET\s+:([a-zA-Z_]\w*)/gi,
+  /\bTOP\s+:([a-zA-Z_]\w*)/gi,
+  /\bFETCH\s+FIRST\s+:([a-zA-Z_]\w*)\s+ROWS/gi,
+  // V1 limitation: arithmetic operators may false-positive for date
+  // expressions like `:start_date - INTERVAL '1 day'`. A smarter
+  // heuristic (e.g. look-ahead for INTERVAL) is deferred to a future PR.
+  /[+\-*/]\s*:([a-zA-Z_]\w*)/g,
+  /:([a-zA-Z_]\w*)\s*[+\-*/]/g,
+];
+
 export function getProtectedRanges(sql: string): Array<[number, number]> {
   const ranges: Array<[number, number]> = [];
   for (const m of sql.matchAll(PROTECTED_RANGE_RE)) {
@@ -71,12 +87,15 @@ function parseError(raw: string): { code?: string; message: string } {
  * @param sql - the SQL query to extract parameters from
  * @returns an array of parameter names
  */
-export function extractParameters(sql: string): string[] {
-  const ranges = getProtectedRanges(sql);
+export function extractParameters(
+  sql: string,
+  ranges?: Array<[number, number]>,
+): string[] {
+  const protectedRanges = ranges ?? getProtectedRanges(sql);
   const matches = sql.matchAll(/(?<!:):([a-zA-Z_]\w*)/g);
   const params = new Set<string>();
   for (const match of matches) {
-    if (!isInsideProtectedRange(match.index, ranges)) {
+    if (!isInsideProtectedRange(match.index, protectedRanges)) {
       params.add(match[1]);
     }
   }
@@ -210,25 +229,16 @@ export function defaultForType(sqlType: string | undefined): string {
  * FETCH FIRST ... ROWS, and arithmetic operators.
  * Parameters inside string literals or SQL comments are ignored.
  */
-export function inferParameterTypes(sql: string): Record<string, string> {
+export function inferParameterTypes(
+  sql: string,
+  ranges?: Array<[number, number]>,
+): Record<string, string> {
   const inferred: Record<string, string> = {};
-  const ranges = getProtectedRanges(sql);
+  const protectedRanges = ranges ?? getProtectedRanges(sql);
 
-  const numericPatterns: RegExp[] = [
-    /\bLIMIT\s+:([a-zA-Z_]\w*)/gi,
-    /\bOFFSET\s+:([a-zA-Z_]\w*)/gi,
-    /\bTOP\s+:([a-zA-Z_]\w*)/gi,
-    /\bFETCH\s+FIRST\s+:([a-zA-Z_]\w*)\s+ROWS/gi,
-    // V1 limitation: arithmetic operators may false-positive for date
-    // expressions like `:start_date - INTERVAL '1 day'`. A smarter
-    // heuristic (e.g. look-ahead for INTERVAL) is deferred to a future PR.
-    /[+\-*/]\s*:([a-zA-Z_]\w*)/g,
-    /:([a-zA-Z_]\w*)\s*[+\-*/]/g,
-  ];
-
-  for (const pattern of numericPatterns) {
+  for (const pattern of NUMERIC_PATTERNS) {
     for (const match of sql.matchAll(pattern)) {
-      if (!isInsideProtectedRange(match.index, ranges)) {
+      if (!isInsideProtectedRange(match.index, protectedRanges)) {
         inferred[match[1]] = "NUMERIC";
       }
     }
@@ -312,10 +322,10 @@ export async function generateQueriesFromDescribe(
       });
       logEntries.push({ queryName, status: "HIT" });
     } else {
-      const annotatedTypes = extractParameterTypes(sql);
-      const inferredTypes = inferParameterTypes(sql);
-      const parameterTypes = { ...inferredTypes, ...annotatedTypes };
       const protectedRanges = getProtectedRanges(sql);
+      const annotatedTypes = extractParameterTypes(sql);
+      const inferredTypes = inferParameterTypes(sql, protectedRanges);
+      const parameterTypes = { ...inferredTypes, ...annotatedTypes };
       const sqlWithDefaults = sql.replace(
         /(?<!:):([a-zA-Z_]\w*)/g,
         (original, paramName, offset) => {
@@ -327,7 +337,7 @@ export async function generateQueriesFromDescribe(
       );
 
       // Warn about unresolved parameters
-      const allParams = extractParameters(sql);
+      const allParams = extractParameters(sql, protectedRanges);
       for (const param of allParams) {
         if (SERVER_INJECTED_PARAMS.includes(param)) continue;
         if (parameterTypes[param]) continue;
