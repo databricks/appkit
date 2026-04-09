@@ -3,8 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Ajv, { type ErrorObject } from "ajv";
 import addFormats from "ajv-formats";
-import type { PluginManifest } from "../manifest-types";
-import { computeOrigin } from "../sync/sync";
+import { computeOrigin, type PluginManifest } from "../manifest-types";
 
 export type { PluginManifest };
 

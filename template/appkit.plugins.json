@@ -207,12 +207,6 @@
                 "examples": [
                   "projects/{project-id}/branches/{branch-id}/endpoints/{endpoint-id}"
                 ],
-                "discovery": {
-                  "cliCommand": "databricks postgres list-endpoints {branch} --profile <PROFILE> --output json",
-                  "selectField": ".name",
-                  "displayField": ".name",
-                  "dependsOn": "branch"
-                },
                 "origin": "cli"
               },
               "port": {

@@ -7,13 +7,14 @@ import {
   type ResolvedManifest,
   resolveManifestInDir,
 } from "../manifest-resolve";
-import type {
-  Origin,
-  PluginManifest,
-  ResourceFieldEntry,
-  ScaffoldingDescriptor,
-  TemplatePlugin,
-  TemplatePluginsManifest,
+import {
+  computeOrigin,
+  type Origin,
+  type PluginManifest,
+  type ResourceFieldEntry,
+  type ScaffoldingDescriptor,
+  type TemplatePlugin,
+  type TemplatePluginsManifest,
 } from "../manifest-types";
 import { shouldAllowJsManifestForPackage } from "../trusted-js-manifest";
 import {
@@ -37,20 +38,6 @@ function isWithinDirectory(filePath: string, boundary: string): boolean {
     resolvedPath === resolvedBoundary ||
     resolvedPath.startsWith(`${resolvedBoundary}${path.sep}`)
   );
-}
-
-/**
- * Derives the origin of a resource field value based on its properties.
- * - localOnly: true → "platform" (auto-injected by Databricks Apps platform)
- * - value present → "static" (hardcoded value)
- * - resolve present → "cli" (resolved by CLI during init)
- * - else → "user" (user must provide the value)
- */
-function computeOrigin(field: ResourceFieldEntry): Origin {
-  if (field.localOnly) return "platform";
-  if (field.value !== undefined) return "static";
-  if (field.resolve !== undefined) return "cli";
-  return "user";
 }
 
 /**

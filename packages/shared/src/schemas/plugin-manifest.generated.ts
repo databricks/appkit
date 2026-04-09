@@ -261,7 +261,10 @@ export interface ResourceFieldEntry {
   discovery?: DiscoveryDescriptor;
 }
 /**
- * How the CLI discovers values for this field via a Databricks CLI command.
+ * Describes how the CLI discovers values for a resource field via a Databricks CLI command.
+ *
+ * This interface was referenced by `PluginManifest`'s JSON-Schema
+ * via the `definition` "discoveryDescriptor".
  */
 export interface DiscoveryDescriptor {
   /**
@@ -332,32 +335,4 @@ export interface PostScaffoldStep {
    * Whether this step is required for the plugin to function correctly.
    */
   required?: boolean;
-}
-/**
- * Describes how the CLI discovers values for a resource field via a Databricks CLI command.
- *
- * This interface was referenced by `PluginManifest`'s JSON-Schema
- * via the `definition` "discoveryDescriptor".
- */
-export interface DiscoveryDescriptor1 {
-  /**
-   * Databricks CLI command that lists resources. Must include <PROFILE> placeholder.
-   */
-  cliCommand: string;
-  /**
-   * jq-style path to the field used as the selected value (e.g., '.id', '.name').
-   */
-  selectField: string;
-  /**
-   * jq-style path to the field shown to the user in selection UI. Defaults to selectField if omitted.
-   */
-  displayField?: string;
-  /**
-   * Name of a sibling field within the same resource that must be resolved first. Used to express ordering dependencies between resource fields.
-   */
-  dependsOn?: string;
-  /**
-   * Single-value fast-path command that returns exactly one value, skipping interactive selection.
-   */
-  shortcut?: string;
 }

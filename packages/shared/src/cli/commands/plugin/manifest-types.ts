@@ -16,6 +16,7 @@ export type {
 import type {
   PluginManifest,
   PostScaffoldStep,
+  ResourceFieldEntry,
 } from "../../../schemas/plugin-manifest.generated";
 
 export interface ScaffoldingFlag {
@@ -37,6 +38,20 @@ export interface ScaffoldingDescriptor {
 }
 
 export type Origin = "user" | "platform" | "static" | "cli";
+
+/**
+ * Derives the origin of a resource field value based on its properties.
+ * - localOnly: true → "platform" (auto-injected by Databricks Apps platform)
+ * - value present → "static" (hardcoded value)
+ * - resolve present → "cli" (resolved by CLI during init)
+ * - else → "user" (user must provide the value)
+ */
+export function computeOrigin(field: ResourceFieldEntry): Origin {
+  if (field.localOnly) return "platform";
+  if (field.value !== undefined) return "static";
+  if (field.resolve !== undefined) return "cli";
+  return "user";
+}
 
 export interface TemplatePlugin extends Omit<PluginManifest, "config"> {
   package: string;

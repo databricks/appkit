@@ -53,13 +53,7 @@
             "description": "Lakebase endpoint resource name. Auto-injected at runtime via app.yaml valueFrom: postgres. For local development, obtain by running `databricks postgres list-endpoints {branch-name}`, select the desired item from the output array and use its .name value.",
             "examples": [
               "projects/{project-id}/branches/{branch-id}/endpoints/{endpoint-id}"
-            ],
-            "discovery": {
-              "cliCommand": "databricks postgres list-endpoints {branch} --profile <PROFILE> --output json",
-              "selectField": ".name",
-              "displayField": ".name",
-              "dependsOn": "branch"
-            }
+            ]
           },
           "port": {
             "env": "PGPORT",
