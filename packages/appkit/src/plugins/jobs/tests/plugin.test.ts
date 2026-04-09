@@ -754,3 +754,500 @@ describe("mapParams", () => {
     });
   });
 });
+
+describe("injectRoutes", () => {
+  let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    setupDatabricksEnv();
+    ServiceContext.reset();
+    serviceContextMock = await mockServiceContext();
+  });
+
+  afterEach(() => {
+    serviceContextMock?.restore();
+    delete process.env.DATABRICKS_JOB_ETL;
+    delete process.env.DATABRICKS_JOB_ML;
+  });
+
+  test("registers all 4 routes via this.route()", () => {
+    process.env.DATABRICKS_JOB_ETL = "123";
+
+    const plugin = new JobsPlugin({});
+    const routeSpy = vi.spyOn(plugin as any, "route");
+
+    const mockRouter = {
+      get: vi.fn(),
+      post: vi.fn(),
+    };
+
+    plugin.injectRoutes(mockRouter as any);
+
+    expect(routeSpy).toHaveBeenCalledTimes(4);
+
+    const routeCalls = routeSpy.mock.calls.map((call) => (call[1] as any).name);
+    expect(routeCalls).toContain("run");
+    expect(routeCalls).toContain("runs");
+    expect(routeCalls).toContain("run-detail");
+    expect(routeCalls).toContain("status");
+  });
+
+  test("registers correct HTTP methods and paths", () => {
+    process.env.DATABRICKS_JOB_ETL = "123";
+
+    const plugin = new JobsPlugin({});
+    const routeSpy = vi.spyOn(plugin as any, "route");
+
+    const mockRouter = {
+      get: vi.fn(),
+      post: vi.fn(),
+    };
+
+    plugin.injectRoutes(mockRouter as any);
+
+    const routes = routeSpy.mock.calls.map((call) => ({
+      name: (call[1] as any).name,
+      method: (call[1] as any).method,
+      path: (call[1] as any).path,
+    }));
+
+    expect(routes).toContainEqual({
+      name: "run",
+      method: "post",
+      path: "/:jobKey/run",
+    });
+    expect(routes).toContainEqual({
+      name: "runs",
+      method: "get",
+      path: "/:jobKey/runs",
+    });
+    expect(routes).toContainEqual({
+      name: "run-detail",
+      method: "get",
+      path: "/:jobKey/runs/:runId",
+    });
+    expect(routes).toContainEqual({
+      name: "status",
+      method: "get",
+      path: "/:jobKey/status",
+    });
+  });
+
+  describe("_resolveJob", () => {
+    test("returns 404 for unknown job key", () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      const plugin = new JobsPlugin({});
+      const resolveJob = (plugin as any)._resolveJob.bind(plugin);
+
+      const mockReq = { params: { jobKey: "unknown" } } as any;
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      } as any;
+
+      const result = resolveJob(mockReq, mockRes);
+
+      expect(result.jobKey).toBeUndefined();
+      expect(mockRes.status).toHaveBeenCalledWith(404);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: 'Unknown job "unknown"',
+          plugin: "jobs",
+        }),
+      );
+    });
+
+    test("sanitizes special characters in unknown job key error", () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      const plugin = new JobsPlugin({});
+      const resolveJob = (plugin as any)._resolveJob.bind(plugin);
+
+      const mockReq = {
+        params: { jobKey: '<script>alert("xss")</script>' },
+      } as any;
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      } as any;
+
+      resolveJob(mockReq, mockRes);
+
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: 'Unknown job "scriptalertxssscript"',
+        }),
+      );
+    });
+
+    test("returns jobKey and jobId for known job", () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      const plugin = new JobsPlugin({});
+      const resolveJob = (plugin as any)._resolveJob.bind(plugin);
+
+      const mockReq = { params: { jobKey: "etl" } } as any;
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      } as any;
+
+      const result = resolveJob(mockReq, mockRes);
+
+      expect(result.jobKey).toBe("etl");
+      expect(result.jobId).toBe(123);
+      expect(mockRes.status).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("POST /:jobKey/run handler", () => {
+    test("returns runId on successful non-streaming run", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
+
+      const plugin = new JobsPlugin({});
+      const routeSpy = vi.spyOn(plugin as any, "route");
+
+      const mockRouter = { get: vi.fn(), post: vi.fn() };
+      plugin.injectRoutes(mockRouter as any);
+
+      const runRoute = routeSpy.mock.calls.find(
+        (call) => (call[1] as any).name === "run",
+      );
+      const handler = (runRoute?.[1] as any).handler;
+
+      const mockReq = {
+        params: { jobKey: "etl" },
+        body: { params: { key: "value" } },
+        query: {},
+        header: vi.fn().mockReturnValue("test-token"),
+      } as any;
+
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+        setHeader: vi.fn(),
+        flushHeaders: vi.fn(),
+        write: vi.fn(),
+        end: vi.fn(),
+      } as any;
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.json).toHaveBeenCalledWith({ runId: 42 });
+    });
+
+    test("returns 400 on parameter validation failure", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      const plugin = new JobsPlugin({
+        jobs: {
+          etl: {
+            taskType: "notebook",
+            params: z.object({ key: z.string() }),
+          },
+        },
+      });
+      const routeSpy = vi.spyOn(plugin as any, "route");
+
+      const mockRouter = { get: vi.fn(), post: vi.fn() };
+      plugin.injectRoutes(mockRouter as any);
+
+      const runRoute = routeSpy.mock.calls.find(
+        (call) => (call[1] as any).name === "run",
+      );
+      const handler = (runRoute?.[1] as any).handler;
+
+      const mockReq = {
+        params: { jobKey: "etl" },
+        body: { params: { key: 42 } },
+        query: {},
+        header: vi.fn().mockReturnValue("test-token"),
+      } as any;
+
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      } as any;
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          plugin: "jobs",
+        }),
+      );
+    });
+  });
+
+  describe("GET /:jobKey/runs handler", () => {
+    test("returns runs with default pagination", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      const mockRuns = [
+        { run_id: 1, state: { life_cycle_state: "TERMINATED" } },
+        { run_id: 2, state: { life_cycle_state: "RUNNING" } },
+      ];
+      mockClient.jobs.listRuns.mockReturnValue(
+        (async function* () {
+          for (const run of mockRuns) yield run;
+        })(),
+      );
+
+      const plugin = new JobsPlugin({});
+      const routeSpy = vi.spyOn(plugin as any, "route");
+
+      const mockRouter = { get: vi.fn(), post: vi.fn() };
+      plugin.injectRoutes(mockRouter as any);
+
+      const runsRoute = routeSpy.mock.calls.find(
+        (call) => (call[1] as any).name === "runs",
+      );
+      const handler = (runsRoute?.[1] as any).handler;
+
+      const mockReq = {
+        params: { jobKey: "etl" },
+        query: {},
+        header: vi.fn().mockReturnValue("test-token"),
+      } as any;
+
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      } as any;
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.json).toHaveBeenCalledWith({
+        runs: mockRuns,
+      });
+    });
+
+    test("passes limit query param to listRuns", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      mockClient.jobs.listRuns.mockReturnValue((async function* () {})());
+
+      const plugin = new JobsPlugin({});
+      const routeSpy = vi.spyOn(plugin as any, "route");
+
+      const mockRouter = { get: vi.fn(), post: vi.fn() };
+      plugin.injectRoutes(mockRouter as any);
+
+      const runsRoute = routeSpy.mock.calls.find(
+        (call) => (call[1] as any).name === "runs",
+      );
+      const handler = (runsRoute?.[1] as any).handler;
+
+      const mockReq = {
+        params: { jobKey: "etl" },
+        query: { limit: "5" },
+        header: vi.fn().mockReturnValue("test-token"),
+      } as any;
+
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      } as any;
+
+      await handler(mockReq, mockRes);
+
+      // Verify the connector was called with limit 5
+      expect(mockClient.jobs.listRuns).toHaveBeenCalledWith(
+        expect.objectContaining({ limit: 5 }),
+        expect.anything(),
+      );
+    });
+  });
+
+  describe("GET /:jobKey/runs/:runId handler", () => {
+    test("returns run detail", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      const mockRun = {
+        run_id: 42,
+        state: { life_cycle_state: "TERMINATED" },
+      };
+      mockClient.jobs.getRun.mockResolvedValue(mockRun);
+
+      const plugin = new JobsPlugin({});
+      const routeSpy = vi.spyOn(plugin as any, "route");
+
+      const mockRouter = { get: vi.fn(), post: vi.fn() };
+      plugin.injectRoutes(mockRouter as any);
+
+      const detailRoute = routeSpy.mock.calls.find(
+        (call) => (call[1] as any).name === "run-detail",
+      );
+      const handler = (detailRoute?.[1] as any).handler;
+
+      const mockReq = {
+        params: { jobKey: "etl", runId: "42" },
+        query: {},
+        header: vi.fn().mockReturnValue("test-token"),
+      } as any;
+
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      } as any;
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.json).toHaveBeenCalledWith(mockRun);
+    });
+
+    test("returns 400 for invalid runId", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      const plugin = new JobsPlugin({});
+      const routeSpy = vi.spyOn(plugin as any, "route");
+
+      const mockRouter = { get: vi.fn(), post: vi.fn() };
+      plugin.injectRoutes(mockRouter as any);
+
+      const detailRoute = routeSpy.mock.calls.find(
+        (call) => (call[1] as any).name === "run-detail",
+      );
+      const handler = (detailRoute?.[1] as any).handler;
+
+      const mockReq = {
+        params: { jobKey: "etl", runId: "not-a-number" },
+        query: {},
+        header: vi.fn().mockReturnValue("test-token"),
+      } as any;
+
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      } as any;
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: "Invalid runId",
+        plugin: "jobs",
+      });
+    });
+  });
+
+  describe("GET /:jobKey/status handler", () => {
+    test("returns latest run status", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      const mockRun = {
+        run_id: 42,
+        state: { life_cycle_state: "TERMINATED" },
+      };
+      mockClient.jobs.listRuns.mockReturnValue(
+        (async function* () {
+          yield mockRun;
+        })(),
+      );
+
+      const plugin = new JobsPlugin({});
+      const routeSpy = vi.spyOn(plugin as any, "route");
+
+      const mockRouter = { get: vi.fn(), post: vi.fn() };
+      plugin.injectRoutes(mockRouter as any);
+
+      const statusRoute = routeSpy.mock.calls.find(
+        (call) => (call[1] as any).name === "status",
+      );
+      const handler = (statusRoute?.[1] as any).handler;
+
+      const mockReq = {
+        params: { jobKey: "etl" },
+        query: {},
+        header: vi.fn().mockReturnValue("test-token"),
+      } as any;
+
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      } as any;
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.json).toHaveBeenCalledWith({
+        status: "TERMINATED",
+        run: mockRun,
+      });
+    });
+
+    test("returns null status when no runs exist", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      mockClient.jobs.listRuns.mockReturnValue((async function* () {})());
+
+      const plugin = new JobsPlugin({});
+      const routeSpy = vi.spyOn(plugin as any, "route");
+
+      const mockRouter = { get: vi.fn(), post: vi.fn() };
+      plugin.injectRoutes(mockRouter as any);
+
+      const statusRoute = routeSpy.mock.calls.find(
+        (call) => (call[1] as any).name === "status",
+      );
+      const handler = (statusRoute?.[1] as any).handler;
+
+      const mockReq = {
+        params: { jobKey: "etl" },
+        query: {},
+        header: vi.fn().mockReturnValue("test-token"),
+      } as any;
+
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      } as any;
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.json).toHaveBeenCalledWith({
+        status: null,
+        run: null,
+      });
+    });
+  });
+
+  describe("OBO header forwarding", () => {
+    test("routes call this.asUser(req) for user context", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      mockClient.jobs.listRuns.mockReturnValue((async function* () {})());
+
+      const plugin = new JobsPlugin({});
+      const asUserSpy = vi.spyOn(plugin, "asUser");
+      const routeSpy = vi.spyOn(plugin as any, "route");
+
+      const mockRouter = { get: vi.fn(), post: vi.fn() };
+      plugin.injectRoutes(mockRouter as any);
+
+      const runsRoute = routeSpy.mock.calls.find(
+        (call) => (call[1] as any).name === "runs",
+      );
+      const handler = (runsRoute?.[1] as any).handler;
+
+      const mockReq = {
+        params: { jobKey: "etl" },
+        query: {},
+        header: vi.fn().mockReturnValue("test-token"),
+      } as any;
+
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      } as any;
+
+      await handler(mockReq, mockRes);
+
+      expect(asUserSpy).toHaveBeenCalledWith(mockReq);
+    });
+  });
+});
