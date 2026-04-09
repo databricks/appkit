@@ -1,5 +1,6 @@
 import type { jobs as jobsTypes } from "@databricks/sdk-experimental";
-import type { IAppRequest, PluginExecutionSettings } from "shared";
+import type express from "express";
+import type { IAppRequest, IAppRouter, PluginExecutionSettings } from "shared";
 import { toJSONSchema } from "zod";
 import { JobsConnector } from "../../connectors/jobs";
 import { getWorkspaceClient } from "../../context";
@@ -329,6 +330,169 @@ class JobsPlugin extends Plugin {
         );
       },
     };
+  }
+
+  /**
+   * Resolve `:jobKey` from the request. Returns the key and ID,
+   * or sends a 404 and returns `{ jobKey: undefined, jobId: undefined }`.
+   */
+  private _resolveJob(
+    req: express.Request,
+    res: express.Response,
+  ):
+    | { jobKey: string; jobId: number }
+    | { jobKey: undefined; jobId: undefined } {
+    const jobKey = req.params.jobKey;
+    if (!this.jobKeys.includes(jobKey)) {
+      const safeKey = jobKey.replace(/[^a-zA-Z0-9_-]/g, "");
+      res.status(404).json({
+        error: `Unknown job "${safeKey}"`,
+        plugin: this.name,
+      });
+      return { jobKey: undefined, jobId: undefined };
+    }
+    const jobId = this.jobIds[jobKey];
+    if (!jobId) {
+      res.status(404).json({
+        error: `Job "${jobKey}" has no configured job ID`,
+        plugin: this.name,
+      });
+      return { jobKey: undefined, jobId: undefined };
+    }
+    return { jobKey, jobId };
+  }
+
+  injectRoutes(router: IAppRouter) {
+    // POST /:jobKey/run
+    this.route(router, {
+      name: "run",
+      method: "post",
+      path: "/:jobKey/run",
+      handler: async (req: express.Request, res: express.Response) => {
+        const { jobKey } = this._resolveJob(req, res);
+        if (!jobKey) return;
+
+        const params = req.body?.params as Record<string, unknown> | undefined;
+        const stream = req.query.stream === "true";
+
+        try {
+          const userPlugin = this.asUser(req) as JobsPlugin;
+          const api = userPlugin.createJobAPI(jobKey);
+
+          if (stream) {
+            res.setHeader("Content-Type", "text/event-stream");
+            res.setHeader("Cache-Control", "no-cache");
+            res.setHeader("Connection", "keep-alive");
+            res.flushHeaders();
+
+            for await (const event of api.runAndWait(params)) {
+              res.write(`data: ${JSON.stringify(event)}\n\n`);
+            }
+            res.end();
+          } else {
+            const result = await api.runNow(params);
+            res.json({ runId: result?.run_id });
+          }
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            error.message.includes("validation failed")
+          ) {
+            res.status(400).json({ error: error.message, plugin: this.name });
+            return;
+          }
+          logger.error("Run failed for job %s: %O", jobKey, error);
+          res.status(500).json({ error: "Run failed", plugin: this.name });
+        }
+      },
+    });
+
+    // GET /:jobKey/runs
+    this.route(router, {
+      name: "runs",
+      method: "get",
+      path: "/:jobKey/runs",
+      handler: async (req: express.Request, res: express.Response) => {
+        const { jobKey } = this._resolveJob(req, res);
+        if (!jobKey) return;
+
+        const limit = Number.parseInt(req.query.limit as string, 10) || 20;
+
+        try {
+          const userPlugin = this.asUser(req) as JobsPlugin;
+          const api = userPlugin.createJobAPI(jobKey);
+          const runs = await api.listRuns({ limit });
+          res.json({ runs: runs ?? [] });
+        } catch (error) {
+          logger.error("List runs failed for job %s: %O", jobKey, error);
+          res
+            .status(500)
+            .json({ error: "List runs failed", plugin: this.name });
+        }
+      },
+    });
+
+    // GET /:jobKey/runs/:runId
+    this.route(router, {
+      name: "run-detail",
+      method: "get",
+      path: "/:jobKey/runs/:runId",
+      handler: async (req: express.Request, res: express.Response) => {
+        const { jobKey } = this._resolveJob(req, res);
+        if (!jobKey) return;
+
+        const runId = Number.parseInt(req.params.runId, 10);
+        if (Number.isNaN(runId)) {
+          res.status(400).json({ error: "Invalid runId", plugin: this.name });
+          return;
+        }
+
+        try {
+          const userPlugin = this.asUser(req) as JobsPlugin;
+          const api = userPlugin.createJobAPI(jobKey);
+          const run = await api.getRun(runId);
+          if (!run) {
+            res.status(404).json({ error: "Run not found", plugin: this.name });
+            return;
+          }
+          res.json(run);
+        } catch (error) {
+          logger.error(
+            "Get run failed for job %s run %d: %O",
+            jobKey,
+            runId,
+            error,
+          );
+          res.status(500).json({ error: "Get run failed", plugin: this.name });
+        }
+      },
+    });
+
+    // GET /:jobKey/status
+    this.route(router, {
+      name: "status",
+      method: "get",
+      path: "/:jobKey/status",
+      handler: async (req: express.Request, res: express.Response) => {
+        const { jobKey } = this._resolveJob(req, res);
+        if (!jobKey) return;
+
+        try {
+          const userPlugin = this.asUser(req) as JobsPlugin;
+          const api = userPlugin.createJobAPI(jobKey);
+          const lastRun = await api.lastRun();
+          res.json({
+            status: lastRun?.state?.life_cycle_state ?? null,
+            run: lastRun ?? null,
+          });
+        } catch (error) {
+          logger.error("Status check failed for job %s: %O", jobKey, error);
+          res
+            .status(500)
+            .json({ error: "Status check failed", plugin: this.name });
+        }
+      },
+    });
   }
 
   exports(): JobsExport {
