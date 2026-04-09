@@ -1,201 +1,90 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { invoke, stream } from "../client";
-
-const mockAuthenticate = vi.fn();
 
 function createMockClient(host = "https://test.databricks.com") {
   return {
-    config: {
-      host,
-      authenticate: mockAuthenticate,
+    config: { host },
+    servingEndpoints: {
+      query: vi.fn(),
+    },
+    apiClient: {
+      request: vi.fn(),
     },
   } as any;
 }
 
 describe("Serving Connector", () => {
-  beforeEach(() => {
-    mockAuthenticate.mockResolvedValue(undefined);
-  });
-
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
   describe("invoke", () => {
-    test("constructs correct URL for endpoint invocation", async () => {
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValue(
-          new Response(JSON.stringify({ result: "ok" }), { status: 200 }),
-        );
-
+    test("calls servingEndpoints.query with endpoint name and body", async () => {
       const client = createMockClient();
-      await invoke(client, "my-endpoint", { messages: [] });
+      const mockResponse = { choices: [{ message: { content: "Hello" } }] };
+      client.servingEndpoints.query.mockResolvedValue(mockResponse);
 
-      expect(fetchSpy).toHaveBeenCalledWith(
-        "https://test.databricks.com/serving-endpoints/my-endpoint/invocations",
-        expect.objectContaining({ method: "POST" }),
-      );
-    });
+      const result = await invoke(client, "my-endpoint", {
+        messages: [{ role: "user", content: "Hi" }],
+        temperature: 0.7,
+      });
 
-    test("constructs correct URL with servedModel override", async () => {
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValue(
-          new Response(JSON.stringify({ result: "ok" }), { status: 200 }),
-        );
-
-      const client = createMockClient();
-      await invoke(
-        client,
-        "my-endpoint",
-        { messages: [] },
-        { servedModel: "llama-v2" },
-      );
-
-      expect(fetchSpy).toHaveBeenCalledWith(
-        "https://test.databricks.com/serving-endpoints/my-endpoint/served-models/llama-v2/invocations",
-        expect.objectContaining({ method: "POST" }),
-      );
-    });
-
-    test("authenticates request headers", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        new Response(JSON.stringify({ result: "ok" }), { status: 200 }),
-      );
-
-      const client = createMockClient();
-      await invoke(client, "my-endpoint", { messages: [] });
-
-      expect(mockAuthenticate).toHaveBeenCalledWith(expect.any(Headers));
+      expect(client.servingEndpoints.query).toHaveBeenCalledWith({
+        name: "my-endpoint",
+        messages: [{ role: "user", content: "Hi" }],
+        temperature: 0.7,
+      });
+      expect(result).toEqual(mockResponse);
     });
 
     test("strips stream property from body", async () => {
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValue(
-          new Response(JSON.stringify({ result: "ok" }), { status: 200 }),
-        );
-
       const client = createMockClient();
+      client.servingEndpoints.query.mockResolvedValue({});
+
       await invoke(client, "my-endpoint", {
         messages: [],
         stream: true,
         temperature: 0.7,
       });
 
-      const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
-      expect(body).toEqual({ messages: [], temperature: 0.7 });
-      expect(body.stream).toBeUndefined();
+      const queryArg = client.servingEndpoints.query.mock.calls[0][0];
+      expect(queryArg.stream).toBeUndefined();
+      expect(queryArg.temperature).toBe(0.7);
     });
 
-    test("returns parsed JSON response", async () => {
-      const responseData = { choices: [{ message: { content: "Hello" } }] };
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        new Response(JSON.stringify(responseData), { status: 200 }),
-      );
-
+    test("returns typed QueryEndpointResponse", async () => {
       const client = createMockClient();
-      const result = await invoke(client, "my-endpoint", { messages: [] });
+      const responseData = {
+        choices: [{ message: { content: "Hello" } }],
+        model: "test-model",
+      };
+      client.servingEndpoints.query.mockResolvedValue(responseData);
 
+      const result = await invoke(client, "my-endpoint", { messages: [] });
       expect(result).toEqual(responseData);
     });
 
-    test("throws ApiError on 400 response", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        new Response(JSON.stringify({ message: "Invalid params" }), {
-          status: 400,
-        }),
+    test("propagates SDK errors", async () => {
+      const client = createMockClient();
+      client.servingEndpoints.query.mockRejectedValue(
+        new Error("Endpoint not found"),
       );
 
-      const client = createMockClient();
-      await expect(
-        invoke(client, "my-endpoint", { messages: [] }),
-      ).rejects.toThrow("Invalid params");
-    });
-
-    test("throws ApiError on 404 response", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        new Response(JSON.stringify({ message: "Endpoint not found" }), {
-          status: 404,
-        }),
-      );
-
-      const client = createMockClient();
       await expect(
         invoke(client, "my-endpoint", { messages: [] }),
       ).rejects.toThrow("Endpoint not found");
     });
-
-    test("maps 5xx to 502 bad gateway", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        new Response(JSON.stringify({ message: "Internal error" }), {
-          status: 500,
-        }),
-      );
-
-      const client = createMockClient();
-      try {
-        await invoke(client, "my-endpoint", { messages: [] });
-        expect.unreachable("Should have thrown");
-      } catch (err: any) {
-        expect(err.statusCode).toBe(502);
-      }
-    });
-
-    test("forwards AbortSignal", async () => {
-      const controller = new AbortController();
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValue(
-          new Response(JSON.stringify({ result: "ok" }), { status: 200 }),
-        );
-
-      const client = createMockClient();
-      await invoke(
-        client,
-        "my-endpoint",
-        { messages: [] },
-        { signal: controller.signal },
-      );
-
-      expect(fetchSpy.mock.calls[0][1]?.signal).toBe(controller.signal);
-    });
-
-    test("throws when host is not configured", async () => {
-      const client = {
-        config: {
-          host: "",
-          authenticate: mockAuthenticate,
-        },
-      } as any;
-      await expect(
-        invoke(client, "my-endpoint", { messages: [] }),
-      ).rejects.toThrow("Databricks host is not configured");
-    });
-
-    test("prepends https:// to host without protocol", async () => {
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValue(
-          new Response(JSON.stringify({ result: "ok" }), { status: 200 }),
-        );
-
-      const client = createMockClient("test.databricks.com");
-      await invoke(client, "my-endpoint", { messages: [] });
-
-      expect(fetchSpy.mock.calls[0][0]).toContain(
-        "https://test.databricks.com",
-      );
-    });
   });
 
   describe("stream", () => {
-    function createSSEResponse(chunks: string[]) {
+    function createSSEStream(chunks: string[]) {
       const body = `${chunks.join("\n")}\n`;
-      return new Response(body, {
-        status: 200,
-        headers: { "Content-Type": "text/event-stream" },
+      const encoder = new TextEncoder();
+      return new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(body));
+          controller.close();
+        },
       });
     }
 
@@ -206,11 +95,11 @@ describe("Serving Connector", () => {
         "data: [DONE]",
       ];
 
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        createSSEResponse(chunks),
-      );
-
       const client = createMockClient();
+      client.apiClient.request.mockResolvedValue({
+        contents: createSSEStream(chunks),
+      });
+
       const results: unknown[] = [];
       for await (const chunk of stream(client, "my-endpoint", {
         messages: [],
@@ -224,27 +113,32 @@ describe("Serving Connector", () => {
       ]);
     });
 
-    test("injects stream: true into body", async () => {
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValue(createSSEResponse(["data: [DONE]"]));
-
+    test("sends stream: true in payload via apiClient.request", async () => {
       const client = createMockClient();
-      // Consume the generator
+      client.apiClient.request.mockResolvedValue({
+        contents: createSSEStream(["data: [DONE]"]),
+      });
+
       for await (const _ of stream(client, "my-endpoint", { messages: [] })) {
         // noop
       }
 
-      const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
-      expect(body.stream).toBe(true);
+      expect(client.apiClient.request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: "/serving-endpoints/my-endpoint/invocations",
+          method: "POST",
+          raw: true,
+          payload: expect.objectContaining({ stream: true }),
+        }),
+      );
     });
 
     test("strips user-provided stream and re-injects", async () => {
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValue(createSSEResponse(["data: [DONE]"]));
-
       const client = createMockClient();
+      client.apiClient.request.mockResolvedValue({
+        contents: createSSEStream(["data: [DONE]"]),
+      });
+
       for await (const _ of stream(client, "my-endpoint", {
         messages: [],
         stream: false,
@@ -252,8 +146,8 @@ describe("Serving Connector", () => {
         // noop
       }
 
-      const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
-      expect(body.stream).toBe(true);
+      const payload = client.apiClient.request.mock.calls[0][0].payload;
+      expect(payload.stream).toBe(true);
     });
 
     test("skips SSE comments and empty lines", async () => {
@@ -265,11 +159,11 @@ describe("Serving Connector", () => {
         "data: [DONE]",
       ];
 
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        createSSEResponse(chunks),
-      );
-
       const client = createMockClient();
+      client.apiClient.request.mockResolvedValue({
+        contents: createSSEStream(chunks),
+      });
+
       const results: unknown[] = [];
       for await (const chunk of stream(client, "my-endpoint", {
         messages: [],
@@ -281,22 +175,45 @@ describe("Serving Connector", () => {
       expect(results[0]).toEqual({ choices: [{ delta: { content: "Hi" } }] });
     });
 
-    test("throws on non-OK response", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        new Response(JSON.stringify({ message: "Rate limited" }), {
-          status: 429,
-          headers: { "Retry-After": "5" },
-        }),
-      );
-
+    test("throws when response has no contents", async () => {
       const client = createMockClient();
+      client.apiClient.request.mockResolvedValue({ contents: null });
+
       try {
-        for await (const _ of stream(client, "my-endpoint", { messages: [] })) {
+        for await (const _ of stream(client, "my-endpoint", {
+          messages: [],
+        })) {
           // noop
         }
         expect.unreachable("Should have thrown");
       } catch (err: any) {
-        expect(err.statusCode).toBe(429);
+        expect(err.message).toContain("streaming not supported");
+      }
+    });
+
+    test("throws when buffer exceeds max size", async () => {
+      const client = createMockClient();
+      const largeData = "x".repeat(1024 * 1024 + 1);
+      const encoder = new TextEncoder();
+      const largeStream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(largeData));
+          controller.close();
+        },
+      });
+      client.apiClient.request.mockResolvedValue({
+        contents: largeStream,
+      });
+
+      try {
+        for await (const _ of stream(client, "my-endpoint", {
+          messages: [],
+        })) {
+          // noop
+        }
+        expect.unreachable("Should have thrown");
+      } catch (err: any) {
+        expect(err.message).toContain("Stream buffer exceeded");
       }
     });
   });

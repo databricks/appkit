@@ -48,7 +48,7 @@ describe("Serving Plugin", () => {
 
   beforeEach(async () => {
     setupDatabricksEnv();
-    process.env.DATABRICKS_SERVING_ENDPOINT = "test-endpoint";
+    process.env.DATABRICKS_SERVING_ENDPOINT_NAME = "test-endpoint";
     ServiceContext.reset();
 
     serviceContextMock = await mockServiceContext();
@@ -56,7 +56,7 @@ describe("Serving Plugin", () => {
 
   afterEach(() => {
     serviceContextMock?.restore();
-    delete process.env.DATABRICKS_SERVING_ENDPOINT;
+    delete process.env.DATABRICKS_SERVING_ENDPOINT_NAME;
     vi.restoreAllMocks();
   });
 
@@ -67,13 +67,13 @@ describe("Serving Plugin", () => {
 
   test("serving factory with config should have correct name", () => {
     const pluginData = serving({
-      endpoints: { llm: { env: "DATABRICKS_SERVING_ENDPOINT" } },
+      endpoints: { llm: { env: "DATABRICKS_SERVING_ENDPOINT_NAME" } },
     });
     expect(pluginData.name).toBe("serving");
   });
 
   describe("default mode", () => {
-    test("reads DATABRICKS_SERVING_ENDPOINT", () => {
+    test("reads DATABRICKS_SERVING_ENDPOINT_NAME", () => {
       const plugin = new ServingPlugin({});
       const api = (plugin.exports() as any)();
       expect(api.invoke).toBeDefined();
@@ -103,8 +103,8 @@ describe("Serving Plugin", () => {
   describe("named mode", () => {
     const namedConfig: IServingConfig = {
       endpoints: {
-        llm: { env: "DATABRICKS_SERVING_ENDPOINT" },
-        embedder: { env: "DATABRICKS_SERVING_ENDPOINT_EMBEDDING" },
+        llm: { env: "DATABRICKS_SERVING_ENDPOINT_NAME" },
+        embedder: { env: "DATABRICKS_SERVING_ENDPOINT_NAME_EMBEDDING" },
       },
     };
 
@@ -132,7 +132,7 @@ describe("Serving Plugin", () => {
   describe("route handlers", () => {
     test("_handleInvoke returns 404 for unknown alias", async () => {
       const plugin = new ServingPlugin({
-        endpoints: { llm: { env: "DATABRICKS_SERVING_ENDPOINT" } },
+        endpoints: { llm: { env: "DATABRICKS_SERVING_ENDPOINT_NAME" } },
       });
 
       const req = createMockRequest({
@@ -165,13 +165,12 @@ describe("Serving Plugin", () => {
         expect.anything(),
         "test-endpoint",
         { messages: [{ role: "user", content: "Hello" }] },
-        { servedModel: undefined },
       );
       expect(res.json).toHaveBeenCalledWith({ choices: [] });
     });
 
     test("_handleInvoke returns 400 with descriptive message when env var is not set", async () => {
-      delete process.env.DATABRICKS_SERVING_ENDPOINT;
+      delete process.env.DATABRICKS_SERVING_ENDPOINT_NAME;
 
       const plugin = new ServingPlugin({});
       const req = createMockRequest({
@@ -185,7 +184,7 @@ describe("Serving Plugin", () => {
       expect(res.status).toHaveBeenCalledWith(400);
       expect(res.json).toHaveBeenCalledWith({
         error:
-          "Endpoint 'default' is not configured: env var 'DATABRICKS_SERVING_ENDPOINT' is not set",
+          "Endpoint 'default' is not configured: env var 'DATABRICKS_SERVING_ENDPOINT_NAME' is not set",
       });
     });
 
@@ -207,7 +206,7 @@ describe("Serving Plugin", () => {
 
     test("_handleStream returns 404 for unknown alias", async () => {
       const plugin = new ServingPlugin({
-        endpoints: { llm: { env: "DATABRICKS_SERVING_ENDPOINT" } },
+        endpoints: { llm: { env: "DATABRICKS_SERVING_ENDPOINT_NAME" } },
       });
 
       const req = createMockRequest({
@@ -226,7 +225,7 @@ describe("Serving Plugin", () => {
     });
 
     test("_handleStream returns 400 when env var is not set", async () => {
-      delete process.env.DATABRICKS_SERVING_ENDPOINT;
+      delete process.env.DATABRICKS_SERVING_ENDPOINT_NAME;
 
       const plugin = new ServingPlugin({});
       const req = createMockRequest({
@@ -241,7 +240,7 @@ describe("Serving Plugin", () => {
       expect(res.status).toHaveBeenCalledWith(400);
       expect(res.json).toHaveBeenCalledWith({
         error:
-          "Endpoint 'default' is not configured: env var 'DATABRICKS_SERVING_ENDPOINT' is not set",
+          "Endpoint 'default' is not configured: env var 'DATABRICKS_SERVING_ENDPOINT_NAME' is not set",
       });
     });
   });
@@ -256,7 +255,7 @@ describe("Serving Plugin", () => {
         permission: "CAN_QUERY",
         fields: {
           name: {
-            env: "DATABRICKS_SERVING_ENDPOINT",
+            env: "DATABRICKS_SERVING_ENDPOINT_NAME",
           },
         },
       });
@@ -288,14 +287,13 @@ describe("Serving Plugin", () => {
         expect.anything(),
         "test-endpoint",
         { messages: [] },
-        { servedModel: undefined },
       );
       expect(result).toEqual({ choices: [{ message: { content: "Hi" } }] });
     });
 
     test("invoke throws for unknown alias", async () => {
       const plugin = new ServingPlugin({
-        endpoints: { llm: { env: "DATABRICKS_SERVING_ENDPOINT" } },
+        endpoints: { llm: { env: "DATABRICKS_SERVING_ENDPOINT_NAME" } },
       });
 
       await expect(plugin.invoke("unknown", { messages: [] })).rejects.toThrow(

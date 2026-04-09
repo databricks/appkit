@@ -11,7 +11,12 @@ import { ResourceType } from "../../registry";
 import { servingInvokeDefaults, servingStreamDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import { filterRequestBody, loadEndpointSchemas } from "./schema-filter";
-import type { EndpointConfig, IServingConfig, ServingFactory } from "./types";
+import type {
+  EndpointConfig,
+  IServingConfig,
+  ServingEndpointMethods,
+  ServingFactory,
+} from "./types";
 
 const logger = createLogger("serving");
 
@@ -31,7 +36,6 @@ class EndpointNotConfiguredError extends Error {
 
 interface ResolvedEndpoint {
   name: string;
-  servedModel?: string;
 }
 
 export class ServingPlugin extends Plugin {
@@ -54,7 +58,7 @@ export class ServingPlugin extends Plugin {
       this.isNamedMode = true;
     } else {
       this.endpoints = {
-        default: { env: "DATABRICKS_SERVING_ENDPOINT" },
+        default: { env: "DATABRICKS_SERVING_ENDPOINT_NAME" },
       };
       this.isNamedMode = false;
     }
@@ -81,7 +85,7 @@ export class ServingPlugin extends Plugin {
     config: IServingConfig,
   ): ResourceRequirement[] {
     const endpoints = config.endpoints ?? {
-      default: { env: "DATABRICKS_SERVING_ENDPOINT" },
+      default: { env: "DATABRICKS_SERVING_ENDPOINT_NAME" },
     };
 
     return Object.entries(endpoints).map(([alias, endpointConfig]) => ({
@@ -114,10 +118,7 @@ export class ServingPlugin extends Plugin {
       throw new EndpointNotConfiguredError(alias, config.env);
     }
 
-    const endpoint: ResolvedEndpoint = {
-      name,
-      servedModel: config.servedModel,
-    };
+    const endpoint: ResolvedEndpoint = { name };
     const filteredBody = filterRequestBody(
       body,
       this.schemaAllowlists,
@@ -127,6 +128,8 @@ export class ServingPlugin extends Plugin {
     return { endpoint, filteredBody };
   }
 
+  // All serving routes use OBO (On-Behalf-Of) by default, consistent with the
+  // Genie and Files plugins. This ensures per-user CAN_QUERY permissions are enforced.
   injectRoutes(router: IAppRouter) {
     if (this.isNamedMode) {
       this.route(router, {
@@ -234,16 +237,11 @@ export class ServingPlugin extends Plugin {
     };
 
     const workspaceClient = getWorkspaceClient();
-    if (!workspaceClient.config.host) {
-      res.status(500).json({ error: "Databricks host not configured" });
-      return;
-    }
 
     await this.executeStream(
       res,
       (signal) =>
         servingConnector.stream(workspaceClient, endpoint.name, filteredBody, {
-          servedModel: endpoint.servedModel,
           signal,
         }),
       streamSettings,
@@ -257,9 +255,7 @@ export class ServingPlugin extends Plugin {
 
     return this.execute(
       () =>
-        servingConnector.invoke(workspaceClient, endpoint.name, filteredBody, {
-          servedModel: endpoint.servedModel,
-        }),
+        servingConnector.invoke(workspaceClient, endpoint.name, filteredBody),
       {
         default: {
           ...servingInvokeDefaults,
@@ -280,7 +276,6 @@ export class ServingPlugin extends Plugin {
       workspaceClient,
       endpoint.name,
       filteredBody,
-      { servedModel: endpoint.servedModel },
     );
   }
 
@@ -288,13 +283,26 @@ export class ServingPlugin extends Plugin {
     this.streamManager.abortAll();
   }
 
+  protected createEndpointAPI(alias: string): ServingEndpointMethods {
+    return {
+      invoke: (body: Record<string, unknown>) => this.invoke(alias, body),
+      stream: (body: Record<string, unknown>) => this.stream(alias, body),
+    };
+  }
+
   exports(): ServingFactory {
-    return ((alias?: string) => ({
-      invoke: (body: Record<string, unknown>) =>
-        this.invoke(alias ?? "default", body),
-      stream: (body: Record<string, unknown>) =>
-        this.stream(alias ?? "default", body),
-    })) as ServingFactory;
+    const resolveEndpoint = (alias?: string) => {
+      const resolved = alias ?? "default";
+      const spApi = this.createEndpointAPI(resolved);
+      return {
+        ...spApi,
+        asUser: (req: express.Request) => {
+          const userPlugin = this.asUser(req) as ServingPlugin;
+          return userPlugin.createEndpointAPI(resolved);
+        },
+      };
+    };
+    return resolveEndpoint as ServingFactory;
   }
 }
 

@@ -13,7 +13,7 @@
         "permission": "CAN_QUERY",
         "fields": {
           "name": {
-            "env": "DATABRICKS_SERVING_ENDPOINT",
+            "env": "DATABRICKS_SERVING_ENDPOINT_NAME",
             "description": "Serving endpoint name"
           }
         }

@@ -1,4 +1,3 @@
-export interface ServingInvokeOptions {
-  servedModel?: string;
+export interface ServingStreamOptions {
   signal?: AbortSignal;
 }

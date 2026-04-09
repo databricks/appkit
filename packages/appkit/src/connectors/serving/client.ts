@@ -1,35 +1,15 @@
+import type { serving } from "@databricks/sdk-experimental";
 import { ApiError, type WorkspaceClient } from "@databricks/sdk-experimental";
 import { createLogger } from "../../logging/logger";
-import type { ServingInvokeOptions } from "./types";
+import type { ServingStreamOptions } from "./types";
 
 const logger = createLogger("connectors:serving");
 
 /**
- * Builds the invocation URL for a serving endpoint.
- * Uses `/served-models/{model}/invocations` when servedModel is specified,
- * otherwise `/serving-endpoints/{name}/invocations`.
- */
-function buildInvocationUrl(
-  host: string,
-  endpointName: string,
-  servedModel?: string,
-): string {
-  const base = host.startsWith("http") ? host : `https://${host}`;
-  const encodedName = encodeURIComponent(endpointName);
-  const path = servedModel
-    ? `/serving-endpoints/${encodedName}/served-models/${encodeURIComponent(servedModel)}/invocations`
-    : `/serving-endpoints/${encodedName}/invocations`;
-  return new URL(path, base).toString();
-}
-
-/**
  * Maps upstream Databricks error status codes to appropriate proxy responses.
+ * Used for raw API responses where the SDK doesn't handle errors automatically.
  */
-function mapUpstreamError(
-  status: number,
-  body: string,
-  headers: Headers,
-): ApiError {
+function mapUpstreamError(status: number, body: string): ApiError {
   const safeMessage = body.length > 500 ? `${body.slice(0, 500)}...` : body;
 
   let parsed: { message?: string; error?: string } = {};
@@ -49,13 +29,8 @@ function mapUpstreamError(
       return new ApiError(message, "AUTH_FAILURE", status, undefined, []);
     case status === 404:
       return new ApiError(message, "NOT_FOUND", 404, undefined, []);
-    case status === 429: {
-      const retryAfter = headers.get("retry-after");
-      const retryMessage = retryAfter
-        ? `${message} (retry-after: ${retryAfter})`
-        : message;
-      return new ApiError(retryMessage, "RATE_LIMITED", 429, undefined, []);
-    }
+    case status === 429:
+      return new ApiError(message, "RATE_LIMITED", 429, undefined, []);
     case status === 503:
       return new ApiError(
         "Endpoint loading, retry shortly",
@@ -72,97 +47,60 @@ function mapUpstreamError(
 }
 
 /**
- * Invokes a serving endpoint and returns the parsed JSON response.
+ * Invokes a serving endpoint using the SDK's high-level query API.
+ * Returns a typed QueryEndpointResponse.
  */
 export async function invoke(
   client: WorkspaceClient,
   endpointName: string,
   body: Record<string, unknown>,
-  options?: ServingInvokeOptions,
-): Promise<unknown> {
-  const host = client.config.host;
-  if (!host) {
-    throw new Error(
-      "Databricks host is not configured. Set DATABRICKS_HOST or configure client.config.host.",
-    );
-  }
-
-  const url = buildInvocationUrl(host, endpointName, options?.servedModel);
-
-  // Always strip `stream` from the body — the connector controls this
+): Promise<serving.QueryEndpointResponse> {
+  // Strip `stream` from the body — the connector controls this
   const { stream: _stream, ...cleanBody } = body;
 
-  const headers = new Headers({
-    "Content-Type": "application/json",
-    Accept: "application/json",
-  });
-  await client.config.authenticate(headers);
+  logger.debug("Invoking endpoint %s", endpointName);
 
-  logger.debug("Invoking endpoint %s at %s", endpointName, url);
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(cleanBody),
-    signal: options?.signal,
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw mapUpstreamError(res.status, text, res.headers);
-  }
-
-  return res.json();
+  return client.servingEndpoints.query({
+    name: endpointName,
+    ...cleanBody,
+  } as serving.QueryEndpointInput);
 }
 
 /**
  * Invokes a serving endpoint with streaming enabled.
- * Yields parsed JSON chunks from the NDJSON SSE response.
+ * Yields parsed JSON chunks from the SSE response.
+ *
+ * Uses the SDK's low-level `apiClient.request({ raw: true })` because
+ * the high-level `servingEndpoints.query()` returns `Promise<QueryEndpointResponse>`
+ * and does not support SSE streaming.
  */
 export async function* stream(
   client: WorkspaceClient,
   endpointName: string,
   body: Record<string, unknown>,
-  options?: ServingInvokeOptions,
+  options?: ServingStreamOptions,
 ): AsyncGenerator<unknown> {
-  const host = client.config.host;
-  if (!host) {
-    throw new Error(
-      "Databricks host is not configured. Set DATABRICKS_HOST or configure client.config.host.",
-    );
-  }
-
-  const url = buildInvocationUrl(host, endpointName, options?.servedModel);
-
   // Strip any user-provided `stream` and inject `stream: true`
   const { stream: _stream, ...cleanBody } = body;
-  const streamBody = { ...cleanBody, stream: true };
 
-  const headers = new Headers({
-    "Content-Type": "application/json",
-    Accept: "text/event-stream",
-  });
-  await client.config.authenticate(headers);
+  logger.debug("Streaming from endpoint %s", endpointName);
 
-  logger.debug("Streaming from endpoint %s at %s", endpointName, url);
-
-  const res = await fetch(url, {
+  const response = (await client.apiClient.request({
+    path: `/serving-endpoints/${encodeURIComponent(endpointName)}/invocations`,
     method: "POST",
-    headers,
-    body: JSON.stringify(streamBody),
-    signal: options?.signal,
-  });
+    headers: new Headers({
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+    }),
+    payload: { ...cleanBody, stream: true },
+    raw: true,
+  })) as { contents: ReadableStream<Uint8Array> };
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw mapUpstreamError(res.status, text, res.headers);
-  }
-
-  if (!res.body) {
+  if (!response.contents) {
     throw new Error("Response body is null — streaming not supported");
   }
 
-  const reader = res.body.getReader();
+  const reader = response.contents.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   const MAX_BUFFER_SIZE = 1024 * 1024; // 1 MB
@@ -177,11 +115,9 @@ export async function* stream(
       buffer += decoder.decode(value, { stream: true });
 
       if (buffer.length > MAX_BUFFER_SIZE) {
-        logger.warn(
-          "Stream buffer exceeded %d bytes, discarding incomplete data",
-          MAX_BUFFER_SIZE,
+        throw new Error(
+          `Stream buffer exceeded ${MAX_BUFFER_SIZE} bytes — possible non-SSE response`,
         );
-        buffer = "";
       }
 
       // Process complete lines from the buffer
@@ -191,7 +127,9 @@ export async function* stream(
 
       for (const line of lines) {
         const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith(":")) continue; // skip empty lines and SSE comments
+        // Per SSE spec: empty lines are event delimiters,
+        // lines starting with ":" are comments (often used as heartbeats).
+        if (!trimmed || trimmed.startsWith(":")) continue;
         if (trimmed === "data: [DONE]") return;
 
         if (trimmed.startsWith("data: ")) {
