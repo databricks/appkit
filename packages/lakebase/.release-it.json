@@ -1,39 +1,30 @@
 {
   "$schema": "https://unpkg.com/release-it@19/schema/release-it.json",
   "git": {
-    "commitMessage": "chore(lakebase): release v${version} [skip ci]",
-    "tagName": "lakebase-v${version}",
+    "commit": false,
+    "tag": false,
+    "push": false,
+    "requireBranch": false,
+    "requireCleanWorkingDir": false,
+    "requireCommits": true,
+    "requireCommitsFail": false,
     "tagMatch": "lakebase-v*",
-    "tagAnnotation": "Release @databricks/lakebase v${version}",
-    "commitsPath": ".",
-    "requireBranch": "main",
-    "requireCleanWorkingDir": true,
-    "push": true,
-    "pushArgs": ["--follow-tags"]
+    "tagName": "lakebase-v${version}",
+    "getLatestTagFromAllRefs": true,
+    "commitsPath": "."
   },
   "github": {
-    "release": true,
-    "releaseName": "@databricks/lakebase v${version}",
-    "autoGenerate": false,
-    "draft": false,
-    "preRelease": false,
-    "tokenRef": "GITHUB_TOKEN"
+    "release": false
   },
   "npm": false,
-  "hooks": {
-    "before:init": "pnpm audit --audit-level=high --prod",
-    "after:bump": "npm version ${version} --no-git-tag-version --allow-same-version",
-    "before:release": "pnpm build:package && pnpm dist && pnpm release:sbom",
-    "after:release": "npm publish ./tmp --access public --provenance"
-  },
+  "hooks": {},
   "plugins": {
     "@release-it/conventional-changelog": {
       "preset": {
         "name": "conventionalcommits",
         "bumpStrict": true
       },
-      "infile": "CHANGELOG.md",
-      "header": "# Changelog\n\nAll notable changes to @databricks/lakebase will be documented in this file.",
+      "infile": "changelog-diff.md",
       "gitRawCommitsOpts": { "path": "." },
       "commitsOpts": { "path": "." }
     }

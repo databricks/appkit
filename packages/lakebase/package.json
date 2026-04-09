@@ -44,9 +44,7 @@
     "dist": "tsx ../../tools/dist-lakebase.ts",
     "tarball": "rm -rf tmp && pnpm dist && npm pack ./tmp --pack-destination ./tmp",
     "typecheck": "tsc --noEmit",
-    "release": "release-it",
     "release:dry": "release-it --dry-run",
-    "release:ci": "release-it --ci",
     "release:sbom": "pnpm exec cdxgen -t js --no-recurse --required-only -o tmp/sbom.cdx.json ."
   },
   "dependencies": {

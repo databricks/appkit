@@ -65,6 +65,21 @@ export async function generateFromEntryPoint(options: {
       },
     );
 
+  const failedQueries = queryRegistry.filter((q) =>
+    q.type.includes("result: unknown"),
+  );
+  if (failedQueries.length > 0) {
+    const names = failedQueries.map((q) => q.name).join(", ");
+    throw new Error(
+      [
+        `Type generation failed: ${failedQueries.length} ${failedQueries.length === 1 ? "query" : "queries"} could not be described: ${names}.`,
+        `DESCRIBE QUERY failed for these queries — see the error codes above for details.`,
+        `Common causes: SQL syntax errors, missing tables/views, or warehouse format incompatibilities.`,
+        `To debug: run the failing query directly in a SQL editor against warehouse ${warehouseId}.`,
+      ].join("\n"),
+    );
+  }
+
   const typeDeclarations = generateTypeDeclarations(queryRegistry);
 
   await fs.writeFile(outFile, typeDeclarations, "utf-8");

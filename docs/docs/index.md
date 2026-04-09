@@ -38,7 +38,7 @@ Databricks AppKit is designed to work with AI coding assistants through Agent Sk
 Install Agent Skills and configure it for use with your preferred AI assistant:
 
 ```bash
-databricks experimental aitools skills install
+databricks experimental aitools install
 ```
 
 Once configured for your development environment, you can use your AI assistant to create and deploy new Databricks applications, as well as to iteratively evolve your app's codebase.
