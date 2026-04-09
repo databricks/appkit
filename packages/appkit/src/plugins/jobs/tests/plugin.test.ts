@@ -722,14 +722,14 @@ describe("mapParams", () => {
     expect(result).toEqual({ python_params: ["a", "b", "c"] });
   });
 
-  test("spark_jar maps to parameters array", () => {
+  test("spark_jar maps to jar_params array", () => {
     const result = mapParams("spark_jar", { args: ["x", "y"] });
-    expect(result).toEqual({ parameters: ["x", "y"] });
+    expect(result).toEqual({ jar_params: ["x", "y"] });
   });
 
-  test("sql maps to parameters Record<string, string>", () => {
+  test("sql maps to sql_params Record<string, string>", () => {
     const result = mapParams("sql", { p1: "v1", p2: 42 });
-    expect(result).toEqual({ parameters: { p1: "v1", p2: "42" } });
+    expect(result).toEqual({ sql_params: { p1: "v1", p2: "42" } });
   });
 
   test("dbt with empty params returns empty object", () => {

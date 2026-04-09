@@ -30,13 +30,13 @@ export function mapParams(
           : [],
       };
     case "spark_jar":
-      // parameters expects string[]
+      // jar_params expects string[]
       return {
-        parameters: Array.isArray(params.args) ? params.args.map(String) : [],
+        jar_params: Array.isArray(params.args) ? params.args.map(String) : [],
       };
     case "sql":
       return {
-        parameters: Object.fromEntries(
+        sql_params: Object.fromEntries(
           Object.entries(params).map(([k, v]) => [k, String(v)]),
         ),
       };
