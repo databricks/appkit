@@ -13,7 +13,7 @@ const logger = createLogger("type-generator:serving:vite-plugin");
 interface AppKitServingTypesPluginOptions {
   /** Path to the output .d.ts file (relative to client root). Default: "src/appKitServingTypes.d.ts" */
   outFile?: string;
-  /** Endpoint config override. If omitted, auto-discovers from the server file or falls back to DATABRICKS_SERVING_ENDPOINT env var. */
+  /** Endpoint config override. If omitted, auto-discovers from the server file or falls back to DATABRICKS_SERVING_ENDPOINT_NAME env var. */
   endpoints?: Record<string, EndpointConfig>;
 }
 
@@ -25,7 +25,7 @@ interface AppKitServingTypesPluginOptions {
  * Endpoint discovery order:
  * 1. Explicit `endpoints` option (override)
  * 2. AST extraction from server file (server/index.ts or server/server.ts)
- * 3. DATABRICKS_SERVING_ENDPOINT env var (single default endpoint)
+ * 3. DATABRICKS_SERVING_ENDPOINT_NAME env var (single default endpoint)
  */
 export function appKitServingTypesPlugin(
   options?: AppKitServingTypesPluginOptions,
@@ -66,7 +66,7 @@ export function appKitServingTypesPlugin(
         return true;
       }
 
-      if (process.env.DATABRICKS_SERVING_ENDPOINT) {
+      if (process.env.DATABRICKS_SERVING_ENDPOINT_NAME) {
         return true;
       }
 

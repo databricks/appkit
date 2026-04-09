@@ -226,8 +226,8 @@ export async function generateServingTypes(
 }
 
 function resolveDefaultEndpoints(): Record<string, EndpointConfig> {
-  if (process.env.DATABRICKS_SERVING_ENDPOINT) {
-    return { default: { env: "DATABRICKS_SERVING_ENDPOINT" } };
+  if (process.env.DATABRICKS_SERVING_ENDPOINT_NAME) {
+    return { default: { env: "DATABRICKS_SERVING_ENDPOINT_NAME" } };
   }
   return {};
 }

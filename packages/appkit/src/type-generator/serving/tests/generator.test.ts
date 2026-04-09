@@ -97,7 +97,7 @@ describe("generateServingTypes", () => {
 
   afterEach(() => {
     delete process.env.TEST_SERVING_ENDPOINT;
-    delete process.env.DATABRICKS_SERVING_ENDPOINT;
+    delete process.env.DATABRICKS_SERVING_ENDPOINT_NAME;
     vi.restoreAllMocks();
   });
 
@@ -191,8 +191,8 @@ describe("generateServingTypes", () => {
     expect(output).toContain("Record<string, unknown>");
   });
 
-  test("resolves default endpoint from DATABRICKS_SERVING_ENDPOINT", async () => {
-    process.env.DATABRICKS_SERVING_ENDPOINT = "my-default-endpoint";
+  test("resolves default endpoint from DATABRICKS_SERVING_ENDPOINT_NAME", async () => {
+    process.env.DATABRICKS_SERVING_ENDPOINT_NAME = "my-default-endpoint";
     mockFetchOpenApiSchema.mockResolvedValue({
       spec: CHAT_OPENAPI_SPEC,
       pathKey: "/served-models/llm/invocations",

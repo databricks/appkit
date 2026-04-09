@@ -52,7 +52,7 @@ createApp({
   plugins: [
     serving({
       endpoints: {
-        demo: { env: "DATABRICKS_SERVING_ENDPOINT" },
+        demo: { env: "DATABRICKS_SERVING_ENDPOINT_NAME" },
         second: { env: "DATABRICKS_SERVING_ENDPOINT_SECOND" },
       }
     }),
@@ -62,7 +62,7 @@ createApp({
 
     const result = extractServingEndpoints("/app/server/index.ts");
     expect(result).toEqual({
-      demo: { env: "DATABRICKS_SERVING_ENDPOINT" },
+      demo: { env: "DATABRICKS_SERVING_ENDPOINT_NAME" },
       second: { env: "DATABRICKS_SERVING_ENDPOINT_SECOND" },
     });
   });
@@ -75,7 +75,7 @@ createApp({
   plugins: [
     serving({
       endpoints: {
-        demo: { env: "DATABRICKS_SERVING_ENDPOINT", servedModel: "my-model" },
+        demo: { env: "DATABRICKS_SERVING_ENDPOINT_NAME", servedModel: "my-model" },
       }
     }),
   ],
@@ -84,7 +84,10 @@ createApp({
 
     const result = extractServingEndpoints("/app/server/index.ts");
     expect(result).toEqual({
-      demo: { env: "DATABRICKS_SERVING_ENDPOINT", servedModel: "my-model" },
+      demo: {
+        env: "DATABRICKS_SERVING_ENDPOINT_NAME",
+        servedModel: "my-model",
+      },
     });
   });
 
@@ -133,7 +136,7 @@ createApp({
     mockServerFile(`
 import { createApp, serving } from '@databricks/appkit';
 
-const myEndpoints = { demo: { env: "DATABRICKS_SERVING_ENDPOINT" } };
+const myEndpoints = { demo: { env: "DATABRICKS_SERVING_ENDPOINT_NAME" } };
 createApp({
   plugins: [
     serving({ endpoints: myEndpoints }),
@@ -175,7 +178,7 @@ createApp({
   plugins: [
     serving({
       endpoints: {
-        demo: { env: 'DATABRICKS_SERVING_ENDPOINT' },
+        demo: { env: 'DATABRICKS_SERVING_ENDPOINT_NAME' },
       }
     }),
   ],
@@ -184,7 +187,7 @@ createApp({
 
     const result = extractServingEndpoints("/app/server/index.ts");
     expect(result).toEqual({
-      demo: { env: "DATABRICKS_SERVING_ENDPOINT" },
+      demo: { env: "DATABRICKS_SERVING_ENDPOINT_NAME" },
     });
   });
 
@@ -196,7 +199,7 @@ createApp({
   plugins: [
     serving({
       endpoints: {
-        demo: { env: "DATABRICKS_SERVING_ENDPOINT" },
+        demo: { env: "DATABRICKS_SERVING_ENDPOINT_NAME" },
         second: { env: "DATABRICKS_SERVING_ENDPOINT_SECOND" },
       },
     }),
@@ -206,7 +209,7 @@ createApp({
 
     const result = extractServingEndpoints("/app/server/index.ts");
     expect(result).toEqual({
-      demo: { env: "DATABRICKS_SERVING_ENDPOINT" },
+      demo: { env: "DATABRICKS_SERVING_ENDPOINT_NAME" },
       second: { env: "DATABRICKS_SERVING_ENDPOINT_SECOND" },
     });
   });

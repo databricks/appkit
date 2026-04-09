@@ -11,7 +11,7 @@ ServingEndpointRegistry module augmentation.
 Endpoint discovery order:
 1. Explicit `endpoints` option (override)
 2. AST extraction from server file (server/index.ts or server/server.ts)
-3. DATABRICKS_SERVING_ENDPOINT env var (single default endpoint)
+3. DATABRICKS_SERVING_ENDPOINT_NAME env var (single default endpoint)
 
 ## Parameters
 

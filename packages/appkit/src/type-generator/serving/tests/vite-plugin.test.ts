@@ -40,8 +40,8 @@ describe("appKitServingTypesPlugin", () => {
       expect((plugin as any).apply()).toBe(true);
     });
 
-    test("returns true when DATABRICKS_SERVING_ENDPOINT is set", () => {
-      process.env.DATABRICKS_SERVING_ENDPOINT = "my-endpoint";
+    test("returns true when DATABRICKS_SERVING_ENDPOINT_NAME is set", () => {
+      process.env.DATABRICKS_SERVING_ENDPOINT_NAME = "my-endpoint";
       const plugin = appKitServingTypesPlugin();
       expect((plugin as any).apply()).toBe(true);
     });
@@ -61,7 +61,7 @@ describe("appKitServingTypesPlugin", () => {
     });
 
     test("returns false when nothing configured", () => {
-      delete process.env.DATABRICKS_SERVING_ENDPOINT;
+      delete process.env.DATABRICKS_SERVING_ENDPOINT_NAME;
       mockFindServerFile.mockReturnValue(null);
       const plugin = appKitServingTypesPlugin();
       expect((plugin as any).apply()).toBe(false);

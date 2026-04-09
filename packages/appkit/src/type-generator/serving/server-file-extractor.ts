@@ -175,7 +175,7 @@ function getPropertyValue(pairNode: SgNode): SgNode | null {
 
 /**
  * Extract a single endpoint entry from a pair node like:
- * `demo: { env: "DATABRICKS_SERVING_ENDPOINT", servedModel: "my-model" }`
+ * `demo: { env: "DATABRICKS_SERVING_ENDPOINT_NAME", servedModel: "my-model" }`
  */
 function extractEndpointEntry(
   pair: SgNode,
