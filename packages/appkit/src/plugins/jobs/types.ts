@@ -1,10 +1,24 @@
 import type { jobs } from "@databricks/sdk-experimental";
 import type { BasePluginConfig, IAppRequest } from "shared";
+import type { z } from "zod";
+
+/** Supported task types for job parameter mapping. */
+export type TaskType =
+  | "notebook"
+  | "python_wheel"
+  | "python_script"
+  | "spark_jar"
+  | "sql"
+  | "dbt";
 
 /** Per-job configuration options. */
 export interface JobConfig {
   /** Override timeout for this specific job. */
   timeout?: number;
+  /** The type of task this job runs. Determines how params are mapped to the SDK request. */
+  taskType?: TaskType;
+  /** Optional Zod schema for validating job parameters at runtime. */
+  params?: z.ZodType<any>;
 }
 
 /** User-facing API for a single configured job. */

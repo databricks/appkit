@@ -3,6 +3,12 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ServiceContext } from "../../../context/service-context";
 import { AuthenticationError } from "../../../errors";
 import { ResourceType } from "../../../registry";
+import {
+  JOBS_READ_DEFAULTS,
+  JOBS_STREAM_DEFAULTS,
+  JOBS_WRITE_DEFAULTS,
+} from "../defaults";
+import { mapParams } from "../params";
 import { JobsPlugin, jobs } from "../plugin";
 
 const { mockClient, mockCacheInstance } = vi.hoisted(() => {
@@ -485,6 +491,77 @@ describe("JobsPlugin", () => {
         expect.objectContaining({ job_id: 200 }),
         expect.anything(),
       );
+    });
+  });
+});
+
+describe("defaults", () => {
+  test("JOBS_READ_DEFAULTS has expected shape", () => {
+    expect(JOBS_READ_DEFAULTS.cache?.enabled).toBe(true);
+    expect(JOBS_READ_DEFAULTS.cache?.ttl).toBe(60);
+    expect(JOBS_READ_DEFAULTS.retry?.enabled).toBe(true);
+    expect(JOBS_READ_DEFAULTS.retry?.attempts).toBe(3);
+    expect(JOBS_READ_DEFAULTS.timeout).toBe(30_000);
+  });
+
+  test("JOBS_WRITE_DEFAULTS has no cache, no retry", () => {
+    expect(JOBS_WRITE_DEFAULTS.cache?.enabled).toBe(false);
+    expect(JOBS_WRITE_DEFAULTS.retry?.enabled).toBe(false);
+    expect(JOBS_WRITE_DEFAULTS.timeout).toBe(120_000);
+  });
+
+  test("JOBS_STREAM_DEFAULTS has extended timeout", () => {
+    expect(JOBS_STREAM_DEFAULTS.cache?.enabled).toBe(false);
+    expect(JOBS_STREAM_DEFAULTS.retry?.enabled).toBe(false);
+    expect(JOBS_STREAM_DEFAULTS.timeout).toBe(600_000);
+  });
+});
+
+describe("mapParams", () => {
+  test("notebook maps to notebook_params with string coercion", () => {
+    const result = mapParams("notebook", { key: "value", num: 42 });
+    expect(result).toEqual({ notebook_params: { key: "value", num: "42" } });
+  });
+
+  test("python_wheel maps to python_named_params", () => {
+    const result = mapParams("python_wheel", { arg1: "a", arg2: "b" });
+    expect(result).toEqual({ python_named_params: { arg1: "a", arg2: "b" } });
+  });
+
+  test("python_script maps to python_params array", () => {
+    const result = mapParams("python_script", { args: ["a", "b", "c"] });
+    expect(result).toEqual({ python_params: ["a", "b", "c"] });
+  });
+
+  test("spark_jar maps to parameters array", () => {
+    const result = mapParams("spark_jar", { args: ["x", "y"] });
+    expect(result).toEqual({ parameters: ["x", "y"] });
+  });
+
+  test("sql maps to parameters Record<string, string>", () => {
+    const result = mapParams("sql", { p1: "v1", p2: 42 });
+    expect(result).toEqual({ parameters: { p1: "v1", p2: "42" } });
+  });
+
+  test("dbt with empty params returns empty object", () => {
+    const result = mapParams("dbt", {});
+    expect(result).toEqual({});
+  });
+
+  test("dbt with params throws error", () => {
+    expect(() => mapParams("dbt", { key: "value" })).toThrow(
+      "dbt tasks do not accept parameters",
+    );
+  });
+
+  test("notebook coerces non-string values to string", () => {
+    const result = mapParams("notebook", {
+      bool: true,
+      num: 123,
+      nil: "null",
+    });
+    expect(result).toEqual({
+      notebook_params: { bool: "true", num: "123", nil: "null" },
     });
   });
 });
