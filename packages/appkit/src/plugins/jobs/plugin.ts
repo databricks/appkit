@@ -3,7 +3,7 @@ import type express from "express";
 import type { IAppRequest, IAppRouter, PluginExecutionSettings } from "shared";
 import { toJSONSchema } from "zod";
 import { JobsConnector } from "../../connectors/jobs";
-import { getWorkspaceClient } from "../../context";
+import { getCurrentUserId, getWorkspaceClient } from "../../context";
 import { InitializationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
@@ -183,6 +183,12 @@ class JobsPlugin extends Plugin {
     const jobConfig = this.jobConfigs[jobKey];
     // Capture `this` for use in the async generator
     const self = this;
+    // Eagerly capture the client and userId so that when createJobAPI is
+    // called inside an asUser() proxy (which runs in user context), the
+    // closures below use the user-scoped client instead of falling back
+    // to the service principal when the ALS context has already exited.
+    const client = this.client;
+    const userKey = getCurrentUserId();
 
     return {
       runNow: async (
@@ -209,7 +215,7 @@ class JobsPlugin extends Plugin {
         return this.execute(
           async (signal) =>
             this.connector.runNow(
-              this.client,
+              client,
               {
                 ...sdkFields,
                 job_id: jobId,
@@ -217,6 +223,7 @@ class JobsPlugin extends Plugin {
               signal,
             ),
           { default: JOBS_WRITE_DEFAULTS },
+          userKey,
         );
       },
 
@@ -244,7 +251,7 @@ class JobsPlugin extends Plugin {
         const runResult = await self.execute(
           async (signal) =>
             self.connector.runNow(
-              self.client,
+              client,
               {
                 ...sdkFields,
                 job_id: jobId,
@@ -252,6 +259,7 @@ class JobsPlugin extends Plugin {
               signal,
             ),
           { default: JOBS_WRITE_DEFAULTS },
+          userKey,
         );
 
         const runId = runResult?.run_id;
@@ -271,7 +279,7 @@ class JobsPlugin extends Plugin {
             );
           }
 
-          const run = await self.connector.getRun(self.client, {
+          const run = await self.connector.getRun(client, {
             run_id: runId,
           });
           const state = run.state?.life_cycle_state;
@@ -294,11 +302,12 @@ class JobsPlugin extends Plugin {
         const runs = await this.execute(
           async (signal) =>
             this.connector.listRuns(
-              this.client,
+              client,
               { job_id: jobId, limit: 1 },
               signal,
             ),
           this._readSettings(["jobs:lastRun", jobKey]),
+          userKey,
         );
         return runs?.[0];
       },
@@ -309,19 +318,21 @@ class JobsPlugin extends Plugin {
         return this.execute(
           async (signal) =>
             this.connector.listRuns(
-              this.client,
+              client,
               { job_id: jobId, limit: options?.limit },
               signal,
             ),
           this._readSettings(["jobs:listRuns", jobKey, options ?? {}]),
+          userKey,
         );
       },
 
       getRun: async (runId: number): Promise<jobsTypes.Run | undefined> => {
         return this.execute(
           async (signal) =>
-            this.connector.getRun(this.client, { run_id: runId }, signal),
+            this.connector.getRun(client, { run_id: runId }, signal),
           this._readSettings(["jobs:getRun", jobKey, runId]),
+          userKey,
         );
       },
 
@@ -330,24 +341,27 @@ class JobsPlugin extends Plugin {
       ): Promise<jobsTypes.RunOutput | undefined> => {
         return this.execute(
           async (signal) =>
-            this.connector.getRunOutput(this.client, { run_id: runId }, signal),
+            this.connector.getRunOutput(client, { run_id: runId }, signal),
           this._readSettings(["jobs:getRunOutput", jobKey, runId]),
+          userKey,
         );
       },
 
       cancelRun: async (runId: number): Promise<void> => {
         await this.execute(
           async (signal) =>
-            this.connector.cancelRun(this.client, { run_id: runId }, signal),
+            this.connector.cancelRun(client, { run_id: runId }, signal),
           { default: JOBS_WRITE_DEFAULTS },
+          userKey,
         );
       },
 
       getJob: async (): Promise<jobsTypes.Job | undefined> => {
         return this.execute(
           async (signal) =>
-            this.connector.getJob(this.client, { job_id: jobId }, signal),
+            this.connector.getJob(client, { job_id: jobId }, signal),
           this._readSettings(["jobs:getJob", jobKey]),
+          userKey,
         );
       },
     };

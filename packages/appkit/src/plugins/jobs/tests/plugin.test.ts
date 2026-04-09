@@ -417,6 +417,7 @@ describe("JobsPlugin", () => {
             }),
           }),
         }),
+        expect.any(String),
       );
     });
 
@@ -440,6 +441,7 @@ describe("JobsPlugin", () => {
             }),
           }),
         }),
+        expect.any(String),
       );
     });
 
@@ -454,9 +456,11 @@ describe("JobsPlugin", () => {
 
       await handle.cancelRun(1);
 
-      expect(executeSpy).toHaveBeenCalledWith(expect.any(Function), {
-        default: JOBS_WRITE_DEFAULTS,
-      });
+      expect(executeSpy).toHaveBeenCalledWith(
+        expect.any(Function),
+        { default: JOBS_WRITE_DEFAULTS },
+        expect.any(String),
+      );
     });
   });
 
