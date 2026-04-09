@@ -26,13 +26,13 @@ await createApp({
 });
 ```
 
-With no configuration, the plugin reads `DATABRICKS_SERVING_ENDPOINT` from the environment and registers it under the `default` alias.
+With no configuration, the plugin reads `DATABRICKS_SERVING_ENDPOINT_NAME` from the environment and registers it under the `default` alias.
 
 ## Configuration options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `endpoints` | `Record<string, EndpointConfig>` | `{ default: { env: "DATABRICKS_SERVING_ENDPOINT" } }` | Map of alias names to endpoint configs |
+| `endpoints` | `Record<string, EndpointConfig>` | `{ default: { env: "DATABRICKS_SERVING_ENDPOINT_NAME" } }` | Map of alias names to endpoint configs |
 | `timeout` | `number` | `120000` | Request timeout in ms |
 
 ### Endpoint aliases
@@ -42,8 +42,8 @@ Endpoint aliases let you reference multiple serving endpoints by name:
 ```ts
 serving({
   endpoints: {
-    llm: { env: "DATABRICKS_SERVING_ENDPOINT" },
-    classifier: { env: "DATABRICKS_SERVING_ENDPOINT_CLASSIFIER" },
+    llm: { env: "DATABRICKS_SERVING_ENDPOINT_NAME" },
+    classifier: { env: "DATABRICKS_SERVING_ENDPOINT_NAME_CLASSIFIER" },
   },
 })
 ```
@@ -53,7 +53,7 @@ Each alias maps to an environment variable holding the actual endpoint name. If 
 ```ts
 serving({
   endpoints: {
-    llm: { env: "DATABRICKS_SERVING_ENDPOINT", servedModel: "llama-v2" },
+    llm: { env: "DATABRICKS_SERVING_ENDPOINT_NAME", servedModel: "llama-v2" },
   },
 })
 ```
@@ -88,9 +88,23 @@ Endpoints that don't define a streaming response schema in their OpenAPI spec wi
 
 | Variable | Description |
 |----------|-------------|
-| `DATABRICKS_SERVING_ENDPOINT` | Default endpoint name (used when `endpoints` config is omitted) |
+| `DATABRICKS_SERVING_ENDPOINT_NAME` | Default endpoint name (used when `endpoints` config is omitted) |
 
-When using named endpoints, define a custom environment variable per alias (e.g. `DATABRICKS_SERVING_ENDPOINT_CLASSIFIER`).
+When using named endpoints, define a custom environment variable per alias (e.g. `DATABRICKS_SERVING_ENDPOINT_NAME_CLASSIFIER`).
+
+## Execution context
+
+All serving routes execute on behalf of the authenticated user (OBO) by default, consistent with the Genie and Files plugins. This ensures per-user `CAN_QUERY` permissions are enforced on the serving endpoint.
+
+For programmatic access via `exports()`, use `.asUser(req)` to run in user context:
+
+```ts
+// Service principal context (default)
+const result = await AppKit.serving("llm").invoke({ messages });
+
+// User context (recommended in route handlers)
+const result = await AppKit.serving("llm").asUser(req).invoke({ messages });
+```
 
 ## HTTP endpoints
 
@@ -127,7 +141,7 @@ const AppKit = await createApp({
     server(),
     serving({
       endpoints: {
-        llm: { env: "DATABRICKS_SERVING_ENDPOINT" },
+        llm: { env: "DATABRICKS_SERVING_ENDPOINT_NAME" },
       },
     }),
   ],
