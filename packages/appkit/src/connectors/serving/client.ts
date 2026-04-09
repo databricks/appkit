@@ -155,7 +155,9 @@ export async function* stream(
       }
     }
   } finally {
-    reader.cancel().catch(() => {});
+    if (options?.signal?.aborted) {
+      reader.cancel().catch(() => {});
+    }
     reader.releaseLock();
   }
 }
