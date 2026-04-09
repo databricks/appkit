@@ -50,6 +50,7 @@ Examples:
   - check-licenses.ts                - License compliance checks
   - build-notice.ts                  - Build NOTICE.md from dependencies
   - check-template-deps.ts           - Validate template package.json dependencies are pinned
+  - finalize-release.ts              - Apply release changes (changelog, versions, tags) for secure repo
 ```
 
 ## Development Commands

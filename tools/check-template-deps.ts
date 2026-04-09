@@ -17,7 +17,10 @@ const deps: Record<string, string> = {
   ...pkg.devDependencies,
 };
 
-const unpinned = Object.entries(deps).filter(([, v]) => /^[~^>=*]/.test(v));
+const PINNED_VERSION = /^(npm:(@[\w-]+\/)?[\w.-]+@)?\d+\.\d+\.\d+(-[\w.]+)?$/;
+const unpinned = Object.entries(deps).filter(
+  ([, v]) => !PINNED_VERSION.test(v),
+);
 
 if (unpinned.length) {
   console.error(

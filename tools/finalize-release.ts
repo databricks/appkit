@@ -44,10 +44,12 @@ if (existsSync(changelogDiff)) {
   if (existsSync(changelogPath)) {
     const existing = readFileSync(changelogPath, "utf-8");
     const lines = existing.split("\n");
-    // Insert after the header (first 3 lines: title, blank, description)
-    const header = lines.slice(0, 3).join("\n");
-    const rest = lines.slice(3).join("\n");
-    writeFileSync(changelogPath, `${header}\n\n${diff}\n${rest}`);
+    // Insert before the first version section (## [...])
+    const firstSection = lines.findIndex((l) => /^## \[/.test(l));
+    const insertAt = firstSection > 0 ? firstSection : lines.length;
+    const header = lines.slice(0, insertAt).join("\n");
+    const rest = lines.slice(insertAt).join("\n");
+    writeFileSync(changelogPath, `${header}\n${diff}\n\n${rest}`);
   } else {
     copyFileSync(changelogDiff, changelogPath);
   }
