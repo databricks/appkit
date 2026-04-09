@@ -21,27 +21,35 @@ export interface JobConfig {
   params?: z.ZodType<any>;
 }
 
+/** Status update yielded by runAndWait during polling. */
+export interface JobRunStatus {
+  status: string | undefined;
+  timestamp: number;
+  run: jobs.Run;
+}
+
 /** User-facing API for a single configured job. */
 export interface JobAPI {
-  /** Trigger the configured job. Returns the run ID. */
-  runNow(params?: jobs.RunNow): Promise<jobs.RunNowResponse>;
-  /** Trigger and wait for completion. */
-  runNowAndWait(
-    params?: jobs.RunNow,
-    options?: { timeoutMs?: number; signal?: AbortSignal },
-  ): Promise<jobs.Run>;
+  /** Trigger the configured job with validated params. Returns the run response. */
+  runNow(
+    params?: Record<string, unknown>,
+  ): Promise<jobs.RunNowResponse | undefined>;
+  /** Trigger and poll until completion, yielding status updates. */
+  runAndWait(
+    params?: Record<string, unknown>,
+  ): AsyncGenerator<JobRunStatus, void, unknown>;
   /** Get the most recent run for this job. */
   lastRun(): Promise<jobs.Run | undefined>;
   /** List runs for this job. */
-  listRuns(options?: { limit?: number }): Promise<jobs.BaseRun[]>;
+  listRuns(options?: { limit?: number }): Promise<jobs.BaseRun[] | undefined>;
   /** Get a specific run by ID. */
-  getRun(runId: number): Promise<jobs.Run>;
+  getRun(runId: number): Promise<jobs.Run | undefined>;
   /** Get output of a specific run. */
-  getRunOutput(runId: number): Promise<jobs.RunOutput>;
+  getRunOutput(runId: number): Promise<jobs.RunOutput | undefined>;
   /** Cancel a specific run. */
   cancelRun(runId: number): Promise<void>;
   /** Get the job definition. */
-  getJob(): Promise<jobs.Job>;
+  getJob(): Promise<jobs.Job | undefined>;
 }
 
 /** Configuration for the Jobs plugin. */
@@ -71,8 +79,10 @@ export type JobHandle = JobAPI & {
  * // Trigger a configured job
  * const { run_id } = await appkit.jobs("etl").runNow();
  *
- * // Trigger and wait for completion
- * const run = await appkit.jobs("etl").runNowAndWait();
+ * // Trigger and poll until completion
+ * for await (const status of appkit.jobs("etl").runAndWait()) {
+ *   console.log(status.status, status.run);
+ * }
  *
  * // OBO access
  * await appkit.jobs("etl").asUser(req).runNow();

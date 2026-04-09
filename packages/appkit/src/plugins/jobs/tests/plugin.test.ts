@@ -1,5 +1,6 @@
 import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { z } from "zod";
 import { ServiceContext } from "../../../context/service-context";
 import { AuthenticationError } from "../../../errors";
 import { ResourceType } from "../../../registry";
@@ -20,7 +21,6 @@ const { mockClient, mockCacheInstance } = vi.hoisted(() => {
     cancelRun: vi.fn(),
     listRuns: vi.fn(),
     get: vi.fn(),
-    create: vi.fn(),
   };
 
   const mockClient = {
@@ -252,7 +252,7 @@ describe("JobsPlugin", () => {
       const handle = exported("etl");
       expect(typeof handle.asUser).toBe("function");
       expect(typeof handle.runNow).toBe("function");
-      expect(typeof handle.runNowAndWait).toBe("function");
+      expect(typeof handle.runAndWait).toBe("function");
       expect(typeof handle.lastRun).toBe("function");
       expect(typeof handle.listRuns).toBe("function");
       expect(typeof handle.getRun).toBe("function");
@@ -299,9 +299,7 @@ describe("JobsPlugin", () => {
     test("runNow passes configured job_id to connector", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.runNow.mockResolvedValue({
-        response: { run_id: 42 },
-      });
+      mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
 
       const plugin = new JobsPlugin({});
       const exported = plugin.exports();
@@ -315,12 +313,10 @@ describe("JobsPlugin", () => {
       );
     });
 
-    test("runNow merges user params with configured job_id", async () => {
+    test("runNow merges user params with configured job_id (no taskType)", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
-      mockClient.jobs.runNow.mockResolvedValue({
-        response: { run_id: 42 },
-      });
+      mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
 
       const plugin = new JobsPlugin({});
       const exported = plugin.exports();
@@ -328,7 +324,7 @@ describe("JobsPlugin", () => {
 
       await handle.runNow({
         notebook_params: { key: "value" },
-      } as any);
+      });
 
       expect(mockClient.jobs.runNow).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -336,6 +332,173 @@ describe("JobsPlugin", () => {
           notebook_params: { key: "value" },
         }),
         expect.anything(),
+      );
+    });
+  });
+
+  describe("parameter validation (Phase 3)", () => {
+    test("runNow validates params against job config schema", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      const plugin = new JobsPlugin({
+        jobs: {
+          etl: {
+            taskType: "notebook",
+            params: z.object({ key: z.string() }),
+          },
+        },
+      });
+      const handle = plugin.exports()("etl");
+
+      await expect(handle.runNow({ key: 42 })).rejects.toThrow(
+        /Parameter validation failed for job "etl"/,
+      );
+    });
+
+    test("runNow maps validated params to SDK fields when taskType is set", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
+
+      const plugin = new JobsPlugin({
+        jobs: {
+          etl: {
+            taskType: "notebook",
+            params: z.object({ key: z.string() }),
+          },
+        },
+      });
+      const handle = plugin.exports()("etl");
+
+      await handle.runNow({ key: "value" });
+
+      expect(mockClient.jobs.runNow).toHaveBeenCalledWith(
+        expect.objectContaining({
+          job_id: 123,
+          notebook_params: { key: "value" },
+        }),
+        expect.anything(),
+      );
+    });
+
+    test("runNow skips validation when no schema is configured", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
+
+      const plugin = new JobsPlugin({});
+      const handle = plugin.exports()("etl");
+
+      await expect(handle.runNow({ anything: "goes" })).resolves.not.toThrow();
+    });
+  });
+
+  describe("read operations use interceptors", () => {
+    test("getRun wraps call in execute", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      mockClient.jobs.getRun.mockResolvedValue({
+        run_id: 1,
+        state: { life_cycle_state: "TERMINATED" },
+      });
+
+      const plugin = new JobsPlugin({});
+      const executeSpy = vi.spyOn(plugin as any, "execute");
+      const handle = plugin.exports()("etl");
+
+      await handle.getRun(1);
+
+      expect(executeSpy).toHaveBeenCalledWith(
+        expect.any(Function),
+        expect.objectContaining({
+          default: expect.objectContaining({
+            cache: expect.objectContaining({
+              cacheKey: ["jobs:getRun", "etl", 1],
+            }),
+          }),
+        }),
+      );
+    });
+
+    test("getJob wraps call in execute", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      mockClient.jobs.get.mockResolvedValue({ job_id: 123 });
+
+      const plugin = new JobsPlugin({});
+      const executeSpy = vi.spyOn(plugin as any, "execute");
+      const handle = plugin.exports()("etl");
+
+      await handle.getJob();
+
+      expect(executeSpy).toHaveBeenCalledWith(
+        expect.any(Function),
+        expect.objectContaining({
+          default: expect.objectContaining({
+            cache: expect.objectContaining({
+              cacheKey: ["jobs:getJob", "etl"],
+            }),
+          }),
+        }),
+      );
+    });
+
+    test("cancelRun wraps call in execute with write defaults", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      mockClient.jobs.cancelRun.mockResolvedValue(undefined);
+
+      const plugin = new JobsPlugin({});
+      const executeSpy = vi.spyOn(plugin as any, "execute");
+      const handle = plugin.exports()("etl");
+
+      await handle.cancelRun(1);
+
+      expect(executeSpy).toHaveBeenCalledWith(expect.any(Function), {
+        default: JOBS_WRITE_DEFAULTS,
+      });
+    });
+  });
+
+  describe("runAndWait polling", () => {
+    test("runAndWait yields status updates and terminates on TERMINATED", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
+      mockClient.jobs.getRun
+        .mockResolvedValueOnce({
+          run_id: 42,
+          state: { life_cycle_state: "RUNNING" },
+        })
+        .mockResolvedValueOnce({
+          run_id: 42,
+          state: { life_cycle_state: "TERMINATED" },
+        });
+
+      const plugin = new JobsPlugin({ pollIntervalMs: 10 });
+      const handle = plugin.exports()("etl");
+
+      const statuses: any[] = [];
+      for await (const status of handle.runAndWait()) {
+        statuses.push(status);
+      }
+
+      expect(statuses).toHaveLength(2);
+      expect(statuses[0].status).toBe("RUNNING");
+      expect(statuses[1].status).toBe("TERMINATED");
+    });
+
+    test("runAndWait throws when runNow returns no run_id", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      mockClient.jobs.runNow.mockResolvedValue({});
+
+      const plugin = new JobsPlugin({});
+      const handle = plugin.exports()("etl");
+
+      const gen = handle.runAndWait();
+      await expect(gen.next()).rejects.toThrow(
+        "runNow did not return a run_id",
       );
     });
   });
@@ -351,7 +514,7 @@ describe("JobsPlugin", () => {
 
       const jobMethods = [
         "runNow",
-        "runNowAndWait",
+        "runAndWait",
         "lastRun",
         "listRuns",
         "getRun",
@@ -393,7 +556,7 @@ describe("JobsPlugin", () => {
 
         const jobMethods = [
           "runNow",
-          "runNowAndWait",
+          "runAndWait",
           "lastRun",
           "listRuns",
           "getRun",
@@ -411,14 +574,19 @@ describe("JobsPlugin", () => {
   });
 
   describe("clientConfig", () => {
-    test("returns configured job keys", () => {
+    test("returns configured job keys with params schema", () => {
       process.env.DATABRICKS_JOB_ETL = "123";
       process.env.DATABRICKS_JOB_ML = "456";
 
       const plugin = new JobsPlugin({});
       const config = plugin.clientConfig();
 
-      expect(config).toEqual({ jobs: ["etl", "ml"] });
+      expect(config).toEqual({
+        jobs: {
+          etl: { params: null },
+          ml: { params: null },
+        },
+      });
     });
 
     test("returns single default key for DATABRICKS_JOB_ID", () => {
@@ -427,14 +595,37 @@ describe("JobsPlugin", () => {
       const plugin = new JobsPlugin({});
       const config = plugin.clientConfig();
 
-      expect(config).toEqual({ jobs: ["default"] });
+      expect(config).toEqual({
+        jobs: {
+          default: { params: null },
+        },
+      });
     });
 
-    test("returns empty array when no jobs configured", () => {
+    test("returns empty object when no jobs configured", () => {
       const plugin = new JobsPlugin({});
       const config = plugin.clientConfig();
 
-      expect(config).toEqual({ jobs: [] });
+      expect(config).toEqual({ jobs: {} });
+    });
+
+    test("includes JSON schema when params schema is configured", () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      const plugin = new JobsPlugin({
+        jobs: {
+          etl: {
+            params: z.object({ key: z.string() }),
+          },
+        },
+      });
+      const config = plugin.clientConfig();
+      const etlConfig = (config.jobs as any).etl;
+
+      expect(etlConfig.params).toBeDefined();
+      expect(etlConfig.params).not.toBeNull();
+      expect(etlConfig.params.type).toBe("object");
+      expect(etlConfig.params.properties).toHaveProperty("key");
     });
   });
 
@@ -471,9 +662,7 @@ describe("JobsPlugin", () => {
       process.env.DATABRICKS_JOB_ETL = "100";
       process.env.DATABRICKS_JOB_ML = "200";
 
-      mockClient.jobs.runNow.mockResolvedValue({
-        response: { run_id: 1 },
-      });
+      mockClient.jobs.runNow.mockResolvedValue({ run_id: 1 });
 
       const plugin = new JobsPlugin({});
       const exported = plugin.exports();
