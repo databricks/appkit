@@ -39,7 +39,7 @@ export interface JobAPI {
     params?: Record<string, unknown>,
   ): AsyncGenerator<JobRunStatus, void, unknown>;
   /** Get the most recent run for this job. */
-  lastRun(): Promise<jobs.Run | undefined>;
+  lastRun(): Promise<jobs.BaseRun | undefined>;
   /** List runs for this job. */
   listRuns(options?: { limit?: number }): Promise<jobs.BaseRun[] | undefined>;
   /** Get a specific run by ID. */
