@@ -55,11 +55,7 @@ export class JobsConnector {
     signal?: AbortSignal,
   ): Promise<jobs.SubmitRunResponse> {
     return this._callApi("submit", async () => {
-      const waiter = await workspaceClient.jobs.submit(
-        request,
-        this._createContext(signal),
-      );
-      return waiter.response;
+      return workspaceClient.jobs.submit(request, this._createContext(signal));
     });
   }
 
@@ -69,11 +65,7 @@ export class JobsConnector {
     signal?: AbortSignal,
   ): Promise<jobs.RunNowResponse> {
     return this._callApi("runNow", async () => {
-      const waiter = await workspaceClient.jobs.runNow(
-        request,
-        this._createContext(signal),
-      );
-      return waiter.response;
+      return workspaceClient.jobs.runNow(request, this._createContext(signal));
     });
   }
 
@@ -106,11 +98,10 @@ export class JobsConnector {
     signal?: AbortSignal,
   ): Promise<void> {
     await this._callApi("cancelRun", async () => {
-      const waiter = await workspaceClient.jobs.cancelRun(
+      return workspaceClient.jobs.cancelRun(
         request,
         this._createContext(signal),
       );
-      return waiter.response;
     });
   }
 
@@ -141,104 +132,6 @@ export class JobsConnector {
     return this._callApi("getJob", async () => {
       return workspaceClient.jobs.get(request, this._createContext(signal));
     });
-  }
-
-  async createJob(
-    workspaceClient: WorkspaceClient,
-    request: jobs.CreateJob,
-    signal?: AbortSignal,
-  ): Promise<jobs.CreateResponse> {
-    return this._callApi("createJob", async () => {
-      return workspaceClient.jobs.create(request, this._createContext(signal));
-    });
-  }
-
-  async waitForRun(
-    workspaceClient: WorkspaceClient,
-    runId: number,
-    pollIntervalMs = 5000,
-    timeoutMs?: number,
-    signal?: AbortSignal,
-  ): Promise<jobs.Run> {
-    const startTime = Date.now();
-    const timeout = timeoutMs ?? this.config.timeout ?? 600000;
-
-    return this.telemetry.startActiveSpan(
-      "jobs.waitForRun",
-      {
-        kind: SpanKind.CLIENT,
-        attributes: {
-          "jobs.run_id": runId,
-          "jobs.poll_interval_ms": pollIntervalMs,
-          "jobs.timeout_ms": timeout,
-        },
-      },
-      async (span: Span) => {
-        try {
-          let pollCount = 0;
-
-          while (true) {
-            pollCount++;
-            const elapsed = Date.now() - startTime;
-
-            if (elapsed > timeout) {
-              throw ExecutionError.statementFailed(
-                `Job run ${runId} polling timeout after ${timeout}ms`,
-              );
-            }
-
-            if (signal?.aborted) {
-              throw ExecutionError.canceled();
-            }
-
-            span.addEvent("poll.attempt", {
-              "poll.count": pollCount,
-              "poll.elapsed_ms": elapsed,
-            });
-
-            const run = await this.getRun(
-              workspaceClient,
-              { run_id: runId },
-              signal,
-            );
-
-            const lifeCycleState = run.state?.life_cycle_state;
-
-            if (
-              lifeCycleState === "TERMINATED" ||
-              lifeCycleState === "SKIPPED" ||
-              lifeCycleState === "INTERNAL_ERROR"
-            ) {
-              span.setAttribute("jobs.final_state", lifeCycleState);
-              span.setAttribute(
-                "jobs.result_state",
-                run.state?.result_state ?? "",
-              );
-              span.setAttribute("jobs.poll_count", pollCount);
-              span.setStatus({ code: SpanStatusCode.OK });
-              return run;
-            }
-
-            await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-          }
-        } catch (error) {
-          span.recordException(error as Error);
-          span.setStatus({
-            code: SpanStatusCode.ERROR,
-            message: error instanceof Error ? error.message : String(error),
-          });
-          if (error instanceof AppKitError) {
-            throw error;
-          }
-          throw ExecutionError.statementFailed(
-            error instanceof Error ? error.message : String(error),
-          );
-        } finally {
-          span.end();
-        }
-      },
-      { name: this.name, includePrefix: true },
-    );
   }
 
   private async _callApi<T>(

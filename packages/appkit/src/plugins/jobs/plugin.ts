@@ -1,5 +1,6 @@
 import type { jobs as jobsTypes } from "@databricks/sdk-experimental";
-import type { IAppRequest } from "shared";
+import type { IAppRequest, PluginExecutionSettings } from "shared";
+import { toJSONSchema } from "zod";
 import { JobsConnector } from "../../connectors/jobs";
 import { getWorkspaceClient } from "../../context";
 import { InitializationError } from "../../errors";
@@ -7,12 +8,15 @@ import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest, ResourceRequirement } from "../../registry";
 import { ResourceType } from "../../registry";
+import { JOBS_READ_DEFAULTS, JOBS_WRITE_DEFAULTS } from "./defaults";
 import manifest from "./manifest.json";
+import { mapParams } from "./params";
 import type {
   IJobsConfig,
   JobAPI,
   JobConfig,
   JobHandle,
+  JobRunStatus,
   JobsExport,
 } from "./types";
 
@@ -28,6 +32,7 @@ class JobsPlugin extends Plugin {
   protected declare config: IJobsConfig;
   private connector: JobsConnector;
   private jobIds: Record<string, number> = {};
+  private jobConfigs: Record<string, JobConfig> = {};
   private jobKeys: string[] = [];
 
   /**
@@ -56,7 +61,7 @@ class JobsPlugin extends Plugin {
       Object.keys(explicit).length === 0 &&
       Object.keys(discovered).length === 0
     ) {
-      discovered["default"] = {};
+      discovered.default = {};
     }
 
     return { ...discovered, ...explicit };
@@ -97,6 +102,7 @@ class JobsPlugin extends Plugin {
 
     const jobs = JobsPlugin.discoverJobs(config);
     this.jobKeys = Object.keys(jobs);
+    this.jobConfigs = jobs;
 
     for (const key of this.jobKeys) {
       const envVar =
@@ -105,8 +111,8 @@ class JobsPlugin extends Plugin {
           : `DATABRICKS_JOB_${key.toUpperCase()}`;
       const jobIdStr = process.env[envVar];
       if (jobIdStr) {
-        const parsed = parseInt(jobIdStr, 10);
-        if (!isNaN(parsed)) {
+        const parsed = Number.parseInt(jobIdStr, 10);
+        if (!Number.isNaN(parsed)) {
           this.jobIds[key] = parsed;
         }
       }
@@ -152,73 +158,175 @@ class JobsPlugin extends Plugin {
     return id;
   }
 
+  private _readSettings(
+    cacheKey: (string | number | object)[],
+  ): PluginExecutionSettings {
+    return {
+      default: {
+        ...JOBS_READ_DEFAULTS,
+        cache: { ...JOBS_READ_DEFAULTS.cache, cacheKey },
+      },
+    };
+  }
+
   /**
    * Creates a JobAPI for a specific configured job key.
    * Each method is scoped to the job's configured ID.
    */
   protected createJobAPI(jobKey: string): JobAPI {
     const jobId = this.getJobId(jobKey);
-    const pollInterval = this.config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL;
-    const waitTimeout = this.config.timeout ?? DEFAULT_WAIT_TIMEOUT;
+    const jobConfig = this.jobConfigs[jobKey];
+    // Capture `this` for use in the async generator
+    const self = this;
 
     return {
-      runNow: async (params?: jobsTypes.RunNow) => {
-        return this.connector.runNow(this.client, {
-          ...params,
-          job_id: jobId,
-        });
-      },
-
-      runNowAndWait: async (
-        params?: jobsTypes.RunNow,
-        options?: { timeoutMs?: number; signal?: AbortSignal },
-      ) => {
-        const result = await this.connector.runNow(this.client, {
-          ...params,
-          job_id: jobId,
-        });
-        const runId = result.run_id;
-        if (!runId) {
-          throw new Error("runNow did not return a run_id");
+      runNow: async (
+        params?: Record<string, unknown>,
+      ): Promise<jobsTypes.RunNowResponse | undefined> => {
+        // Validate if schema exists
+        if (jobConfig?.params && params) {
+          const result = jobConfig.params.safeParse(params);
+          if (!result.success) {
+            throw new Error(
+              `Parameter validation failed for job "${jobKey}": ${result.error.message}`,
+            );
+          }
         }
-        return this.connector.waitForRun(
-          this.client,
-          runId,
-          pollInterval,
-          options?.timeoutMs ?? waitTimeout,
-          options?.signal,
+
+        // Map params to SDK fields
+        const sdkFields =
+          jobConfig?.taskType && params
+            ? mapParams(jobConfig.taskType, params)
+            : (params ?? {});
+
+        return this.execute(
+          async () =>
+            this.connector.runNow(this.client, {
+              ...sdkFields,
+              job_id: jobId,
+            }),
+          { default: JOBS_WRITE_DEFAULTS },
         );
       },
 
-      lastRun: async () => {
-        const runs = await this.connector.listRuns(this.client, {
-          job_id: jobId,
-          limit: 1,
-        });
-        return runs[0];
+      async *runAndWait(
+        params?: Record<string, unknown>,
+      ): AsyncGenerator<JobRunStatus, void, unknown> {
+        // Validate if schema exists
+        if (jobConfig?.params && params) {
+          const result = jobConfig.params.safeParse(params);
+          if (!result.success) {
+            throw new Error(
+              `Parameter validation failed for job "${jobKey}": ${result.error.message}`,
+            );
+          }
+        }
+
+        // Map params to SDK fields
+        const sdkFields =
+          jobConfig?.taskType && params
+            ? mapParams(jobConfig.taskType, params)
+            : (params ?? {});
+
+        const runResult = await self.execute(
+          async () =>
+            self.connector.runNow(self.client, {
+              ...sdkFields,
+              job_id: jobId,
+            }),
+          { default: JOBS_WRITE_DEFAULTS },
+        );
+
+        const runId = runResult?.run_id;
+        if (!runId) {
+          throw new Error("runNow did not return a run_id");
+        }
+
+        const pollInterval =
+          self.config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL;
+        const timeout = jobConfig?.timeout ?? DEFAULT_WAIT_TIMEOUT;
+        const startTime = Date.now();
+
+        while (true) {
+          if (Date.now() - startTime > timeout) {
+            throw new Error(
+              `Job run ${runId} polling timeout after ${timeout}ms`,
+            );
+          }
+
+          const run = await self.connector.getRun(self.client, {
+            run_id: runId,
+          });
+          const state = run.state?.life_cycle_state;
+
+          yield { status: state, timestamp: Date.now(), run };
+
+          if (
+            state === "TERMINATED" ||
+            state === "SKIPPED" ||
+            state === "INTERNAL_ERROR"
+          ) {
+            return;
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, pollInterval));
+        }
       },
 
-      listRuns: async (options?: { limit?: number }) => {
-        return this.connector.listRuns(this.client, {
-          job_id: jobId,
-          limit: options?.limit,
-        });
+      lastRun: async (): Promise<jobsTypes.Run | undefined> => {
+        const runs = await this.execute(
+          async () =>
+            this.connector.listRuns(this.client, {
+              job_id: jobId,
+              limit: 1,
+            }),
+          this._readSettings(["jobs:lastRun", jobKey]),
+        );
+        return runs?.[0];
       },
 
-      getRun: async (runId: number) => {
-        return this.connector.getRun(this.client, { run_id: runId });
+      listRuns: async (options?: {
+        limit?: number;
+      }): Promise<jobsTypes.BaseRun[] | undefined> => {
+        return this.execute(
+          async () =>
+            this.connector.listRuns(this.client, {
+              job_id: jobId,
+              limit: options?.limit,
+            }),
+          this._readSettings(["jobs:listRuns", jobKey, options ?? {}]),
+        );
       },
 
-      getRunOutput: async (runId: number) => {
-        return this.connector.getRunOutput(this.client, { run_id: runId });
+      getRun: async (runId: number): Promise<jobsTypes.Run | undefined> => {
+        return this.execute(
+          async () => this.connector.getRun(this.client, { run_id: runId }),
+          this._readSettings(["jobs:getRun", jobKey, runId]),
+        );
       },
 
-      cancelRun: async (runId: number) => {
-        await this.connector.cancelRun(this.client, { run_id: runId });
+      getRunOutput: async (
+        runId: number,
+      ): Promise<jobsTypes.RunOutput | undefined> => {
+        return this.execute(
+          async () =>
+            this.connector.getRunOutput(this.client, { run_id: runId }),
+          this._readSettings(["jobs:getRunOutput", jobKey, runId]),
+        );
       },
 
-      getJob: async () => {
-        return this.connector.getJob(this.client, { job_id: jobId });
+      cancelRun: async (runId: number): Promise<void> => {
+        await this.execute(
+          async () => this.connector.cancelRun(this.client, { run_id: runId }),
+          { default: JOBS_WRITE_DEFAULTS },
+        );
+      },
+
+      getJob: async (): Promise<jobsTypes.Job | undefined> => {
+        return this.execute(
+          async () => this.connector.getJob(this.client, { job_id: jobId }),
+          this._readSettings(["jobs:getJob", jobKey]),
+        );
       },
     };
   }
@@ -249,7 +357,14 @@ class JobsPlugin extends Plugin {
   }
 
   clientConfig(): Record<string, unknown> {
-    return { jobs: this.jobKeys };
+    const jobs: Record<string, { params: unknown }> = {};
+    for (const key of this.jobKeys) {
+      const config = this.jobConfigs[key];
+      jobs[key] = {
+        params: config?.params ? toJSONSchema(config.params) : null,
+      };
+    }
+    return { jobs };
   }
 }
 
