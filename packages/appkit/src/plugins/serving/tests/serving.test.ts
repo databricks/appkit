@@ -349,7 +349,10 @@ describe("Serving Plugin", () => {
         "test-endpoint",
         { messages: [] },
       );
-      expect(result).toEqual({ choices: [{ message: { content: "Hi" } }] });
+      expect(result).toEqual({
+        ok: true,
+        data: { choices: [{ message: { content: "Hi" } }] },
+      });
     });
 
     test("invoke throws for unknown alias", async () => {

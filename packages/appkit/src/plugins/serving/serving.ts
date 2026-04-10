@@ -182,11 +182,11 @@ export class ServingPlugin extends Plugin {
 
     try {
       const result = await this.invoke(alias, rawBody);
-      if (result === undefined) {
-        res.status(502).json({ error: "Invocation returned no result" });
+      if (!result.ok) {
+        res.status(result.status).json({ error: result.message });
         return;
       }
-      res.json(result);
+      res.json(result.data);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Invocation failed";
       if (err instanceof EndpointNotFoundError) {
