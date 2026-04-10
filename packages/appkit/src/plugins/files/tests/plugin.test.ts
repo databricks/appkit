@@ -1445,6 +1445,108 @@ describe("FilesPlugin", () => {
       );
       expect(statusCodes).not.toContain(403);
     });
+
+    test("policy that throws → HTTP route returns 500 (fail closed)", async () => {
+      const brokenConfig = {
+        volumes: {
+          broken: {
+            policy: () => {
+              throw new Error("policy crashed");
+            },
+          },
+          uploads: {},
+          exports: {},
+        },
+      };
+      process.env.DATABRICKS_VOLUME_BROKEN = "/Volumes/c/s/broken";
+
+      try {
+        const plugin = new FilesPlugin(brokenConfig);
+        const handler = getRouteHandler(plugin, "get", "/list");
+        const res = mockRes();
+
+        await handler(mockReq("broken"), res);
+
+        expect(res.status).toHaveBeenCalledWith(500);
+        expect(res.json).toHaveBeenCalledWith(
+          expect.objectContaining({
+            error: "Policy evaluation failed",
+            plugin: "files",
+          }),
+        );
+        // Must NOT be 403 — a broken policy is not a denial, it's a server error
+        const statusCodes = (res.status.mock.calls as number[][]).map(
+          (c) => c[0],
+        );
+        expect(statusCodes).not.toContain(403);
+      } finally {
+        delete process.env.DATABRICKS_VOLUME_BROKEN;
+      }
+    });
+
+    test("policy that throws → programmatic API propagates the error", async () => {
+      const brokenConfig = {
+        volumes: {
+          broken: {
+            policy: () => {
+              throw new Error("policy crashed");
+            },
+          },
+          uploads: {},
+          exports: {},
+        },
+      };
+      process.env.DATABRICKS_VOLUME_BROKEN = "/Volumes/c/s/broken";
+
+      try {
+        const plugin = new FilesPlugin(brokenConfig);
+        const handle = plugin.exports()("broken");
+
+        await expect(handle.list()).rejects.toThrow("policy crashed");
+        await expect(handle.list()).rejects.not.toBeInstanceOf(
+          PolicyDeniedError,
+        );
+      } finally {
+        delete process.env.DATABRICKS_VOLUME_BROKEN;
+      }
+    });
+
+    test("async policy that rejects → HTTP route returns 500 (fail closed)", async () => {
+      const brokenConfig = {
+        volumes: {
+          broken: {
+            policy: async () => {
+              throw new Error("async policy crashed");
+            },
+          },
+          uploads: {},
+          exports: {},
+        },
+      };
+      process.env.DATABRICKS_VOLUME_BROKEN = "/Volumes/c/s/broken";
+
+      try {
+        const plugin = new FilesPlugin(brokenConfig);
+        const handler = getRouteHandler(plugin, "get", "/list");
+        const res = mockRes();
+
+        await handler(mockReq("broken"), res);
+
+        expect(res.status).toHaveBeenCalledWith(500);
+        expect(res.json).toHaveBeenCalledWith(
+          expect.objectContaining({
+            error: "Policy evaluation failed",
+            plugin: "files",
+          }),
+        );
+        const statusCodes = (res.status.mock.calls as number[][]).map(
+          (c) => c[0],
+        );
+        expect(statusCodes).not.toContain(403);
+      } finally {
+        delete process.env.DATABRICKS_VOLUME_BROKEN;
+      }
+    });
   });
 
   describe("Upload Stream Size Limiter", () => {

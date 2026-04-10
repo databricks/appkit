@@ -144,21 +144,13 @@ export class FilesPlugin extends Plugin {
     };
     const allowed = await policyFn(action, resource, user);
     if (!allowed) {
-      try {
-        logger.warn(
-          'Policy denied "%s" on volume "%s" for user "%s"',
-          action,
-          volumeKey,
-          user.id,
-        );
-      } catch (err) {
-        if (!(err instanceof TypeError)) throw err;
-        logger.debug(
-          "Could not resolve user ID for policy denial log: %O",
-          err,
-        );
-        logger.warn('Policy denied "%s" on volume "%s"', action, volumeKey);
-      }
+      const userId = user.isServicePrincipal ? "<service-principal>" : user.id;
+      logger.warn(
+        'Policy denied "%s" on volume "%s" for user "%s"',
+        action,
+        volumeKey,
+        userId,
+      );
       throw new PolicyDeniedError(action, volumeKey);
     }
   }
@@ -196,7 +188,13 @@ export class FilesPlugin extends Plugin {
         res.status(403).json({ error: error.message, plugin: this.name });
         return false;
       }
-      throw error;
+      // A crashing policy is treated as a server error (fail closed).
+      logger.error("Policy function threw on volume %s: %O", volumeKey, error);
+      res.status(500).json({
+        error: "Policy evaluation failed",
+        plugin: this.name,
+      });
+      return false;
     }
 
     return true;
