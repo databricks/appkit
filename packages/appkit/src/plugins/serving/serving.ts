@@ -6,7 +6,7 @@ import type { IAppRouter } from "shared";
 import * as servingConnector from "../../connectors/serving/client";
 import { getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging";
-import { Plugin, toPlugin } from "../../plugin";
+import { type ExecutionResult, Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest, ResourceRequirement } from "../../registry";
 import { ResourceType } from "../../registry";
 import { servingInvokeDefaults } from "./defaults";
@@ -264,7 +264,10 @@ export class ServingPlugin extends Plugin {
     }
   }
 
-  async invoke(alias: string, body: Record<string, unknown>): Promise<unknown> {
+  async invoke(
+    alias: string,
+    body: Record<string, unknown>,
+  ): Promise<ExecutionResult<unknown>> {
     const { endpoint, filteredBody } = this.resolveAndFilter(alias, body);
     const workspaceClient = getWorkspaceClient();
     const timeout = this.config.timeout ?? 120_000;
