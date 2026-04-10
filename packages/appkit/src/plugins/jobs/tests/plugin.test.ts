@@ -761,7 +761,7 @@ describe("injectRoutes", () => {
     delete process.env.DATABRICKS_JOB_ML;
   });
 
-  test("registers all 4 routes via this.route()", () => {
+  test("registers all 5 routes via this.route()", () => {
     process.env.DATABRICKS_JOB_ETL = "123";
 
     const plugin = new JobsPlugin({});
@@ -770,17 +770,19 @@ describe("injectRoutes", () => {
     const mockRouter = {
       get: vi.fn(),
       post: vi.fn(),
+      delete: vi.fn(),
     };
 
     plugin.injectRoutes(mockRouter as any);
 
-    expect(routeSpy).toHaveBeenCalledTimes(4);
+    expect(routeSpy).toHaveBeenCalledTimes(5);
 
     const routeCalls = routeSpy.mock.calls.map((call) => (call[1] as any).name);
     expect(routeCalls).toContain("run");
     expect(routeCalls).toContain("runs");
     expect(routeCalls).toContain("run-detail");
     expect(routeCalls).toContain("status");
+    expect(routeCalls).toContain("cancel-run");
   });
 
   test("registers correct HTTP methods and paths", () => {
@@ -792,6 +794,7 @@ describe("injectRoutes", () => {
     const mockRouter = {
       get: vi.fn(),
       post: vi.fn(),
+      delete: vi.fn(),
     };
 
     plugin.injectRoutes(mockRouter as any);
@@ -821,6 +824,11 @@ describe("injectRoutes", () => {
       name: "status",
       method: "get",
       path: "/:jobKey/status",
+    });
+    expect(routes).toContainEqual({
+      name: "cancel-run",
+      method: "delete",
+      path: "/:jobKey/runs/:runId",
     });
   });
 
@@ -901,7 +909,7 @@ describe("injectRoutes", () => {
       const plugin = new JobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
-      const mockRouter = { get: vi.fn(), post: vi.fn() };
+      const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
       plugin.injectRoutes(mockRouter as any);
 
       const runRoute = routeSpy.mock.calls.find(
@@ -943,7 +951,7 @@ describe("injectRoutes", () => {
       });
       const routeSpy = vi.spyOn(plugin as any, "route");
 
-      const mockRouter = { get: vi.fn(), post: vi.fn() };
+      const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
       plugin.injectRoutes(mockRouter as any);
 
       const runRoute = routeSpy.mock.calls.find(
@@ -991,7 +999,7 @@ describe("injectRoutes", () => {
       const plugin = new JobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
-      const mockRouter = { get: vi.fn(), post: vi.fn() };
+      const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
       plugin.injectRoutes(mockRouter as any);
 
       const runsRoute = routeSpy.mock.calls.find(
@@ -1025,7 +1033,7 @@ describe("injectRoutes", () => {
       const plugin = new JobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
-      const mockRouter = { get: vi.fn(), post: vi.fn() };
+      const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
       plugin.injectRoutes(mockRouter as any);
 
       const runsRoute = routeSpy.mock.calls.find(
@@ -1067,7 +1075,7 @@ describe("injectRoutes", () => {
       const plugin = new JobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
-      const mockRouter = { get: vi.fn(), post: vi.fn() };
+      const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
       plugin.injectRoutes(mockRouter as any);
 
       const detailRoute = routeSpy.mock.calls.find(
@@ -1097,7 +1105,7 @@ describe("injectRoutes", () => {
       const plugin = new JobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
-      const mockRouter = { get: vi.fn(), post: vi.fn() };
+      const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
       plugin.injectRoutes(mockRouter as any);
 
       const detailRoute = routeSpy.mock.calls.find(
@@ -1143,7 +1151,7 @@ describe("injectRoutes", () => {
       const plugin = new JobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
-      const mockRouter = { get: vi.fn(), post: vi.fn() };
+      const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
       plugin.injectRoutes(mockRouter as any);
 
       const statusRoute = routeSpy.mock.calls.find(
@@ -1178,7 +1186,7 @@ describe("injectRoutes", () => {
       const plugin = new JobsPlugin({});
       const routeSpy = vi.spyOn(plugin as any, "route");
 
-      const mockRouter = { get: vi.fn(), post: vi.fn() };
+      const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
       plugin.injectRoutes(mockRouter as any);
 
       const statusRoute = routeSpy.mock.calls.find(
@@ -1206,6 +1214,217 @@ describe("injectRoutes", () => {
     });
   });
 
+  describe("DELETE /:jobKey/runs/:runId handler", () => {
+    test("cancels run and returns 204", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      mockClient.jobs.cancelRun.mockResolvedValue(undefined);
+
+      const plugin = new JobsPlugin({});
+      const routeSpy = vi.spyOn(plugin as any, "route");
+
+      const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
+      plugin.injectRoutes(mockRouter as any);
+
+      const cancelRoute = routeSpy.mock.calls.find(
+        (call) => (call[1] as any).name === "cancel-run",
+      );
+      const handler = (cancelRoute?.[1] as any).handler;
+
+      const mockReq = {
+        params: { jobKey: "etl", runId: "42" },
+        query: {},
+        header: vi.fn().mockReturnValue("test-token"),
+      } as any;
+
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+        end: vi.fn(),
+      } as any;
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(204);
+      expect(mockRes.end).toHaveBeenCalled();
+    });
+
+    test("returns 400 for invalid runId", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      const plugin = new JobsPlugin({});
+      const routeSpy = vi.spyOn(plugin as any, "route");
+
+      const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
+      plugin.injectRoutes(mockRouter as any);
+
+      const cancelRoute = routeSpy.mock.calls.find(
+        (call) => (call[1] as any).name === "cancel-run",
+      );
+      const handler = (cancelRoute?.[1] as any).handler;
+
+      const mockReq = {
+        params: { jobKey: "etl", runId: "not-a-number" },
+        query: {},
+        header: vi.fn().mockReturnValue("test-token"),
+      } as any;
+
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+        end: vi.fn(),
+      } as any;
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: "Invalid runId",
+        plugin: "jobs",
+      });
+    });
+
+    test("returns 404 for unknown job key", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      const plugin = new JobsPlugin({});
+      const routeSpy = vi.spyOn(plugin as any, "route");
+
+      const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
+      plugin.injectRoutes(mockRouter as any);
+
+      const cancelRoute = routeSpy.mock.calls.find(
+        (call) => (call[1] as any).name === "cancel-run",
+      );
+      const handler = (cancelRoute?.[1] as any).handler;
+
+      const mockReq = {
+        params: { jobKey: "unknown", runId: "42" },
+        query: {},
+        header: vi.fn().mockReturnValue("test-token"),
+      } as any;
+
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+        end: vi.fn(),
+      } as any;
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(404);
+    });
+  });
+
+  describe("POST /:jobKey/run params validation", () => {
+    test("returns 400 when params is an array", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      const plugin = new JobsPlugin({});
+      const routeSpy = vi.spyOn(plugin as any, "route");
+
+      const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
+      plugin.injectRoutes(mockRouter as any);
+
+      const runRoute = routeSpy.mock.calls.find(
+        (call) => (call[1] as any).name === "run",
+      );
+      const handler = (runRoute?.[1] as any).handler;
+
+      const mockReq = {
+        params: { jobKey: "etl" },
+        body: { params: [1, 2, 3] },
+        query: {},
+        header: vi.fn().mockReturnValue("test-token"),
+      } as any;
+
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      } as any;
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: "params must be a plain object",
+        plugin: "jobs",
+      });
+    });
+
+    test("returns 400 when params is a string", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      const plugin = new JobsPlugin({});
+      const routeSpy = vi.spyOn(plugin as any, "route");
+
+      const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
+      plugin.injectRoutes(mockRouter as any);
+
+      const runRoute = routeSpy.mock.calls.find(
+        (call) => (call[1] as any).name === "run",
+      );
+      const handler = (runRoute?.[1] as any).handler;
+
+      const mockReq = {
+        params: { jobKey: "etl" },
+        body: { params: "not-an-object" },
+        query: {},
+        header: vi.fn().mockReturnValue("test-token"),
+      } as any;
+
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      } as any;
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: "params must be a plain object",
+        plugin: "jobs",
+      });
+    });
+
+    test("allows undefined params", async () => {
+      process.env.DATABRICKS_JOB_ETL = "123";
+
+      mockClient.jobs.runNow.mockResolvedValue({ run_id: 42 });
+
+      const plugin = new JobsPlugin({});
+      const routeSpy = vi.spyOn(plugin as any, "route");
+
+      const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
+      plugin.injectRoutes(mockRouter as any);
+
+      const runRoute = routeSpy.mock.calls.find(
+        (call) => (call[1] as any).name === "run",
+      );
+      const handler = (runRoute?.[1] as any).handler;
+
+      const mockReq = {
+        params: { jobKey: "etl" },
+        body: {},
+        query: {},
+        header: vi.fn().mockReturnValue("test-token"),
+      } as any;
+
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+        setHeader: vi.fn(),
+        flushHeaders: vi.fn(),
+        write: vi.fn(),
+        end: vi.fn(),
+      } as any;
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.json).toHaveBeenCalledWith({ runId: 42 });
+    });
+  });
+
   describe("OBO header forwarding", () => {
     test("routes call this.asUser(req) for user context", async () => {
       process.env.DATABRICKS_JOB_ETL = "123";
@@ -1216,7 +1435,7 @@ describe("injectRoutes", () => {
       const asUserSpy = vi.spyOn(plugin, "asUser");
       const routeSpy = vi.spyOn(plugin as any, "route");
 
-      const mockRouter = { get: vi.fn(), post: vi.fn() };
+      const mockRouter = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
       plugin.injectRoutes(mockRouter as any);
 
       const runsRoute = routeSpy.mock.calls.find(

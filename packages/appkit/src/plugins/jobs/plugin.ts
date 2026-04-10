@@ -433,7 +433,22 @@ class JobsPlugin extends Plugin {
         const { jobKey } = this._resolveJob(req, res);
         if (!jobKey) return;
 
-        const params = req.body?.params as Record<string, unknown> | undefined;
+        const rawParams = req.body?.params;
+        if (
+          rawParams !== undefined &&
+          (typeof rawParams !== "object" ||
+            rawParams === null ||
+            Array.isArray(rawParams))
+        ) {
+          res
+            .status(400)
+            .json({
+              error: "params must be a plain object",
+              plugin: this.name,
+            });
+          return;
+        }
+        const params = rawParams as Record<string, unknown> | undefined;
         const stream = req.query.stream === "true";
 
         try {
@@ -551,6 +566,40 @@ class JobsPlugin extends Plugin {
           res
             .status(500)
             .json({ error: "Status check failed", plugin: this.name });
+        }
+      },
+    });
+
+    // DELETE /:jobKey/runs/:runId
+    this.route(router, {
+      name: "cancel-run",
+      method: "delete",
+      path: "/:jobKey/runs/:runId",
+      handler: async (req: express.Request, res: express.Response) => {
+        const { jobKey } = this._resolveJob(req, res);
+        if (!jobKey) return;
+
+        const runId = Number.parseInt(req.params.runId, 10);
+        if (Number.isNaN(runId)) {
+          res.status(400).json({ error: "Invalid runId", plugin: this.name });
+          return;
+        }
+
+        try {
+          const userPlugin = this.asUser(req) as JobsPlugin;
+          const api = userPlugin.createJobAPI(jobKey);
+          await api.cancelRun(runId);
+          res.status(204).end();
+        } catch (error) {
+          logger.error(
+            "Cancel run failed for job %s run %d: %O",
+            jobKey,
+            runId,
+            error,
+          );
+          res
+            .status(500)
+            .json({ error: "Cancel run failed", plugin: this.name });
         }
       },
     });
