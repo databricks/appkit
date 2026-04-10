@@ -63,150 +63,14 @@ export async function generateServingTypes(
   }> = [];
 
   for (const [alias, config] of Object.entries(endpoints)) {
-    const endpointName = process.env[config.env];
-    if (!endpointName) {
-      registryEntries.push(
-        buildRegistryEntry(
-          alias,
-          GENERIC_REQUEST,
-          GENERIC_RESPONSE,
-          GENERIC_CHUNK,
-        ),
-      );
-      logEntries.push({
-        alias,
-        status: "MISS",
-        error: `env ${config.env} not set`,
-      });
-      continue;
-    }
-
     client ??= new WorkspaceClient({});
-    const result = await fetchOpenApiSchema(
-      client,
-      endpointName,
-      config.servedModel,
-    );
-    if (!result) {
-      registryEntries.push(
-        buildRegistryEntry(
-          alias,
-          GENERIC_REQUEST,
-          GENERIC_RESPONSE,
-          GENERIC_CHUNK,
-        ),
-      );
-      logEntries.push({
-        alias,
-        status: "MISS",
-        error: "schema fetch failed",
-      });
-      continue;
-    }
-
-    const { spec, pathKey } = result;
-    const schemaJson = JSON.stringify(spec);
-    const hash = hashSchema(schemaJson);
-
-    // Check cache
-    const cached = cache.endpoints[alias];
-    if (cached && cached.hash === hash) {
-      registryEntries.push(
-        buildRegistryEntry(
-          alias,
-          cached.requestType,
-          cached.responseType,
-          cached.chunkType,
-        ),
-      );
-      logEntries.push({ alias, status: "HIT" });
-      continue;
-    }
-
-    // Cache miss — convert
-    const operation = spec.paths[pathKey]?.post;
-    if (!operation) {
-      logEntries.push({
-        alias,
-        status: "MISS",
-        error: "no POST operation",
-      });
-      continue;
-    }
-
-    let requestType: string;
-    let responseType: string;
-    let chunkType: string | null;
-    let requestKeys: string[];
-    try {
-      requestType = convertRequestSchema(operation);
-      responseType = convertResponseSchema(operation);
-      chunkType = deriveChunkType(operation);
-      requestKeys = extractRequestKeys(operation);
-    } catch (convErr) {
-      logger.warn(
-        "Schema conversion failed for '%s': %s",
-        alias,
-        (convErr as Error).message,
-      );
-      registryEntries.push(
-        buildRegistryEntry(
-          alias,
-          GENERIC_REQUEST,
-          GENERIC_RESPONSE,
-          GENERIC_CHUNK,
-        ),
-      );
-      logEntries.push({
-        alias,
-        status: "MISS",
-        error: "schema conversion failed",
-      });
-      continue;
-    }
-
-    cache.endpoints[alias] = {
-      hash,
-      requestType,
-      responseType,
-      chunkType,
-      requestKeys,
-    };
-    updated = true;
-
-    registryEntries.push(
-      buildRegistryEntry(alias, requestType, responseType, chunkType),
-    );
-    logEntries.push({ alias, status: "MISS" });
+    const result = await processEndpoint(alias, config, client, cache);
+    if (result.cacheUpdated) updated = true;
+    registryEntries.push(result.entry);
+    logEntries.push(result.log);
   }
 
-  // Print formatted table (matching analytics typegen output)
-  if (logEntries.length > 0) {
-    const maxNameLen = Math.max(...logEntries.map((e) => e.alias.length));
-    const separator = pc.dim("─".repeat(50));
-    console.log("");
-    console.log(
-      `  ${pc.bold("Typegen Serving")} ${pc.dim(`(${logEntries.length})`)}`,
-    );
-    console.log(`  ${separator}`);
-    for (const entry of logEntries) {
-      const tag =
-        entry.status === "HIT"
-          ? `cache ${pc.bold(pc.green("HIT  "))}`
-          : `cache ${pc.bold(pc.yellow("MISS "))}`;
-      const rawName = entry.alias.padEnd(maxNameLen);
-      const reason = entry.error ? `  ${pc.dim(entry.error)}` : "";
-      console.log(`  ${tag}  ${rawName}${reason}`);
-    }
-    const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
-    const newCount = logEntries.filter((e) => e.status === "MISS").length;
-    const cacheCount = logEntries.filter((e) => e.status === "HIT").length;
-    console.log(`  ${separator}`);
-    console.log(
-      `  ${newCount} new, ${cacheCount} from cache. ${pc.dim(`${elapsed}s`)}`,
-    );
-    console.log("");
-  }
+  printLogTable(logEntries, startTime);
 
   const output = generateTypeDeclarations(registryEntries);
   await fs.writeFile(outFile, output, "utf-8");
@@ -223,6 +87,142 @@ export async function generateServingTypes(
   if (updated) {
     await saveServingCache(cache as ServingCache);
   }
+}
+
+interface EndpointResult {
+  entry: string;
+  log: { alias: string; status: "HIT" | "MISS"; error?: string };
+  cacheUpdated: boolean;
+}
+
+function genericEntry(alias: string): string {
+  return buildRegistryEntry(
+    alias,
+    GENERIC_REQUEST,
+    GENERIC_RESPONSE,
+    GENERIC_CHUNK,
+  );
+}
+
+async function processEndpoint(
+  alias: string,
+  config: EndpointConfig,
+  client: WorkspaceClient,
+  cache: { endpoints: Record<string, any> },
+): Promise<EndpointResult> {
+  const endpointName = process.env[config.env];
+  if (!endpointName) {
+    return {
+      entry: genericEntry(alias),
+      log: { alias, status: "MISS", error: `env ${config.env} not set` },
+      cacheUpdated: false,
+    };
+  }
+
+  const result = await fetchOpenApiSchema(
+    client,
+    endpointName,
+    config.servedModel,
+  );
+  if (!result) {
+    return {
+      entry: genericEntry(alias),
+      log: { alias, status: "MISS", error: "schema fetch failed" },
+      cacheUpdated: false,
+    };
+  }
+
+  const { spec, pathKey } = result;
+  const hash = hashSchema(JSON.stringify(spec));
+
+  // Cache hit
+  const cached = cache.endpoints[alias];
+  if (cached && cached.hash === hash) {
+    return {
+      entry: buildRegistryEntry(
+        alias,
+        cached.requestType,
+        cached.responseType,
+        cached.chunkType,
+      ),
+      log: { alias, status: "HIT" },
+      cacheUpdated: false,
+    };
+  }
+
+  // Cache miss — convert schema to types
+  const operation = spec.paths[pathKey]?.post;
+  if (!operation) {
+    return {
+      entry: genericEntry(alias),
+      log: { alias, status: "MISS", error: "no POST operation" },
+      cacheUpdated: false,
+    };
+  }
+
+  try {
+    const requestType = convertRequestSchema(operation);
+    const responseType = convertResponseSchema(operation);
+    const chunkType = deriveChunkType(operation);
+    const requestKeys = extractRequestKeys(operation);
+
+    cache.endpoints[alias] = {
+      hash,
+      requestType,
+      responseType,
+      chunkType,
+      requestKeys,
+    };
+
+    return {
+      entry: buildRegistryEntry(alias, requestType, responseType, chunkType),
+      log: { alias, status: "MISS" },
+      cacheUpdated: true,
+    };
+  } catch (convErr) {
+    logger.warn(
+      "Schema conversion failed for '%s': %s",
+      alias,
+      (convErr as Error).message,
+    );
+    return {
+      entry: genericEntry(alias),
+      log: { alias, status: "MISS", error: "schema conversion failed" },
+      cacheUpdated: false,
+    };
+  }
+}
+
+function printLogTable(
+  logEntries: Array<{ alias: string; status: "HIT" | "MISS"; error?: string }>,
+  startTime: number,
+): void {
+  if (logEntries.length === 0) return;
+
+  const maxNameLen = Math.max(...logEntries.map((e) => e.alias.length));
+  const separator = pc.dim("─".repeat(50));
+  console.log("");
+  console.log(
+    `  ${pc.bold("Typegen Serving")} ${pc.dim(`(${logEntries.length})`)}`,
+  );
+  console.log(`  ${separator}`);
+  for (const entry of logEntries) {
+    const tag =
+      entry.status === "HIT"
+        ? `cache ${pc.bold(pc.green("HIT  "))}`
+        : `cache ${pc.bold(pc.yellow("MISS "))}`;
+    const rawName = entry.alias.padEnd(maxNameLen);
+    const reason = entry.error ? `  ${pc.dim(entry.error)}` : "";
+    console.log(`  ${tag}  ${rawName}${reason}`);
+  }
+  const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+  const newCount = logEntries.filter((e) => e.status === "MISS").length;
+  const cacheCount = logEntries.filter((e) => e.status === "HIT").length;
+  console.log(`  ${separator}`);
+  console.log(
+    `  ${newCount} new, ${cacheCount} from cache. ${pc.dim(`${elapsed}s`)}`,
+  );
+  console.log("");
 }
 
 function resolveDefaultEndpoints(): Record<string, EndpointConfig> {

@@ -23,8 +23,14 @@ const mockConnectSSE = vi.fn().mockImplementation((opts: any) => {
   });
 });
 
+const mockGetPluginClientConfig = vi
+  .fn()
+  .mockReturnValue({ isNamedMode: false, aliases: ["default"] });
+
 vi.mock("@/js", () => ({
   connectSSE: (...args: unknown[]) => mockConnectSSE(...args),
+  getPluginClientConfig: (...args: unknown[]) =>
+    mockGetPluginClientConfig(...args),
 }));
 
 import { useServingStream } from "../use-serving-stream";
@@ -82,6 +88,10 @@ describe("useServingStream", () => {
   });
 
   test("uses alias in URL when provided", () => {
+    mockGetPluginClientConfig.mockReturnValue({
+      isNamedMode: true,
+      aliases: ["embedder", "llm"],
+    });
     const { result } = renderHook(() =>
       useServingStream({ messages: [] }, { alias: "embedder" }),
     );
@@ -95,6 +105,38 @@ describe("useServingStream", () => {
         url: "/api/serving/embedder/stream",
       }),
     );
+  });
+
+  test("sets error for unknown alias", () => {
+    mockGetPluginClientConfig.mockReturnValue({
+      isNamedMode: true,
+      aliases: ["llm", "embedder"],
+    });
+
+    const { result } = renderHook(() =>
+      useServingStream({ messages: [] }, { alias: "unknown" as any }),
+    );
+
+    expect(result.current.error).toBe(
+      'Unknown serving alias "unknown". Available: llm, embedder',
+    );
+  });
+
+  test("stream does not call connectSSE for unknown alias", () => {
+    mockGetPluginClientConfig.mockReturnValue({
+      isNamedMode: true,
+      aliases: ["llm"],
+    });
+
+    const { result } = renderHook(() =>
+      useServingStream({ messages: [] }, { alias: "bad" as any }),
+    );
+
+    act(() => {
+      result.current.stream();
+    });
+
+    expect(mockConnectSSE).not.toHaveBeenCalled();
   });
 
   test("sets streaming to true when stream() is called", () => {
@@ -243,6 +285,28 @@ describe("useServingStream", () => {
     });
 
     await waitFor(() => {
+      expect(result.current.streaming).toBe(false);
+    });
+  });
+
+  test("sets error when connectSSE promise rejects", async () => {
+    mockConnectSSE.mockImplementationOnce((opts: any) => {
+      capturedCallbacks = {
+        onMessage: opts.onMessage,
+        onError: opts.onError,
+        signal: opts.signal,
+      };
+      return Promise.reject(new Error("Network failure"));
+    });
+
+    const { result } = renderHook(() => useServingStream({ messages: [] }));
+
+    act(() => {
+      result.current.stream();
+    });
+
+    await waitFor(() => {
+      expect(result.current.error).toBe("Connection error");
       expect(result.current.streaming).toBe(false);
     });
   });

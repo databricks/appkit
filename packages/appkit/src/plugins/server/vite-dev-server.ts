@@ -5,6 +5,7 @@ import type { ViteDevServer as ViteDevServerType } from "vite";
 import { mergeConfigDedup } from "@/utils";
 import { ServerError } from "../../errors";
 import { createLogger } from "../../logging/logger";
+import { appKitServingTypesPlugin } from "../../type-generator/serving/vite-plugin";
 import { appKitTypesPlugin } from "../../type-generator/vite-plugin";
 import { BaseServer } from "./base-server";
 import type { PluginClientConfigs, PluginEndpoints } from "./utils";
@@ -78,7 +79,11 @@ export class ViteDevServer extends BaseServer {
           ignored: ["**/node_modules/**", "!**/node_modules/@databricks/**"],
         },
       },
-      plugins: [react.default(), appKitTypesPlugin()],
+      plugins: [
+        react.default(),
+        appKitTypesPlugin(),
+        appKitServingTypesPlugin(),
+      ],
       appType: "custom",
     };
 

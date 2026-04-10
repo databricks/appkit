@@ -1,9 +1,23 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+const mockGetPluginClientConfig = vi
+  .fn()
+  .mockReturnValue({ isNamedMode: false, aliases: ["default"] });
+
+vi.mock("@/js", () => ({
+  getPluginClientConfig: (...args: unknown[]) =>
+    mockGetPluginClientConfig(...args),
+}));
+
 import { useServingInvoke } from "../use-serving-invoke";
 
 describe("useServingInvoke", () => {
   beforeEach(() => {
+    mockGetPluginClientConfig.mockReturnValue({
+      isNamedMode: false,
+      aliases: ["default"],
+    });
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ choices: [] }), { status: 200 }),
     );
@@ -47,6 +61,10 @@ describe("useServingInvoke", () => {
   });
 
   test("uses alias in URL when provided", async () => {
+    mockGetPluginClientConfig.mockReturnValue({
+      isNamedMode: true,
+      aliases: ["llm", "embedder"],
+    });
     const fetchSpy = vi.spyOn(globalThis, "fetch");
 
     const { result } = renderHook(() =>
@@ -63,6 +81,41 @@ describe("useServingInvoke", () => {
         expect.any(Object),
       );
     });
+  });
+
+  test("sets error for unknown alias", () => {
+    mockGetPluginClientConfig.mockReturnValue({
+      isNamedMode: true,
+      aliases: ["llm", "embedder"],
+    });
+
+    const { result } = renderHook(() =>
+      useServingInvoke({ messages: [] }, { alias: "unknown" as any }),
+    );
+
+    expect(result.current.error).toBe(
+      'Unknown serving alias "unknown". Available: llm, embedder',
+    );
+  });
+
+  test("invoke returns null for unknown alias without calling fetch", async () => {
+    mockGetPluginClientConfig.mockReturnValue({
+      isNamedMode: true,
+      aliases: ["llm"],
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const { result } = renderHook(() =>
+      useServingInvoke({ messages: [] }, { alias: "bad" as any }),
+    );
+
+    let returnValue: unknown;
+    act(() => {
+      returnValue = result.current.invoke();
+    });
+
+    expect(await returnValue).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   test("sets data on successful response", async () => {
@@ -101,6 +154,45 @@ describe("useServingInvoke", () => {
 
     await waitFor(() => {
       expect(result.current.error).toBe("Not found");
+      expect(result.current.loading).toBe(false);
+    });
+  });
+
+  test("sets error with HTTP status on non-JSON error response", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<html>Not Found</html>", {
+        status: 404,
+        headers: { "Content-Type": "text/html" },
+      }),
+    );
+
+    const { result } = renderHook(() => useServingInvoke({ messages: [] }));
+
+    await act(async () => {
+      result.current.invoke();
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    await waitFor(() => {
+      expect(result.current.error).toBe("HTTP 404");
+      expect(result.current.loading).toBe(false);
+    });
+  });
+
+  test("sets error on fetch network failure", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(
+      new Error("Network timeout"),
+    );
+
+    const { result } = renderHook(() => useServingInvoke({ messages: [] }));
+
+    await act(async () => {
+      result.current.invoke();
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    await waitFor(() => {
+      expect(result.current.error).toBe("Network timeout");
       expect(result.current.loading).toBe(false);
     });
   });

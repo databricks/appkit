@@ -1,3 +1,5 @@
+export { generateServingTypes } from "./serving/generator";
+
 import fs from "node:fs/promises";
 import dotenv from "dotenv";
 import { createLogger } from "../logging/logger";

@@ -1,16 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { ApiError } from "@databricks/sdk-experimental";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { fetchOpenApiSchema } from "../fetcher";
-
-const mockAuthenticate = vi.fn(async () => {});
-
-function createMockClient(host?: string) {
-  return {
-    config: {
-      host,
-      authenticate: mockAuthenticate,
-    },
-  } as any;
-}
 
 function makeValidSpec(
   paths: Record<string, unknown> = { "/invocations": { post: {} } },
@@ -22,79 +12,67 @@ function makeValidSpec(
   };
 }
 
-describe("fetchOpenApiSchema", () => {
-  beforeEach(() => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify(makeValidSpec()), { status: 200 }),
-    );
+function createReadableStream(data: string): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(data));
+      controller.close();
+    },
   });
+}
 
+function createMockClient(getOpenApiImpl?: (...args: any[]) => any) {
+  const defaultImpl = async () => ({
+    contents: createReadableStream(JSON.stringify(makeValidSpec())),
+  });
+  return {
+    servingEndpoints: {
+      getOpenApi: vi.fn(getOpenApiImpl ?? defaultImpl),
+    },
+  } as any;
+}
+
+describe("fetchOpenApiSchema", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  test("returns null when host is not configured", async () => {
-    const result = await fetchOpenApiSchema(createMockClient(undefined), "ep");
+  test("returns null on ApiError 404", async () => {
+    const client = createMockClient(async () => {
+      throw new ApiError("Not found", "NOT_FOUND", 404, undefined, []);
+    });
+    const result = await fetchOpenApiSchema(client, "ep");
     expect(result).toBeNull();
   });
 
-  test("returns null on HTTP 404", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response("Not found", { status: 404 }),
-    );
-
-    const result = await fetchOpenApiSchema(
-      createMockClient("https://host.databricks.com"),
-      "my-endpoint",
-    );
+  test("returns null on ApiError 403", async () => {
+    const client = createMockClient(async () => {
+      throw new ApiError("Forbidden", "FORBIDDEN", 403, undefined, []);
+    });
+    const result = await fetchOpenApiSchema(client, "ep");
     expect(result).toBeNull();
   });
 
-  test("returns null on HTTP 403", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response("Forbidden", { status: 403 }),
-    );
-
-    const result = await fetchOpenApiSchema(
-      createMockClient("https://host.databricks.com"),
-      "my-endpoint",
-    );
+  test("returns null on ApiError 500", async () => {
+    const client = createMockClient(async () => {
+      throw new ApiError("Server error", "INTERNAL", 500, undefined, []);
+    });
+    const result = await fetchOpenApiSchema(client, "ep");
     expect(result).toBeNull();
   });
 
-  test("returns null on generic error status", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response("Server error", { status: 500 }),
-    );
-
-    const result = await fetchOpenApiSchema(
-      createMockClient("https://host.databricks.com"),
-      "my-endpoint",
-    );
+  test("returns null on generic error", async () => {
+    const client = createMockClient(async () => {
+      throw new Error("network failure");
+    });
+    const result = await fetchOpenApiSchema(client, "ep");
     expect(result).toBeNull();
   });
 
-  test("returns null on timeout (AbortError)", async () => {
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(
-      Object.assign(new Error("The operation was aborted"), {
-        name: "AbortError",
-      }),
-    );
-
-    const result = await fetchOpenApiSchema(
-      createMockClient("https://host.databricks.com"),
-      "my-endpoint",
-    );
-    expect(result).toBeNull();
-  });
-
-  test("returns null on network error", async () => {
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("fetch failed"));
-
-    const result = await fetchOpenApiSchema(
-      createMockClient("https://host.databricks.com"),
-      "my-endpoint",
-    );
+  test("returns null when response has no contents", async () => {
+    const client = createMockClient(async () => ({ contents: undefined }));
+    const result = await fetchOpenApiSchema(client, "ep");
     expect(result).toBeNull();
   });
 
@@ -102,14 +80,11 @@ describe("fetchOpenApiSchema", () => {
     const spec = makeValidSpec({
       "/serving-endpoints/ep/invocations": { post: { requestBody: {} } },
     });
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify(spec), { status: 200 }),
-    );
+    const client = createMockClient(async () => ({
+      contents: createReadableStream(JSON.stringify(spec)),
+    }));
 
-    const result = await fetchOpenApiSchema(
-      createMockClient("https://host.databricks.com"),
-      "ep",
-    );
+    const result = await fetchOpenApiSchema(client, "ep");
     expect(result).not.toBeNull();
     expect(result?.pathKey).toBe("/serving-endpoints/ep/invocations");
     expect(result?.spec.openapi).toBe("3.0.0");
@@ -120,15 +95,11 @@ describe("fetchOpenApiSchema", () => {
       "/serving-endpoints/ep/served-models/gpt4/invocations": { post: {} },
       "/serving-endpoints/ep/invocations": { post: {} },
     });
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify(spec), { status: 200 }),
-    );
+    const client = createMockClient(async () => ({
+      contents: createReadableStream(JSON.stringify(spec)),
+    }));
 
-    const result = await fetchOpenApiSchema(
-      createMockClient("https://host.databricks.com"),
-      "ep",
-      "gpt4",
-    );
+    const result = await fetchOpenApiSchema(client, "ep", "gpt4");
     expect(result?.pathKey).toBe(
       "/serving-endpoints/ep/served-models/gpt4/invocations",
     );
@@ -138,72 +109,40 @@ describe("fetchOpenApiSchema", () => {
     const spec = makeValidSpec({
       "/serving-endpoints/ep/invocations": { post: {} },
     });
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify(spec), { status: 200 }),
-    );
+    const client = createMockClient(async () => ({
+      contents: createReadableStream(JSON.stringify(spec)),
+    }));
 
-    const result = await fetchOpenApiSchema(
-      createMockClient("https://host.databricks.com"),
-      "ep",
-      "nonexistent-model",
-    );
+    const result = await fetchOpenApiSchema(client, "ep", "nonexistent-model");
     expect(result?.pathKey).toBe("/serving-endpoints/ep/invocations");
   });
 
   test("returns null for invalid spec structure (missing paths)", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ openapi: "3.0.0", info: {} }), {
-        status: 200,
-      }),
-    );
+    const client = createMockClient(async () => ({
+      contents: createReadableStream(
+        JSON.stringify({ openapi: "3.0.0", info: {} }),
+      ),
+    }));
 
-    const result = await fetchOpenApiSchema(
-      createMockClient("https://host.databricks.com"),
-      "ep",
-    );
+    const result = await fetchOpenApiSchema(client, "ep");
     expect(result).toBeNull();
   });
 
   test("returns null when paths object is empty", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify(makeValidSpec({})), { status: 200 }),
-    );
+    const client = createMockClient(async () => ({
+      contents: createReadableStream(JSON.stringify(makeValidSpec({}))),
+    }));
 
-    const result = await fetchOpenApiSchema(
-      createMockClient("https://host.databricks.com"),
-      "ep",
-    );
+    const result = await fetchOpenApiSchema(client, "ep");
     expect(result).toBeNull();
   });
 
-  test("authenticates request headers", async () => {
-    await fetchOpenApiSchema(
-      createMockClient("https://host.databricks.com"),
-      "ep",
-    );
-    expect(mockAuthenticate).toHaveBeenCalledWith(expect.any(Headers));
-  });
+  test("calls SDK getOpenApi with correct endpoint name", async () => {
+    const client = createMockClient();
+    await fetchOpenApiSchema(client, "my-endpoint");
 
-  test("constructs correct URL with encoded endpoint name", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-
-    await fetchOpenApiSchema(
-      createMockClient("https://host.databricks.com"),
-      "my endpoint",
-    );
-
-    expect(fetchSpy).toHaveBeenCalledWith(
-      expect.stringContaining("/serving-endpoints/my%20endpoint/openapi"),
-      expect.any(Object),
-    );
-  });
-
-  test("prepends https when host lacks protocol", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-
-    await fetchOpenApiSchema(createMockClient("host.databricks.com"), "ep");
-
-    const url = fetchSpy.mock.calls[0][0] as string;
-    expect(url.startsWith("https://")).toBe(true);
+    expect(client.servingEndpoints.getOpenApi).toHaveBeenCalledWith({
+      name: "my-endpoint",
+    });
   });
 });

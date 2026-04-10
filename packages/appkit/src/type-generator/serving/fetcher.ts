@@ -1,4 +1,4 @@
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
+import { ApiError, type WorkspaceClient } from "@databricks/sdk-experimental";
 import { createLogger } from "../../logging/logger";
 
 const logger = createLogger("type-generator:serving:fetcher");
@@ -41,7 +41,7 @@ export interface OpenApiSchema {
 }
 
 /**
- * Fetches the OpenAPI schema for a serving endpoint.
+ * Fetches the OpenAPI schema for a serving endpoint using the SDK.
  * Returns null if the endpoint is not found or access is denied.
  */
 export async function fetchOpenApiSchema(
@@ -49,56 +49,22 @@ export async function fetchOpenApiSchema(
   endpointName: string,
   servedModel?: string,
 ): Promise<{ spec: OpenApiSpec; pathKey: string } | null> {
-  const headers = new Headers({ Accept: "application/json" });
-  await client.config.authenticate(headers);
-
-  const host = client.config.host;
-  if (!host) {
-    logger.warn("Databricks host not configured, skipping schema fetch");
-    return null;
-  }
-
-  const base = host.startsWith("http") ? host : `https://${host}`;
-  const url = new URL(
-    `/api/2.0/serving-endpoints/${encodeURIComponent(endpointName)}/openapi`,
-    base,
-  );
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5000);
-
   try {
-    const res = await fetch(url.toString(), {
-      headers,
-      signal: controller.signal,
+    const response = await client.servingEndpoints.getOpenApi({
+      name: endpointName,
     });
 
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      if (res.status === 404) {
-        logger.warn(
-          "Endpoint '%s' not found, skipping type generation%s",
-          endpointName,
-          body ? `: ${body}` : "",
-        );
-      } else if (res.status === 403) {
-        logger.warn(
-          "Access denied to endpoint '%s' schema, skipping type generation%s",
-          endpointName,
-          body ? `: ${body}` : "",
-        );
-      } else {
-        logger.warn(
-          "Failed to fetch schema for '%s' (HTTP %d), skipping%s",
-          endpointName,
-          res.status,
-          body ? `: ${body}` : "",
-        );
-      }
+    if (!response.contents) {
+      logger.warn(
+        "Empty OpenAPI response for '%s', skipping type generation",
+        endpointName,
+      );
       return null;
     }
 
-    const rawSpec: unknown = await res.json();
+    const text = await new Response(response.contents).text();
+    const rawSpec: unknown = JSON.parse(text);
+
     if (
       typeof rawSpec !== "object" ||
       rawSpec === null ||
@@ -139,11 +105,26 @@ export async function fetchOpenApiSchema(
 
     return { spec, pathKey };
   } catch (err) {
-    if ((err as Error).name === "AbortError") {
-      logger.warn(
-        "Timeout fetching schema for '%s', skipping type generation",
-        endpointName,
-      );
+    if (err instanceof ApiError) {
+      const status = err.statusCode ?? 0;
+      if (status === 404) {
+        logger.warn(
+          "Endpoint '%s' not found, skipping type generation",
+          endpointName,
+        );
+      } else if (status === 403) {
+        logger.warn(
+          "Access denied to endpoint '%s' schema, skipping type generation",
+          endpointName,
+        );
+      } else {
+        logger.warn(
+          "Failed to fetch schema for '%s' (HTTP %d), skipping: %s",
+          endpointName,
+          status,
+          err.message,
+        );
+      }
     } else {
       logger.warn(
         "Error fetching schema for '%s': %s",
@@ -152,7 +133,5 @@ export async function fetchOpenApiSchema(
       );
     }
     return null;
-  } finally {
-    clearTimeout(timeout);
   }
 }

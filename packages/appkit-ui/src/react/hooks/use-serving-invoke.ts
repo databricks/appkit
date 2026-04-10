@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getPluginClientConfig } from "@/js";
 import type {
   InferServingRequest,
   InferServingResponse,
   ServingAlias,
+  ServingClientConfig,
 } from "./types";
 
 export interface UseServingInvokeOptions<
@@ -42,9 +44,23 @@ export function useServingInvoke<K extends ServingAlias = ServingAlias>(
   type TResponse = InferServingResponse<K>;
   const { alias, autoStart = false } = options;
 
+  const config = useMemo(
+    () => getPluginClientConfig<ServingClientConfig>("serving"),
+    [],
+  );
+
+  const aliasError = useMemo(() => {
+    if (!alias || !config.aliases) return null;
+    const aliasStr = String(alias);
+    if (!config.aliases.includes(aliasStr)) {
+      return `Unknown serving alias "${aliasStr}". Available: ${config.aliases.join(", ")}`;
+    }
+    return null;
+  }, [alias, config.aliases]);
+
   const [data, setData] = useState<TResponse | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(aliasError);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const urlSuffix = alias
@@ -55,6 +71,11 @@ export function useServingInvoke<K extends ServingAlias = ServingAlias>(
 
   const invoke = useCallback(
     (overrideBody?: InferServingRequest<K>): Promise<TResponse | null> => {
+      if (aliasError) {
+        setError(aliasError);
+        return Promise.resolve(null);
+      }
+
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
@@ -94,7 +115,7 @@ export function useServingInvoke<K extends ServingAlias = ServingAlias>(
           return null;
         });
     },
-    [urlSuffix, bodyJson],
+    [urlSuffix, bodyJson, aliasError],
   );
 
   useEffect(() => {

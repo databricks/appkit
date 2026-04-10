@@ -135,6 +135,11 @@ export interface PluginRegistry {
   [key: string]: Record<string, any>;
 }
 
+export interface ServingClientConfig {
+  isNamedMode: boolean;
+  aliases: string[];
+}
+
 // ============================================================================
 // Serving Endpoint Registry
 // ============================================================================

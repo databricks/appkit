@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { connectSSE } from "@/js";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { connectSSE, getPluginClientConfig } from "@/js";
 import type {
   InferServingChunk,
   InferServingRequest,
   ServingAlias,
+  ServingClientConfig,
 } from "./types";
 
 export interface UseServingStreamOptions<
@@ -49,9 +50,23 @@ export function useServingStream<K extends ServingAlias = ServingAlias>(
   type TChunk = InferServingChunk<K>;
   const { alias, autoStart = false, onComplete } = options;
 
+  const config = useMemo(
+    () => getPluginClientConfig<ServingClientConfig>("serving"),
+    [],
+  );
+
+  const aliasError = useMemo(() => {
+    if (!alias || !config.aliases) return null;
+    const aliasStr = String(alias);
+    if (!config.aliases.includes(aliasStr)) {
+      return `Unknown serving alias "${aliasStr}". Available: ${config.aliases.join(", ")}`;
+    }
+    return null;
+  }, [alias, config.aliases]);
+
   const [chunks, setChunks] = useState<TChunk[]>([]);
   const [streaming, setStreaming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(aliasError);
   const abortControllerRef = useRef<AbortController | null>(null);
   const chunksRef = useRef<TChunk[]>([]);
   const onCompleteRef = useRef(onComplete);
@@ -74,6 +89,11 @@ export function useServingStream<K extends ServingAlias = ServingAlias>(
 
   const stream = useCallback(
     (overrideBody?: InferServingRequest<K>) => {
+      if (aliasError) {
+        setError(aliasError);
+        return;
+      }
+
       // Abort any existing stream
       abortControllerRef.current?.abort();
 
@@ -120,7 +140,7 @@ export function useServingStream<K extends ServingAlias = ServingAlias>(
           setError("Connection error");
         });
     },
-    [urlSuffix, bodyJson],
+    [urlSuffix, bodyJson, aliasError],
   );
 
   useEffect(() => {

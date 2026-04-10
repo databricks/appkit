@@ -281,6 +281,13 @@ export class ServingPlugin extends Plugin {
     );
   }
 
+  clientConfig(): Record<string, unknown> {
+    return {
+      isNamedMode: this.isNamedMode,
+      aliases: Object.keys(this.endpoints),
+    };
+  }
+
   async shutdown(): Promise<void> {
     this.streamManager.abortAll();
   }
