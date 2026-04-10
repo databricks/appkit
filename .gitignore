@@ -10,5 +10,4 @@ coverage
 
 .turbo
 
-# AppKit type generator caches
 .databricks

@@ -37,7 +37,7 @@ async function runGenerateTypes(
     }
 
     // Generate serving endpoint types (no warehouse required)
-    await (typeGen as any).generateServingTypes({
+    await typeGen.generateServingTypes({
       outFile: path.join(process.cwd(), "client/src/appKitServingTypes.d.ts"),
       noCache,
     });

@@ -2,7 +2,7 @@ import path from "node:path";
 import type { Plugin } from "vite";
 import { createLogger } from "../../logging/logger";
 import type { EndpointConfig } from "../../plugins/serving/types";
-import { generateServingTypes } from "./generator";
+import { generateServingTypes } from "../index";
 import {
   extractServingEndpoints,
   findServerFile,
