@@ -70,7 +70,7 @@ For each plugin being reviewed, map the changed files to the relevant best-pract
 | Main plugin class file (the primary `.ts` file, not index/types/defaults) | 2. Plugin Class Structure |
 | Main plugin class file (the primary `.ts` file, not index/types/defaults) | 9. Type Safety |
 | Any file containing route registration (`this.route(`, `injectRoutes`) | 3. Route Design |
-| `defaults.ts` | 4. Interceptor Usage |
+| `defaults.ts`, or any file containing `execute(` / `executeStream(` calls with interceptor settings | 4. Interceptor Usage |
 | Any file containing `asUser(`, `.obo.sql`, `isInUserContext`, `runInUserContext` | 5. asUser / OBO Patterns |
 | Any file containing `clientConfig()` | 6. Client Config |
 | Any file containing `executeStream(`, `streamManager`, `AsyncGenerator`, SSE-related code | 7. SSE Streaming |

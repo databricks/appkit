@@ -53,7 +53,9 @@ Collect the full contents of every file. You need the complete source to evaluat
 
 ## Step 4: Structural Completeness Check
 
-Verify the following expected files exist inside `packages/appkit/src/plugins/{PLUGIN_NAME}/`:
+If `packages/appkit/src/plugins/{PLUGIN_NAME}/` does not exist (connector-only package), mark Structural Completeness as **N/A** in the scorecard and proceed to Step 5.
+
+Otherwise, verify the following expected files exist inside `packages/appkit/src/plugins/{PLUGIN_NAME}/`:
 
 | Expected file | Required? |
 |---|---|

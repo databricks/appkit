@@ -6,13 +6,15 @@ Reference guide for building AppKit plugins. Every guideline is prefixed with a 
 - **MUST** — Correctness requirement. Violating this produces bugs, broken APIs, or inconsistent behavior.
 - **SHOULD** — Quality recommendation. Violating this degrades DX, performance, or maintainability.
 
+> **Scope:** These guidelines target **core plugins within the AppKit monorepo** (`packages/appkit/src/plugins/`). Custom plugins built outside the monorepo have more flexibility — see `docs/docs/plugins/custom-plugins.md` for lighter-weight patterns (inline manifests, camelCase names, etc.).
+
 ---
 
 ## 1. Manifest Design
 
 **MUST** include all four required top-level fields: `name`, `displayName`, `description`, `resources`.
 
-**MUST** use lowercase kebab-case for `name` (pattern: `^[a-z][a-z0-9-]*$`). This becomes the route prefix (`/api/{name}`) and the key on the AppKit instance.
+**MUST** use lowercase kebab-case for `name` (pattern: `^[a-z][a-z0-9-]*$`). This becomes the route prefix (`/api/{name}`) and the key on the AppKit instance. (This is a monorepo convention; custom plugins may use camelCase per the official docs.)
 
 **MUST** declare both `resources.required` and `resources.optional` arrays, even if empty.
 
@@ -32,11 +34,13 @@ Reference guide for building AppKit plugins. Every guideline is prefixed with a 
 
 **MUST** extend `Plugin` (the base class accepts an optional generic but core plugins use the plain form).
 
-**MUST** declare a static `manifest` property typed with `PluginManifest<"your-name">`:
+**MUST** declare a static `manifest` property. Core plugins import `manifest.json` as a JSON module, which requires `as` (JSON imports cannot use `satisfies`):
 
 ```ts
 static manifest = manifest as PluginManifest<"my-plugin">;
 ```
+
+> **Note:** The `<"my-plugin">` generic is a **SHOULD** (see Section 9: Type Safety). Inline manifests — as shown in the custom-plugins docs — should use `satisfies PluginManifest<"name">` instead, which is stricter and catches structural errors at compile time.
 
 **MUST** export a `toPlugin`-wrapped factory as the public API. Mark the factory (not the class) as `@internal`:
 
@@ -75,7 +79,7 @@ export const myPlugin = toPlugin(MyPlugin);
 
 ## 4. Interceptor Usage
 
-**MUST** define execution defaults in a separate `defaults.ts` file as `PluginExecuteConfig` constants. This keeps route handlers clean and makes defaults testable.
+**SHOULD** define execution defaults in a separate `defaults.ts` file as `PluginExecuteConfig` constants. This keeps route handlers clean and makes defaults testable. (Required when the plugin uses `execute()` or `executeStream()` with non-trivial settings; not needed for plugins that don't use execution interceptors.)
 
 **MUST** pass defaults via the `default` key in `PluginExecutionSettings`. User overrides go in `user`. The merge order is: method defaults <- plugin config <- user override.
 

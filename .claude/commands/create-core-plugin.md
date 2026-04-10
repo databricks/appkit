@@ -75,6 +75,8 @@ connectors/{name}/
 
 ## 4. Plugin Patterns to Follow
 
+> The scaffolding templates below implement the guidelines from `.claude/references/plugin-best-practices.md`. Refer to that document for the full NEVER/MUST/SHOULD rules and rationale behind each pattern.
+
 ### 4a. Config Interface (`types.ts`)
 
 Extend `BasePluginConfig` from `shared`:
@@ -176,7 +178,7 @@ const logger = createLogger("{name}");
 
 export class {PascalName}Plugin extends Plugin {
   name = "{name}";
-  static manifest = manifest as PluginManifest;
+  static manifest = manifest as PluginManifest<"{name}">;
   protected declare config: I{PascalName}Config;
 
   private connector: {PascalName}Connector;
@@ -330,15 +332,7 @@ export * from "./{name}";
 
 ## 6. Key Conventions
 
-### Route Registration
-Routes mount at `/api/{pluginName}/...`. Use `this.route(router, { name, method, path, handler })`.
-
-### User-Scoped Execution (OBO)
-`this.asUser(req)` returns a proxy where all method calls use the user's Databricks credentials. Use it in route handlers for user-scoped operations. Inside the proxied method, `getWorkspaceClient()` automatically returns the user-scoped client. **Important:** any plugin using `asUser()` must declare the appropriate `user_api_scopes` in the bundle config — see section 4f.
-
-### Execution Methods
-- `this.execute(fn, options)` — single request-response with interceptors (telemetry, timeout, retry, cache)
-- `this.executeStream(res, fn, options)` — SSE streaming with interceptors
+For full NEVER/MUST/SHOULD rules on routes, interceptors, OBO, streaming, and type safety, see `.claude/references/plugin-best-practices.md`.
 
 ### Context Utilities
 Import from `../../context`:
@@ -349,12 +343,8 @@ Import from `../../context`:
 ### Logging
 Use `createLogger("plugin-name")` from `../../logging/logger`.
 
-### Setup/Teardown
-- Override `setup()` for async init (e.g., connection pools). Called by AppKit during startup.
-- Override `abortActiveOperations()` for cleanup. Call `super.abortActiveOperations()` first.
-
-### Plugin Phases
-Set `static phase: PluginPhase` if needed: `"core"` (first), `"normal"` (default), `"deferred"` (last).
+### OBO Scopes Reminder
+Any plugin using `this.asUser(req)` must declare `user_api_scopes` in the bundle config — see section 4f.
 
 ## 7. After Scaffolding
 
