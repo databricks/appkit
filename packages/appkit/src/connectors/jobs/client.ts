@@ -112,13 +112,13 @@ export class JobsConnector {
   ): Promise<jobs.BaseRun[]> {
     return this._callApi("listRuns", async () => {
       const runs: jobs.BaseRun[] = [];
-      const limit = request.limit;
+      const limit = Math.max(1, Math.min(request.limit ?? 100, 100));
       for await (const run of workspaceClient.jobs.listRuns(
         request,
         this._createContext(signal),
       )) {
         runs.push(run);
-        if (limit && runs.length >= limit) break;
+        if (runs.length >= limit) break;
       }
       return runs;
     });
