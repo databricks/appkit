@@ -17,6 +17,7 @@ import { promptOneResource } from "./prompt-resource";
 import {
   DEFAULT_PERMISSION_BY_TYPE,
   getDefaultFieldsForType,
+  getValidResourceTypes,
   humanizeResourceType,
   RESOURCE_TYPE_OPTIONS,
   resourceKeyFromType,
@@ -91,12 +92,17 @@ function parseResourcesJson(json: string): SelectedResource[] {
   }
 
   return (parsed as JsonResourceEntry[]).map((entry, i) => {
+    if (entry == null || typeof entry !== "object") {
+      console.error(`Error: --resources-json entry ${i} is not an object.`);
+      process.exit(1);
+    }
     if (!entry.type || typeof entry.type !== "string") {
       console.error(
         `Error: --resources-json entry ${i} missing required "type" field.`,
       );
       process.exit(1);
     }
+    validateResourceType(entry.type);
     const defaults = buildResourceFromType(entry.type);
     return {
       type: entry.type,
@@ -109,12 +115,22 @@ function parseResourcesJson(json: string): SelectedResource[] {
   });
 }
 
+function validateResourceType(type: string): void {
+  const validTypes = getValidResourceTypes();
+  if (!validTypes.includes(type)) {
+    console.error(`Error: Unknown resource type "${type}".`);
+    console.error(`  Valid types: ${validTypes.join(", ")}`);
+    process.exit(1);
+  }
+}
+
 function parseResourcesShorthand(csv: string): SelectedResource[] {
-  return csv
+  const types = csv
     .split(",")
     .map((s) => s.trim())
-    .filter(Boolean)
-    .map(buildResourceFromType);
+    .filter(Boolean);
+  for (const t of types) validateResourceType(t);
+  return types.map(buildResourceFromType);
 }
 
 function printNextSteps(answers: CreateAnswers, targetDir: string): void {
@@ -166,6 +182,17 @@ function runNonInteractive(opts: CreateOptions): void {
     process.exit(1);
   }
 
+  const targetPath = (opts.path as string).trim();
+  if (
+    placement === "in-repo" &&
+    (path.isAbsolute(targetPath) || targetPath.startsWith(".."))
+  ) {
+    console.error(
+      "Error: --path must be a relative path under the current directory for in-repo plugins.",
+    );
+    process.exit(1);
+  }
+
   const name = opts.name as string;
   if (!NAME_PATTERN.test(name)) {
     console.error(
@@ -183,7 +210,7 @@ function runNonInteractive(opts: CreateOptions): void {
 
   const answers: CreateAnswers = {
     placement,
-    targetPath: (opts.path as string).trim(),
+    targetPath,
     name: name.trim(),
     displayName: opts.displayName?.trim() || deriveDisplayName(name),
     description: (opts.description as string).trim(),
@@ -380,11 +407,30 @@ async function runInteractive(): Promise<void> {
   }
 }
 
+const OPTIONAL_FLAGS = [
+  "displayName",
+  "resources",
+  "resourcesJson",
+  "force",
+] as const;
+
 async function runPluginCreate(opts: CreateOptions): Promise<void> {
-  const hasAnyFlag = REQUIRED_FLAGS.some((f) => opts[f] !== undefined);
-  if (hasAnyFlag) {
+  const hasRequiredFlag = REQUIRED_FLAGS.some((f) => opts[f] !== undefined);
+  if (hasRequiredFlag) {
     runNonInteractive(opts);
   } else {
+    const hasOptionalOnly = OPTIONAL_FLAGS.some(
+      (f) => opts[f] !== undefined && opts[f] !== false,
+    );
+    if (hasOptionalOnly) {
+      console.error(
+        `Error: Non-interactive mode requires: ${REQUIRED_FLAGS.map((f) => `--${f}`).join(", ")}`,
+      );
+      console.error(
+        '  appkit plugin create --placement in-repo --path plugins/my-plugin --name my-plugin --description "Does X"',
+      );
+      process.exit(1);
+    }
     await runInteractive();
   }
 }

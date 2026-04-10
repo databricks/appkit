@@ -529,15 +529,14 @@ function writeManifest(
     plugins,
   };
 
+  const serialized = JSON.stringify(templateManifest, null, 2);
+
   if (options.json) {
-    console.log(JSON.stringify(templateManifest, null, 2));
+    console.log(serialized);
   }
 
   if (options.write) {
-    fs.writeFileSync(
-      outputPath,
-      `${JSON.stringify(templateManifest, null, 2)}\n`,
-    );
+    fs.writeFileSync(outputPath, `${serialized}\n`);
     if (!options.silent && !options.json) {
       console.log(`\n✓ Wrote ${outputPath}`);
     }
@@ -546,7 +545,7 @@ function writeManifest(
     console.log("  npx appkit plugin sync --write\n");
     console.log("Preview:");
     console.log("─".repeat(60));
-    console.log(JSON.stringify(templateManifest, null, 2));
+    console.log(serialized);
     console.log("─".repeat(60));
   }
 }
@@ -684,9 +683,10 @@ async function runPluginsSync(options: {
   const pluginCount = Object.keys(plugins).length;
 
   if (pluginCount === 0) {
-    if (options.silent) {
+    if (options.silent || options.json) {
       writeManifest(outputPath, { plugins: {} }, options);
-      return;
+      if (options.silent) return;
+      process.exit(1);
     }
     console.log("No plugins found.");
     if (options.pluginsDir) {

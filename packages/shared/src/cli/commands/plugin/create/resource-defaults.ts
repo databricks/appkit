@@ -98,6 +98,11 @@ export const DEFAULT_FIELDS_BY_TYPE: Record<
   },
 };
 
+/** Valid resource type values from the schema. */
+export function getValidResourceTypes(): string[] {
+  return RESOURCE_TYPE_OPTIONS.map((o) => o.value);
+}
+
 /** Humanized alias from resource type (e.g. sql_warehouse -> "SQL Warehouse"). */
 export function humanizeResourceType(type: string): string {
   const option = RESOURCE_TYPE_OPTIONS.find((o) => o.value === type);

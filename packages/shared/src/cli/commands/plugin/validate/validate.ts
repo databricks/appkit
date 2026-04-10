@@ -128,10 +128,12 @@ async function runPluginValidate(
         console.log(`✓ ${relativePath}`);
       }
     } else {
-      const errors = result.errors?.length
-        ? formatValidationErrors(result.errors, obj).split("\n").filter(Boolean)
-        : [];
       if (options.json) {
+        const errors = result.errors?.length
+          ? formatValidationErrors(result.errors, obj)
+              .split("\n")
+              .filter(Boolean)
+          : [];
         jsonResults.push({
           path: relativePath,
           valid: false,

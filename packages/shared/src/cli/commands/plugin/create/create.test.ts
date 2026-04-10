@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildResourceFromType,
   parseResourcesJson,
@@ -94,6 +94,59 @@ describe("create non-interactive helpers", () => {
       expect(resources[0].type).toBe("sql_warehouse");
       expect(resources[1].type).toBe("volume");
       expect(resources[1].required).toBe(false);
+    });
+
+    it("exits on null entries in the array", () => {
+      const stderrSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      vi.spyOn(process, "exit").mockImplementation((code) => {
+        throw new Error(`process.exit(${code})`);
+      });
+      try {
+        expect(() => parseResourcesJson('[null, {"type":"volume"}]')).toThrow(
+          "process.exit(1)",
+        );
+        expect(stderrSpy).toHaveBeenCalledWith(
+          expect.stringContaining("entry 0 is not an object"),
+        );
+      } finally {
+        vi.restoreAllMocks();
+      }
+    });
+
+    it("exits on unknown resource type", () => {
+      const stderrSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      vi.spyOn(process, "exit").mockImplementation((code) => {
+        throw new Error(`process.exit(${code})`);
+      });
+      try {
+        expect(() =>
+          parseResourcesJson('[{"type":"not_a_real_type"}]'),
+        ).toThrow("process.exit(1)");
+        expect(stderrSpy).toHaveBeenCalledWith(
+          expect.stringContaining('Unknown resource type "not_a_real_type"'),
+        );
+      } finally {
+        vi.restoreAllMocks();
+      }
+    });
+  });
+
+  describe("parseResourcesShorthand", () => {
+    it("exits on unknown resource type", () => {
+      const stderrSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      vi.spyOn(process, "exit").mockImplementation((code) => {
+        throw new Error(`process.exit(${code})`);
+      });
+      try {
+        expect(() =>
+          parseResourcesShorthand("sql_warehouse,fake_type"),
+        ).toThrow("process.exit(1)");
+        expect(stderrSpy).toHaveBeenCalledWith(
+          expect.stringContaining('Unknown resource type "fake_type"'),
+        );
+      } finally {
+        vi.restoreAllMocks();
+      }
     });
   });
 });

@@ -7,6 +7,7 @@ import { promptOneResource } from "../create/prompt-resource";
 import {
   DEFAULT_PERMISSION_BY_TYPE,
   getDefaultFieldsForType,
+  getValidResourceTypes,
   humanizeResourceType,
   resourceKeyFromType,
 } from "../create/resource-defaults";
@@ -121,6 +122,12 @@ function runNonInteractive(opts: AddResourceOptions): void {
   const { manifest, manifestPath } = loaded;
 
   const type = opts.type as string;
+  const validTypes = getValidResourceTypes();
+  if (!validTypes.includes(type)) {
+    console.error(`Error: Unknown resource type "${type}".`);
+    console.error(`  Valid types: ${validTypes.join(", ")}`);
+    process.exit(1);
+  }
   const { entry, isRequired } = buildEntry(type, opts);
 
   if (isRequired) {
