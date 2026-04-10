@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - pkosiec/template-artifact # temporary: remove before merge
 
 concurrency:
   group: prepare-release
