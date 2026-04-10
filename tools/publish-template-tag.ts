@@ -1,8 +1,10 @@
 #!/usr/bin/env tsx
 /**
  * Syncs the template to the given version (with retry), then commits, tags
- * template-vX.X.X, and pushes. Used by the Release workflow (sync-template job
- * in .github/workflows/release.yml) and for manual runs.
+ * template-vX.X.X, and pushes.
+ *
+ * Used by the private secure release repo during the template-sync step.
+ * Changes here affect the release pipeline.
  */
 
 import { spawnSync } from "node:child_process";
@@ -41,7 +43,6 @@ if (templateJson.dependencies) {
 // 2. npm install in template (with retry for registry propagation)
 const MAX_ATTEMPTS = 3;
 const templateDir = join(ROOT, "template");
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -75,9 +76,12 @@ if (installExit !== 0) {
 // 3. Git add, commit, tag, push
 const commands: [string, string[]][] = [
   ["git", ["add", "template/package.json", "template/package-lock.json"]],
-  ["git", ["commit", "-m", `chore: sync template to v${version} [skip ci]`]],
+  [
+    "git",
+    ["commit", "-s", "-m", `chore: sync template to v${version} [skip ci]`],
+  ],
   ["git", ["tag", "-a", `template-v${version}`, "-m", `Template v${version}`]],
-  ["git", ["push", "origin", "main", "--follow-tags"]],
+  ["git", ["push", "origin", "HEAD", "--follow-tags"]],
 ];
 
 for (const [command, args] of commands) {

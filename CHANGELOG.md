@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+# Changelog
+
+## [0.22.0](https://github.com/databricks/appkit/compare/v0.21.0...v0.22.0) (2026-04-09)
+
+* correct misleading asUser() log message in development mode ([#250](https://github.com/databricks/appkit/issues/250)) ([ee05c8a](https://github.com/databricks/appkit/commit/ee05c8af61f8b63ea9a7fad8be93b4f5358fce41))
+* fail typegen build when queries produce unknown result types ([#254](https://github.com/databricks/appkit/issues/254)) ([f2d44ae](https://github.com/databricks/appkit/commit/f2d44ae74e35ef8b9f5b027658690aef2efc390b))
+* Genie plugin — handle in-progress messages on reload and fix message overflow ([#196](https://github.com/databricks/appkit/issues/196)) ([f94b3e2](https://github.com/databricks/appkit/commit/f94b3e230fe211c4b3406151a361477119e2af7f))
+* harden cookie flags, sanitize Genie markdown output, fix remote tunnel ([#216](https://github.com/databricks/appkit/issues/216)) ([c39b88b](https://github.com/databricks/appkit/commit/c39b88bebc81abc137351ab3be54d50aa8a04e16))
+* plugin client config ([#190](https://github.com/databricks/appkit/issues/190)) ([03f4b97](https://github.com/databricks/appkit/commit/03f4b977ecde284f0e920213329ed7fb67facf2d))
+
+
 ## [0.21.0](https://github.com/databricks/appkit/compare/v0.20.3...v0.21.0) (2026-03-17)
 
 * allow users to change the inferred chart type ([#191](https://github.com/databricks/appkit/issues/191)) ([4c090f3](https://github.com/databricks/appkit/commit/4c090f383380b05aa304831a9bf10228e376e65d))

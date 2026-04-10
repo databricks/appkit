@@ -374,6 +374,14 @@ export class StreamManager {
       if (error.name === "AbortError") {
         return SSEErrorCode.STREAM_ABORTED;
       }
+
+      // Detect upstream API errors (e.g., from Databricks SDK ApiError)
+      if (
+        "statusCode" in error &&
+        typeof (error as any).statusCode === "number"
+      ) {
+        return SSEErrorCode.UPSTREAM_ERROR;
+      }
     }
 
     return SSEErrorCode.INTERNAL_ERROR;

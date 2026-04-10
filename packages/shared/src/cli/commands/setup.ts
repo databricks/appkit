@@ -58,7 +58,7 @@ ${links}
 For enhanced AI assistance with Databricks CLI operations, authentication, data exploration, and app development, install the Databricks skills:
 
 \`\`\`bash
-databricks experimental aitools skills install
+databricks experimental aitools install
 \`\`\`
 ${SECTION_END}`;
 }
@@ -88,7 +88,7 @@ ${links}
 For enhanced AI assistance with Databricks CLI operations, authentication, data exploration, and app development, install the Databricks skills:
 
 \`\`\`bash
-databricks experimental aitools skills install
+databricks experimental aitools install
 \`\`\`
 ${SECTION_END}
 `;

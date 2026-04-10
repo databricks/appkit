@@ -45,4 +45,4 @@ Exported from `@databricks/appkit`:
 
 ## Development mode behavior
 
-In local development (`NODE_ENV=development`), if `asUser(req)` is called without a user token, it logs a warning and falls back to the service principal.
+In local development (`NODE_ENV=development`), if `asUser(req)` is called without a user token, it logs a warning and skips user impersonation — the operation runs with the default credentials configured for the app instead.

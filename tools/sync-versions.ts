@@ -4,6 +4,11 @@
  * Used by release-it after version bump.
  */
 
+/**
+ * NOTE: This script is also used by the private secure release repo
+ * during the finalize step. Changes here affect the release pipeline.
+ */
+
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 

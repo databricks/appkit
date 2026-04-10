@@ -8,14 +8,18 @@
   ],
   "workspaces": {
     "packages/appkit": {},
-    "packages/appkit-ui": {}
+    "packages/appkit-ui": {
+      "ignoreDependencies": ["tailwindcss", "tw-animate-css"]
+    }
   },
   "ignore": [
     "**/*.generated.ts",
     "**/*.example.tsx",
+    "**/*.css",
     "template/**",
     "tools/**",
     "docs/**"
   ],
+  "ignoreDependencies": ["json-schema-to-typescript"],
   "ignoreBinaries": ["tarball"]
 }

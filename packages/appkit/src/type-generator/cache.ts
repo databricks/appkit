@@ -26,7 +26,7 @@ interface Cache {
   queries: Record<string, CacheEntry>;
 }
 
-export const CACHE_VERSION = "2";
+export const CACHE_VERSION = "3";
 const CACHE_FILE = ".appkit-types-cache.json";
 const CACHE_DIR = path.join(
   process.cwd(),
