@@ -205,6 +205,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.ExecutionResult",
+          label: "ExecutionResult"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.IAppRouter",
           label: "IAppRouter"
         },
@@ -257,6 +262,11 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
+          id: "api/appkit/Function.appKitServingTypesPlugin",
+          label: "appKitServingTypesPlugin"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.appKitTypesPlugin",
           label: "appKitTypesPlugin"
         },
@@ -269,6 +279,16 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.createLakebasePool",
           label: "createLakebasePool"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.extractServingEndpoints",
+          label: "extractServingEndpoints"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.findServerFile",
+          label: "findServerFile"
         },
         {
           type: "doc",

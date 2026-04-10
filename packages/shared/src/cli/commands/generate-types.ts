@@ -12,35 +12,34 @@ async function runGenerateTypes(
   options?: { noCache?: boolean },
 ) {
   try {
+    const resolvedRootDir = rootDir || process.cwd();
+    const noCache = options?.noCache || false;
+
+    const typeGen = await import("@databricks/appkit/type-generator");
+
+    // Generate analytics query types (requires warehouse ID)
     const resolvedWarehouseId =
       warehouseId || process.env.DATABRICKS_WAREHOUSE_ID;
 
-    if (!resolvedWarehouseId) {
-      process.exit(0);
+    if (resolvedWarehouseId) {
+      const resolvedOutFile =
+        outFile || path.join(process.cwd(), "client/src/appKitTypes.d.ts");
+
+      const queryFolder = path.join(resolvedRootDir, "config/queries");
+      if (fs.existsSync(queryFolder)) {
+        await typeGen.generateFromEntryPoint({
+          queryFolder,
+          outFile: resolvedOutFile,
+          warehouseId: resolvedWarehouseId,
+          noCache,
+        });
+      }
     }
 
-    // Try to import the type generator from @databricks/appkit
-    const { generateFromEntryPoint } = await import(
-      "@databricks/appkit/type-generator"
-    );
-
-    const resolvedRootDir = rootDir || process.cwd();
-    const resolvedOutFile =
-      outFile || path.join(process.cwd(), "client/src/appKitTypes.d.ts");
-
-    const queryFolder = path.join(resolvedRootDir, "config/queries");
-    if (!fs.existsSync(queryFolder)) {
-      console.warn(
-        `Warning: No queries found at ${queryFolder}. Skipping type generation.`,
-      );
-      return;
-    }
-
-    await generateFromEntryPoint({
-      queryFolder,
-      outFile: resolvedOutFile,
-      warehouseId: resolvedWarehouseId,
-      noCache: options?.noCache || false,
+    // Generate serving endpoint types (no warehouse required)
+    await typeGen.generateServingTypes({
+      outFile: path.join(process.cwd(), "client/src/appKitServingTypes.d.ts"),
+      noCache,
     });
   } catch (error) {
     if (

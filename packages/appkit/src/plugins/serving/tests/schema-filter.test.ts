@@ -109,7 +109,7 @@ describe("schema-filter", () => {
       expect(result.size).toBe(0);
     });
 
-    test("extracts property keys from cached types", async () => {
+    test("reads requestKeys from cache entries", async () => {
       const fs = (await import("node:fs/promises")).default;
       vi.mocked(fs.readFile).mockResolvedValue(
         JSON.stringify({
@@ -117,13 +117,10 @@ describe("schema-filter", () => {
           endpoints: {
             default: {
               hash: "abc",
-              requestType: `{
-  messages: string[];
-  temperature?: number | null;
-  max_tokens: number;
-}`,
+              requestType: "{}",
               responseType: "{}",
               chunkType: null,
+              requestKeys: ["messages", "temperature", "max_tokens"],
             },
           },
         }),
@@ -136,6 +133,27 @@ describe("schema-filter", () => {
       expect(keys?.has("messages")).toBe(true);
       expect(keys?.has("temperature")).toBe(true);
       expect(keys?.has("max_tokens")).toBe(true);
+    });
+
+    test("skips entries without requestKeys (backwards compat)", async () => {
+      const fs = (await import("node:fs/promises")).default;
+      vi.mocked(fs.readFile).mockResolvedValue(
+        JSON.stringify({
+          version: "1",
+          endpoints: {
+            default: {
+              hash: "abc",
+              requestType: "{ messages: string[] }",
+              responseType: "{}",
+              chunkType: null,
+            },
+          },
+        }),
+      );
+
+      const result = await loadEndpointSchemas("/some/path");
+      // No requestKeys → passthrough mode (no allowlist)
+      expect(result.size).toBe(0);
     });
   });
 });

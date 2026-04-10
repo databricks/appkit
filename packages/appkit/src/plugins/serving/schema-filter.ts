@@ -1,19 +1,9 @@
 import fs from "node:fs/promises";
 import { createLogger } from "../../logging/logger";
-
-const CACHE_VERSION = "1";
-
-interface ServingCacheEntry {
-  hash: string;
-  requestType: string;
-  responseType: string;
-  chunkType: string | null;
-}
-
-interface ServingCache {
-  version: string;
-  endpoints: Record<string, ServingCacheEntry>;
-}
+import {
+  CACHE_VERSION,
+  type ServingCache,
+} from "../../type-generator/serving/cache";
 
 const logger = createLogger("serving:schema-filter");
 
@@ -47,11 +37,8 @@ export async function loadEndpointSchemas(
     const cache = parsed;
 
     for (const [alias, entry] of Object.entries(cache.endpoints)) {
-      // Extract property keys from the requestType string
-      // The requestType is a TypeScript object type like "{ messages: ...; temperature: ...; }"
-      const keys = extractPropertyKeys(entry.requestType);
-      if (keys.size > 0) {
-        allowlists.set(alias, keys);
+      if (entry.requestKeys && entry.requestKeys.length > 0) {
+        allowlists.set(alias, new Set(entry.requestKeys));
       }
     }
   } catch (err) {
@@ -65,25 +52,6 @@ export async function loadEndpointSchemas(
   }
 
   return allowlists;
-}
-
-/**
- * Extracts top-level property keys from a TypeScript object type string.
- * Matches patterns like `key:` or `key?:` at the first nesting level.
- */
-function extractPropertyKeys(typeStr: string): Set<string> {
-  const keys = new Set<string>();
-  // Match property names at the top level of the object type
-  // Looking for patterns: `  propertyName:` or `  propertyName?:`
-  const propRegex = /^\s{2}(?:\/\*\*[^*]*\*\/\s*)?(\w+)\??:/gm;
-  for (
-    let match = propRegex.exec(typeStr);
-    match !== null;
-    match = propRegex.exec(typeStr)
-  ) {
-    keys.add(match[1]);
-  }
-  return keys;
 }
 
 /**

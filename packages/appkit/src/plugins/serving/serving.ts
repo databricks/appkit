@@ -6,7 +6,7 @@ import type { IAppRouter } from "shared";
 import * as servingConnector from "../../connectors/serving/client";
 import { getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging";
-import { Plugin, toPlugin } from "../../plugin";
+import { type ExecutionResult, Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest, ResourceRequirement } from "../../registry";
 import { ResourceType } from "../../registry";
 import { servingInvokeDefaults } from "./defaults";
@@ -182,11 +182,11 @@ export class ServingPlugin extends Plugin {
 
     try {
       const result = await this.invoke(alias, rawBody);
-      if (result === undefined) {
-        res.status(502).json({ error: "Invocation returned no result" });
+      if (!result.ok) {
+        res.status(result.status).json({ error: result.message });
         return;
       }
-      res.json(result);
+      res.json(result.data);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Invocation failed";
       if (err instanceof EndpointNotFoundError) {
@@ -264,7 +264,10 @@ export class ServingPlugin extends Plugin {
     }
   }
 
-  async invoke(alias: string, body: Record<string, unknown>): Promise<unknown> {
+  async invoke(
+    alias: string,
+    body: Record<string, unknown>,
+  ): Promise<ExecutionResult<unknown>> {
     const { endpoint, filteredBody } = this.resolveAndFilter(alias, body);
     const workspaceClient = getWorkspaceClient();
     const timeout = this.config.timeout ?? 120_000;
@@ -279,6 +282,13 @@ export class ServingPlugin extends Plugin {
         },
       },
     );
+  }
+
+  clientConfig(): Record<string, unknown> {
+    return {
+      isNamedMode: this.isNamedMode,
+      aliases: Object.keys(this.endpoints),
+    };
   }
 
   async shutdown(): Promise<void> {

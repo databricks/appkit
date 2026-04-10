@@ -674,7 +674,7 @@ describe("FilesPlugin", () => {
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith(
         expect.objectContaining({
-          error: "List failed",
+          error: "Internal Server Error",
           plugin: "files",
         }),
       );
@@ -698,7 +698,7 @@ describe("FilesPlugin", () => {
 
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({ error: "Read failed" }),
+        expect.objectContaining({ error: "Internal Server Error" }),
       );
     });
 
@@ -722,7 +722,7 @@ describe("FilesPlugin", () => {
 
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({ error: "Exists check failed" }),
+        expect.objectContaining({ error: "Internal Server Error" }),
       );
     });
 
@@ -746,7 +746,7 @@ describe("FilesPlugin", () => {
 
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({ error: "Metadata fetch failed" }),
+        expect.objectContaining({ error: "Internal Server Error" }),
       );
     });
 
@@ -768,7 +768,7 @@ describe("FilesPlugin", () => {
 
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({ error: "Download failed" }),
+        expect.objectContaining({ error: "Internal Server Error" }),
       );
     });
 
@@ -791,7 +791,7 @@ describe("FilesPlugin", () => {
 
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({ error: "Create directory failed" }),
+        expect.objectContaining({ error: "Internal Server Error" }),
       );
     });
 
@@ -835,7 +835,7 @@ describe("FilesPlugin", () => {
       await handlerPromise;
 
       const errorBody = res.json.mock.calls[0][0];
-      expect(errorBody.error).toBe("List failed");
+      expect(errorBody.error).toBe("Internal Server Error");
       expect(errorBody.error).not.toContain("secret");
       expect(errorBody.error).not.toContain("internal");
     });
@@ -876,7 +876,7 @@ describe("FilesPlugin", () => {
       expect(signalWasAborted).toBe(true);
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({ error: "List failed" }),
+        expect.objectContaining({ error: "Internal Server Error" }),
       );
     });
 

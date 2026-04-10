@@ -19,7 +19,7 @@ import {
   ServiceContext,
   type UserContext,
 } from "../context";
-import { AuthenticationError } from "../errors";
+import { AppKitError, AuthenticationError } from "../errors";
 import { createLogger } from "../logging/logger";
 import { StreamManager } from "../stream";
 import {
@@ -29,6 +29,7 @@ import {
 } from "../telemetry";
 import { deepMerge } from "../utils";
 import { DevFileReader } from "./dev-reader";
+import type { ExecutionResult } from "./execution-result";
 import { CacheInterceptor } from "./interceptors/cache";
 import { RetryInterceptor } from "./interceptors/retry";
 import { TelemetryInterceptor } from "./interceptors/telemetry";
@@ -39,6 +40,20 @@ import type {
 } from "./interceptors/types";
 
 const logger = createLogger("plugin");
+
+/**
+ * Narrow an unknown thrown value to an Error that carries a numeric
+ * `statusCode` property (e.g. `ApiError` from `@databricks/sdk-experimental`).
+ */
+function hasHttpStatusCode(
+  error: unknown,
+): error is Error & { statusCode: number } {
+  return (
+    error instanceof Error &&
+    "statusCode" in error &&
+    typeof (error as Record<string, unknown>).statusCode === "number"
+  );
+}
 
 /**
  * Methods that should not be proxied by asUser().
@@ -435,15 +450,17 @@ export abstract class Plugin<
   /**
    * Execute a function with the plugin's interceptor chain.
    *
-   * All errors are caught and `undefined` is returned (production-safe).
-   * Route handlers should check for `undefined` and respond with an
-   * appropriate error status.
+   * Returns an {@link ExecutionResult} discriminated union:
+   * - `{ ok: true, data: T }` on success
+   * - `{ ok: false, status: number, message: string }` on failure
+   *
+   * Errors are never thrown — the method is production-safe.
    */
   protected async execute<T>(
     fn: (signal?: AbortSignal) => Promise<T>,
     options: PluginExecutionSettings,
     userKey?: string,
-  ): Promise<T | undefined> {
+  ): Promise<ExecutionResult<T>> {
     const executeConfig = this._buildExecutionConfig(options);
 
     const interceptors = this._buildInterceptors(executeConfig);
@@ -457,11 +474,40 @@ export abstract class Plugin<
     };
 
     try {
-      return await this._executeWithInterceptors(fn, interceptors, context);
+      const data = await this._executeWithInterceptors(
+        fn,
+        interceptors,
+        context,
+      );
+      return { ok: true, data };
     } catch (error) {
-      // production-safe: swallow all errors, don't crash the app
       logger.error("Plugin execution failed", { error, plugin: this.name });
-      return undefined;
+
+      if (error instanceof AppKitError) {
+        return {
+          ok: false,
+          status: error.statusCode,
+          message: error.message,
+        };
+      }
+
+      if (hasHttpStatusCode(error)) {
+        const isDev = process.env.NODE_ENV !== "production";
+        const isClientError = error.statusCode >= 400 && error.statusCode < 500;
+        return {
+          ok: false,
+          status: error.statusCode,
+          message: isDev || isClientError ? error.message : "Server error",
+        };
+      }
+
+      const isDev = process.env.NODE_ENV !== "production";
+      return {
+        ok: false,
+        status: 500,
+        message:
+          isDev && error instanceof Error ? error.message : "Server error",
+      };
     }
   }
 

@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import dotenv from "dotenv";
 import { createLogger } from "../logging/logger";
 import { generateQueriesFromDescribe } from "./query-registry";
+import { generateServingTypes as generateServingTypesImpl } from "./serving/generator";
 import type { QuerySchema } from "./types";
 
 dotenv.config();
@@ -86,3 +87,8 @@ export async function generateFromEntryPoint(options: {
 
   logger.debug("Type generation complete!");
 }
+
+// Rolldown tree-shaking only preserves "own exports" (locally defined) — not re-exports.
+// A local binding ensures the serving vite plugin's import keeps this in the dependency graph,
+// mirroring how generateFromEntryPoint (also defined here) is preserved via the analytics vite plugin.
+export const generateServingTypes = generateServingTypesImpl;
