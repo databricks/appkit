@@ -225,7 +225,7 @@ class JobsPlugin extends Plugin {
             ? mapParams(jobConfig.taskType, validatedParams)
             : (validatedParams ?? {});
 
-        return self.execute(
+        const result = await self.execute(
           async (signal) =>
             self.connector.runNow(
               client,
@@ -238,6 +238,7 @@ class JobsPlugin extends Plugin {
           { default: JOBS_WRITE_DEFAULTS },
           userKey,
         );
+        return result.ok ? result.data : undefined;
       },
 
       async *runAndWait(
@@ -275,7 +276,12 @@ class JobsPlugin extends Plugin {
           userKey,
         );
 
-        const runId = runResult?.run_id;
+        if (!runResult.ok) {
+          throw new ExecutionError(
+            `Failed to start job run: ${runResult.message}`,
+          );
+        }
+        const runId = runResult.data.run_id;
         if (!runId) {
           throw new Error("runNow did not return a run_id");
         }
@@ -292,7 +298,7 @@ class JobsPlugin extends Plugin {
             );
           }
 
-          const run = await self.execute(
+          const runStatusResult = await self.execute(
             async (signal) =>
               self.connector.getRun(client, { run_id: runId }, signal),
             {
@@ -303,11 +309,12 @@ class JobsPlugin extends Plugin {
             },
             userKey,
           );
-          if (!run) {
+          if (!runStatusResult.ok) {
             throw new ExecutionError(
               `Failed to fetch run status for run ${runId}`,
             );
           }
+          const run = runStatusResult.data;
           const state = run.state?.life_cycle_state;
 
           yield { status: state, timestamp: Date.now(), run };
@@ -325,7 +332,7 @@ class JobsPlugin extends Plugin {
       },
 
       lastRun: async (): Promise<jobsTypes.BaseRun | undefined> => {
-        const runs = await self.execute(
+        const result = await self.execute(
           async (signal) =>
             self.connector.listRuns(
               client,
@@ -335,13 +342,13 @@ class JobsPlugin extends Plugin {
           self._readSettings(["jobs:lastRun", jobKey]),
           userKey,
         );
-        return runs?.[0];
+        return result.ok ? result.data[0] : undefined;
       },
 
       listRuns: async (options?: {
         limit?: number;
       }): Promise<jobsTypes.BaseRun[] | undefined> => {
-        return self.execute(
+        const result = await self.execute(
           async (signal) =>
             self.connector.listRuns(
               client,
@@ -351,26 +358,29 @@ class JobsPlugin extends Plugin {
           self._readSettings(["jobs:listRuns", jobKey, options ?? {}]),
           userKey,
         );
+        return result.ok ? result.data : undefined;
       },
 
       getRun: async (runId: number): Promise<jobsTypes.Run | undefined> => {
-        return self.execute(
+        const result = await self.execute(
           async (signal) =>
             self.connector.getRun(client, { run_id: runId }, signal),
           self._readSettings(["jobs:getRun", jobKey, runId]),
           userKey,
         );
+        return result.ok ? result.data : undefined;
       },
 
       getRunOutput: async (
         runId: number,
       ): Promise<jobsTypes.RunOutput | undefined> => {
-        return self.execute(
+        const result = await self.execute(
           async (signal) =>
             self.connector.getRunOutput(client, { run_id: runId }, signal),
           self._readSettings(["jobs:getRunOutput", jobKey, runId]),
           userKey,
         );
+        return result.ok ? result.data : undefined;
       },
 
       cancelRun: async (runId: number): Promise<void> => {
@@ -383,12 +393,13 @@ class JobsPlugin extends Plugin {
       },
 
       getJob: async (): Promise<jobsTypes.Job | undefined> => {
-        return self.execute(
+        const result = await self.execute(
           async (signal) =>
             self.connector.getJob(client, { job_id: jobId }, signal),
           self._readSettings(["jobs:getJob", jobKey]),
           userKey,
         );
+        return result.ok ? result.data : undefined;
       },
     };
   }
