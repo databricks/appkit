@@ -1,15 +1,28 @@
 import type { jobs as jobsTypes } from "@databricks/sdk-experimental";
 import type express from "express";
-import type { IAppRequest, IAppRouter, PluginExecutionSettings } from "shared";
+import type {
+  IAppRequest,
+  IAppRouter,
+  PluginExecutionSettings,
+  StreamExecutionSettings,
+} from "shared";
 import { toJSONSchema } from "zod";
 import { JobsConnector } from "../../connectors/jobs";
 import { getCurrentUserId, getWorkspaceClient } from "../../context";
-import { InitializationError } from "../../errors";
+import {
+  ExecutionError,
+  InitializationError,
+  ValidationError,
+} from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest, ResourceRequirement } from "../../registry";
 import { ResourceType } from "../../registry";
-import { JOBS_READ_DEFAULTS, JOBS_WRITE_DEFAULTS } from "./defaults";
+import {
+  JOBS_READ_DEFAULTS,
+  JOBS_STREAM_DEFAULTS,
+  JOBS_WRITE_DEFAULTS,
+} from "./defaults";
 import manifest from "./manifest.json";
 import { mapParams } from "./params";
 import type {
@@ -199,7 +212,7 @@ class JobsPlugin extends Plugin {
         if (jobConfig?.params) {
           const result = jobConfig.params.safeParse(params ?? {});
           if (!result.success) {
-            throw new Error(
+            throw new ValidationError(
               `Parameter validation failed for job "${jobKey}": ${result.error.message}`,
             );
           }
@@ -212,9 +225,9 @@ class JobsPlugin extends Plugin {
             ? mapParams(jobConfig.taskType, validatedParams)
             : (validatedParams ?? {});
 
-        return this.execute(
+        return self.execute(
           async (signal) =>
-            this.connector.runNow(
+            self.connector.runNow(
               client,
               {
                 ...sdkFields,
@@ -235,7 +248,7 @@ class JobsPlugin extends Plugin {
         if (jobConfig?.params) {
           const result = jobConfig.params.safeParse(params ?? {});
           if (!result.success) {
-            throw new Error(
+            throw new ValidationError(
               `Parameter validation failed for job "${jobKey}": ${result.error.message}`,
             );
           }
@@ -279,9 +292,22 @@ class JobsPlugin extends Plugin {
             );
           }
 
-          const run = await self.connector.getRun(client, {
-            run_id: runId,
-          });
+          const run = await self.execute(
+            async (signal) =>
+              self.connector.getRun(client, { run_id: runId }, signal),
+            {
+              default: {
+                ...JOBS_READ_DEFAULTS,
+                cache: { enabled: false },
+              },
+            },
+            userKey,
+          );
+          if (!run) {
+            throw new ExecutionError(
+              `Failed to fetch run status for run ${runId}`,
+            );
+          }
           const state = run.state?.life_cycle_state;
 
           yield { status: state, timestamp: Date.now(), run };
@@ -299,14 +325,14 @@ class JobsPlugin extends Plugin {
       },
 
       lastRun: async (): Promise<jobsTypes.BaseRun | undefined> => {
-        const runs = await this.execute(
+        const runs = await self.execute(
           async (signal) =>
-            this.connector.listRuns(
+            self.connector.listRuns(
               client,
               { job_id: jobId, limit: 1 },
               signal,
             ),
-          this._readSettings(["jobs:lastRun", jobKey]),
+          self._readSettings(["jobs:lastRun", jobKey]),
           userKey,
         );
         return runs?.[0];
@@ -315,23 +341,23 @@ class JobsPlugin extends Plugin {
       listRuns: async (options?: {
         limit?: number;
       }): Promise<jobsTypes.BaseRun[] | undefined> => {
-        return this.execute(
+        return self.execute(
           async (signal) =>
-            this.connector.listRuns(
+            self.connector.listRuns(
               client,
               { job_id: jobId, limit: options?.limit },
               signal,
             ),
-          this._readSettings(["jobs:listRuns", jobKey, options ?? {}]),
+          self._readSettings(["jobs:listRuns", jobKey, options ?? {}]),
           userKey,
         );
       },
 
       getRun: async (runId: number): Promise<jobsTypes.Run | undefined> => {
-        return this.execute(
+        return self.execute(
           async (signal) =>
-            this.connector.getRun(client, { run_id: runId }, signal),
-          this._readSettings(["jobs:getRun", jobKey, runId]),
+            self.connector.getRun(client, { run_id: runId }, signal),
+          self._readSettings(["jobs:getRun", jobKey, runId]),
           userKey,
         );
       },
@@ -339,28 +365,28 @@ class JobsPlugin extends Plugin {
       getRunOutput: async (
         runId: number,
       ): Promise<jobsTypes.RunOutput | undefined> => {
-        return this.execute(
+        return self.execute(
           async (signal) =>
-            this.connector.getRunOutput(client, { run_id: runId }, signal),
-          this._readSettings(["jobs:getRunOutput", jobKey, runId]),
+            self.connector.getRunOutput(client, { run_id: runId }, signal),
+          self._readSettings(["jobs:getRunOutput", jobKey, runId]),
           userKey,
         );
       },
 
       cancelRun: async (runId: number): Promise<void> => {
-        await this.execute(
+        await self.execute(
           async (signal) =>
-            this.connector.cancelRun(client, { run_id: runId }, signal),
+            self.connector.cancelRun(client, { run_id: runId }, signal),
           { default: JOBS_WRITE_DEFAULTS },
           userKey,
         );
       },
 
       getJob: async (): Promise<jobsTypes.Job | undefined> => {
-        return this.execute(
+        return self.execute(
           async (signal) =>
-            this.connector.getJob(client, { job_id: jobId }, signal),
-          this._readSettings(["jobs:getJob", jobKey]),
+            self.connector.getJob(client, { job_id: jobId }, signal),
+          self._readSettings(["jobs:getJob", jobKey]),
           userKey,
         );
       },
@@ -415,35 +441,27 @@ class JobsPlugin extends Plugin {
           const api = userPlugin.createJobAPI(jobKey);
 
           if (stream) {
-            res.setHeader("Content-Type", "text/event-stream");
-            res.setHeader("Cache-Control", "no-cache");
-            res.setHeader("Connection", "keep-alive");
-            res.flushHeaders();
-
-            for await (const event of api.runAndWait(params)) {
-              res.write(`data: ${JSON.stringify(event)}\n\n`);
-            }
-            res.end();
+            const streamSettings: StreamExecutionSettings = {
+              default: JOBS_STREAM_DEFAULTS,
+            };
+            await this.executeStream<JobRunStatus>(
+              res,
+              () => api.runAndWait(params),
+              streamSettings,
+            );
           } else {
             const result = await api.runNow(params);
             res.json({ runId: result?.run_id });
           }
         } catch (error) {
-          if (
-            error instanceof Error &&
-            error.message.includes("validation failed")
-          ) {
+          if (error instanceof ValidationError) {
             if (!res.headersSent) {
               res.status(400).json({ error: error.message, plugin: this.name });
             }
             return;
           }
           logger.error("Run failed for job %s: %O", jobKey, error);
-          if (res.headersSent) {
-            // SSE headers already flushed — write error event and close
-            res.write(`data: ${JSON.stringify({ error: "Run failed" })}\n\n`);
-            res.end();
-          } else {
+          if (!res.headersSent) {
             res.status(500).json({ error: "Run failed", plugin: this.name });
           }
         }
@@ -557,18 +575,17 @@ class JobsPlugin extends Plugin {
       };
     };
 
-    const jobsExport = ((jobKey: string) => resolveJob(jobKey)) as JobsExport;
-    jobsExport.job = resolveJob;
-
-    return jobsExport;
+    return ((jobKey: string) => resolveJob(jobKey)) as JobsExport;
   }
 
   clientConfig(): Record<string, unknown> {
-    const jobs: Record<string, { params: unknown }> = {};
+    const jobs: Record<string, { params: unknown; taskType: string | null }> =
+      {};
     for (const key of this.jobKeys) {
       const config = this.jobConfigs[key];
       jobs[key] = {
         params: config?.params ? toJSONSchema(config.params) : null,
+        taskType: config?.taskType ?? null,
       };
     }
     return { jobs };

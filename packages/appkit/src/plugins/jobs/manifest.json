@@ -2,7 +2,7 @@
   "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
   "name": "jobs",
   "displayName": "Jobs Plugin",
-  "description": "Trigger and monitor Databricks Lakeflow Jobs scoped to configured job resources",
+  "description": "Trigger and monitor Databricks Lakeflow Jobs. Supports single-job mode (DATABRICKS_JOB_ID) or multi-job mode (DATABRICKS_JOB_{NAME} per job, e.g. DATABRICKS_JOB_ETL, DATABRICKS_JOB_ML).",
   "resources": {
     "required": [
       {
@@ -14,7 +14,7 @@
         "fields": {
           "id": {
             "env": "DATABRICKS_JOB_ID",
-            "description": "Job ID (numeric). Obtain from the Jobs UI or `databricks jobs list`."
+            "description": "Job ID (numeric). Use DATABRICKS_JOB_ID for single-job mode, or DATABRICKS_JOB_{NAME} for each named job. Obtain from the Jobs UI or `databricks jobs list`."
           }
         }
       }
