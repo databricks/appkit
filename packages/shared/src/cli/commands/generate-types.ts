@@ -37,7 +37,6 @@ async function runGenerateTypes(
     }
 
     // Generate serving endpoint types (no warehouse required)
-    // generateServingTypes is re-exported here but not yet in built .d.ts
     await (typeGen as any).generateServingTypes({
       outFile: path.join(process.cwd(), "client/src/appKitServingTypes.d.ts"),
       noCache,

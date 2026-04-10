@@ -23,14 +23,17 @@ const mockConnectSSE = vi.fn().mockImplementation((opts: any) => {
   });
 });
 
-const mockGetPluginClientConfig = vi
+const mockUsePluginClientConfig = vi
   .fn()
   .mockReturnValue({ isNamedMode: false, aliases: ["default"] });
 
 vi.mock("@/js", () => ({
   connectSSE: (...args: unknown[]) => mockConnectSSE(...args),
-  getPluginClientConfig: (...args: unknown[]) =>
-    mockGetPluginClientConfig(...args),
+}));
+
+vi.mock("../use-plugin-config", () => ({
+  usePluginClientConfig: (...args: unknown[]) =>
+    mockUsePluginClientConfig(...args),
 }));
 
 import { useServingStream } from "../use-serving-stream";
@@ -88,7 +91,7 @@ describe("useServingStream", () => {
   });
 
   test("uses alias in URL when provided", () => {
-    mockGetPluginClientConfig.mockReturnValue({
+    mockUsePluginClientConfig.mockReturnValue({
       isNamedMode: true,
       aliases: ["embedder", "llm"],
     });
@@ -108,7 +111,7 @@ describe("useServingStream", () => {
   });
 
   test("sets error for unknown alias", () => {
-    mockGetPluginClientConfig.mockReturnValue({
+    mockUsePluginClientConfig.mockReturnValue({
       isNamedMode: true,
       aliases: ["llm", "embedder"],
     });
@@ -123,7 +126,7 @@ describe("useServingStream", () => {
   });
 
   test("stream does not call connectSSE for unknown alias", () => {
-    mockGetPluginClientConfig.mockReturnValue({
+    mockUsePluginClientConfig.mockReturnValue({
       isNamedMode: true,
       aliases: ["llm"],
     });

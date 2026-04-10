@@ -1,9 +1,8 @@
-export { generateServingTypes } from "./serving/generator";
-
 import fs from "node:fs/promises";
 import dotenv from "dotenv";
 import { createLogger } from "../logging/logger";
 import { generateQueriesFromDescribe } from "./query-registry";
+import { generateServingTypes } from "./serving/generator";
 import type { QuerySchema } from "./types";
 
 dotenv.config();
@@ -88,3 +87,5 @@ export async function generateFromEntryPoint(options: {
 
   logger.debug("Type generation complete!");
 }
+
+export { generateServingTypes };

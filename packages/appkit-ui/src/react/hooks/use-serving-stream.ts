@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { connectSSE, getPluginClientConfig } from "@/js";
+import { connectSSE } from "@/js";
 import type {
   InferServingChunk,
   InferServingRequest,
   ServingAlias,
   ServingClientConfig,
 } from "./types";
+import { usePluginClientConfig } from "./use-plugin-config";
 
 export interface UseServingStreamOptions<
   K extends ServingAlias = ServingAlias,
@@ -50,10 +51,7 @@ export function useServingStream<K extends ServingAlias = ServingAlias>(
   type TChunk = InferServingChunk<K>;
   const { alias, autoStart = false, onComplete } = options;
 
-  const config = useMemo(
-    () => getPluginClientConfig<ServingClientConfig>("serving"),
-    [],
-  );
+  const config = usePluginClientConfig<ServingClientConfig>("serving");
 
   const aliasError = useMemo(() => {
     if (!alias || !config.aliases) return null;

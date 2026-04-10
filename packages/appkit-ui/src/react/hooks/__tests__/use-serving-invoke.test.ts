@@ -1,20 +1,20 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-const mockGetPluginClientConfig = vi
+const mockUsePluginClientConfig = vi
   .fn()
   .mockReturnValue({ isNamedMode: false, aliases: ["default"] });
 
-vi.mock("@/js", () => ({
-  getPluginClientConfig: (...args: unknown[]) =>
-    mockGetPluginClientConfig(...args),
+vi.mock("../use-plugin-config", () => ({
+  usePluginClientConfig: (...args: unknown[]) =>
+    mockUsePluginClientConfig(...args),
 }));
 
 import { useServingInvoke } from "../use-serving-invoke";
 
 describe("useServingInvoke", () => {
   beforeEach(() => {
-    mockGetPluginClientConfig.mockReturnValue({
+    mockUsePluginClientConfig.mockReturnValue({
       isNamedMode: false,
       aliases: ["default"],
     });
@@ -61,7 +61,7 @@ describe("useServingInvoke", () => {
   });
 
   test("uses alias in URL when provided", async () => {
-    mockGetPluginClientConfig.mockReturnValue({
+    mockUsePluginClientConfig.mockReturnValue({
       isNamedMode: true,
       aliases: ["llm", "embedder"],
     });
@@ -84,7 +84,7 @@ describe("useServingInvoke", () => {
   });
 
   test("sets error for unknown alias", () => {
-    mockGetPluginClientConfig.mockReturnValue({
+    mockUsePluginClientConfig.mockReturnValue({
       isNamedMode: true,
       aliases: ["llm", "embedder"],
     });
@@ -99,7 +99,7 @@ describe("useServingInvoke", () => {
   });
 
   test("invoke returns null for unknown alias without calling fetch", async () => {
-    mockGetPluginClientConfig.mockReturnValue({
+    mockUsePluginClientConfig.mockReturnValue({
       isNamedMode: true,
       aliases: ["llm"],
     });

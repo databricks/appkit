@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getPluginClientConfig } from "@/js";
 import type {
   InferServingRequest,
   InferServingResponse,
   ServingAlias,
   ServingClientConfig,
 } from "./types";
+import { usePluginClientConfig } from "./use-plugin-config";
 
 export interface UseServingInvokeOptions<
   K extends ServingAlias = ServingAlias,
@@ -44,10 +44,7 @@ export function useServingInvoke<K extends ServingAlias = ServingAlias>(
   type TResponse = InferServingResponse<K>;
   const { alias, autoStart = false } = options;
 
-  const config = useMemo(
-    () => getPluginClientConfig<ServingClientConfig>("serving"),
-    [],
-  );
+  const config = usePluginClientConfig<ServingClientConfig>("serving");
 
   const aliasError = useMemo(() => {
     if (!alias || !config.aliases) return null;
