@@ -233,14 +233,13 @@ describe("JobsPlugin", () => {
   });
 
   describe("exports()", () => {
-    test("returns a callable function with a .job alias", () => {
+    test("returns a callable function", () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
       const plugin = new JobsPlugin({});
       const exported = plugin.exports();
 
       expect(typeof exported).toBe("function");
-      expect(typeof exported.job).toBe("function");
     });
 
     test("returns job handle with asUser and direct JobAPI methods", () => {
@@ -261,18 +260,6 @@ describe("JobsPlugin", () => {
       expect(typeof handle.getJob).toBe("function");
     });
 
-    test(".job() returns the same shape as the callable", () => {
-      process.env.DATABRICKS_JOB_ETL = "123";
-
-      const plugin = new JobsPlugin({});
-      const exported = plugin.exports();
-
-      const direct = exported("etl");
-      const viaJob = exported.job("etl");
-
-      expect(Object.keys(direct).sort()).toEqual(Object.keys(viaJob).sort());
-    });
-
     test("throws for unknown job key", () => {
       process.env.DATABRICKS_JOB_ETL = "123";
 
@@ -280,7 +267,6 @@ describe("JobsPlugin", () => {
       const exported = plugin.exports();
 
       expect(() => exported("unknown")).toThrow(/Unknown job "unknown"/);
-      expect(() => exported.job("unknown")).toThrow(/Unknown job "unknown"/);
     });
 
     test("single-job default key is accessible", () => {
@@ -587,8 +573,8 @@ describe("JobsPlugin", () => {
 
       expect(config).toEqual({
         jobs: {
-          etl: { params: null },
-          ml: { params: null },
+          etl: { params: null, taskType: null },
+          ml: { params: null, taskType: null },
         },
       });
     });
@@ -601,12 +587,12 @@ describe("JobsPlugin", () => {
 
       expect(config).toEqual({
         jobs: {
-          default: { params: null },
+          default: { params: null, taskType: null },
         },
       });
     });
 
-    test("returns empty object when no jobs configured", () => {
+    test("returns empty jobs when no jobs configured", () => {
       const plugin = new JobsPlugin({});
       const config = plugin.clientConfig();
 

@@ -18,7 +18,7 @@ export interface JobConfig {
   /** The type of task this job runs. Determines how params are mapped to the SDK request. */
   taskType?: TaskType;
   /** Optional Zod schema for validating job parameters at runtime. */
-  params?: z.ZodType<any>;
+  params?: z.ZodType<Record<string, unknown>>;
 }
 
 /** Status update yielded by runAndWait during polling. */
@@ -86,13 +86,6 @@ export type JobHandle = JobAPI & {
  *
  * // OBO access
  * await appkit.jobs("etl").asUser(req).runNow();
- *
- * // Named accessor
- * const job = appkit.jobs.job("etl");
- * await job.runNow();
  * ```
  */
-export interface JobsExport {
-  (jobKey: string): JobHandle;
-  job: (jobKey: string) => JobHandle;
-}
+export type JobsExport = (jobKey: string) => JobHandle;
