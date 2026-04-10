@@ -151,8 +151,12 @@ export class FilesPlugin extends Plugin {
           volumeKey,
           user.id,
         );
-      } catch {
-        // user.id may not be resolvable in all contexts (e.g. lazy SP getter)
+      } catch (err) {
+        if (!(err instanceof TypeError)) throw err;
+        logger.debug(
+          "Could not resolve user ID for policy denial log: %O",
+          err,
+        );
         logger.warn('Policy denied "%s" on volume "%s"', action, volumeKey);
       }
       throw new PolicyDeniedError(action, volumeKey);
@@ -258,6 +262,10 @@ export class FilesPlugin extends Plugin {
    * `_createPolicyWrappedAPI` for anything that serves user requests.
    */
   protected createVolumeAPI(volumeKey: string): VolumeAPI {
+    logger.debug(
+      'createVolumeAPI("%s") — bypassing policy enforcement',
+      volumeKey,
+    );
     const connector = this.volumeConnectors[volumeKey];
     return {
       list: (directoryPath?: string) =>
@@ -819,6 +827,13 @@ export class FilesPlugin extends Plugin {
       : undefined;
 
     if (
+      !(await this._enforcePolicy(req, res, volumeKey, "upload", path, {
+        size: contentLength,
+      }))
+    )
+      return;
+
+    if (
       contentLength !== undefined &&
       !Number.isNaN(contentLength) &&
       contentLength > maxSize
@@ -829,13 +844,6 @@ export class FilesPlugin extends Plugin {
       });
       return;
     }
-
-    if (
-      !(await this._enforcePolicy(req, res, volumeKey, "upload", path, {
-        size: contentLength,
-      }))
-    )
-      return;
 
     logger.debug(req, "Upload started: volume=%s path=%s", volumeKey, path);
 

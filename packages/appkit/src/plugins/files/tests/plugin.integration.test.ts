@@ -510,7 +510,9 @@ describe("Files Plugin Integration", () => {
       });
     }
 
-    test(`POST /api/files/${VOL}/upload with content-length over limit returns 413`, async () => {
+    test(`POST /api/files/${VOL}/upload with content-length over limit returns 403 (policy checked before size)`, async () => {
+      // Default publicRead() policy denies uploads. Policy enforcement runs
+      // before the content-length size check, so the response is 403 (not 413).
       const res = await rawPost(
         `/api/files/${VOL}/upload?path=/Volumes/catalog/schema/vol/large.bin`,
         {
@@ -519,10 +521,10 @@ describe("Files Plugin Integration", () => {
         },
       );
 
-      expect(res.status).toBe(413);
+      expect(res.status).toBe(403);
       const data = JSON.parse(res.body) as { error: string; plugin: string };
       expect(data.plugin).toBe("files");
-      expect(data.error).toMatch(/exceeds maximum allowed size/);
+      expect(data.error).toMatch(/Policy denied/);
     });
   });
 

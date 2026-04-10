@@ -445,11 +445,16 @@ describe("FilesPlugin", () => {
       const res = mockRes();
 
       // uploads has maxUploadSize: 100_000_000
+      const headers: Record<string, string> = {
+        "content-length": String(200_000_000),
+        "x-forwarded-user": "test-user",
+      };
       await handler(
         {
           params: { volumeKey: "uploads" },
           query: { path: "/large.bin" },
-          headers: { "content-length": String(200_000_000) },
+          headers,
+          header: (name: string) => headers[name.toLowerCase()],
         },
         res,
       );
@@ -469,11 +474,16 @@ describe("FilesPlugin", () => {
       const res = mockRes();
 
       // exports has no maxUploadSize, uses default 5GB
+      const headers: Record<string, string> = {
+        "content-length": String(6 * 1024 * 1024 * 1024),
+        "x-forwarded-user": "test-user",
+      };
       await handler(
         {
           params: { volumeKey: "exports" },
           query: { path: "/large.bin" },
-          headers: { "content-length": String(6 * 1024 * 1024 * 1024) },
+          headers,
+          header: (name: string) => headers[name.toLowerCase()],
         },
         res,
       );
@@ -911,6 +921,7 @@ describe("FilesPlugin", () => {
         public: { policy: policy.publicRead() },
         locked: { policy: policy.denyAll() },
         open: { policy: policy.allowAll() },
+        writeonly: { policy: policy.not(policy.publicRead()) },
         uploads: {},
         exports: {},
       },
@@ -967,12 +978,14 @@ describe("FilesPlugin", () => {
       process.env.DATABRICKS_VOLUME_PUBLIC = "/Volumes/c/s/public";
       process.env.DATABRICKS_VOLUME_LOCKED = "/Volumes/c/s/locked";
       process.env.DATABRICKS_VOLUME_OPEN = "/Volumes/c/s/open";
+      process.env.DATABRICKS_VOLUME_WRITEONLY = "/Volumes/c/s/writeonly";
     });
 
     afterEach(() => {
       delete process.env.DATABRICKS_VOLUME_PUBLIC;
       delete process.env.DATABRICKS_VOLUME_LOCKED;
       delete process.env.DATABRICKS_VOLUME_OPEN;
+      delete process.env.DATABRICKS_VOLUME_WRITEONLY;
     });
 
     test("policy volume + no user header (production) → 401", async () => {
@@ -1400,6 +1413,37 @@ describe("FilesPlugin", () => {
           error: expect.stringContaining("Policy denied"),
         }),
       );
+    });
+
+    test("not(publicRead()) volume → read denied with 403", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "get", "/list");
+      const res = mockRes();
+
+      await handler(mockReq("writeonly"), res);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+        }),
+      );
+    });
+
+    test("not(publicRead()) volume → write allowed", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "post", "/mkdir");
+      const res = mockRes();
+
+      mockClient.files.createDirectory.mockResolvedValue(undefined);
+
+      await handler(mockReq("writeonly", { body: { path: "/dropbox" } }), res);
+
+      // Should not receive 403
+      const statusCodes = (res.status.mock.calls as number[][]).map(
+        (c) => c[0],
+      );
+      expect(statusCodes).not.toContain(403);
     });
   });
 
