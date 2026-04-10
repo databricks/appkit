@@ -72,7 +72,7 @@ export type JobHandle = JobAPI & {
 
 /**
  * Public API shape of the jobs plugin.
- * Callable to select a job, with a `.job()` alias.
+ * Callable to select a job by key.
  *
  * @example
  * ```ts
