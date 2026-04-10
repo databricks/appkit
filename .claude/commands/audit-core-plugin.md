@@ -74,19 +74,9 @@ Treat each missing `MUST` file as a **MUST**-severity finding under the "Structu
 
 ## Step 5: Full Best-Practices Review
 
-> **Deduplication:** If the same code issue is covered by guidelines in multiple categories, report it once under the most specific category and note that it also relates to the other category. Do not count it as separate findings in each category.
+Before evaluating, read the shared review rules in `.claude/references/plugin-review-guidance.md` and apply them throughout this step (deduplication, cache-key tracing).
 
-Evaluate the plugin code against **all 9 categories** from the best-practices reference:
-
-1. **Manifest Design** — Check `manifest.json` against all NEVER/MUST/SHOULD rules
-2. **Plugin Class Structure** — Check the main plugin class against all NEVER/MUST/SHOULD rules
-3. **Route Design** — Check `injectRoutes()` and route handlers against all NEVER/MUST/SHOULD rules
-4. **Interceptor Usage** — Check `execute()`/`executeStream()` calls and `defaults.ts` against all NEVER/MUST/SHOULD rules. **Important:** When evaluating cache configuration in `defaults.ts`, the codebase uses a two-stage pattern where `defaults.ts` defines partial cache config (e.g., `enabled: true, ttl: 3600`) and the `cacheKey` is injected at the call site in the plugin class. Before flagging a NEVER violation for missing `cacheKey`, trace the cache config through to `execute()`/`executeStream()` call sites to verify whether a `cacheKey` is provided there. Only flag as NEVER if no `cacheKey` is provided at any point in the execution path.
-5. **asUser / OBO Patterns** — Check OBO usage, cache key scoping, context enforcement against all NEVER/MUST/SHOULD rules
-6. **Client Config** — Check `clientConfig()` return value against all NEVER/MUST/SHOULD rules
-7. **SSE Streaming** — Check streaming usage and shutdown behavior against all NEVER/MUST/SHOULD rules
-8. **Testing Expectations** — Check test files for coverage, mocking patterns, error path tests against all NEVER/MUST/SHOULD rules
-9. **Type Safety** — Check types, exports, config interface, `any` usage against all NEVER/MUST/SHOULD rules
+Evaluate the plugin code against **all 9 categories** from the Category Index in `plugin-review-guidance.md`. Check each category's NEVER/MUST/SHOULD rules from the best-practices reference.
 
 For each guideline in each category, determine whether the plugin **passes**, **violates**, or is **not applicable** (e.g., SSE rules for a non-streaming plugin). Record findings with:
 
@@ -128,11 +118,7 @@ And `{count}` is the number of findings (0 if pass).
 
 ### Detailed Findings (output second, severity-first)
 
-Group all findings across all categories and sort by severity:
-
-1. **NEVER** findings first (most critical)
-2. **MUST** findings second
-3. **SHOULD** findings last
+Group all findings across all categories and sort by severity per the Severity Ordering rule in `plugin-review-guidance.md`.
 
 For each finding, output:
 

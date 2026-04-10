@@ -62,22 +62,9 @@ Deduplicate the list. You will run Steps 4-6 for **each** detected plugin.
 
 ## Step 4: Category Scoping
 
-For each plugin being reviewed, map the changed files to the relevant best-practices categories:
+For each plugin being reviewed, use the Category Index from `.claude/references/plugin-review-guidance.md` as the canonical list of categories. Map changed files to relevant categories using the "What to check" column as a guide — match file names and code patterns (e.g., `this.route(` → Route Design, `asUser(` → asUser / OBO Patterns). A single file may trigger multiple categories.
 
-| Changed file pattern | Category |
-|---|---|
-| `manifest.json` | 1. Manifest Design |
-| Main plugin class file (the primary `.ts` file, not index/types/defaults) | 2. Plugin Class Structure |
-| Main plugin class file (the primary `.ts` file, not index/types/defaults) | 9. Type Safety |
-| Any file containing route registration (`this.route(`, `injectRoutes`) | 3. Route Design |
-| `defaults.ts`, or any file containing `execute(` / `executeStream(` calls with interceptor settings | 4. Interceptor Usage |
-| Any file containing `asUser(`, `.obo.sql`, `isInUserContext`, `runInUserContext` | 5. asUser / OBO Patterns |
-| Any file containing `clientConfig()` | 6. Client Config |
-| Any file containing `executeStream(`, `streamManager`, `AsyncGenerator`, SSE-related code | 7. SSE Streaming |
-| Files under `tests/` or files ending in `.test.ts` | 8. Testing Expectations |
-| `types.ts`, config interfaces, `exports()` return types | 9. Type Safety |
-
-Read the actual changed file contents with `git diff <base-branch>...HEAD -- <file>` to determine which patterns are present. A single file may trigger multiple categories.
+Read the actual changed file contents with `git diff <base-branch>...HEAD -- <file>` to determine which patterns are present.
 
 Record which of the 9 categories are **relevant** (at least one changed file maps to them) and which are **skipped** (no changed files map to them).
 
@@ -89,12 +76,14 @@ For each **relevant** category identified in Step 4, extract all NEVER, MUST, an
 
 ## Step 6: Best-Practices Review
 
+Before evaluating, read the shared review rules in `.claude/references/plugin-review-guidance.md` and apply them throughout this step (deduplication, cache-key tracing).
+
 For each plugin detected in Step 3, review the changed code against the scoped guidelines from Step 5.
 
 For each finding:
 - Identify the **severity** (NEVER, MUST, or SHOULD)
 - Identify the **category** (e.g., "Manifest Design", "Route Design")
-- Cite the specific guideline being violated or satisfied. **Important:** For Interceptor Usage findings (Category 4), when evaluating cache configuration, trace `cacheKey` through to `execute()`/`executeStream()` call sites before flagging. The codebase commonly defines partial cache config in `defaults.ts` and injects `cacheKey` at the call site. Only flag as NEVER if no `cacheKey` is provided anywhere in the execution path.
+- Cite the specific guideline being violated or satisfied
 - Reference the exact file and line(s) involved
 - Provide a concrete fix if it is a violation
 
@@ -104,11 +93,7 @@ For each finding:
 
 For each plugin reviewed, output a section with the plugin name as the heading.
 
-**Order findings by severity, not by category:**
-
-1. **NEVER violations** (most critical) — these are security or breakage blockers
-2. **MUST violations** — these are correctness requirements
-3. **SHOULD violations** — these are quality recommendations
+Order findings by severity per the Severity Ordering rule in `plugin-review-guidance.md`.
 
 Each finding should follow this format:
 
