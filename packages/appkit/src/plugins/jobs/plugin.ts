@@ -440,16 +440,28 @@ class JobsPlugin extends Plugin {
             rawParams === null ||
             Array.isArray(rawParams))
         ) {
-          res
-            .status(400)
-            .json({
-              error: "params must be a plain object",
-              plugin: this.name,
-            });
+          res.status(400).json({
+            error: "params must be a plain object",
+            plugin: this.name,
+          });
           return;
         }
         const params = rawParams as Record<string, unknown> | undefined;
         const stream = req.query.stream === "true";
+
+        // Validate params eagerly so streaming requests get a clean 400
+        // instead of a generic SSE error event.
+        const jobConfig = this.jobConfigs[jobKey];
+        if (jobConfig?.params) {
+          const result = jobConfig.params.safeParse(params ?? {});
+          if (!result.success) {
+            res.status(400).json({
+              error: `Parameter validation failed for job "${jobKey}": ${result.error.message}`,
+              plugin: this.name,
+            });
+            return;
+          }
+        }
 
         try {
           const userPlugin = this.asUser(req) as JobsPlugin;
@@ -492,7 +504,10 @@ class JobsPlugin extends Plugin {
         const { jobKey } = this._resolveJob(req, res);
         if (!jobKey) return;
 
-        const limit = Number.parseInt(req.query.limit as string, 10) || 20;
+        const limit = Math.max(
+          1,
+          Math.min(Number.parseInt(req.query.limit as string, 10) || 20, 100),
+        );
 
         try {
           const userPlugin = this.asUser(req) as JobsPlugin;
@@ -518,7 +533,7 @@ class JobsPlugin extends Plugin {
         if (!jobKey) return;
 
         const runId = Number.parseInt(req.params.runId, 10);
-        if (Number.isNaN(runId)) {
+        if (Number.isNaN(runId) || runId <= 0) {
           res.status(400).json({ error: "Invalid runId", plugin: this.name });
           return;
         }
@@ -580,7 +595,7 @@ class JobsPlugin extends Plugin {
         if (!jobKey) return;
 
         const runId = Number.parseInt(req.params.runId, 10);
-        if (Number.isNaN(runId)) {
+        if (Number.isNaN(runId) || runId <= 0) {
           res.status(400).json({ error: "Invalid runId", plugin: this.name });
           return;
         }
