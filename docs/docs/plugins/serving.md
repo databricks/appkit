@@ -60,19 +60,9 @@ serving({
 
 ## Type generation
 
-The `appKitServingTypesPlugin()` Vite plugin generates TypeScript types from your serving endpoints' OpenAPI schemas. Add it to your `vite.config.ts`:
+The `appKitServingTypesPlugin()` Vite plugin generates TypeScript types from your serving endpoints' OpenAPI schemas. **No manual setup needed** — the AppKit dev server includes this plugin automatically.
 
-```ts
-import { appKitServingTypesPlugin } from "@databricks/appkit";
-
-export default defineConfig({
-  plugins: [
-    appKitServingTypesPlugin(),
-  ],
-});
-```
-
-The plugin auto-discovers endpoint configuration from your server file (`server/index.ts` or `server/server.ts`) — no manual config passing needed.
+The plugin auto-discovers endpoint configuration from your server file (`server/index.ts` or `server/server.ts`).
 
 Generated types provide:
 - **Alias autocomplete** in both backend (`AppKit.serving("alias")`) and frontend hooks (`useServingStream`, `useServingInvoke`)
