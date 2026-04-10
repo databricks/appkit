@@ -77,51 +77,30 @@ describe("Serving Connector", () => {
   });
 
   describe("stream", () => {
-    function createSSEStream(chunks: string[]) {
-      const body = `${chunks.join("\n")}\n`;
+    test("returns a ReadableStream from apiClient.request", async () => {
       const encoder = new TextEncoder();
-      return new ReadableStream<Uint8Array>({
+      const mockContents = new ReadableStream<Uint8Array>({
         start(controller) {
-          controller.enqueue(encoder.encode(body));
+          controller.enqueue(encoder.encode("data: {}\n\n"));
           controller.close();
         },
       });
-    }
-
-    test("yields parsed NDJSON chunks", async () => {
-      const chunks = [
-        'data: {"choices":[{"delta":{"content":"Hello"}}]}',
-        'data: {"choices":[{"delta":{"content":" world"}}]}',
-        "data: [DONE]",
-      ];
 
       const client = createMockClient();
-      client.apiClient.request.mockResolvedValue({
-        contents: createSSEStream(chunks),
-      });
+      client.apiClient.request.mockResolvedValue({ contents: mockContents });
 
-      const results: unknown[] = [];
-      for await (const chunk of stream(client, "my-endpoint", {
-        messages: [],
-      })) {
-        results.push(chunk);
-      }
+      const result = await stream(client, "my-endpoint", { messages: [] });
 
-      expect(results).toEqual([
-        { choices: [{ delta: { content: "Hello" } }] },
-        { choices: [{ delta: { content: " world" } }] },
-      ]);
+      expect(result).toBeInstanceOf(ReadableStream);
     });
 
     test("sends stream: true in payload via apiClient.request", async () => {
       const client = createMockClient();
       client.apiClient.request.mockResolvedValue({
-        contents: createSSEStream(["data: [DONE]"]),
+        contents: new ReadableStream(),
       });
 
-      for await (const _ of stream(client, "my-endpoint", { messages: [] })) {
-        // noop
-      }
+      await stream(client, "my-endpoint", { messages: [] });
 
       expect(client.apiClient.request).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -136,85 +115,25 @@ describe("Serving Connector", () => {
     test("strips user-provided stream and re-injects", async () => {
       const client = createMockClient();
       client.apiClient.request.mockResolvedValue({
-        contents: createSSEStream(["data: [DONE]"]),
+        contents: new ReadableStream(),
       });
 
-      for await (const _ of stream(client, "my-endpoint", {
+      await stream(client, "my-endpoint", {
         messages: [],
         stream: false,
-      })) {
-        // noop
-      }
+      });
 
       const payload = client.apiClient.request.mock.calls[0][0].payload;
       expect(payload.stream).toBe(true);
-    });
-
-    test("skips SSE comments and empty lines", async () => {
-      const chunks = [
-        ": this is a comment",
-        "",
-        'data: {"choices":[{"delta":{"content":"Hi"}}]}',
-        "",
-        "data: [DONE]",
-      ];
-
-      const client = createMockClient();
-      client.apiClient.request.mockResolvedValue({
-        contents: createSSEStream(chunks),
-      });
-
-      const results: unknown[] = [];
-      for await (const chunk of stream(client, "my-endpoint", {
-        messages: [],
-      })) {
-        results.push(chunk);
-      }
-
-      expect(results).toHaveLength(1);
-      expect(results[0]).toEqual({ choices: [{ delta: { content: "Hi" } }] });
     });
 
     test("throws when response has no contents", async () => {
       const client = createMockClient();
       client.apiClient.request.mockResolvedValue({ contents: null });
 
-      try {
-        for await (const _ of stream(client, "my-endpoint", {
-          messages: [],
-        })) {
-          // noop
-        }
-        expect.unreachable("Should have thrown");
-      } catch (err: any) {
-        expect(err.message).toContain("streaming not supported");
-      }
-    });
-
-    test("throws when buffer exceeds max size", async () => {
-      const client = createMockClient();
-      const largeData = "x".repeat(1024 * 1024 + 1);
-      const encoder = new TextEncoder();
-      const largeStream = new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(encoder.encode(largeData));
-          controller.close();
-        },
-      });
-      client.apiClient.request.mockResolvedValue({
-        contents: largeStream,
-      });
-
-      try {
-        for await (const _ of stream(client, "my-endpoint", {
-          messages: [],
-        })) {
-          // noop
-        }
-        expect.unreachable("Should have thrown");
-      } catch (err: any) {
-        expect(err.message).toContain("Stream buffer exceeded");
-      }
+      await expect(
+        stream(client, "my-endpoint", { messages: [] }),
+      ).rejects.toThrow("streaming not supported");
     });
   });
 });

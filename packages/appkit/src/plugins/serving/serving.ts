@@ -1,14 +1,15 @@
-import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import type express from "express";
-import type { IAppRouter, StreamExecutionSettings } from "shared";
+import type { IAppRouter } from "shared";
 import * as servingConnector from "../../connectors/serving/client";
 import { getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest, ResourceRequirement } from "../../registry";
 import { ResourceType } from "../../registry";
-import { servingInvokeDefaults, servingStreamDefaults } from "./defaults";
+import { servingInvokeDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import { filterRequestBody, loadEndpointSchemas } from "./schema-filter";
 import type {
@@ -220,32 +221,47 @@ export class ServingPlugin extends Plugin {
     }
 
     const timeout = this.config.timeout ?? 120_000;
-    const requestId =
-      (typeof req.query.requestId === "string" && req.query.requestId) ||
-      randomUUID();
-
-    const streamSettings: StreamExecutionSettings = {
-      ...servingStreamDefaults,
-      default: {
-        ...servingStreamDefaults.default,
-        timeout,
-      },
-      stream: {
-        ...servingStreamDefaults.stream,
-        streamId: requestId,
-      },
-    };
-
     const workspaceClient = getWorkspaceClient();
 
-    await this.executeStream(
-      res,
-      (signal) =>
-        servingConnector.stream(workspaceClient, endpoint.name, filteredBody, {
-          signal,
-        }),
-      streamSettings,
+    // Pipe raw SSE bytes from the upstream endpoint directly to the client.
+    // No parsing/re-serialization — the upstream response is already valid SSE.
+    let rawStream: ReadableStream<Uint8Array>;
+    try {
+      rawStream = await servingConnector.stream(
+        workspaceClient,
+        endpoint.name,
+        filteredBody,
+      );
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Streaming request failed";
+      res.status(502).json({ error: message });
+      return;
+    }
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Content-Encoding", "none");
+    res.flushHeaders();
+
+    const nodeStream = Readable.fromWeb(
+      rawStream as import("stream/web").ReadableStream,
     );
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => abortController.abort(), timeout);
+
+    req.on("close", () => abortController.abort());
+
+    try {
+      await pipeline(nodeStream, res, { signal: abortController.signal });
+    } catch (err) {
+      // AbortError is expected on client disconnect or timeout
+      if (err instanceof Error && err.name !== "AbortError") {
+        logger.warn("Stream pipe error: %s", err.message);
+      }
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   async invoke(alias: string, body: Record<string, unknown>): Promise<unknown> {
@@ -265,20 +281,6 @@ export class ServingPlugin extends Plugin {
     );
   }
 
-  async *stream(
-    alias: string,
-    body: Record<string, unknown>,
-  ): AsyncGenerator<unknown> {
-    const { endpoint, filteredBody } = this.resolveAndFilter(alias, body);
-    const workspaceClient = getWorkspaceClient();
-
-    yield* servingConnector.stream(
-      workspaceClient,
-      endpoint.name,
-      filteredBody,
-    );
-  }
-
   async shutdown(): Promise<void> {
     this.streamManager.abortAll();
   }
@@ -286,7 +288,6 @@ export class ServingPlugin extends Plugin {
   protected createEndpointAPI(alias: string): ServingEndpointMethods {
     return {
       invoke: (body: Record<string, unknown>) => this.invoke(alias, body),
-      stream: (body: Record<string, unknown>) => this.stream(alias, body),
     };
   }
 

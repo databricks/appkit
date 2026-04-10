@@ -1,3 +1,4 @@
+import { PassThrough } from "node:stream";
 import {
   createMockRequest,
   createMockResponse,
@@ -77,7 +78,6 @@ describe("Serving Plugin", () => {
       const plugin = new ServingPlugin({});
       const api = (plugin.exports() as any)();
       expect(api.invoke).toBeDefined();
-      expect(api.stream).toBeDefined();
     });
 
     test("injects /invoke and /stream routes", () => {
@@ -90,13 +90,12 @@ describe("Serving Plugin", () => {
       expect(handlers["POST:/stream"]).toBeDefined();
     });
 
-    test("exports returns a factory that provides invoke and stream", () => {
+    test("exports returns a factory that provides invoke", () => {
       const plugin = new ServingPlugin({});
       const factory = plugin.exports() as any;
       const api = factory();
 
       expect(typeof api.invoke).toBe("function");
-      expect(typeof api.stream).toBe("function");
     });
   });
 
@@ -118,14 +117,12 @@ describe("Serving Plugin", () => {
       expect(handlers["POST:/:alias/stream"]).toBeDefined();
     });
 
-    test("exports factory returns invoke and stream for named aliases", () => {
+    test("exports factory returns invoke for named aliases", () => {
       const plugin = new ServingPlugin(namedConfig);
       const factory = plugin.exports() as any;
 
       expect(typeof factory("llm").invoke).toBe("function");
-      expect(typeof factory("llm").stream).toBe("function");
       expect(typeof factory("embedder").invoke).toBe("function");
-      expect(typeof factory("embedder").stream).toBe("function");
     });
   });
 
@@ -243,6 +240,70 @@ describe("Serving Plugin", () => {
           "Endpoint 'default' is not configured: env var 'DATABRICKS_SERVING_ENDPOINT_NAME' is not set",
       });
     });
+
+    test("_handleStream pipes raw SSE bytes to response", async () => {
+      const ssePayload =
+        'data: {"choices":[{"delta":{"content":"Hi"}}]}\n\ndata: [DONE]\n\n';
+      const encoder = new TextEncoder();
+      const rawStream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(ssePayload));
+          controller.close();
+        },
+      });
+      mockStream.mockResolvedValue(rawStream);
+
+      const plugin = new ServingPlugin({});
+      const req = createMockRequest({
+        params: { alias: "default" },
+        body: { messages: [{ role: "user", content: "Hello" }] },
+        query: {},
+      });
+      // Add req.on for client disconnect handling
+      req.on = vi.fn();
+
+      // Use a real writable stream so pipeline() works
+      const output = new PassThrough();
+      const chunks: Buffer[] = [];
+      output.on("data", (chunk: Buffer) => chunks.push(chunk));
+
+      const res = Object.assign(output, {
+        setHeader: vi.fn(),
+        flushHeaders: vi.fn(),
+      });
+
+      await plugin._handleStream(req as any, res as any);
+
+      expect(res.setHeader).toHaveBeenCalledWith(
+        "Content-Type",
+        "text/event-stream",
+      );
+      expect(res.setHeader).toHaveBeenCalledWith("Cache-Control", "no-cache");
+      expect(mockStream).toHaveBeenCalledWith(
+        expect.anything(),
+        "test-endpoint",
+        { messages: [{ role: "user", content: "Hello" }] },
+      );
+      const written = Buffer.concat(chunks).toString();
+      expect(written).toBe(ssePayload);
+    });
+
+    test("_handleStream returns 502 when stream fails", async () => {
+      mockStream.mockRejectedValue(new Error("Connection refused"));
+
+      const plugin = new ServingPlugin({});
+      const req = createMockRequest({
+        params: { alias: "default" },
+        body: { messages: [] },
+        query: {},
+      });
+      const res = createMockResponse();
+
+      await plugin._handleStream(req as any, res as any);
+
+      expect(res.status).toHaveBeenCalledWith(502);
+      expect(res.json).toHaveBeenCalledWith({ error: "Connection refused" });
+    });
   });
 
   describe("getResourceRequirements", () => {
@@ -299,27 +360,6 @@ describe("Serving Plugin", () => {
       await expect(plugin.invoke("unknown", { messages: [] })).rejects.toThrow(
         "Unknown endpoint alias: unknown",
       );
-    });
-
-    test("stream yields chunks from connector", async () => {
-      const chunks = [
-        { choices: [{ delta: { content: "Hello" } }] },
-        { choices: [{ delta: { content: " world" } }] },
-      ];
-
-      mockStream.mockImplementation(async function* () {
-        for (const chunk of chunks) {
-          yield chunk;
-        }
-      });
-
-      const plugin = new ServingPlugin({});
-      const results: unknown[] = [];
-      for await (const chunk of plugin.stream("default", { messages: [] })) {
-        results.push(chunk);
-      }
-
-      expect(results).toEqual(chunks);
     });
   });
 
