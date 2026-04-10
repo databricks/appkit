@@ -129,16 +129,22 @@ Since HTTP routes always execute as the service principal, removing a user's UC 
 
 :::
 
+:::info New in v0.21.0
+
+File policies are new. Volumes without an explicit policy now default to `publicRead()`, which **denies all write operations** (`upload`, `mkdir`, `delete`). If your app relies on write access, set an explicit policy — for example `files.policy.allowAll()` — on each volume that needs it.
+
+:::
+
 #### Access policies
 
 Attach a policy to a volume to control which actions are allowed:
 
 ```ts
-import { files, policy } from "@databricks/appkit";
+import { files } from "@databricks/appkit";
 
 files({
   volumes: {
-    uploads: { policy: policy.publicRead() },
+    uploads: { policy: files.policy.publicRead() },
   },
 });
 ```
@@ -156,26 +162,26 @@ Policies receive an action string. The full list, split by category:
 
 | Helper | Allows | Denies |
 |--------|--------|--------|
-| `policy.publicRead()` | all read actions | all write actions |
-| `policy.allowAll()` | everything | nothing |
-| `policy.denyAll()` | nothing | everything |
+| `files.policy.publicRead()` | all read actions | all write actions |
+| `files.policy.allowAll()` | everything | nothing |
+| `files.policy.denyAll()` | nothing | everything |
 
 #### Composing policies
 
 Combine built-in and custom policies with three combinators:
 
-- **`policy.all(a, b)`** — AND: all policies must allow. Short-circuits on first denial.
-- **`policy.any(a, b)`** — OR: at least one policy must allow. Short-circuits on first allow.
-- **`policy.not(p)`** — Inverts a policy. For example, `not(publicRead())` yields a write-only policy (useful for ingestion/drop-box volumes).
+- **`files.policy.all(a, b)`** — AND: all policies must allow. Short-circuits on first denial.
+- **`files.policy.any(a, b)`** — OR: at least one policy must allow. Short-circuits on first allow.
+- **`files.policy.not(p)`** — Inverts a policy. For example, `not(publicRead())` yields a write-only policy (useful for ingestion/drop-box volumes).
 
 ```ts
 // Read-only for regular users, full access for the service principal
 files({
   volumes: {
     shared: {
-      policy: policy.any(
+      policy: files.policy.any(
         (_action, _resource, user) => !!user.isServicePrincipal,
-        policy.publicRead(),
+        files.policy.publicRead(),
       ),
     },
   },
@@ -205,9 +211,9 @@ files({
 
 #### Enforcement
 
-- **HTTP routes**: Policy checked before every operation. Denied → `403` JSON response with `"Action denied by volume policy"`.
+- **HTTP routes**: Policy checked before every operation. Denied → `403` JSON response with `Policy denied "{action}" on volume "{volumeKey}"`.
 - **Programmatic API**: Policy checked on both `appkit.files("vol").list()` (SP identity, `isServicePrincipal: true`) and `appkit.files("vol").asUser(req).list()` (user identity). Denied → throws `PolicyDeniedError`.
-- **No policy configured**: Defaults to `publicRead()` — read actions are allowed, write actions are denied. A startup warning is logged encouraging you to set an explicit policy.
+- **No policy configured**: Defaults to `files.policy.publicRead()` — read actions are allowed, write actions are denied. A startup warning is logged encouraging you to set an explicit policy.
 
 ### Custom content types
 
@@ -227,7 +233,7 @@ Dangerous MIME types (`text/html`, `text/javascript`, `application/javascript`, 
 
 ## HTTP routes
 
-Routes are mounted at `/api/files/*`. All routes except `/volumes` execute in user context via `asUser(req)`.
+Routes are mounted at `/api/files/*`. All routes execute as the service principal. Policy enforcement checks user identity (from the `x-forwarded-user` header) before allowing operations — see [Access policies](#access-policies).
 
 | Method | Path                       | Query / Body                 | Response                                          |
 | ------ | -------------------------- | ---------------------------- | ------------------------------------------------- |
@@ -414,7 +420,7 @@ Built-in extensions: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.bmp`, `
 
 ## User context
 
-Routes use `this.asUser(req)` so operations execute with the requesting user's Databricks credentials (on-behalf-of / OBO). The `/volumes` route is the only exception since it only reads plugin config.
+HTTP routes always execute as the **service principal** — the SP's Databricks credentials are used for all API calls. User identity is extracted from the `x-forwarded-user` header and passed to the volume's [access policy](#access-policies) for authorization. This means UC grants on the SP (not individual users) determine what operations are possible, while policies control what each user is allowed to do through the app.
 
 The programmatic API returns a `VolumeHandle` that exposes all `VolumeAPI` methods directly (service principal) and an `asUser(req)` method for OBO access. Calling any method without `asUser()` logs a warning encouraging OBO usage but does not throw. OBO access is strongly recommended for production use.
 

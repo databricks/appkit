@@ -58,6 +58,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Class.PolicyDeniedError",
+          label: "PolicyDeniedError"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Class.ResourceRegistry",
           label: "ResourceRegistry"
         },
@@ -101,6 +106,16 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.EndpointConfig",
           label: "EndpointConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.FilePolicyUser",
+          label: "FilePolicyUser"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.FileResource",
+          label: "FileResource"
         },
         {
           type: "doc",
@@ -190,6 +205,16 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.FileAction",
+          label: "FileAction"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.FilePolicy",
+          label: "FilePolicy"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.IAppRouter",
           label: "IAppRouter"
         },
@@ -221,13 +246,18 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
-          id: "api/appkit/Variable.policy",
-          label: "policy"
+          id: "api/appkit/Variable.READ_ACTIONS",
+          label: "READ_ACTIONS"
         },
         {
           type: "doc",
           id: "api/appkit/Variable.sql",
           label: "sql"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Variable.WRITE_ACTIONS",
+          label: "WRITE_ACTIONS"
         }
       ]
     },

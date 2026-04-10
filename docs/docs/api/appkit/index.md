@@ -21,6 +21,7 @@ plugin architecture, and React integration.
 | [ExecutionError](Class.ExecutionError.md) | Error thrown when an operation execution fails. Use for statement failures, canceled operations, or unexpected states. |
 | [InitializationError](Class.InitializationError.md) | Error thrown when a service or component is not properly initialized. Use when accessing services before they are ready. |
 | [Plugin](Class.Plugin.md) | Base abstract class for creating AppKit plugins. |
+| [PolicyDeniedError](Class.PolicyDeniedError.md) | Thrown when a policy denies an action. |
 | [ResourceRegistry](Class.ResourceRegistry.md) | Central registry for tracking plugin resource requirements. Deduplication uses type + resourceKey (machine-stable); alias is for display only. |
 | [ServerError](Class.ServerError.md) | Error thrown when server lifecycle operations fail. Use for server start/stop issues, configuration conflicts, etc. |
 | [TunnelError](Class.TunnelError.md) | Error thrown when remote tunnel operations fail. Use for tunnel connection issues, message parsing failures, etc. |
@@ -34,6 +35,8 @@ plugin architecture, and React integration.
 | [CacheConfig](Interface.CacheConfig.md) | Configuration for the CacheInterceptor. Controls TTL, size limits, storage backend, and probabilistic cleanup. |
 | [DatabaseCredential](Interface.DatabaseCredential.md) | Database credentials with OAuth token for Postgres connection |
 | [EndpointConfig](Interface.EndpointConfig.md) | - |
+| [FilePolicyUser](Interface.FilePolicyUser.md) | Minimal user identity passed to the policy function. |
+| [FileResource](Interface.FileResource.md) | Describes the file or directory being acted upon. |
 | [GenerateDatabaseCredentialRequest](Interface.GenerateDatabaseCredentialRequest.md) | Request parameters for generating database OAuth credentials |
 | [ITelemetry](Interface.ITelemetry.md) | Plugin-facing interface for OpenTelemetry instrumentation. Provides a thin abstraction over OpenTelemetry APIs for plugins. |
 | [LakebasePoolConfig](Interface.LakebasePoolConfig.md) | Configuration for creating a Lakebase connection pool |
@@ -55,6 +58,8 @@ plugin architecture, and React integration.
 | ------ | ------ |
 | [ConfigSchema](TypeAlias.ConfigSchema.md) | Configuration schema definition for plugin config. Re-exported from the standard JSON Schema Draft 7 types. |
 | [ExecutionResult](TypeAlias.ExecutionResult.md) | Discriminated union for plugin execution results. |
+| [FileAction](TypeAlias.FileAction.md) | Every action the files plugin can perform. |
+| [FilePolicy](TypeAlias.FilePolicy.md) | A policy function that decides whether `user` may perform `action` on `resource`. Return `true` to allow, `false` to deny. |
 | [IAppRouter](TypeAlias.IAppRouter.md) | Express router type for plugin route registration |
 | [PluginData](TypeAlias.PluginData.md) | Tuple of plugin class, config, and name. Created by `toPlugin()` and passed to `createApp()`. |
 | [ResourcePermission](TypeAlias.ResourcePermission.md) | Union of all possible permission levels across all resource types. |
@@ -65,8 +70,9 @@ plugin architecture, and React integration.
 
 | Variable | Description |
 | ------ | ------ |
-| [policy](Variable.policy.md) | Utility namespace with common policy combinators. |
+| [READ\_ACTIONS](Variable.READ_ACTIONS.md) | Actions that only read data. |
 | [sql](Variable.sql.md) | SQL helper namespace |
+| [WRITE\_ACTIONS](Variable.WRITE_ACTIONS.md) | Actions that mutate data. |
 
 ## Functions
 

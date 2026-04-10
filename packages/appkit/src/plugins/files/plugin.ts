@@ -108,7 +108,7 @@ export class FilesPlugin extends Plugin {
    * Extract user identity from the request.
    * Falls back to `getCurrentUserId()` in development mode.
    */
-  private _extractUser(req: import("express").Request): FilePolicyUser {
+  private _extractUser(req: express.Request): FilePolicyUser {
     const userId = req.header("x-forwarded-user");
     if (userId) return { id: userId };
     if (process.env.NODE_ENV === "development") {
@@ -165,8 +165,8 @@ export class FilesPlugin extends Plugin {
    * Returns `true` if the request may proceed, `false` if a response was sent.
    */
   private async _enforcePolicy(
-    req: import("express").Request,
-    res: import("express").Response,
+    req: express.Request,
+    res: express.Response,
     volumeKey: string,
     action: FileAction,
     path: string,
@@ -471,46 +471,6 @@ export class FilesPlugin extends Plugin {
       getCurrentUserId(),
     );
     this.cache.delete(listKey);
-  }
-
-  /**
-   * Like `execute()`, but re-throws Databricks API client errors (4xx)
-   * so route handlers can return the appropriate HTTP status via `_handleApiError`.
-   *
-   * Server errors and infrastructure failures are still swallowed (returns `undefined`).
-   */
-  private async _executeOrThrow<T>(
-    fn: (signal?: AbortSignal) => Promise<T>,
-    options: PluginExecutionSettings,
-    userKey?: string,
-  ): Promise<T | undefined> {
-    let capturedClientError: unknown;
-
-    const result = await this.execute<T>(
-      async (signal) => {
-        try {
-          return await fn(signal);
-        } catch (error) {
-          if (
-            error instanceof ApiError &&
-            error.statusCode !== undefined &&
-            error.statusCode >= 400 &&
-            error.statusCode < 500
-          ) {
-            capturedClientError = error;
-          }
-          throw error;
-        }
-      },
-      options,
-      userKey,
-    );
-
-    if (result === undefined && capturedClientError) {
-      throw capturedClientError;
-    }
-
-    return result;
   }
 
   private _handleApiError(
@@ -1167,7 +1127,7 @@ export class FilesPlugin extends Plugin {
 
       return {
         ...spApi,
-        asUser: (req: import("express").Request) => {
+        asUser: (req: express.Request) => {
           const user = this._extractUser(req);
           return this._createPolicyWrappedAPI(volumeKey, user);
         },
@@ -1189,4 +1149,4 @@ export class FilesPlugin extends Plugin {
 /**
  * @internal
  */
-export const files = toPlugin(FilesPlugin);
+export const files = Object.assign(toPlugin(FilesPlugin), { policy });
