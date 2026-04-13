@@ -7,7 +7,11 @@ sidebar_position: 7
 If you need custom API routes or background logic, implement an AppKit plugin. The fastest way is to use the CLI:
 
 ```bash
+# Interactive
 npx @databricks/appkit plugin create
+
+# Non-interactive
+npx @databricks/appkit plugin create --placement in-repo --path plugins/my-plugin --name my-plugin --description "My plugin" --force
 ```
 
 For a deeper understanding of the plugin structure, read on.
