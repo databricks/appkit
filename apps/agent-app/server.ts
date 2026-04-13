@@ -8,14 +8,21 @@ const port = Number(process.env.DATABRICKS_APP_PORT) || 8003;
 
 createAgent({
   plugins: [analytics(), files()],
+  tools: [
+    {
+      type: "external_mcp_server",
+      external_mcp_server: { connection_name: "confluence-mcp-dogfood" },
+    },
+  ],
   adapter: DatabricksAdapter.fromServingEndpoint({
     workspaceClient: new WorkspaceClient({}),
     endpointName,
     systemPrompt: [
       "You are a helpful data assistant running on Databricks.",
-      "Use the available tools to query data, browse files, and help users with their analysis.",
+      "Use the available tools to query data, browse files, search Confluence, and help users with their analysis.",
       "When using analytics.query, write Databricks SQL.",
       "When results are large, summarize the key findings rather than dumping raw data.",
+      "You have access to Confluence — use it when users ask about documentation or internal knowledge.",
     ].join(" "),
   }),
   port,

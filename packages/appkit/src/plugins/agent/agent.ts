@@ -161,26 +161,45 @@ export class AgentPlugin extends Plugin {
   private async connectHostedTools(
     hostedTools: import("./tools/hosted-tools").HostedTool[],
   ) {
-    const host = process.env.DATABRICKS_HOST;
+    let host: string | undefined;
+    let authenticate: () => Promise<Record<string, string>>;
+
+    try {
+      const { getWorkspaceClient } = await import("../../context");
+      const wsClient = getWorkspaceClient();
+      await wsClient.config.ensureResolved();
+      host = wsClient.config.host;
+      authenticate = async (): Promise<Record<string, string>> => {
+        const headers = new Headers();
+        await wsClient.config.authenticate(headers);
+        return Object.fromEntries(headers.entries());
+      };
+    } catch {
+      host = process.env.DATABRICKS_HOST;
+      authenticate = async (): Promise<Record<string, string>> => {
+        const token = process.env.DATABRICKS_TOKEN;
+        if (token) return { Authorization: `Bearer ${token}` };
+        return {};
+      };
+    }
+
     if (!host) {
       logger.warn(
-        "DATABRICKS_HOST not set — skipping %d hosted tools",
+        "No Databricks host available — skipping %d hosted tools",
         hostedTools.length,
       );
       return;
     }
 
-    this.mcpClient = new AppKitMcpClient(
-      host,
-      async (): Promise<Record<string, string>> => {
-        const token = process.env.DATABRICKS_TOKEN;
-        if (token) return { Authorization: `Bearer ${token}` };
-        return {};
-      },
-    );
+    this.mcpClient = new AppKitMcpClient(host, authenticate);
 
     const endpoints = resolveHostedTools(hostedTools);
-    await this.mcpClient.connectAll(endpoints);
+    try {
+      await this.mcpClient.connectAll(endpoints);
+    } catch (error) {
+      logger.error("Failed to connect hosted tools: %O", error);
+      return;
+    }
 
     for (const def of this.mcpClient.getAllToolDefinitions()) {
       this.toolIndex.set(def.name, {
@@ -189,6 +208,12 @@ export class AgentPlugin extends Plugin {
         def,
       });
     }
+
+    logger.info(
+      "Connected %d MCP tools from %d hosted tool(s)",
+      this.mcpClient.getAllToolDefinitions().length,
+      hostedTools.length,
+    );
   }
 
   private addFunctionToolToIndex(ft: FunctionTool) {

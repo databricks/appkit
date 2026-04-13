@@ -93,3 +93,13 @@ optional telemetry: TelemetryConfig;
 ```
 
 Telemetry configuration.
+
+***
+
+### tools?
+
+```ts
+optional tools: AgentTool[];
+```
+
+Explicit tools (FunctionTool, HostedTool) alongside auto-discovered ToolProvider tools.

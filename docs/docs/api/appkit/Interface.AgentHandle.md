@@ -2,6 +2,26 @@
 
 ## Properties
 
+### addTools()
+
+```ts
+addTools: (tools: FunctionTool[]) => void;
+```
+
+Add function tools at runtime (HostedTools must be configured at setup).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `tools` | [`FunctionTool`](Interface.FunctionTool.md)[] |
+
+#### Returns
+
+`void`
+
+***
+
 ### getThreads()
 
 ```ts
