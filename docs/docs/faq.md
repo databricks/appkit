@@ -25,13 +25,21 @@ Stay tuned for new plugins as we constantly expand integrations!
 
 Yes. AppKit's plugin architecture is extensible - you can create custom plugins using the CLI (`npx appkit plugin create`) or manually. See the [creating custom plugins guide](./plugins/custom-plugins).
 
+## Authentication
+
+### How does authentication work in AppKit apps?
+
+AppKit apps are designed to run on [Databricks Apps](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/), which handles user authentication and authorization. Databricks Apps forwards user identity to the app via request headers, and AppKit integrates with this through the `.asUser(req)` pattern for on-behalf-of (OBO) execution — allowing plugins to act on behalf of the authenticated user.
+
+For details on how authentication and authorization work in Databricks Apps, see the [official auth documentation](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/auth).
+
 ## Databases
 
 *Also: Lakebase, PostgreSQL, OLTP*
 
 ### How does AppKit handle databases?
 
-AppKit is a Node.js + React SDK and does not manage databases directly.
+AppKit is a TypeScript SDK (Express + React) and does not manage databases directly.
 
 To add database support, use the [Lakebase plugin](./plugins/lakebase), which integrates with Lakebase Autoscaling.
 
