@@ -335,7 +335,12 @@ export class AgentPlugin extends Plugin {
               if (!self.mcpClient) {
                 throw new Error("MCP client not connected");
               }
-              return self.mcpClient.callTool(entry.mcpToolName, args);
+              const oboToken = req.headers["x-forwarded-access-token"];
+              const mcpAuth =
+                typeof oboToken === "string"
+                  ? { Authorization: `Bearer ${oboToken}` }
+                  : undefined;
+              return self.mcpClient.callTool(entry.mcpToolName, args, mcpAuth);
             }
           }
         },

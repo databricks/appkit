@@ -104,7 +104,11 @@ export class AppKitMcpClient {
     return defs;
   }
 
-  async callTool(qualifiedName: string, args: unknown): Promise<string> {
+  async callTool(
+    qualifiedName: string,
+    args: unknown,
+    authHeaders?: Record<string, string>,
+  ): Promise<string> {
     const parts = qualifiedName.split(".");
     if (parts.length < 3 || parts[0] !== "mcp") {
       throw new Error(`Invalid MCP tool name: ${qualifiedName}`);
@@ -117,10 +121,12 @@ export class AppKitMcpClient {
       throw new Error(`MCP server not connected: ${serverName}`);
     }
 
-    const result = (await this.sendRpc(conn.config.path, "tools/call", {
-      name: toolName,
-      arguments: args,
-    })) as McpToolCallResult;
+    const result = (await this.sendRpc(
+      conn.config.path,
+      "tools/call",
+      { name: toolName, arguments: args },
+      authHeaders,
+    )) as McpToolCallResult;
 
     if (result.isError) {
       const errText = result.content
@@ -145,6 +151,7 @@ export class AppKitMcpClient {
     path: string,
     method: string,
     params?: Record<string, unknown>,
+    authOverride?: Record<string, string>,
   ): Promise<unknown> {
     if (this.closed) throw new Error("MCP client is closed");
 
@@ -156,7 +163,7 @@ export class AppKitMcpClient {
     };
 
     const url = `${this.workspaceHost}${path}`;
-    const authHeaders = await this.authenticate();
+    const authHeaders = authOverride ?? (await this.authenticate());
 
     const response = await fetch(url, {
       method: "POST",

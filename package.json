@@ -14,6 +14,7 @@
     "generate:app-templates": "tsx tools/generate-app-templates.ts",
     "check:licenses": "tsx tools/check-licenses.ts",
     "build:notice": "tsx tools/build-notice.ts > NOTICE.md",
+    "deploy:agent": "pnpm pack:sdk && tsx tools/deploy-agent-app.ts",
     "deploy:playground": "pnpm pack:sdk && tsx tools/playground/deploy-playground.ts",
     "clean:full": "rm -rf node_modules dist coverage && pnpm -r clean:full",
     "clean": "pnpm -r clean",

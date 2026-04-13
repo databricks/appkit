@@ -7,6 +7,8 @@ import type {
   PluginData,
 } from "shared";
 import { agent } from "../plugins/agent";
+import type { FunctionTool } from "../plugins/agent/tools/function-tool";
+import type { AgentTool } from "../plugins/agent/types";
 import { server } from "../plugins/server";
 import type { TelemetryConfig } from "../telemetry";
 import { createApp } from "./appkit";
@@ -28,6 +30,8 @@ export interface CreateAgentConfig {
   telemetry?: TelemetryConfig;
   /** Cache configuration. */
   cache?: CacheConfig;
+  /** Explicit tools (FunctionTool, HostedTool) alongside auto-discovered ToolProvider tools. */
+  tools?: AgentTool[];
   /** Pre-configured WorkspaceClient. */
   client?: WorkspaceClient;
 }
@@ -35,6 +39,8 @@ export interface CreateAgentConfig {
 export interface AgentHandle {
   /** Register an additional agent at runtime. */
   registerAgent: (name: string, adapter: AgentAdapter) => void;
+  /** Add function tools at runtime (HostedTools must be configured at setup). */
+  addTools: (tools: FunctionTool[]) => void;
   /** Get all tool definitions available to agents. */
   getTools: () => AgentToolDefinition[];
   /** List threads for a user. */
@@ -98,6 +104,7 @@ export async function createAgent(
       agent({
         agents,
         defaultAgent: config.defaultAgent,
+        tools: config.tools,
       }),
       ...(config.plugins ?? []),
       server({
@@ -123,6 +130,7 @@ export async function createAgent(
 
   return {
     registerAgent: agentExports.registerAgent,
+    addTools: agentExports.addTools,
     getTools: agentExports.getTools,
     getThreads: agentExports.getThreads,
     plugins,

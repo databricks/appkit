@@ -203,4 +203,41 @@ describe("createAgent", () => {
     handle.registerAgent("second", createMockAdapter());
     expect(handle.getTools).toBeTypeOf("function");
   });
+
+  test("tools config is forwarded to agent plugin", async () => {
+    const handle = await createAgent({
+      adapter: createMockAdapter(),
+      tools: [
+        {
+          type: "function" as const,
+          name: "greet",
+          description: "Say hello",
+          parameters: { type: "object", properties: {} },
+          execute: async () => "hello",
+        },
+      ],
+    });
+
+    const tools = handle.getTools();
+    expect(tools.some((t) => t.name === "greet")).toBe(true);
+  });
+
+  test("addTools is exposed on AgentHandle", async () => {
+    const handle = await createAgent({
+      adapter: createMockAdapter(),
+    });
+
+    expect(handle.addTools).toBeTypeOf("function");
+
+    handle.addTools([
+      {
+        type: "function" as const,
+        name: "farewell",
+        execute: async () => "bye",
+      },
+    ]);
+
+    const tools = handle.getTools();
+    expect(tools.some((t) => t.name === "farewell")).toBe(true);
+  });
 });
