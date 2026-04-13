@@ -91,6 +91,7 @@ describe("generateServingTypes", () => {
   const outFile = "/tmp/test-serving-types.d.ts";
 
   beforeEach(() => {
+    vi.mocked(fs.mkdir).mockResolvedValue(undefined);
     vi.mocked(fs.writeFile).mockResolvedValue();
     process.env.TEST_SERVING_ENDPOINT = "my-endpoint";
   });

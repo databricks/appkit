@@ -23,7 +23,8 @@ async function runGenerateTypes(
 
     if (resolvedWarehouseId) {
       const resolvedOutFile =
-        outFile || path.join(process.cwd(), "client/src/appKitTypes.d.ts");
+        outFile ||
+        path.join(process.cwd(), "client/src/appkit-types/analytics.d.ts");
 
       const queryFolder = path.join(resolvedRootDir, "config/queries");
       if (fs.existsSync(queryFolder)) {
@@ -44,7 +45,7 @@ async function runGenerateTypes(
     // Generate serving endpoint types (no warehouse required)
     const servingOutFile = path.join(
       process.cwd(),
-      "client/src/appKitServingTypes.d.ts",
+      "client/src/appkit-types/serving.d.ts",
     );
     await typeGen.generateServingTypes({
       outFile: servingOutFile,
@@ -72,7 +73,7 @@ export const generateTypesCommand = new Command("generate-types")
   .argument(
     "[outFile]",
     "Output file path",
-    path.join(process.cwd(), "client/src/appKitTypes.d.ts"),
+    path.join(process.cwd(), "client/src/appkit-types/analytics.d.ts"),
   )
   .argument("[warehouseId]", "Databricks warehouse ID")
   .option("--no-cache", "Disable caching for type generation")

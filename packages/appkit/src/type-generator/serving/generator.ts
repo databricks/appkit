@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import pc from "picocolors";
 import { createLogger } from "../../logging/logger";
@@ -73,6 +74,7 @@ export async function generateServingTypes(
   printLogTable(logEntries, startTime);
 
   const output = generateTypeDeclarations(registryEntries);
+  await fs.mkdir(path.dirname(outFile), { recursive: true });
   await fs.writeFile(outFile, output, "utf-8");
 
   if (registryEntries.length === 0) {

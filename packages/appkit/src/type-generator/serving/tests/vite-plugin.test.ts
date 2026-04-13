@@ -79,7 +79,7 @@ describe("appKitServingTypesPlugin", () => {
       expect(mockGenerateServingTypes).toHaveBeenCalledWith(
         expect.objectContaining({
           outFile: expect.stringContaining(
-            "/app/client/src/appKitServingTypes.d.ts",
+            "/app/client/src/appkit-types/serving.d.ts",
           ),
         }),
       );

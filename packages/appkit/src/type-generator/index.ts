@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import dotenv from "dotenv";
 import { createLogger } from "../logging/logger";
 import { generateQueriesFromDescribe } from "./query-registry";
@@ -83,6 +84,7 @@ export async function generateFromEntryPoint(options: {
 
   const typeDeclarations = generateTypeDeclarations(queryRegistry);
 
+  await fs.mkdir(path.dirname(outFile), { recursive: true });
   await fs.writeFile(outFile, typeDeclarations, "utf-8");
 
   logger.debug("Type generation complete!");
@@ -92,3 +94,10 @@ export async function generateFromEntryPoint(options: {
 // A local binding ensures the serving vite plugin's import keeps this in the dependency graph,
 // mirroring how generateFromEntryPoint (also defined here) is preserved via the analytics vite plugin.
 export const generateServingTypes = generateServingTypesImpl;
+
+/** Directory name for generated AppKit type declaration files. */
+export const TYPES_DIR = "appkit-types";
+/** Default filename for analytics query type declarations. */
+export const ANALYTICS_TYPES_FILE = "analytics.d.ts";
+/** Default filename for serving endpoint type declarations. */
+export const SERVING_TYPES_FILE = "serving.d.ts";
