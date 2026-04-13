@@ -483,6 +483,65 @@ describe("Analytics Plugin", () => {
       );
     });
 
+    test("OBO cache key must use the end user's ID, not the service principal's", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM my_data",
+        isAsUser: true,
+      });
+
+      const executeMock = vi
+        .fn()
+        .mockResolvedValueOnce({
+          result: { data: [{ owner: "alice-data" }] },
+        })
+        .mockResolvedValueOnce({
+          result: { data: [{ owner: "bob-data" }] },
+        });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/query/:query_key");
+
+      // User Alice makes an OBO query
+      const aliceReq = createMockRequest({
+        params: { query_key: "my_data" },
+        body: { parameters: {} },
+        headers: {
+          "x-forwarded-access-token": "alice-token",
+          "x-forwarded-user": "alice",
+        },
+      });
+      const aliceRes = createMockResponse();
+      await handler(aliceReq, aliceRes);
+
+      // User Bob makes the SAME OBO query with the SAME parameters
+      const bobReq = createMockRequest({
+        params: { query_key: "my_data" },
+        body: { parameters: {} },
+        headers: {
+          "x-forwarded-access-token": "bob-token",
+          "x-forwarded-user": "bob",
+        },
+      });
+      const bobRes = createMockResponse();
+      await handler(bobReq, bobRes);
+
+      // Both queries must execute — different users must not share OBO cache
+      expect(executeMock).toHaveBeenCalledTimes(2);
+
+      // Alice sees her own data
+      expect(aliceRes.write).toHaveBeenCalledWith(
+        expect.stringContaining('"owner":"alice-data"'),
+      );
+      // Bob sees his own data, NOT Alice's cached result
+      expect(bobRes.write).toHaveBeenCalledWith(
+        expect.stringContaining('"owner":"bob-data"'),
+      );
+    });
+
     test("should handle AbortSignal cancellation", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
