@@ -13,14 +13,12 @@ export interface StreamConfig {
   maxActiveStreams?: number;
 }
 
-/** Retry configuration for the RetryInterceptor. Uses exponential backoff with jitter between attempts. */
+/** Retry configuration for the RetryInterceptor. Uses exponential backoff with full jitter between attempts. */
 export interface RetryConfig {
   enabled?: boolean;
   attempts?: number;
   initialDelay?: number;
   maxDelay?: number;
-  /** Whether to add random jitter to retry delays to avoid thundering herd. Defaults to `true`. */
-  jitter?: boolean;
 }
 
 /** Telemetry configuration for the TelemetryInterceptor. Controls span creation and custom attributes. */
