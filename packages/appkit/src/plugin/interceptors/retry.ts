@@ -9,11 +9,13 @@ export class RetryInterceptor implements ExecutionInterceptor {
   private attempts: number;
   private initialDelay: number;
   private maxDelay: number;
+  private jitter: boolean;
 
   constructor(config: RetryConfig) {
     this.attempts = config.attempts ?? 3;
     this.initialDelay = config.initialDelay ?? 1000;
     this.maxDelay = config.maxDelay ?? 30000;
+    this.jitter = config.jitter ?? true;
   }
 
   async intercept<T>(
@@ -59,11 +61,13 @@ export class RetryInterceptor implements ExecutionInterceptor {
   }
 
   private calculateDelay(attempt: number): number {
-    // exponential backoff
     const delay = this.initialDelay * 2 ** (attempt - 1);
+    const capped = Math.min(delay, this.maxDelay);
 
-    // max delay cap
-    return Math.min(delay, this.maxDelay);
+    if (!this.jitter) return capped;
+
+    // Full jitter: random value between 50% and 100% of the calculated delay
+    return capped * (0.5 + Math.random() * 0.5);
   }
 
   private sleep(ms: number): Promise<void> {

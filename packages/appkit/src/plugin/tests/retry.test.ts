@@ -77,11 +77,12 @@ describe("RetryInterceptor", () => {
     expect(fn).toHaveBeenCalledTimes(3);
   });
 
-  test("should use exponential backoff", async () => {
+  test("should use exponential backoff with jitter disabled", async () => {
     const config: RetryConfig = {
       enabled: true,
       attempts: 4,
       initialDelay: 1000,
+      jitter: false,
     };
     const interceptor = new RetryInterceptor(config);
     const fn = vi
@@ -111,7 +112,8 @@ describe("RetryInterceptor", () => {
       enabled: true,
       attempts: 10,
       initialDelay: 1000,
-      maxDelay: 5000, // Cap at 5 seconds
+      maxDelay: 5000,
+      jitter: false,
     };
     const interceptor = new RetryInterceptor(config);
     const fn = vi.fn().mockRejectedValue(new Error("fail"));
@@ -169,5 +171,70 @@ describe("RetryInterceptor", () => {
 
     await expect(interceptor.intercept(fn, context)).rejects.toThrow("fail");
     expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  test("should add jitter to delay by default", async () => {
+    const config: RetryConfig = {
+      enabled: true,
+      attempts: 3,
+      initialDelay: 1000,
+    };
+    const interceptor = new RetryInterceptor(config);
+
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("fail 1"))
+      .mockResolvedValue("success");
+
+    interceptor.intercept(fn, context);
+
+    // With jitter: delay = 1000 * (0.5 + 0.5 * 0.5) = 750ms
+    await vi.advanceTimersByTimeAsync(749);
+    expect(fn).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fn).toHaveBeenCalledTimes(2);
+
+    vi.spyOn(Math, "random").mockRestore();
+  });
+
+  test("should produce delays between 50% and 100% of base delay with jitter", async () => {
+    const config: RetryConfig = {
+      enabled: true,
+      attempts: 3,
+      initialDelay: 1000,
+    };
+
+    // At Math.random() = 0, delay = 1000 * (0.5 + 0) = 500ms (minimum)
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const interceptorMin = new RetryInterceptor(config);
+    const fnMin = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("fail"))
+      .mockResolvedValue("ok");
+
+    interceptorMin.intercept(fnMin, context);
+    await vi.advanceTimersByTimeAsync(499);
+    expect(fnMin).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fnMin).toHaveBeenCalledTimes(2);
+
+    // At Math.random() = 1, delay = 1000 * (0.5 + 0.5) = 1000ms (maximum)
+    vi.spyOn(Math, "random").mockReturnValue(1);
+    const interceptorMax = new RetryInterceptor(config);
+    const fnMax = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("fail"))
+      .mockResolvedValue("ok");
+
+    interceptorMax.intercept(fnMax, context);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(fnMax).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fnMax).toHaveBeenCalledTimes(2);
+
+    vi.spyOn(Math, "random").mockRestore();
   });
 });
