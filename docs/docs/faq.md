@@ -27,6 +27,8 @@ Yes. AppKit's plugin architecture is extensible - you can create custom plugins 
 
 ## Databases
 
+*Also: Lakebase, PostgreSQL, OLTP*
+
 ### How does AppKit handle databases?
 
 AppKit is a Node.js + React SDK and does not manage databases directly.
@@ -37,9 +39,11 @@ AppKit also uses Lakebase for caching when it is available (see the [caching](#d
 
 You can manage Lakebase Autoscaling projects and branches using the dedicated agent skill from [Databricks Agent Skills](./development/ai-assisted-development), installed with the Databricks CLI.
 
-### What database comes with an AppKit app, and how are permissions managed?
+### How does database setup and permission management work in AppKit?
 
-AppKit apps can have an attached Lakebase Autoscaling instance. No database is bundled by default - you add one by configuring the [Lakebase plugin](./plugins/lakebase).
+AppKit apps can have an attached Lakebase Autoscaling instance. No database is bundled by default - you add one by configuring the [Lakebase plugin](./plugins/lakebase). When running `databricks apps init` and selecting the Lakebase plugin, the selected database is automatically attached as an app resource after deployment.
+
+With [AI-assisted development](./development/ai-assisted-development), you can also ask the Agent to create a Lakebase project and branch for you.
 
 When deployed, a Databricks app uses its Service Principal for schema and table creation. If you configure the Lakebase Autoscaling project as an [app resource](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/resources), the necessary connect and create permissions are granted automatically to the app's Service Principal.
 
