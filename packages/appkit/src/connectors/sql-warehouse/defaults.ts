@@ -12,7 +12,7 @@ interface ExecuteStatementDefaults {
 export const executeStatementDefaults: ExecuteStatementDefaults = {
   wait_timeout: "30s",
   disposition: "INLINE",
-  format: "ARROW_STREAM",
+  format: "JSON_ARRAY",
   on_wait_timeout: "CONTINUE",
   timeout: 60000,
 };

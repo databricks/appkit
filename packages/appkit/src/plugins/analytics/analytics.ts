@@ -201,7 +201,7 @@ export class AnalyticsPlugin extends Plugin {
       type: "result" as const,
     },
     JSON: {
-      formatParameters: undefined,
+      formatParameters: { disposition: "INLINE", format: "JSON_ARRAY" },
       type: "result" as const,
     },
     ARROW: {

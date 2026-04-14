@@ -393,7 +393,12 @@ export class SQLWarehouseConnector {
 
   private _transformDataArray(response: sql.StatementResponse) {
     if (response.manifest?.format === "ARROW_STREAM") {
-      return this.updateWithArrowStatus(response);
+      // INLINE disposition: data is in data_array, transform like JSON_ARRAY.
+      // EXTERNAL_LINKS disposition: data fetched separately via statement_id.
+      if (!response.result?.data_array) {
+        return this.updateWithArrowStatus(response);
+      }
+      // Fall through to the data_array transform below.
     }
 
     if (!response.result?.data_array || !response.manifest?.schema?.columns) {
