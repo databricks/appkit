@@ -455,6 +455,10 @@ export class FilesPlugin extends Plugin {
    * Invalidate cached list entries for a directory after a write operation.
    * Uses the same cache-key format as `_handleList`: resolved path for
    * subdirectories, `"__root__"` for the volume root.
+   *
+   * Cache keys include `getCurrentUserId()` — must match the identity used
+   * by `this.execute()` in `_handleList`. Both run in service-principal
+   * context; wrapping either in `runInUserContext` would break invalidation.
    */
   private _invalidateListCache(
     volumeKey: string,

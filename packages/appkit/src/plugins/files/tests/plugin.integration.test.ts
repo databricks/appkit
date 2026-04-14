@@ -581,7 +581,7 @@ describe("Files Plugin Integration", () => {
     });
 
     test("ApiError 409 preserves upstream status code", async () => {
-      mockFilesApi.createDirectory.mockRejectedValue(
+      mockFilesApi.getMetadata.mockRejectedValue(
         new MockApiError("Conflict", 409),
       );
 
