@@ -26,14 +26,29 @@ vi.mock("../../../telemetry", () => ({
         createCounter: () => ({ add: vi.fn() }),
         createHistogram: () => ({ record: vi.fn() }),
       }),
+      startActiveSpan: vi.fn(
+        (_name: string, _opts: unknown, fn: Function, _telemetryOpts?: unknown) =>
+          fn({
+            setAttribute: vi.fn(),
+            setStatus: vi.fn(),
+            recordException: vi.fn(),
+          }),
+      ),
     }),
   },
+  SpanKind: { CLIENT: 3 },
+  SpanStatusCode: { OK: 1, ERROR: 2 },
   normalizeTelemetryOptions: () => ({ traces: false, metrics: false }),
 }));
 
 vi.mock("../../../cache", () => ({
   CacheManager: {
-    getInstanceSync: () => ({ get: vi.fn(), set: vi.fn() }),
+    getInstanceSync: () => ({
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      generateKey: vi.fn(() => "test-key"),
+    }),
   },
 }));
 
@@ -202,7 +217,7 @@ describe("VectorSearchPlugin", () => {
       expect(callBody.columns).toEqual(["id", "title"]);
     });
 
-    it("throws INDEX_NOT_FOUND for unknown alias", async () => {
+    it("throws Error for unknown alias", async () => {
       const plugin = new VectorSearchPlugin({
         indexes: {
           test: { indexName: "cat.sch.idx", columns: ["id"] },
@@ -210,8 +225,9 @@ describe("VectorSearchPlugin", () => {
       });
       await plugin.setup();
 
-      await expect(plugin.query("unknown", { queryText: "test" })).rejects
-        .toMatchObject({ code: "INDEX_NOT_FOUND" });
+      await expect(
+        plugin.query("unknown", { queryText: "test" }),
+      ).rejects.toThrow('No index configured with alias "unknown"');
     });
 
     it("includes filters when provided", async () => {
@@ -272,6 +288,26 @@ describe("VectorSearchPlugin", () => {
       const callBody = mockRequest.mock.calls[0][0].body;
       expect(callBody.query_vector).toEqual([0.1, 0.2, 0.3]);
       expect(callBody.query_text).toBeUndefined();
+    });
+
+    it("throws when embeddingFn fails", async () => {
+      const mockEmbeddingFn = vi
+        .fn()
+        .mockRejectedValue(new Error("embedding service unavailable"));
+      const plugin = new VectorSearchPlugin({
+        indexes: {
+          test: {
+            indexName: "cat.sch.idx",
+            columns: ["id", "title"],
+            embeddingFn: mockEmbeddingFn,
+          },
+        },
+      });
+      await plugin.setup();
+
+      await expect(
+        plugin.query("test", { queryText: "test" }),
+      ).rejects.toThrow("Embedding generation failed");
     });
   });
 

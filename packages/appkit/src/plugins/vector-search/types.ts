@@ -56,7 +56,6 @@ export interface SearchResponse<
   totalCount: number;
   queryTimeMs: number;
   queryType: "ann" | "hybrid" | "full_text";
-  fromCache: boolean;
   nextPageToken: string | null;
 }
 
@@ -67,13 +66,3 @@ export interface SearchResult<
   data: T;
 }
 
-export interface SearchError {
-  code:
-    | "UNAUTHORIZED"
-    | "INDEX_NOT_FOUND"
-    | "INVALID_QUERY"
-    | "RATE_LIMITED"
-    | "INTERNAL";
-  message: string;
-  statusCode: number;
-}

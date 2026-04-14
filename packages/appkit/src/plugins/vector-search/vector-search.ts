@@ -1,11 +1,12 @@
 import type express from "express";
-import type { IAppRouter } from "shared";
+import type { IAppRouter, PluginExecutionSettings } from "shared";
 import { VectorSearchConnector } from "../../connectors";
 import { getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import type { VsRawResponse } from "../../connectors/vector-search/types";
+import { vectorSearchDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import type {
   IVectorSearchConfig,
@@ -15,6 +16,10 @@ import type {
 } from "./types";
 
 const logger = createLogger("vector-search");
+
+const querySettings: PluginExecutionSettings = {
+  default: vectorSearchDefaults,
+};
 
 export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
   static manifest = manifest as PluginManifest<"vector-search">;
@@ -67,17 +72,54 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
         const indexConfig = this._resolveIndex(req.params.alias);
         if (!indexConfig) {
           res.status(404).json({
-            code: "INDEX_NOT_FOUND",
-            message: `No index configured with alias "${req.params.alias}"`,
-            statusCode: 404,
+            error: `No index configured with alias "${req.params.alias}"`,
+            plugin: this.name,
           });
           return;
         }
 
-        if (indexConfig.auth === "on-behalf-of-user") {
-          await this.asUser(req)._handleQuery(req, res, indexConfig);
-        } else {
-          await this._handleQuery(req, res, indexConfig);
+        const body: SearchRequest = req.body;
+        if (!body.queryText && !body.queryVector) {
+          res.status(400).json({
+            error: "queryText or queryVector is required",
+            plugin: this.name,
+          });
+          return;
+        }
+
+        try {
+          const prepared = await this._prepareQuery(body, indexConfig);
+          const plugin =
+            indexConfig.auth === "on-behalf-of-user" ? this.asUser(req) : this;
+
+          const result = await plugin.execute(
+            async (signal) =>
+              this.connector.query(
+                getWorkspaceClient(),
+                {
+                  indexName: indexConfig.indexName,
+                  queryText: prepared.queryText,
+                  queryVector: prepared.queryVector,
+                  columns: prepared.columns,
+                  numResults: prepared.numResults,
+                  queryType: prepared.queryType,
+                  filters: body.filters,
+                  reranker: prepared.rerankerConfig,
+                },
+                signal,
+              ),
+            querySettings,
+          );
+
+          if (result === undefined) {
+            res
+              .status(500)
+              .json({ error: "Query failed", plugin: this.name });
+            return;
+          }
+          res.json(this._parseResponse(result, prepared.queryType));
+        } catch (error) {
+          this._handleError(res, error, "Query failed");
         }
       },
     });
@@ -90,17 +132,69 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
         const indexConfig = this._resolveIndex(req.params.alias);
         if (!indexConfig) {
           res.status(404).json({
-            code: "INDEX_NOT_FOUND",
-            message: `No index configured with alias "${req.params.alias}"`,
-            statusCode: 404,
+            error: `No index configured with alias "${req.params.alias}"`,
+            plugin: this.name,
           });
           return;
         }
 
-        if (indexConfig.auth === "on-behalf-of-user") {
-          await this.asUser(req)._handleNextPage(req, res, indexConfig);
-        } else {
-          await this._handleNextPage(req, res, indexConfig);
+        if (!indexConfig.pagination) {
+          res.status(400).json({
+            error: `Pagination is not enabled for index "${req.params.alias}"`,
+            plugin: this.name,
+          });
+          return;
+        }
+
+        if (!indexConfig.endpointName) {
+          res.status(400).json({
+            error: `Index "${req.params.alias}" is missing endpointName required for pagination`,
+            plugin: this.name,
+          });
+          return;
+        }
+
+        const { pageToken } = req.body;
+        if (!pageToken) {
+          res.status(400).json({
+            error: "pageToken is required",
+            plugin: this.name,
+          });
+          return;
+        }
+
+        try {
+          const plugin =
+            indexConfig.auth === "on-behalf-of-user" ? this.asUser(req) : this;
+
+          const result = await plugin.execute(
+            async (signal) =>
+              this.connector.queryNextPage(
+                getWorkspaceClient(),
+                {
+                  indexName: indexConfig.indexName,
+                  endpointName: indexConfig.endpointName!,
+                  pageToken,
+                },
+                signal,
+              ),
+            querySettings,
+          );
+
+          if (result === undefined) {
+            res
+              .status(500)
+              .json({ error: "Next-page query failed", plugin: this.name });
+            return;
+          }
+          res.json(
+            this._parseResponse(
+              result,
+              indexConfig.queryType ?? "hybrid",
+            ),
+          );
+        } catch (error) {
+          this._handleError(res, error, "Next-page query failed");
         }
       },
     });
@@ -114,9 +208,8 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
         const indexConfig = this._resolveIndex(alias);
         if (!indexConfig) {
           res.status(404).json({
-            code: "INDEX_NOT_FOUND",
-            message: `No index configured with alias "${alias}"`,
-            statusCode: 404,
+            error: `No index configured with alias "${alias}"`,
+            plugin: this.name,
           });
           return;
         }
@@ -132,123 +225,6 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
     });
   }
 
-  async _handleQuery(
-    req: express.Request,
-    res: express.Response,
-    indexConfig: IndexConfig,
-  ): Promise<void> {
-    const body: SearchRequest = req.body;
-
-    if (!body.queryText && !body.queryVector) {
-      res.status(400).json({
-        code: "INVALID_QUERY",
-        message: "queryText or queryVector is required",
-        statusCode: 400,
-      });
-      return;
-    }
-
-    const event = logger.event(req);
-    event
-      ?.setComponent("vector-search", "query")
-      .setContext("vector-search", {
-        index: indexConfig.indexName,
-        query_type: body.queryType ?? indexConfig.queryType ?? "hybrid",
-        plugin: this.name,
-      });
-
-    const queryType = body.queryType ?? indexConfig.queryType ?? "hybrid";
-    let queryText = body.queryText;
-    let queryVector = body.queryVector;
-
-    if (indexConfig.embeddingFn && queryText && !queryVector) {
-      queryVector = await indexConfig.embeddingFn(queryText);
-      queryText = undefined;
-    }
-
-    const rerankerConfig = this._resolveReranker(
-      body.reranker,
-      indexConfig,
-      body.columns ?? indexConfig.columns,
-    );
-
-    try {
-      const workspaceClient = getWorkspaceClient();
-      const raw = await this.connector.query(
-        workspaceClient,
-        {
-          indexName: indexConfig.indexName,
-          queryText,
-          queryVector,
-          columns: body.columns ?? indexConfig.columns,
-          numResults: body.numResults ?? indexConfig.numResults ?? 20,
-          queryType,
-          filters: body.filters,
-          reranker: rerankerConfig,
-        },
-      );
-      res.json(this._parseResponse(raw, queryType));
-    } catch (error) {
-      logger.error("Vector search query failed: %O", error);
-      const statusCode =
-        (error as { statusCode?: number }).statusCode ?? 500;
-      res.status(statusCode).json({
-        code: (error as { code?: string }).code ?? "INTERNAL",
-        message:
-          error instanceof Error ? error.message : "Query execution failed",
-        statusCode,
-      });
-    }
-  }
-
-  async _handleNextPage(
-    req: express.Request,
-    res: express.Response,
-    indexConfig: IndexConfig,
-  ): Promise<void> {
-    if (!indexConfig.pagination) {
-      res.status(400).json({
-        code: "INVALID_QUERY",
-        message: `Pagination is not enabled for index "${req.params.alias}"`,
-        statusCode: 400,
-      });
-      return;
-    }
-
-    const { pageToken } = req.body;
-    if (!pageToken) {
-      res.status(400).json({
-        code: "INVALID_QUERY",
-        message: "pageToken is required",
-        statusCode: 400,
-      });
-      return;
-    }
-
-    try {
-      const workspaceClient = getWorkspaceClient();
-      const raw = await this.connector.queryNextPage(
-        workspaceClient,
-        {
-          indexName: indexConfig.indexName,
-          endpointName: indexConfig.endpointName!,
-          pageToken,
-        },
-      );
-      res.json(this._parseResponse(raw, "hybrid"));
-    } catch (error) {
-      logger.error("Vector search next-page query failed: %O", error);
-      const statusCode =
-        (error as { statusCode?: number }).statusCode ?? 500;
-      res.status(statusCode).json({
-        code: (error as { code?: string }).code ?? "INTERNAL",
-        message:
-          error instanceof Error ? error.message : "Next-page query failed",
-        statusCode,
-      });
-    }
-  }
-
   /**
    * Programmatic query API — available as `appkit.vectorSearch.query()`.
    * When called through `asUser(req)`, executes with the user's credentials.
@@ -256,45 +232,39 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
   async query(alias: string, request: SearchRequest): Promise<SearchResponse> {
     const indexConfig = this._resolveIndex(alias);
     if (!indexConfig) {
-      throw {
-        code: "INDEX_NOT_FOUND" as const,
-        message: `No index configured with alias "${alias}"`,
-        statusCode: 404,
-      };
+      throw new Error(`No index configured with alias "${alias}"`);
     }
 
-    const queryType = request.queryType ?? indexConfig.queryType ?? "hybrid";
-    let queryText = request.queryText;
-    let queryVector = request.queryVector;
+    const prepared = await this._prepareQuery(request, indexConfig);
 
-    if (indexConfig.embeddingFn && queryText && !queryVector) {
-      queryVector = await indexConfig.embeddingFn(queryText);
-      queryText = undefined;
-    }
-
-    const rerankerConfig = this._resolveReranker(
-      request.reranker,
-      indexConfig,
-      request.columns ?? indexConfig.columns,
+    const result = await this.execute(
+      async (signal) =>
+        this.connector.query(
+          getWorkspaceClient(),
+          {
+            indexName: indexConfig.indexName,
+            queryText: prepared.queryText,
+            queryVector: prepared.queryVector,
+            columns: prepared.columns,
+            numResults: prepared.numResults,
+            queryType: prepared.queryType,
+            filters: request.filters,
+            reranker: prepared.rerankerConfig,
+          },
+          signal,
+        ),
+      querySettings,
     );
 
-    const workspaceClient = getWorkspaceClient();
-    const raw = await this.connector.query(workspaceClient, {
-      indexName: indexConfig.indexName,
-      queryText,
-      queryVector,
-      columns: request.columns ?? indexConfig.columns,
-      numResults: request.numResults ?? indexConfig.numResults ?? 20,
-      queryType,
-      filters: request.filters,
-      reranker: rerankerConfig,
-    });
+    if (result === undefined) {
+      throw new Error(`Vector search query failed for index "${alias}"`);
+    }
 
-    return this._parseResponse(raw, queryType);
+    return this._parseResponse(result, prepared.queryType);
   }
 
   async shutdown(): Promise<void> {
-    this.streamManager.abortAll();
+    // No streams or persistent connections to clean up
   }
 
   exports() {
@@ -305,6 +275,47 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
 
   private _resolveIndex(alias: string): IndexConfig | undefined {
     return this.config.indexes[alias];
+  }
+
+  private async _prepareQuery(
+    request: SearchRequest,
+    indexConfig: IndexConfig,
+  ): Promise<{
+    queryText: string | undefined;
+    queryVector: number[] | undefined;
+    queryType: "ann" | "hybrid" | "full_text";
+    columns: string[];
+    numResults: number;
+    rerankerConfig: { columnsToRerank: string[] } | undefined;
+  }> {
+    const queryType = request.queryType ?? indexConfig.queryType ?? "hybrid";
+    let queryText = request.queryText;
+    let queryVector = request.queryVector;
+
+    if (indexConfig.embeddingFn && queryText && !queryVector) {
+      try {
+        queryVector = await indexConfig.embeddingFn(queryText);
+        queryText = undefined;
+      } catch (error) {
+        throw new Error(
+          `Embedding generation failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    const columns = request.columns ?? indexConfig.columns;
+    return {
+      queryText,
+      queryVector,
+      queryType,
+      columns,
+      numResults: request.numResults ?? indexConfig.numResults ?? 20,
+      rerankerConfig: this._resolveReranker(
+        request.reranker,
+        indexConfig,
+        columns,
+      ),
+    };
   }
 
   private _resolveReranker(
@@ -345,9 +356,19 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
       queryTimeMs:
         raw.debug_info?.response_time ?? raw.debug_info?.latency_ms ?? 0,
       queryType,
-      fromCache: false,
       nextPageToken: raw.next_page_token ?? null,
     };
+  }
+
+  private _handleError(
+    res: express.Response,
+    error: unknown,
+    fallbackMessage: string,
+  ): void {
+    logger.error("%s: %O", fallbackMessage, error);
+    const message =
+      error instanceof Error ? error.message : fallbackMessage;
+    res.status(500).json({ error: message, plugin: this.name });
   }
 }
 

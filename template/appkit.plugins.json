@@ -173,6 +173,34 @@
         ],
         "optional": []
       }
+    },
+    "vectorSearch": {
+      "name": "vectorSearch",
+      "displayName": "Vector Search Plugin",
+      "description": "Query Databricks Vector Search indexes with hybrid search, reranking, and pagination",
+      "package": "@databricks/appkit",
+      "resources": {
+        "required": [
+          {
+            "type": "vector_search_index",
+            "alias": "Vector Search Index",
+            "resourceKey": "vector-search-index",
+            "description": "A Databricks Vector Search index to query. Index names configured via plugin config.",
+            "permission": "CAN_QUERY",
+            "fields": {
+              "indexName": {
+                "env": "DATABRICKS_VS_INDEX_NAME",
+                "description": "Three-level UC name of the default index (catalog.schema.index_name)"
+              },
+              "endpointName": {
+                "env": "DATABRICKS_VS_ENDPOINT_NAME",
+                "description": "Vector Search endpoint name (required for pagination)"
+              }
+            }
+          }
+        ],
+        "optional": []
+      }
     }
   }
 }

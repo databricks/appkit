@@ -1,4 +1,4 @@
-import { Context, type WorkspaceClient } from "@databricks/sdk-experimental";
+import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { TelemetryOptions } from "shared";
 import { createLogger } from "../../logging/logger";
 import {

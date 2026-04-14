@@ -53,7 +53,7 @@ export {
   type ToPlugin,
   toPlugin,
 } from "./plugin";
-export { analytics, files, genie, lakebase, server, serving } from "./plugins";
+export { analytics, files, genie, lakebase, server, serving, vectorSearch } from "./plugins";
 export type {
   EndpointConfig,
   ServingEndpointEntry,
