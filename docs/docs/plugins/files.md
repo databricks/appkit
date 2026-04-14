@@ -9,6 +9,7 @@ File operations against Databricks Unity Catalog Volumes. Supports listing, read
 **Key features:**
 - **Multi-volume**: Define named volumes (e.g. `uploads`, `exports`) and access them independently
 - CRUD operations on Unity Catalog Volume files
+- **Bulk upload/download** with concurrency control and per-file retry
 - Streaming downloads with content-type resolution
 - Inline raw serving with XSS-safe content type enforcement
 - Upload size limits with streaming enforcement
@@ -79,6 +80,8 @@ interface VolumeConfig {
   maxUploadSize?: number;
   /** Map of file extensions to MIME types for this volume. Overrides plugin-level default. */
   customContentTypes?: Record<string, string>;
+  /** Maximum concurrent file operations for bulk methods. Defaults to 8. */
+  concurrency?: number;
 }
 ```
 
@@ -130,6 +133,9 @@ Routes are mounted at `/api/files/*`. All routes except `/volumes` execute in us
 | POST   | `/:volumeKey/upload`       | `?path` (required), raw body | `{ success: true }`                               |
 | POST   | `/:volumeKey/mkdir`        | `body.path` (required)       | `{ success: true }`                               |
 | DELETE | `/:volumeKey`              | `?path` (required)           | `{ success: true }`                               |
+| POST   | `/:volumeKey/bulk-upload`  | `multipart/form-data` body   | `{ results: BulkResult[] }`                        |
+| POST   | `/:volumeKey/bulk-upload-stream` | `multipart/form-data` body, `X-File-Count` header | `{ results: BulkResult[] }`   |
+| POST   | `/:volumeKey/bulk-download` | `body.paths` (string array) | `multipart/mixed` stream with trailing JSON summary |
 
 The `:volumeKey` parameter must match one of the configured volume keys. Unknown volume keys return a `404` with the list of available volumes.
 
@@ -156,6 +162,9 @@ Every operation runs through the interceptor pipeline with tier-specific default
 | **Read**     | 60 s  | 3x    | 30 s    | list, read, exists, metadata, preview |
 | **Download** | none  | 3x    | 30 s    | download, raw                         |
 | **Write**    | none  | none  | 600 s   | upload, mkdir, delete                 |
+| **Bulk**     | none  | none* | 600 s   | bulk-upload, bulk-upload-stream, bulk-download |
+
+\* Bulk operations do not use interceptor-level retry. Per-file retries (3x, exponential backoff) happen internally.
 
 Retry uses exponential backoff with a 1 s initial delay.
 
@@ -197,8 +206,103 @@ await vol.asUser(req).list();
 | `createDirectory` | `(directoryPath: string)`                                                                          | `void`             |
 | `delete`          | `(filePath: string)`                                                                               | `void`             |
 | `preview`         | `(filePath: string)`                                                                               | `FilePreview`      |
+| `bulkUpload`      | `(files: { path: string; content: Buffer }[], options?: BulkOperationOptions)`                      | `BulkResult[]`     |
+| `bulkUploadStream`| `(fileCount: number, stream: AsyncIterable<{ path: string; content: Buffer }>, options?: BulkOperationOptions)` | `BulkResult[]` |
+| `bulkDownload`    | `(paths: string[], options?: BulkOperationOptions)`                                                 | `AsyncIterable<BulkDownloadItem>` |
 
 > `read()` loads the entire file into memory as a string. Files larger than 10 MB (default) are rejected — use `download()` for large files, or pass `{ maxSize: <bytes> }` to override.
+
+## Bulk operations
+
+Upload or download multiple files in a single call with concurrency control. Useful for pipelines that work with many small files (e.g., chunked Arrow IPC, batch exports).
+
+### Batch upload
+
+All files known upfront. Payload must fit in a single request body.
+
+```ts
+const vol = appkit.files("exports").asUser(req);
+const results = await vol.bulkUpload([
+  { path: "chunks/001.arrow", content: arrowBuffer1 },
+  { path: "chunks/002.arrow", content: arrowBuffer2 },
+  { path: "chunks/003.arrow", content: arrowBuffer3 },
+]);
+// results: BulkResult[] — one entry per file with success/failure status
+```
+
+### Streaming upload
+
+Files produced incrementally. Declare the expected count upfront; the operation resolves when all files have been processed.
+
+```ts
+async function* generateChunks() {
+  for (const chunk of pipeline) {
+    yield { path: `chunks/${chunk.id}.arrow`, content: chunk.buffer };
+  }
+}
+
+const results = await vol.bulkUploadStream(
+  pipeline.length,
+  generateChunks(),
+  { concurrency: 16 }, // override volume-level default
+);
+```
+
+### Bulk download
+
+Always streams results back as an async iterable. Each item includes the file content on success, or an error string on failure.
+
+```ts
+const stream = vol.bulkDownload([
+  "chunks/001.arrow",
+  "chunks/002.arrow",
+  "chunks/003.arrow",
+]);
+
+for await (const item of stream) {
+  if (item.error) {
+    console.error(`Failed to download ${item.path}: ${item.error}`);
+  } else {
+    processArrowChunk(item.content);
+  }
+}
+```
+
+### Concurrency
+
+Bulk operations fan out to per-file REST calls bounded by a concurrency limiter. Configure at the volume level or override per call:
+
+```ts
+files({
+  volumes: {
+    exports: { concurrency: 16 },  // volume-level default
+  },
+});
+
+// Per-call override
+vol.bulkUpload(files, { concurrency: 4 });
+```
+
+Default concurrency is **8** if not configured.
+
+### Error handling
+
+Partial failures do not abort the batch. Each file gets its own `BulkResult`:
+
+```ts
+interface BulkResult {
+  path: string;
+  success: boolean;
+  error?: string;       // only when success is false
+  bytesWritten?: number; // only when success is true
+}
+```
+
+Individual files are retried internally (3x with exponential backoff) before being reported as failed. The interceptor chain (telemetry, timeout) wraps the entire bulk operation, not individual files.
+
+### HTTP bulk download response
+
+The `POST /:volumeKey/bulk-download` route returns a `multipart/mixed` response. Each successful file is a separate part with `Content-Disposition`, `Content-Type`, and `X-File-Path` headers. A trailing JSON part named `summary` contains the `BulkResult[]` for all requested files (including failures).
 
 ## Path resolution
 
@@ -241,6 +345,26 @@ interface VolumeConfig {
   maxUploadSize?: number;
   /** Map of file extensions to MIME types for this volume. */
   customContentTypes?: Record<string, string>;
+  /** Maximum concurrent file operations for bulk methods. Defaults to 8. */
+  concurrency?: number;
+}
+
+interface BulkOperationOptions {
+  /** Override the volume-level concurrency limit for this call. */
+  concurrency?: number;
+}
+
+interface BulkResult {
+  path: string;
+  success: boolean;
+  error?: string;
+  bytesWritten?: number;
+}
+
+interface BulkDownloadItem {
+  path: string;
+  content: Buffer | null;
+  error?: string;
 }
 
 interface VolumeAPI {
@@ -253,6 +377,9 @@ interface VolumeAPI {
   createDirectory(directoryPath: string): Promise<void>;
   delete(filePath: string): Promise<void>;
   preview(filePath: string): Promise<FilePreview>;
+  bulkUpload(files: { path: string; content: Buffer }[], options?: BulkOperationOptions): Promise<BulkResult[]>;
+  bulkUploadStream(fileCount: number, stream: AsyncIterable<{ path: string; content: Buffer }>, options?: BulkOperationOptions): Promise<BulkResult[]>;
+  bulkDownload(paths: string[], options?: BulkOperationOptions): AsyncIterable<BulkDownloadItem>;
 }
 
 /** Volume handle: all VolumeAPI methods (service principal) + asUser() for OBO. */
