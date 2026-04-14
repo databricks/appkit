@@ -8,7 +8,7 @@ import {
   usePluginClientConfig,
 } from "@databricks/appkit-ui/react";
 import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
-import { FolderPlus, Loader2, Upload } from "lucide-react";
+import { Check, FolderPlus, Loader2, Upload, X } from "lucide-react";
 import {
   type RefObject,
   useCallback,
@@ -62,6 +62,11 @@ function FilesRoute() {
   const [newDirName, setNewDirName] = useState("");
   const [showNewDirInput, setShowNewDirInput] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const bulkFileInputRef = useRef<HTMLInputElement>(null);
+  const [bulkUploading, setBulkUploading] = useState(false);
+  const [bulkResults, setBulkResults] = useState<
+    { path: string; success: boolean; error?: string; bytesWritten?: number }[] | null
+  >(null);
   const listAbort = useAbortController();
   const previewAbort = useAbortController();
 
@@ -292,6 +297,55 @@ function FilesRoute() {
     }
   };
 
+  const handleBulkUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+
+    const oversized = Array.from(fileList).find((f) => f.size > MAX_UPLOAD_SIZE);
+    if (oversized) {
+      setError(
+        `File "${oversized.name}" is too large (${(oversized.size / 1024 / 1024).toFixed(1)} MB). Maximum per-file size is ${MAX_UPLOAD_SIZE / 1024 / 1024 / 1024} GB.`,
+      );
+      if (bulkFileInputRef.current) bulkFileInputRef.current.value = "";
+      return;
+    }
+
+    setBulkUploading(true);
+    setBulkResults(null);
+    setError(null);
+
+    try {
+      const formData = new FormData();
+      for (const file of Array.from(fileList)) {
+        const uploadPath = currentPath
+          ? `${currentPath}/${file.name}`
+          : file.name;
+        formData.append(uploadPath, file, uploadPath);
+      }
+
+      const response = await fetch(apiUrl("bulk-upload"), {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error ?? `Bulk upload failed (${response.status})`);
+      }
+
+      const data = await response.json();
+      setBulkResults(data.results);
+      await loadDirectory(currentPath || undefined);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBulkUploading(false);
+      if (bulkFileInputRef.current) {
+        bulkFileInputRef.current.value = "";
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-7xl mx-auto px-6 py-12">
@@ -360,8 +414,69 @@ function FilesRoute() {
               )}
               {uploading ? "Uploading..." : "Upload"}
             </Button>
+            <input
+              ref={bulkFileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={handleBulkUpload}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={bulkUploading}
+              onClick={() => bulkFileInputRef.current?.click()}
+            >
+              {bulkUploading ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Upload className="h-4 w-4 mr-2" />
+              )}
+              {bulkUploading ? "Uploading..." : "Bulk Upload"}
+            </Button>
           </div>
         </div>
+
+        {bulkResults && (
+          <div className="mb-4 rounded-lg border border-border bg-card p-4">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-medium">
+                Bulk Upload Results — {bulkResults.filter((r) => r.success).length}/{bulkResults.length} succeeded
+              </h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setBulkResults(null)}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <ul className="space-y-1 text-sm max-h-48 overflow-y-auto">
+              {bulkResults.map((r) => (
+                <li key={r.path} className="flex items-center gap-2">
+                  {r.success ? (
+                    <Check className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                  ) : (
+                    <X className="h-3.5 w-3.5 text-red-500 shrink-0" />
+                  )}
+                  <span className="truncate">{r.path.split("/").pop()}</span>
+                  {r.success && r.bytesWritten != null && (
+                    <span className="text-muted-foreground ml-auto shrink-0">
+                      {r.bytesWritten > 1024
+                        ? `${(r.bytesWritten / 1024).toFixed(1)} KB`
+                        : `${r.bytesWritten} B`}
+                    </span>
+                  )}
+                  {r.error && (
+                    <span className="text-red-500 ml-auto truncate shrink-0 max-w-[50%]">
+                      {r.error}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div className="flex gap-6">
           <DirectoryList
