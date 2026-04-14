@@ -3,6 +3,7 @@ import {
   type sql,
   type WorkspaceClient,
 } from "@databricks/sdk-experimental";
+import { tableFromIPC } from "apache-arrow";
 import type { TelemetryOptions } from "shared";
 import {
   AppKitError,
@@ -393,12 +394,20 @@ export class SQLWarehouseConnector {
 
   private _transformDataArray(response: sql.StatementResponse) {
     if (response.manifest?.format === "ARROW_STREAM") {
-      // INLINE disposition: data is in data_array, transform like JSON_ARRAY.
-      // EXTERNAL_LINKS disposition: data fetched separately via statement_id.
-      if (!response.result?.data_array) {
+      const result = response.result as any;
+
+      // Inline Arrow: some warehouses return base64 Arrow IPC in `attachment`.
+      if (result?.attachment) {
+        return this._transformArrowAttachment(response, result.attachment);
+      }
+
+      // Inline data_array: fall through to the row transform below.
+      if (result?.data_array) {
+        // Fall through.
+      } else {
+        // External links: data fetched separately via statement_id.
         return this.updateWithArrowStatus(response);
       }
-      // Fall through to the data_array transform below.
     }
 
     if (!response.result?.data_array || !response.manifest?.schema?.columns) {
@@ -440,6 +449,28 @@ export class SQLWarehouseConnector {
       result: {
         ...restResult,
         data: transformedData,
+      },
+    };
+  }
+
+  /**
+   * Decode a base64 Arrow IPC attachment into row objects.
+   * Some serverless warehouses return inline results as Arrow IPC in
+   * `result.attachment` rather than `result.data_array`.
+   */
+  private _transformArrowAttachment(
+    response: sql.StatementResponse,
+    attachment: string,
+  ) {
+    const buf = Buffer.from(attachment, "base64");
+    const table = tableFromIPC(buf);
+    const data = table.toArray().map((row) => row.toJSON());
+    const { attachment: _att, ...restResult } = response.result as any;
+    return {
+      ...response,
+      result: {
+        ...restResult,
+        data,
       },
     };
   }
