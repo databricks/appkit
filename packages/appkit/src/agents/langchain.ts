@@ -67,6 +67,11 @@ export class LangChainAdapter implements AgentAdapter {
       },
     );
 
+    const toolCallAccumulator = new Map<
+      number,
+      { id: string; name: string; arguments: string }
+    >();
+
     for await (const event of stream) {
       if (context.signal?.aborted) break;
 
@@ -78,16 +83,39 @@ export class LangChainAdapter implements AgentAdapter {
           }
           if (chunk?.tool_call_chunks) {
             for (const tc of chunk.tool_call_chunks) {
-              if (tc.name) {
-                yield {
-                  type: "tool_call",
-                  callId: tc.id ?? tc.name,
+              const idx = tc.index ?? 0;
+              const existing = toolCallAccumulator.get(idx);
+              if (existing) {
+                if (tc.args) existing.arguments += tc.args;
+              } else if (tc.name) {
+                toolCallAccumulator.set(idx, {
+                  id: tc.id ?? tc.name,
                   name: tc.name,
-                  args: tc.args ? JSON.parse(tc.args) : {},
-                };
+                  arguments: tc.args ?? "",
+                });
               }
             }
           }
+          break;
+        }
+
+        case "on_tool_start": {
+          const accumulated = Array.from(toolCallAccumulator.values());
+          for (const tc of accumulated) {
+            let args: unknown;
+            try {
+              args = JSON.parse(tc.arguments || "{}");
+            } catch {
+              args = {};
+            }
+            yield {
+              type: "tool_call" as const,
+              callId: tc.id,
+              name: tc.name,
+              args,
+            };
+          }
+          toolCallAccumulator.clear();
           break;
         }
 

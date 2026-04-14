@@ -39,7 +39,8 @@ export function isHostedTool(value: unknown): value is HostedTool {
 
 export interface McpEndpointConfig {
   name: string;
-  path: string;
+  /** Absolute URL or path relative to workspace host */
+  url: string;
 }
 
 /**
@@ -51,7 +52,7 @@ function resolveHostedTool(tool: HostedTool): McpEndpointConfig {
     case "genie-space":
       return {
         name: `genie-${tool.genie_space.id}`,
-        path: `/api/2.0/mcp/genie/${tool.genie_space.id}`,
+        url: `/api/2.0/mcp/genie/${tool.genie_space.id}`,
       };
     case "vector_search_index": {
       const parts = tool.vector_search_index.name.split(".");
@@ -62,18 +63,18 @@ function resolveHostedTool(tool: HostedTool): McpEndpointConfig {
       }
       return {
         name: `vs-${parts.join("-")}`,
-        path: `/api/2.0/mcp/vector-search/${parts[0]}/${parts[1]}/${parts[2]}`,
+        url: `/api/2.0/mcp/vector-search/${parts[0]}/${parts[1]}/${parts[2]}`,
       };
     }
     case "custom_mcp_server":
       return {
         name: tool.custom_mcp_server.app_name,
-        path: `/apps/${tool.custom_mcp_server.app_url}`,
+        url: tool.custom_mcp_server.app_url,
       };
     case "external_mcp_server":
       return {
         name: tool.external_mcp_server.connection_name,
-        path: `/api/2.0/mcp/connections/${tool.external_mcp_server.connection_name}`,
+        url: `/api/2.0/mcp/external/${tool.external_mcp_server.connection_name}`,
       };
   }
 }

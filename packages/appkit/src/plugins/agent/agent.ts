@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type express from "express";
+import pc from "picocolors";
 import type {
   AgentAdapter,
   AgentToolDefinition,
@@ -87,18 +88,12 @@ export class AgentPlugin extends Plugin {
 
   private mountInvocationsRoute() {
     const serverPlugin = this.config.plugins?.server as
-      | { serverExtensions?: Array<(app: any) => void> }
+      | { addExtension?: (fn: (app: any) => void) => void }
       | undefined;
 
-    if (!serverPlugin) return;
+    if (!serverPlugin?.addExtension) return;
 
-    const extensions = (serverPlugin as any).serverExtensions as
-      | Array<(app: any) => void>
-      | undefined;
-
-    if (!extensions) return;
-
-    extensions.push((app: import("express").Application) => {
+    serverPlugin.addExtension((app: import("express").Application) => {
       app.post(
         "/invocations",
         (req: express.Request, res: express.Response) => {
@@ -155,7 +150,53 @@ export class AgentPlugin extends Plugin {
       }
     }
 
-    logger.info("Total agent tools: %d", this.toolIndex.size);
+    this.printTools();
+  }
+
+  private printTools() {
+    const entries = Array.from(this.toolIndex.values());
+    if (entries.length === 0) return;
+
+    const SOURCE_COLORS: Record<string, (s: string) => string> = {
+      plugin: pc.blue,
+      function: pc.yellow,
+      mcp: pc.magenta,
+    };
+
+    const rows = entries
+      .map((e) => ({
+        source: e.source,
+        name: e.def.name,
+        description: e.def.description.slice(0, 60),
+      }))
+      .sort(
+        (a, b) =>
+          a.source.localeCompare(b.source) || a.name.localeCompare(b.name),
+      );
+
+    const maxSourceLen = Math.max(...rows.map((r) => r.source.length));
+    const maxNameLen = Math.min(
+      40,
+      Math.max(...rows.map((r) => r.name.length)),
+    );
+    const separator = pc.dim("─".repeat(60));
+
+    console.log("");
+    console.log(`  ${pc.bold("Agent Tools")} ${pc.dim(`(${rows.length})`)}`);
+    console.log(`  ${separator}`);
+
+    for (const { source, name, description } of rows) {
+      const colorize = SOURCE_COLORS[source] ?? pc.white;
+      const sourceStr = colorize(pc.bold(source.padEnd(maxSourceLen)));
+      const nameStr =
+        name.length > maxNameLen
+          ? `${name.slice(0, maxNameLen - 1)}…`
+          : name.padEnd(maxNameLen);
+      console.log(`  ${sourceStr}  ${nameStr}  ${pc.dim(description)}`);
+    }
+
+    console.log(`  ${separator}`);
+    console.log("");
   }
 
   private async connectHostedTools(
@@ -194,12 +235,7 @@ export class AgentPlugin extends Plugin {
     this.mcpClient = new AppKitMcpClient(host, authenticate);
 
     const endpoints = resolveHostedTools(hostedTools);
-    try {
-      await this.mcpClient.connectAll(endpoints);
-    } catch (error) {
-      logger.error("Failed to connect hosted tools: %O", error);
-      return;
-    }
+    await this.mcpClient.connectAll(endpoints);
 
     for (const def of this.mcpClient.getAllToolDefinitions()) {
       this.toolIndex.set(def.name, {
@@ -271,6 +307,20 @@ export class AgentPlugin extends Plugin {
       path: "/threads/:threadId",
       handler: async (req, res) => this._handleDeleteThread(req, res),
     });
+
+    this.route(router, {
+      name: "info",
+      method: "get",
+      path: "/info",
+      handler: async (_req, res) => {
+        res.json({
+          toolCount: this.toolIndex.size,
+          tools: this.getAllToolDefinitions(),
+          agents: Array.from(this.agents.keys()),
+          defaultAgent: this.defaultAgentName,
+        });
+      },
+    });
   }
 
   clientConfig(): Record<string, unknown> {
@@ -327,6 +377,16 @@ export class AgentPlugin extends Plugin {
     };
     await this.threadStore.addMessage(thread.id, userId, userMessage);
 
+    return this._streamChat(req, res, resolvedAgent, thread, userId);
+  }
+
+  private async _streamChat(
+    req: express.Request,
+    res: express.Response,
+    resolvedAgent: RegisteredAgent,
+    thread: import("shared").Thread,
+    userId: string,
+  ): Promise<void> {
     const tools = this.getAllToolDefinitions();
     const abortController = new AbortController();
     const signal = abortController.signal;
@@ -343,9 +403,7 @@ export class AgentPlugin extends Plugin {
         async (execSignal) => {
           switch (entry.source) {
             case "plugin": {
-              const target = entry.def.annotations?.requiresUserContext
-                ? (entry.plugin as any).asUser(req)
-                : entry.plugin;
+              const target = (entry.plugin as any).asUser(req);
               return (target as ToolProvider).executeAgentTool(
                 entry.localName,
                 args,
@@ -478,22 +536,42 @@ export class AgentPlugin extends Plugin {
     }
 
     const { input } = parsed.data;
-
-    let userMessage: string;
-    if (typeof input === "string") {
-      userMessage = input;
-    } else {
-      const last = [...input].reverse().find((m) => m.role === "user");
-      const content = last?.content;
-      if (!content || typeof content !== "string") {
-        res.status(400).json({ error: "No user message found in input" });
-        return;
-      }
-      userMessage = content;
+    const resolvedAgent = this.resolveAgent();
+    if (!resolvedAgent) {
+      res.status(400).json({ error: "No agent registered" });
+      return;
     }
 
-    req.body = { message: userMessage };
-    return this._handleChat(req, res);
+    const userId = this.resolveUserId(req);
+    const thread = await this.threadStore.create(userId);
+
+    if (typeof input === "string") {
+      const msg: Message = {
+        id: randomUUID(),
+        role: "user",
+        content: input,
+        createdAt: new Date(),
+      };
+      await this.threadStore.addMessage(thread.id, userId, msg);
+    } else {
+      for (const item of input) {
+        const role = item.role ?? "user";
+        const content =
+          typeof item.content === "string"
+            ? item.content
+            : JSON.stringify(item.content ?? "");
+        if (!content) continue;
+        const msg: Message = {
+          id: randomUUID(),
+          role: role as Message["role"],
+          content,
+          createdAt: new Date(),
+        };
+        await this.threadStore.addMessage(thread.id, userId, msg);
+      }
+    }
+
+    return this._streamChat(req, res, resolvedAgent, thread, userId);
   }
 
   private async _handleCancel(

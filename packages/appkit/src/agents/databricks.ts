@@ -326,7 +326,7 @@ export class DatabricksAdapter implements AgentAdapter {
     ).map((tc) => ({
       id: tc.id,
       type: "function" as const,
-      function: { name: tc.name, arguments: tc.arguments },
+      function: { name: tc.name, arguments: tc.arguments || "{}" },
     }));
 
     return { text: fullText, toolCalls };

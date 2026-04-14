@@ -1,6 +1,4 @@
-import { getPluginClientConfig } from "@databricks/appkit-ui/js";
 import { TooltipProvider } from "@databricks/appkit-ui/react";
-import { marked } from "marked";
 import { useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
 import { ThemeSelector } from "./components/theme-selector";
@@ -40,12 +38,17 @@ export default function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const idRef = useRef(0);
 
-  const agentConfig = getPluginClientConfig<{
-    tools?: Array<{ name: string }>;
-    agents?: string[];
-    defaultAgent?: string;
-  }>("agent");
-  const toolCount = agentConfig.tools?.length ?? 0;
+  const [toolCount, setToolCount] = useState(0);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetch("/api/agent/info")
+        .then((r) => r.json())
+        .then((data) => setToolCount(data.toolCount ?? 0))
+        .catch(() => {});
+    }, 500);
+    return () => clearTimeout(timer);
+  }, []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on new messages
   useEffect(() => {
@@ -188,18 +191,9 @@ export default function App() {
                     key={msg.id}
                     className={`message-row ${msg.role === "user" ? "user" : "assistant"}`}
                   >
-                    <div
-                      className={`bubble ${msg.role}`}
-                      {...(msg.role === "assistant"
-                        ? {
-                            dangerouslySetInnerHTML: {
-                              __html: marked.parse(msg.content, {
-                                async: false,
-                              }) as string,
-                            },
-                          }
-                        : { children: msg.content })}
-                    />
+                    <div className={`bubble ${msg.role}`}>
+                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                    </div>
                   </div>
                 ))}
 

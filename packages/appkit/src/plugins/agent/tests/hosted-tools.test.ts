@@ -62,7 +62,7 @@ describe("resolveHostedTools", () => {
 
     expect(configs).toHaveLength(1);
     expect(configs[0].name).toBe("genie-space123");
-    expect(configs[0].path).toBe("/api/2.0/mcp/genie/space123");
+    expect(configs[0].url).toBe("/api/2.0/mcp/genie/space123");
   });
 
   test("resolves vector_search_index with 3-part name", () => {
@@ -75,7 +75,7 @@ describe("resolveHostedTools", () => {
 
     expect(configs).toHaveLength(1);
     expect(configs[0].name).toBe("vs-catalog-schema-my_index");
-    expect(configs[0].path).toBe(
+    expect(configs[0].url).toBe(
       "/api/2.0/mcp/vector-search/catalog/schema/my_index",
     );
   });
@@ -100,7 +100,7 @@ describe("resolveHostedTools", () => {
     ]);
 
     expect(configs[0].name).toBe("my-app");
-    expect(configs[0].path).toBe("/apps/my-app-endpoint");
+    expect(configs[0].url).toBe("my-app-endpoint");
   });
 
   test("resolves external_mcp_server", () => {
@@ -112,7 +112,7 @@ describe("resolveHostedTools", () => {
     ]);
 
     expect(configs[0].name).toBe("conn1");
-    expect(configs[0].path).toBe("/api/2.0/mcp/connections/conn1");
+    expect(configs[0].url).toBe("/api/2.0/mcp/external/conn1");
   });
 
   test("resolves multiple tools preserving order", () => {

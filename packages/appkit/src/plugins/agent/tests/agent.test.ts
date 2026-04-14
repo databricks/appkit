@@ -1,7 +1,14 @@
-import { createMockRouter, setupDatabricksEnv } from "@tools/test-helpers";
+import {
+  createMockRequest,
+  createMockResponse,
+  createMockRouter,
+  setupDatabricksEnv,
+} from "@tools/test-helpers";
 import type {
   AgentAdapter,
   AgentEvent,
+  AgentInput,
+  AgentRunContext,
   AgentToolDefinition,
   ToolProvider,
 } from "shared";
@@ -19,6 +26,18 @@ vi.mock("../../../cache", () => ({
     })),
   },
 }));
+
+vi.mock("../../../context", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../context")>();
+  return {
+    ...actual,
+    getCurrentUserId: vi.fn(() => "test-user"),
+    getExecutionContext: vi.fn(() => ({
+      userId: "test-user",
+      isUserContext: false,
+    })),
+  };
+});
 
 vi.mock("../../../telemetry", () => ({
   TelemetryManager: {
@@ -156,5 +175,56 @@ describe("AgentPlugin", () => {
     const tools = plugin.exports().getTools();
     expect(tools).toHaveLength(1);
     expect(tools[0].name).toBe("myTool");
+  });
+
+  test("executeTool always calls asUser(req) for plugin tools, even without requiresUserContext", async () => {
+    const mockProvider = createMockToolProvider([
+      {
+        name: "action",
+        description: "An action without requiresUserContext",
+        parameters: { type: "object", properties: {} },
+      },
+    ]);
+
+    function createToolCallingAdapter(): AgentAdapter {
+      return {
+        async *run(
+          input: AgentInput,
+          context: AgentRunContext,
+        ): AsyncGenerator<AgentEvent> {
+          await context.executeTool("testplugin.action", {});
+          yield { type: "message_delta", content: "done" };
+        },
+      };
+    }
+
+    const plugin = new AgentPlugin({
+      name: "agent",
+      agents: { assistant: createToolCallingAdapter() },
+      plugins: { testplugin: mockProvider },
+    });
+    await plugin.setup();
+
+    const { router, getHandler } = createMockRouter();
+    plugin.injectRoutes(router);
+    const handler = getHandler("POST", "/chat");
+
+    const req = createMockRequest({
+      body: { message: "hi" },
+      headers: {
+        "x-forwarded-user": "test-user",
+        "x-forwarded-access-token": "test-token",
+      },
+    });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(mockProvider.asUser).toHaveBeenCalledWith(req);
+    expect(mockProvider.executeAgentTool).toHaveBeenCalledWith(
+      "action",
+      {},
+      expect.anything(),
+    );
   });
 });

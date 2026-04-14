@@ -18,6 +18,7 @@ export class AgentEventTranslator {
   private outputIndex = 0;
   private messageId: string | null = null;
   private messageText = "";
+  private finalized = false;
 
   translate(event: AgentEvent): ResponseStreamEvent[] {
     switch (event.type) {
@@ -51,6 +52,9 @@ export class AgentEventTranslator {
   }
 
   finalize(): ResponseStreamEvent[] {
+    if (this.finalized) return [];
+    this.finalized = true;
+
     const events: ResponseStreamEvent[] = [];
 
     if (this.messageId) {

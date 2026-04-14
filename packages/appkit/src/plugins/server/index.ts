@@ -180,6 +180,16 @@ export class ServerPlugin extends Plugin {
   }
 
   /**
+   * Register a server extension from another plugin during setup.
+   * Unlike extend(), this does not guard on autoStart — it's designed
+   * for internal plugin-to-plugin coordination where extensions are
+   * registered before the server starts listening.
+   */
+  addExtension(fn: (app: express.Application) => void) {
+    this.serverExtensions.push(fn);
+  }
+
+  /**
    * Setup the routes with the plugins.
    *
    * This method goes through all the plugins and injects the routes into the server application.

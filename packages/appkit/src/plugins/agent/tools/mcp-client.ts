@@ -31,6 +31,7 @@ interface McpToolCallResult {
 
 interface McpServerConnection {
   config: McpEndpointConfig;
+  resolvedUrl: string;
   tools: Map<string, McpToolSchema>;
 }
 
@@ -43,6 +44,7 @@ interface McpServerConnection {
  */
 export class AppKitMcpClient {
   private connections = new Map<string, McpServerConnection>();
+  private sessionIds = new Map<string, string>();
   private requestId = 0;
   private closed = false;
 
@@ -52,33 +54,66 @@ export class AppKitMcpClient {
   ) {}
 
   async connectAll(endpoints: McpEndpointConfig[]): Promise<void> {
-    await Promise.all(endpoints.map((ep) => this.connect(ep)));
+    const results = await Promise.allSettled(
+      endpoints.map((ep) => this.connect(ep)),
+    );
+    for (let i = 0; i < results.length; i++) {
+      if (results[i].status === "rejected") {
+        logger.error(
+          "Failed to connect MCP server %s: %O",
+          endpoints[i].name,
+          (results[i] as PromiseRejectedResult).reason,
+        );
+      }
+    }
+  }
+
+  private resolveUrl(endpoint: McpEndpointConfig): string {
+    if (
+      endpoint.url.startsWith("http://") ||
+      endpoint.url.startsWith("https://")
+    ) {
+      return endpoint.url;
+    }
+    return `${this.workspaceHost}${endpoint.url}`;
   }
 
   async connect(endpoint: McpEndpointConfig): Promise<void> {
-    logger.info(
-      "Connecting to MCP server: %s at %s",
-      endpoint.name,
-      endpoint.path,
-    );
+    const url = this.resolveUrl(endpoint);
+    logger.info("Connecting to MCP server: %s at %s", endpoint.name, url);
 
-    await this.sendRpc(endpoint.path, "initialize", {
+    const initResponse = await this.sendRpc(url, "initialize", {
       protocolVersion: "2025-03-26",
       capabilities: {},
       clientInfo: { name: "appkit-agent", version: "0.1.0" },
     });
 
-    await this.sendNotification(endpoint.path, "notifications/initialized");
+    if (initResponse.sessionId) {
+      this.sessionIds.set(endpoint.name, initResponse.sessionId);
+    }
+    const sessionId = this.sessionIds.get(endpoint.name);
 
-    const result = await this.sendRpc(endpoint.path, "tools/list", {});
-    const toolList = (result as { tools?: McpToolSchema[] })?.tools ?? [];
+    await this.sendNotification(url, "notifications/initialized", sessionId);
+
+    const listResponse = await this.sendRpc(
+      url,
+      "tools/list",
+      {},
+      { sessionId },
+    );
+    const toolList =
+      (listResponse.result as { tools?: McpToolSchema[] })?.tools ?? [];
 
     const tools = new Map<string, McpToolSchema>();
     for (const tool of toolList) {
       tools.set(tool.name, tool);
     }
 
-    this.connections.set(endpoint.name, { config: endpoint, tools });
+    this.connections.set(endpoint.name, {
+      config: endpoint,
+      resolvedUrl: url,
+      tools,
+    });
     logger.info(
       "Connected to MCP server %s: %d tools available",
       endpoint.name,
@@ -121,12 +156,14 @@ export class AppKitMcpClient {
       throw new Error(`MCP server not connected: ${serverName}`);
     }
 
-    const result = (await this.sendRpc(
-      conn.config.path,
+    const sessionId = this.sessionIds.get(serverName);
+    const rpcResult = await this.sendRpc(
+      conn.resolvedUrl,
       "tools/call",
       { name: toolName, arguments: args },
-      authHeaders,
-    )) as McpToolCallResult;
+      { authOverride: authHeaders, sessionId },
+    );
+    const result = rpcResult.result as McpToolCallResult;
 
     if (result.isError) {
       const errText = result.content
@@ -148,11 +185,14 @@ export class AppKitMcpClient {
   }
 
   private async sendRpc(
-    path: string,
+    url: string,
     method: string,
     params?: Record<string, unknown>,
-    authOverride?: Record<string, string>,
-  ): Promise<unknown> {
+    options?: {
+      authOverride?: Record<string, string>;
+      sessionId?: string;
+    },
+  ): Promise<{ result: unknown; sessionId?: string }> {
     if (this.closed) throw new Error("MCP client is closed");
 
     const request: JsonRpcRequest = {
@@ -162,17 +202,21 @@ export class AppKitMcpClient {
       ...(params && { params }),
     };
 
-    const url = `${this.workspaceHost}${path}`;
-    const authHeaders = authOverride ?? (await this.authenticate());
+    const authHeaders = options?.authOverride ?? (await this.authenticate());
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+      ...authHeaders,
+    };
+    if (options?.sessionId) {
+      headers["Mcp-Session-Id"] = options.sessionId;
+    }
 
     const response = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        ...authHeaders,
-      },
+      headers,
       body: JSON.stringify(request),
+      signal: AbortSignal.timeout(30_000),
     });
 
     if (!response.ok) {
@@ -181,28 +225,54 @@ export class AppKitMcpClient {
       );
     }
 
-    const json = (await response.json()) as JsonRpcResponse;
+    const contentType = response.headers.get("content-type") ?? "";
+    let json: JsonRpcResponse;
+
+    if (contentType.includes("text/event-stream")) {
+      const text = await response.text();
+      const lastData = text
+        .split("\n")
+        .filter((line) => line.startsWith("data: "))
+        .map((line) => line.slice(6))
+        .pop();
+      if (!lastData) {
+        throw new Error(`MCP SSE response for ${method} contained no data`);
+      }
+      json = JSON.parse(lastData) as JsonRpcResponse;
+    } else {
+      json = (await response.json()) as JsonRpcResponse;
+    }
+
     if (json.error) {
       throw new Error(`MCP error (${json.error.code}): ${json.error.message}`);
     }
 
-    return json.result;
+    const sid = response.headers.get("mcp-session-id") ?? undefined;
+    return { result: json.result, sessionId: sid };
   }
 
-  private async sendNotification(path: string, method: string): Promise<void> {
+  private async sendNotification(
+    url: string,
+    method: string,
+    sessionId?: string,
+  ): Promise<void> {
     if (this.closed) return;
 
-    const url = `${this.workspaceHost}${path}`;
     const authHeaders = await this.authenticate();
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+      ...authHeaders,
+    };
+    if (sessionId) {
+      headers["Mcp-Session-Id"] = sessionId;
+    }
 
     await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        ...authHeaders,
-      },
+      headers,
       body: JSON.stringify({ jsonrpc: "2.0", method }),
+      signal: AbortSignal.timeout(30_000),
     });
   }
 }
