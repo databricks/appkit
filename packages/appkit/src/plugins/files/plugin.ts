@@ -1,6 +1,7 @@
 import { STATUS_CODES } from "node:http";
 import { Readable } from "node:stream";
 import { ApiError } from "@databricks/sdk-experimental";
+import Busboy from "busboy";
 import type express from "express";
 import type { IAppRouter, PluginExecutionSettings } from "shared";
 import {
@@ -16,6 +17,14 @@ import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest, ResourceRequirement } from "../../registry";
 import { ResourceType } from "../../registry";
 import {
+  executeBulkDownload,
+  executeBulkUpload,
+  executeBulkUploadStream,
+  resolveConcurrency,
+} from "./bulk";
+import {
+  FILES_BULK_DOWNLOAD_DEFAULTS,
+  FILES_BULK_UPLOAD_DEFAULTS,
   FILES_DOWNLOAD_DEFAULTS,
   FILES_MAX_UPLOAD_SIZE,
   FILES_READ_DEFAULTS,
@@ -24,6 +33,7 @@ import {
 import { parentDirectory, sanitizeFilename } from "./helpers";
 import manifest from "./manifest.json";
 import type {
+  BulkOperationOptions,
   DownloadResponse,
   FilesExport,
   IFilesConfig,
@@ -138,6 +148,7 @@ export class FilesPlugin extends Plugin {
         maxUploadSize: volumeCfg.maxUploadSize ?? config.maxUploadSize,
         customContentTypes:
           volumeCfg.customContentTypes ?? config.customContentTypes,
+        concurrency: volumeCfg.concurrency,
       };
       this.volumeConfigs[key] = mergedConfig;
 
@@ -201,6 +212,53 @@ export class FilesPlugin extends Plugin {
       preview: (filePath: string) => {
         this.throwIfNoUserContext(volumeKey, `preview`);
         return connector.preview(getWorkspaceClient(), filePath);
+      },
+      bulkUpload: (
+        files: { path: string; content: Buffer }[],
+        options?: BulkOperationOptions,
+      ) => {
+        this.throwIfNoUserContext(volumeKey, `bulkUpload`);
+        const concurrency = resolveConcurrency(
+          this.volumeConfigs[volumeKey].concurrency,
+          options,
+        );
+        return executeBulkUpload(
+          connector,
+          getWorkspaceClient(),
+          files,
+          concurrency,
+        );
+      },
+      bulkUploadStream: (
+        fileCount: number,
+        stream: AsyncIterable<{ path: string; content: Buffer }>,
+        options?: BulkOperationOptions,
+      ) => {
+        this.throwIfNoUserContext(volumeKey, `bulkUploadStream`);
+        const concurrency = resolveConcurrency(
+          this.volumeConfigs[volumeKey].concurrency,
+          options,
+        );
+        return executeBulkUploadStream(
+          connector,
+          getWorkspaceClient(),
+          fileCount,
+          stream,
+          concurrency,
+        );
+      },
+      bulkDownload: (paths: string[], options?: BulkOperationOptions) => {
+        this.throwIfNoUserContext(volumeKey, `bulkDownload`);
+        const concurrency = resolveConcurrency(
+          this.volumeConfigs[volumeKey].concurrency,
+          options,
+        );
+        return executeBulkDownload(
+          connector,
+          getWorkspaceClient(),
+          paths,
+          concurrency,
+        );
       },
     };
   }
@@ -323,6 +381,41 @@ export class FilesPlugin extends Plugin {
         const { connector, volumeKey } = this._resolveVolume(req, res);
         if (!connector) return;
         await this._handleDelete(req, res, connector, volumeKey);
+      },
+    });
+
+    this.route(router, {
+      name: "bulk-upload",
+      method: "post",
+      path: "/:volumeKey/bulk-upload",
+      skipBodyParsing: true,
+      handler: async (req: express.Request, res: express.Response) => {
+        const { connector, volumeKey } = this._resolveVolume(req, res);
+        if (!connector) return;
+        await this._handleBulkUpload(req, res, connector, volumeKey);
+      },
+    });
+
+    this.route(router, {
+      name: "bulk-upload-stream",
+      method: "post",
+      path: "/:volumeKey/bulk-upload-stream",
+      skipBodyParsing: true,
+      handler: async (req: express.Request, res: express.Response) => {
+        const { connector, volumeKey } = this._resolveVolume(req, res);
+        if (!connector) return;
+        await this._handleBulkUploadStream(req, res, connector, volumeKey);
+      },
+    });
+
+    this.route(router, {
+      name: "bulk-download",
+      method: "post",
+      path: "/:volumeKey/bulk-download",
+      handler: async (req: express.Request, res: express.Response) => {
+        const { connector, volumeKey } = this._resolveVolume(req, res);
+        if (!connector) return;
+        await this._handleBulkDownload(req, res, connector, volumeKey);
       },
     });
   }
@@ -906,6 +999,354 @@ export class FilesPlugin extends Plugin {
       res.json(result.data);
     } catch (error) {
       this._handleApiError(res, error, "Delete failed");
+    }
+  }
+
+  /**
+   * Parse multipart/form-data from a request into an array of file entries.
+   * Each form field name is used as the file path.
+   */
+  private _parseMultipartFiles(
+    req: express.Request,
+  ): Promise<{ path: string; content: Buffer }[]> {
+    return new Promise((resolve, reject) => {
+      const files: { path: string; content: Buffer }[] = [];
+      const busboy = Busboy({ headers: req.headers });
+
+      busboy.on("file", (fieldname, stream) => {
+        const chunks: Buffer[] = [];
+        stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+        stream.on("end", () => {
+          files.push({ path: fieldname, content: Buffer.concat(chunks) });
+        });
+        stream.on("error", reject);
+      });
+
+      busboy.on("finish", () => resolve(files));
+      busboy.on("error", reject);
+
+      req.pipe(busboy);
+    });
+  }
+
+  private async _handleBulkUpload(
+    req: express.Request,
+    res: express.Response,
+    connector: FilesConnector,
+    volumeKey: string,
+  ): Promise<void> {
+    const contentType = req.headers["content-type"] ?? "";
+    if (!contentType.includes("multipart/form-data")) {
+      res.status(400).json({
+        error: "Content-Type must be multipart/form-data",
+        plugin: this.name,
+      });
+      return;
+    }
+
+    try {
+      const files = await this._parseMultipartFiles(req);
+      if (files.length === 0) {
+        res.status(400).json({
+          error: "No files provided in multipart body",
+          plugin: this.name,
+        });
+        return;
+      }
+
+      // Validate all file paths
+      for (const file of files) {
+        const valid = this._isValidPath(file.path);
+        if (valid !== true) {
+          res.status(400).json({
+            error: `Invalid path "${file.path}": ${valid}`,
+            plugin: this.name,
+          });
+          return;
+        }
+      }
+
+      const concurrency = resolveConcurrency(
+        this.volumeConfigs[volumeKey].concurrency,
+        req.body?.concurrency
+          ? { concurrency: Number(req.body.concurrency) }
+          : undefined,
+      );
+
+      const userPlugin = this.asUser(req);
+      const settings: PluginExecutionSettings = {
+        default: FILES_BULK_UPLOAD_DEFAULTS,
+      };
+
+      const result = await this.trackWrite(() =>
+        userPlugin.execute(async () => {
+          this.warnIfNoUserContext(volumeKey, `bulkUpload`);
+          return executeBulkUpload(
+            connector,
+            getWorkspaceClient(),
+            files,
+            concurrency,
+          );
+        }, settings),
+      );
+
+      if (!result.ok) {
+        this._sendStatusError(res, result.status);
+        return;
+      }
+
+      res.json({ results: result.data });
+    } catch (error) {
+      this._handleApiError(res, error, "Bulk upload failed");
+    }
+  }
+
+  private async _handleBulkUploadStream(
+    req: express.Request,
+    res: express.Response,
+    connector: FilesConnector,
+    volumeKey: string,
+  ): Promise<void> {
+    const contentType = req.headers["content-type"] ?? "";
+    if (!contentType.includes("multipart/form-data")) {
+      res.status(400).json({
+        error: "Content-Type must be multipart/form-data",
+        plugin: this.name,
+      });
+      return;
+    }
+
+    const rawFileCount = req.headers["x-file-count"];
+    if (!rawFileCount || Number.isNaN(Number(rawFileCount))) {
+      res.status(400).json({
+        error: "X-File-Count header is required and must be a number",
+        plugin: this.name,
+      });
+      return;
+    }
+    const fileCount = Number(rawFileCount);
+
+    try {
+      const concurrency = resolveConcurrency(
+        this.volumeConfigs[volumeKey].concurrency,
+      );
+
+      // Create an async iterable that yields files as busboy parses them
+      const fileStream = this._createMultipartFileStream(req);
+
+      const userPlugin = this.asUser(req);
+      const settings: PluginExecutionSettings = {
+        default: FILES_BULK_UPLOAD_DEFAULTS,
+      };
+
+      const result = await this.trackWrite(() =>
+        userPlugin.execute(async () => {
+          this.warnIfNoUserContext(volumeKey, `bulkUploadStream`);
+          return executeBulkUploadStream(
+            connector,
+            getWorkspaceClient(),
+            fileCount,
+            fileStream,
+            concurrency,
+          );
+        }, settings),
+      );
+
+      if (!result.ok) {
+        this._sendStatusError(res, result.status);
+        return;
+      }
+
+      res.json({ results: result.data });
+    } catch (error) {
+      this._handleApiError(res, error, "Bulk upload stream failed");
+    }
+  }
+
+  /**
+   * Creates an async iterable that yields files from a multipart/form-data stream
+   * as busboy parses them, one at a time.
+   */
+  private _createMultipartFileStream(
+    req: express.Request,
+  ): AsyncIterable<{ path: string; content: Buffer }> {
+    const busboy = Busboy({ headers: req.headers });
+    const queue: Array<{
+      resolve: (
+        value: IteratorResult<{ path: string; content: Buffer }>,
+      ) => void;
+    }> = [];
+    const buffer: Array<IteratorResult<{ path: string; content: Buffer }>> = [];
+    let finished = false;
+
+    const push = (value: IteratorResult<{ path: string; content: Buffer }>) => {
+      const waiter = queue.shift();
+      if (waiter) {
+        waiter.resolve(value);
+      } else {
+        buffer.push(value);
+      }
+    };
+
+    busboy.on("file", (fieldname, stream) => {
+      const chunks: Buffer[] = [];
+      stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+      stream.on("end", () => {
+        push({
+          value: { path: fieldname, content: Buffer.concat(chunks) },
+          done: false,
+        });
+      });
+    });
+
+    busboy.on("finish", () => {
+      finished = true;
+      push({ value: undefined as never, done: true });
+    });
+
+    busboy.on("error", (err: Error) => {
+      finished = true;
+      const waiter = queue.shift();
+      if (waiter) {
+        waiter.resolve({ value: undefined as never, done: true });
+      }
+      logger.error("Busboy error during streaming upload: %O", err);
+    });
+
+    req.pipe(busboy);
+
+    return {
+      [Symbol.asyncIterator]() {
+        return {
+          next(): Promise<IteratorResult<{ path: string; content: Buffer }>> {
+            const buffered = buffer.shift();
+            if (buffered) return Promise.resolve(buffered);
+            if (finished)
+              return Promise.resolve({
+                value: undefined as never,
+                done: true,
+              });
+            return new Promise((resolve) => {
+              queue.push({ resolve });
+            });
+          },
+        };
+      },
+    };
+  }
+
+  private async _handleBulkDownload(
+    req: express.Request,
+    res: express.Response,
+    connector: FilesConnector,
+    volumeKey: string,
+  ): Promise<void> {
+    const paths = req.body?.paths;
+    if (!Array.isArray(paths) || paths.length === 0) {
+      res.status(400).json({
+        error: "Request body must contain a non-empty 'paths' array",
+        plugin: this.name,
+      });
+      return;
+    }
+
+    // Validate all paths
+    for (const filePath of paths) {
+      if (typeof filePath !== "string") {
+        res.status(400).json({
+          error: "All paths must be strings",
+          plugin: this.name,
+        });
+        return;
+      }
+      const valid = this._isValidPath(filePath);
+      if (valid !== true) {
+        res.status(400).json({
+          error: `Invalid path "${filePath}": ${valid}`,
+          plugin: this.name,
+        });
+        return;
+      }
+    }
+
+    try {
+      const concurrency = resolveConcurrency(
+        this.volumeConfigs[volumeKey].concurrency,
+      );
+
+      const userPlugin = this.asUser(req);
+      const settings: PluginExecutionSettings = {
+        default: FILES_BULK_DOWNLOAD_DEFAULTS,
+      };
+
+      const result = await userPlugin.execute(async () => {
+        this.warnIfNoUserContext(volumeKey, `bulkDownload`);
+
+        // Collect all files, then write multipart response
+        const items: Array<{
+          path: string;
+          content: Buffer | null;
+          error?: string;
+        }> = [];
+        const stream = executeBulkDownload(
+          connector,
+          getWorkspaceClient(),
+          paths,
+          concurrency,
+        );
+
+        for await (const item of stream) {
+          items.push(item);
+        }
+        return items;
+      }, settings);
+
+      if (!result.ok) {
+        this._sendStatusError(res, result.status);
+        return;
+      }
+
+      const boundary = `----appkit-bulk-download-${Date.now()}`;
+      res.setHeader("Content-Type", `multipart/mixed; boundary=${boundary}`);
+
+      for (const item of result.data) {
+        if (item.content) {
+          const fileName = item.path.split("/").pop() ?? "file";
+          res.write(`--${boundary}\r\n`);
+          res.write(
+            `Content-Disposition: attachment; filename="${sanitizeFilename(fileName)}"\r\n`,
+          );
+          res.write("Content-Type: application/octet-stream\r\n");
+          res.write(`Content-Length: ${item.content.length}\r\n`);
+          res.write(`X-File-Path: ${item.path}\r\n`);
+          res.write("\r\n");
+          res.write(item.content);
+          res.write("\r\n");
+        }
+      }
+
+      // Trailing summary part with BulkResult[] for all files
+      const summary = result.data.map((item) => ({
+        path: item.path,
+        success: item.content !== null,
+        error: item.error,
+        bytesWritten: item.content?.length,
+      }));
+      res.write(`--${boundary}\r\n`);
+      res.write("Content-Type: application/json\r\n");
+      res.write('Content-Disposition: inline; name="summary"\r\n');
+      res.write("\r\n");
+      res.write(JSON.stringify(summary));
+      res.write("\r\n");
+      res.write(`--${boundary}--\r\n`);
+      res.end();
+    } catch (error) {
+      if (!res.headersSent) {
+        this._handleApiError(res, error, "Bulk download failed");
+      } else {
+        logger.error("Error during bulk download streaming: %O", error);
+        res.end();
+      }
     }
   }
 

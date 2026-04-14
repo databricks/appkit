@@ -61,3 +61,39 @@ export const FILES_WRITE_DEFAULTS: PluginExecuteConfig = {
  * This matches the Databricks Files API v2 per-file limit.
  */
 export const FILES_MAX_UPLOAD_SIZE = 5 * 1024 * 1024 * 1024; // 5 GB
+
+/**
+ * Default concurrency for bulk file operations.
+ * Controls how many per-file REST calls run in parallel within a single bulk operation.
+ */
+export const FILES_DEFAULT_CONCURRENCY = 8;
+
+/**
+ * Execution defaults for bulk upload operations.
+ * No cache, no interceptor-level retry (retries happen per-file internally).
+ * Extended timeout (10 min) to accommodate large batches.
+ */
+export const FILES_BULK_UPLOAD_DEFAULTS: PluginExecuteConfig = {
+  cache: {
+    enabled: false,
+  },
+  retry: {
+    enabled: false,
+  },
+  timeout: 600_000,
+};
+
+/**
+ * Execution defaults for bulk download operations.
+ * No cache, no interceptor-level retry (retries happen per-file internally).
+ * Extended timeout (10 min) to accommodate large batches.
+ */
+export const FILES_BULK_DOWNLOAD_DEFAULTS: PluginExecuteConfig = {
+  cache: {
+    enabled: false,
+  },
+  retry: {
+    enabled: false,
+  },
+  timeout: 600_000,
+};

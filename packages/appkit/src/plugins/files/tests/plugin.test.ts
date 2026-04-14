@@ -333,8 +333,8 @@ describe("FilesPlugin", () => {
     // 1 GET /volumes + 7 GET /:volumeKey/* routes
     // (list, read, download, raw, exists, metadata, preview)
     expect(mockRouter.get).toHaveBeenCalledTimes(8);
-    // 2 POST /:volumeKey/* routes (upload, mkdir)
-    expect(mockRouter.post).toHaveBeenCalledTimes(2);
+    // 5 POST /:volumeKey/* routes (upload, mkdir, bulk-upload, bulk-upload-stream, bulk-download)
+    expect(mockRouter.post).toHaveBeenCalledTimes(5);
     // 1 DELETE /:volumeKey route
     expect(mockRouter.delete).toHaveBeenCalledTimes(1);
     expect(mockRouter.put).not.toHaveBeenCalled();

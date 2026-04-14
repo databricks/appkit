@@ -9,6 +9,43 @@ export interface VolumeConfig {
   maxUploadSize?: number;
   /** Map of file extensions to MIME types for this volume. Inherits from plugin-level `customContentTypes` if not set. */
   customContentTypes?: Record<string, string>;
+  /** Maximum number of concurrent file operations for bulk methods. Defaults to 8. */
+  concurrency?: number;
+}
+
+/**
+ * Options for bulk file operations.
+ */
+export interface BulkOperationOptions {
+  /** Override the volume-level concurrency limit for this call. */
+  concurrency?: number;
+}
+
+/**
+ * Per-file result from a bulk upload operation.
+ */
+export interface BulkResult {
+  /** The file path that was operated on. */
+  path: string;
+  /** Whether the operation succeeded for this file. */
+  success: boolean;
+  /** Error message if the operation failed. Only present when `success` is `false`. */
+  error?: string;
+  /** Number of bytes written. Only present when `success` is `true`. */
+  bytesWritten?: number;
+}
+
+/**
+ * A single item yielded by {@link VolumeAPI.bulkDownload}.
+ * Check `error` to determine success or failure for each file.
+ */
+export interface BulkDownloadItem {
+  /** The file path that was downloaded (or attempted). */
+  path: string;
+  /** File content on success, `null` on failure. */
+  content: Buffer | null;
+  /** Error message if the download failed. */
+  error?: string;
 }
 
 /**
@@ -29,6 +66,37 @@ export interface VolumeAPI {
   createDirectory(directoryPath: string): Promise<void>;
   delete(filePath: string): Promise<void>;
   preview(filePath: string): Promise<FilePreview>;
+
+  /**
+   * Upload multiple files in a single call with concurrency control.
+   * All files must be known upfront. For incremental uploads, use {@link bulkUploadStream}.
+   * Partial failures do not abort the batch — each file gets its own {@link BulkResult}.
+   */
+  bulkUpload(
+    files: { path: string; content: Buffer }[],
+    options?: BulkOperationOptions,
+  ): Promise<BulkResult[]>;
+
+  /**
+   * Upload files from an async iterable with concurrency control.
+   * The caller declares the expected file count; the operation resolves when all files
+   * have been received and processed (or the stream ends).
+   */
+  bulkUploadStream(
+    fileCount: number,
+    stream: AsyncIterable<{ path: string; content: Buffer }>,
+    options?: BulkOperationOptions,
+  ): Promise<BulkResult[]>;
+
+  /**
+   * Download multiple files as a streaming async iterable.
+   * Each yielded item includes the file content on success or an error string on failure.
+   * Failed downloads do not abort the stream.
+   */
+  bulkDownload(
+    paths: string[],
+    options?: BulkOperationOptions,
+  ): AsyncIterable<BulkDownloadItem>;
 }
 
 /**
