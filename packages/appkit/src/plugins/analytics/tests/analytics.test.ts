@@ -718,9 +718,10 @@ describe("Analytics Plugin", () => {
 
       await handler(mockReq, mockRes);
 
-      const callArgs = executeMock.mock.calls[0][1];
-      expect(callArgs).not.toHaveProperty("disposition");
-      expect(callArgs).not.toHaveProperty("format");
+      expect(executeMock.mock.calls[0][1]).toMatchObject({
+        disposition: "INLINE",
+        format: "JSON_ARRAY",
+      });
     });
 
     test("/query/:query_key should fall back from ARROW_STREAM to JSON when warehouse rejects ARROW_STREAM", async () => {
@@ -760,10 +761,11 @@ describe("Analytics Plugin", () => {
         disposition: "INLINE",
         format: "ARROW_STREAM",
       });
-      // Second call: JSON (no format params, uses defaults)
-      const secondCallArgs = executeMock.mock.calls[1][1];
-      expect(secondCallArgs).not.toHaveProperty("disposition");
-      expect(secondCallArgs).not.toHaveProperty("format");
+      // Second call: JSON (explicit JSON_ARRAY + INLINE)
+      expect(executeMock.mock.calls[1][1]).toMatchObject({
+        disposition: "INLINE",
+        format: "JSON_ARRAY",
+      });
     });
 
     test("/query/:query_key should fall back through all formats when each is rejected", async () => {
@@ -869,10 +871,12 @@ describe("Analytics Plugin", () => {
 
       await handler(mockReq, mockRes);
 
-      // All calls have no disposition/format — explicit JSON uses defaults, no fallback.
+      // All calls use JSON_ARRAY + INLINE — explicit JSON, no fallback.
       for (const call of executeMock.mock.calls) {
-        expect(call[1]).not.toHaveProperty("disposition");
-        expect(call[1]).not.toHaveProperty("format");
+        expect(call[1]).toMatchObject({
+          disposition: "INLINE",
+          format: "JSON_ARRAY",
+        });
       }
     });
 
