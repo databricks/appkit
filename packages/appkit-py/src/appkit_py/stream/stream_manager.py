@@ -3,9 +3,10 @@
 Ports the TypeScript StreamManager from packages/appkit/src/stream/stream-manager.ts.
 Handles async generator-based event streams with:
 - UUID event IDs
-- Ring buffer for reconnection replay
+- Ring buffer for reconnection replay (persisted per stream_id)
 - Heartbeat keep-alive
 - Error event emission
+- Graceful abort via tracked disconnect events
 """
 
 from __future__ import annotations
@@ -43,6 +44,10 @@ class StreamManager:
     ) -> None:
         self._buffer_size = buffer_size
         self._heartbeat_interval = heartbeat_interval
+        # Persist buffers per stream_id for reconnection replay
+        self._stream_buffers: dict[str, EventRingBuffer] = {}
+        # Track active disconnect events for abort_all()
+        self._active_disconnects: set[asyncio.Event] = set()
 
     async def stream(
         self,
@@ -53,31 +58,32 @@ class StreamManager:
         last_event_id: str | None = None,
         stream_id: str | None = None,
     ) -> None:
-        """Stream events from an async generator to the client.
+        """Stream events from an async generator to the client."""
+        sid = stream_id or str(uuid.uuid4())
+        # Get or create a persistent buffer for this stream
+        if sid not in self._stream_buffers:
+            self._stream_buffers[sid] = EventRingBuffer(capacity=self._buffer_size)
+        event_buffer = self._stream_buffers[sid]
 
-        Args:
-            send: Async function to send SSE text to the client.
-            handler: Async generator factory yielding event dicts.
-            on_disconnect: Event that signals client disconnection.
-            last_event_id: For reconnection — replay events since this ID.
-            stream_id: Optional stream identifier.
-        """
-        event_buffer = EventRingBuffer(capacity=self._buffer_size)
         disconnect = on_disconnect or asyncio.Event()
+        self._active_disconnects.add(disconnect)
         heartbeat_task: asyncio.Task | None = None
 
         try:
-            # Start heartbeat
             heartbeat_task = asyncio.create_task(
                 self._heartbeat_loop(send, disconnect)
             )
 
             # Replay buffered events if reconnecting
-            if last_event_id and event_buffer.has_event(last_event_id):
-                missed = event_buffer.get_events_since(last_event_id)
-                if missed:
-                    for event in missed:
-                        await send(format_buffered_event(event))
+            if last_event_id:
+                if event_buffer.has_event(last_event_id):
+                    missed = event_buffer.get_events_since(last_event_id)
+                    if missed:
+                        for event in missed:
+                            await send(format_buffered_event(event))
+                else:
+                    # Buffer overflow — event was evicted
+                    await send(format_buffer_overflow_warning(last_event_id))
 
             # Stream events from handler
             async for event in handler(signal=disconnect):
@@ -88,7 +94,6 @@ class StreamManager:
                 event_type = str(event.get("type", "message"))
                 event_data = json.dumps(event, separators=(",", ":"))
 
-                # Buffer for replay
                 event_buffer.add_event(
                     BufferedEvent(
                         id=event_id,
@@ -98,7 +103,6 @@ class StreamManager:
                     )
                 )
 
-                # Send to client
                 await send(format_event(event_id, event))
 
         except Exception as exc:
@@ -110,6 +114,7 @@ class StreamManager:
                 pass
             logger.error("Stream error: %s", exc)
         finally:
+            self._active_disconnects.discard(disconnect)
             if heartbeat_task and not heartbeat_task.done():
                 heartbeat_task.cancel()
                 try:
@@ -131,5 +136,8 @@ class StreamManager:
             pass
 
     def abort_all(self) -> None:
-        """Placeholder for aborting all active streams."""
-        pass
+        """Abort all active streams by setting their disconnect events."""
+        for evt in list(self._active_disconnects):
+            evt.set()
+        self._active_disconnects.clear()
+        self._stream_buffers.clear()

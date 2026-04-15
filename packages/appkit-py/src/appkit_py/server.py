@@ -328,7 +328,9 @@ def create_server(
             result = await connector.download(_ws_client, path)
             import mimetypes
             content_type = result.get("content_type") or mimetypes.guess_type(path)[0] or "application/octet-stream"
-            filename = path.split("/")[-1] if path else "download"
+            raw_name = path.split("/")[-1] if path else "download"
+            # Sanitize filename: strip chars that could enable header injection
+            filename = "".join(c for c in raw_name if c.isalnum() or c in "._- ")[:255] or "download"
             headers = {
                 "Content-Disposition": f'attachment; filename="{filename}"',
                 "X-Content-Type-Options": "nosniff",
@@ -436,7 +438,21 @@ def create_server(
                 status_code=500,
             )
         try:
-            body = await request.body()
+            # Stream the body with a running size counter to prevent OOM
+            chunks: list[bytes] = []
+            bytes_received = 0
+            async for chunk in request.stream():
+                bytes_received += len(chunk)
+                if bytes_received > max_size:
+                    return JSONResponse(
+                        {
+                            "error": f"Upload stream exceeds maximum allowed size ({max_size} bytes).",
+                            "plugin": "files",
+                        },
+                        status_code=413,
+                    )
+                chunks.append(chunk)
+            body = b"".join(chunks)
             await connector.upload(_ws_client, path, body)
             return {"success": True}
         except Exception as exc:
@@ -604,10 +620,14 @@ def create_server(
         @app.get("/{full_path:path}")
         async def serve_spa(full_path: str):
             """Serve static files or index.html with injected config (SPA catch-all)."""
-            # Try serving the actual file first
-            file_path = _static_dir / full_path
-            if file_path.is_file() and ".." not in full_path:
-                import mimetypes
+            import mimetypes
+            # Resolve and verify the path stays within the static directory
+            file_path = (_static_dir / full_path).resolve()
+            static_root = _static_dir.resolve()
+            if (
+                file_path.is_file()
+                and str(file_path).startswith(str(static_root) + os.sep)
+            ):
                 ct = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
                 return Response(content=file_path.read_bytes(), media_type=ct)
 
@@ -679,12 +699,19 @@ def _load_query(query_key: str, query_dir: str | None) -> str | None:
     if not query_dir:
         return None
 
+    # Sanitize query_key: reject path separators and traversal sequences
+    if "/" in query_key or "\\" in query_key or ".." in query_key:
+        return None
+
     base = query_key.removesuffix(".obo")
-    dir_path = Path(query_dir)
+    dir_path = Path(query_dir).resolve()
 
     # Try .obo.sql first, then .sql
     for suffix in [".obo.sql", ".sql"]:
-        file_path = dir_path / f"{base}{suffix}"
+        file_path = (dir_path / f"{base}{suffix}").resolve()
+        # Verify the resolved path stays within the query directory
+        if not str(file_path).startswith(str(dir_path) + os.sep):
+            return None
         if file_path.is_file():
             return file_path.read_text()
 

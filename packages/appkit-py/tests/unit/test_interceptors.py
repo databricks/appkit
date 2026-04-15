@@ -124,9 +124,10 @@ class TestCacheInterceptor:
         assert call_count == 1
 
     async def test_cache_hit_skips_function(self):
+        import time
         from appkit_py.plugin.interceptors.cache import CacheInterceptor
 
-        cache_store: dict[str, object] = {"test-key": {"data": "cached"}}
+        cache_store: dict[str, object] = {"test-key": ({"data": "cached"}, time.time() + 60)}
         interceptor = CacheInterceptor(
             cache_store=cache_store, cache_key="test-key", ttl=60
         )

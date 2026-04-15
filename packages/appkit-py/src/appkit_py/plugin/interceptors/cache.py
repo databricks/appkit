@@ -5,6 +5,7 @@ Mirrors packages/appkit/src/plugin/interceptors/cache.ts
 
 from __future__ import annotations
 
+import time
 from typing import Any, Awaitable, Callable
 
 
@@ -26,9 +27,12 @@ class CacheInterceptor:
             return await fn()
 
         if self._key in self._store:
-            return self._store[self._key]
+            value, expires_at = self._store[self._key]
+            if time.time() < expires_at:
+                return value
+            del self._store[self._key]
 
         result = await fn()
         if self._key:
-            self._store[self._key] = result
+            self._store[self._key] = (result, time.time() + self._ttl)
         return result

@@ -5,6 +5,8 @@ Mirrors packages/appkit/src/plugin/plugin.ts
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 from typing import Any
 
 from appkit_py.context.execution_context import run_in_user_context
@@ -79,10 +81,14 @@ class _UserContextProxy(Plugin):
         if name in _EXCLUDED_FROM_PROXY or not callable(attr):
             return attr
 
-        async def wrapper(*args: Any, **kwargs: Any) -> Any:
-            return await run_in_user_context(
-                self._user_context,
-                lambda: attr(*args, **kwargs),
-            )
+        # Only wrap coroutine functions as async; leave sync methods alone
+        if asyncio.iscoroutinefunction(attr):
+            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                return await run_in_user_context(
+                    self._user_context,
+                    lambda: attr(*args, **kwargs),
+                )
+            return async_wrapper
 
-        return wrapper
+        # Sync callable — return as-is (context won't propagate, but won't break)
+        return attr
