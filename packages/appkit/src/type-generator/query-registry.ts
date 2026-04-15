@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
+import { tableFromIPC } from "apache-arrow";
 import pc from "picocolors";
 import { createLogger } from "../logging/logger";
 import { CACHE_VERSION, hashSQL, loadCache, saveCache } from "./cache";
@@ -78,17 +79,84 @@ function formatParametersType(sql: string): string {
     : "Record<string, never>";
 }
 
+/**
+ * Map Arrow DataType IDs to Databricks SQL type names.
+ * Arrow type IDs come from the Arrow spec (apache-arrow TypeId enum).
+ * We only need to cover the types that DESCRIBE QUERY can return.
+ */
+function arrowTypeToSqlName(arrowType: { typeId: number }): string {
+  switch (arrowType.typeId) {
+    case 1: // Bool
+      return "BOOLEAN";
+    case 2: // Int (covers TINYINT, SMALLINT, INT, BIGINT depending on bitWidth)
+      return "INT";
+    case 3: // Float (covers FLOAT, DOUBLE)
+      return "DOUBLE";
+    case 4: // Decimal
+      return "DECIMAL";
+    case 5: // Utf8
+      return "STRING";
+    case 6: // Binary
+      return "BINARY";
+    case 7: // FixedSizeBinary
+      return "BINARY";
+    case 8: // Date
+      return "DATE";
+    case 10: // Timestamp
+      return "TIMESTAMP";
+    case 12: // List
+      return "ARRAY";
+    case 14: // Struct
+      return "STRUCT";
+    case 15: // Map
+      return "MAP";
+    default:
+      return "STRING";
+  }
+}
+
+/**
+ * Decode a base64 Arrow IPC attachment and extract column metadata.
+ * Returns the same shape as rows parsed from DESCRIBE QUERY data_array.
+ */
+function columnsFromArrowAttachment(
+  attachment: string,
+): Array<{ name: string; type_name: string; comment: string | undefined }> {
+  const buf = Buffer.from(attachment, "base64");
+  const table = tableFromIPC(buf);
+  return table.schema.fields.map((field) => ({
+    name: field.name,
+    type_name: arrowTypeToSqlName(field.type),
+    comment: undefined,
+  }));
+}
+
 export function convertToQueryType(
   result: DatabricksStatementExecutionResponse,
   sql: string,
   queryName: string,
 ): { type: string; hasResults: boolean } {
   const dataRows = result.result?.data_array || [];
-  const columns = dataRows.map((row) => ({
+  let columns = dataRows.map((row) => ({
     name: row[0] || "",
     type_name: row[1]?.toUpperCase() || "STRING",
     comment: row[2] || undefined,
   }));
+
+  // Fallback: serverless warehouses may return ARROW_STREAM format with an
+  // inline base64 attachment instead of data_array. Decode the Arrow IPC
+  // schema to extract column names and types.
+  if (columns.length === 0 && result.result?.attachment) {
+    logger.debug("data_array empty, decoding Arrow IPC attachment for schema");
+    try {
+      columns = columnsFromArrowAttachment(result.result.attachment);
+    } catch (err) {
+      logger.warn(
+        "Failed to decode Arrow IPC attachment: %s",
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
 
   const paramsType = formatParametersType(sql);
 
@@ -277,10 +345,11 @@ export async function generateQueriesFromDescribe(
       );
 
       logger.debug(
-        "DESCRIBE result for %s: state=%s, rows=%d",
+        "DESCRIBE result for %s: state=%s, rows=%d, hasAttachment=%s",
         queryName,
         result.status.state,
         result.result?.data_array?.length ?? 0,
+        !!result.result?.attachment,
       );
 
       if (result.status.state === "FAILED") {
