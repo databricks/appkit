@@ -8,7 +8,8 @@ import {
   serving,
 } from "@databricks/appkit";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
-import { vectorSearch } from "../../../packages/appkit/src/plugins/vector-search";
+// TODO: re-enable once vector-search is exported from @databricks/appkit
+// import { vectorSearch } from "@databricks/appkit";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
@@ -35,16 +36,17 @@ createApp({
     lakebaseExamples(),
     files(),
     serving(),
-    vectorSearch({
-      indexes: {
-        demo: {
-          indexName:
-            process.env.DATABRICKS_VS_INDEX_NAME ?? "catalog.schema.index",
-          columns: ["id", "text", "title"],
-          queryType: "hybrid",
-        },
-      },
-    }),
+    // TODO: re-enable once vector-search is exported from @databricks/appkit
+    // vectorSearch({
+    //   indexes: {
+    //     demo: {
+    //       indexName:
+    //         process.env.DATABRICKS_VS_INDEX_NAME ?? "catalog.schema.index",
+    //       columns: ["id", "text", "title"],
+    //       queryType: "hybrid",
+    //     },
+    //   },
+    // }),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
 }).then((appkit) => {
