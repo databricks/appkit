@@ -84,7 +84,10 @@ function VectorSearchRoute() {
               onKeyDown={handleKeyDown}
               className="flex-1"
             />
-            <Button onClick={() => void handleSearch()} disabled={loading || !query.trim()}>
+            <Button
+              onClick={() => void handleSearch()}
+              disabled={loading || !query.trim()}
+            >
               {loading ? (
                 "Searching..."
               ) : (
@@ -105,15 +108,18 @@ function VectorSearchRoute() {
           {response && (
             <div className="flex flex-col gap-4">
               <div className="text-sm text-muted-foreground">
-                {response.totalCount} result{response.totalCount !== 1 ? "s" : ""} &middot;{" "}
+                {response.totalCount} result
+                {response.totalCount !== 1 ? "s" : ""} &middot;{" "}
                 {response.queryTimeMs}ms &middot; {response.queryType}
               </div>
 
               {response.results.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No results found.</p>
+                <p className="text-sm text-muted-foreground">
+                  No results found.
+                </p>
               ) : (
                 response.results.map((result, index) => (
-                  <Card key={index}>
+                  <Card key={`${result.score}-${index}`}>
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm font-medium flex items-center justify-between">
                         <span>Result {index + 1}</span>

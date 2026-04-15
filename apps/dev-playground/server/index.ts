@@ -6,9 +6,9 @@ import {
   genie,
   server,
   serving,
-  vectorSearch,
 } from "@databricks/appkit";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
+import { vectorSearch } from "../../../packages/appkit/src/plugins/vector-search";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
@@ -38,7 +38,8 @@ createApp({
     vectorSearch({
       indexes: {
         demo: {
-          indexName: process.env.DATABRICKS_VS_INDEX_NAME ?? "catalog.schema.index",
+          indexName:
+            process.env.DATABRICKS_VS_INDEX_NAME ?? "catalog.schema.index",
           columns: ["id", "text", "title"],
           queryType: "hybrid",
         },

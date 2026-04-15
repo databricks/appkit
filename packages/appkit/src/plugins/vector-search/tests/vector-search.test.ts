@@ -27,7 +27,12 @@ vi.mock("../../../telemetry", () => ({
         createHistogram: () => ({ record: vi.fn() }),
       }),
       startActiveSpan: vi.fn(
-        (_name: string, _opts: unknown, fn: Function, _telemetryOpts?: unknown) =>
+        (
+          _name: string,
+          _opts: unknown,
+          fn: (...args: unknown[]) => unknown,
+          _telemetryOpts?: unknown,
+        ) =>
           fn({
             setAttribute: vi.fn(),
             setStatus: vi.fn(),
@@ -305,9 +310,9 @@ describe("VectorSearchPlugin", () => {
       });
       await plugin.setup();
 
-      await expect(
-        plugin.query("test", { queryText: "test" }),
-      ).rejects.toThrow("Embedding generation failed");
+      await expect(plugin.query("test", { queryText: "test" })).rejects.toThrow(
+        "Embedding generation failed",
+      );
     });
   });
 

@@ -1,13 +1,12 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
-import type { TelemetryOptions } from "shared";
 import { createLogger } from "../../logging/logger";
+import type { TelemetryProvider } from "../../telemetry";
 import {
   type Span,
   SpanKind,
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
-import type { TelemetryProvider } from "../../telemetry";
 import type {
   VectorSearchConnectorConfig,
   VsNextPageParams,
@@ -18,13 +17,9 @@ import type {
 const logger = createLogger("connectors:vector-search");
 
 export class VectorSearchConnector {
-  private readonly config: Required<VectorSearchConnectorConfig>;
   private readonly telemetry: TelemetryProvider;
 
   constructor(config: VectorSearchConnectorConfig = {}) {
-    this.config = {
-      timeout: config.timeout ?? 30_000,
-    };
     this.telemetry = TelemetryManager.getProvider(
       "vector-search",
       config.telemetry,
@@ -95,7 +90,10 @@ export class VectorSearchConnector {
 
           const duration = Date.now() - startTime;
           span.setAttribute("vs.result_count", response.result.row_count);
-          span.setAttribute("vs.query_time_ms", response.debug_info?.response_time ?? 0);
+          span.setAttribute(
+            "vs.query_time_ms",
+            response.debug_info?.response_time ?? 0,
+          );
           span.setAttribute("vs.duration_ms", duration);
           span.setStatus({ code: SpanStatusCode.OK });
 

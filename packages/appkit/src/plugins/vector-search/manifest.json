@@ -10,7 +10,7 @@
         "alias": "Vector Search Index",
         "resourceKey": "vector-search-index",
         "description": "A Databricks Vector Search index to query. Index names configured via plugin config.",
-        "permission": "CAN_QUERY",
+        "permission": "SELECT",
         "fields": {
           "indexName": {
             "env": "DATABRICKS_VS_INDEX_NAME",

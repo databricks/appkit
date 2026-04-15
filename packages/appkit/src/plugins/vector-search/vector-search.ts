@@ -1,16 +1,16 @@
 import type express from "express";
 import type { IAppRouter, PluginExecutionSettings } from "shared";
 import { VectorSearchConnector } from "../../connectors";
+import type { VsRawResponse } from "../../connectors/vector-search/types";
 import { getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
-import type { VsRawResponse } from "../../connectors/vector-search/types";
 import { vectorSearchDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import type {
-  IVectorSearchConfig,
   IndexConfig,
+  IVectorSearchConfig,
   SearchRequest,
   SearchResponse,
 } from "./types";
@@ -47,9 +47,7 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
         );
       }
       if (!idx.columns || idx.columns.length === 0) {
-        throw new Error(
-          `Index "${alias}" is missing required field "columns"`,
-        );
+        throw new Error(`Index "${alias}" is missing required field "columns"`);
       }
       if (idx.pagination && !idx.endpointName) {
         throw new Error(
@@ -112,9 +110,7 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
           );
 
           if (result === undefined) {
-            res
-              .status(500)
-              .json({ error: "Query failed", plugin: this.name });
+            res.status(500).json({ error: "Query failed", plugin: this.name });
             return;
           }
           res.json(this._parseResponse(result, prepared.queryType));
@@ -173,7 +169,7 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
                 getWorkspaceClient(),
                 {
                   indexName: indexConfig.indexName,
-                  endpointName: indexConfig.endpointName!,
+                  endpointName: indexConfig.endpointName as string,
                   pageToken,
                 },
                 signal,
@@ -188,10 +184,7 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
             return;
           }
           res.json(
-            this._parseResponse(
-              result,
-              indexConfig.queryType ?? "hybrid",
-            ),
+            this._parseResponse(result, indexConfig.queryType ?? "hybrid"),
           );
         } catch (error) {
           this._handleError(res, error, "Next-page query failed");
@@ -366,8 +359,7 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
     fallbackMessage: string,
   ): void {
     logger.error("%s: %O", fallbackMessage, error);
-    const message =
-      error instanceof Error ? error.message : fallbackMessage;
+    const message = error instanceof Error ? error.message : fallbackMessage;
     res.status(500).json({ error: message, plugin: this.name });
   }
 }

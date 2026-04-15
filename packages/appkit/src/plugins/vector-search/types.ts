@@ -65,4 +65,3 @@ export interface SearchResult<
   score: number;
   data: T;
 }
-
