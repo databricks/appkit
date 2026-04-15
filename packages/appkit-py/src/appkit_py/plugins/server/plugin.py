@@ -116,9 +116,15 @@ class ServerPlugin(Plugin):
 
     @staticmethod
     def _find_static_dir() -> str | None:
+        # 1. Check conventional paths relative to cwd (user-provided frontend)
         for candidate in ["client/dist", "dist", "build", "public", "out", "../client/dist"]:
             if Path(candidate).is_dir():
                 return candidate
+        # 2. Fall back to the frontend bundled in the wheel
+        # __file__ is at appkit_py/plugins/server/plugin.py → 3 parents up to appkit_py/
+        bundled = Path(__file__).resolve().parent.parent.parent / "static"
+        if bundled.is_dir() and (bundled / "index.html").is_file():
+            return str(bundled)
         return None
 
     def extend(self, fn) -> ServerPlugin:

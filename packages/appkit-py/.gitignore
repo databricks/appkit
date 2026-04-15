@@ -21,5 +21,9 @@ venv/
 htmlcov/
 .coverage
 
+# Frontend build output (built at release time via scripts/build_frontend.sh)
+src/appkit_py/static/
+frontend/node_modules/
+
 # OS
 .DS_Store
