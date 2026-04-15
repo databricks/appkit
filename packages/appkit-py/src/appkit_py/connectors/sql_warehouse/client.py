@@ -6,10 +6,14 @@ Mirrors packages/appkit/src/connectors/sql-warehouse/client.ts
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import time
 from typing import Any
 
+import httpx
+import pyarrow as pa
+import pyarrow.ipc as ipc
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.sql import (
     Disposition,
@@ -24,6 +28,17 @@ logger = logging.getLogger("appkit.connector.sql")
 # States that indicate the query is still running
 _PENDING_STATES = {StatementState.PENDING, StatementState.RUNNING}
 _FAILED_STATES = {StatementState.FAILED, StatementState.CANCELED, StatementState.CLOSED}
+
+
+def decode_arrow_attachment(attachment_b64: str) -> list[dict[str, Any]]:
+    """Decode a base64 Arrow IPC attachment into row dicts.
+
+    Mirrors the TS _transformArrowAttachment: base64 → Arrow IPC → row objects.
+    """
+    buf = base64.b64decode(attachment_b64)
+    reader = ipc.open_stream(buf)
+    table = reader.read_all()
+    return table.to_pylist()
 
 
 class SQLWarehouseConnector:
@@ -58,7 +73,6 @@ class SQLWarehouseConnector:
         disp = Disposition(disposition)
         fmt = Format(format)
 
-        # Execute in a thread to avoid blocking the event loop
         response = await asyncio.to_thread(
             client.statement_execution.execute_statement,
             statement=statement,
@@ -85,6 +99,42 @@ class SQLWarehouseConnector:
 
         return response
 
+    def transform_result(self, response: StatementResponse) -> list[dict[str, Any]]:
+        """Transform a StatementResponse into row dicts.
+
+        Handles three result shapes (matching TS _transformDataArray):
+        1. Inline Arrow IPC attachment (serverless warehouses) → decode base64
+        2. data_array (classic warehouses) → zip with column names
+        3. external_links (large results) → not transformed here
+        """
+        result = response.result
+        if result is None:
+            return []
+
+        # 1. Inline Arrow IPC attachment
+        attachment = getattr(result, "attachment", None)
+        if attachment:
+            try:
+                return decode_arrow_attachment(attachment)
+            except Exception as exc:
+                logger.warning("Failed to decode inline Arrow IPC attachment: %s", exc)
+                # Fall through to data_array
+
+        # 2. data_array (JSON format)
+        if result.data_array:
+            columns: list[str] = []
+            if response.manifest and response.manifest.schema and response.manifest.schema.columns:
+                columns = [c.name for c in response.manifest.schema.columns]
+            rows: list[dict[str, Any]] = []
+            for row in result.data_array:
+                if columns:
+                    rows.append(dict(zip(columns, row)))
+                else:
+                    rows.append({"values": row})
+            return rows
+
+        return []
+
     async def _poll_until_done(
         self, client: WorkspaceClient, statement_id: str
     ) -> StatementResponse:
@@ -106,15 +156,32 @@ class SQLWarehouseConnector:
     async def get_arrow_data(
         self, client: WorkspaceClient, job_id: str
     ) -> dict[str, Any]:
-        """Fetch Arrow binary data for a completed statement."""
+        """Fetch Arrow binary data for a completed statement.
+
+        Downloads external link chunks and concatenates into a single buffer.
+        """
         response = await asyncio.to_thread(
             client.statement_execution.get_statement, job_id
         )
-        if response.result and response.result.external_links:
-            # Download from external links
-            # For now return the first chunk
-            link = response.result.external_links[0]
-            # The actual download would use the link URL
-            raise NotImplementedError("External Arrow link download not yet implemented")
+
+        if not response.result:
+            raise ValueError(f"No result available for job {job_id}")
+
+        # Check for inline attachment first
+        attachment = getattr(response.result, "attachment", None)
+        if attachment:
+            return {"data": base64.b64decode(attachment)}
+
+        # Download from external links
+        if response.result.external_links:
+            chunks: list[bytes] = []
+            async with httpx.AsyncClient(timeout=30.0) as http:
+                for link in response.result.external_links:
+                    url = getattr(link, "external_link", None) or getattr(link, "url", None)
+                    if url:
+                        resp = await http.get(url)
+                        resp.raise_for_status()
+                        chunks.append(resp.content)
+            return {"data": b"".join(chunks)}
 
         raise ValueError(f"No Arrow data available for job {job_id}")

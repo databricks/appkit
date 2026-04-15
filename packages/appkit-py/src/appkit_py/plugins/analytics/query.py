@@ -6,6 +6,7 @@ Mirrors packages/appkit/src/plugins/analytics/query.ts
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from typing import Any
 
@@ -48,8 +49,20 @@ class QueryProcessor:
         self,
         query: str,
         parameters: dict[str, Any] | None = None,
+        *,
+        workspace_id: str | None = None,
     ) -> dict[str, Any] | None:
-        """Process and validate query parameters."""
-        if not parameters:
-            return None
-        return parameters
+        """Process and validate query parameters.
+
+        Auto-injects workspaceId if the query references :workspaceId and
+        it's not already in the parameters.
+        """
+        params = dict(parameters) if parameters else {}
+
+        # Auto-inject workspaceId if referenced in query but not provided
+        if ":workspaceId" in query and "workspaceId" not in params:
+            ws_id = workspace_id or os.environ.get("DATABRICKS_WORKSPACE_ID", "")
+            if ws_id:
+                params["workspaceId"] = {"__sql_type": "STRING", "value": ws_id}
+
+        return params if params else None

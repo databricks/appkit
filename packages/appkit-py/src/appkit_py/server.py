@@ -181,17 +181,8 @@ def create_server(
                         "statement_id": response.statement_id,
                     })
                 else:
-                    # Transform result from data_array into row objects
-                    result_data: list[dict] = []
-                    if response.result and response.result.data_array:
-                        columns = []
-                        if response.manifest and response.manifest.schema and response.manifest.schema.columns:
-                            columns = [c.name for c in response.manifest.schema.columns]
-                        for row in response.result.data_array:
-                            if columns:
-                                result_data.append(dict(zip(columns, row)))
-                            else:
-                                result_data.append({"values": row})
+                    # Transform result: handles Arrow IPC attachment, data_array, etc.
+                    result_data = _sql_connector.transform_result(response)
 
                     event_id = str(uuid.uuid4())
                     yield format_event(event_id, {
