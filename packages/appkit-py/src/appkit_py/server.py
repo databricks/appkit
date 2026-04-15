@@ -156,25 +156,53 @@ def create_server(
 
             try:
                 converted = query_processor.convert_to_sql_parameters(query_text, parameters)
-                # Map format to Databricks API parameters (matching TS FORMAT_CONFIGS)
-                format_map = {
-                    "ARROW_STREAM": {"disposition": "INLINE", "format": "ARROW_STREAM"},
-                    "JSON": {"disposition": "INLINE", "format": "JSON_ARRAY"},
-                    "ARROW": {"disposition": "EXTERNAL_LINKS", "format": "ARROW_STREAM"},
-                }
-                fmt_config = format_map.get(format_, format_map["JSON"])
 
-                response = await _sql_connector.execute_statement(
-                    _ws_client,
-                    statement=converted["statement"],
-                    warehouse_id=_warehouse_id,
-                    parameters=converted.get("parameters") or None,
-                    disposition=fmt_config["disposition"],
-                    format=fmt_config["format"],
-                )
+                # Format configs matching TS FORMAT_CONFIGS with fallback order
+                FORMAT_CONFIGS = {
+                    "ARROW_STREAM": {"disposition": "INLINE", "format": "ARROW_STREAM", "type": "result"},
+                    "JSON": {"disposition": "INLINE", "format": "JSON_ARRAY", "type": "result"},
+                    "ARROW": {"disposition": "EXTERNAL_LINKS", "format": "ARROW_STREAM", "type": "arrow"},
+                }
+
+                # For default ARROW_STREAM, try fallback: ARROW_STREAM → JSON → ARROW
+                if format_ == "ARROW_STREAM":
+                    fallback_order = ["ARROW_STREAM", "JSON", "ARROW"]
+                else:
+                    fallback_order = [format_]
+
+                response = None
+                result_type = "result"
+                for i, fmt_name in enumerate(fallback_order):
+                    fmt_config = FORMAT_CONFIGS.get(fmt_name, FORMAT_CONFIGS["JSON"])
+                    try:
+                        response = await _sql_connector.execute_statement(
+                            _ws_client,
+                            statement=converted["statement"],
+                            warehouse_id=_warehouse_id,
+                            parameters=converted.get("parameters") or None,
+                            disposition=fmt_config["disposition"],
+                            format=fmt_config["format"],
+                        )
+                        result_type = fmt_config["type"]
+                        if i > 0:
+                            logger.info("Query succeeded with fallback format %s", fmt_name)
+                        break
+                    except Exception as fmt_err:
+                        msg = str(fmt_err)
+                        is_format_error = any(s in msg for s in [
+                            "ARROW_STREAM", "JSON_ARRAY", "EXTERNAL_LINKS",
+                            "INVALID_PARAMETER_VALUE", "NOT_IMPLEMENTED",
+                            "format field must be",
+                        ])
+                        if not is_format_error or i == len(fallback_order) - 1:
+                            raise
+                        logger.warning("Format %s rejected, falling back: %s", fmt_name, msg)
+
+                if response is None:
+                    raise RuntimeError("All format fallbacks exhausted")
 
                 # For ARROW format with EXTERNAL_LINKS, emit an arrow event
-                if format_ == "ARROW" and response.statement_id:
+                if result_type == "arrow" and response.statement_id:
                     event_id = str(uuid.uuid4())
                     yield format_event(event_id, {
                         "type": "arrow",
