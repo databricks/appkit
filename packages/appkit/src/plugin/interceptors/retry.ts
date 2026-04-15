@@ -59,11 +59,10 @@ export class RetryInterceptor implements ExecutionInterceptor {
   }
 
   private calculateDelay(attempt: number): number {
-    // exponential backoff
     const delay = this.initialDelay * 2 ** (attempt - 1);
+    const capped = Math.min(delay, this.maxDelay);
 
-    // max delay cap
-    return Math.min(delay, this.maxDelay);
+    return capped * Math.random();
   }
 
   private sleep(ms: number): Promise<void> {

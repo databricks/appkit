@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.23.0](https://github.com/databricks/appkit/compare/v0.22.0...v0.23.0) (2026-04-14)
+
+### appkit
+
+* **appkit:** add jitter to RetryInterceptor exponential backoff ([#269](https://github.com/databricks/appkit/issues/269)) ([bdf2ea3](https://github.com/databricks/appkit/commit/bdf2ea335b11b09e772081890e1e75ec778f4ec2))
+
+* typegen queries ([#251](https://github.com/databricks/appkit/issues/251)) ([9dd7fa3](https://github.com/databricks/appkit/commit/9dd7fa36e0f76a64dbd11fac42a9c10be836b688))
+* use end-user ID in OBO analytics cache key ([#268](https://github.com/databricks/appkit/issues/268)) ([a8e9f6e](https://github.com/databricks/appkit/commit/a8e9f6e4c6d3e1cfd6d7b74da2ce1772ecba1757))
+* add Model Serving connector and plugin ([#239](https://github.com/databricks/appkit/issues/239)) ([9dc35f1](https://github.com/databricks/appkit/commit/9dc35f1fa9f316dd9806a3a2e3d78be8302c47c4))
+* add serving type generator, Vite plugin, and UI hooks ([#240](https://github.com/databricks/appkit/issues/240)) ([c4285af](https://github.com/databricks/appkit/commit/c4285af958556fcb4770e4cfa96dd6071dee66b3))
+* Improve error handling from 3P requests on interceptor ([#238](https://github.com/databricks/appkit/issues/238)) ([e72bee4](https://github.com/databricks/appkit/commit/e72bee476fa3ecccee6ad184cf930fd2b56d2ed6)), closes [#258](https://github.com/databricks/appkit/issues/258)
+
+
 ## [0.22.0](https://github.com/databricks/appkit/compare/v0.21.0...v0.22.0) (2026-04-09)
 
 * correct misleading asUser() log message in development mode ([#250](https://github.com/databricks/appkit/issues/250)) ([ee05c8a](https://github.com/databricks/appkit/commit/ee05c8af61f8b63ea9a7fad8be93b4f5358fce41))

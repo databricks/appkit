@@ -162,7 +162,7 @@ jobs:
         run: pnpm pack:sdk
 
       - name: Prepare template artifact
-        run: pnpm exec tsx tools/prepare-pr-template.ts "${{ steps.version.outputs.version }}"
+        run: pnpm exec tsx tools/prepare-template-artifact.ts --version "${{ steps.version.outputs.version }}"
 
       - name: Install template dependencies
         working-directory: pr-template

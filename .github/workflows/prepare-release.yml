@@ -15,6 +15,8 @@ permissions:
 
 jobs:
   prepare:
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     runs-on:
       group: databricks-protected-runner-group
       labels: linux-ubuntu-latest
@@ -112,3 +114,57 @@ jobs:
             VERSION
             SHA256SUMS
             NOTICE.md
+
+  template-artifact:
+    needs: [prepare]
+    if: needs.prepare.outputs.version != ''
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup JFrog npm
+        uses: ./.github/actions/setup-jfrog-npm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: appkit-release-${{ github.run_number }}
+          path: release-artifacts
+
+      - name: Prepare template artifact
+        run: >
+          pnpm exec tsx tools/prepare-template-artifact.ts
+          --version "${{ needs.prepare.outputs.version }}"
+          --tarball-dir release-artifacts
+          --output-dir template-artifact
+
+      - name: Install template dependencies
+        working-directory: template-artifact
+        run: npm install
+
+      - name: Create zip artifact
+        working-directory: template-artifact
+        run: zip -r ../template.zip . -x 'node_modules/*'
+
+      - name: Upload template artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: appkit-template-${{ github.run_number }}
+          retention-days: 7
+          path: template.zip
