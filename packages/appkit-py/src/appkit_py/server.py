@@ -68,13 +68,28 @@ def create_server(
     _query_dir = query_dir or _find_query_dir()
 
     # Initialize connectors
-    _ws_client = _get_workspace_client()
+    _ws_client = _get_workspace_client()  # Service principal client
     _sql_connector = SQLWarehouseConnector()
     _genie_connector = GenieConnector()
     _file_connectors: dict[str, FilesConnector] = {
         key: FilesConnector(default_volume=path) for key, path in _volumes.items()
     }
     _warehouse_id = os.environ.get("DATABRICKS_WAREHOUSE_ID")
+
+    def _get_user_client(request: Request) -> Any | None:
+        """Create a per-request WorkspaceClient using OBO credentials.
+
+        Falls back to the service principal client if no user headers are present.
+        """
+        token = request.headers.get("x-forwarded-access-token")
+        host = os.environ.get("DATABRICKS_HOST")
+        if token and host:
+            try:
+                from databricks.sdk import WorkspaceClient
+                return WorkspaceClient(host=host, token=token)
+            except Exception:
+                pass
+        return _ws_client
 
     # -----------------------------------------------------------------------
     # Health endpoint
@@ -141,35 +156,51 @@ def create_server(
 
             try:
                 converted = query_processor.convert_to_sql_parameters(query_text, parameters)
+                # Map format to Databricks API parameters (matching TS FORMAT_CONFIGS)
+                format_map = {
+                    "ARROW_STREAM": {"disposition": "INLINE", "format": "ARROW_STREAM"},
+                    "JSON": {"disposition": "INLINE", "format": "JSON_ARRAY"},
+                    "ARROW": {"disposition": "EXTERNAL_LINKS", "format": "ARROW_STREAM"},
+                }
+                fmt_config = format_map.get(format_, format_map["JSON"])
+
                 response = await _sql_connector.execute_statement(
                     _ws_client,
                     statement=converted["statement"],
                     warehouse_id=_warehouse_id,
                     parameters=converted.get("parameters") or None,
-                    disposition="INLINE",
-                    format={"ARROW_STREAM": "ARROW_STREAM", "JSON": "JSON_ARRAY", "ARROW": "ARROW_STREAM"}.get(format_, "JSON_ARRAY"),
+                    disposition=fmt_config["disposition"],
+                    format=fmt_config["format"],
                 )
 
-                # Transform result
-                result_data: list[dict] = []
-                if response.result and response.result.data_array:
-                    columns = []
-                    if response.manifest and response.manifest.schema and response.manifest.schema.columns:
-                        columns = [c.name for c in response.manifest.schema.columns]
-                    for row in response.result.data_array:
-                        if columns:
-                            result_data.append(dict(zip(columns, row)))
-                        else:
-                            result_data.append({"values": row})
+                # For ARROW format with EXTERNAL_LINKS, emit an arrow event
+                if format_ == "ARROW" and response.statement_id:
+                    event_id = str(uuid.uuid4())
+                    yield format_event(event_id, {
+                        "type": "arrow",
+                        "statement_id": response.statement_id,
+                    })
+                else:
+                    # Transform result from data_array into row objects
+                    result_data: list[dict] = []
+                    if response.result and response.result.data_array:
+                        columns = []
+                        if response.manifest and response.manifest.schema and response.manifest.schema.columns:
+                            columns = [c.name for c in response.manifest.schema.columns]
+                        for row in response.result.data_array:
+                            if columns:
+                                result_data.append(dict(zip(columns, row)))
+                            else:
+                                result_data.append({"values": row})
 
-                event_id = str(uuid.uuid4())
-                yield format_event(event_id, {
-                    "type": "result",
-                    "chunk_index": 0,
-                    "row_offset": 0,
-                    "row_count": len(result_data),
-                    "data": result_data,
-                })
+                    event_id = str(uuid.uuid4())
+                    yield format_event(event_id, {
+                        "type": "result",
+                        "chunk_index": 0,
+                        "row_offset": 0,
+                        "row_count": len(result_data),
+                        "data": result_data,
+                    })
 
             except Exception as exc:
                 error_id = str(uuid.uuid4())
@@ -262,13 +293,14 @@ def create_server(
                 status_code=404,
             )
         connector = _file_connectors.get(volume_key)
-        if not _ws_client or not connector:
+        client = _get_user_client(request)
+        if not client or not connector:
             return JSONResponse(
                 {"error": "Databricks connection not configured", "plugin": "files"},
                 status_code=500,
             )
         try:
-            result = await connector.list(_ws_client, path)
+            result = await connector.list(client, path)
             return result
         except Exception as exc:
             return JSONResponse(
@@ -287,45 +319,57 @@ def create_server(
         if valid is not True:
             return JSONResponse({"error": valid, "plugin": "files"}, status_code=400)
         connector = _file_connectors.get(volume_key)
-        if not _ws_client or not connector:
+        client = _get_user_client(request)
+        if not client or not connector:
             return JSONResponse(
                 {"error": "Databricks connection not configured", "plugin": "files"},
                 status_code=500,
             )
         try:
-            text = await connector.read(_ws_client, path)
+            text = await connector.read(client, path)
             return Response(content=text, media_type="text/plain")
         except Exception as exc:
             return JSONResponse({"error": str(exc), "plugin": "files"}, status_code=500)
 
-    def _file_handler_preamble(volume_key: str, path: str | None = None, require_path: bool = True):
-        """Common preamble for file endpoints: resolve volume, validate path."""
+    def _get_client_for_request(request: Request) -> Any:
+        """Get the appropriate WorkspaceClient for a request.
+
+        OBO routes use per-request client with user's token.
+        Falls back to service principal client.
+        """
+        return _get_user_client(request)
+
+    def _file_handler_preamble(volume_key: str, request: Request, path: str | None = None, require_path: bool = True):
+        """Common preamble for file endpoints: resolve volume, validate path, get client.
+
+        Returns (error_response, None, None) on failure, or (None, connector, client) on success.
+        """
         if not _resolve_volume(volume_key):
             safe_key = "".join(c for c in volume_key if c.isalnum() or c in "_-")
-            return JSONResponse(
+            return (JSONResponse(
                 {"error": f'Unknown volume "{safe_key}"', "plugin": "files"},
                 status_code=404,
-            )
+            ), None, None)
         if require_path:
             valid = _validate_path(path)
             if valid is not True:
-                return JSONResponse({"error": valid, "plugin": "files"}, status_code=400)
+                return (JSONResponse({"error": valid, "plugin": "files"}, status_code=400), None, None)
         connector = _file_connectors.get(volume_key)
-        if not _ws_client or not connector:
-            return JSONResponse(
+        client = _get_user_client(request)
+        if not client or not connector:
+            return (JSONResponse(
                 {"error": "Databricks connection not configured", "plugin": "files"},
                 status_code=500,
-            )
-        return None  # All checks passed
+            ), None, None)
+        return (None, connector, client)  # All checks passed
 
     @app.get("/api/files/{volume_key}/download")
-    async def files_download(volume_key: str, path: str | None = None):
-        err = _file_handler_preamble(volume_key, path)
+    async def files_download(volume_key: str, request: Request, path: str | None = None):
+        err, connector, client = _file_handler_preamble(volume_key, request, path)
         if err:
             return err
-        connector = _file_connectors[volume_key]
         try:
-            result = await connector.download(_ws_client, path)
+            result = await connector.download(client, path)
             import mimetypes
             content_type = result.get("content_type") or mimetypes.guess_type(path)[0] or "application/octet-stream"
             raw_name = path.split("/")[-1] if path else "download"
@@ -345,13 +389,12 @@ def create_server(
             return JSONResponse({"error": str(exc), "plugin": "files"}, status_code=500)
 
     @app.get("/api/files/{volume_key}/raw")
-    async def files_raw(volume_key: str, path: str | None = None):
-        err = _file_handler_preamble(volume_key, path)
+    async def files_raw(volume_key: str, request: Request, path: str | None = None):
+        err, connector, client = _file_handler_preamble(volume_key, request, path)
         if err:
             return err
-        connector = _file_connectors[volume_key]
         try:
-            result = await connector.download(_ws_client, path)
+            result = await connector.download(client, path)
             import mimetypes
             content_type = result.get("content_type") or mimetypes.guess_type(path)[0] or "application/octet-stream"
             headers = {
@@ -368,37 +411,34 @@ def create_server(
             return JSONResponse({"error": str(exc), "plugin": "files"}, status_code=500)
 
     @app.get("/api/files/{volume_key}/exists")
-    async def files_exists(volume_key: str, path: str | None = None):
-        err = _file_handler_preamble(volume_key, path)
+    async def files_exists(volume_key: str, request: Request, path: str | None = None):
+        err, connector, client = _file_handler_preamble(volume_key, request, path)
         if err:
             return err
-        connector = _file_connectors[volume_key]
         try:
-            exists = await connector.exists(_ws_client, path)
+            exists = await connector.exists(client, path)
             return {"exists": exists}
         except Exception as exc:
             return JSONResponse({"error": str(exc), "plugin": "files"}, status_code=500)
 
     @app.get("/api/files/{volume_key}/metadata")
-    async def files_metadata(volume_key: str, path: str | None = None):
-        err = _file_handler_preamble(volume_key, path)
+    async def files_metadata(volume_key: str, request: Request, path: str | None = None):
+        err, connector, client = _file_handler_preamble(volume_key, request, path)
         if err:
             return err
-        connector = _file_connectors[volume_key]
         try:
-            meta = await connector.metadata(_ws_client, path)
+            meta = await connector.metadata(client, path)
             return meta
         except Exception as exc:
             return JSONResponse({"error": str(exc), "plugin": "files"}, status_code=500)
 
     @app.get("/api/files/{volume_key}/preview")
-    async def files_preview(volume_key: str, path: str | None = None):
-        err = _file_handler_preamble(volume_key, path)
+    async def files_preview(volume_key: str, request: Request, path: str | None = None):
+        err, connector, client = _file_handler_preamble(volume_key, request, path)
         if err:
             return err
-        connector = _file_connectors[volume_key]
         try:
-            preview = await connector.preview(_ws_client, path)
+            preview = await connector.preview(client, path)
             return preview
         except Exception as exc:
             return JSONResponse({"error": str(exc), "plugin": "files"}, status_code=500)
@@ -432,7 +472,8 @@ def create_server(
                 pass
 
         connector = _file_connectors.get(volume_key)
-        if not _ws_client or not connector:
+        client = _get_user_client(request)
+        if not client or not connector:
             return JSONResponse(
                 {"error": "Databricks connection not configured", "plugin": "files"},
                 status_code=500,
@@ -453,7 +494,7 @@ def create_server(
                     )
                 chunks.append(chunk)
             body = b"".join(chunks)
-            await connector.upload(_ws_client, path, body)
+            await connector.upload(client, path, body)
             return {"success": True}
         except Exception as exc:
             if "exceeds maximum allowed size" in str(exc):
@@ -478,19 +519,20 @@ def create_server(
         if valid is not True:
             return JSONResponse({"error": valid, "plugin": "files"}, status_code=400)
         connector = _file_connectors.get(volume_key)
-        if not _ws_client or not connector:
+        client = _get_user_client(request)
+        if not client or not connector:
             return JSONResponse(
                 {"error": "Databricks connection not configured", "plugin": "files"},
                 status_code=500,
             )
         try:
-            await connector.create_directory(_ws_client, dir_path)
+            await connector.create_directory(client, dir_path)
             return {"success": True}
         except Exception as exc:
             return JSONResponse({"error": str(exc), "plugin": "files"}, status_code=500)
 
     @app.delete("/api/files/{volume_key}")
-    async def files_delete(volume_key: str, path: str | None = None):
+    async def files_delete(volume_key: str, request: Request, path: str | None = None):
         if not _resolve_volume(volume_key):
             safe_key = "".join(c for c in volume_key if c.isalnum() or c in "_-")
             return JSONResponse(
@@ -501,13 +543,14 @@ def create_server(
         if valid is not True:
             return JSONResponse({"error": valid, "plugin": "files"}, status_code=400)
         connector = _file_connectors.get(volume_key)
-        if not _ws_client or not connector:
+        client = _get_user_client(request)
+        if not client or not connector:
             return JSONResponse(
                 {"error": "Databricks connection not configured", "plugin": "files"},
                 status_code=500,
             )
         try:
-            await connector.delete(_ws_client, path)
+            await connector.delete(client, path)
             return {"success": True}
         except Exception as exc:
             return JSONResponse({"error": str(exc), "plugin": "files"}, status_code=500)
@@ -515,10 +558,10 @@ def create_server(
     # -----------------------------------------------------------------------
     # Genie plugin
     # -----------------------------------------------------------------------
-    def _sse_from_genie(gen_coro) -> StreamingResponse:
+    def _sse_from_genie(gen_coro, client: Any) -> StreamingResponse:
         """Create an SSE StreamingResponse from a genie async generator."""
         async def event_generator() -> AsyncGenerator[str, None]:
-            if not _ws_client:
+            if not client:
                 error_id = str(uuid.uuid4())
                 yield format_error(error_id, "Databricks Genie connection not configured", SSEErrorCode.TEMPORARY_UNAVAILABLE)
                 return
@@ -552,8 +595,10 @@ def create_server(
             return JSONResponse({"error": "content is required"}, status_code=400)
 
         conversation_id = body.get("conversationId") if isinstance(body, dict) else None
+        client = _get_user_client(request)
         return _sse_from_genie(
-            _genie_connector.stream_send_message(_ws_client, space_id, content, conversation_id)
+            _genie_connector.stream_send_message(client, space_id, content, conversation_id),
+            client,
         )
 
     @app.get("/api/genie/{alias}/conversations/{conversation_id}")
@@ -564,11 +609,13 @@ def create_server(
 
         include_query_results = request.query_params.get("includeQueryResults", "true") != "false"
         page_token = request.query_params.get("pageToken")
+        client = _get_user_client(request)
         return _sse_from_genie(
             _genie_connector.stream_conversation(
-                _ws_client, space_id, conversation_id,
+                client, space_id, conversation_id,
                 include_query_results=include_query_results, page_token=page_token,
-            )
+            ),
+            client,
         )
 
     @app.get("/api/genie/{alias}/conversations/{conversation_id}/messages/{message_id}")
@@ -577,8 +624,10 @@ def create_server(
         if not space_id:
             return JSONResponse({"error": f"Unknown space alias: {alias}"}, status_code=404)
 
+        client = _get_user_client(request)
         return _sse_from_genie(
-            _genie_connector.stream_get_message(_ws_client, space_id, conversation_id, message_id)
+            _genie_connector.stream_get_message(client, space_id, conversation_id, message_id),
+            client,
         )
 
     # -----------------------------------------------------------------------
