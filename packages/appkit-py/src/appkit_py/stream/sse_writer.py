@@ -39,7 +39,8 @@ def format_error(event_id: str, error: str, code: SSEErrorCode = SSEErrorCode.IN
 
 def format_buffered_event(event: BufferedEvent) -> str:
     """Format a buffered event for replay."""
-    return f"id: {event.id}\nevent: {event.type}\ndata: {event.data}\n\n"
+    event_type = sanitize_event_type(event.type)
+    return f"id: {event.id}\nevent: {event_type}\ndata: {event.data}\n\n"
 
 
 def format_heartbeat() -> str:
