@@ -1,6 +1,6 @@
 import type express from "express";
 import type { IAppRouter, PluginExecutionSettings } from "shared";
-import { VectorSearchConnector } from "../../connectors";
+import { VectorSearchConnector } from "../../connectors/vector-search/client";
 import type { VsRawResponse } from "../../connectors/vector-search/types";
 import { getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging/logger";
