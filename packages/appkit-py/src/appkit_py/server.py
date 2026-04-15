@@ -1,51 +1,41 @@
-"""Main FastAPI application — the Python AppKit backend server.
+"""Main server entry point — thin wrapper around the plugin-based architecture.
 
-This is the full server implementation that provides 100% API compatibility
-with the TypeScript AppKit backend. It serves the same endpoints that the
-React frontend (appkit-ui) expects.
+Usage with uvicorn:
+    uvicorn appkit_py.server:app
+
+Usage programmatically (matching TS dev-playground/server/index.ts):
+    from appkit_py.core.appkit import create_app
+    from appkit_py.plugins.server.plugin import server, ServerPlugin
+    from appkit_py.plugins.analytics.plugin import analytics
+    from appkit_py.plugins.files.plugin import files
+    from appkit_py.plugins.genie.plugin import genie
+
+    appkit = await create_app(plugins=[
+        server({"autoStart": False}),
+        analytics({}),
+        files(),
+        genie({"spaces": {"demo": "space-id"}}),
+    ])
+    appkit.server.extend(lambda app: app.get("/custom", ...))
+    await appkit.server.start()
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
-import os
-import uuid
-from pathlib import Path
-from typing import Any, AsyncGenerator
+from typing import Any
 
-from fastapi import FastAPI, Request, Response
-from fastapi.responses import JSONResponse, StreamingResponse
-from starlette.staticfiles import StaticFiles
+from fastapi import FastAPI
 
-from appkit_py.connectors.files.client import FilesConnector
-from appkit_py.connectors.genie.client import GenieConnector
-from appkit_py.connectors.sql_warehouse.client import SQLWarehouseConnector
-from appkit_py.plugins.analytics.query import QueryProcessor
-from appkit_py.stream.sse_writer import SSE_HEADERS, format_error, format_event, format_heartbeat
-from appkit_py.stream.stream_manager import StreamManager
-from appkit_py.stream.types import SSEErrorCode
+from appkit_py.core.appkit import create_app
+from appkit_py.plugin.plugin import Plugin
+from appkit_py.plugins.analytics.plugin import AnalyticsPlugin
+from appkit_py.plugins.files.plugin import FilesPlugin
+from appkit_py.plugins.genie.plugin import GeniePlugin
+from appkit_py.plugins.server.plugin import ServerPlugin
 
 logger = logging.getLogger("appkit.server")
 
-
-def _get_workspace_client() -> Any | None:
-    """Create a WorkspaceClient if DATABRICKS_HOST is set."""
-    host = os.environ.get("DATABRICKS_HOST")
-    if not host:
-        return None
-    try:
-        from databricks.sdk import WorkspaceClient
-        return WorkspaceClient()
-    except Exception as exc:
-        logger.warning("Failed to create WorkspaceClient: %s", exc)
-        return None
-
-
-# ---------------------------------------------------------------------------
-# App factory
-# ---------------------------------------------------------------------------
 
 def create_server(
     *,
@@ -53,749 +43,86 @@ def create_server(
     static_path: str | None = None,
     genie_spaces: dict[str, str] | None = None,
     volumes: dict[str, str] | None = None,
-) -> FastAPI:
-    """Create and configure the FastAPI application.
+):
+    """Create the FastAPI app using the plugin architecture.
 
-    This mirrors the TypeScript createApp() + server plugin pattern.
+    This is the convenience function for uvicorn. For full control,
+    use create_app() directly.
     """
-    app = FastAPI(title="AppKit Python Backend")
-    stream_manager = StreamManager()
-    query_processor = QueryProcessor()
+    server_config: dict = {"autoStart": False}
+    if static_path:
+        server_config["staticPath"] = static_path
 
-    # Discover configuration from environment
-    _genie_spaces = genie_spaces or _discover_genie_spaces()
-    _volumes = volumes or _discover_volumes()
-    _query_dir = query_dir or _find_query_dir()
+    analytics_config: dict = {}
+    if query_dir:
+        analytics_config["query_dir"] = query_dir
 
-    # Initialize connectors
-    _ws_client = _get_workspace_client()  # Service principal client
-    _sql_connector = SQLWarehouseConnector()
-    _genie_connector = GenieConnector()
-    _file_connectors: dict[str, FilesConnector] = {
-        key: FilesConnector(default_volume=path) for key, path in _volumes.items()
-    }
-    _warehouse_id = os.environ.get("DATABRICKS_WAREHOUSE_ID")
+    files_config: dict = {}
+    if volumes:
+        files_config["volumes"] = volumes
 
-    def _get_user_client(request: Request) -> Any | None:
-        """Create a per-request WorkspaceClient using OBO credentials.
+    genie_config: dict = {}
+    if genie_spaces:
+        genie_config["spaces"] = genie_spaces
 
-        Falls back to the service principal client if no user headers are present.
-        """
-        token = request.headers.get("x-forwarded-access-token")
-        host = os.environ.get("DATABRICKS_HOST")
-        if token and host:
-            try:
-                from databricks.sdk import WorkspaceClient
-                return WorkspaceClient(host=host, token=token)
-            except Exception:
-                pass
-        return _ws_client
+    plugins = [
+        ServerPlugin(server_config),
+        AnalyticsPlugin(analytics_config),
+        FilesPlugin(files_config),
+        GeniePlugin(genie_config),
+    ]
 
-    # -----------------------------------------------------------------------
-    # Health endpoint
-    # -----------------------------------------------------------------------
-    @app.get("/health")
-    async def health():
-        return {"status": "ok"}
+    # Synchronous initialization: manually run setup steps without asyncio.run()
+    # This avoids "Cannot run event loop while another is running" when
+    # imported by uvicorn (which already has an event loop).
+    import os
+    from appkit_py.cache.cache_manager import CacheManager
+    from appkit_py.context.service_context import ServiceContext
 
-    # -----------------------------------------------------------------------
-    # Reconnect plugin (test/dev SSE endpoint matching TS dev-playground)
-    # -----------------------------------------------------------------------
-    @app.get("/api/reconnect/stream")
-    async def reconnect_stream(request: Request):
-        async def event_generator() -> AsyncGenerator[str, None]:
-            for i in range(1, 6):
-                event_id = str(uuid.uuid4())
-                yield format_event(event_id, {
-                    "type": "message",
-                    "count": i,
-                    "total": 5,
-                    "message": f"Event {i} of 5",
-                })
-                await asyncio.sleep(0.1)
+    CacheManager.reset()
+    CacheManager.get_instance()
+    ServiceContext.reset()
+    ServiceContext.initialize()
 
-        return StreamingResponse(
-            event_generator(),
-            media_type="text/event-stream",
-            headers={k: v for k, v in SSE_HEADERS.items() if k != "Content-Type"},
-        )
-
-    # -----------------------------------------------------------------------
-    # Analytics plugin: POST /api/analytics/query/{query_key}
-    # -----------------------------------------------------------------------
-    @app.post("/api/analytics/query/{query_key}")
-    async def analytics_query(query_key: str, request: Request):
-        body = {}
+    # Create workspace client
+    ws_client = None
+    host = os.environ.get("DATABRICKS_HOST")
+    if host:
         try:
-            body = await request.json()
-        except Exception:
-            pass
-
-        format_ = body.get("format", "ARROW_STREAM")
-        parameters = body.get("parameters")
-
-        if not query_key:
-            return JSONResponse({"error": "query_key is required"}, status_code=400)
-
-        # Look up the query file
-        query_text = _load_query(query_key, _query_dir)
-        if query_text is None:
-            return JSONResponse({"error": "Query not found"}, status_code=404)
-
-        is_obo = query_key.endswith(".obo") or _has_obo_file(query_key, _query_dir)
-
-        async def event_generator() -> AsyncGenerator[str, None]:
-            if not _ws_client or not _warehouse_id:
-                error_id = str(uuid.uuid4())
-                yield format_error(
-                    error_id,
-                    "Databricks connection not configured",
-                    SSEErrorCode.TEMPORARY_UNAVAILABLE,
-                )
-                return
-
-            try:
-                converted = query_processor.convert_to_sql_parameters(query_text, parameters)
-
-                # Format configs matching TS FORMAT_CONFIGS with fallback order
-                FORMAT_CONFIGS = {
-                    "ARROW_STREAM": {"disposition": "INLINE", "format": "ARROW_STREAM", "type": "result"},
-                    "JSON": {"disposition": "INLINE", "format": "JSON_ARRAY", "type": "result"},
-                    "ARROW": {"disposition": "EXTERNAL_LINKS", "format": "ARROW_STREAM", "type": "arrow"},
-                }
-
-                # For default ARROW_STREAM, try fallback: ARROW_STREAM → JSON → ARROW
-                if format_ == "ARROW_STREAM":
-                    fallback_order = ["ARROW_STREAM", "JSON", "ARROW"]
-                else:
-                    fallback_order = [format_]
-
-                response = None
-                result_type = "result"
-                for i, fmt_name in enumerate(fallback_order):
-                    fmt_config = FORMAT_CONFIGS.get(fmt_name, FORMAT_CONFIGS["JSON"])
-                    try:
-                        response = await _sql_connector.execute_statement(
-                            _ws_client,
-                            statement=converted["statement"],
-                            warehouse_id=_warehouse_id,
-                            parameters=converted.get("parameters") or None,
-                            disposition=fmt_config["disposition"],
-                            format=fmt_config["format"],
-                        )
-                        result_type = fmt_config["type"]
-                        if i > 0:
-                            logger.info("Query succeeded with fallback format %s", fmt_name)
-                        break
-                    except Exception as fmt_err:
-                        msg = str(fmt_err)
-                        is_format_error = any(s in msg for s in [
-                            "ARROW_STREAM", "JSON_ARRAY", "EXTERNAL_LINKS",
-                            "INVALID_PARAMETER_VALUE", "NOT_IMPLEMENTED",
-                            "format field must be",
-                        ])
-                        if not is_format_error or i == len(fallback_order) - 1:
-                            raise
-                        logger.warning("Format %s rejected, falling back: %s", fmt_name, msg)
-
-                if response is None:
-                    raise RuntimeError("All format fallbacks exhausted")
-
-                # For ARROW format with EXTERNAL_LINKS, emit an arrow event
-                if result_type == "arrow" and response.statement_id:
-                    event_id = str(uuid.uuid4())
-                    yield format_event(event_id, {
-                        "type": "arrow",
-                        "statement_id": response.statement_id,
-                    })
-                else:
-                    # Transform result: handles Arrow IPC attachment, data_array, etc.
-                    result_data = _sql_connector.transform_result(response)
-
-                    event_id = str(uuid.uuid4())
-                    yield format_event(event_id, {
-                        "type": "result",
-                        "chunk_index": 0,
-                        "row_offset": 0,
-                        "row_count": len(result_data),
-                        "data": result_data,
-                    })
-
-            except Exception as exc:
-                error_id = str(uuid.uuid4())
-                yield format_error(error_id, str(exc))
-
-        return StreamingResponse(
-            event_generator(),
-            media_type="text/event-stream",
-            headers={k: v for k, v in SSE_HEADERS.items() if k != "Content-Type"},
-        )
-
-    # -----------------------------------------------------------------------
-    # Analytics plugin: GET /api/analytics/arrow-result/{job_id}
-    # -----------------------------------------------------------------------
-    @app.get("/api/analytics/arrow-result/{job_id}")
-    async def analytics_arrow_result(job_id: str):
-        if not _ws_client:
-            return JSONResponse(
-                {"error": "Arrow job not found", "plugin": "analytics"},
-                status_code=404,
-            )
-        try:
-            result = await _sql_connector.get_arrow_data(_ws_client, job_id)
-            return Response(
-                content=result["data"],
-                media_type="application/octet-stream",
-                headers={
-                    "Content-Length": str(len(result["data"])),
-                    "Cache-Control": "public, max-age=3600",
-                },
-            )
+            from databricks.sdk import WorkspaceClient
+            ws_client = WorkspaceClient()
         except Exception as exc:
-            return JSONResponse(
-                {"error": str(exc) or "Arrow job not found", "plugin": "analytics"},
-                status_code=404,
-            )
+            logger.warning("Failed to create WorkspaceClient: %s", exc)
 
-    # -----------------------------------------------------------------------
-    # Files plugin: GET /api/files/volumes
-    # -----------------------------------------------------------------------
-    @app.get("/api/files/volumes")
-    async def files_volumes():
-        return {"volumes": list(_volumes.keys())}
+    # Wire up plugins (sync parts)
+    phase_order = {"core": 0, "normal": 1, "deferred": 2}
+    sorted_plugins = sorted(plugins, key=lambda p: phase_order.get(p.phase, 1))
+    plugin_map: dict[str, Plugin] = {}
+    server_plugin: ServerPlugin | None = None
 
-    # -----------------------------------------------------------------------
-    # Files plugin: volume routes
-    # -----------------------------------------------------------------------
-    def _resolve_volume(volume_key: str) -> str | None:
-        return _volumes.get(volume_key)
+    for plugin in sorted_plugins:
+        plugin.set_workspace_client(ws_client)
+        if isinstance(plugin, ServerPlugin):
+            server_plugin = plugin
+        else:
+            plugin_map[plugin.name] = plugin
 
-    def _validate_path(path: str | None) -> str | True:
-        if not path:
-            return "path is required"
-        if len(path) > 4096:
-            return f"path exceeds maximum length of 4096 characters (got {len(path)})"
-        if "\0" in path:
-            return "path must not contain null bytes"
-        return True
+    if server_plugin:
+        server_plugin.set_workspace_client(ws_client)
+        server_plugin.set_plugins(plugin_map)
+        plugin_map["server"] = server_plugin
 
-    async def _run_file_op(volume_key: str, op_name: str, op_coro):
-        """Helper to run a file operation with error handling."""
-        if not _ws_client:
-            return JSONResponse(
-                {"error": "Databricks connection not configured", "plugin": "files"},
-                status_code=500,
-            )
-        connector = _file_connectors.get(volume_key)
-        if not connector:
-            return JSONResponse(
-                {"error": "Volume connector not found", "plugin": "files"},
-                status_code=500,
-            )
-        try:
-            return await op_coro
-        except Exception as exc:
-            status = 500
-            if hasattr(exc, "status_code"):
-                status = exc.status_code
-            return JSONResponse(
-                {"error": str(exc), "plugin": "files"},
-                status_code=status,
-            )
+    # Run async setup via startup event (runs when uvicorn starts the event loop)
+    app = server_plugin.app if server_plugin else FastAPI()
 
-    @app.get("/api/files/{volume_key}/list")
-    async def files_list(volume_key: str, request: Request, path: str | None = None):
-        if not _resolve_volume(volume_key):
-            safe_key = "".join(c for c in volume_key if c.isalnum() or c in "_-")
-            return JSONResponse(
-                {"error": f'Unknown volume "{safe_key}"', "plugin": "files"},
-                status_code=404,
-            )
-        connector = _file_connectors.get(volume_key)
-        client = _get_user_client(request)
-        if not client or not connector:
-            return JSONResponse(
-                {"error": "Databricks connection not configured", "plugin": "files"},
-                status_code=500,
-            )
-        try:
-            result = await connector.list(client, path)
-            return result
-        except Exception as exc:
-            return JSONResponse(
-                {"error": str(exc), "plugin": "files"}, status_code=500
-            )
-
-    @app.get("/api/files/{volume_key}/read")
-    async def files_read(volume_key: str, path: str | None = None):
-        if not _resolve_volume(volume_key):
-            safe_key = "".join(c for c in volume_key if c.isalnum() or c in "_-")
-            return JSONResponse(
-                {"error": f'Unknown volume "{safe_key}"', "plugin": "files"},
-                status_code=404,
-            )
-        valid = _validate_path(path)
-        if valid is not True:
-            return JSONResponse({"error": valid, "plugin": "files"}, status_code=400)
-        connector = _file_connectors.get(volume_key)
-        client = _get_user_client(request)
-        if not client or not connector:
-            return JSONResponse(
-                {"error": "Databricks connection not configured", "plugin": "files"},
-                status_code=500,
-            )
-        try:
-            text = await connector.read(client, path)
-            return Response(content=text, media_type="text/plain")
-        except Exception as exc:
-            return JSONResponse({"error": str(exc), "plugin": "files"}, status_code=500)
-
-    def _get_client_for_request(request: Request) -> Any:
-        """Get the appropriate WorkspaceClient for a request.
-
-        OBO routes use per-request client with user's token.
-        Falls back to service principal client.
-        """
-        return _get_user_client(request)
-
-    def _file_handler_preamble(volume_key: str, request: Request, path: str | None = None, require_path: bool = True):
-        """Common preamble for file endpoints: resolve volume, validate path, get client.
-
-        Returns (error_response, None, None) on failure, or (None, connector, client) on success.
-        """
-        if not _resolve_volume(volume_key):
-            safe_key = "".join(c for c in volume_key if c.isalnum() or c in "_-")
-            return (JSONResponse(
-                {"error": f'Unknown volume "{safe_key}"', "plugin": "files"},
-                status_code=404,
-            ), None, None)
-        if require_path:
-            valid = _validate_path(path)
-            if valid is not True:
-                return (JSONResponse({"error": valid, "plugin": "files"}, status_code=400), None, None)
-        connector = _file_connectors.get(volume_key)
-        client = _get_user_client(request)
-        if not client or not connector:
-            return (JSONResponse(
-                {"error": "Databricks connection not configured", "plugin": "files"},
-                status_code=500,
-            ), None, None)
-        return (None, connector, client)  # All checks passed
-
-    @app.get("/api/files/{volume_key}/download")
-    async def files_download(volume_key: str, request: Request, path: str | None = None):
-        err, connector, client = _file_handler_preamble(volume_key, request, path)
-        if err:
-            return err
-        try:
-            result = await connector.download(client, path)
-            import mimetypes
-            content_type = result.get("content_type") or mimetypes.guess_type(path)[0] or "application/octet-stream"
-            raw_name = path.split("/")[-1] if path else "download"
-            # Sanitize filename: strip chars that could enable header injection
-            filename = "".join(c for c in raw_name if c.isalnum() or c in "._- ")[:255] or "download"
-            headers = {
-                "Content-Disposition": f'attachment; filename="{filename}"',
-                "X-Content-Type-Options": "nosniff",
-            }
-            content = result.get("contents")
-            if hasattr(content, "read"):
-                body = content.read()
-            else:
-                body = content or b""
-            return Response(content=body, media_type=content_type, headers=headers)
-        except Exception as exc:
-            return JSONResponse({"error": str(exc), "plugin": "files"}, status_code=500)
-
-    @app.get("/api/files/{volume_key}/raw")
-    async def files_raw(volume_key: str, request: Request, path: str | None = None):
-        err, connector, client = _file_handler_preamble(volume_key, request, path)
-        if err:
-            return err
-        try:
-            result = await connector.download(client, path)
-            import mimetypes
-            content_type = result.get("content_type") or mimetypes.guess_type(path)[0] or "application/octet-stream"
-            headers = {
-                "Content-Security-Policy": "sandbox",
-                "X-Content-Type-Options": "nosniff",
-            }
-            content = result.get("contents")
-            if hasattr(content, "read"):
-                body = content.read()
-            else:
-                body = content or b""
-            return Response(content=body, media_type=content_type, headers=headers)
-        except Exception as exc:
-            return JSONResponse({"error": str(exc), "plugin": "files"}, status_code=500)
-
-    @app.get("/api/files/{volume_key}/exists")
-    async def files_exists(volume_key: str, request: Request, path: str | None = None):
-        err, connector, client = _file_handler_preamble(volume_key, request, path)
-        if err:
-            return err
-        try:
-            exists = await connector.exists(client, path)
-            return {"exists": exists}
-        except Exception as exc:
-            return JSONResponse({"error": str(exc), "plugin": "files"}, status_code=500)
-
-    @app.get("/api/files/{volume_key}/metadata")
-    async def files_metadata(volume_key: str, request: Request, path: str | None = None):
-        err, connector, client = _file_handler_preamble(volume_key, request, path)
-        if err:
-            return err
-        try:
-            meta = await connector.metadata(client, path)
-            return meta
-        except Exception as exc:
-            return JSONResponse({"error": str(exc), "plugin": "files"}, status_code=500)
-
-    @app.get("/api/files/{volume_key}/preview")
-    async def files_preview(volume_key: str, request: Request, path: str | None = None):
-        err, connector, client = _file_handler_preamble(volume_key, request, path)
-        if err:
-            return err
-        try:
-            preview = await connector.preview(client, path)
-            return preview
-        except Exception as exc:
-            return JSONResponse({"error": str(exc), "plugin": "files"}, status_code=500)
-
-    @app.post("/api/files/{volume_key}/upload")
-    async def files_upload(volume_key: str, request: Request, path: str | None = None):
-        if not _resolve_volume(volume_key):
-            safe_key = "".join(c for c in volume_key if c.isalnum() or c in "_-")
-            return JSONResponse(
-                {"error": f'Unknown volume "{safe_key}"', "plugin": "files"},
-                status_code=404,
-            )
-        valid = _validate_path(path)
-        if valid is not True:
-            return JSONResponse({"error": valid, "plugin": "files"}, status_code=400)
-
-        max_size = 5 * 1024 * 1024 * 1024  # 5GB
-        content_length = request.headers.get("content-length")
-        if content_length:
-            try:
-                size = int(content_length)
-                if size > max_size:
-                    return JSONResponse(
-                        {
-                            "error": f"File size ({size} bytes) exceeds maximum allowed size ({max_size} bytes).",
-                            "plugin": "files",
-                        },
-                        status_code=413,
-                    )
-            except ValueError:
-                pass
-
-        connector = _file_connectors.get(volume_key)
-        client = _get_user_client(request)
-        if not client or not connector:
-            return JSONResponse(
-                {"error": "Databricks connection not configured", "plugin": "files"},
-                status_code=500,
-            )
-        try:
-            # Stream the body with a running size counter to prevent OOM
-            chunks: list[bytes] = []
-            bytes_received = 0
-            async for chunk in request.stream():
-                bytes_received += len(chunk)
-                if bytes_received > max_size:
-                    return JSONResponse(
-                        {
-                            "error": f"Upload stream exceeds maximum allowed size ({max_size} bytes).",
-                            "plugin": "files",
-                        },
-                        status_code=413,
-                    )
-                chunks.append(chunk)
-            body = b"".join(chunks)
-            await connector.upload(client, path, body)
-            return {"success": True}
-        except Exception as exc:
-            if "exceeds maximum allowed size" in str(exc):
-                return JSONResponse({"error": str(exc), "plugin": "files"}, status_code=413)
-            return JSONResponse({"error": str(exc), "plugin": "files"}, status_code=500)
-
-    @app.post("/api/files/{volume_key}/mkdir")
-    async def files_mkdir(volume_key: str, request: Request):
-        if not _resolve_volume(volume_key):
-            safe_key = "".join(c for c in volume_key if c.isalnum() or c in "_-")
-            return JSONResponse(
-                {"error": f'Unknown volume "{safe_key}"', "plugin": "files"},
-                status_code=404,
-            )
-        body = {}
-        try:
-            body = await request.json()
-        except Exception:
-            pass
-        dir_path = body.get("path") if isinstance(body, dict) else None
-        valid = _validate_path(dir_path)
-        if valid is not True:
-            return JSONResponse({"error": valid, "plugin": "files"}, status_code=400)
-        connector = _file_connectors.get(volume_key)
-        client = _get_user_client(request)
-        if not client or not connector:
-            return JSONResponse(
-                {"error": "Databricks connection not configured", "plugin": "files"},
-                status_code=500,
-            )
-        try:
-            await connector.create_directory(client, dir_path)
-            return {"success": True}
-        except Exception as exc:
-            return JSONResponse({"error": str(exc), "plugin": "files"}, status_code=500)
-
-    @app.delete("/api/files/{volume_key}")
-    async def files_delete(volume_key: str, request: Request, path: str | None = None):
-        if not _resolve_volume(volume_key):
-            safe_key = "".join(c for c in volume_key if c.isalnum() or c in "_-")
-            return JSONResponse(
-                {"error": f'Unknown volume "{safe_key}"', "plugin": "files"},
-                status_code=404,
-            )
-        valid = _validate_path(path)
-        if valid is not True:
-            return JSONResponse({"error": valid, "plugin": "files"}, status_code=400)
-        connector = _file_connectors.get(volume_key)
-        client = _get_user_client(request)
-        if not client or not connector:
-            return JSONResponse(
-                {"error": "Databricks connection not configured", "plugin": "files"},
-                status_code=500,
-            )
-        try:
-            await connector.delete(client, path)
-            return {"success": True}
-        except Exception as exc:
-            return JSONResponse({"error": str(exc), "plugin": "files"}, status_code=500)
-
-    # -----------------------------------------------------------------------
-    # Genie plugin
-    # -----------------------------------------------------------------------
-    def _sse_from_genie(gen_coro, client: Any) -> StreamingResponse:
-        """Create an SSE StreamingResponse from a genie async generator."""
-        async def event_generator() -> AsyncGenerator[str, None]:
-            if not client:
-                error_id = str(uuid.uuid4())
-                yield format_error(error_id, "Databricks Genie connection not configured", SSEErrorCode.TEMPORARY_UNAVAILABLE)
-                return
-            try:
-                async for event in gen_coro:
-                    event_id = str(uuid.uuid4())
-                    yield format_event(event_id, event)
-            except Exception as exc:
-                error_id = str(uuid.uuid4())
-                yield format_error(error_id, str(exc))
-
-        return StreamingResponse(
-            event_generator(),
-            media_type="text/event-stream",
-            headers={k: v for k, v in SSE_HEADERS.items() if k != "Content-Type"},
-        )
-
-    @app.post("/api/genie/{alias}/messages")
-    async def genie_send_message(alias: str, request: Request):
-        space_id = _genie_spaces.get(alias)
-        if not space_id:
-            return JSONResponse({"error": f"Unknown space alias: {alias}"}, status_code=404)
-
-        body = {}
-        try:
-            body = await request.json()
-        except Exception:
-            pass
-        content = body.get("content") if isinstance(body, dict) else None
-        if not content:
-            return JSONResponse({"error": "content is required"}, status_code=400)
-
-        conversation_id = body.get("conversationId") if isinstance(body, dict) else None
-        client = _get_user_client(request)
-        return _sse_from_genie(
-            _genie_connector.stream_send_message(client, space_id, content, conversation_id),
-            client,
-        )
-
-    @app.get("/api/genie/{alias}/conversations/{conversation_id}")
-    async def genie_get_conversation(alias: str, conversation_id: str, request: Request):
-        space_id = _genie_spaces.get(alias)
-        if not space_id:
-            return JSONResponse({"error": f"Unknown space alias: {alias}"}, status_code=404)
-
-        include_query_results = request.query_params.get("includeQueryResults", "true") != "false"
-        page_token = request.query_params.get("pageToken")
-        client = _get_user_client(request)
-        return _sse_from_genie(
-            _genie_connector.stream_conversation(
-                client, space_id, conversation_id,
-                include_query_results=include_query_results, page_token=page_token,
-            ),
-            client,
-        )
-
-    @app.get("/api/genie/{alias}/conversations/{conversation_id}/messages/{message_id}")
-    async def genie_get_message(alias: str, conversation_id: str, message_id: str, request: Request):
-        space_id = _genie_spaces.get(alias)
-        if not space_id:
-            return JSONResponse({"error": f"Unknown space alias: {alias}"}, status_code=404)
-
-        client = _get_user_client(request)
-        return _sse_from_genie(
-            _genie_connector.stream_get_message(client, space_id, conversation_id, message_id),
-            client,
-        )
-
-    # -----------------------------------------------------------------------
-    # Static file serving with client config injection
-    # -----------------------------------------------------------------------
-    resolved_static = static_path or _find_static_dir()
-    if resolved_static and Path(resolved_static).is_dir():
-        _static_dir = Path(resolved_static)
-        _index_html = _static_dir / "index.html"
-
-        # Build client config (injected into index.html like TS StaticServer)
-        _client_config = json.dumps({
-            "appName": os.environ.get("DATABRICKS_APP_NAME", "appkit-py"),
-            "queries": {},
-            "endpoints": {
-                "analytics": {"query": "/api/analytics/query", "arrow": "/api/analytics/arrow-result"},
-                "files": {
-                    "volumes": "/api/files/volumes", "list": "/api/files/:volumeKey/list",
-                    "read": "/api/files/:volumeKey/read", "download": "/api/files/:volumeKey/download",
-                    "raw": "/api/files/:volumeKey/raw", "exists": "/api/files/:volumeKey/exists",
-                    "metadata": "/api/files/:volumeKey/metadata", "preview": "/api/files/:volumeKey/preview",
-                    "upload": "/api/files/:volumeKey/upload", "mkdir": "/api/files/:volumeKey/mkdir",
-                    "delete": "/api/files/:volumeKey",
-                },
-                "genie": {
-                    "sendMessage": "/api/genie/:alias/messages",
-                    "getConversation": "/api/genie/:alias/conversations/:conversationId",
-                    "getMessage": "/api/genie/:alias/conversations/:conversationId/messages/:messageId",
-                },
-            },
-            "plugins": {
-                "files": {"volumes": list(_volumes.keys())},
-                "genie": {"spaces": list(_genie_spaces.keys())},
-            },
-        })
-        # Escape for safe HTML embedding
-        _safe_config = _client_config.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
-
-        @app.get("/{full_path:path}")
-        async def serve_spa(full_path: str):
-            """Serve static files or index.html with injected config (SPA catch-all)."""
-            import mimetypes
-            # Resolve and verify the path stays within the static directory
-            file_path = (_static_dir / full_path).resolve()
-            static_root = _static_dir.resolve()
-            if (
-                file_path.is_file()
-                and str(file_path).startswith(str(static_root) + os.sep)
-            ):
-                ct = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
-                return Response(content=file_path.read_bytes(), media_type=ct)
-
-            # Fall back to index.html with injected config
-            if _index_html.is_file():
-                html = _index_html.read_text()
-                config_script = (
-                    f'<script id="__appkit__" type="application/json">{_safe_config}</script>\n'
-                    '<script>window.__appkit__=JSON.parse(document.getElementById("__appkit__")?.textContent||"{}")</script>'
-                )
-                # Inject before </head> or at end of <head>
-                if "</head>" in html:
-                    html = html.replace("</head>", f"{config_script}\n</head>")
-                else:
-                    html = config_script + "\n" + html
-                return Response(content=html, media_type="text/html")
-
-            return JSONResponse({"error": "Not found"}, status_code=404)
+    @app.on_event("startup")
+    async def _run_plugin_setup():
+        for plugin in sorted_plugins:
+            await plugin.setup()
+        logger.info("AppKit plugins initialized: %s", ", ".join(plugin_map.keys()))
 
     return app
 
 
-# ---------------------------------------------------------------------------
-# Configuration discovery helpers
-# ---------------------------------------------------------------------------
-
-def _discover_genie_spaces() -> dict[str, str]:
-    space_id = os.environ.get("DATABRICKS_GENIE_SPACE_ID")
-    if space_id:
-        return {"default": space_id}
-    return {}
-
-
-def _discover_volumes() -> dict[str, str]:
-    prefix = "DATABRICKS_VOLUME_"
-    volumes: dict[str, str] = {}
-    for key, value in os.environ.items():
-        if key.startswith(prefix) and value:
-            suffix = key[len(prefix):]
-            if suffix:
-                volumes[suffix.lower()] = value
-    return volumes
-
-
-def _find_static_dir() -> str | None:
-    """Auto-detect the frontend static directory (matching TS StaticServer logic)."""
-    candidates = [
-        "client/dist", "dist", "build", "public", "out",
-        "../client/dist", "../dist",
-    ]
-    for candidate in candidates:
-        if Path(candidate).is_dir():
-            return candidate
-    return None
-
-
-def _find_query_dir() -> str | None:
-    """Find the config/queries directory relative to CWD."""
-    candidates = ["config/queries", "../config/queries", "../../config/queries"]
-    for candidate in candidates:
-        path = Path(candidate)
-        if path.is_dir():
-            return str(path)
-    return None
-
-
-def _load_query(query_key: str, query_dir: str | None) -> str | None:
-    """Load a SQL query file by key from the query directory."""
-    if not query_dir:
-        return None
-
-    # Sanitize query_key: reject path separators and traversal sequences
-    if "/" in query_key or "\\" in query_key or ".." in query_key:
-        return None
-
-    base = query_key.removesuffix(".obo")
-    dir_path = Path(query_dir).resolve()
-
-    # Try .obo.sql first, then .sql
-    for suffix in [".obo.sql", ".sql"]:
-        file_path = (dir_path / f"{base}{suffix}").resolve()
-        # Verify the resolved path stays within the query directory
-        if not str(file_path).startswith(str(dir_path) + os.sep):
-            return None
-        if file_path.is_file():
-            return file_path.read_text()
-
-    return None
-
-
-def _has_obo_file(query_key: str, query_dir: str | None) -> bool:
-    """Check if a .obo.sql variant exists for this query key."""
-    if not query_dir:
-        return False
-    base = query_key.removesuffix(".obo")
-    return (Path(query_dir) / f"{base}.obo.sql").is_file()
-
-
-# ---------------------------------------------------------------------------
-# App instance for uvicorn
-# ---------------------------------------------------------------------------
-
+# Module-level app for `uvicorn appkit_py.server:app`
 app = create_server()
