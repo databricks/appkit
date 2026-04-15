@@ -84,8 +84,8 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
       ];
     },
 
-    async buildStart() {
-      await generate();
+    buildStart() {
+      generate();
     },
 
     configureServer(server) {
