@@ -3,6 +3,7 @@
   "name": "serving",
   "displayName": "Model Serving Plugin",
   "description": "Authenticated proxy to Databricks Model Serving endpoints",
+  "hidden": true,
   "resources": {
     "required": [
       {
