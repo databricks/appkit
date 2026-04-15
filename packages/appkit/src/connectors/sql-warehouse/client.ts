@@ -3,6 +3,7 @@ import {
   type sql,
   type WorkspaceClient,
 } from "@databricks/sdk-experimental";
+import { tableFromIPC } from "apache-arrow";
 import type { TelemetryOptions } from "shared";
 import {
   AppKitError,
@@ -435,6 +436,37 @@ export class SQLWarehouseConnector {
       result: {
         ...restResult,
         data: transformedData,
+      },
+    };
+  }
+
+  /**
+   * Decode a base64 Arrow IPC attachment into row objects.
+   * Some serverless warehouses return inline results as Arrow IPC in
+   * `result.attachment` rather than `result.data_array`.
+   */
+  private _transformArrowAttachment(
+    response: sql.StatementResponse,
+    attachment: string,
+  ) {
+    const buf = Buffer.from(attachment, "base64");
+    const table = tableFromIPC(buf);
+    const data = table.toArray().map((row) => {
+      const obj = row.toJSON();
+      // Convert BigInt values to strings to avoid JSON.stringify failures
+      for (const key of Object.keys(obj)) {
+        if (typeof obj[key] === "bigint") {
+          obj[key] = obj[key].toString();
+        }
+      }
+      return obj;
+    });
+    const { attachment: _att, ...restResult } = response.result as any;
+    return {
+      ...response,
+      result: {
+        ...restResult,
+        data,
       },
     };
   }
