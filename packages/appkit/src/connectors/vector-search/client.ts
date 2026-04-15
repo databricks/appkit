@@ -82,7 +82,7 @@ export class VectorSearchConnector {
           const response = (await workspaceClient.apiClient.request({
             method: "POST",
             path: `/api/2.0/vector-search/indexes/${params.indexName}/query`,
-            body,
+            payload: body,
             headers: new Headers({ "Content-Type": "application/json" }),
             raw: false,
             query: {},
@@ -149,7 +149,7 @@ export class VectorSearchConnector {
           const response = (await workspaceClient.apiClient.request({
             method: "POST",
             path: `/api/2.0/vector-search/indexes/${params.indexName}/query-next-page`,
-            body: {
+            payload: {
               endpoint_name: params.endpointName,
               page_token: params.pageToken,
             },

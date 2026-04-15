@@ -2,7 +2,7 @@ import type { BasePluginConfig } from "shared";
 
 export interface IVectorSearchConfig extends BasePluginConfig {
   timeout?: number;
-  indexes: Record<string, IndexConfig>;
+  indexes?: Record<string, IndexConfig>;
 }
 
 export interface IndexConfig {

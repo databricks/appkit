@@ -40,6 +40,11 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
   }
 
   async setup(): Promise<void> {
+    if (!this.config.indexes || Object.keys(this.config.indexes).length === 0) {
+      throw new Error(
+        'VectorSearchPlugin requires at least one index in "indexes" config',
+      );
+    }
     for (const [alias, idx] of Object.entries(this.config.indexes)) {
       if (!idx.indexName) {
         throw new Error(
@@ -109,11 +114,13 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
             querySettings,
           );
 
-          if (result === undefined) {
-            res.status(500).json({ error: "Query failed", plugin: this.name });
+          if (!result.ok) {
+            res
+              .status(result.status)
+              .json({ error: result.message, plugin: this.name });
             return;
           }
-          res.json(this._parseResponse(result, prepared.queryType));
+          res.json(this._parseResponse(result.data, prepared.queryType));
         } catch (error) {
           this._handleError(res, error, "Query failed");
         }
@@ -177,14 +184,14 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
             querySettings,
           );
 
-          if (result === undefined) {
+          if (!result.ok) {
             res
-              .status(500)
-              .json({ error: "Next-page query failed", plugin: this.name });
+              .status(result.status)
+              .json({ error: result.message, plugin: this.name });
             return;
           }
           res.json(
-            this._parseResponse(result, indexConfig.queryType ?? "hybrid"),
+            this._parseResponse(result.data, indexConfig.queryType ?? "hybrid"),
           );
         } catch (error) {
           this._handleError(res, error, "Next-page query failed");
@@ -196,7 +203,7 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
       name: "getConfig",
       method: "get",
       path: "/:alias/config",
-      handler: (req: express.Request, res: express.Response) => {
+      handler: async (req: express.Request, res: express.Response) => {
         const { alias } = req.params;
         const indexConfig = this._resolveIndex(alias);
         if (!indexConfig) {
@@ -249,11 +256,13 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
       querySettings,
     );
 
-    if (result === undefined) {
-      throw new Error(`Vector search query failed for index "${alias}"`);
+    if (!result.ok) {
+      throw new Error(
+        `Vector search query failed for index "${alias}": ${result.message}`,
+      );
     }
 
-    return this._parseResponse(result, prepared.queryType);
+    return this._parseResponse(result.data, prepared.queryType);
   }
 
   async shutdown(): Promise<void> {
@@ -267,7 +276,7 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
   }
 
   private _resolveIndex(alias: string): IndexConfig | undefined {
-    return this.config.indexes[alias];
+    return this.config.indexes?.[alias];
   }
 
   private async _prepareQuery(

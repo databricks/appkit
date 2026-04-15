@@ -14,6 +14,7 @@ vi.mock("../../../logging/logger", () => ({
     event: () => ({
       setComponent: vi.fn().mockReturnThis(),
       setContext: vi.fn().mockReturnThis(),
+      setExecution: vi.fn().mockReturnThis(),
     }),
   }),
 }));
@@ -215,7 +216,7 @@ describe("VectorSearchPlugin", () => {
         }),
       );
 
-      const callBody = mockRequest.mock.calls[0][0].body;
+      const callBody = mockRequest.mock.calls[0][0].payload;
       expect(callBody.query_text).toBe("test query");
       expect(callBody.query_type).toBe("HYBRID");
       expect(callBody.num_results).toBe(10);
@@ -250,7 +251,7 @@ describe("VectorSearchPlugin", () => {
         filters: { category: ["books"] },
       });
 
-      const callBody = mockRequest.mock.calls[0][0].body;
+      const callBody = mockRequest.mock.calls[0][0].payload;
       expect(callBody.filters).toEqual({ category: ["books"] });
     });
 
@@ -267,7 +268,7 @@ describe("VectorSearchPlugin", () => {
       await plugin.setup();
       await plugin.query("test", { queryText: "test" });
 
-      const callBody = mockRequest.mock.calls[0][0].body;
+      const callBody = mockRequest.mock.calls[0][0].payload;
       expect(callBody.reranker.model).toBe("databricks_reranker");
       expect(callBody.reranker.parameters.columns_to_rerank).toEqual([
         "title",
@@ -290,7 +291,7 @@ describe("VectorSearchPlugin", () => {
       await plugin.query("test", { queryText: "test" });
 
       expect(mockEmbeddingFn).toHaveBeenCalledWith("test");
-      const callBody = mockRequest.mock.calls[0][0].body;
+      const callBody = mockRequest.mock.calls[0][0].payload;
       expect(callBody.query_vector).toEqual([0.1, 0.2, 0.3]);
       expect(callBody.query_text).toBeUndefined();
     });
