@@ -26,7 +26,14 @@ class FilesConnector:
         self.default_volume = default_volume or ""
 
     def resolve_path(self, file_path: str) -> str:
-        """Resolve a relative path against the default volume."""
+        """Resolve a relative path against the default volume.
+
+        Rejects path traversal sequences to prevent escaping the volume.
+        """
+        # Reject traversal sequences
+        if ".." in file_path:
+            raise ValueError(f"Path must not contain '..': {file_path}")
+
         if file_path.startswith("/Volumes/"):
             return file_path
         # Strip leading slash and join with volume path

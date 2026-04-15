@@ -23,6 +23,7 @@ logger = logging.getLogger("appkit.connector.sql")
 
 # States that indicate the query is still running
 _PENDING_STATES = {StatementState.PENDING, StatementState.RUNNING}
+_FAILED_STATES = {StatementState.FAILED, StatementState.CANCELED, StatementState.CLOSED}
 
 
 class SQLWarehouseConnector:
@@ -71,6 +72,16 @@ class SQLWarehouseConnector:
         # Poll if still pending
         if response.status and response.status.state in _PENDING_STATES:
             response = await self._poll_until_done(client, response.statement_id)
+
+        # Check for terminal failure states
+        if response.status and response.status.state in _FAILED_STATES:
+            error_msg = ""
+            if response.status.error:
+                error_msg = getattr(response.status.error, "message", str(response.status.error))
+            raise RuntimeError(
+                f"Statement {response.statement_id} failed with state "
+                f"{response.status.state.value}: {error_msg}"
+            )
 
         return response
 
