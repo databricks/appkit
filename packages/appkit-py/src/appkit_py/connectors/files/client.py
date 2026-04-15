@@ -62,10 +62,20 @@ class FilesConnector:
     async def read(
         self, client: WorkspaceClient, file_path: str, options: dict | None = None
     ) -> str:
-        """Read file as text."""
+        """Read file as text, enforcing optional maxSize limit."""
+        max_size = (options or {}).get("maxSize")
         path = self.resolve_path(file_path)
         response = await asyncio.to_thread(client.files.download, path)
-        content = response.contents.read()
+
+        if max_size:
+            content = response.contents.read(max_size + 1)
+            if isinstance(content, bytes) and len(content) > max_size:
+                raise ValueError(
+                    f"File exceeds maximum read size ({max_size} bytes)"
+                )
+        else:
+            content = response.contents.read()
+
         if isinstance(content, bytes):
             return content.decode("utf-8", errors="replace")
         return content
