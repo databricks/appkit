@@ -47,4 +47,6 @@ export interface FileBrowserLabels {
   modified?: string;
   /** Unknown value fallback (default: "Unknown") */
   unknown?: string;
+  /** Select-all row label when bulk file selection is enabled (default: "Select all files") */
+  selectAllFiles?: string;
 }

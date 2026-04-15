@@ -1,9 +1,12 @@
 import { AlertCircle, ArrowLeft, FileIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
+import { Checkbox } from "../ui/checkbox";
 import { Skeleton } from "../ui/skeleton";
 import { FileEntry } from "./file-entry";
 import type { DirectoryEntry, FileBrowserLabels } from "./types";
+
+const EMPTY_FILE_PATHS: ReadonlySet<string> = new Set();
 
 /** Props for the DirectoryList component */
 export interface DirectoryListProps
@@ -32,10 +35,22 @@ export interface DirectoryListProps
   hasCurrentPath?: boolean;
   /** Custom file size formatter */
   formatSize?: (bytes: number | undefined) => string;
+  /** Enable checkboxes for files and a select-all row */
+  enableFileSelection?: boolean;
+  /** Paths of files selected for bulk actions */
+  selectedFilePaths?: ReadonlySet<string>;
+  /** Toggle one file path in the bulk selection set */
+  onToggleFile?: (path: string, selected: boolean) => void;
+  /** Select or clear all files in the current listing */
+  onSelectAllFiles?: (select: boolean) => void;
   /** Customizable labels */
   labels?: Pick<
     FileBrowserLabels,
-    "backToParent" | "emptyDirectory" | "noVolumeConfigured" | "retry"
+    | "backToParent"
+    | "emptyDirectory"
+    | "noVolumeConfigured"
+    | "retry"
+    | "selectAllFiles"
   >;
 }
 
@@ -53,10 +68,30 @@ export function DirectoryList({
   headerContent,
   hasCurrentPath,
   formatSize,
+  enableFileSelection = false,
+  selectedFilePaths,
+  onToggleFile,
+  onSelectAllFiles,
   labels,
   className,
   ...props
 }: DirectoryListProps) {
+  const pathSet = selectedFilePaths ?? EMPTY_FILE_PATHS;
+  const filePaths = entries
+    .filter((e) => !e.is_directory)
+    .map((e) => resolveEntryPath(e));
+  const allFilesSelected =
+    filePaths.length > 0 && filePaths.every((p) => pathSet.has(p));
+  const someFilesSelected =
+    filePaths.some((p) => pathSet.has(p)) && !allFilesSelected;
+  const showSelectAll =
+    enableFileSelection &&
+    !loading &&
+    !error &&
+    filePaths.length > 0 &&
+    onToggleFile &&
+    onSelectAllFiles;
+
   return (
     <div data-slot="directory-list" className={className} {...props}>
       <Card className="p-0 overflow-hidden">
@@ -110,6 +145,19 @@ export function DirectoryList({
           </div>
         )}
 
+        {showSelectAll && (
+          <div className="flex items-center gap-2 px-4 py-2 border-b bg-muted/30 text-sm text-muted-foreground">
+            <div className="w-10 shrink-0 flex items-center justify-center pl-2">
+              <Checkbox
+                checked={someFilesSelected ? "indeterminate" : allFilesSelected}
+                onCheckedChange={(v) => onSelectAllFiles(v === true)}
+                aria-label={labels?.selectAllFiles ?? "Select all files"}
+              />
+            </div>
+            <span>{labels?.selectAllFiles ?? "Select all files"}</span>
+          </div>
+        )}
+
         {!loading &&
           !error &&
           entries.map((entry) => {
@@ -121,7 +169,14 @@ export function DirectoryList({
                 entryPath={entryPath}
                 isSelected={selectedPath === entryPath}
                 formatSize={formatSize}
-                onClick={() => onEntryClick(entry)}
+                selectionMode={enableFileSelection ? "files" : "off"}
+                checked={enableFileSelection ? pathSet.has(entryPath) : false}
+                onCheckedChange={
+                  enableFileSelection && onToggleFile
+                    ? (sel) => onToggleFile(entryPath, sel)
+                    : undefined
+                }
+                onEntryClick={() => onEntryClick(entry)}
               />
             );
           })}

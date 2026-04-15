@@ -8,7 +8,7 @@ import {
   usePluginClientConfig,
 } from "@databricks/appkit-ui/react";
 import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
-import { Check, FolderPlus, Loader2, Upload, X } from "lucide-react";
+import { Check, Download, FolderPlus, Loader2, Upload, X } from "lucide-react";
 import {
   type RefObject,
   useCallback,
@@ -16,6 +16,9 @@ import {
   useRef,
   useState,
 } from "react";
+
+import { Header } from "@/components/layout/header";
+import { saveBulkDownloadResponse } from "@/lib/parse-bulk-download-response";
 
 function useAbortController(): RefObject<AbortController | null> {
   const ref = useRef<AbortController | null>(null);
@@ -27,8 +30,6 @@ function nextSignal(ref: RefObject<AbortController | null>): AbortSignal {
   ref.current = new AbortController();
   return ref.current.signal;
 }
-
-import { Header } from "@/components/layout/header";
 
 export const Route = createFileRoute("/files")({
   component: FilesRoute,
@@ -65,7 +66,26 @@ function FilesRoute() {
   const bulkFileInputRef = useRef<HTMLInputElement>(null);
   const [bulkUploading, setBulkUploading] = useState(false);
   const [bulkResults, setBulkResults] = useState<
-    { path: string; success: boolean; error?: string; bytesWritten?: number }[] | null
+    | {
+        path: string;
+        success: boolean;
+        error?: string;
+        bytesWritten?: number;
+      }[]
+    | null
+  >(null);
+  const [selectedBulkPaths, setSelectedBulkPaths] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [bulkDownloading, setBulkDownloading] = useState(false);
+  const [bulkDownloadResults, setBulkDownloadResults] = useState<
+    | {
+        path: string;
+        success: boolean;
+        error?: string;
+        bytesWritten?: number;
+      }[]
+    | null
   >(null);
   const listAbort = useAbortController();
   const previewAbort = useAbortController();
@@ -168,10 +188,57 @@ function FilesRoute() {
     }
   }, [volumeKey, loadDirectory]);
 
-  const resolveEntryPath = (entry: DirectoryEntry) => {
-    const name = entry.name ?? "";
-    return currentPath ? `${currentPath}/${name}` : name;
-  };
+  const resolveEntryPath = useCallback(
+    (entry: DirectoryEntry) => {
+      const name = entry.name ?? "";
+      return currentPath ? `${currentPath}/${name}` : name;
+    },
+    [currentPath],
+  );
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset bulk selection when volume or folder changes
+  useEffect(() => {
+    setSelectedBulkPaths(new Set());
+  }, [volumeKey, currentPath]);
+
+  useEffect(() => {
+    const valid = new Set(entries.map((e) => resolveEntryPath(e)));
+    setSelectedBulkPaths((prev) => {
+      const next = new Set<string>();
+      for (const p of prev) {
+        if (valid.has(p)) next.add(p);
+      }
+      if (next.size === prev.size) return prev;
+      return next;
+    });
+  }, [entries, resolveEntryPath]);
+
+  const onToggleBulkFile = useCallback((path: string, selected: boolean) => {
+    setSelectedBulkPaths((prev) => {
+      const next = new Set(prev);
+      if (selected) next.add(path);
+      else next.delete(path);
+      return next;
+    });
+  }, []);
+
+  const onSelectAllFilesInList = useCallback(
+    (select: boolean) => {
+      const filePaths = entries
+        .filter((e) => !e.is_directory)
+        .map((e) => resolveEntryPath(e));
+      setSelectedBulkPaths((prev) => {
+        const next = new Set(prev);
+        if (select) {
+          for (const p of filePaths) next.add(p);
+        } else {
+          for (const p of filePaths) next.delete(p);
+        }
+        return next;
+      });
+    },
+    [entries, resolveEntryPath],
+  );
 
   const handleEntryClick = (entry: DirectoryEntry) => {
     const entryPath = resolveEntryPath(entry);
@@ -301,7 +368,9 @@ function FilesRoute() {
     const fileList = e.target.files;
     if (!fileList || fileList.length === 0) return;
 
-    const oversized = Array.from(fileList).find((f) => f.size > MAX_UPLOAD_SIZE);
+    const oversized = Array.from(fileList).find(
+      (f) => f.size > MAX_UPLOAD_SIZE,
+    );
     if (oversized) {
       setError(
         `File "${oversized.name}" is too large (${(oversized.size / 1024 / 1024).toFixed(1)} MB). Maximum per-file size is ${MAX_UPLOAD_SIZE / 1024 / 1024 / 1024} GB.`,
@@ -330,7 +399,9 @@ function FilesRoute() {
 
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        throw new Error(data.error ?? `Bulk upload failed (${response.status})`);
+        throw new Error(
+          data.error ?? `Bulk upload failed (${response.status})`,
+        );
       }
 
       const data = await response.json();
@@ -343,6 +414,28 @@ function FilesRoute() {
       if (bulkFileInputRef.current) {
         bulkFileInputRef.current.value = "";
       }
+    }
+  };
+
+  const handleBulkDownload = async () => {
+    if (selectedBulkPaths.size === 0 || !volumeKey) return;
+
+    setBulkDownloading(true);
+    setBulkDownloadResults(null);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/files/${volumeKey}/bulk-download`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paths: [...selectedBulkPaths] }),
+      });
+      const summary = await saveBulkDownloadResponse(response);
+      setBulkDownloadResults(summary);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBulkDownloading(false);
     }
   };
 
@@ -368,6 +461,7 @@ function FilesRoute() {
                   setEntries([]);
                   setSelectedFile(null);
                   setPreview(null);
+                  setSelectedBulkPaths(new Set());
                 }}
                 className="rounded-md border border-input bg-background px-3 py-1.5 text-sm"
               >
@@ -434,6 +528,21 @@ function FilesRoute() {
               )}
               {bulkUploading ? "Uploading..." : "Bulk Upload"}
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={
+                bulkDownloading || selectedBulkPaths.size === 0 || !volumeKey
+              }
+              onClick={handleBulkDownload}
+            >
+              {bulkDownloading ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4 mr-2" />
+              )}
+              {bulkDownloading ? "Downloading..." : "Download selected"}
+            </Button>
           </div>
         </div>
 
@@ -441,7 +550,9 @@ function FilesRoute() {
           <div className="mb-4 rounded-lg border border-border bg-card p-4">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm font-medium">
-                Bulk Upload Results — {bulkResults.filter((r) => r.success).length}/{bulkResults.length} succeeded
+                Bulk Upload Results —{" "}
+                {bulkResults.filter((r) => r.success).length}/
+                {bulkResults.length} succeeded
               </h3>
               <Button
                 variant="ghost"
@@ -453,6 +564,49 @@ function FilesRoute() {
             </div>
             <ul className="space-y-1 text-sm max-h-48 overflow-y-auto">
               {bulkResults.map((r) => (
+                <li key={r.path} className="flex items-center gap-2">
+                  {r.success ? (
+                    <Check className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                  ) : (
+                    <X className="h-3.5 w-3.5 text-red-500 shrink-0" />
+                  )}
+                  <span className="truncate">{r.path.split("/").pop()}</span>
+                  {r.success && r.bytesWritten != null && (
+                    <span className="text-muted-foreground ml-auto shrink-0">
+                      {r.bytesWritten > 1024
+                        ? `${(r.bytesWritten / 1024).toFixed(1)} KB`
+                        : `${r.bytesWritten} B`}
+                    </span>
+                  )}
+                  {r.error && (
+                    <span className="text-red-500 ml-auto truncate shrink-0 max-w-[50%]">
+                      {r.error}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {bulkDownloadResults && (
+          <div className="mb-4 rounded-lg border border-border bg-card p-4">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-medium">
+                Bulk Download Results —{" "}
+                {bulkDownloadResults.filter((r) => r.success).length}/
+                {bulkDownloadResults.length} succeeded
+              </h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setBulkDownloadResults(null)}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <ul className="space-y-1 text-sm max-h-48 overflow-y-auto">
+              {bulkDownloadResults.map((r) => (
                 <li key={r.path} className="flex items-center gap-2">
                   {r.success ? (
                     <Check className="h-3.5 w-3.5 text-green-500 shrink-0" />
@@ -491,6 +645,10 @@ function FilesRoute() {
             selectedPath={selectedFile}
             resolveEntryPath={resolveEntryPath}
             hasCurrentPath={!!currentPath}
+            enableFileSelection
+            selectedFilePaths={selectedBulkPaths}
+            onToggleFile={onToggleBulkFile}
+            onSelectAllFiles={onSelectAllFilesInList}
             headerContent={
               showNewDirInput ? (
                 <NewFolderInput

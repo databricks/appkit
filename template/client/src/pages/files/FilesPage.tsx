@@ -7,7 +7,7 @@ import {
   FilePreviewPanel,
   NewFolderInput,
 } from '@databricks/appkit-ui/react';
-import { FolderPlus, Loader2, Upload } from 'lucide-react';
+import { Check, Download, FolderPlus, Loader2, Upload, X } from 'lucide-react';
 import {
   type RefObject,
   useCallback,
@@ -15,6 +15,8 @@ import {
   useRef,
   useState,
 } from 'react';
+
+import { saveBulkDownloadResponse } from '@/lib/parse-bulk-download-response';
 
 function useAbortController(): RefObject<AbortController | null> {
   const ref = useRef<AbortController | null>(null);
@@ -45,6 +47,13 @@ export function FilesPage() {
   const [newDirName, setNewDirName] = useState('');
   const [showNewDirInput, setShowNewDirInput] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedBulkPaths, setSelectedBulkPaths] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [bulkDownloading, setBulkDownloading] = useState(false);
+  const [bulkDownloadResults, setBulkDownloadResults] = useState<
+    { path: string; success: boolean; error?: string; bytesWritten?: number }[] | null
+  >(null);
   const listAbort = useAbortController();
   const previewAbort = useAbortController();
 
@@ -151,10 +160,54 @@ export function FilesPage() {
     }
   }, [volumeKey, loadDirectory]);
 
-  const resolveEntryPath = (entry: DirectoryEntry) => {
+  const resolveEntryPath = useCallback((entry: DirectoryEntry) => {
     const name = entry.name ?? '';
     return currentPath ? `${currentPath}/${name}` : name;
-  };
+  }, [currentPath]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset bulk selection when volume or folder changes
+  useEffect(() => {
+    setSelectedBulkPaths(new Set());
+  }, [volumeKey, currentPath]);
+
+  useEffect(() => {
+    const valid = new Set(entries.map((e) => resolveEntryPath(e)));
+    setSelectedBulkPaths((prev) => {
+      const next = new Set<string>();
+      for (const p of prev) {
+        if (valid.has(p)) next.add(p);
+      }
+      if (next.size === prev.size) return prev;
+      return next;
+    });
+  }, [entries, resolveEntryPath]);
+
+  const onToggleBulkFile = useCallback((path: string, selected: boolean) => {
+    setSelectedBulkPaths((prev) => {
+      const next = new Set(prev);
+      if (selected) next.add(path);
+      else next.delete(path);
+      return next;
+    });
+  }, []);
+
+  const onSelectAllFilesInList = useCallback(
+    (select: boolean) => {
+      const filePaths = entries
+        .filter((e) => !e.is_directory)
+        .map((e) => resolveEntryPath(e));
+      setSelectedBulkPaths((prev) => {
+        const next = new Set(prev);
+        if (select) {
+          for (const p of filePaths) next.add(p);
+        } else {
+          for (const p of filePaths) next.delete(p);
+        }
+        return next;
+      });
+    },
+    [entries, resolveEntryPath],
+  );
 
   const handleEntryClick = (entry: DirectoryEntry) => {
     const entryPath = resolveEntryPath(entry);
@@ -280,6 +333,31 @@ export function FilesPage() {
     }
   };
 
+  const handleBulkDownload = async () => {
+    if (selectedBulkPaths.size === 0 || !volumeKey) return;
+
+    setBulkDownloading(true);
+    setBulkDownloadResults(null);
+    setError(null);
+
+    try {
+      const response = await fetch(
+        `/api/files/${volumeKey}/bulk-download`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paths: [...selectedBulkPaths] }),
+        },
+      );
+      const summary = await saveBulkDownloadResponse(response);
+      setBulkDownloadResults(summary);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBulkDownloading(false);
+    }
+  };
+
   return (
     <div className="space-y-6 w-full max-w-7xl mx-auto">
       <div>
@@ -302,6 +380,7 @@ export function FilesPage() {
                 setEntries([]);
                 setSelectedFile(null);
                 setPreview(null);
+                setSelectedBulkPaths(new Set());
               }}
               className="rounded-md border border-input bg-background px-3 py-1.5 text-sm"
             >
@@ -348,8 +427,64 @@ export function FilesPage() {
             )}
             {uploading ? 'Uploading...' : 'Upload'}
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={
+              bulkDownloading || selectedBulkPaths.size === 0 || !volumeKey
+            }
+            onClick={handleBulkDownload}
+          >
+            {bulkDownloading ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4 mr-2" />
+            )}
+            {bulkDownloading ? 'Downloading...' : 'Download selected'}
+          </Button>
         </div>
       </div>
+
+      {bulkDownloadResults && (
+        <div className="rounded-lg border border-border bg-card p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-medium">
+              Bulk Download Results — {bulkDownloadResults.filter((r) => r.success).length}/{bulkDownloadResults.length} succeeded
+            </h3>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setBulkDownloadResults(null)}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          <ul className="space-y-1 text-sm max-h-48 overflow-y-auto">
+            {bulkDownloadResults.map((r) => (
+              <li key={r.path} className="flex items-center gap-2">
+                {r.success ? (
+                  <Check className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                ) : (
+                  <X className="h-3.5 w-3.5 text-red-500 shrink-0" />
+                )}
+                <span className="truncate">{r.path.split('/').pop()}</span>
+                {r.success && r.bytesWritten != null && (
+                  <span className="text-muted-foreground ml-auto shrink-0">
+                    {r.bytesWritten > 1024
+                      ? `${(r.bytesWritten / 1024).toFixed(1)} KB`
+                      : `${r.bytesWritten} B`}
+                  </span>
+                )}
+                {r.error && (
+                  <span className="text-red-500 ml-auto truncate shrink-0 max-w-[50%]">
+                    {r.error}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="flex gap-6">
         <DirectoryList
@@ -364,6 +499,10 @@ export function FilesPage() {
           selectedPath={selectedFile}
           resolveEntryPath={resolveEntryPath}
           hasCurrentPath={!!currentPath}
+          enableFileSelection
+          selectedFilePaths={selectedBulkPaths}
+          onToggleFile={onToggleBulkFile}
+          onSelectAllFiles={onSelectAllFilesInList}
           headerContent={
             showNewDirInput ? (
               <NewFolderInput
