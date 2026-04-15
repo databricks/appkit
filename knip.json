@@ -3,6 +3,7 @@
   "ignoreWorkspaces": [
     "packages/shared",
     "packages/lakebase",
+    "packages/appkit-py",
     "apps/**",
     "docs"
   ],
@@ -15,7 +16,9 @@
     "**/*.example.tsx",
     "template/**",
     "tools/**",
-    "docs/**"
+    "docs/**",
+    "client/**",
+    "test-e2e-minimal.ts"
   ],
   "ignoreBinaries": ["tarball"]
 }
