@@ -18,6 +18,10 @@ import {
   extractRequestKeys,
 } from "./converter";
 import { fetchOpenApiSchema } from "./fetcher";
+import {
+  extractServingEndpoints,
+  findServerFile,
+} from "./server-file-extractor";
 
 const logger = createLogger("type-generator:serving");
 
@@ -34,14 +38,21 @@ interface GenerateServingTypesOptions {
 /**
  * Generates TypeScript type declarations for serving endpoints
  * by fetching their OpenAPI schemas and converting to TypeScript.
+ *
+ * Endpoint discovery order (when `endpoints` is not provided):
+ * 1. AST extraction from server file (server/index.ts or server/server.ts)
+ * 2. DATABRICKS_SERVING_ENDPOINT_NAME env var (single default endpoint)
  */
 export async function generateServingTypes(
   options: GenerateServingTypesOptions,
 ): Promise<void> {
   const { outFile, noCache } = options;
 
-  // Resolve endpoints from config or env
-  const endpoints = options.endpoints ?? resolveDefaultEndpoints();
+  // Resolve endpoints: explicit > AST extraction from server file > env var fallback
+  const endpoints =
+    options.endpoints ??
+    resolveEndpointsFromServerFile() ??
+    resolveDefaultEndpoints();
   if (Object.keys(endpoints).length === 0) {
     logger.debug("No serving endpoints configured, skipping type generation");
     return;
@@ -225,6 +236,14 @@ function printLogTable(
     `  ${newCount} new, ${cacheCount} from cache. ${pc.dim(`${elapsed}s`)}`,
   );
   console.log("");
+}
+
+function resolveEndpointsFromServerFile():
+  | Record<string, EndpointConfig>
+  | undefined {
+  const serverFile = findServerFile(process.cwd());
+  if (!serverFile) return undefined;
+  return extractServingEndpoints(serverFile) ?? undefined;
 }
 
 function resolveDefaultEndpoints(): Record<string, EndpointConfig> {

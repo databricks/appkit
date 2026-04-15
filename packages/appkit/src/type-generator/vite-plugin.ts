@@ -75,9 +75,10 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
 
     configResolved(config) {
       root = config.root;
+      const projectRoot = path.resolve(config.root, "..");
       outFile = path.resolve(
-        root,
-        options?.outFile ?? `src/${TYPES_DIR}/${ANALYTICS_TYPES_FILE}`,
+        projectRoot,
+        options?.outFile ?? `shared/${TYPES_DIR}/${ANALYTICS_TYPES_FILE}`,
       );
       watchFolders = options?.watchFolders ?? [
         path.join(process.cwd(), "config", "queries"),

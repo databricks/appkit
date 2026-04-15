@@ -95,8 +95,8 @@ export function appKitServingTypesPlugin(
       // - pnpm build: process.cwd() is client/ (cd client && vite build), config.root is client/
       projectRoot = path.resolve(config.root, "..");
       outFile = path.resolve(
-        config.root,
-        options?.outFile ?? `src/${TYPES_DIR}/${SERVING_TYPES_FILE}`,
+        projectRoot,
+        options?.outFile ?? `shared/${TYPES_DIR}/${SERVING_TYPES_FILE}`,
       );
     },
 
