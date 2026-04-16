@@ -43,6 +43,8 @@ export {
 } from "./connectors/lakebase";
 export { getExecutionContext } from "./context";
 export { createApp } from "./core";
+export type { AgentHandle, CreateAgentConfig } from "./core/create-agent";
+export { createAgent } from "./core/create-agent";
 // Errors
 export {
   AppKitError,

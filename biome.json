@@ -20,7 +20,8 @@
       "!**/*.gen.css",
       "!**/*.gen.ts",
       "!**/typedoc-sidebar.ts",
-      "!**/template"
+      "!**/template",
+      "!**/config/agents"
     ]
   },
   "formatter": {

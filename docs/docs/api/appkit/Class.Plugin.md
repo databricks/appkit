@@ -136,6 +136,14 @@ protected config: TConfig;
 
 ***
 
+### context?
+
+```ts
+protected optional context: PluginContext;
+```
+
+***
+
 ### devFileReader
 
 ```ts

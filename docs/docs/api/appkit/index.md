@@ -30,13 +30,21 @@ plugin architecture, and React integration.
 
 | Interface | Description |
 | ------ | ------ |
+| [AgentAdapter](Interface.AgentAdapter.md) | - |
+| [AgentHandle](Interface.AgentHandle.md) | - |
+| [AgentInput](Interface.AgentInput.md) | - |
+| [AgentRunContext](Interface.AgentRunContext.md) | - |
+| [AgentToolDefinition](Interface.AgentToolDefinition.md) | - |
 | [BasePluginConfig](Interface.BasePluginConfig.md) | Base configuration interface for AppKit plugins |
 | [CacheConfig](Interface.CacheConfig.md) | Configuration for the CacheInterceptor. Controls TTL, size limits, storage backend, and probabilistic cleanup. |
+| [CreateAgentConfig](Interface.CreateAgentConfig.md) | - |
 | [DatabaseCredential](Interface.DatabaseCredential.md) | Database credentials with OAuth token for Postgres connection |
 | [EndpointConfig](Interface.EndpointConfig.md) | - |
+| [FunctionTool](Interface.FunctionTool.md) | - |
 | [GenerateDatabaseCredentialRequest](Interface.GenerateDatabaseCredentialRequest.md) | Request parameters for generating database OAuth credentials |
 | [ITelemetry](Interface.ITelemetry.md) | Plugin-facing interface for OpenTelemetry instrumentation. Provides a thin abstraction over OpenTelemetry APIs for plugins. |
 | [LakebasePoolConfig](Interface.LakebasePoolConfig.md) | Configuration for creating a Lakebase connection pool |
+| [Message](Interface.Message.md) | - |
 | [PluginManifest](Interface.PluginManifest.md) | Plugin manifest that declares metadata and resource requirements. Attached to plugin classes as a static property. Extends the shared PluginManifest with strict resource types. |
 | [RequestedClaims](Interface.RequestedClaims.md) | Optional claims for fine-grained Unity Catalog table permissions When specified, the returned token will be scoped to only the requested tables |
 | [RequestedResource](Interface.RequestedResource.md) | Resource to request permissions for in Unity Catalog |
@@ -47,14 +55,21 @@ plugin architecture, and React integration.
 | [ServingEndpointRegistry](Interface.ServingEndpointRegistry.md) | Registry interface for serving endpoint type generation. Empty by default — augmented by the Vite type generator's `.d.ts` output via module augmentation. When populated, provides autocomplete for alias names and typed request/response/chunk per endpoint. |
 | [StreamExecutionSettings](Interface.StreamExecutionSettings.md) | Execution settings for streaming endpoints. Extends PluginExecutionSettings with SSE stream configuration. |
 | [TelemetryConfig](Interface.TelemetryConfig.md) | OpenTelemetry configuration for AppKit applications |
+| [Thread](Interface.Thread.md) | - |
+| [ThreadStore](Interface.ThreadStore.md) | - |
+| [ToolConfig](Interface.ToolConfig.md) | - |
+| [ToolProvider](Interface.ToolProvider.md) | - |
 | [ValidationResult](Interface.ValidationResult.md) | Result of validating all registered resources against the environment. |
 
 ## Type Aliases
 
 | Type Alias | Description |
 | ------ | ------ |
+| [AgentEvent](TypeAlias.AgentEvent.md) | - |
+| [AgentTool](TypeAlias.AgentTool.md) | - |
 | [ConfigSchema](TypeAlias.ConfigSchema.md) | Configuration schema definition for plugin config. Re-exported from the standard JSON Schema Draft 7 types. |
 | [ExecutionResult](TypeAlias.ExecutionResult.md) | Discriminated union for plugin execution results. |
+| [HostedTool](TypeAlias.HostedTool.md) | - |
 | [IAppRouter](TypeAlias.IAppRouter.md) | Express router type for plugin route registration |
 | [PluginData](TypeAlias.PluginData.md) | Tuple of plugin class, config, and name. Created by `toPlugin()` and passed to `createApp()`. |
 | [ResourcePermission](TypeAlias.ResourcePermission.md) | Union of all possible permission levels across all resource types. |
@@ -73,6 +88,7 @@ plugin architecture, and React integration.
 | ------ | ------ |
 | [appKitServingTypesPlugin](Function.appKitServingTypesPlugin.md) | Vite plugin to generate TypeScript types for AppKit serving endpoints. Fetches OpenAPI schemas from Databricks and generates a .d.ts with ServingEndpointRegistry module augmentation. |
 | [appKitTypesPlugin](Function.appKitTypesPlugin.md) | Vite plugin to generate types for AppKit queries. Calls generateFromEntryPoint under the hood. |
+| [createAgent](Function.createAgent.md) | Creates an agent-powered app with batteries included. |
 | [createApp](Function.createApp.md) | Bootstraps AppKit with the provided configuration. |
 | [createLakebasePool](Function.createLakebasePool.md) | Create a Lakebase pool with appkit's logger integration. Telemetry automatically uses appkit's OpenTelemetry configuration via global registry. |
 | [extractServingEndpoints](Function.extractServingEndpoints.md) | Extract serving endpoint config from a server file by AST-parsing it. Looks for `serving({ endpoints: { alias: { env: "..." }, ... } })` calls and extracts the endpoint alias names and their environment variable mappings. |
@@ -85,4 +101,8 @@ plugin architecture, and React integration.
 | [getResourceRequirements](Function.getResourceRequirements.md) | Gets the resource requirements from a plugin's manifest. |
 | [getUsernameWithApiLookup](Function.getUsernameWithApiLookup.md) | Resolves the PostgreSQL username for a Lakebase connection. |
 | [getWorkspaceClient](Function.getWorkspaceClient.md) | Get workspace client from config or SDK default auth chain |
+| [isFunctionTool](Function.isFunctionTool.md) | - |
+| [isHostedTool](Function.isHostedTool.md) | - |
 | [isSQLTypeMarker](Function.isSQLTypeMarker.md) | Type guard to check if a value is a SQL type marker |
+| [mcpServer](Function.mcpServer.md) | Factory for declaring a custom MCP server tool. |
+| [tool](Function.tool.md) | Factory for defining function tools with Zod schemas. |

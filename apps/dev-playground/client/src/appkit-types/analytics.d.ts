@@ -119,10 +119,10 @@ declare module "@databricks/appkit-ui/react" {
         result: Array<{
           /** @sqlType STRING */
           string_value: string;
-          /** @sqlType STRING */
-          number_value: string;
-          /** @sqlType STRING */
-          boolean_value: string;
+          /** @sqlType INT */
+          number_value: number;
+          /** @sqlType BOOLEAN */
+          boolean_value: boolean;
           /** @sqlType STRING */
           date_value: string;
           /** @sqlType STRING */

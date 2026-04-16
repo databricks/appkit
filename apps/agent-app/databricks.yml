@@ -1,0 +1,50 @@
+bundle:
+  name: appkit-agent-app
+
+variables:
+  sql_warehouse_id:
+    description: SQL Warehouse ID for analytics queries
+  serving_endpoint_name:
+    description: Model Serving endpoint name for the agent LLM
+  volume_full_name:
+    description: "UC Volume full name (e.g. catalog.schema.volume_name)"
+
+resources:
+  apps:
+    agent_app:
+      name: "appkit-agent-app"
+      description: "AppKit agent with auto-discovered tools from analytics, files, and genie plugins"
+      source_code_path: ./
+
+      user_api_scopes:
+        - sql
+        - files.files
+        - dashboards.genie
+
+      resources:
+        - name: sql-warehouse
+          sql_warehouse:
+            id: ${var.sql_warehouse_id}
+            permission: CAN_USE
+
+        - name: serving-endpoint
+          serving_endpoint:
+            name: ${var.serving_endpoint_name}
+            permission: CAN_QUERY
+
+        - name: volume
+          uc_securable:
+            securable_type: VOLUME
+            securable_full_name: ${var.volume_full_name}
+            permission: WRITE_VOLUME
+
+targets:
+  dogfood:
+    default: true
+    workspace:
+      host: https://e2-dogfood.staging.cloud.databricks.com
+
+    variables:
+      sql_warehouse_id: dd43ee29fedd958d
+      serving_endpoint_name: databricks-claude-sonnet-4-5
+      volume_full_name: main.mario.mario-vol
