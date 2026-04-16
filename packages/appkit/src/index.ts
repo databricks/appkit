@@ -60,12 +60,12 @@ export type {
   FilePolicy,
   FilePolicyUser,
   FileResource,
-} from "./plugins/files";
+} from "./plugins/files/policy";
 export {
   PolicyDeniedError,
   READ_ACTIONS,
   WRITE_ACTIONS,
-} from "./plugins/files";
+} from "./plugins/files/policy";
 export type {
   EndpointConfig,
   ServingEndpointEntry,

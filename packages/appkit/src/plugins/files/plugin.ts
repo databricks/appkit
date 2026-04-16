@@ -239,50 +239,6 @@ export class FilesPlugin extends Plugin {
     }
   }
 
-  /**
-   * Creates a VolumeAPI for a specific volume key.
-   * All operations execute as the service principal without policy checks.
-   *
-   * Not used internally — `_createPolicyWrappedAPI` handles all current
-   * call sites. Kept as a `protected` extension point so subclasses can
-   * override `exports()` or build custom APIs with raw connector access,
-   * e.g. background jobs or migrations that should bypass user-facing policies.
-   *
-   * @security This method skips all policy enforcement. Do not expose its
-   * return value to HTTP routes or end-user-facing code paths — use
-   * `_createPolicyWrappedAPI` for anything that serves user requests.
-   */
-  protected createVolumeAPI(volumeKey: string): VolumeAPI {
-    logger.debug(
-      'createVolumeAPI("%s") — bypassing policy enforcement',
-      volumeKey,
-    );
-    const connector = this.volumeConnectors[volumeKey];
-    return {
-      list: (directoryPath?: string) =>
-        connector.list(getWorkspaceClient(), directoryPath),
-      read: (filePath: string, options?: { maxSize?: number }) =>
-        connector.read(getWorkspaceClient(), filePath, options),
-      download: (filePath: string): Promise<DownloadResponse> =>
-        connector.download(getWorkspaceClient(), filePath),
-      exists: (filePath: string) =>
-        connector.exists(getWorkspaceClient(), filePath),
-      metadata: (filePath: string) =>
-        connector.metadata(getWorkspaceClient(), filePath),
-      upload: (
-        filePath: string,
-        contents: ReadableStream | Buffer | string,
-        options?: { overwrite?: boolean },
-      ) => connector.upload(getWorkspaceClient(), filePath, contents, options),
-      createDirectory: (directoryPath: string) =>
-        connector.createDirectory(getWorkspaceClient(), directoryPath),
-      delete: (filePath: string) =>
-        connector.delete(getWorkspaceClient(), filePath),
-      preview: (filePath: string) =>
-        connector.preview(getWorkspaceClient(), filePath),
-    };
-  }
-
   injectRoutes(router: IAppRouter) {
     this.route(router, {
       name: "volumes",
@@ -993,28 +949,35 @@ export class FilesPlugin extends Plugin {
   }
 
   /**
-   * Creates a VolumeAPI that enforces the volume's policy and then delegates
-   * to the connector as the service principal.
+   * Creates a VolumeAPI for a specific volume key.
+   *
+   * By default, enforces the volume's policy before each operation.
+   * Pass `bypassPolicy: true` to skip policy checks — useful for
+   * background jobs or migrations that should bypass user-facing policies.
+   *
+   * @security When `bypassPolicy` is `true`, no policy enforcement runs.
+   * Do not expose bypassed APIs to HTTP routes or end-user code paths.
    */
-  private _createPolicyWrappedAPI(
+  protected createVolumeAPI(
     volumeKey: string,
     user: FilePolicyUser,
+    options?: { bypassPolicy?: boolean },
   ): VolumeAPI {
     const connector = this.volumeConnectors[volumeKey];
-    const check = (
-      action: FileAction,
-      path: string,
-      overrides?: Partial<FileResource>,
-    ) => this._checkPolicy(volumeKey, action, path, user, overrides);
+    const noop = () => Promise.resolve();
+    const check = options?.bypassPolicy
+      ? noop
+      : (action: FileAction, path: string, overrides?: Partial<FileResource>) =>
+          this._checkPolicy(volumeKey, action, path, user, overrides);
 
     return {
       list: async (directoryPath?: string) => {
         await check("list", directoryPath ?? "/");
         return connector.list(getWorkspaceClient(), directoryPath);
       },
-      read: async (filePath: string, options?: { maxSize?: number }) => {
+      read: async (filePath: string, opts?: { maxSize?: number }) => {
         await check("read", filePath);
-        return connector.read(getWorkspaceClient(), filePath, options);
+        return connector.read(getWorkspaceClient(), filePath, opts);
       },
       download: async (filePath: string) => {
         await check("download", filePath);
@@ -1031,15 +994,10 @@ export class FilesPlugin extends Plugin {
       upload: async (
         filePath: string,
         contents: ReadableStream | Buffer | string,
-        options?: { overwrite?: boolean },
+        opts?: { overwrite?: boolean },
       ) => {
         await check("upload", filePath);
-        return connector.upload(
-          getWorkspaceClient(),
-          filePath,
-          contents,
-          options,
-        );
+        return connector.upload(getWorkspaceClient(), filePath, contents, opts);
       },
       createDirectory: async (directoryPath: string) => {
         await check("mkdir", directoryPath);
@@ -1116,13 +1074,13 @@ export class FilesPlugin extends Plugin {
         },
         isServicePrincipal: true,
       };
-      const spApi = this._createPolicyWrappedAPI(volumeKey, spUser);
+      const spApi = this.createVolumeAPI(volumeKey, spUser);
 
       return {
         ...spApi,
         asUser: (req: express.Request) => {
           const user = this._extractUser(req);
-          return this._createPolicyWrappedAPI(volumeKey, user);
+          return this.createVolumeAPI(volumeKey, user);
         },
       };
     };
