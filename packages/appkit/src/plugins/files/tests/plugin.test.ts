@@ -1206,6 +1206,40 @@ describe("FilesPlugin", () => {
       await expect(api.list()).rejects.toThrow(PolicyDeniedError);
     });
 
+    test("SDK asUser(req) + denyAll() → delete throws PolicyDeniedError", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handle = plugin.exports()("locked");
+
+      const mockReqObj = {
+        header: (name: string) => {
+          if (name === "x-forwarded-user") return "test-user";
+          if (name === "x-forwarded-access-token") return "test-token";
+          return undefined;
+        },
+      } as any;
+
+      await expect(
+        handle.asUser(mockReqObj).delete("/secret.txt"),
+      ).rejects.toThrow(PolicyDeniedError);
+    });
+
+    test("SDK asUser(req) + publicRead() → upload throws PolicyDeniedError", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handle = plugin.exports()("public");
+
+      const mockReqObj = {
+        header: (name: string) => {
+          if (name === "x-forwarded-user") return "test-user";
+          if (name === "x-forwarded-access-token") return "test-token";
+          return undefined;
+        },
+      } as any;
+
+      await expect(
+        handle.asUser(mockReqObj).upload("/file.bin", Buffer.from("data")),
+      ).rejects.toThrow(PolicyDeniedError);
+    });
+
     test("direct call on policy volume → enforces policy as SP", async () => {
       const plugin = new FilesPlugin(POLICY_CONFIG);
       const handle = plugin.exports()("open");
@@ -1406,6 +1440,31 @@ describe("FilesPlugin", () => {
       const res = mockRes();
 
       await handler(mockReq("locked", { query: { path: "/test.txt" } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+        }),
+      );
+    });
+
+    test("denyAll() volume → upload denied with 403", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "post", "/upload");
+      const res = mockRes();
+
+      await handler(
+        mockReq("locked", {
+          query: { path: "/test.bin" },
+          headers: {
+            "content-length": "100",
+            "x-forwarded-user": "test-user",
+            "x-forwarded-access-token": "test-token",
+          },
+        }),
+        res,
+      );
 
       expect(res.status).toHaveBeenCalledWith(403);
       expect(res.json).toHaveBeenCalledWith(
