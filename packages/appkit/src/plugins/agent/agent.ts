@@ -8,7 +8,6 @@ import type {
   Message,
   PluginPhase,
   ResponseStreamEvent,
-  ToolProvider,
 } from "shared";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
@@ -29,17 +28,6 @@ import {
 import type { AgentPluginConfig, RegisteredAgent, ToolEntry } from "./types";
 
 const logger = createLogger("agent");
-
-function isToolProvider(obj: unknown): obj is ToolProvider {
-  return (
-    typeof obj === "object" &&
-    obj !== null &&
-    "getAgentTools" in obj &&
-    typeof (obj as any).getAgentTools === "function" &&
-    "executeAgentTool" in obj &&
-    typeof (obj as any).executeAgentTool === "function"
-  );
-}
 
 export class AgentPlugin extends Plugin {
   static manifest = manifest as PluginManifest<"agent">;
@@ -87,40 +75,32 @@ export class AgentPlugin extends Plugin {
   }
 
   private mountInvocationsRoute() {
-    const serverPlugin = this.config.plugins?.server as
-      | { addExtension?: (fn: (app: any) => void) => void }
-      | undefined;
+    if (!this.context) return;
 
-    if (!serverPlugin?.addExtension) return;
+    this.context.addRoute(
+      "post",
+      "/invocations",
+      (req: express.Request, res: express.Response) => {
+        this._handleInvocations(req, res);
+      },
+    );
 
-    serverPlugin.addExtension((app: import("express").Application) => {
-      app.post(
-        "/invocations",
-        (req: express.Request, res: express.Response) => {
-          this._handleInvocations(req, res);
-        },
-      );
-    });
-
-    logger.info("Mounted POST /invocations route");
+    logger.info("Registered POST /invocations route via PluginContext");
   }
 
   private async collectTools() {
-    // 1. Auto-discover from sibling ToolProvider plugins
-    const plugins = this.config.plugins;
-    if (plugins) {
-      for (const [pluginName, pluginInstance] of Object.entries(plugins)) {
-        if (pluginName === "agent") continue;
-        if (!isToolProvider(pluginInstance)) continue;
-
-        const tools = (pluginInstance as ToolProvider).getAgentTools();
+    // 1. Auto-discover from sibling ToolProvider plugins via PluginContext
+    if (this.context) {
+      for (const {
+        name: pluginName,
+        provider,
+      } of this.context.getToolProviders()) {
+        const tools = provider.getAgentTools();
         for (const tool of tools) {
           const qualifiedName = `${pluginName}.${tool.name}`;
           this.toolIndex.set(qualifiedName, {
             source: "plugin",
-            plugin: pluginInstance as ToolProvider & {
-              asUser(req: any): any;
-            },
+            pluginName,
             def: { ...tool, name: qualifiedName },
             localName: tool.name,
           });
@@ -399,41 +379,51 @@ export class AgentPlugin extends Plugin {
       const entry = self.toolIndex.get(qualifiedName);
       if (!entry) throw new Error(`Unknown tool: ${qualifiedName}`);
 
-      const result = await self.execute(
-        async (execSignal) => {
-          switch (entry.source) {
-            case "plugin": {
-              const target = (entry.plugin as any).asUser(req);
-              return (target as ToolProvider).executeAgentTool(
-                entry.localName,
-                args,
-                execSignal,
-              );
-            }
-            case "function":
-              return entry.functionTool.execute(
-                args as Record<string, unknown>,
-              );
-            case "mcp": {
-              if (!self.mcpClient) {
-                throw new Error("MCP client not connected");
+      let result: unknown;
+
+      if (entry.source === "plugin" && self.context) {
+        result = await self.context.executeTool(
+          req,
+          entry.pluginName,
+          entry.localName,
+          args,
+          signal,
+        );
+      } else {
+        result = await self.execute(
+          async (_execSignal) => {
+            switch (entry.source) {
+              case "plugin":
+                throw new Error("Plugin tool execution requires PluginContext");
+              case "function":
+                return entry.functionTool.execute(
+                  args as Record<string, unknown>,
+                );
+              case "mcp": {
+                if (!self.mcpClient) {
+                  throw new Error("MCP client not connected");
+                }
+                const oboToken = req.headers["x-forwarded-access-token"];
+                const mcpAuth =
+                  typeof oboToken === "string"
+                    ? { Authorization: `Bearer ${oboToken}` }
+                    : undefined;
+                return self.mcpClient.callTool(
+                  entry.mcpToolName,
+                  args,
+                  mcpAuth,
+                );
               }
-              const oboToken = req.headers["x-forwarded-access-token"];
-              const mcpAuth =
-                typeof oboToken === "string"
-                  ? { Authorization: `Bearer ${oboToken}` }
-                  : undefined;
-              return self.mcpClient.callTool(entry.mcpToolName, args, mcpAuth);
             }
-          }
-        },
-        {
-          default: {
-            telemetryInterceptor: { enabled: true },
-            timeout: 30_000,
           },
-        },
-      );
+          {
+            default: {
+              telemetryInterceptor: { enabled: true },
+              timeout: 30_000,
+            },
+          },
+        );
+      }
 
       if (result === undefined) {
         return `Error: Tool "${qualifiedName}" execution failed`;
