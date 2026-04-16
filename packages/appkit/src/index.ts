@@ -7,11 +7,20 @@
 
 // Types from shared
 export type {
+  AgentAdapter,
+  AgentEvent,
+  AgentInput,
+  AgentRunContext,
+  AgentToolDefinition,
   BasePluginConfig,
   CacheConfig,
   IAppRouter,
+  Message,
   PluginData,
   StreamExecutionSettings,
+  Thread,
+  ThreadStore,
+  ToolProvider,
 } from "shared";
 export { isSQLTypeMarker, sql } from "shared";
 export { CacheManager } from "./cache";

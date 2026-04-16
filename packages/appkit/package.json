@@ -29,6 +29,18 @@
       "development": "./src/index.ts",
       "default": "./dist/index.js"
     },
+    "./agents/vercel-ai": {
+      "development": "./src/agents/vercel-ai.ts",
+      "default": "./dist/agents/vercel-ai.js"
+    },
+    "./agents/langchain": {
+      "development": "./src/agents/langchain.ts",
+      "default": "./dist/agents/langchain.js"
+    },
+    "./agents/databricks": {
+      "development": "./src/agents/databricks.ts",
+      "default": "./dist/agents/databricks.js"
+    },
     "./type-generator": {
       "types": "./dist/type-generator/index.d.ts",
       "development": "./src/type-generator/index.ts",
@@ -79,12 +91,32 @@
     "vite": "npm:rolldown-vite@7.1.14",
     "ws": "8.18.3"
   },
+  "peerDependencies": {
+    "@langchain/core": ">=0.3.0",
+    "ai": ">=4.0.0",
+    "zod": ">=3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "ai": {
+      "optional": true
+    },
+    "@langchain/core": {
+      "optional": true
+    },
+    "zod": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@ai-sdk/openai": "4.0.0-beta.27",
+    "@langchain/core": "^1.1.39",
     "@types/express": "4.17.25",
     "@types/json-schema": "7.0.15",
     "@types/pg": "8.16.0",
     "@types/ws": "8.18.1",
-    "@vitejs/plugin-react": "5.1.1"
+    "@vitejs/plugin-react": "5.1.1",
+    "ai": "7.0.0-beta.76",
+    "zod": "^4.3.6"
   },
   "overrides": {
     "vite": "npm:rolldown-vite@7.1.14"
@@ -93,6 +125,9 @@
   "publishConfig": {
     "exports": {
       ".": "./dist/index.js",
+      "./agents/vercel-ai": "./dist/agents/vercel-ai.js",
+      "./agents/langchain": "./dist/agents/langchain.js",
+      "./agents/databricks": "./dist/agents/databricks.js",
       "./dist/shared/src/plugin": "./dist/shared/src/plugin.d.ts",
       "./type-generator": "./dist/type-generator/index.js",
       "./package.json": "./package.json"
