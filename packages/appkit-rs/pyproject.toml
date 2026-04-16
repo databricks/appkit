@@ -1,0 +1,21 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "databricks-appkit"
+version = "0.1.0"
+requires-python = ">=3.11"
+description = "Databricks AppKit Python SDK"
+
+[project.optional-dependencies]
+test = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[tool.maturin]
+features = ["extension-module"]
+python-source = "."
+module-name = "appkit.appkit"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

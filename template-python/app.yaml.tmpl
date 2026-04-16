@@ -1,0 +1,5 @@
+command: ['python', 'server/main.py']
+{{- if .appEnv}}
+env:
+{{.appEnv}}
+{{- end}}

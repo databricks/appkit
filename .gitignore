@@ -11,3 +11,16 @@ coverage
 .turbo
 
 .databricks
+
+# Rust / maturin
+target/
+.cargo/
+*.so
+*.pyd
+*.dylib
+
+# Python / uv
+__pycache__/
+*.egg-info/
+.venv/
+*.pyc
