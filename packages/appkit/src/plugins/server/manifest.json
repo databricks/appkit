@@ -11,11 +11,6 @@
     "schema": {
       "type": "object",
       "properties": {
-        "autoStart": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically start the server on plugin setup"
-        },
         "host": {
           "type": "string",
           "default": "0.0.0.0",

@@ -197,19 +197,16 @@ describe("ServerPlugin", () => {
       const plugin = new ServerPlugin({
         port: 3000,
         host: "127.0.0.1",
-        autoStart: false,
       });
 
       const config = plugin.getConfig();
       expect(config.port).toBe(3000);
       expect(config.host).toBe("127.0.0.1");
-      expect(config.autoStart).toBe(false);
     });
   });
 
   describe("DEFAULT_CONFIG", () => {
     test("should have correct default values", () => {
-      expect(ServerPlugin.DEFAULT_CONFIG.autoStart).toBe(true);
       expect(ServerPlugin.DEFAULT_CONFIG.host).toBe("0.0.0.0");
       expect(ServerPlugin.DEFAULT_CONFIG.port).toBe(8000);
     });
@@ -220,30 +217,9 @@ describe("ServerPlugin", () => {
     });
   });
 
-  describe("shouldAutoStart", () => {
-    test("should return true when autoStart is true", () => {
-      const plugin = new ServerPlugin({ autoStart: true });
-      expect(plugin.shouldAutoStart()).toBe(true);
-    });
-
-    test("should return false when autoStart is false", () => {
-      const plugin = new ServerPlugin({ autoStart: false });
-      expect(plugin.shouldAutoStart()).toBe(false);
-    });
-  });
-
   describe("setup", () => {
-    test("should call start when autoStart is true", async () => {
-      const plugin = new ServerPlugin({ autoStart: true });
-      const startSpy = vi.spyOn(plugin, "start").mockResolvedValue({} as any);
-
-      await plugin.setup();
-
-      expect(startSpy).toHaveBeenCalled();
-    });
-
-    test("should not call start when autoStart is false", async () => {
-      const plugin = new ServerPlugin({ autoStart: false });
+    test("should be a no-op (server start is orchestrated by createApp)", async () => {
+      const plugin = new ServerPlugin({});
       const startSpy = vi.spyOn(plugin, "start").mockResolvedValue({} as any);
 
       await plugin.setup();
@@ -254,7 +230,7 @@ describe("ServerPlugin", () => {
 
   describe("start", () => {
     test("should call listen on express app", async () => {
-      const plugin = new ServerPlugin({ autoStart: false, port: 3000 });
+      const plugin = new ServerPlugin({ port: 3000 });
 
       await plugin.start();
 
@@ -267,7 +243,7 @@ describe("ServerPlugin", () => {
 
     test("should setup ViteDevServer in development mode", async () => {
       process.env.NODE_ENV = "development";
-      const plugin = new ServerPlugin({ autoStart: false });
+      const plugin = new ServerPlugin({});
 
       await plugin.start();
 
@@ -277,7 +253,7 @@ describe("ServerPlugin", () => {
     });
 
     test("should register RemoteTunnelController middleware and set server", async () => {
-      const plugin = new ServerPlugin({ autoStart: false });
+      const plugin = new ServerPlugin({});
 
       await plugin.start();
 
@@ -304,7 +280,7 @@ describe("ServerPlugin", () => {
         },
       };
 
-      const plugin = new ServerPlugin({ autoStart: false, plugins });
+      const plugin = new ServerPlugin({ plugins });
       await plugin.start();
 
       // Get the type function passed to express.json
@@ -348,7 +324,7 @@ describe("ServerPlugin", () => {
         },
       };
 
-      const plugin = new ServerPlugin({ autoStart: false, plugins });
+      const plugin = new ServerPlugin({ plugins });
       await plugin.start();
 
       const routerFn = (express as any).Router as ReturnType<typeof vi.fn>;
@@ -386,7 +362,7 @@ describe("ServerPlugin", () => {
         },
       };
 
-      const plugin = new ServerPlugin({ autoStart: false, plugins });
+      const plugin = new ServerPlugin({ plugins });
       await plugin.start();
 
       expect(plugins["plugin-a"].clientConfig).toHaveBeenCalled();
@@ -413,7 +389,7 @@ describe("ServerPlugin", () => {
         },
       };
 
-      const plugin = new ServerPlugin({ autoStart: false, plugins });
+      const plugin = new ServerPlugin({ plugins });
       await plugin.start();
 
       expect(plugins["plugin-null"].clientConfig).toHaveBeenCalled();
@@ -444,7 +420,7 @@ describe("ServerPlugin", () => {
         },
       };
 
-      const plugin = new ServerPlugin({ autoStart: false, plugins });
+      const plugin = new ServerPlugin({ plugins });
       await expect(plugin.start()).resolves.toBeDefined();
       expect(mockLoggerError).toHaveBeenCalledWith(
         "Plugin '%s' clientConfig() failed, skipping its config: %O",
@@ -457,7 +433,7 @@ describe("ServerPlugin", () => {
       process.env.NODE_ENV = "production";
       vi.mocked(fs.existsSync).mockReturnValue(true);
 
-      const plugin = new ServerPlugin({ autoStart: false });
+      const plugin = new ServerPlugin({});
 
       await plugin.start();
 
@@ -470,7 +446,7 @@ describe("ServerPlugin", () => {
       process.env.NODE_ENV = "production";
       vi.mocked(fs.existsSync).mockReturnValue(false);
 
-      const plugin = new ServerPlugin({ autoStart: false });
+      const plugin = new ServerPlugin({});
 
       await plugin.start();
 
@@ -479,8 +455,8 @@ describe("ServerPlugin", () => {
   });
 
   describe("extend", () => {
-    test("should add extension function when autoStart is false", () => {
-      const plugin = new ServerPlugin({ autoStart: false });
+    test("should add extension function and return plugin for chaining", () => {
+      const plugin = new ServerPlugin({});
       const extensionFn = vi.fn();
 
       const result = plugin.extend(extensionFn);
@@ -488,17 +464,8 @@ describe("ServerPlugin", () => {
       expect(result).toBe(plugin);
     });
 
-    test("should throw when autoStart is true", () => {
-      const plugin = new ServerPlugin({ autoStart: true });
-      const extensionFn = vi.fn();
-
-      expect(() => plugin.extend(extensionFn)).toThrow(
-        "Cannot extend server when autoStart is true",
-      );
-    });
-
     test("should call extension functions during start", async () => {
-      const plugin = new ServerPlugin({ autoStart: false });
+      const plugin = new ServerPlugin({});
       const extensionFn = vi.fn();
 
       plugin.extend(extensionFn);
@@ -509,16 +476,8 @@ describe("ServerPlugin", () => {
   });
 
   describe("getServer", () => {
-    test("should throw when autoStart is true", () => {
-      const plugin = new ServerPlugin({ autoStart: true });
-
-      expect(() => plugin.getServer()).toThrow(
-        "Cannot get server when autoStart is true",
-      );
-    });
-
     test("should throw when server not started", () => {
-      const plugin = new ServerPlugin({ autoStart: false });
+      const plugin = new ServerPlugin({});
 
       expect(() => plugin.getServer()).toThrow(
         "Server not started. Please start the server first by calling the start() method",
@@ -526,7 +485,7 @@ describe("ServerPlugin", () => {
     });
 
     test("should return server after start", async () => {
-      const plugin = new ServerPlugin({ autoStart: false });
+      const plugin = new ServerPlugin({});
 
       await plugin.start();
       const server = plugin.getServer();
@@ -553,7 +512,7 @@ describe("ServerPlugin", () => {
   describe("logStartupInfo", () => {
     test("logs remote tunnel controller disabled when missing", () => {
       mockLoggerDebug.mockClear();
-      const plugin = new ServerPlugin({ autoStart: false });
+      const plugin = new ServerPlugin({});
       (plugin as any).remoteTunnelController = undefined;
 
       (plugin as any).logStartupInfo();
@@ -565,7 +524,7 @@ describe("ServerPlugin", () => {
 
     test("logs remote tunnel allowed/active when controller present", () => {
       mockLoggerDebug.mockClear();
-      const plugin = new ServerPlugin({ autoStart: false });
+      const plugin = new ServerPlugin({});
       (plugin as any).remoteTunnelController = {
         isAllowedByEnv: () => true,
         isActive: () => true,
@@ -607,7 +566,6 @@ describe("ServerPlugin", () => {
         .mockImplementation(((_code?: number) => undefined) as any);
 
       const plugin = new ServerPlugin({
-        autoStart: false,
         plugins: {
           ok: {
             name: "ok",

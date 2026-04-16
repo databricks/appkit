@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as VectorSearchRouteRouteImport } from './routes/vector-search.route'
 import { Route as TypeSafetyRouteRouteImport } from './routes/type-safety.route'
 import { Route as TelemetryRouteRouteImport } from './routes/telemetry.route'
 import { Route as SqlHelpersRouteRouteImport } from './routes/sql-helpers.route'
@@ -23,6 +24,11 @@ import { Route as ArrowAnalyticsRouteRouteImport } from './routes/arrow-analytic
 import { Route as AnalyticsRouteRouteImport } from './routes/analytics.route'
 import { Route as IndexRouteImport } from './routes/index'
 
+const VectorSearchRouteRoute = VectorSearchRouteRouteImport.update({
+  id: '/vector-search',
+  path: '/vector-search',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TypeSafetyRouteRoute = TypeSafetyRouteRouteImport.update({
   id: '/type-safety',
   path: '/type-safety',
@@ -103,6 +109,7 @@ export interface FileRoutesByFullPath {
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
   '/type-safety': typeof TypeSafetyRouteRoute
+  '/vector-search': typeof VectorSearchRouteRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -118,6 +125,7 @@ export interface FileRoutesByTo {
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
   '/type-safety': typeof TypeSafetyRouteRoute
+  '/vector-search': typeof VectorSearchRouteRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -134,6 +142,7 @@ export interface FileRoutesById {
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
   '/type-safety': typeof TypeSafetyRouteRoute
+  '/vector-search': typeof VectorSearchRouteRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -151,6 +160,7 @@ export interface FileRouteTypes {
     | '/sql-helpers'
     | '/telemetry'
     | '/type-safety'
+    | '/vector-search'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -166,6 +176,7 @@ export interface FileRouteTypes {
     | '/sql-helpers'
     | '/telemetry'
     | '/type-safety'
+    | '/vector-search'
   id:
     | '__root__'
     | '/'
@@ -181,6 +192,7 @@ export interface FileRouteTypes {
     | '/sql-helpers'
     | '/telemetry'
     | '/type-safety'
+    | '/vector-search'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -197,10 +209,18 @@ export interface RootRouteChildren {
   SqlHelpersRouteRoute: typeof SqlHelpersRouteRoute
   TelemetryRouteRoute: typeof TelemetryRouteRoute
   TypeSafetyRouteRoute: typeof TypeSafetyRouteRoute
+  VectorSearchRouteRoute: typeof VectorSearchRouteRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/vector-search': {
+      id: '/vector-search'
+      path: '/vector-search'
+      fullPath: '/vector-search'
+      preLoaderRoute: typeof VectorSearchRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/type-safety': {
       id: '/type-safety'
       path: '/type-safety'
@@ -309,6 +329,7 @@ const rootRouteChildren: RootRouteChildren = {
   SqlHelpersRouteRoute: SqlHelpersRouteRoute,
   TelemetryRouteRoute: TelemetryRouteRoute,
   TypeSafetyRouteRoute: TypeSafetyRouteRoute,
+  VectorSearchRouteRoute: VectorSearchRouteRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

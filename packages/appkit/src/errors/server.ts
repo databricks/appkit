@@ -6,7 +6,6 @@ import { AppKitError } from "./base";
  *
  * @example
  * ```typescript
- * throw new ServerError("Cannot get server when autoStart is true");
  * throw new ServerError("Server not started");
  * ```
  */
@@ -14,15 +13,6 @@ export class ServerError extends AppKitError {
   readonly code = "SERVER_ERROR";
   readonly statusCode = 500;
   readonly isRetryable = false;
-
-  /**
-   * Create a server error for autoStart conflict
-   */
-  static autoStartConflict(operation: string): ServerError {
-    return new ServerError(`Cannot ${operation} when autoStart is true`, {
-      context: { operation },
-    });
-  }
 
   /**
    * Create a server error for server not started

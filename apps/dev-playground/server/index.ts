@@ -26,7 +26,7 @@ function createMockClient() {
 
 createApp({
   plugins: [
-    server({ autoStart: false }),
+    server(),
     reconnect(),
     telemetryExamples(),
     analytics({}),
@@ -49,9 +49,8 @@ createApp({
     // }),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
-}).then((appkit) => {
-  appkit.server
-    .extend((app) => {
+  customize(appkit) {
+    appkit.server.extend((app) => {
       app.get("/sp", (_req, res) => {
         appkit.analytics
           .query("SELECT * FROM samples.nyctaxi.trips;")
@@ -86,6 +85,6 @@ createApp({
             });
           });
       });
-    })
-    .start();
-});
+    });
+  },
+}).catch(console.error);

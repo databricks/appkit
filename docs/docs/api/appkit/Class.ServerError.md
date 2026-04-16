@@ -6,7 +6,6 @@ Use for server start/stop issues, configuration conflicts, etc.
 ## Example
 
 ```typescript
-throw new ServerError("Cannot get server when autoStart is true");
 throw new ServerError("Server not started");
 ```
 
@@ -148,26 +147,6 @@ Create a human-readable string representation
 #### Inherited from
 
 [`AppKitError`](Class.AppKitError.md).[`toString`](Class.AppKitError.md#tostring)
-
-***
-
-### autoStartConflict()
-
-```ts
-static autoStartConflict(operation: string): ServerError;
-```
-
-Create a server error for autoStart conflict
-
-#### Parameters
-
-| Parameter | Type |
-| ------ | ------ |
-| `operation` | `string` |
-
-#### Returns
-
-`ServerError`
 
 ***
 
