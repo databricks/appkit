@@ -326,6 +326,9 @@ importers:
       ws:
         specifier: 8.18.3
         version: 8.18.3(bufferutil@4.0.9)
+      zod:
+        specifier: ^4.0.0
+        version: 4.3.6
     devDependencies:
       '@ai-sdk/openai':
         specifier: 4.0.0-beta.27
@@ -351,9 +354,6 @@ importers:
       ai:
         specifier: 7.0.0-beta.76
         version: 7.0.0-beta.76(zod@4.3.6)
-      zod:
-        specifier: ^4.3.6
-        version: 4.3.6
 
   packages/appkit-ui:
     dependencies:
@@ -12019,12 +12019,12 @@ packages:
 
 snapshots:
 
-  '@ai-sdk/gateway@2.0.21(zod@4.1.13)':
+  '@ai-sdk/gateway@2.0.21(zod@4.3.6)':
     dependencies:
       '@ai-sdk/provider': 2.0.0
-      '@ai-sdk/provider-utils': 3.0.19(zod@4.1.13)
+      '@ai-sdk/provider-utils': 3.0.19(zod@4.3.6)
       '@vercel/oidc': 3.0.5
-      zod: 4.1.13
+      zod: 4.3.6
 
   '@ai-sdk/gateway@4.0.0-beta.43(zod@4.3.6)':
     dependencies:
@@ -12039,12 +12039,12 @@ snapshots:
       '@ai-sdk/provider-utils': 5.0.0-beta.16(zod@4.3.6)
       zod: 4.3.6
 
-  '@ai-sdk/provider-utils@3.0.19(zod@4.1.13)':
+  '@ai-sdk/provider-utils@3.0.19(zod@4.3.6)':
     dependencies:
       '@ai-sdk/provider': 2.0.0
       '@standard-schema/spec': 1.1.0
       eventsource-parser: 3.0.6
-      zod: 4.1.13
+      zod: 4.3.6
 
   '@ai-sdk/provider-utils@5.0.0-beta.16(zod@4.3.6)':
     dependencies:
@@ -12061,15 +12061,15 @@ snapshots:
     dependencies:
       json-schema: 0.4.0
 
-  '@ai-sdk/react@2.0.115(react@19.2.0)(zod@4.1.13)':
+  '@ai-sdk/react@2.0.115(react@19.2.0)(zod@4.3.6)':
     dependencies:
-      '@ai-sdk/provider-utils': 3.0.19(zod@4.1.13)
-      ai: 5.0.113(zod@4.1.13)
+      '@ai-sdk/provider-utils': 3.0.19(zod@4.3.6)
+      ai: 5.0.113(zod@4.3.6)
       react: 19.2.0
       swr: 2.3.8(react@19.2.0)
       throttleit: 2.1.0
     optionalDependencies:
-      zod: 4.1.13
+      zod: 4.3.6
 
   '@algolia/abtesting@1.12.0':
     dependencies:
@@ -13732,14 +13732,14 @@ snapshots:
 
   '@docsearch/react@4.3.2(@algolia/client-search@5.46.0)(@types/react@19.2.7)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(search-insights@2.17.3)':
     dependencies:
-      '@ai-sdk/react': 2.0.115(react@19.2.0)(zod@4.1.13)
+      '@ai-sdk/react': 2.0.115(react@19.2.0)(zod@4.3.6)
       '@algolia/autocomplete-core': 1.19.2(@algolia/client-search@5.46.0)(algoliasearch@5.46.0)(search-insights@2.17.3)
       '@docsearch/core': 4.3.1(@types/react@19.2.7)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@docsearch/css': 4.3.2
-      ai: 5.0.113(zod@4.1.13)
+      ai: 5.0.113(zod@4.3.6)
       algoliasearch: 5.46.0
       marked: 16.4.2
-      zod: 4.1.13
+      zod: 4.3.6
     optionalDependencies:
       '@types/react': 19.2.7
       react: 19.2.0
@@ -17908,13 +17908,13 @@ snapshots:
       clean-stack: 2.2.0
       indent-string: 4.0.0
 
-  ai@5.0.113(zod@4.1.13):
+  ai@5.0.113(zod@4.3.6):
     dependencies:
-      '@ai-sdk/gateway': 2.0.21(zod@4.1.13)
+      '@ai-sdk/gateway': 2.0.21(zod@4.3.6)
       '@ai-sdk/provider': 2.0.0
-      '@ai-sdk/provider-utils': 3.0.19(zod@4.1.13)
+      '@ai-sdk/provider-utils': 3.0.19(zod@4.3.6)
       '@opentelemetry/api': 1.9.0
-      zod: 4.1.13
+      zod: 4.3.6
 
   ai@7.0.0-beta.76(zod@4.3.6):
     dependencies:
@@ -21167,7 +21167,7 @@ snapshots:
       typescript: 5.9.3
       unbash: 2.2.0
       yaml: 2.8.2
-      zod: 4.1.13
+      zod: 4.3.6
 
   langium@3.3.1:
     dependencies:

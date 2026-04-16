@@ -63,6 +63,13 @@ export {
   toPlugin,
 } from "./plugin";
 export { analytics, files, genie, lakebase, server, serving } from "./plugins";
+export {
+  type FunctionTool,
+  type HostedTool,
+  mcpServer,
+  type ToolConfig,
+  tool,
+} from "./plugins/agent/tools";
 export type {
   EndpointConfig,
   ServingEndpointEntry,
