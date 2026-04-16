@@ -87,6 +87,9 @@ export async function generateFromEntryPoint(options: {
   await fs.mkdir(path.dirname(outFile), { recursive: true });
   await fs.writeFile(outFile, typeDeclarations, "utf-8");
 
+  // One-time migration: remove old generated file from client/src/ to avoid duplicate module augmentation
+  await removeOldAnalyticsTypes(outFile);
+
   logger.debug("Type generation complete!");
 }
 
@@ -94,6 +97,27 @@ export async function generateFromEntryPoint(options: {
 // A local binding ensures the serving vite plugin's import keeps this in the dependency graph,
 // mirroring how generateFromEntryPoint (also defined here) is preserved via the analytics vite plugin.
 export const generateServingTypes = generateServingTypesImpl;
+
+/**
+ * Remove old analytics types from client/src/appkit-types/ (pre-shared/ location).
+ * Best-effort: silently ignores missing files.
+ */
+async function removeOldAnalyticsTypes(newOutFile: string): Promise<void> {
+  const projectRoot = path.resolve(path.dirname(newOutFile), "..", "..");
+  const oldFile = path.join(
+    projectRoot,
+    "client",
+    "src",
+    "appkit-types",
+    "analytics.d.ts",
+  );
+  try {
+    await fs.unlink(oldFile);
+    logger.debug("Removed old analytics types at %s", oldFile);
+  } catch {
+    // File doesn't exist — nothing to clean up
+  }
+}
 
 /** Directory name for generated AppKit type declaration files. */
 export const TYPES_DIR = "appkit-types";
