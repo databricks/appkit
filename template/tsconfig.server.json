@@ -6,6 +6,7 @@
     "lib": ["ES2020"],
 
     /* Emit */
+    "noEmit": true,
     "outDir": "./dist",
     "rootDir": "./",
     "declaration": true,

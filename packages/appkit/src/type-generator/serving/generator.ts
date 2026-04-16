@@ -88,6 +88,9 @@ export async function generateServingTypes(
   await fs.mkdir(path.dirname(outFile), { recursive: true });
   await fs.writeFile(outFile, output, "utf-8");
 
+  // One-time migration: remove old generated file from client/src/ to avoid duplicate module augmentation
+  await removeOldServingTypes(outFile);
+
   if (registryEntries.length === 0) {
     logger.debug(
       "Wrote empty serving types to %s (no endpoints resolved)",
@@ -244,6 +247,29 @@ function resolveEndpointsFromServerFile():
   const serverFile = findServerFile(process.cwd());
   if (!serverFile) return undefined;
   return extractServingEndpoints(serverFile) ?? undefined;
+}
+
+/**
+ * Remove old serving types from client/src/appkit-types/ (pre-shared/ location).
+ * Best-effort: silently ignores missing files.
+ */
+async function removeOldServingTypes(newOutFile: string): Promise<void> {
+  // newOutFile is like <project>/shared/appkit-types/serving.d.ts
+  // old location was <project>/client/src/appkit-types/serving.d.ts
+  const projectRoot = path.resolve(path.dirname(newOutFile), "..", "..");
+  const oldFile = path.join(
+    projectRoot,
+    "client",
+    "src",
+    "appkit-types",
+    "serving.d.ts",
+  );
+  try {
+    await fs.unlink(oldFile);
+    logger.debug("Removed old serving types at %s", oldFile);
+  } catch {
+    // File doesn't exist — nothing to clean up
+  }
 }
 
 function resolveDefaultEndpoints(): Record<string, EndpointConfig> {
