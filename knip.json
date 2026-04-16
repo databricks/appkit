@@ -16,6 +16,7 @@
     "**/*.generated.ts",
     "**/*.example.tsx",
     "**/*.css",
+    "packages/appkit/src/plugins/vector-search/**",
     "template/**",
     "tools/**",
     "docs/**"

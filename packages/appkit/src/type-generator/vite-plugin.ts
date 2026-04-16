@@ -2,7 +2,11 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import type { Plugin } from "vite";
 import { createLogger } from "../logging/logger";
-import { generateFromEntryPoint } from "./index";
+import {
+  ANALYTICS_TYPES_FILE,
+  generateFromEntryPoint,
+  TYPES_DIR,
+} from "./index";
 
 const logger = createLogger("type-generator:vite-plugin");
 
@@ -71,7 +75,10 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
 
     configResolved(config) {
       root = config.root;
-      outFile = path.resolve(root, options?.outFile ?? "src/appKitTypes.d.ts");
+      outFile = path.resolve(
+        root,
+        options?.outFile ?? `src/${TYPES_DIR}/${ANALYTICS_TYPES_FILE}`,
+      );
       watchFolders = options?.watchFolders ?? [
         path.join(process.cwd(), "config", "queries"),
       ];

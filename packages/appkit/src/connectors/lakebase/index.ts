@@ -3,7 +3,7 @@ import {
   type LakebasePoolConfig,
 } from "@databricks/lakebase";
 import type { Pool } from "pg";
-import { createLogger } from "@/logging/logger";
+import { createLogger } from "../../logging/logger";
 
 /**
  * Create a Lakebase pool with appkit's logger integration.

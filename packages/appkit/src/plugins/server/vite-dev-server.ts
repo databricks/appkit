@@ -2,11 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import type express from "express";
 import type { ViteDevServer as ViteDevServerType } from "vite";
-import { mergeConfigDedup } from "@/utils";
 import { ServerError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { appKitServingTypesPlugin } from "../../type-generator/serving/vite-plugin";
 import { appKitTypesPlugin } from "../../type-generator/vite-plugin";
+import { mergeConfigDedup } from "../../utils";
 import { BaseServer } from "./base-server";
 import type { PluginClientConfigs, PluginEndpoints } from "./utils";
 

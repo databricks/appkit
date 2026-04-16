@@ -2,7 +2,7 @@ import path from "node:path";
 import type { Plugin } from "vite";
 import { createLogger } from "../../logging/logger";
 import type { EndpointConfig } from "../../plugins/serving/types";
-import { generateServingTypes } from "../index";
+import { generateServingTypes, SERVING_TYPES_FILE, TYPES_DIR } from "../index";
 import {
   extractServingEndpoints,
   findServerFile,
@@ -96,7 +96,7 @@ export function appKitServingTypesPlugin(
       projectRoot = path.resolve(config.root, "..");
       outFile = path.resolve(
         config.root,
-        options?.outFile ?? "src/appKitServingTypes.d.ts",
+        options?.outFile ?? `src/${TYPES_DIR}/${SERVING_TYPES_FILE}`,
       );
     },
 
