@@ -189,7 +189,7 @@ describe("AgentPlugin", () => {
     function createToolCallingAdapter(): AgentAdapter {
       return {
         async *run(
-          input: AgentInput,
+          _input: AgentInput,
           context: AgentRunContext,
         ): AsyncGenerator<AgentEvent> {
           await context.executeTool("testplugin.action", {});

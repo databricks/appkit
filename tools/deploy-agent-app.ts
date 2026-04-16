@@ -5,7 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import ora from "ora";
 
-const exec = promisify(execChildProcess);
+const _exec = promisify(execChildProcess);
 
 const config = {
   profile: process.env.DATABRICKS_PROFILE,
