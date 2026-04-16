@@ -69,7 +69,7 @@ describe("appKitServingTypesPlugin", () => {
   });
 
   describe("configResolved()", () => {
-    test("resolves outFile relative to config.root", async () => {
+    test("resolves outFile relative to project root", async () => {
       const plugin = appKitServingTypesPlugin({
         endpoints: { llm: { env: "LLM" } },
       });
@@ -79,7 +79,7 @@ describe("appKitServingTypesPlugin", () => {
       expect(mockGenerateServingTypes).toHaveBeenCalledWith(
         expect.objectContaining({
           outFile: expect.stringContaining(
-            "/app/client/src/appkit-types/serving.d.ts",
+            "/app/shared/appkit-types/serving.d.ts",
           ),
         }),
       );
