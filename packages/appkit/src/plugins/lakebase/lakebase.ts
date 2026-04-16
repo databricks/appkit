@@ -1,4 +1,6 @@
 import type { Pool, QueryResult, QueryResultRow } from "pg";
+import type { AgentToolDefinition, ToolProvider } from "shared";
+import { z } from "zod";
 import {
   createLakebasePool,
   getLakebaseOrmConfig,
@@ -8,6 +10,11 @@ import {
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
+import {
+  defineTool,
+  executeFromRegistry,
+  toolsFromRegistry,
+} from "../agent/tools/define-tool";
 import manifest from "./manifest.json";
 import type { ILakebaseConfig } from "./types";
 
@@ -30,7 +37,7 @@ const logger = createLogger("lakebase");
  * const result = await AppKit.lakebase.query("SELECT * FROM users WHERE id = $1", [userId]);
  * ```
  */
-class LakebasePlugin extends Plugin {
+class LakebasePlugin extends Plugin implements ToolProvider {
   /** Plugin manifest declaring metadata and resource requirements */
   static manifest = manifest as PluginManifest<"lakebase">;
 
@@ -102,6 +109,46 @@ class LakebasePlugin extends Plugin {
    * - `getOrmConfig()` — Returns a config object compatible with Drizzle, TypeORM, Sequelize, etc.
    * - `getPgConfig()` — Returns a `pg.PoolConfig` object for manual pool construction
    */
+
+  private tools = {
+    query: defineTool({
+      description:
+        "Execute a parameterized SQL query against the Lakebase PostgreSQL database. Use $1, $2, etc. as placeholders and pass values separately.",
+      schema: z.object({
+        text: z
+          .string()
+          .describe(
+            "SQL query string with $1, $2, ... placeholders for parameters",
+          ),
+        values: z
+          .array(z.unknown())
+          .optional()
+          .describe("Parameter values corresponding to placeholders"),
+      }),
+      annotations: {
+        readOnly: false,
+        destructive: false,
+        idempotent: false,
+      },
+      handler: async (args) => {
+        const result = await this.query(args.text, args.values);
+        return result.rows;
+      },
+    }),
+  };
+
+  getAgentTools(): AgentToolDefinition[] {
+    return toolsFromRegistry(this.tools);
+  }
+
+  async executeAgentTool(
+    name: string,
+    args: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    return executeFromRegistry(this.tools, name, args, signal);
+  }
+
   exports() {
     return {
       // biome-ignore lint/style/noNonNullAssertion: pool is guaranteed non-null after setup(), which AppKit always awaits before exposing the plugin API

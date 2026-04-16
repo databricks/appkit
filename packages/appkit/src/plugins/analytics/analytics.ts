@@ -1,16 +1,24 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type express from "express";
 import type {
+  AgentToolDefinition,
   IAppRouter,
   PluginExecuteConfig,
   SQLTypeMarker,
   StreamExecutionSettings,
+  ToolProvider,
 } from "shared";
+import { z } from "zod";
 import { SQLWarehouseConnector } from "../../connectors";
 import { getWarehouseId, getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
+import {
+  defineTool,
+  executeFromRegistry,
+  toolsFromRegistry,
+} from "../agent/tools/define-tool";
 import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import { QueryProcessor } from "./query";
@@ -22,7 +30,7 @@ import type {
 
 const logger = createLogger("analytics");
 
-export class AnalyticsPlugin extends Plugin {
+export class AnalyticsPlugin extends Plugin implements ToolProvider {
   /** Plugin manifest declaring metadata and resource requirements */
   static manifest = manifest as PluginManifest<"analytics">;
 
@@ -260,6 +268,34 @@ export class AnalyticsPlugin extends Plugin {
 
   async shutdown(): Promise<void> {
     this.streamManager.abortAll();
+  }
+
+  private tools = {
+    query: defineTool({
+      description:
+        "Execute a SQL query against the Databricks SQL warehouse. Returns the query results as JSON.",
+      schema: z.object({
+        query: z.string().describe("The SQL query to execute"),
+      }),
+      annotations: {
+        readOnly: true,
+        requiresUserContext: true,
+      },
+      handler: (args, signal) =>
+        this.query(args.query, undefined, undefined, signal),
+    }),
+  };
+
+  getAgentTools(): AgentToolDefinition[] {
+    return toolsFromRegistry(this.tools);
+  }
+
+  async executeAgentTool(
+    name: string,
+    args: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    return executeFromRegistry(this.tools, name, args, signal);
   }
 
   /**

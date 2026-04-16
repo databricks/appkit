@@ -1,4 +1,11 @@
 export {
+  defineTool,
+  executeFromRegistry,
+  type ToolEntry,
+  type ToolRegistry,
+  toolsFromRegistry,
+} from "./define-tool";
+export {
   type FunctionTool,
   functionToolToDefinition,
   isFunctionTool,

@@ -2,7 +2,13 @@ import { STATUS_CODES } from "node:http";
 import { Readable } from "node:stream";
 import { ApiError } from "@databricks/sdk-experimental";
 import type express from "express";
-import type { IAppRouter, PluginExecutionSettings } from "shared";
+import type {
+  AgentToolDefinition,
+  IAppRouter,
+  PluginExecutionSettings,
+  ToolProvider,
+} from "shared";
+import { z } from "zod";
 import {
   contentTypeFromPath,
   FilesConnector,
@@ -15,6 +21,12 @@ import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest, ResourceRequirement } from "../../registry";
 import { ResourceType } from "../../registry";
+import {
+  defineTool,
+  executeFromRegistry,
+  type ToolRegistry,
+  toolsFromRegistry,
+} from "../agent/tools/define-tool";
 import {
   FILES_DOWNLOAD_DEFAULTS,
   FILES_MAX_UPLOAD_SIZE,
@@ -34,7 +46,7 @@ import type {
 
 const logger = createLogger("files");
 
-export class FilesPlugin extends Plugin {
+export class FilesPlugin extends Plugin implements ToolProvider {
   name = "files";
 
   /** Plugin manifest declaring metadata and resource requirements. */
@@ -45,6 +57,7 @@ export class FilesPlugin extends Plugin {
   private volumeConnectors: Record<string, FilesConnector> = {};
   private volumeConfigs: Record<string, VolumeConfig> = {};
   private volumeKeys: string[] = [];
+  private tools: ToolRegistry = {};
 
   /**
    * Scans `process.env` for `DATABRICKS_VOLUME_*` keys and merges them with
@@ -148,6 +161,79 @@ export class FilesPlugin extends Plugin {
         customContentTypes: mergedConfig.customContentTypes,
       });
     }
+
+    for (const volumeKey of this.volumeKeys) {
+      Object.assign(this.tools, this._defineVolumeTools(volumeKey));
+    }
+  }
+
+  /**
+   * Builds the registry entries for a single volume. One set of tools per
+   * configured volume, keyed by `${volumeKey}.${method}`.
+   */
+  private _defineVolumeTools(volumeKey: string): ToolRegistry {
+    const api = () => this.createVolumeAPI(volumeKey);
+    return {
+      [`${volumeKey}.list`]: defineTool({
+        description: `List files and directories in the "${volumeKey}" volume`,
+        schema: z.object({
+          path: z
+            .string()
+            .optional()
+            .describe("Directory path to list (optional, defaults to root)"),
+        }),
+        annotations: { readOnly: true, requiresUserContext: true },
+        handler: (args) => api().list(args.path),
+      }),
+      [`${volumeKey}.read`]: defineTool({
+        description: `Read a text file from the "${volumeKey}" volume`,
+        schema: z.object({
+          path: z.string().describe("File path to read"),
+        }),
+        annotations: { readOnly: true, requiresUserContext: true },
+        handler: (args) => api().read(args.path),
+      }),
+      [`${volumeKey}.exists`]: defineTool({
+        description: `Check if a file or directory exists in the "${volumeKey}" volume`,
+        schema: z.object({
+          path: z.string().describe("Path to check"),
+        }),
+        annotations: { readOnly: true, requiresUserContext: true },
+        handler: (args) => api().exists(args.path),
+      }),
+      [`${volumeKey}.metadata`]: defineTool({
+        description: `Get metadata (size, type, last modified) for a file in the "${volumeKey}" volume`,
+        schema: z.object({
+          path: z.string().describe("File path"),
+        }),
+        annotations: { readOnly: true, requiresUserContext: true },
+        handler: (args) => api().metadata(args.path),
+      }),
+      [`${volumeKey}.upload`]: defineTool({
+        description: `Upload a text file to the "${volumeKey}" volume`,
+        schema: z.object({
+          path: z.string().describe("Destination file path"),
+          contents: z.string().describe("File contents as a string"),
+          overwrite: z
+            .boolean()
+            .optional()
+            .describe("Whether to overwrite existing file"),
+        }),
+        annotations: { destructive: true, requiresUserContext: true },
+        handler: (args) =>
+          api().upload(args.path, args.contents, {
+            overwrite: args.overwrite,
+          }),
+      }),
+      [`${volumeKey}.delete`]: defineTool({
+        description: `Delete a file from the "${volumeKey}" volume`,
+        schema: z.object({
+          path: z.string().describe("File path to delete"),
+        }),
+        annotations: { destructive: true, requiresUserContext: true },
+        handler: (args) => api().delete(args.path),
+      }),
+    };
   }
 
   /**
@@ -950,6 +1036,19 @@ export class FilesPlugin extends Plugin {
    * appKit.files("uploads").list()
    * ```
    */
+
+  getAgentTools(): AgentToolDefinition[] {
+    return toolsFromRegistry(this.tools);
+  }
+
+  async executeAgentTool(
+    name: string,
+    args: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    return executeFromRegistry(this.tools, name, args, signal);
+  }
+
   exports(): FilesExport {
     const resolveVolume = (volumeKey: string): VolumeHandle => {
       if (!this.volumeKeys.includes(volumeKey)) {
