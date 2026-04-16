@@ -13,6 +13,7 @@ import type {
   ToolProvider,
 } from "shared";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { PluginContext } from "../../../core/plugin-context";
 import { AgentPlugin } from "../agent";
 
 vi.mock("../../../cache", () => ({
@@ -42,7 +43,16 @@ vi.mock("../../../context", async (importOriginal) => {
 vi.mock("../../../telemetry", () => ({
   TelemetryManager: {
     getProvider: vi.fn(() => ({
-      getTracer: vi.fn(),
+      getTracer: vi.fn(() => ({
+        startActiveSpan: (_name: string, fn: (span: any) => any) => {
+          const span = {
+            setStatus: vi.fn(),
+            recordException: vi.fn(),
+            end: vi.fn(),
+          };
+          return fn(span);
+        },
+      })),
       getMeter: vi.fn(),
       getLogger: vi.fn(),
       emit: vi.fn(),
@@ -61,10 +71,25 @@ function createMockToolProvider(
   tools: AgentToolDefinition[],
 ): ToolProvider & { asUser: any } {
   return {
+    name: "mock-plugin",
     getAgentTools: () => tools,
     executeAgentTool: vi.fn().mockResolvedValue({ result: "ok" }),
     asUser: vi.fn().mockReturnThis(),
-  };
+  } as any;
+}
+
+function createMockContext(
+  providers: Array<{
+    name: string;
+    provider: ToolProvider & { asUser: any };
+  }> = [],
+): PluginContext {
+  const ctx = new PluginContext();
+  for (const { name, provider } of providers) {
+    ctx.registerToolProvider(name, provider as any);
+    ctx.registerPlugin(name, provider as any);
+  }
+  return ctx;
 }
 
 async function* mockAdapterRun(): AsyncGenerator<AgentEvent> {
@@ -83,7 +108,7 @@ describe("AgentPlugin", () => {
     setupDatabricksEnv();
   });
 
-  test("collectTools discovers ToolProvider plugins", async () => {
+  test("collectTools discovers ToolProvider plugins via context", async () => {
     const mockProvider = createMockToolProvider([
       {
         name: "query",
@@ -92,10 +117,14 @@ describe("AgentPlugin", () => {
       },
     ]);
 
+    const context = createMockContext([
+      { name: "analytics", provider: mockProvider },
+    ]);
+
     const plugin = new AgentPlugin({
       name: "agent",
-      plugins: { analytics: mockProvider },
-    });
+      context,
+    } as any);
 
     await plugin.setup();
 
@@ -106,20 +135,14 @@ describe("AgentPlugin", () => {
     expect(tools[0].name).toBe("analytics.query");
   });
 
-  test("skips non-ToolProvider plugins", async () => {
+  test("works with no context (backward compat)", async () => {
     const plugin = new AgentPlugin({
       name: "agent",
-      plugins: {
-        server: { name: "server" },
-        analytics: createMockToolProvider([
-          { name: "query", description: "q", parameters: { type: "object" } },
-        ]),
-      },
     });
 
     await plugin.setup();
     const tools = plugin.exports().getTools();
-    expect(tools).toHaveLength(1);
+    expect(tools).toEqual([]);
   });
 
   test("registerAgent and resolveAgent", () => {
@@ -128,7 +151,6 @@ describe("AgentPlugin", () => {
 
     plugin.exports().registerAgent("assistant", adapter);
 
-    // The first registered agent becomes the default
     const tools = plugin.exports().getTools();
     expect(tools).toEqual([]);
   });
@@ -177,14 +199,38 @@ describe("AgentPlugin", () => {
     expect(tools[0].name).toBe("myTool");
   });
 
-  test("executeTool always calls asUser(req) for plugin tools, even without requiresUserContext", async () => {
+  test("mountInvocationsRoute registers via context.addRoute", async () => {
+    const context = createMockContext();
+    const addRouteSpy = vi.spyOn(context, "addRoute");
+
+    const plugin = new AgentPlugin({
+      name: "agent",
+      agents: { assistant: createMockAdapter() },
+      context,
+    } as any);
+
+    await plugin.setup();
+
+    expect(addRouteSpy).toHaveBeenCalledWith(
+      "post",
+      "/invocations",
+      expect.any(Function),
+    );
+  });
+
+  test("executeTool calls context.executeTool for plugin tools", async () => {
     const mockProvider = createMockToolProvider([
       {
         name: "action",
-        description: "An action without requiresUserContext",
+        description: "An action",
         parameters: { type: "object", properties: {} },
       },
     ]);
+
+    const context = createMockContext([
+      { name: "testplugin", provider: mockProvider },
+    ]);
+    const executeToolSpy = vi.spyOn(context, "executeTool");
 
     function createToolCallingAdapter(): AgentAdapter {
       return {
@@ -201,8 +247,8 @@ describe("AgentPlugin", () => {
     const plugin = new AgentPlugin({
       name: "agent",
       agents: { assistant: createToolCallingAdapter() },
-      plugins: { testplugin: mockProvider },
-    });
+      context,
+    } as any);
     await plugin.setup();
 
     const { router, getHandler } = createMockRouter();
@@ -220,8 +266,9 @@ describe("AgentPlugin", () => {
 
     await handler(req, res);
 
-    expect(mockProvider.asUser).toHaveBeenCalledWith(req);
-    expect(mockProvider.executeAgentTool).toHaveBeenCalledWith(
+    expect(executeToolSpy).toHaveBeenCalledWith(
+      req,
+      "testplugin",
       "action",
       {},
       expect.anything(),

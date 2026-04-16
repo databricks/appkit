@@ -19,6 +19,7 @@ import {
   ServiceContext,
   type UserContext,
 } from "../context";
+import type { PluginContext } from "../core/plugin-context";
 import { AppKitError, AuthenticationError } from "../errors";
 import { createLogger } from "../logging/logger";
 import { StreamManager } from "../stream";
@@ -168,6 +169,7 @@ export abstract class Plugin<
   protected devFileReader: DevFileReader;
   protected streamManager: StreamManager;
   protected telemetry: ITelemetry;
+  protected context?: PluginContext;
 
   /** Registered endpoints for this plugin */
   private registeredEndpoints: PluginEndpointMap = {};
@@ -198,6 +200,9 @@ export abstract class Plugin<
     this.cache = CacheManager.getInstanceSync();
     this.app = new AppManager();
     this.devFileReader = DevFileReader.getInstance();
+    this.context = (config as Record<string, unknown>).context as
+      | PluginContext
+      | undefined;
 
     this.isReady = true;
   }

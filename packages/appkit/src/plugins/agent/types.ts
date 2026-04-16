@@ -3,7 +3,6 @@ import type {
   AgentToolDefinition,
   BasePluginConfig,
   ThreadStore,
-  ToolProvider,
 } from "shared";
 import type { FunctionTool } from "./tools/function-tool";
 import type { HostedTool } from "./tools/hosted-tools";
@@ -29,7 +28,7 @@ export interface AgentPluginConfig extends BasePluginConfig {
 export type ToolEntry =
   | {
       source: "plugin";
-      plugin: ToolProvider & { asUser(req: any): any };
+      pluginName: string;
       def: AgentToolDefinition;
       localName: string;
     }
@@ -50,8 +49,4 @@ export type RegisteredAgent = {
   systemPrompt?: string;
 };
 
-export type {
-  AgentAdapter,
-  AgentToolDefinition,
-  ToolProvider,
-} from "shared";
+export type { AgentAdapter, AgentToolDefinition } from "shared";

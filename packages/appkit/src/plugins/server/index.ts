@@ -63,6 +63,7 @@ export class ServerPlugin extends Plugin {
       instrumentations.http,
       instrumentations.express,
     ]);
+    this.context?.registerAsRouteTarget(this);
   }
 
   /** Setup the server plugin. */
@@ -203,14 +204,15 @@ export class ServerPlugin extends Plugin {
     const endpoints: PluginEndpoints = {};
     const pluginConfigs: PluginClientConfigs = {};
 
-    if (!this.config.plugins) return { endpoints, pluginConfigs };
+    const plugins = this.context?.getPlugins();
+    if (!plugins || plugins.size === 0) return { endpoints, pluginConfigs };
 
     this.serverApplication.get("/health", (_, res) => {
       res.status(200).json({ status: "ok" });
     });
     this.registerEndpoint("health", "/health");
 
-    for (const plugin of Object.values(this.config.plugins)) {
+    for (const plugin of plugins.values()) {
       if (EXCLUDED_PLUGINS.includes(plugin.name)) continue;
 
       if (plugin?.injectRoutes && typeof plugin.injectRoutes === "function") {
@@ -359,8 +361,9 @@ export class ServerPlugin extends Plugin {
     }
 
     // 1. abort active operations from plugins
-    if (this.config.plugins) {
-      for (const plugin of Object.values(this.config.plugins)) {
+    const shutdownPlugins = this.context?.getPlugins();
+    if (shutdownPlugins) {
+      for (const plugin of shutdownPlugins.values()) {
         if (plugin.abortActiveOperations) {
           try {
             plugin.abortActiveOperations();
