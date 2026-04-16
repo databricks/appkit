@@ -87,13 +87,11 @@ describe("Files Plugin Integration", () => {
         serverPlugin({
           port: TEST_PORT,
           host: "127.0.0.1",
-          autoStart: false,
         }),
         files(),
       ],
     });
 
-    await appkit.server.start();
     server = appkit.server.getServer();
     baseUrl = `http://127.0.0.1:${TEST_PORT}`;
   });
