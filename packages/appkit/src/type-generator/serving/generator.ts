@@ -4,6 +4,7 @@ import { WorkspaceClient } from "@databricks/sdk-experimental";
 import pc from "picocolors";
 import { createLogger } from "../../logging/logger";
 import type { EndpointConfig } from "../../plugins/serving/types";
+import { removeOldGeneratedTypes } from "../migration";
 import {
   CACHE_VERSION,
   hashSchema,
@@ -89,7 +90,7 @@ export async function generateServingTypes(
   await fs.writeFile(outFile, output, "utf-8");
 
   // One-time migration: remove old generated file from client/src/ to avoid duplicate module augmentation
-  await removeOldServingTypes(outFile);
+  await removeOldGeneratedTypes(outFile, "serving.d.ts");
 
   if (registryEntries.length === 0) {
     logger.debug(
@@ -244,31 +245,16 @@ function printLogTable(
 function resolveEndpointsFromServerFile():
   | Record<string, EndpointConfig>
   | undefined {
-  const serverFile = findServerFile(process.cwd());
-  if (!serverFile) return undefined;
-  return extractServingEndpoints(serverFile) ?? undefined;
-}
-
-/**
- * Remove old serving types from client/src/appkit-types/ (pre-shared/ location).
- * Best-effort: silently ignores missing files.
- */
-async function removeOldServingTypes(newOutFile: string): Promise<void> {
-  // newOutFile is like <project>/shared/appkit-types/serving.d.ts
-  // old location was <project>/client/src/appkit-types/serving.d.ts
-  const projectRoot = path.resolve(path.dirname(newOutFile), "..", "..");
-  const oldFile = path.join(
-    projectRoot,
-    "client",
-    "src",
-    "appkit-types",
-    "serving.d.ts",
-  );
   try {
-    await fs.unlink(oldFile);
-    logger.debug("Removed old serving types at %s", oldFile);
-  } catch {
-    // File doesn't exist — nothing to clean up
+    const serverFile = findServerFile(process.cwd());
+    if (!serverFile) return undefined;
+    return extractServingEndpoints(serverFile) ?? undefined;
+  } catch (error) {
+    logger.debug(
+      "Failed to extract endpoints from server file: %s",
+      (error as Error).message,
+    );
+    return undefined;
   }
 }
 

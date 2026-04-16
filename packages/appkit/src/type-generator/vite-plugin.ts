@@ -27,7 +27,6 @@ interface AppKitTypesPluginOptions {
  * @returns Vite plugin to generate types for AppKit queries.
  */
 export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
-  let root: string;
   let outFile: string;
   let watchFolders: string[];
 
@@ -74,7 +73,6 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
     },
 
     configResolved(config) {
-      root = config.root;
       const projectRoot = path.resolve(config.root, "..");
       outFile = path.resolve(
         projectRoot,
