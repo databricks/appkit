@@ -151,24 +151,46 @@ export class ServingPlugin extends Plugin {
         },
       });
     } else {
+      // Unnamed mode: register both /invoke and /:alias/invoke patterns.
+      // The type generator creates a "default" alias, so clients may use either URL.
+      const invokeHandler = async (
+        req: express.Request,
+        res: express.Response,
+      ) => {
+        req.params.alias ??= "default";
+        await this.asUser(req)._handleInvoke(req, res);
+      };
+      const streamHandler = async (
+        req: express.Request,
+        res: express.Response,
+      ) => {
+        req.params.alias ??= "default";
+        await this.asUser(req)._handleStream(req, res);
+      };
+
       this.route(router, {
         name: "invoke",
         method: "post",
         path: "/invoke",
-        handler: async (req: express.Request, res: express.Response) => {
-          req.params.alias = "default";
-          await this.asUser(req)._handleInvoke(req, res);
-        },
+        handler: invokeHandler,
       });
-
+      this.route(router, {
+        name: "invoke-named",
+        method: "post",
+        path: "/:alias/invoke",
+        handler: invokeHandler,
+      });
       this.route(router, {
         name: "stream",
         method: "post",
         path: "/stream",
-        handler: async (req: express.Request, res: express.Response) => {
-          req.params.alias = "default";
-          await this.asUser(req)._handleStream(req, res);
-        },
+        handler: streamHandler,
+      });
+      this.route(router, {
+        name: "stream-named",
+        method: "post",
+        path: "/:alias/stream",
+        handler: streamHandler,
       });
     }
   }
