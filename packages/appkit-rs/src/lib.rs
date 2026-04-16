@@ -5,8 +5,10 @@ pub mod cache;
 pub mod config;
 pub mod connectors;
 pub mod context;
+pub mod errors;
 pub mod interceptor;
 pub mod plugin;
+pub mod plugins;
 pub mod server;
 pub mod stream;
 pub mod telemetry;
@@ -149,6 +151,8 @@ fn appkit(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<connectors::lakebase::LakebaseConnector>()?;
     m.add_class::<connectors::lakebase::DatabaseCredential>()?;
     m.add_class::<connectors::lakebase::LakebasePgConfig>()?;
+    m.add_class::<connectors::vector_search::VectorSearchConnector>()?;
+    m.add_class::<connectors::vector_search::PyVsSearchRequest>()?;
 
     // Top-level create_app function
     m.add_function(wrap_pyfunction!(create_app, m)?)?;
@@ -158,6 +162,9 @@ fn appkit(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(context::as_user, m)?)?;
     m.add_function(wrap_pyfunction!(context::get_current_user, m)?)?;
     m.add_function(wrap_pyfunction!(context::is_in_user_context, m)?)?;
+
+    // Error hierarchy — Python exception classes (AppKitError + subclasses).
+    errors::register(m.py(), m)?;
 
     // Initialize the contextvars.ContextVar on the module.
     context::create_context_var(m.py(), m)?;

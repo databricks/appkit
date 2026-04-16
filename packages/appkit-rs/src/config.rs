@@ -62,11 +62,15 @@ impl AppConfig {
     /// Parse configuration from environment variables.
     #[staticmethod]
     pub fn from_env() -> PyResult<Self> {
-        let databricks_host = non_empty_env("DATABRICKS_HOST").ok_or_else(|| {
+        let mut databricks_host = non_empty_env("DATABRICKS_HOST").ok_or_else(|| {
             pyo3::exceptions::PyValueError::new_err(
                 "DATABRICKS_HOST environment variable is required",
             )
         })?;
+        // Databricks Apps sets DATABRICKS_HOST without a scheme; normalise.
+        if !databricks_host.starts_with("https://") && !databricks_host.starts_with("http://") {
+            databricks_host = format!("https://{databricks_host}");
+        }
 
         let app_port = non_empty_env("DATABRICKS_APP_PORT")
             .or_else(|| non_empty_env("PORT"))

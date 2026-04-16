@@ -16,6 +16,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use crate::cache::{CacheConfig, CacheManager};
+use crate::errors::classify_pyerr;
 use crate::interceptor::{
     build_interceptor_chain, build_stream_interceptor_chain, ExecuteFn, ExecutionError,
     InterceptorContext, PluginExecuteConfig, StreamItem,
@@ -395,24 +396,50 @@ pub struct PyPlugin {
 
 #[pymethods]
 impl PyPlugin {
+    /// Construct a `PyPlugin`. Accepts any `*args`/`**kwargs` so that
+    /// Python subclasses with arbitrary constructor signatures
+    /// (e.g. `AnalyticsPlugin(config)`) can inherit `__new__` without
+    /// type errors. Best-effort extracts `name`/`phase` from positional
+    /// args and `manifest` from kwargs so direct construction
+    /// (`appkit.Plugin("name", manifest=m)`) still fully initializes
+    /// fields without requiring a separate `__init__` call.
     #[new]
-    #[pyo3(signature = (name = String::new(), phase = "normal".to_string(), *, manifest = None))]
-    fn new(name: String, phase: String, manifest: Option<PyPluginManifest>) -> PyResult<Self> {
-        if !name.is_empty() {
-            if phase.parse::<PluginPhase>().is_err() {
-                return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "Invalid phase: {phase}. Must be 'core', 'normal', or 'deferred'"
-                )));
-            }
-        }
-        Ok(Self {
-            name: name.clone(),
-            phase,
-            manifest: manifest.unwrap_or_else(|| PyPluginManifest {
-                name,
+    #[pyo3(signature = (*args, **kwargs))]
+    fn new(
+        args: &Bound<'_, pyo3::types::PyTuple>,
+        kwargs: Option<&Bound<'_, pyo3::types::PyDict>>,
+    ) -> PyResult<Self> {
+        let name = args
+            .get_item(0)
+            .ok()
+            .and_then(|a| a.extract::<String>().ok())
+            .unwrap_or_default();
+        let phase = kwargs
+            .and_then(|k| k.get_item("phase").ok().flatten())
+            .and_then(|v| v.extract::<String>().ok())
+            .or_else(|| {
+                args.get_item(1)
+                    .ok()
+                    .and_then(|a| a.extract::<String>().ok())
+            })
+            .unwrap_or_else(|| "normal".to_string());
+        let manifest = kwargs
+            .and_then(|k| k.get_item("manifest").ok().flatten())
+            .and_then(|m| m.extract::<PyPluginManifest>().ok())
+            .unwrap_or_else(|| PyPluginManifest {
+                name: name.clone(),
                 display_name: None,
                 description: None,
-            }),
+            });
+        if !name.is_empty() && phase.parse::<PluginPhase>().is_err() {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "Invalid phase: {phase}. Must be 'core', 'normal', or 'deferred'"
+            )));
+        }
+        Ok(Self {
+            name,
+            phase,
+            manifest,
             is_ready: false,
             runtime: None,
         })
@@ -518,26 +545,30 @@ impl PyPlugin {
             metadata: HashMap::new(),
         };
 
-        // Wrap the Python callable as an ExecuteFn.
+        // Wrap the Python callable as an ExecuteFn. Any Python exception is
+        // classified through the AppKit error hierarchy so `ExecutionResult`
+        // carries a meaningful HTTP status instead of always 500.
         let py_fn = Arc::new(func);
         let base_fn: ExecuteFn = Arc::new(move || {
             let py_fn = py_fn.clone();
             Box::pin(async move {
                 let future = Python::with_gil(|py| {
-                    let coroutine = py_fn.call0(py).map_err(|e| ExecutionError {
-                        status: 500,
-                        message: e.to_string(),
+                    let coroutine = py_fn.call0(py).map_err(|e| {
+                        let (status, _code, msg) = classify_pyerr(py, &e);
+                        ExecutionError { status, message: msg }
                     })?;
                     pyo3_async_runtimes::tokio::into_future(coroutine.into_bound(py))
-                        .map_err(|e| ExecutionError {
-                            status: 500,
-                            message: e.to_string(),
+                        .map_err(|e| {
+                            let (status, _code, msg) = classify_pyerr(py, &e);
+                            ExecutionError { status, message: msg }
                         })
                 })?;
 
-                let result = future.await.map_err(|e| ExecutionError {
-                    status: 500,
-                    message: e.to_string(),
+                let result = future.await.map_err(|e| {
+                    Python::with_gil(|py| {
+                        let (status, _code, msg) = classify_pyerr(py, &e);
+                        ExecutionError { status, message: msg }
+                    })
                 })?;
 
                 let json_str: String = Python::with_gil(|py| {
@@ -867,7 +898,12 @@ impl PyAppKit {
         }
         indexed.sort_by_key(|(order, _)| *order);
 
-        // Inject runtime into each plugin.
+        // Inject runtime into each plugin. Python subclasses of `Plugin`
+        // (PyPlugin) inherit the parent's storage, so `PyRefMut<'_, PyPlugin>`
+        // is obtainable from subclass instances. Fail loudly if extraction
+        // fails — otherwise the plugin would silently stay uninitialized and
+        // later `execute()` / `execute_stream()` calls would error with a
+        // cryptic "Plugin not initialized" message.
         for &(_, i) in &indexed {
             let plugin_obj = &self.plugins[i];
             let name: String = plugin_obj
@@ -876,10 +912,14 @@ impl PyAppKit {
                 .unwrap_or_else(|_| format!("plugin-{i}"));
             let runtime = PluginRuntime::new(&name, cache.clone(), None);
 
-            // Downcast to PyPlugin and inject runtime.
-            if let Ok(mut py_plugin) = plugin_obj.extract::<PyRefMut<'_, PyPlugin>>(py) {
-                py_plugin.inject_runtime(runtime);
-            }
+            let mut py_plugin = plugin_obj
+                .extract::<PyRefMut<'_, PyPlugin>>(py)
+                .map_err(|e| {
+                    pyo3::exceptions::PyTypeError::new_err(format!(
+                        "Plugin '{name}' is not a subclass of appkit.Plugin (cannot inject runtime): {e}"
+                    ))
+                })?;
+            py_plugin.inject_runtime(runtime);
         }
 
         // Call setup() on each plugin in phase order.
@@ -982,6 +1022,7 @@ impl PyAppKit {
             }
         }
 
+        let task_locals = pyo3_async_runtimes::tokio::get_current_locals(py)?;
         let stream_manager = crate::stream::StreamManager::new(crate::stream::StreamConfig::default());
         let static_path = crate::server::detect_static_path(server_config.static_path.as_deref());
         let router = crate::server::build_router(
@@ -989,6 +1030,7 @@ impl PyAppKit {
             plugin_configs,
             stream_manager.clone(),
             static_path,
+            task_locals,
         );
         let host = server_config.host.clone();
         let port = server_config.port;

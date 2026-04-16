@@ -208,10 +208,22 @@ class Plugin:
         phase: str = "normal",
         manifest: PluginManifest,
     ) -> None: ...
-    def setup(self) -> Awaitable[None]: ...
-    def exports(self) -> dict[str, str]: ...
-    def client_config(self) -> dict[str, str]: ...
-    def inject_routes(self, router: Router) -> None: ...
+    def setup(self) -> Awaitable[None]:
+        """One-time initialization hook called once during
+        :meth:`AppKit.initialize` after the plugin's runtime is injected.
+        """
+        ...
+    def exports(self) -> dict[str, str]:
+        """Return string values exported to other plugins and the server."""
+        ...
+    def client_config(self) -> dict[str, str]:
+        """Return per-plugin config surfaced to clients via ``/api/config``."""
+        ...
+    def inject_routes(self, router: Router) -> None:
+        """Register HTTP routes with the server router. Called once per
+        plugin, mounted under ``/api/<plugin-name>/``.
+        """
+        ...
     def execute(
         self,
         func: Callable[[], Awaitable[str]],
@@ -221,7 +233,16 @@ class Plugin:
         retry_attempts: Optional[int] = None,
         cache_key: Optional[list[str]] = None,
         cache_ttl: Optional[int] = None,
-    ) -> Awaitable[ExecutionResult]: ...
+    ) -> Awaitable[ExecutionResult]:
+        """Execute a coroutine through the plugin's interceptor chain
+        (telemetry, timeout, retry, cache).
+
+        ``user_key`` scopes caches to a user for OBO flows. ``cache_key``
+        parts are hashed together with ``user_key`` to form a stable key.
+        Pass ``timeout_ms=None`` / ``retry_attempts=None`` to fall back to
+        the plugin defaults.
+        """
+        ...
     def execute_stream(
         self,
         func: Callable[[], Any],
@@ -240,20 +261,45 @@ class Plugin:
     def __repr__(self) -> str: ...
 
 class AppKit:
-    """AppKit orchestrator — registers plugins and manages initialization."""
+    """AppKit orchestrator — registers plugins and manages initialization.
+
+    Most applications should use :func:`create_app` instead of driving
+    this class directly; ``create_app`` wires registration, initialization
+    and optional server startup in one call.
+    """
 
     def __init__(self) -> None: ...
-    def register(self, plugin: Plugin) -> None: ...
+    def register(self, plugin: Plugin) -> None:
+        """Register a plugin. Must be called before :meth:`initialize`."""
+        ...
     def initialize(
         self,
         config: AppConfig,
         *,
         cache_config: Optional[CacheConfig] = None,
-    ) -> Awaitable[None]: ...
-    def get_plugin(self, name: str) -> Optional[Plugin]: ...
-    def plugin_names(self) -> list[str]: ...
-    def start_server(self, server_config: ServerConfig) -> Awaitable[None]: ...
-    def shutdown(self) -> None: ...
+    ) -> Awaitable[None]:
+        """Initialize telemetry, cache, and run phase-ordered ``Plugin.setup``.
+
+        After this returns, plugins are ready to serve requests. Calling
+        ``initialize`` twice is an error.
+        """
+        ...
+    def get_plugin(self, name: str) -> Optional[Plugin]:
+        """Look up a registered plugin by its manifest name."""
+        ...
+    def plugin_names(self) -> list[str]:
+        """Return the manifest names of all registered plugins."""
+        ...
+    def start_server(self, server_config: ServerConfig) -> Awaitable[None]:
+        """Start the HTTP server and block until it exits.
+
+        Routes previously injected via ``Plugin.inject_routes`` are mounted
+        under ``/api/<plugin-name>/...``.
+        """
+        ...
+    def shutdown(self) -> None:
+        """Stop the HTTP server and release resources."""
+        ...
     def __repr__(self) -> str: ...
     def __len__(self) -> int: ...
     def __bool__(self) -> bool: ...
@@ -381,26 +427,45 @@ class FilePreview:
     def __repr__(self) -> str: ...
 
 class FilesConnector:
-    """Databricks Files API connector."""
+    """Databricks Files API connector.
+
+    Operates against Unity Catalog Volume paths. The ``default_volume``
+    constructor argument is used as a prefix when a ``file_path`` is not
+    already a ``/Volumes/...`` absolute path.
+    """
 
     def __init__(self, host: str, *, default_volume: Optional[str] = None) -> None: ...
-    def resolve_path(self, file_path: str) -> str: ...
+    def resolve_path(self, file_path: str) -> str:
+        """Join ``file_path`` with the connector's default volume if the
+        path is not already a fully-qualified ``/Volumes/...`` path.
+        """
+        ...
     def list(
         self,
         token: str,
         *,
         directory_path: Optional[str] = None,
-    ) -> Awaitable[list[FileDirectoryEntry]]: ...
+    ) -> Awaitable[list[FileDirectoryEntry]]:
+        """List entries under ``directory_path`` (or the default volume)."""
+        ...
     def read(
         self,
         token: str,
         file_path: str,
         *,
         max_size: Optional[int] = None,
-    ) -> Awaitable[str]: ...
-    def download(self, token: str, file_path: str) -> Awaitable[bytes]: ...
-    def exists(self, token: str, file_path: str) -> Awaitable[bool]: ...
-    def metadata(self, token: str, file_path: str) -> Awaitable[FileMetadata]: ...
+    ) -> Awaitable[str]:
+        """Read a text file, optionally truncated to ``max_size`` bytes."""
+        ...
+    def download(self, token: str, file_path: str) -> Awaitable[bytes]:
+        """Download a file as raw bytes."""
+        ...
+    def exists(self, token: str, file_path: str) -> Awaitable[bool]:
+        """Return whether the given file or directory exists."""
+        ...
+    def metadata(self, token: str, file_path: str) -> Awaitable[FileMetadata]:
+        """Fetch metadata for a file via a HEAD request."""
+        ...
     def upload(
         self,
         token: str,
@@ -408,16 +473,25 @@ class FilesConnector:
         contents: bytes,
         *,
         overwrite: bool = True,
-    ) -> Awaitable[None]: ...
-    def create_directory(self, token: str, directory_path: str) -> Awaitable[None]: ...
-    def delete(self, token: str, file_path: str) -> Awaitable[None]: ...
+    ) -> Awaitable[None]:
+        """Upload ``contents`` to ``file_path``. Overwrites by default."""
+        ...
+    def create_directory(self, token: str, directory_path: str) -> Awaitable[None]:
+        """Create a directory, creating parents as needed."""
+        ...
+    def delete(self, token: str, file_path: str) -> Awaitable[None]:
+        """Delete a file or (empty) directory."""
+        ...
     def preview(
         self,
         token: str,
         file_path: str,
         *,
         max_chars: int = 1024,
-    ) -> Awaitable[FilePreview]: ...
+    ) -> Awaitable[FilePreview]:
+        """Fetch metadata and a capped-length text preview if the file is
+        recognized as text."""
+        ...
     def __repr__(self) -> str: ...
 
 # ---------------------------------------------------------------------------
@@ -448,7 +522,12 @@ class SqlStatementResult:
     def __bool__(self) -> bool: ...
 
 class SqlWarehouseConnector:
-    """Databricks SQL Warehouse connector."""
+    """Databricks SQL Warehouse connector.
+
+    Runs parameterised SQL statements against a Serverless or Pro warehouse
+    via the ``/api/2.0/sql/statements`` endpoint and polls until the
+    statement reaches a terminal status.
+    """
 
     def __init__(self, host: str, *, timeout_ms: Optional[int] = None) -> None: ...
     def execute_statement(
@@ -467,7 +546,14 @@ class SqlWarehouseConnector:
         byte_limit: Optional[int] = None,
         row_limit: Optional[int] = None,
         timeout_ms: Optional[int] = None,
-    ) -> Awaitable[SqlStatementResult]: ...
+    ) -> Awaitable[SqlStatementResult]:
+        """Execute ``statement`` on ``warehouse_id`` and return the result.
+
+        ``parameters`` is a list of ``(name, value)`` pairs corresponding
+        to ``:name`` placeholders in the SQL; values are always passed as
+        strings and typed by the server via column metadata.
+        """
+        ...
     def __repr__(self) -> str: ...
 
 # ---------------------------------------------------------------------------
@@ -594,7 +680,11 @@ class ServingResponse:
     def __hash__(self) -> int: ...
 
 class ServingConnector:
-    """Databricks Serving Endpoints connector."""
+    """Databricks Serving Endpoints connector.
+
+    Wraps ``/serving-endpoints/<name>/invocations`` for synchronous calls
+    and the SSE streaming variant for LLM-style endpoints.
+    """
 
     def __init__(self, host: str) -> None: ...
     def invoke(
@@ -602,7 +692,10 @@ class ServingConnector:
         token: str,
         endpoint_name: str,
         body: str,
-    ) -> Awaitable[ServingResponse]: ...
+    ) -> Awaitable[ServingResponse]:
+        """Invoke a serving endpoint with a JSON request body and return
+        the raw response."""
+        ...
     def stream(
         self,
         token: str,
@@ -656,7 +749,11 @@ class LakebasePgConfig:
     def __hash__(self) -> int: ...
 
 class LakebaseConnector:
-    """Databricks Lakebase connector."""
+    """Databricks Lakebase connector.
+
+    Generates short-lived PostgreSQL credentials for a set of Lakebase
+    instances via the database credentials API.
+    """
 
     def __init__(self, host: str) -> None: ...
     def generate_credential(
@@ -665,7 +762,86 @@ class LakebaseConnector:
         instance_names: list[str],
         *,
         request_id: Optional[str] = None,
-    ) -> Awaitable[DatabaseCredential]: ...
+    ) -> Awaitable[DatabaseCredential]:
+        """Generate a credential good for one or more Lakebase instances.
+
+        Use the returned token as the PostgreSQL password for the life of
+        ``expiration_time`` — typically tens of minutes.
+        """
+        ...
+    def __repr__(self) -> str: ...
+
+# ---------------------------------------------------------------------------
+# Connectors — Vector Search
+# ---------------------------------------------------------------------------
+
+class VsSearchRequest:
+    """Parsed Vector Search request matching the TS ``SearchRequest`` shape.
+
+    Parameters are passed by keyword; ``filters_json`` is a JSON object
+    string of scalar-or-array filter values.
+    """
+
+    query_text: Optional[str]
+    query_vector: Optional[list[float]]
+    columns: Optional[list[str]]
+    num_results: Optional[int]
+    query_type: Optional[str]
+    filters_json: Optional[str]
+    reranker_columns: Optional[list[str]]
+
+    def __init__(
+        self,
+        *,
+        query_text: Optional[str] = None,
+        query_vector: Optional[list[float]] = None,
+        columns: Optional[list[str]] = None,
+        num_results: Optional[int] = None,
+        query_type: Optional[str] = None,
+        filters_json: Optional[str] = None,
+        reranker_columns: Optional[list[str]] = None,
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+
+class VectorSearchConnector:
+    """Databricks Vector Search REST connector.
+
+    Wraps the ``/api/2.0/vector-search`` endpoints; returns raw JSON response
+    bodies as strings so Python callers can reuse their existing shaping
+    logic without a second serde pass across the PyO3 boundary.
+    """
+
+    def __init__(self, host: str, *, timeout_ms: Optional[int] = None) -> None: ...
+    def query(
+        self,
+        token: str,
+        index_name: str,
+        *,
+        columns: list[str],
+        num_results: int = 20,
+        query_type: str = "hybrid",
+        query_text: Optional[str] = None,
+        query_vector: Optional[list[float]] = None,
+        filters_json: Optional[str] = None,
+        reranker_columns: Optional[list[str]] = None,
+    ) -> Awaitable[str]:
+        """Run a query against ``index_name`` and return the raw JSON
+        response body.
+
+        Pass ``query_text`` for text/hybrid queries, ``query_vector`` for
+        ANN queries. ``filters_json`` is the JSON-serialised filter object.
+        """
+        ...
+    def query_next_page(
+        self,
+        token: str,
+        index_name: str,
+        endpoint_name: str,
+        page_token: str,
+    ) -> Awaitable[str]:
+        """Fetch the next page of a paginated query using ``page_token``
+        from a prior :meth:`query` response."""
+        ...
     def __repr__(self) -> str: ...
 
 # ---------------------------------------------------------------------------

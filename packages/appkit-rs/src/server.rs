@@ -24,6 +24,8 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use tower_http::cors::CorsLayer;
 
+use pyo3_async_runtimes::TaskLocals;
+
 use crate::stream::{SseEvent, StreamConfig, StreamManager};
 
 // ---------------------------------------------------------------------------
@@ -434,7 +436,9 @@ pub fn build_router(
     plugin_configs: HashMap<String, JsonValue>,
     stream_manager: Arc<StreamManager>,
     static_path: Option<PathBuf>,
+    task_locals: TaskLocals,
 ) -> Router {
+    let task_locals = Arc::new(task_locals);
     let mut app = Router::new();
 
     // GET /health
@@ -465,9 +469,9 @@ pub fn build_router(
         for route in routes {
             if route.is_stream {
                 plugin_router =
-                    mount_stream_route(plugin_router, route, stream_manager.clone());
+                    mount_stream_route(plugin_router, route, stream_manager.clone(), task_locals.clone());
             } else {
-                plugin_router = mount_handler_route(plugin_router, route);
+                plugin_router = mount_handler_route(plugin_router, route, task_locals.clone());
             }
         }
 
@@ -485,18 +489,33 @@ pub fn build_router(
     app.layer(CorsLayer::permissive())
 }
 
-fn mount_handler_route(router: Router, route: RouteDefinition) -> Router {
+/// Pick a response Content-Type by peeking at the handler's output.
+///
+/// Handlers return strings. JSON is the default — but handlers that render
+/// HTML (e.g. server-rendered pages) would otherwise be served as
+/// `application/json` and not render in browsers. A leading `<` after
+/// optional whitespace unambiguously signals markup because valid JSON
+/// cannot start with `<`.
+fn detect_content_type(body: &str) -> &'static str {
+    match body.trim_start().as_bytes().first() {
+        Some(b'<') => "text/html; charset=utf-8",
+        _ => "application/json",
+    }
+}
+
+fn mount_handler_route(router: Router, route: RouteDefinition, task_locals: Arc<TaskLocals>) -> Router {
     let py_handler = GilPyObject::new(route.handler);
 
     let handler_fn = move |method: Method, uri: Uri, headers: HeaderMap, body: Bytes| {
         let py_handler = py_handler.clone().into_inner();
+        let locals = Python::with_gil(|py| (*task_locals).clone_ref(py));
         async move {
             let request = extract_request_data(&method, &uri, &headers, &body);
-            match call_python_handler(py_handler, request).await {
-                Ok(json_str) => Response::builder()
+            match pyo3_async_runtimes::tokio::scope(locals, call_python_handler(py_handler, request)).await {
+                Ok(body_str) => Response::builder()
                     .status(StatusCode::OK)
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(axum::body::Body::from(json_str))
+                    .header(header::CONTENT_TYPE, detect_content_type(&body_str))
+                    .body(axum::body::Body::from(body_str))
                     .unwrap_or_else(|_| {
                         StatusCode::INTERNAL_SERVER_ERROR.into_response().into_response()
                     }),
@@ -527,6 +546,7 @@ fn mount_stream_route(
     router: Router,
     route: RouteDefinition,
     stream_manager: Arc<StreamManager>,
+    _task_locals: Arc<TaskLocals>,
 ) -> Router {
     let py_handler = GilPyObject::new(route.handler);
     let sm = stream_manager;
@@ -668,7 +688,7 @@ pub fn detect_static_path(explicit: Option<&str>) -> Option<PathBuf> {
 /// `PyAppKit.shutdown()` can trigger graceful shutdown.
 pub struct ServerHandle {
     pub shutdown_tx: tokio::sync::watch::Sender<bool>,
-    _task: tokio::task::JoinHandle<()>,
+    pub task: tokio::task::JoinHandle<()>,
 }
 
 /// Graceful shutdown timeout (matches TS `15000ms`).
@@ -759,7 +779,7 @@ pub async fn start_server(
 
     Ok(ServerHandle {
         shutdown_tx,
-        _task: task,
+        task,
     })
 }
 
@@ -781,6 +801,22 @@ mod tests {
         // In the test environment there's unlikely to be a dist/ with index.html.
         // Just verify it doesn't panic.
         let _ = detect_static_path(None);
+    }
+
+    #[test]
+    fn test_detect_content_type() {
+        assert_eq!(detect_content_type("{\"ok\":true}"), "application/json");
+        assert_eq!(detect_content_type("[]"), "application/json");
+        assert_eq!(detect_content_type(""), "application/json");
+        assert_eq!(detect_content_type("plain text"), "application/json");
+        assert_eq!(
+            detect_content_type("<!DOCTYPE html><html></html>"),
+            "text/html; charset=utf-8"
+        );
+        assert_eq!(
+            detect_content_type("  \n<html>hi</html>"),
+            "text/html; charset=utf-8"
+        );
     }
 
     #[test]

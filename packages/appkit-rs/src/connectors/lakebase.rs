@@ -282,6 +282,7 @@ impl LakebaseConnector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
     fn test_pg_config_explicit() {
@@ -302,6 +303,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_pg_config_defaults() {
         // Set required env vars
         env::set_var("PGHOST", "env-host.example.com");
@@ -324,6 +326,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_pg_config_missing_host() {
         env::remove_var("PGHOST");
         env::remove_var("LAKEBASE_ENDPOINT");
@@ -336,6 +339,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_pg_config_lakebase_endpoint_fallback() {
         env::remove_var("PGHOST");
         env::set_var("LAKEBASE_ENDPOINT", "lakebase.example.com");
