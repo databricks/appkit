@@ -5,7 +5,7 @@ import type { Table } from "apache-arrow";
 // ============================================================================
 
 /** Supported response formats for analytics queries */
-export type AnalyticsFormat = "JSON" | "ARROW" | "ARROW_STREAM";
+export type AnalyticsFormat = "JSON_ARRAY" | "ARROW_STREAM";
 
 /**
  * Typed Arrow Table - preserves row type information for type inference.
@@ -33,9 +33,9 @@ export interface TypedArrowTable<
 
 /** Options for configuring an analytics SSE query */
 export interface UseAnalyticsQueryOptions<
-  F extends AnalyticsFormat = "ARROW_STREAM",
+  F extends AnalyticsFormat = "JSON_ARRAY",
 > {
-  /** Response format - "ARROW_STREAM" (default) uses inline Arrow, "JSON" returns typed arrays, "ARROW" uses external links */
+  /** Response format - "JSON_ARRAY" (default) returns typed arrays, "ARROW_STREAM" uses Arrow (inline or external links) */
   format?: F;
 
   /** Maximum size of serialized parameters in bytes */
@@ -122,7 +122,9 @@ export type InferResultByFormat<
   T,
   K,
   F extends AnalyticsFormat,
-> = F extends "ARROW" ? TypedArrowTable<InferRowType<K>> : InferResult<T, K>;
+> = F extends "ARROW_STREAM"
+  ? TypedArrowTable<InferRowType<K>>
+  : InferResult<T, K>;
 
 /**
  * Infers parameters type from QueryRegistry[K]["parameters"]

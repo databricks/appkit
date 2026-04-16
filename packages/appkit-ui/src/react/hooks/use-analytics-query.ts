@@ -27,8 +27,8 @@ function getArrowStreamUrl(id: string) {
  * Integration hook between client and analytics plugin.
  *
  * The return type is automatically inferred based on the format:
- * - `format: "JSON"` (default): Returns typed array from QueryRegistry
- * - `format: "ARROW"`: Returns TypedArrowTable with row type preserved
+ * - `format: "JSON_ARRAY"` (default): Returns typed array from QueryRegistry
+ * - `format: "ARROW_STREAM"`: Returns TypedArrowTable with row type preserved
  *
  * Note: User context execution is determined by query file naming:
  * - `queryKey.obo.sql`: Executes as user (OBO = on-behalf-of / user delegation)
@@ -39,28 +39,28 @@ function getArrowStreamUrl(id: string) {
  * @param options - Analytics query settings including format
  * @returns Query result state with format-appropriate data type
  *
- * @example JSON format (default)
+ * @example JSON_ARRAY format (default)
  * ```typescript
  * const { data } = useAnalyticsQuery("spend_data", params);
  * // data: Array<{ group_key: string; cost_usd: number; ... }> | null
  * ```
  *
- * @example Arrow format
+ * @example ARROW_STREAM format
  * ```typescript
- * const { data } = useAnalyticsQuery("spend_data", params, { format: "ARROW" });
+ * const { data } = useAnalyticsQuery("spend_data", params, { format: "ARROW_STREAM" });
  * // data: TypedArrowTable<{ group_key: string; cost_usd: number; ... }> | null
  * ```
  */
 export function useAnalyticsQuery<
   T = unknown,
   K extends QueryKey = QueryKey,
-  F extends AnalyticsFormat = "ARROW_STREAM",
+  F extends AnalyticsFormat = "JSON_ARRAY",
 >(
   queryKey: K,
   parameters?: InferParams<K> | null,
   options: UseAnalyticsQueryOptions<F> = {} as UseAnalyticsQueryOptions<F>,
 ): UseAnalyticsQueryResult<InferResultByFormat<T, K, F>> {
-  const format = options?.format ?? "ARROW_STREAM";
+  const format = options?.format ?? "JSON_ARRAY";
   const maxParametersSize = options?.maxParametersSize ?? 100 * 1024;
   const autoStart = options?.autoStart ?? true;
 

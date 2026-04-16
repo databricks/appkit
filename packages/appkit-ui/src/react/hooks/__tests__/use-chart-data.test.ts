@@ -72,7 +72,7 @@ describe("useChartData", () => {
   });
 
   describe("format selection", () => {
-    test("uses JSON format when explicitly specified", () => {
+    test("uses JSON_ARRAY format when explicitly specified", () => {
       mockUseAnalyticsQuery.mockReturnValue({
         data: [],
         loading: false,
@@ -82,18 +82,18 @@ describe("useChartData", () => {
       renderHook(() =>
         useChartData({
           queryKey: "test",
-          format: "json",
+          format: "json_array",
         }),
       );
 
       expect(mockUseAnalyticsQuery).toHaveBeenCalledWith(
         "test",
         undefined,
-        expect.objectContaining({ format: "JSON" }),
+        expect.objectContaining({ format: "JSON_ARRAY" }),
       );
     });
 
-    test("uses ARROW format when explicitly specified", () => {
+    test("uses ARROW_STREAM format when explicitly specified", () => {
       mockUseAnalyticsQuery.mockReturnValue({
         data: [],
         loading: false,
@@ -103,18 +103,18 @@ describe("useChartData", () => {
       renderHook(() =>
         useChartData({
           queryKey: "test",
-          format: "arrow",
+          format: "arrow_stream",
         }),
       );
 
       expect(mockUseAnalyticsQuery).toHaveBeenCalledWith(
         "test",
         undefined,
-        expect.objectContaining({ format: "ARROW" }),
+        expect.objectContaining({ format: "ARROW_STREAM" }),
       );
     });
 
-    test("auto-selects ARROW for large limit", () => {
+    test("auto-selects ARROW_STREAM for large limit", () => {
       mockUseAnalyticsQuery.mockReturnValue({
         data: [],
         loading: false,
@@ -132,11 +132,11 @@ describe("useChartData", () => {
       expect(mockUseAnalyticsQuery).toHaveBeenCalledWith(
         "test",
         { limit: 1000 },
-        expect.objectContaining({ format: "ARROW" }),
+        expect.objectContaining({ format: "ARROW_STREAM" }),
       );
     });
 
-    test("auto-selects ARROW for date range queries", () => {
+    test("auto-selects ARROW_STREAM for date range queries", () => {
       mockUseAnalyticsQuery.mockReturnValue({
         data: [],
         loading: false,
@@ -157,7 +157,7 @@ describe("useChartData", () => {
       expect(mockUseAnalyticsQuery).toHaveBeenCalledWith(
         "test",
         expect.objectContaining({ startDate: "2025-01-01" }),
-        expect.objectContaining({ format: "ARROW" }),
+        expect.objectContaining({ format: "ARROW_STREAM" }),
       );
     });
 
@@ -179,7 +179,7 @@ describe("useChartData", () => {
       expect(mockUseAnalyticsQuery).toHaveBeenCalledWith(
         "test",
         expect.anything(),
-        expect.objectContaining({ format: "JSON" }),
+        expect.objectContaining({ format: "JSON_ARRAY" }),
       );
     });
 
@@ -201,11 +201,11 @@ describe("useChartData", () => {
       expect(mockUseAnalyticsQuery).toHaveBeenCalledWith(
         "test",
         expect.anything(),
-        expect.objectContaining({ format: "ARROW" }),
+        expect.objectContaining({ format: "ARROW_STREAM" }),
       );
     });
 
-    test("auto-selects ARROW_STREAM by default when no heuristics match", () => {
+    test("auto-selects JSON_ARRAY by default when no heuristics match", () => {
       mockUseAnalyticsQuery.mockReturnValue({
         data: [],
         loading: false,
@@ -223,11 +223,11 @@ describe("useChartData", () => {
       expect(mockUseAnalyticsQuery).toHaveBeenCalledWith(
         "test",
         { limit: 100 },
-        expect.objectContaining({ format: "ARROW_STREAM" }),
+        expect.objectContaining({ format: "JSON_ARRAY" }),
       );
     });
 
-    test("defaults to auto format (ARROW_STREAM) when format is not specified", () => {
+    test("defaults to auto format (JSON_ARRAY) when format is not specified", () => {
       mockUseAnalyticsQuery.mockReturnValue({
         data: [],
         loading: false,
@@ -243,7 +243,7 @@ describe("useChartData", () => {
       expect(mockUseAnalyticsQuery).toHaveBeenCalledWith(
         "test",
         undefined,
-        expect.objectContaining({ format: "ARROW_STREAM" }),
+        expect.objectContaining({ format: "JSON_ARRAY" }),
       );
     });
   });
@@ -353,7 +353,7 @@ describe("useChartData", () => {
       expect(result.current.isArrow).toBe(false);
     });
 
-    test("isArrow reflects requested ARROW format when data is null", () => {
+    test("isArrow reflects requested ARROW_STREAM format when data is null", () => {
       mockUseAnalyticsQuery.mockReturnValue({
         data: null,
         loading: true,
@@ -361,13 +361,13 @@ describe("useChartData", () => {
       });
 
       const { result } = renderHook(() =>
-        useChartData({ queryKey: "test", format: "arrow" }),
+        useChartData({ queryKey: "test", format: "arrow_stream" }),
       );
 
       expect(result.current.isArrow).toBe(true);
     });
 
-    test("isArrow reflects requested JSON format when data is null", () => {
+    test("isArrow reflects requested JSON_ARRAY format when data is null", () => {
       mockUseAnalyticsQuery.mockReturnValue({
         data: null,
         loading: true,
@@ -375,7 +375,7 @@ describe("useChartData", () => {
       });
 
       const { result } = renderHook(() =>
-        useChartData({ queryKey: "test", format: "json" }),
+        useChartData({ queryKey: "test", format: "json_array" }),
       );
 
       expect(result.current.isArrow).toBe(false);

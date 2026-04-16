@@ -621,44 +621,7 @@ describe("Analytics Plugin", () => {
       );
     });
 
-    test("/query/:query_key should pass EXTERNAL_LINKS + ARROW_STREAM format parameters when format is ARROW", async () => {
-      const plugin = new AnalyticsPlugin(config);
-      const { router, getHandler } = createMockRouter();
-
-      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
-        query: "SELECT * FROM test",
-        isAsUser: false,
-      });
-
-      const executeMock = vi.fn().mockResolvedValue({
-        result: { data: [{ id: 1 }] },
-      });
-      (plugin as any).SQLClient.executeStatement = executeMock;
-
-      plugin.injectRoutes(router);
-
-      const handler = getHandler("POST", "/query/:query_key");
-      const mockReq = createMockRequest({
-        params: { query_key: "test_query" },
-        body: { parameters: {}, format: "ARROW" },
-      });
-      const mockRes = createMockResponse();
-
-      await handler(mockReq, mockRes);
-
-      expect(executeMock).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          statement: "SELECT * FROM test",
-          warehouse_id: "test-warehouse-id",
-          disposition: "EXTERNAL_LINKS",
-          format: "ARROW_STREAM",
-        }),
-        expect.any(AbortSignal),
-      );
-    });
-
-    test("/query/:query_key should use INLINE + ARROW_STREAM by default when no format specified", async () => {
+    test("/query/:query_key should use INLINE + JSON_ARRAY by default when no format specified", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -687,13 +650,13 @@ describe("Analytics Plugin", () => {
         expect.anything(),
         expect.objectContaining({
           disposition: "INLINE",
-          format: "ARROW_STREAM",
+          format: "JSON_ARRAY",
         }),
         expect.any(AbortSignal),
       );
     });
 
-    test("/query/:query_key should not pass format parameters when format is explicitly JSON", async () => {
+    test("/query/:query_key should pass INLINE + JSON_ARRAY when format is explicitly JSON_ARRAY", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -712,7 +675,7 @@ describe("Analytics Plugin", () => {
       const handler = getHandler("POST", "/query/:query_key");
       const mockReq = createMockRequest({
         params: { query_key: "test_query" },
-        body: { parameters: {}, format: "JSON" },
+        body: { parameters: {}, format: "JSON_ARRAY" },
       });
       const mockRes = createMockResponse();
 
@@ -724,7 +687,7 @@ describe("Analytics Plugin", () => {
       });
     });
 
-    test("/query/:query_key should fall back from ARROW_STREAM to JSON when warehouse rejects ARROW_STREAM", async () => {
+    test("/query/:query_key should fall back ARROW_STREAM from INLINE to EXTERNAL_LINKS when warehouse rejects INLINE", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -737,11 +700,11 @@ describe("Analytics Plugin", () => {
         .fn()
         .mockRejectedValueOnce(
           new Error(
-            "INVALID_PARAMETER_VALUE: Inline disposition only supports JSON_ARRAY format",
+            "INVALID_PARAMETER_VALUE: ARROW_STREAM not supported with INLINE disposition",
           ),
         )
         .mockResolvedValueOnce({
-          result: { data: [{ id: 1 }] },
+          result: { statement_id: "stmt-1", status: { state: "SUCCEEDED" } },
         });
       (plugin as any).SQLClient.executeStatement = executeMock;
 
@@ -750,60 +713,19 @@ describe("Analytics Plugin", () => {
       const handler = getHandler("POST", "/query/:query_key");
       const mockReq = createMockRequest({
         params: { query_key: "test_query" },
-        body: { parameters: {} },
+        body: { parameters: {}, format: "ARROW_STREAM" },
       });
       const mockRes = createMockResponse();
 
       await handler(mockReq, mockRes);
 
-      // First call: ARROW_STREAM (rejected)
+      // First call: INLINE (rejected)
       expect(executeMock.mock.calls[0][1]).toMatchObject({
         disposition: "INLINE",
         format: "ARROW_STREAM",
       });
-      // Second call: JSON (explicit JSON_ARRAY + INLINE)
+      // Second call: EXTERNAL_LINKS (fallback)
       expect(executeMock.mock.calls[1][1]).toMatchObject({
-        disposition: "INLINE",
-        format: "JSON_ARRAY",
-      });
-    });
-
-    test("/query/:query_key should fall back through all formats when each is rejected", async () => {
-      const plugin = new AnalyticsPlugin(config);
-      const { router, getHandler } = createMockRouter();
-
-      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
-        query: "SELECT * FROM test",
-        isAsUser: false,
-      });
-
-      const executeMock = vi
-        .fn()
-        .mockRejectedValueOnce(
-          new Error("INVALID_PARAMETER_VALUE: only supports JSON_ARRAY"),
-        )
-        .mockRejectedValueOnce(
-          new Error("INVALID_PARAMETER_VALUE: only supports ARROW_STREAM"),
-        )
-        .mockResolvedValueOnce({
-          result: { data: [{ id: 1 }] },
-        });
-      (plugin as any).SQLClient.executeStatement = executeMock;
-
-      plugin.injectRoutes(router);
-
-      const handler = getHandler("POST", "/query/:query_key");
-      const mockReq = createMockRequest({
-        params: { query_key: "test_query" },
-        body: { parameters: {} },
-      });
-      const mockRes = createMockResponse();
-
-      await handler(mockReq, mockRes);
-
-      expect(executeMock).toHaveBeenCalledTimes(3);
-      // Third call: ARROW (EXTERNAL_LINKS)
-      expect(executeMock.mock.calls[2][1]).toMatchObject({
         disposition: "EXTERNAL_LINKS",
         format: "ARROW_STREAM",
       });
@@ -828,14 +750,13 @@ describe("Analytics Plugin", () => {
       const handler = getHandler("POST", "/query/:query_key");
       const mockReq = createMockRequest({
         params: { query_key: "test_query" },
-        body: { parameters: {} },
+        body: { parameters: {}, format: "ARROW_STREAM" },
       });
       const mockRes = createMockResponse();
 
       await handler(mockReq, mockRes);
 
-      // All calls use same format (ARROW_STREAM) — no format fallback occurred.
-      // (executeStream's retry interceptor may retry, but always with the same format.)
+      // Only one call — non-format error is not retried with different disposition.
       for (const call of executeMock.mock.calls) {
         expect(call[1]).toMatchObject({
           disposition: "INLINE",
@@ -844,7 +765,7 @@ describe("Analytics Plugin", () => {
       }
     });
 
-    test("/query/:query_key should not fall back when format is explicitly JSON", async () => {
+    test("/query/:query_key should not fall back when format is explicitly JSON_ARRAY", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -865,13 +786,13 @@ describe("Analytics Plugin", () => {
       const handler = getHandler("POST", "/query/:query_key");
       const mockReq = createMockRequest({
         params: { query_key: "test_query" },
-        body: { parameters: {}, format: "JSON" },
+        body: { parameters: {}, format: "JSON_ARRAY" },
       });
       const mockRes = createMockResponse();
 
       await handler(mockReq, mockRes);
 
-      // All calls use JSON_ARRAY + INLINE — explicit JSON, no fallback.
+      // All calls use JSON_ARRAY + INLINE — explicit JSON_ARRAY, no fallback.
       for (const call of executeMock.mock.calls) {
         expect(call[1]).toMatchObject({
           disposition: "INLINE",
