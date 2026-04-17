@@ -305,9 +305,14 @@ struct EndpointInfo {
 // ---------------------------------------------------------------------------
 
 /// Call a Python async handler with a `PyRequest`, returning the JSON string.
+///
+/// `task_locals` carries the Python asyncio event loop reference so that
+/// `into_future` can bridge the coroutine even though we're on a bare
+/// tokio task (no running Python event loop).
 async fn call_python_handler(
     handler: PyObject,
     request: PyRequest,
+    task_locals: &TaskLocals,
 ) -> Result<String, (StatusCode, String)> {
     let future = Python::with_gil(|py| {
         let req_obj = Py::new(py, request)
@@ -317,8 +322,11 @@ async fn call_python_handler(
             .call1(py, (req_obj,))
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-        pyo3_async_runtimes::tokio::into_future(coroutine.into_bound(py))
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+        pyo3_async_runtimes::into_future_with_locals(
+            &task_locals.clone_ref(py),
+            coroutine.into_bound(py),
+        )
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
     })?;
 
     let result = future
@@ -511,7 +519,7 @@ fn mount_handler_route(router: Router, route: RouteDefinition, task_locals: Arc<
         let locals = Python::with_gil(|py| (*task_locals).clone_ref(py));
         async move {
             let request = extract_request_data(&method, &uri, &headers, &body);
-            match pyo3_async_runtimes::tokio::scope(locals, call_python_handler(py_handler, request)).await {
+            match call_python_handler(py_handler, request, &locals).await {
                 Ok(body_str) => Response::builder()
                     .status(StatusCode::OK)
                     .header(header::CONTENT_TYPE, detect_content_type(&body_str))
