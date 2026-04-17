@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type express from "express";
-import type { IAppRouter, StreamExecutionSettings } from "shared";
+import type {
+  IAppRequestWithBody,
+  IAppRouter,
+  StreamExecutionSettings,
+} from "shared";
+import { z } from "zod";
 import { GenieConnector } from "../../connectors";
 import { getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging";
@@ -10,10 +15,21 @@ import { genieStreamDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import type {
   GenieConversationHistoryResponse,
-  GenieSendMessageRequest,
   GenieStreamEvent,
   IGenieConfig,
 } from "./types";
+
+/**
+ * Request body for POST /:alias/messages. Validated via Standard Schema
+ * (Zod natively implements `~standard` from v3.24+). The handler sees
+ * `req.body` typed as `SendMessageBody` once validation passes.
+ */
+const sendMessageBodySchema = z.object({
+  content: z.string().min(1),
+  conversationId: z.string().optional(),
+});
+
+type SendMessageBody = z.infer<typeof sendMessageBodySchema>;
 
 const logger = createLogger("genie");
 
@@ -48,11 +64,12 @@ export class GeniePlugin extends Plugin {
   }
 
   injectRoutes(router: IAppRouter) {
-    this.route(router, {
+    this.route<SendMessageBody>(router, {
       name: "sendMessage",
       method: "post",
       path: "/:alias/messages",
-      handler: async (req: express.Request, res: express.Response) => {
+      body: sendMessageBodySchema,
+      handler: async (req, res) => {
         await this.asUser(req)._handleSendMessage(req, res);
       },
     });
@@ -77,7 +94,7 @@ export class GeniePlugin extends Plugin {
   }
 
   async _handleSendMessage(
-    req: express.Request,
+    req: IAppRequestWithBody<SendMessageBody>,
     res: express.Response,
   ): Promise<void> {
     const { alias } = req.params;
@@ -88,12 +105,8 @@ export class GeniePlugin extends Plugin {
       return;
     }
 
-    const { content, conversationId } = req.body as GenieSendMessageRequest;
-
-    if (!content) {
-      res.status(400).json({ error: "content is required" });
-      return;
-    }
+    // Body is validated+narrowed by the framework before this runs.
+    const { content, conversationId } = req.body;
 
     logger.debug(
       "Sending message to space %s (alias=%s, conversationId=%s)",

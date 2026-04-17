@@ -1,3 +1,4 @@
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type express from "express";
 import type { JSONSchema7 } from "json-schema";
 import type {
@@ -202,14 +203,61 @@ export type IAppRequest = express.Request;
 
 export type HttpMethod = "get" | "post" | "put" | "delete" | "patch" | "head";
 
-export type RouteConfig = {
+/**
+ * Express request type used by route handlers. When `TBody` is `any` the
+ * type collapses to the plain `express.Request`, keeping backwards
+ * compatibility with handlers typed as `(req: express.Request, res: ...)`.
+ * When a Standard Schema is provided via `body`, `TBody` is narrowed to the
+ * schema's output type so handlers see a fully-typed `req.body`.
+ */
+export type IAppRequestWithBody<TBody> = 0 extends 1 & TBody
+  ? express.Request
+  : express.Request<
+      Record<string, string>,
+      unknown,
+      TBody,
+      Record<string, string | string[] | undefined>
+    >;
+
+/**
+ * Route registration config for `Plugin.route()`.
+ *
+ * @typeParam TBody - The validated/narrowed `req.body` type. Defaults to `any`
+ *   so existing route registrations that do not provide a `body` schema keep
+ *   compiling without changes. When a `body` schema is provided, `TBody` is
+ *   inferred as the schema's Standard Schema output type.
+ */
+export type RouteConfig<TBody = any> = {
   /** Unique name for this endpoint (used for frontend access) */
   name: string;
   method: HttpMethod;
   path: string;
-  handler: (req: IAppRequest, res: IAppResponse) => Promise<void>;
+  handler: (
+    req: IAppRequestWithBody<TBody>,
+    res: IAppResponse,
+  ) => Promise<void>;
   /** When true, the server will skip JSON body parsing for this route (e.g. file uploads). */
   skipBodyParsing?: boolean;
+  /**
+   * Optional Standard Schema describing the shape of `req.body`.
+   *
+   * When present, the framework validates the request body before the handler
+   * runs. On validation failure it emits a canonical 400 response with shape
+   * `{ error, code: "VALIDATION_ERROR", requestId, issues? }` and the handler
+   * is not invoked. On success, `req.body` is narrowed to the schema's output
+   * type for the handler. Any Standard Schema v1-compatible validator may be
+   * used (zod 3.24+, valibot, arktype, etc.).
+   *
+   * @see https://standardschema.dev
+   */
+  body?: StandardSchemaV1<unknown, TBody>;
+  /**
+   * When true, the canonical 400 response includes the full `issues` array
+   * even in production (default: only included when `NODE_ENV !== "production"`).
+   * Use sparingly — surfacing detailed validation issues in production can
+   * leak schema internals to clients.
+   */
+  exposeValidationErrors?: boolean;
 };
 
 /** Map of endpoint names to their full paths for a plugin */

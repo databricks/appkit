@@ -326,7 +326,13 @@ importers:
       ws:
         specifier: 8.18.3
         version: 8.18.3(bufferutil@4.0.9)
+      zod:
+        specifier: 4.1.13
+        version: 4.1.13
     devDependencies:
+      '@standard-schema/spec':
+        specifier: 1.1.0
+        version: 1.1.0
       '@types/express':
         specifier: 4.17.25
         version: 4.17.25
@@ -540,6 +546,9 @@ importers:
         specifier: 12.1.0
         version: 12.1.0
     devDependencies:
+      '@standard-schema/spec':
+        specifier: 1.1.0
+        version: 1.1.0
       '@types/express':
         specifier: 4.17.23
         version: 4.17.23

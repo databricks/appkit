@@ -123,6 +123,73 @@ This pattern allows:
 - **Static tools** (CLI, docs) to show all possible resources
 - **Runtime validation** to enforce resources based on actual configuration
 
+## Validating request bodies
+
+When registering a route via `this.route()`, provide a `body` schema to validate `req.body` before the handler runs. The framework accepts any validator that implements the [Standard Schema](https://standardschema.dev) v1 contract — Zod 3.24+, Valibot, ArkType, and others all work out of the box. Your plugin picks its own validator.
+
+```typescript
+import { Plugin, toPlugin, type PluginManifest } from "@databricks/appkit";
+import { z } from "zod";
+
+const sendMessageBody = z.object({
+  content: z.string().min(1),
+  conversationId: z.string().optional(),
+});
+
+type SendMessageBody = z.infer<typeof sendMessageBody>;
+
+class MyPlugin extends Plugin {
+  injectRoutes(router) {
+    this.route<SendMessageBody>(router, {
+      name: "sendMessage",
+      method: "post",
+      path: "/messages",
+      body: sendMessageBody,
+      handler: async (req, res) => {
+        // req.body.content is typed as string.
+        // req.body.conversationId is typed as string | undefined.
+        res.json({ ok: true, content: req.body.content });
+      },
+    });
+  }
+}
+```
+
+### Behavior
+
+- When `body` is absent, the route is a zero-overhead pass-through — your handler runs exactly as if no validation existed.
+- When `body` is present, the framework calls `schema["~standard"].validate(req.body)` before invoking the handler. If validation succeeds, `req.body` is replaced with the validated value and narrowed to the schema's output type. If validation fails, the handler is not called and the framework emits a canonical 400 response.
+- Validation narrows types; if you need to transform the body (e.g. coerce strings to dates), do it in the handler — transformations performed by the schema will be preserved but are not part of the v1 public contract.
+
+### Canonical 400 error body
+
+On validation failure the framework responds with:
+
+```json
+{
+  "error": "Invalid request body",
+  "code": "VALIDATION_ERROR",
+  "requestId": "req_a3f9c18d",
+  "issues": [
+    { "path": ["content"], "message": "String must contain at least 1 character(s)" }
+  ]
+}
+```
+
+- `requestId` is taken from the `x-request-id` header when present, otherwise a short random token is generated. The full `issues` array is always logged server-side keyed by `requestId`, so operators can correlate client-visible 400s with detailed logs.
+- `issues` is included when `NODE_ENV !== "production"`. In production the `issues` field is omitted by default to avoid leaking schema internals. Set `exposeValidationErrors: true` on the route config to opt into including `issues` in production responses.
+
+```typescript
+this.route<SendMessageBody>(router, {
+  name: "sendMessage",
+  method: "post",
+  path: "/messages",
+  body: sendMessageBody,
+  exposeValidationErrors: true, // include issues in prod responses
+  handler: async (req, res) => { /* ... */ },
+});
+```
+
 ## Key extension points
 
 - **Route injection**: Implement `injectRoutes()` to add custom endpoints using [`IAppRouter`](../api/appkit/TypeAlias.IAppRouter.md)

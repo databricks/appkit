@@ -1,7 +1,10 @@
+import { randomBytes } from "node:crypto";
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type express from "express";
 import type {
   BasePlugin,
   BasePluginConfig,
+  IAppRequestWithBody,
   IAppResponse,
   PluginEndpointMap,
   PluginExecuteConfig,
@@ -53,6 +56,20 @@ function hasHttpStatusCode(
     "statusCode" in error &&
     typeof (error as Record<string, unknown>).statusCode === "number"
   );
+}
+
+/**
+ * Resolve a request ID from the `x-request-id` header (if present), falling
+ * back to a short random token. Used by the body validation wrapper so
+ * operators can correlate a client-facing 400 with the full server-side
+ * issue log.
+ */
+function resolveRequestId(req: express.Request): string {
+  const headerId = req.header("x-request-id");
+  if (headerId && typeof headerId === "string" && headerId.length > 0) {
+    return headerId;
+  }
+  return `req_${randomBytes(4).toString("hex")}`;
 }
 
 /**
@@ -515,13 +532,25 @@ export abstract class Plugin<
     this.registeredEndpoints[name] = path;
   }
 
-  protected route<_TResponse>(
+  protected route<TBody = unknown>(
     router: express.Router,
-    config: RouteConfig,
+    config: RouteConfig<TBody>,
   ): void {
     const { name, method, path, handler } = config;
 
-    router[method](path, handler);
+    // Zero-overhead pass-through when no body schema is provided.
+    const effectiveHandler = config.body
+      ? this._wrapHandlerWithBodyValidation(
+          handler,
+          config.body,
+          config.exposeValidationErrors === true,
+        )
+      : (handler as (
+          req: express.Request,
+          res: express.Response,
+        ) => Promise<void>);
+
+    router[method](path, effectiveHandler);
 
     const fullPath = `/api/${this.name}${path}`;
     this.registerEndpoint(name, fullPath);
@@ -529,6 +558,85 @@ export abstract class Plugin<
     if (config.skipBodyParsing) {
       this.skipBodyParsingPaths.add(fullPath);
     }
+  }
+
+  /**
+   * Wrap a route handler in a pre-validation closure. When the wrapped
+   * handler runs, the request body is validated against the provided
+   * Standard Schema before the original handler is invoked.
+   *
+   * On validation failure the wrapper emits a canonical 400 response and
+   * does not call the original handler. On success the request body is
+   * reassigned to the validated value (preserving any narrowing/coercion)
+   * and the original handler runs as before.
+   */
+  private _wrapHandlerWithBodyValidation<TBody>(
+    handler: RouteConfig<TBody>["handler"],
+    schema: StandardSchemaV1<unknown, TBody>,
+    exposeValidationErrors: boolean,
+  ): (req: express.Request, res: express.Response) => Promise<void> {
+    return async (req, res) => {
+      let result = schema["~standard"].validate(req.body);
+      if (result instanceof Promise) {
+        result = await result;
+      }
+
+      if (result.issues) {
+        const requestId = resolveRequestId(req);
+
+        // Normalize Standard Schema path segments: spec allows either a
+        // PropertyKey or an object with a `key` field. Callers expect a
+        // plain ReadonlyArray<PropertyKey>.
+        const normalizedIssues = result.issues.map((issue) => ({
+          path: Array.isArray(issue.path)
+            ? (issue.path.map((segment) =>
+                typeof segment === "object" && segment !== null
+                  ? segment.key
+                  : segment,
+              ) as ReadonlyArray<PropertyKey>)
+            : ([] as ReadonlyArray<PropertyKey>),
+          message: issue.message,
+        }));
+
+        // Always log the full issues server-side for operator correlation,
+        // even when omitted from the response body in production.
+        logger.warn("Request body validation failed", {
+          plugin: this.name,
+          requestId,
+          issues: normalizedIssues,
+        });
+
+        const isProduction = process.env.NODE_ENV === "production";
+        const includeIssues = !isProduction || exposeValidationErrors;
+
+        const body: {
+          error: string;
+          code: string;
+          requestId: string;
+          issues?: Array<{
+            path: ReadonlyArray<PropertyKey>;
+            message: string;
+          }>;
+        } = {
+          error: "Invalid request body",
+          code: "VALIDATION_ERROR",
+          requestId,
+        };
+        if (includeIssues) {
+          body.issues = normalizedIssues;
+        }
+
+        res.status(400).json(body);
+        return;
+      }
+
+      // Narrow req.body to the validated value. This preserves any
+      // transformation performed by the schema (e.g. coercion), though
+      // v1 docs advise against relying on transforms.
+      (req as { body: unknown }).body = result.value;
+
+      await handler(req as IAppRequestWithBody<TBody>, res);
+    };
   }
 
   // build execution options by merging defaults, plugin config, and user overrides

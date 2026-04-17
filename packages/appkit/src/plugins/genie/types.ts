@@ -10,8 +10,3 @@ export interface IGenieConfig extends BasePluginConfig {
   /** Genie polling timeout in ms. Set to 0 for indefinite. Default: 120000 (2 min) */
   timeout?: number;
 }
-
-export interface GenieSendMessageRequest {
-  content: string;
-  conversationId?: string;
-}

@@ -528,21 +528,21 @@ AuthenticationError in production when no user header is present.
 ### route()
 
 ```ts
-protected route<_TResponse>(router: Router, config: RouteConfig): void;
+protected route<TBody>(router: Router, config: RouteConfig<TBody>): void;
 ```
 
 #### Type Parameters
 
-| Type Parameter |
-| ------ |
-| `_TResponse` |
+| Type Parameter | Default type |
+| ------ | ------ |
+| `TBody` | `unknown` |
 
 #### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
 | `router` | `Router` |
-| `config` | `RouteConfig` |
+| `config` | `RouteConfig`\<`TBody`\> |
 
 #### Returns
 

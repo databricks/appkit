@@ -243,7 +243,7 @@ describe("Genie Plugin", () => {
   });
 
   describe("validation", () => {
-    test("should return 400 when content is missing", async () => {
+    test("should return 400 with canonical shape when content is missing", async () => {
       const plugin = new GeniePlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -263,9 +263,49 @@ describe("Genie Plugin", () => {
       await handler(mockReq, mockRes);
 
       expect(mockRes.status).toHaveBeenCalledWith(400);
-      expect(mockRes.json).toHaveBeenCalledWith({
-        error: "content is required",
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: "Invalid request body",
+          code: "VALIDATION_ERROR",
+          requestId: expect.any(String),
+          issues: expect.arrayContaining([
+            expect.objectContaining({
+              path: expect.arrayContaining(["content"]),
+              message: expect.any(String),
+            }),
+          ]),
+        }),
+      );
+      // Handler should not have invoked the genie service.
+      expect(mockGenieService.startConversation).not.toHaveBeenCalled();
+    });
+
+    test("should return 400 when content is empty string", async () => {
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/:alias/messages");
+      const mockReq = createMockRequest({
+        params: { alias: "myspace" },
+        body: { content: "" },
+        headers: {
+          "x-forwarded-access-token": "user-token",
+          "x-forwarded-user": "user-1",
+        },
       });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: "Invalid request body",
+          code: "VALIDATION_ERROR",
+        }),
+      );
     });
   });
 
