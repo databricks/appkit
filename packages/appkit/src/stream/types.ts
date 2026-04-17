@@ -1,3 +1,4 @@
+import type { SseEnvelope } from "@databricks/appkit-contracts";
 import type { Context } from "@opentelemetry/api";
 import type { IAppResponse } from "shared";
 import type { EventRingBuffer } from "./buffers";
@@ -32,6 +33,15 @@ export interface BufferedEvent {
   data: string;
   timestamp: number;
 }
+
+// Compile-time anchor against contracts/appkit/v1/wire.proto. When BufferedEvent
+// and the generated SseEnvelope diverge, tsc fails here — a signal that either
+// the contract or the implementation needs updating. Follow-up PRs will retire
+// BufferedEvent in favour of the generated type.
+type _BufferedEventSseEnvelopeCompat = {
+  id: BufferedEvent["id"] extends SseEnvelope["id"] ? true : never;
+  data: BufferedEvent["data"] extends SseEnvelope["data"] ? true : never;
+};
 
 export interface StreamEntry {
   streamId: string;

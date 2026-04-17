@@ -1,0 +1,59 @@
+// Wire-protocol contract for AppKit (draft, v1).
+//
+// This proto defines the HTTP + SSE surface every AppKit backend must serve.
+// It is the single source of truth for the TS, Python, and Rust ports,
+// and for the React SDK that consumes the stream.
+//
+// Scope of this initial draft is intentionally small: envelope shape,
+// structured error frames, and SQL warehouse result-format negotiation.
+// Route conventions, heartbeat/reconnect semantics, and the client-config
+// payload will land in follow-up PRs.
+syntax = "proto3";
+
+package appkit.v1;
+
+// Envelope for a single Server-Sent Event frame emitted by an AppKit backend
+// and parsed by the React SDK via connectSSE(). Structurally compatible with
+// the current BufferedEvent type in packages/appkit/src/stream/types.ts.
+message SseEnvelope {
+  // Monotonically increasing stream event identifier. Clients echo the most
+  // recent id back via the Last-Event-ID header to resume a stream.
+  string id = 1;
+
+  // Event type. Opaque to the envelope; interpreted per-plugin.
+  string event = 2;
+
+  // UTF-8 payload. Binary content should be base64-encoded by the emitter.
+  string data = 3;
+
+  // Emission timestamp in milliseconds since epoch (wall clock on the emitter).
+  int64 timestamp_ms = 4;
+}
+
+// Structured error frame. Emitted over the same SSE transport as SseEnvelope
+// but distinguished by event="error".
+message SseError {
+  SseErrorCode code = 1;
+  string message = 2;
+}
+
+enum SseErrorCode {
+  SSE_ERROR_CODE_UNSPECIFIED = 0;
+  SSE_ERROR_CODE_TEMPORARY_UNAVAILABLE = 1;
+  SSE_ERROR_CODE_TIMEOUT = 2;
+  SSE_ERROR_CODE_INTERNAL_ERROR = 3;
+  SSE_ERROR_CODE_INVALID_REQUEST = 4;
+  SSE_ERROR_CODE_STREAM_ABORTED = 5;
+  SSE_ERROR_CODE_STREAM_EVICTED = 6;
+  SSE_ERROR_CODE_UPSTREAM_ERROR = 7;
+}
+
+// SQL warehouse result-format negotiation. Backends attempt formats in the
+// order specified by their fallback chain — the canonical TS chain today is
+// ARROW_STREAM -> JSON -> ARROW.
+enum ResultFormat {
+  RESULT_FORMAT_UNSPECIFIED = 0;
+  RESULT_FORMAT_ARROW_STREAM = 1;
+  RESULT_FORMAT_JSON = 2;
+  RESULT_FORMAT_ARROW = 3;
+}

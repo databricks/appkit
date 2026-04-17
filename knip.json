@@ -3,6 +3,7 @@
   "ignoreWorkspaces": [
     "packages/shared",
     "packages/lakebase",
+    "packages/contracts",
     "apps/**",
     "docs"
   ],

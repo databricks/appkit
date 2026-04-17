@@ -15,6 +15,7 @@
     "paths": {
       "@databricks/appkit": ["packages/appkit/*"],
       "@databricks/appkit-ui": ["packages/appkit-ui/*"],
+      "@databricks/appkit-contracts": ["packages/contracts/src"],
       "shared": ["packages/shared/src"],
       "@tools/*": ["tools/*"]
     }

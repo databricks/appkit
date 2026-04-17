@@ -1,0 +1,36 @@
+{
+  "name": "@databricks/appkit-contracts",
+  "type": "module",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Shared proto data contracts for AppKit (wire, query, plugin, agenteval, deploy). Single source of truth for cross-language interface shapes.",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "generate": "tsx ../../tools/generate-contracts.ts",
+    "build:package": "pnpm run generate && tsdown --config tsdown.config.ts",
+    "build:watch": "tsdown --config tsdown.config.ts --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "clean:full": "rm -rf dist node_modules src/generated"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "2.11.0"
+  },
+  "devDependencies": {
+    "@bufbuild/buf": "1.47.2",
+    "@bufbuild/protoc-gen-es": "2.11.0"
+  },
+  "types": "./dist/index.d.ts",
+  "publishConfig": {
+    "exports": {
+      ".": "./dist/index.js",
+      "./package.json": "./package.json"
+    }
+  }
+}
