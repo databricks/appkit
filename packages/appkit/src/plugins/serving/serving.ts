@@ -39,6 +39,30 @@ interface ResolvedEndpoint {
   name: string;
 }
 
+/**
+ * TODO(serving-validation-follow-up): migrate request-body validation to the
+ * framework's `RouteConfig.body` mechanism (Standard Schema) once a per-request
+ * schema resolution story lands — see GitHub issue <TODO: open and link>.
+ *
+ * The other AppKit plugins (analytics, genie, vector-search, files/mkdir) all
+ * declare their request-body schemas statically on `RouteConfig.body` and rely
+ * on the framework to validate incoming `req.body` against a Standard Schema
+ * before the handler runs.
+ *
+ * The serving plugin is the exception: its body shape is NOT static. Each
+ * configured alias proxies to a different model-serving endpoint, and every
+ * endpoint has its own input schema (inferred and cached on disk at
+ * `.databricks/appkit/.appkit-serving-types-cache.json`). The body therefore
+ * has to be resolved and filtered per-request via `filterRequestBody()` in
+ * `_handleInvoke` / `_handleStream` / `invoke`, keyed off the `:alias` route
+ * param.
+ *
+ * Fitting this into `RouteConfig.body` needs its own design conversation —
+ * most likely a function-form `body: (req) => schema` that resolves the
+ * Standard Schema per-request based on the alias and the loaded allowlists.
+ * Until that lands, serving validation intentionally stays inside
+ * `filterRequestBody()` rather than the framework pipeline.
+ */
 export class ServingPlugin extends Plugin {
   static manifest = manifest as PluginManifest<"serving">;
 
