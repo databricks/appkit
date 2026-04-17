@@ -27,7 +27,12 @@ import type { IAnalyticsConfig } from "./types";
  * the plugin's.
  */
 const queryBodySchema = z.object({
-  parameters: z.record(z.string(), z.unknown()).optional(),
+  parameters: z
+    .record(z.string(), z.unknown())
+    .refine((obj) => Object.keys(obj).length <= 100, {
+      message: "parameters may not contain more than 100 keys",
+    })
+    .optional(),
   format: z.enum(["JSON", "ARROW"]).default("JSON"),
 });
 

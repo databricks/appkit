@@ -188,6 +188,40 @@ describe("Analytics Plugin", () => {
       expect(executeMock).not.toHaveBeenCalled();
     });
 
+    test("/query/:query_key should return canonical 400 when parameters has more than 100 keys", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      const executeMock = vi.fn();
+      (plugin as any).SQLClient.executeStatement = executeMock;
+      (plugin as any).app.getAppQuery = vi.fn();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const oversizedParams: Record<string, string> = {};
+      for (let i = 0; i < 101; i++) {
+        oversizedParams[`p${i}`] = String(i);
+      }
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: oversizedParams },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: "Invalid request body",
+          code: "VALIDATION_ERROR",
+        }),
+      );
+      expect(executeMock).not.toHaveBeenCalled();
+      expect((plugin as any).app.getAppQuery).not.toHaveBeenCalled();
+    });
+
     test("/query/:query_key should apply format default of JSON when omitted", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();

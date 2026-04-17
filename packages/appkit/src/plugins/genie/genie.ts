@@ -25,8 +25,8 @@ import type {
  * `req.body` typed as `SendMessageBody` once validation passes.
  */
 const sendMessageBodySchema = z.object({
-  content: z.string().min(1),
-  conversationId: z.string().optional(),
+  content: z.string().min(1).max(32768),
+  conversationId: z.string().max(128).optional(),
 });
 
 type SendMessageBody = z.infer<typeof sendMessageBodySchema>;

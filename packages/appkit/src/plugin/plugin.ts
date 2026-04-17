@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type express from "express";
 import type {
@@ -59,17 +59,48 @@ function hasHttpStatusCode(
 }
 
 /**
+ * Character allowlist for incoming `x-request-id` headers. Restricts to
+ * URL-safe ASCII + underscore/hyphen and caps length at 100 characters so
+ * client-supplied values can never contain CRLF (log-injection / CWE-117)
+ * or blow up server memory.
+ */
+const REQUEST_ID_HEADER_PATTERN = /^[A-Za-z0-9_-]{1,100}$/;
+
+/**
  * Resolve a request ID from the `x-request-id` header (if present), falling
- * back to a short random token. Used by the body validation wrapper so
- * operators can correlate a client-facing 400 with the full server-side
- * issue log.
+ * back to a freshly generated UUID-derived token. Used by the body
+ * validation wrapper so operators can correlate a client-facing 400 with
+ * the full server-side issue log.
+ *
+ * The header value is validated against a strict allowlist. Invalid values
+ * are silently discarded — they are never logged or reflected anywhere —
+ * and a fresh ID is generated instead.
  */
 function resolveRequestId(req: express.Request): string {
   const headerId = req.header("x-request-id");
-  if (headerId && typeof headerId === "string" && headerId.length > 0) {
+  if (
+    typeof headerId === "string" &&
+    REQUEST_ID_HEADER_PATTERN.test(headerId)
+  ) {
     return headerId;
   }
-  return `req_${randomBytes(4).toString("hex")}`;
+  return `req_${randomUUID().slice(0, 8)}`;
+}
+
+/** Maximum number of Standard Schema issues retained on a validation failure. */
+const MAX_VALIDATION_ISSUES = 20;
+
+/**
+ * Shallow runtime check that a value looks like a Standard Schema v1
+ * compliant validator (object with a `~standard` property exposing a
+ * `validate` function). Used to surface plugin programmer errors at route
+ * registration time.
+ */
+function isStandardSchema(value: unknown): value is StandardSchemaV1 {
+  if (typeof value !== "object" || value === null) return false;
+  const standard = (value as { "~standard"?: unknown })["~standard"];
+  if (typeof standard !== "object" || standard === null) return false;
+  return typeof (standard as { validate?: unknown }).validate === "function";
 }
 
 /**
@@ -538,6 +569,14 @@ export abstract class Plugin<
   ): void {
     const { name, method, path, handler } = config;
 
+    // Fail-fast: catch mis-wired `body` values at registration time so plugin
+    // programmer errors surface at startup instead of the first request.
+    if (config.body !== undefined && !isStandardSchema(config.body)) {
+      throw new Error(
+        "RouteConfig.body must be a Standard Schema v1 compliant value (e.g., a Zod schema)",
+      );
+    }
+
     // Zero-overhead pass-through when no body schema is provided.
     const effectiveHandler = config.body
       ? this._wrapHandlerWithBodyValidation(
@@ -569,6 +608,12 @@ export abstract class Plugin<
    * does not call the original handler. On success the request body is
    * reassigned to the validated value (preserving any narrowing/coercion)
    * and the original handler runs as before.
+   *
+   * Exceptions thrown from the validator itself (sync throw from a
+   * user-written `.refine()`, or a rejected Promise from an async
+   * validate) are caught and converted into a canonical 500 response. The
+   * thrown error's message is never leaked to the client — only a fixed
+   * code is returned.
    */
   private _wrapHandlerWithBodyValidation<TBody>(
     handler: RouteConfig<TBody>["handler"],
@@ -576,18 +621,41 @@ export abstract class Plugin<
     exposeValidationErrors: boolean,
   ): (req: express.Request, res: express.Response) => Promise<void> {
     return async (req, res) => {
-      let result = schema["~standard"].validate(req.body);
-      if (result instanceof Promise) {
-        result = await result;
+      let result: StandardSchemaV1.Result<TBody>;
+      try {
+        const maybePromise = schema["~standard"].validate(req.body);
+        result =
+          maybePromise instanceof Promise ? await maybePromise : maybePromise;
+      } catch (error) {
+        const requestId = resolveRequestId(req);
+        // Log via AppKitError-compatible path so sensitive values inside
+        // `context` are redacted. The thrown error's free-form message is
+        // intentionally omitted to avoid leaking refinement internals.
+        logger.error("validation schema threw unexpectedly", {
+          plugin: this.name,
+          requestId,
+          errorName: error instanceof Error ? error.name : "UnknownError",
+        });
+        res.status(500).json({
+          error: "Internal validation error",
+          code: "VALIDATION_INTERNAL_ERROR",
+          requestId,
+        });
+        return;
       }
 
       if (result.issues) {
         const requestId = resolveRequestId(req);
+        const totalIssueCount = result.issues.length;
+        const truncated = totalIssueCount > MAX_VALIDATION_ISSUES;
+        const retained = truncated
+          ? result.issues.slice(0, MAX_VALIDATION_ISSUES)
+          : result.issues;
 
         // Normalize Standard Schema path segments: spec allows either a
         // PropertyKey or an object with a `key` field. Callers expect a
         // plain ReadonlyArray<PropertyKey>.
-        const normalizedIssues = result.issues.map((issue) => ({
+        const normalizedIssues = retained.map((issue) => ({
           path: Array.isArray(issue.path)
             ? (issue.path.map((segment) =>
                 typeof segment === "object" && segment !== null
@@ -598,12 +666,16 @@ export abstract class Plugin<
           message: issue.message,
         }));
 
-        // Always log the full issues server-side for operator correlation,
-        // even when omitted from the response body in production.
+        // Log only path metadata server-side; `issue.message` can contain
+        // arbitrary refinement text and would not pass through the
+        // AppKitError redactor. Callers can opt in to full issue content
+        // via `exposeValidationErrors` in the response.
         logger.warn("Request body validation failed", {
           plugin: this.name,
           requestId,
-          issues: normalizedIssues,
+          issueCount: totalIssueCount,
+          truncated,
+          paths: normalizedIssues.map((issue) => issue.path),
         });
 
         const isProduction = process.env.NODE_ENV === "production";
@@ -617,6 +689,7 @@ export abstract class Plugin<
             path: ReadonlyArray<PropertyKey>;
             message: string;
           }>;
+          issuesTruncated?: boolean;
         } = {
           error: "Invalid request body",
           code: "VALIDATION_ERROR",
@@ -624,6 +697,9 @@ export abstract class Plugin<
         };
         if (includeIssues) {
           body.issues = normalizedIssues;
+          if (truncated) {
+            body.issuesTruncated = true;
+          }
         }
 
         res.status(400).json(body);

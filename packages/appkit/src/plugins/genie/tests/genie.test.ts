@@ -307,6 +307,35 @@ describe("Genie Plugin", () => {
         }),
       );
     });
+
+    test("should return 400 when content exceeds 32768 chars", async () => {
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/:alias/messages");
+      const mockReq = createMockRequest({
+        params: { alias: "myspace" },
+        body: { content: "a".repeat(32769) },
+        headers: {
+          "x-forwarded-access-token": "user-token",
+          "x-forwarded-user": "user-1",
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: "Invalid request body",
+          code: "VALIDATION_ERROR",
+        }),
+      );
+      expect(mockGenieService.startConversation).not.toHaveBeenCalled();
+    });
   });
 
   describe("send message - new conversation", () => {

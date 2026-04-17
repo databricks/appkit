@@ -52,7 +52,6 @@ const mkdirBodySchema = z.object({
     .max(4096)
     .refine((p) => !p.includes("\u0000"), {
       message: "path must not contain null bytes",
-      path: ["path"],
     }),
 });
 

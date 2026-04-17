@@ -428,6 +428,55 @@ describe("VectorSearchPlugin", () => {
       });
     });
 
+    describe("POST /:alias/query size caps", () => {
+      it("rejects queryVector longer than 4096", async () => {
+        const plugin = buildPlugin();
+        await plugin.setup();
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+
+        const handler = getHandler("POST", "/:alias/query");
+        const mockReq = createMockRequest({
+          params: { alias: "products" },
+          body: { queryVector: new Array(4097).fill(0) },
+        });
+        const mockRes = createMockResponse();
+
+        await handler(mockReq, mockRes);
+
+        expect(mockRes.status).toHaveBeenCalledWith(400);
+        expect(mockRes.json).toHaveBeenCalledWith(
+          expect.objectContaining({
+            error: "Invalid request body",
+            code: "VALIDATION_ERROR",
+          }),
+        );
+        expect(mockRequest).not.toHaveBeenCalled();
+      });
+
+      it("rejects columns array longer than 100", async () => {
+        const plugin = buildPlugin();
+        await plugin.setup();
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+
+        const handler = getHandler("POST", "/:alias/query");
+        const mockReq = createMockRequest({
+          params: { alias: "products" },
+          body: {
+            queryText: "hello",
+            columns: Array.from({ length: 101 }, (_, i) => `col${i}`),
+          },
+        });
+        const mockRes = createMockResponse();
+
+        await handler(mockReq, mockRes);
+
+        expect(mockRes.status).toHaveBeenCalledWith(400);
+        expect(mockRequest).not.toHaveBeenCalled();
+      });
+    });
+
     describe("POST /:alias/next-page", () => {
       it("returns canonical 400 when pageToken is missing", async () => {
         const plugin = buildPlugin();
@@ -504,6 +553,31 @@ describe("VectorSearchPlugin", () => {
         expect(mockRequest).toHaveBeenCalledTimes(1);
         const callBody = mockRequest.mock.calls[0][0].payload;
         expect(callBody.page_token).toBe("token-abc");
+      });
+
+      it("rejects pageToken longer than 4096 chars", async () => {
+        const plugin = buildPlugin();
+        await plugin.setup();
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+
+        const handler = getHandler("POST", "/:alias/next-page");
+        const mockReq = createMockRequest({
+          params: { alias: "products" },
+          body: { pageToken: "x".repeat(4097) },
+        });
+        const mockRes = createMockResponse();
+
+        await handler(mockReq, mockRes);
+
+        expect(mockRes.status).toHaveBeenCalledWith(400);
+        expect(mockRes.json).toHaveBeenCalledWith(
+          expect.objectContaining({
+            error: "Invalid request body",
+            code: "VALIDATION_ERROR",
+          }),
+        );
+        expect(mockRequest).not.toHaveBeenCalled();
       });
     });
   });

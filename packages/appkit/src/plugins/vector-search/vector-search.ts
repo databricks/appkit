@@ -28,22 +28,26 @@ import type {
  * refinement surfaces its issue on the `queryText` path so clients get a
  * single, stable location to render the error.
  */
-const searchFiltersSchema = z.record(
-  z.string(),
-  z.union([
+const searchFiltersSchema = z
+  .record(
     z.string(),
-    z.number(),
-    z.boolean(),
-    z.array(z.union([z.string(), z.number()])),
-  ]),
-);
+    z.union([
+      z.string(),
+      z.number(),
+      z.boolean(),
+      z.array(z.union([z.string(), z.number()])),
+    ]),
+  )
+  .refine((obj) => Object.keys(obj).length <= 50, {
+    message: "filters may not contain more than 50 keys",
+  });
 
 const queryBodySchema = z
   .object({
-    queryText: z.string().optional(),
-    queryVector: z.array(z.number()).optional(),
-    columns: z.array(z.string()).optional(),
-    numResults: z.number().optional(),
+    queryText: z.string().max(10000).optional(),
+    queryVector: z.array(z.number()).max(4096).optional(),
+    columns: z.array(z.string().max(255)).max(100).optional(),
+    numResults: z.number().int().min(1).max(1000).optional(),
     queryType: z.enum(["ann", "hybrid", "full_text"]).optional(),
     filters: searchFiltersSchema.optional(),
     reranker: z.boolean().optional(),
@@ -56,7 +60,7 @@ const queryBodySchema = z
 type QueryBody = z.infer<typeof queryBodySchema>;
 
 const nextPageBodySchema = z.object({
-  pageToken: z.string().min(1),
+  pageToken: z.string().min(1).max(4096),
 });
 
 type NextPageBody = z.infer<typeof nextPageBodySchema>;
