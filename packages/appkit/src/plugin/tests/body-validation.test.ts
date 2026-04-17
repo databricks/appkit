@@ -7,7 +7,7 @@ import {
   mockServiceContext,
 } from "@tools/test-helpers";
 import type express from "express";
-import type { BasePluginConfig } from "shared";
+import type { BasePluginConfig, RouteConfig } from "shared";
 import {
   afterEach,
   assertType,
@@ -56,13 +56,27 @@ vi.mock("../../logging/logger", () => ({
 }));
 
 class TestPlugin extends Plugin<BasePluginConfig> {
-  // Expose protected route() for testing.
-  public exposedRoute<TBody>(
+  // Expose protected route() for testing. Overload signatures mirror the
+  // real `route()` so callers get the same TBody inference rules as
+  // plugin authors see in production.
+  public exposedRoute<TSchema extends StandardSchemaV1<unknown, any>>(
     router: express.Router,
-    config: Parameters<typeof this.route<TBody>>[1],
-  ) {
+    config: RouteConfig<StandardSchemaV1.InferOutput<TSchema>> & {
+      body: TSchema;
+    },
+  ): void;
+  public exposedRoute(
+    router: express.Router,
+    config: Omit<RouteConfig<unknown>, "body"> & { body?: undefined },
+  ): void;
+  public exposedRoute(
+    router: express.Router,
+    config:
+      | (RouteConfig<any> & { body: StandardSchemaV1<unknown, any> })
+      | (Omit<RouteConfig<unknown>, "body"> & { body?: undefined }),
+  ): void {
     // biome-ignore lint/complexity/useLiteralKeys: calling protected member from subclass
-    return this["route"]<TBody>(router, config);
+    this["route"](router, config as any);
   }
 }
 
@@ -114,7 +128,7 @@ describe("route body validation", () => {
       res.status(200).json({ ok: true });
     });
 
-    plugin.exposedRoute<z.infer<typeof schema>>(router, {
+    plugin.exposedRoute(router, {
       name: "sendMessage",
       method: "post",
       path: "/messages",
@@ -144,7 +158,7 @@ describe("route body validation", () => {
     const schema = z.object({ content: z.string().min(1) });
     const handlerSpy = vi.fn();
 
-    plugin.exposedRoute<z.infer<typeof schema>>(router, {
+    plugin.exposedRoute(router, {
       name: "sendMessage",
       method: "post",
       path: "/messages",
@@ -183,7 +197,7 @@ describe("route body validation", () => {
     const schema = z.object({ content: z.string().min(1) });
     const handlerSpy = vi.fn();
 
-    plugin.exposedRoute<z.infer<typeof schema>>(router, {
+    plugin.exposedRoute(router, {
       name: "sendMessage",
       method: "post",
       path: "/messages",
@@ -216,7 +230,7 @@ describe("route body validation", () => {
     const schema = z.object({ content: z.string().min(1) });
     const handlerSpy = vi.fn();
 
-    plugin.exposedRoute<z.infer<typeof schema>>(router, {
+    plugin.exposedRoute(router, {
       name: "sendMessage",
       method: "post",
       path: "/messages",
@@ -248,7 +262,7 @@ describe("route body validation", () => {
     const { router, getHandler } = createMockRouter();
 
     const schema = z.object({ content: z.string().min(1) });
-    plugin.exposedRoute<z.infer<typeof schema>>(router, {
+    plugin.exposedRoute(router, {
       name: "sendMessage",
       method: "post",
       path: "/messages",
@@ -324,7 +338,7 @@ describe("route body validation", () => {
       res.status(200).json({ ok: true });
     });
 
-    plugin.exposedRoute<{ content: string }>(router, {
+    plugin.exposedRoute(router, {
       name: "sendMessage",
       method: "post",
       path: "/messages",
@@ -345,8 +359,11 @@ describe("route body validation", () => {
     expect(badRes.status).toHaveBeenCalledWith(400);
   });
 
-  // Compile-time check: handler's req.body should be typed as the schema's
-  // output. If this block type-checks, the generic is threading through.
+  // Compile-time checks: the overload on `route()` must derive `TBody`
+  // from `body`'s schema output when present, and fall back to `unknown`
+  // when absent. Plugin authors should never need to write `<TBody>`
+  // explicitly — if these blocks type-check without explicit generics,
+  // the overload is doing its job.
   test("type-level: handler req.body is narrowed to schema output", () => {
     const plugin = createTestPlugin();
     const { router } = createMockRouter();
@@ -355,17 +372,35 @@ describe("route body validation", () => {
       content: z.string().min(1),
       conversationId: z.string().optional(),
     });
-    type Body = z.infer<typeof schema>;
 
-    plugin.exposedRoute<Body>(router, {
+    plugin.exposedRoute(router, {
       name: "sendMessage",
       method: "post",
       path: "/messages",
       body: schema,
       handler: async (req, _res) => {
-        // These assertions fail at compile time if generics regress.
+        // These assertions fail at compile time if the overload regresses.
         assertType<string>(req.body.content);
         assertType<string | undefined>(req.body.conversationId);
+      },
+    });
+  });
+
+  test("type-level: handler req.body defaults to unknown when body is absent", () => {
+    const plugin = createTestPlugin();
+    const { router } = createMockRouter();
+
+    plugin.exposedRoute(router, {
+      name: "noBody",
+      method: "post",
+      path: "/no-body",
+      handler: async (req, _res) => {
+        // Without a schema, `req.body` has no compile-time shape. Reading
+        // any property off `unknown` is a compile error, so this @ts-expect-error
+        // proves the overload falls back to `unknown` (not `any`).
+        // @ts-expect-error unknown is not indexable
+        req.body.anyProperty;
+        assertType<unknown>(req.body);
       },
     });
   });
@@ -384,7 +419,7 @@ describe("route body validation", () => {
 
     const handlerSpy = vi.fn();
 
-    plugin.exposedRoute<{ content: string }>(router, {
+    plugin.exposedRoute(router, {
       name: "sendMessage",
       method: "post",
       path: "/messages",
@@ -428,7 +463,7 @@ describe("route body validation", () => {
 
     const handlerSpy = vi.fn();
 
-    plugin.exposedRoute<{ ok: true }>(router, {
+    plugin.exposedRoute(router, {
       name: "sendMessage",
       method: "post",
       path: "/messages",
@@ -459,7 +494,7 @@ describe("route body validation", () => {
     const { router, getHandler } = createMockRouter();
 
     const schema = z.object({ content: z.string().min(1) });
-    plugin.exposedRoute<z.infer<typeof schema>>(router, {
+    plugin.exposedRoute(router, {
       name: "sendMessage",
       method: "post",
       path: "/messages",
@@ -494,7 +529,7 @@ describe("route body validation", () => {
     const { router, getHandler } = createMockRouter();
 
     const schema = z.object({ content: z.string().min(1) });
-    plugin.exposedRoute<z.infer<typeof schema>>(router, {
+    plugin.exposedRoute(router, {
       name: "sendMessage",
       method: "post",
       path: "/messages",
@@ -538,7 +573,7 @@ describe("route body validation", () => {
 
     const handlerSpy = vi.fn();
 
-    plugin.exposedRoute<Record<string, never>>(router, {
+    plugin.exposedRoute(router, {
       name: "many",
       method: "post",
       path: "/many",
@@ -577,7 +612,7 @@ describe("route body validation", () => {
       },
     };
 
-    plugin.exposedRoute<Record<string, never>>(router, {
+    plugin.exposedRoute(router, {
       name: "exact",
       method: "post",
       path: "/exact",
@@ -614,7 +649,7 @@ describe("route body validation", () => {
       },
     };
 
-    plugin.exposedRoute<Record<string, never>>(router, {
+    plugin.exposedRoute(router, {
       name: "many",
       method: "post",
       path: "/many",
@@ -639,7 +674,7 @@ describe("route body validation", () => {
     const { router } = createMockRouter();
 
     expect(() =>
-      plugin.exposedRoute<unknown>(router, {
+      plugin.exposedRoute(router, {
         name: "bad",
         method: "post",
         path: "/bad",

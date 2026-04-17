@@ -64,7 +64,7 @@ export class GeniePlugin extends Plugin {
   }
 
   injectRoutes(router: IAppRouter) {
-    this.route<SendMessageBody>(router, {
+    this.route(router, {
       name: "sendMessage",
       method: "post",
       path: "/:alias/messages",

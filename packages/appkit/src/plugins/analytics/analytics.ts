@@ -73,7 +73,7 @@ export class AnalyticsPlugin extends Plugin {
       },
     });
 
-    this.route<QueryBody>(router, {
+    this.route(router, {
       name: "query",
       method: "post",
       path: "/query/:query_key",

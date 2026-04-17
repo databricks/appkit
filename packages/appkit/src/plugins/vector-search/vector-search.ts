@@ -117,7 +117,7 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
   }
 
   injectRoutes(router: IAppRouter) {
-    this.route<QueryBody>(router, {
+    this.route(router, {
       name: "query",
       method: "post",
       path: "/:alias/query",
@@ -176,7 +176,7 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
       },
     });
 
-    this.route<NextPageBody>(router, {
+    this.route(router, {
       name: "queryNextPage",
       method: "post",
       path: "/:alias/next-page",

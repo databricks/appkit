@@ -329,7 +329,7 @@ export class FilesPlugin extends Plugin {
       },
     });
 
-    this.route<MkdirBody>(router, {
+    this.route(router, {
       name: "mkdir",
       method: "post",
       path: "/:volumeKey/mkdir",

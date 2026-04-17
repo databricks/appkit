@@ -527,24 +527,87 @@ AuthenticationError in production when no user header is present.
 
 ### route()
 
+#### Call Signature
+
 ```ts
-protected route<TBody>(router: Router, config: RouteConfig<TBody>): void;
+protected route<TSchema>(router: Router, config: RouteConfig<InferOutput<TSchema>> & {
+  body: TSchema;
+}): void;
 ```
 
-#### Type Parameters
+Bind a handler to a router path with optional `req.body` validation.
 
-| Type Parameter | Default type |
-| ------ | ------ |
-| `TBody` | `unknown` |
+Overloads exist because `RouteConfig<TBody>` carries two independent
+uses of `TBody` — `body: StandardSchemaV1<unknown, TBody>` and
+`handler: (req: IAppRequestWithBody<TBody>, …)`. Without overloads,
+plugin authors can pass a schema whose output diverges from the
+declared handler body type; the compiler stays quiet and runtime
+narrowing silently disagrees. The overloads below tie `TBody` to the
+schema's `InferOutput` when `body` is present, so the handler always
+sees the schema's real output type. When `body` is absent, `TBody`
+resolves to `unknown` so handlers must narrow before use.
 
-#### Parameters
+Note: `RouteConfig<TBody = any>` default is load-bearing for backward
+compat with handlers typed as plain `express.Request`. DO NOT "fix"
+it to `unknown` — cascades into mass typecheck breakage.
+
+If you're confused why this needs overloads: TypeScript cannot otherwise
+enforce that `TBody` equals `StandardSchemaV1.InferOutput<typeof body>`
+when both are separate type parameters on the same function.
+
+##### Type Parameters
+
+| Type Parameter |
+| ------ |
+| `TSchema` *extends* `StandardSchemaV1`\<`unknown`, `any`\> |
+
+##### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
 | `router` | `Router` |
-| `config` | `RouteConfig`\<`TBody`\> |
+| `config` | `RouteConfig`\<`InferOutput`\<`TSchema`\>\> & \{ `body`: `TSchema`; \} |
 
-#### Returns
+##### Returns
+
+`void`
+
+#### Call Signature
+
+```ts
+protected route(router: Router, config: Omit<RouteConfig<unknown>, "body"> & {
+  body?: undefined;
+}): void;
+```
+
+Bind a handler to a router path with optional `req.body` validation.
+
+Overloads exist because `RouteConfig<TBody>` carries two independent
+uses of `TBody` — `body: StandardSchemaV1<unknown, TBody>` and
+`handler: (req: IAppRequestWithBody<TBody>, …)`. Without overloads,
+plugin authors can pass a schema whose output diverges from the
+declared handler body type; the compiler stays quiet and runtime
+narrowing silently disagrees. The overloads below tie `TBody` to the
+schema's `InferOutput` when `body` is present, so the handler always
+sees the schema's real output type. When `body` is absent, `TBody`
+resolves to `unknown` so handlers must narrow before use.
+
+Note: `RouteConfig<TBody = any>` default is load-bearing for backward
+compat with handlers typed as plain `express.Request`. DO NOT "fix"
+it to `unknown` — cascades into mass typecheck breakage.
+
+If you're confused why this needs overloads: TypeScript cannot otherwise
+enforce that `TBody` equals `StandardSchemaV1.InferOutput<typeof body>`
+when both are separate type parameters on the same function.
+
+##### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `router` | `Router` |
+| `config` | `Omit`\<`RouteConfig`\<`unknown`\>, `"body"`\> & \{ `body?`: `undefined`; \} |
+
+##### Returns
 
 `void`
 
