@@ -25,6 +25,7 @@ import {
 import {
   FILES_BULK_DOWNLOAD_DEFAULTS,
   FILES_BULK_UPLOAD_DEFAULTS,
+  FILES_DEFAULT_MAX_BULK_FILES,
   FILES_DOWNLOAD_DEFAULTS,
   FILES_MAX_UPLOAD_SIZE,
   FILES_READ_DEFAULTS,
@@ -452,6 +453,7 @@ export class FilesPlugin extends Plugin {
     if (path.length > 4096)
       return `path exceeds maximum length of 4096 characters (got ${path.length})`;
     if (path.includes("\0")) return "path must not contain null bytes";
+    if (/[\r\n]/.test(path)) return "path must not contain line breaks";
     return true;
   }
 
@@ -1008,20 +1010,41 @@ export class FilesPlugin extends Plugin {
    */
   private _parseMultipartFiles(
     req: express.Request,
+    maxUploadSize: number,
   ): Promise<{ path: string; content: Buffer }[]> {
     return new Promise((resolve, reject) => {
       const files: { path: string; content: Buffer }[] = [];
-      const busboy = Busboy({ headers: req.headers });
+      const busboy = Busboy({
+        headers: req.headers,
+        limits: {
+          files: FILES_DEFAULT_MAX_BULK_FILES,
+          fileSize: maxUploadSize,
+        },
+      });
 
       busboy.on("file", (fieldname, stream) => {
         const chunks: Buffer[] = [];
         stream.on("data", (chunk: Buffer) => chunks.push(chunk));
         stream.on("end", () => {
+          if (stream.truncated) {
+            logger.warn(
+              "File %s exceeded size limit and was truncated — skipping",
+              fieldname,
+            );
+            return;
+          }
           files.push({ path: fieldname, content: Buffer.concat(chunks) });
         });
         stream.on("error", reject);
       });
 
+      busboy.on("filesLimit", () => {
+        reject(
+          new Error(
+            `Request exceeds the maximum of ${FILES_DEFAULT_MAX_BULK_FILES} files per bulk upload`,
+          ),
+        );
+      });
       busboy.on("finish", () => resolve(files));
       busboy.on("error", reject);
 
@@ -1045,7 +1068,9 @@ export class FilesPlugin extends Plugin {
     }
 
     try {
-      const files = await this._parseMultipartFiles(req);
+      const maxUploadSize =
+        this.volumeConfigs[volumeKey].maxUploadSize ?? FILES_MAX_UPLOAD_SIZE;
+      const files = await this._parseMultipartFiles(req, maxUploadSize);
       if (files.length === 0) {
         res.status(400).json({
           error: "No files provided in multipart body",
@@ -1059,7 +1084,7 @@ export class FilesPlugin extends Plugin {
         const valid = this._isValidPath(file.path);
         if (valid !== true) {
           res.status(400).json({
-            error: `Invalid path "${file.path}": ${valid}`,
+            error: `Invalid path "${file.path.slice(0, 100)}": ${valid}`,
             plugin: this.name,
           });
           return;
@@ -1068,9 +1093,6 @@ export class FilesPlugin extends Plugin {
 
       const concurrency = resolveConcurrency(
         this.volumeConfigs[volumeKey].concurrency,
-        req.body?.concurrency
-          ? { concurrency: Number(req.body.concurrency) }
-          : undefined,
       );
 
       const userPlugin = this.asUser(req);
@@ -1117,22 +1139,31 @@ export class FilesPlugin extends Plugin {
     }
 
     const rawFileCount = req.headers["x-file-count"];
-    if (!rawFileCount || Number.isNaN(Number(rawFileCount))) {
+    const fileCount = Number(rawFileCount);
+    if (!Number.isInteger(fileCount) || fileCount < 1) {
       res.status(400).json({
-        error: "X-File-Count header is required and must be a number",
+        error: "X-File-Count header is required and must be a positive integer",
         plugin: this.name,
       });
       return;
     }
-    const fileCount = Number(rawFileCount);
+    if (fileCount > FILES_DEFAULT_MAX_BULK_FILES) {
+      res.status(400).json({
+        error: `X-File-Count exceeds maximum of ${FILES_DEFAULT_MAX_BULK_FILES} files per bulk operation`,
+        plugin: this.name,
+      });
+      return;
+    }
 
     try {
       const concurrency = resolveConcurrency(
         this.volumeConfigs[volumeKey].concurrency,
       );
 
+      const maxUploadSize =
+        this.volumeConfigs[volumeKey].maxUploadSize ?? FILES_MAX_UPLOAD_SIZE;
       // Create an async iterable that yields files as busboy parses them
-      const fileStream = this._createMultipartFileStream(req);
+      const fileStream = this._createMultipartFileStream(req, maxUploadSize);
 
       const userPlugin = this.asUser(req);
       const settings: PluginExecutionSettings = {
@@ -1169,8 +1200,15 @@ export class FilesPlugin extends Plugin {
    */
   private _createMultipartFileStream(
     req: express.Request,
+    maxUploadSize: number,
   ): AsyncIterable<{ path: string; content: Buffer }> {
-    const busboy = Busboy({ headers: req.headers });
+    const busboy = Busboy({
+      headers: req.headers,
+      limits: {
+        files: FILES_DEFAULT_MAX_BULK_FILES,
+        fileSize: maxUploadSize,
+      },
+    });
     const queue: Array<{
       resolve: (
         value: IteratorResult<{ path: string; content: Buffer }>,
@@ -1189,14 +1227,34 @@ export class FilesPlugin extends Plugin {
     };
 
     busboy.on("file", (fieldname, stream) => {
+      const valid = this._isValidPath(fieldname);
+      if (valid !== true) {
+        logger.warn("Skipping file with invalid path: %s", valid);
+        stream.resume(); // drain and skip
+        return;
+      }
       const chunks: Buffer[] = [];
       stream.on("data", (chunk: Buffer) => chunks.push(chunk));
       stream.on("end", () => {
+        if (stream.truncated) {
+          logger.warn(
+            "File %s exceeded size limit and was truncated — skipping",
+            fieldname,
+          );
+          return;
+        }
         push({
           value: { path: fieldname, content: Buffer.concat(chunks) },
           done: false,
         });
       });
+    });
+
+    busboy.on("filesLimit", () => {
+      logger.warn(
+        "Streaming upload hit the %d-file limit — excess files will be ignored",
+        FILES_DEFAULT_MAX_BULK_FILES,
+      );
     });
 
     busboy.on("finish", () => {
@@ -1250,6 +1308,14 @@ export class FilesPlugin extends Plugin {
       return;
     }
 
+    if (paths.length > FILES_DEFAULT_MAX_BULK_FILES) {
+      res.status(400).json({
+        error: `Maximum ${FILES_DEFAULT_MAX_BULK_FILES} files per bulk download`,
+        plugin: this.name,
+      });
+      return;
+    }
+
     // Validate all paths
     for (const filePath of paths) {
       if (typeof filePath !== "string") {
@@ -1262,7 +1328,7 @@ export class FilesPlugin extends Plugin {
       const valid = this._isValidPath(filePath);
       if (valid !== true) {
         res.status(400).json({
-          error: `Invalid path "${filePath}": ${valid}`,
+          error: `Invalid path: ${valid}`,
           plugin: this.name,
         });
         return;
@@ -1279,15 +1345,21 @@ export class FilesPlugin extends Plugin {
         default: FILES_BULK_DOWNLOAD_DEFAULTS,
       };
 
+      const boundary = `----appkit-bulk-download-${Date.now()}`;
+
       const result = await userPlugin.execute(async () => {
         this.warnIfNoUserContext(volumeKey, `bulkDownload`);
 
-        // Collect all files, then write multipart response
-        const items: Array<{
+        res.setHeader("Content-Type", `multipart/mixed; boundary=${boundary}`);
+
+        // Stream each part as the generator yields it — only metadata is retained
+        const summary: Array<{
           path: string;
-          content: Buffer | null;
+          success: boolean;
           error?: string;
+          bytesWritten?: number;
         }> = [];
+
         const stream = executeBulkDownload(
           connector,
           getWorkspaceClient(),
@@ -1296,50 +1368,48 @@ export class FilesPlugin extends Plugin {
         );
 
         for await (const item of stream) {
-          items.push(item);
+          if (item.content) {
+            const fileName = item.path.split("/").pop() ?? "file";
+            res.write(`--${boundary}\r\n`);
+            res.write(
+              `Content-Disposition: attachment; filename="${sanitizeFilename(fileName)}"\r\n`,
+            );
+            res.write("Content-Type: application/octet-stream\r\n");
+            res.write(`Content-Length: ${item.content.length}\r\n`);
+            res.write(`X-File-Path: ${sanitizeFilename(item.path)}\r\n`);
+            res.write("\r\n");
+            res.write(item.content);
+            res.write("\r\n");
+          }
+          summary.push({
+            path: item.path,
+            success: item.content !== null,
+            error: item.error,
+            bytesWritten: item.content?.length,
+          });
         }
-        return items;
+
+        // Trailing summary part with BulkResult[] for all files
+        res.write(`--${boundary}\r\n`);
+        res.write("Content-Type: application/json\r\n");
+        res.write('Content-Disposition: inline; name="summary"\r\n');
+        res.write("\r\n");
+        res.write(JSON.stringify(summary));
+        res.write("\r\n");
+        res.write(`--${boundary}--\r\n`);
+        res.end();
+
+        return summary;
       }, settings);
 
       if (!result.ok) {
-        this._sendStatusError(res, result.status);
+        if (!res.headersSent) {
+          this._sendStatusError(res, result.status);
+        } else {
+          res.end();
+        }
         return;
       }
-
-      const boundary = `----appkit-bulk-download-${Date.now()}`;
-      res.setHeader("Content-Type", `multipart/mixed; boundary=${boundary}`);
-
-      for (const item of result.data) {
-        if (item.content) {
-          const fileName = item.path.split("/").pop() ?? "file";
-          res.write(`--${boundary}\r\n`);
-          res.write(
-            `Content-Disposition: attachment; filename="${sanitizeFilename(fileName)}"\r\n`,
-          );
-          res.write("Content-Type: application/octet-stream\r\n");
-          res.write(`Content-Length: ${item.content.length}\r\n`);
-          res.write(`X-File-Path: ${item.path}\r\n`);
-          res.write("\r\n");
-          res.write(item.content);
-          res.write("\r\n");
-        }
-      }
-
-      // Trailing summary part with BulkResult[] for all files
-      const summary = result.data.map((item) => ({
-        path: item.path,
-        success: item.content !== null,
-        error: item.error,
-        bytesWritten: item.content?.length,
-      }));
-      res.write(`--${boundary}\r\n`);
-      res.write("Content-Type: application/json\r\n");
-      res.write('Content-Disposition: inline; name="summary"\r\n');
-      res.write("\r\n");
-      res.write(JSON.stringify(summary));
-      res.write("\r\n");
-      res.write(`--${boundary}--\r\n`);
-      res.end();
     } catch (error) {
       if (!res.headersSent) {
         this._handleApiError(res, error, "Bulk download failed");

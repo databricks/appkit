@@ -93,10 +93,9 @@ function parseParts(
     const contentLength = clMatch ? Number.parseInt(clMatch[1], 10) : null;
 
     if (isAttachment && contentLength !== null) {
-      const body = u8.subarray(bodyStart, bodyStart + contentLength);
       attachments.push({
         filename: parseFilename(headersText),
-        body: new Uint8Array(body),
+        body: u8.subarray(bodyStart, bodyStart + contentLength),
       });
       pos = bodyStart + contentLength;
     } else if (isSummary) {
@@ -152,6 +151,10 @@ function triggerDownload(blob: Blob, filename: string): void {
 /**
  * Parses the bulk-download response, saves each attachment via object URL download,
  * and returns the summary part (or an empty array if missing).
+ *
+ * NOTE: This loads the entire response into an ArrayBuffer before parsing.
+ * For very large bulk downloads, consider a streaming approach using
+ * `response.body.getReader()` to parse parts incrementally.
  */
 export async function saveBulkDownloadResponse(
   response: Response,
@@ -173,9 +176,7 @@ export async function saveBulkDownloadResponse(
   const { attachments, summary } = parseParts(buffer, boundary);
 
   for (const { filename, body } of attachments) {
-    const blob = new Blob([body.slice()], {
-      type: "application/octet-stream",
-    });
+    const blob = new Blob([body], { type: "application/octet-stream" });
     triggerDownload(blob, filename);
   }
 

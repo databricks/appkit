@@ -69,6 +69,18 @@ export const FILES_MAX_UPLOAD_SIZE = 5 * 1024 * 1024 * 1024; // 5 GB
 export const FILES_DEFAULT_CONCURRENCY = 8;
 
 /**
+ * Maximum allowed concurrency for bulk operations.
+ * Prevents user-supplied values from firing unbounded parallel requests.
+ */
+export const FILES_MAX_BULK_CONCURRENCY = 32;
+
+/**
+ * Default maximum number of files in a single bulk operation.
+ * Prevents memory exhaustion from unbounded bulk requests.
+ */
+export const FILES_DEFAULT_MAX_BULK_FILES = 100;
+
+/**
  * Execution defaults for bulk upload operations.
  * No cache, no interceptor-level retry (retries happen per-file internally).
  * Extended timeout (10 min) to accommodate large batches.

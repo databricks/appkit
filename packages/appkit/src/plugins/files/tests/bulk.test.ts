@@ -175,4 +175,24 @@ describe("resolveConcurrency", () => {
   test("per-call override takes precedence over volume config", () => {
     expect(resolveConcurrency(4, { concurrency: 2 })).toBe(2);
   });
+
+  test("clamps to maximum concurrency", () => {
+    expect(resolveConcurrency(undefined, { concurrency: 100 })).toBe(32);
+  });
+
+  test("clamps zero to minimum of 1", () => {
+    expect(resolveConcurrency(0)).toBe(1);
+  });
+
+  test("clamps negative to minimum of 1", () => {
+    expect(resolveConcurrency(undefined, { concurrency: -5 })).toBe(1);
+  });
+
+  test("falls back to default for NaN", () => {
+    expect(resolveConcurrency(undefined, { concurrency: NaN })).toBe(8);
+  });
+
+  test("falls back to default for Infinity", () => {
+    expect(resolveConcurrency(undefined, { concurrency: Infinity })).toBe(8);
+  });
 });

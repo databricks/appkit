@@ -1,7 +1,10 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { FilesConnector } from "../../connectors/files";
 import { createLogger } from "../../logging/logger";
-import { FILES_DEFAULT_CONCURRENCY } from "./defaults";
+import {
+  FILES_DEFAULT_CONCURRENCY,
+  FILES_MAX_BULK_CONCURRENCY,
+} from "./defaults";
 import type {
   BulkDownloadItem,
   BulkOperationOptions,
@@ -61,17 +64,47 @@ export async function retryWithBackoff<T>(
 /**
  * Resolves the effective concurrency for a bulk operation.
  * Per-call override > volume config > default.
+ * Clamped to [1, FILES_MAX_BULK_CONCURRENCY] to prevent unbounded parallelism.
  */
 export function resolveConcurrency(
   volumeConcurrency: number | undefined,
   options?: BulkOperationOptions,
 ): number {
-  return options?.concurrency ?? volumeConcurrency ?? FILES_DEFAULT_CONCURRENCY;
+  const raw =
+    options?.concurrency ?? volumeConcurrency ?? FILES_DEFAULT_CONCURRENCY;
+  if (!Number.isFinite(raw)) return FILES_DEFAULT_CONCURRENCY;
+  return Math.max(1, Math.min(raw, FILES_MAX_BULK_CONCURRENCY));
+}
+
+/**
+ * Uploads a single file with retry and returns a BulkResult.
+ * Shared by both batch and streaming upload paths so bug fixes apply to both.
+ */
+async function uploadFile(
+  connector: FilesConnector,
+  client: WorkspaceClient,
+  file: { path: string; content: Buffer },
+): Promise<BulkResult> {
+  try {
+    await retryWithBackoff(() =>
+      connector.upload(client, file.path, file.content),
+    );
+    return {
+      path: file.path,
+      success: true,
+      bytesWritten: file.content.length,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error("Bulk upload failed for %s: %s", file.path, message);
+    return { path: file.path, success: false, error: message };
+  }
 }
 
 /**
  * Upload multiple files to a volume with concurrency control and per-file retry.
  * Partial failures do not abort the batch.
+ * Results are returned in the same order as the input files.
  */
 export async function executeBulkUpload(
   connector: FilesConnector,
@@ -80,30 +113,12 @@ export async function executeBulkUpload(
   concurrency: number,
 ): Promise<BulkResult[]> {
   const limit = createConcurrencyLimiter(concurrency);
-  const results: BulkResult[] = [];
+  const results: BulkResult[] = new Array(files.length);
 
   await Promise.all(
-    files.map((file) =>
+    files.map((file, i) =>
       limit(async () => {
-        try {
-          await retryWithBackoff(() =>
-            connector.upload(client, file.path, file.content),
-          );
-          results.push({
-            path: file.path,
-            success: true,
-            bytesWritten: file.content.length,
-          });
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : String(error);
-          logger.error("Bulk upload failed for %s: %s", file.path, message);
-          results.push({
-            path: file.path,
-            success: false,
-            error: message,
-          });
-        }
+        results[i] = await uploadFile(connector, client, file);
       }),
     ),
   );
@@ -114,6 +129,7 @@ export async function executeBulkUpload(
 /**
  * Upload files from an async iterable with concurrency control.
  * Tracks received file count against the declared total.
+ * Results are returned in submission order (the order files arrive from the stream).
  */
 export async function executeBulkUploadStream(
   connector: FilesConnector,
@@ -128,6 +144,7 @@ export async function executeBulkUploadStream(
   let received = 0;
 
   for await (const file of stream) {
+    const idx = received;
     received++;
     if (received > fileCount) {
       logger.warn(
@@ -139,29 +156,7 @@ export async function executeBulkUploadStream(
 
     pending.push(
       limit(async () => {
-        try {
-          await retryWithBackoff(() =>
-            connector.upload(client, file.path, file.content),
-          );
-          results.push({
-            path: file.path,
-            success: true,
-            bytesWritten: file.content.length,
-          });
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : String(error);
-          logger.error(
-            "Bulk upload stream failed for %s: %s",
-            file.path,
-            message,
-          );
-          results.push({
-            path: file.path,
-            success: false,
-            error: message,
-          });
-        }
+        results[idx] = await uploadFile(connector, client, file);
       }),
     );
   }
