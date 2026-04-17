@@ -1,5 +1,10 @@
 import type express from "express";
-import type { IAppRouter, PluginExecutionSettings } from "shared";
+import type {
+  IAppRequestWithBody,
+  IAppRouter,
+  PluginExecutionSettings,
+} from "shared";
+import { z } from "zod";
 import { VectorSearchConnector } from "../../connectors/vector-search/client";
 import type { VsRawResponse } from "../../connectors/vector-search/types";
 import { getWorkspaceClient } from "../../context";
@@ -14,6 +19,47 @@ import type {
   SearchRequest,
   SearchResponse,
 } from "./types";
+
+/**
+ * Request body for POST /:alias/query. Validated via Standard Schema
+ * (Zod natively implements `~standard` from v3.24+). The schema expresses
+ * both the shape of a Vector Search query and a cross-field refinement:
+ * at least one of `queryText` or `queryVector` must be present. The
+ * refinement surfaces its issue on the `queryText` path so clients get a
+ * single, stable location to render the error.
+ */
+const searchFiltersSchema = z.record(
+  z.string(),
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.array(z.union([z.string(), z.number()])),
+  ]),
+);
+
+const queryBodySchema = z
+  .object({
+    queryText: z.string().optional(),
+    queryVector: z.array(z.number()).optional(),
+    columns: z.array(z.string()).optional(),
+    numResults: z.number().optional(),
+    queryType: z.enum(["ann", "hybrid", "full_text"]).optional(),
+    filters: searchFiltersSchema.optional(),
+    reranker: z.boolean().optional(),
+  })
+  .refine((value) => Boolean(value.queryText) || Boolean(value.queryVector), {
+    message: "queryText or queryVector is required",
+    path: ["queryText"],
+  });
+
+type QueryBody = z.infer<typeof queryBodySchema>;
+
+const nextPageBodySchema = z.object({
+  pageToken: z.string().min(1),
+});
+
+type NextPageBody = z.infer<typeof nextPageBodySchema>;
 
 const logger = createLogger("vector-search");
 
@@ -67,11 +113,15 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
   }
 
   injectRoutes(router: IAppRouter) {
-    this.route(router, {
+    this.route<QueryBody>(router, {
       name: "query",
       method: "post",
       path: "/:alias/query",
-      handler: async (req: express.Request, res: express.Response) => {
+      body: queryBodySchema,
+      handler: async (
+        req: IAppRequestWithBody<QueryBody>,
+        res: express.Response,
+      ) => {
         const indexConfig = this._resolveIndex(req.params.alias);
         if (!indexConfig) {
           res.status(404).json({
@@ -81,14 +131,9 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
           return;
         }
 
-        const body: SearchRequest = req.body;
-        if (!body.queryText && !body.queryVector) {
-          res.status(400).json({
-            error: "queryText or queryVector is required",
-            plugin: this.name,
-          });
-          return;
-        }
+        // Body validated+narrowed by the framework; cross-field refinement
+        // guarantees at least one of queryText/queryVector is present.
+        const body = req.body;
 
         try {
           const prepared = await this._prepareQuery(body, indexConfig);
@@ -127,11 +172,15 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
       },
     });
 
-    this.route(router, {
+    this.route<NextPageBody>(router, {
       name: "queryNextPage",
       method: "post",
       path: "/:alias/next-page",
-      handler: async (req: express.Request, res: express.Response) => {
+      body: nextPageBodySchema,
+      handler: async (
+        req: IAppRequestWithBody<NextPageBody>,
+        res: express.Response,
+      ) => {
         const indexConfig = this._resolveIndex(req.params.alias);
         if (!indexConfig) {
           res.status(404).json({
@@ -157,14 +206,8 @@ export class VectorSearchPlugin extends Plugin<IVectorSearchConfig> {
           return;
         }
 
+        // Body validated+narrowed by the framework; pageToken is guaranteed non-empty.
         const { pageToken } = req.body;
-        if (!pageToken) {
-          res.status(400).json({
-            error: "pageToken is required",
-            plugin: this.name,
-          });
-          return;
-        }
 
         try {
           const plugin =

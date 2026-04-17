@@ -1,3 +1,8 @@
+import {
+  createMockRequest,
+  createMockResponse,
+  createMockRouter,
+} from "@tools/test-helpers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../context", () => ({
@@ -325,6 +330,181 @@ describe("VectorSearchPlugin", () => {
         },
       });
       await expect(plugin.shutdown()).resolves.not.toThrow();
+    });
+  });
+
+  describe("routes — body validation", () => {
+    function buildPlugin() {
+      const plugin = new VectorSearchPlugin({
+        indexes: {
+          products: {
+            indexName: "cat.sch.products",
+            columns: ["id", "title"],
+            queryType: "hybrid",
+            pagination: true,
+            endpointName: "ep-1",
+          },
+        },
+      });
+      return plugin;
+    }
+
+    describe("POST /:alias/query", () => {
+      it("returns canonical 400 when neither queryText nor queryVector is present", async () => {
+        const plugin = buildPlugin();
+        await plugin.setup();
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+
+        const handler = getHandler("POST", "/:alias/query");
+        const mockReq = createMockRequest({
+          params: { alias: "products" },
+          body: {},
+        });
+        const mockRes = createMockResponse();
+
+        await handler(mockReq, mockRes);
+
+        expect(mockRes.status).toHaveBeenCalledWith(400);
+        expect(mockRes.json).toHaveBeenCalledWith(
+          expect.objectContaining({
+            error: "Invalid request body",
+            code: "VALIDATION_ERROR",
+            requestId: expect.any(String),
+            issues: expect.arrayContaining([
+              expect.objectContaining({
+                path: expect.arrayContaining(["queryText"]),
+                message: "queryText or queryVector is required",
+              }),
+            ]),
+          }),
+        );
+        // Handler body must not have reached the VS connector.
+        expect(mockRequest).not.toHaveBeenCalled();
+      });
+
+      it("passes validation and reaches the connector with queryText only", async () => {
+        const plugin = buildPlugin();
+        await plugin.setup();
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+
+        const handler = getHandler("POST", "/:alias/query");
+        const mockReq = createMockRequest({
+          params: { alias: "products" },
+          body: { queryText: "machine learning" },
+        });
+        const mockRes = createMockResponse();
+
+        await handler(mockReq, mockRes);
+
+        expect(mockRes.status).not.toHaveBeenCalledWith(400);
+        expect(mockRequest).toHaveBeenCalledTimes(1);
+        const callBody = mockRequest.mock.calls[0][0].payload;
+        expect(callBody.query_text).toBe("machine learning");
+        expect(callBody.query_vector).toBeUndefined();
+      });
+
+      it("passes validation and reaches the connector with queryVector only", async () => {
+        const plugin = buildPlugin();
+        await plugin.setup();
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+
+        const handler = getHandler("POST", "/:alias/query");
+        const mockReq = createMockRequest({
+          params: { alias: "products" },
+          body: { queryVector: [0.1, 0.2, 0.3] },
+        });
+        const mockRes = createMockResponse();
+
+        await handler(mockReq, mockRes);
+
+        expect(mockRes.status).not.toHaveBeenCalledWith(400);
+        expect(mockRequest).toHaveBeenCalledTimes(1);
+        const callBody = mockRequest.mock.calls[0][0].payload;
+        expect(callBody.query_vector).toEqual([0.1, 0.2, 0.3]);
+        expect(callBody.query_text).toBeUndefined();
+      });
+    });
+
+    describe("POST /:alias/next-page", () => {
+      it("returns canonical 400 when pageToken is missing", async () => {
+        const plugin = buildPlugin();
+        await plugin.setup();
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+
+        const handler = getHandler("POST", "/:alias/next-page");
+        const mockReq = createMockRequest({
+          params: { alias: "products" },
+          body: {},
+        });
+        const mockRes = createMockResponse();
+
+        await handler(mockReq, mockRes);
+
+        expect(mockRes.status).toHaveBeenCalledWith(400);
+        expect(mockRes.json).toHaveBeenCalledWith(
+          expect.objectContaining({
+            error: "Invalid request body",
+            code: "VALIDATION_ERROR",
+            requestId: expect.any(String),
+            issues: expect.arrayContaining([
+              expect.objectContaining({
+                path: expect.arrayContaining(["pageToken"]),
+              }),
+            ]),
+          }),
+        );
+        expect(mockRequest).not.toHaveBeenCalled();
+      });
+
+      it("returns canonical 400 when pageToken is empty string", async () => {
+        const plugin = buildPlugin();
+        await plugin.setup();
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+
+        const handler = getHandler("POST", "/:alias/next-page");
+        const mockReq = createMockRequest({
+          params: { alias: "products" },
+          body: { pageToken: "" },
+        });
+        const mockRes = createMockResponse();
+
+        await handler(mockReq, mockRes);
+
+        expect(mockRes.status).toHaveBeenCalledWith(400);
+        expect(mockRes.json).toHaveBeenCalledWith(
+          expect.objectContaining({
+            error: "Invalid request body",
+            code: "VALIDATION_ERROR",
+          }),
+        );
+        expect(mockRequest).not.toHaveBeenCalled();
+      });
+
+      it("passes validation and reaches the connector with a valid pageToken", async () => {
+        const plugin = buildPlugin();
+        await plugin.setup();
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+
+        const handler = getHandler("POST", "/:alias/next-page");
+        const mockReq = createMockRequest({
+          params: { alias: "products" },
+          body: { pageToken: "token-abc" },
+        });
+        const mockRes = createMockResponse();
+
+        await handler(mockReq, mockRes);
+
+        expect(mockRes.status).not.toHaveBeenCalledWith(400);
+        expect(mockRequest).toHaveBeenCalledTimes(1);
+        const callBody = mockRequest.mock.calls[0][0].payload;
+        expect(callBody.page_token).toBe("token-abc");
+      });
     });
   });
 });
