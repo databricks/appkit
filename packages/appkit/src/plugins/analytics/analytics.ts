@@ -1,11 +1,13 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type express from "express";
 import type {
+  IAppRequestWithBody,
   IAppRouter,
   PluginExecuteConfig,
   SQLTypeMarker,
   StreamExecutionSettings,
 } from "shared";
+import { z } from "zod";
 import { SQLWarehouseConnector } from "../../connectors";
 import { getWarehouseId, getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging/logger";
@@ -14,11 +16,22 @@ import type { PluginManifest } from "../../registry";
 import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import { QueryProcessor } from "./query";
-import type {
-  AnalyticsQueryResponse,
-  IAnalyticsConfig,
-  IAnalyticsQueryRequest,
-} from "./types";
+import type { IAnalyticsConfig } from "./types";
+
+/**
+ * Request body for POST /query/:query_key. Validated via Standard Schema
+ * (Zod natively implements `~standard` from v3.24+). The `format` field
+ * defaults to "JSON" via the schema so the handler sees a fully-populated
+ * body with no manual fallback needed. `parameters` accepts any value
+ * shape — per-query parameter schemas are the application's concern, not
+ * the plugin's.
+ */
+const queryBodySchema = z.object({
+  parameters: z.record(z.string(), z.unknown()).optional(),
+  format: z.enum(["JSON", "ARROW"]).default("JSON"),
+});
+
+type QueryBody = z.infer<typeof queryBodySchema>;
 
 const logger = createLogger("analytics");
 
@@ -55,11 +68,12 @@ export class AnalyticsPlugin extends Plugin {
       },
     });
 
-    this.route<AnalyticsQueryResponse>(router, {
+    this.route<QueryBody>(router, {
       name: "query",
       method: "post",
       path: "/query/:query_key",
-      handler: async (req: express.Request, res: express.Response) => {
+      body: queryBodySchema,
+      handler: async (req, res) => {
         await this._handleQueryRoute(req, res);
       },
     });
@@ -111,11 +125,13 @@ export class AnalyticsPlugin extends Plugin {
    * When called via asUser(req), uses the user's Databricks credentials.
    */
   async _handleQueryRoute(
-    req: express.Request,
+    req: IAppRequestWithBody<QueryBody>,
     res: express.Response,
   ): Promise<void> {
     const { query_key } = req.params;
-    const { parameters, format = "JSON" } = req.body as IAnalyticsQueryRequest;
+    // Body is validated+narrowed by the framework before this runs;
+    // `format` defaults to "JSON" via the schema.
+    const { parameters, format } = req.body;
 
     // Request-scoped logging with WideEvent tracking
     logger.debug(req, "Executing query: %s (format=%s)", query_key, format);
@@ -187,9 +203,11 @@ export class AnalyticsPlugin extends Plugin {
     await executor.executeStream(
       res,
       async (signal) => {
+        // The body schema validates shape only; per-value SQL type checks
+        // happen inside QueryProcessor via isSQLTypeMarker.
         const processedParams = await this.queryProcessor.processQueryParams(
           query,
-          parameters,
+          parameters as Record<string, SQLTypeMarker | null | undefined>,
         );
 
         const result = await executor.query(

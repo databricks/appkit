@@ -127,6 +127,101 @@ describe("Analytics Plugin", () => {
       });
     });
 
+    test("/query/:query_key should return canonical 400 when format is invalid", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      const executeMock = vi.fn();
+      (plugin as any).SQLClient.executeStatement = executeMock;
+      (plugin as any).app.getAppQuery = vi.fn();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { format: 123 },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: "Invalid request body",
+          code: "VALIDATION_ERROR",
+          requestId: expect.any(String),
+        }),
+      );
+      // Handler body (SQL execution) should never be reached.
+      expect(executeMock).not.toHaveBeenCalled();
+      expect((plugin as any).app.getAppQuery).not.toHaveBeenCalled();
+    });
+
+    test("/query/:query_key should return canonical 400 when format is unknown string", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      const executeMock = vi.fn();
+      (plugin as any).SQLClient.executeStatement = executeMock;
+      (plugin as any).app.getAppQuery = vi.fn();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { format: "PARQUET" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: "Invalid request body",
+          code: "VALIDATION_ERROR",
+        }),
+      );
+      expect(executeMock).not.toHaveBeenCalled();
+    });
+
+    test("/query/:query_key should apply format default of JSON when omitted", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT 1",
+        isAsUser: false,
+      });
+
+      const executeMock = vi.fn().mockResolvedValue({
+        result: { data: [{ id: 1 }] },
+      });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      // No `format` field — schema should default it to "JSON"
+      // (i.e. no formatParameters are passed to executeStatement).
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {} },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(executeMock).toHaveBeenCalledTimes(1);
+      // JSON format should NOT set a disposition/format ARROW_STREAM.
+      const call = executeMock.mock.calls[0][1];
+      expect(call).not.toHaveProperty("disposition");
+      expect(call).not.toHaveProperty("format");
+    });
+
     test("/query/:query_key should execute as service principal for .sql files (isAsUser: false)", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
