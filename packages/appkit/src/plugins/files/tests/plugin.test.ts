@@ -1,4 +1,10 @@
-import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
+import {
+  createMockRequest,
+  createMockResponse,
+  createMockRouter,
+  mockServiceContext,
+  setupDatabricksEnv,
+} from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ServiceContext } from "../../../context/service-context";
 import { AuthenticationError } from "../../../errors";
@@ -1006,6 +1012,160 @@ describe("FilesPlugin", () => {
 
       await expect(reader.read()).rejects.toThrow(
         /exceeds maximum allowed size/,
+      );
+    });
+  });
+
+  describe("POST /:volumeKey/mkdir — body validation", () => {
+    test("returns canonical 400 when path is missing", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const { router, getHandler } = createMockRouter();
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/:volumeKey/mkdir");
+      const mockReq = createMockRequest({
+        params: { volumeKey: "uploads" },
+        body: {},
+        headers: {
+          "x-forwarded-access-token": "test-token",
+          "x-forwarded-user": "test-user",
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: "Invalid request body",
+          code: "VALIDATION_ERROR",
+          requestId: expect.any(String),
+          issues: expect.arrayContaining([
+            expect.objectContaining({
+              path: expect.arrayContaining(["path"]),
+            }),
+          ]),
+        }),
+      );
+      // Handler body must not have reached the SDK.
+      expect(mockClient.files.createDirectory).not.toHaveBeenCalled();
+    });
+
+    test("returns canonical 400 when path is empty string", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const { router, getHandler } = createMockRouter();
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/:volumeKey/mkdir");
+      const mockReq = createMockRequest({
+        params: { volumeKey: "uploads" },
+        body: { path: "" },
+        headers: {
+          "x-forwarded-access-token": "test-token",
+          "x-forwarded-user": "test-user",
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: "Invalid request body",
+          code: "VALIDATION_ERROR",
+        }),
+      );
+      expect(mockClient.files.createDirectory).not.toHaveBeenCalled();
+    });
+
+    test("returns canonical 400 when path exceeds 4096 characters", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const { router, getHandler } = createMockRouter();
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/:volumeKey/mkdir");
+      const mockReq = createMockRequest({
+        params: { volumeKey: "uploads" },
+        body: { path: "a".repeat(4097) },
+        headers: {
+          "x-forwarded-access-token": "test-token",
+          "x-forwarded-user": "test-user",
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: "Invalid request body",
+          code: "VALIDATION_ERROR",
+        }),
+      );
+      expect(mockClient.files.createDirectory).not.toHaveBeenCalled();
+    });
+
+    test("returns canonical 400 when path contains a null byte", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const { router, getHandler } = createMockRouter();
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/:volumeKey/mkdir");
+      const mockReq = createMockRequest({
+        params: { volumeKey: "uploads" },
+        body: { path: "foo\u0000bar" },
+        headers: {
+          "x-forwarded-access-token": "test-token",
+          "x-forwarded-user": "test-user",
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: "Invalid request body",
+          code: "VALIDATION_ERROR",
+          issues: expect.arrayContaining([
+            expect.objectContaining({
+              path: expect.arrayContaining(["path"]),
+              message: "path must not contain null bytes",
+            }),
+          ]),
+        }),
+      );
+      expect(mockClient.files.createDirectory).not.toHaveBeenCalled();
+    });
+
+    test("passes validation and reaches the SDK with a valid path", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const { router, getHandler } = createMockRouter();
+      plugin.injectRoutes(router);
+
+      mockClient.files.createDirectory.mockResolvedValue(undefined);
+
+      const handler = getHandler("POST", "/:volumeKey/mkdir");
+      const mockReq = createMockRequest({
+        params: { volumeKey: "uploads" },
+        body: { path: "/Volumes/catalog/schema/uploads/new-dir" },
+        headers: {
+          "x-forwarded-access-token": "test-token",
+          "x-forwarded-user": "test-user",
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).not.toHaveBeenCalledWith(400);
+      expect(mockClient.files.createDirectory).toHaveBeenCalledTimes(1);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({ success: true }),
       );
     });
   });

@@ -2,7 +2,12 @@ import { STATUS_CODES } from "node:http";
 import { Readable } from "node:stream";
 import { ApiError } from "@databricks/sdk-experimental";
 import type express from "express";
-import type { IAppRouter, PluginExecutionSettings } from "shared";
+import type {
+  IAppRequestWithBody,
+  IAppRouter,
+  PluginExecutionSettings,
+} from "shared";
+import { z } from "zod";
 import {
   contentTypeFromPath,
   FilesConnector,
@@ -31,6 +36,27 @@ import type {
   VolumeConfig,
   VolumeHandle,
 } from "./types";
+
+/**
+ * Request body for POST /:volumeKey/mkdir. Validated via Standard Schema
+ * (Zod natively implements `~standard` from v3.24+). The schema mirrors the
+ * existing `_isValidPath` rules — non-empty, at most 4096 characters, and
+ * no null bytes — expressed as a `.refine()` so the issue surfaces on the
+ * `path` field for clients. `_isValidPath` itself stays in place for the
+ * GET routes that still read `req.query.path`; those migrate separately.
+ */
+const mkdirBodySchema = z.object({
+  path: z
+    .string()
+    .min(1)
+    .max(4096)
+    .refine((p) => !p.includes("\u0000"), {
+      message: "path must not contain null bytes",
+      path: ["path"],
+    }),
+});
+
+type MkdirBody = z.infer<typeof mkdirBodySchema>;
 
 const logger = createLogger("files");
 
@@ -304,11 +330,15 @@ export class FilesPlugin extends Plugin {
       },
     });
 
-    this.route(router, {
+    this.route<MkdirBody>(router, {
       name: "mkdir",
       method: "post",
       path: "/:volumeKey/mkdir",
-      handler: async (req: express.Request, res: express.Response) => {
+      body: mkdirBodySchema,
+      handler: async (
+        req: IAppRequestWithBody<MkdirBody>,
+        res: express.Response,
+      ) => {
         const { connector, volumeKey } = this._resolveVolume(req, res);
         if (!connector) return;
         await this._handleMkdir(req, res, connector, volumeKey);
@@ -820,18 +850,14 @@ export class FilesPlugin extends Plugin {
   }
 
   private async _handleMkdir(
-    req: express.Request,
+    req: IAppRequestWithBody<MkdirBody>,
     res: express.Response,
     connector: FilesConnector,
     volumeKey: string,
   ): Promise<void> {
-    const dirPath =
-      typeof req.body?.path === "string" ? req.body.path : undefined;
-    const valid = this._isValidPath(dirPath);
-    if (valid !== true) {
-      res.status(400).json({ error: valid, plugin: this.name });
-      return;
-    }
+    // Body validated+narrowed by the framework; `path` is guaranteed to be a
+    // non-empty, null-byte-free string at most 4096 characters long.
+    const dirPath = req.body.path;
 
     try {
       const userPlugin = this.asUser(req);
