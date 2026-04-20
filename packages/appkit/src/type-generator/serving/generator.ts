@@ -4,7 +4,11 @@ import { WorkspaceClient } from "@databricks/sdk-experimental";
 import pc from "picocolors";
 import { createLogger } from "../../logging/logger";
 import type { EndpointConfig } from "../../plugins/serving/types";
-import { removeOldGeneratedTypes } from "../migration";
+import {
+  migrateProjectConfig,
+  removeOldGeneratedTypes,
+  resolveProjectRoot,
+} from "../migration";
 import {
   CACHE_VERSION,
   hashSchema,
@@ -48,6 +52,7 @@ export async function generateServingTypes(
   options: GenerateServingTypesOptions,
 ): Promise<void> {
   const { outFile, noCache } = options;
+  const projectRoot = resolveProjectRoot(outFile);
 
   // Resolve endpoints: explicit > AST extraction from server file > env var fallback
   const endpoints =
@@ -89,8 +94,9 @@ export async function generateServingTypes(
   await fs.mkdir(path.dirname(outFile), { recursive: true });
   await fs.writeFile(outFile, output, "utf-8");
 
-  // One-time migration: remove old generated file from client/src/ to avoid duplicate module augmentation
-  await removeOldGeneratedTypes(outFile, "serving.d.ts");
+  // One-time migration: remove old generated file and patch project configs
+  await removeOldGeneratedTypes(projectRoot, "serving.d.ts");
+  await migrateProjectConfig(projectRoot);
 
   if (registryEntries.length === 0) {
     logger.debug(
