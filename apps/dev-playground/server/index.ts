@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import {
-  agent,
+  agents,
   analytics,
   createApp,
   files,
@@ -33,7 +33,7 @@ createApp({
     }),
     lakebaseExamples(),
     files(),
-    agent(),
+    agents(),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
 }).then((appkit) => {
