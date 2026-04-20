@@ -5,3 +5,5 @@ env:
     valueFrom: volume
   - name: DATABRICKS_VOLUME_OTHER
     valueFrom: other-volume
+  - name: DATABRICKS_VS_INDEX_NAME
+    valueFrom: vs-index

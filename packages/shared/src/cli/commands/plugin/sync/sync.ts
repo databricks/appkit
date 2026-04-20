@@ -520,7 +520,7 @@ async function scanPluginsDir(
 function writeManifest(
   outputPath: string,
   { plugins }: { plugins: TemplatePluginsManifest["plugins"] },
-  options: { write?: boolean; silent?: boolean },
+  options: { write?: boolean; silent?: boolean; json?: boolean },
 ) {
   const templateManifest: TemplatePluginsManifest = {
     $schema:
@@ -529,20 +529,23 @@ function writeManifest(
     plugins,
   };
 
+  const serialized = JSON.stringify(templateManifest, null, 2);
+
+  if (options.json) {
+    console.log(serialized);
+  }
+
   if (options.write) {
-    fs.writeFileSync(
-      outputPath,
-      `${JSON.stringify(templateManifest, null, 2)}\n`,
-    );
-    if (!options.silent) {
+    fs.writeFileSync(outputPath, `${serialized}\n`);
+    if (!options.silent && !options.json) {
       console.log(`\n✓ Wrote ${outputPath}`);
     }
-  } else if (!options.silent) {
+  } else if (!options.silent && !options.json) {
     console.log("\nTo write the manifest, run:");
     console.log("  npx appkit plugin sync --write\n");
     console.log("Preview:");
     console.log("─".repeat(60));
-    console.log(JSON.stringify(templateManifest, null, 2));
+    console.log(serialized);
     console.log("─".repeat(60));
   }
 }
@@ -557,6 +560,7 @@ async function runPluginsSync(options: {
   write?: boolean;
   output?: string;
   silent?: boolean;
+  json?: boolean;
   requirePlugins?: string;
   pluginsDir?: string;
   packageName?: string;
@@ -575,7 +579,7 @@ async function runPluginsSync(options: {
     process.exit(1);
   }
 
-  if (!options.silent) {
+  if (!options.silent && !options.json) {
     console.log("Scanning for AppKit plugins...\n");
     if (allowJsManifest) {
       console.warn(
@@ -590,7 +594,7 @@ async function runPluginsSync(options: {
   let pluginUsages = new Set<string>();
 
   if (serverFile) {
-    if (!options.silent) {
+    if (!options.silent && !options.json) {
       const relativePath = path.relative(cwd, serverFile);
       console.log(`Server entry file: ${relativePath}`);
     }
@@ -602,7 +606,7 @@ async function runPluginsSync(options: {
 
     serverImports = parseImports(root);
     pluginUsages = parsePluginUsages(root);
-  } else if (!options.silent) {
+  } else if (!options.silent && !options.json) {
     console.log(
       "No server entry file found. Checked:",
       SERVER_FILE_CANDIDATES.join(", "),
@@ -623,7 +627,7 @@ async function runPluginsSync(options: {
   if (options.pluginsDir) {
     const resolvedDir = path.resolve(cwd, options.pluginsDir);
     const pkgName = options.packageName ?? "@databricks/appkit";
-    if (!options.silent) {
+    if (!options.silent && !options.json) {
       console.log(`Scanning plugins directory: ${options.pluginsDir}`);
     }
     Object.assign(
@@ -663,7 +667,7 @@ async function runPluginsSync(options: {
   for (const dir of localDirsToScan) {
     const resolvedDir = path.resolve(cwd, dir);
     if (!fs.existsSync(resolvedDir)) continue;
-    if (!options.silent) {
+    if (!options.silent && !options.json) {
       console.log(`Scanning local plugins directory: ${dir}`);
     }
     const discovered = await scanPluginsDirRecursive(
@@ -679,9 +683,10 @@ async function runPluginsSync(options: {
   const pluginCount = Object.keys(plugins).length;
 
   if (pluginCount === 0) {
-    if (options.silent) {
+    if (options.silent || options.json) {
       writeManifest(outputPath, { plugins: {} }, options);
-      return;
+      if (options.silent) return;
+      process.exit(1);
     }
     console.log("No plugins found.");
     if (options.pluginsDir) {
@@ -689,7 +694,10 @@ async function runPluginsSync(options: {
         `\nNo manifest (${allowJsManifest ? "manifest.json or manifest.js" : "manifest.json"}) found in: ${options.pluginsDir}`,
       );
     } else {
-      console.log("\nMake sure you have plugin packages installed.");
+      console.log(
+        "\nMake sure you have plugin packages installed, or specify a directory:",
+      );
+      console.log("  appkit plugin sync --plugins-dir <path>");
     }
     process.exit(1);
   }
@@ -744,7 +752,7 @@ async function runPluginsSync(options: {
     }
   }
 
-  if (!options.silent) {
+  if (!options.silent && !options.json) {
     console.log(`\nFound ${pluginCount} plugin(s):`);
     for (const [name, manifest] of Object.entries(plugins)) {
       const resourceCount =
@@ -801,6 +809,18 @@ export const pluginsSyncCommand = new Command("sync")
   .option(
     "--allow-js-manifest",
     "Allow reading manifest.js/manifest.cjs (executes code; use only with trusted plugins)",
+  )
+  .option("--json", "Output manifest as JSON to stdout")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ appkit plugin sync
+  $ appkit plugin sync --write
+  $ appkit plugin sync --write --require-plugins server,analytics
+  $ appkit plugin sync --write --plugins-dir src/plugins --package-name @my/pkg
+  $ appkit plugin sync --json
+  $ appkit plugin sync --silent`,
   )
   .action((opts) =>
     runPluginsSync(opts).catch((err) => {

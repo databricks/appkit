@@ -205,6 +205,9 @@ async function runPluginList(options: {
     );
     if (!fs.existsSync(manifestPath)) {
       console.error(`Manifest not found: ${manifestPath}`);
+      console.error(
+        "  appkit plugin list --manifest <path-to-manifest> or appkit plugin list --dir <plugins-directory>",
+      );
       process.exit(1);
     }
     try {
@@ -238,6 +241,15 @@ export const pluginListCommand = new Command("list")
     "Allow reading manifest.js/manifest.cjs (executes code; use only with trusted plugins)",
   )
   .option("--json", "Output as JSON")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ appkit plugin list
+  $ appkit plugin list --json
+  $ appkit plugin list --manifest custom-manifest.json
+  $ appkit plugin list --dir plugins/`,
+  )
   .action((opts) =>
     runPluginList(opts).catch((err) => {
       console.error(err);

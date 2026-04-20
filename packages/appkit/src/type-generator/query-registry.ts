@@ -15,6 +15,51 @@ import {
 const logger = createLogger("type-generator:query-registry");
 
 /**
+ * Regex breakdown:
+ *   '(?:[^']|'')*'   — matches a SQL string literal, including escaped '' pairs
+ *   |                 — alternation: whichever branch matches first at a position wins
+ *   --[^\n]*          — matches a single-line SQL comment
+ *
+ * Because the regex engine scans left-to-right, a `'` is consumed as a string
+ * literal before any `--` inside it could match as a comment — giving us
+ * correct single-pass ordering without a manual state machine.
+ *
+ * V1: no block-comment support (deferred to next PR).
+ */
+const PROTECTED_RANGE_RE = /'(?:[^']|'')*'|--[^\n]*/g;
+
+/**
+ * Numeric-context patterns for positional type inference.
+ * Hoisted to module scope — safe because matchAll() clones the regex internally.
+ */
+const NUMERIC_PATTERNS: RegExp[] = [
+  /\bLIMIT\s+:([a-zA-Z_]\w*)/gi,
+  /\bOFFSET\s+:([a-zA-Z_]\w*)/gi,
+  /\bTOP\s+:([a-zA-Z_]\w*)/gi,
+  /\bFETCH\s+FIRST\s+:([a-zA-Z_]\w*)\s+ROWS/gi,
+  // V1 limitation: arithmetic operators may false-positive for date
+  // expressions like `:start_date - INTERVAL '1 day'`. A smarter
+  // heuristic (e.g. look-ahead for INTERVAL) is deferred to a future PR.
+  /[+\-*/]\s*:([a-zA-Z_]\w*)/g,
+  /:([a-zA-Z_]\w*)\s*[+\-*/]/g,
+];
+
+export function getProtectedRanges(sql: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  for (const m of sql.matchAll(PROTECTED_RANGE_RE)) {
+    ranges.push([m.index, m.index + m[0].length]);
+  }
+  return ranges;
+}
+
+function isInsideProtectedRange(
+  offset: number,
+  ranges: Array<[number, number]>,
+): boolean {
+  return ranges.some(([start, end]) => offset >= start && offset < end);
+}
+
+/**
  * Parse a raw API/SDK error into a structured code + message.
  * Handles Databricks-style JSON bodies embedded in the message string,
  * e.g. `Response from server (Bad Request) {"error_code":"...","message":"..."}`.
@@ -42,11 +87,17 @@ function parseError(raw: string): { code?: string; message: string } {
  * @param sql - the SQL query to extract parameters from
  * @returns an array of parameter names
  */
-export function extractParameters(sql: string): string[] {
-  const matches = sql.matchAll(/:([a-zA-Z_]\w*)/g);
+export function extractParameters(
+  sql: string,
+  ranges?: Array<[number, number]>,
+): string[] {
+  const protectedRanges = ranges ?? getProtectedRanges(sql);
+  const matches = sql.matchAll(/(?<!:):([a-zA-Z_]\w*)/g);
   const params = new Set<string>();
   for (const match of matches) {
-    params.add(match[1]);
+    if (!isInsideProtectedRange(match.index, protectedRanges)) {
+      params.add(match[1]);
+    }
   }
   return Array.from(params);
 }
@@ -153,6 +204,49 @@ export function extractParameterTypes(sql: string): Record<string, string> {
   return paramTypes;
 }
 
+export function defaultForType(sqlType: string | undefined): string {
+  switch (sqlType?.toUpperCase()) {
+    case "NUMERIC":
+      return "0";
+    case "STRING":
+      return "''";
+    case "BOOLEAN":
+      return "true";
+    case "DATE":
+      return "'2000-01-01'";
+    case "TIMESTAMP":
+      return "'2000-01-01T00:00:00Z'";
+    case "BINARY":
+      return "X'00'";
+    default:
+      return "''";
+  }
+}
+
+/**
+ * Infer parameter types from positional context in SQL.
+ * V1 only infers NUMERIC from patterns like LIMIT, OFFSET, TOP,
+ * FETCH FIRST ... ROWS, and arithmetic operators.
+ * Parameters inside string literals or SQL comments are ignored.
+ */
+export function inferParameterTypes(
+  sql: string,
+  ranges?: Array<[number, number]>,
+): Record<string, string> {
+  const inferred: Record<string, string> = {};
+  const protectedRanges = ranges ?? getProtectedRanges(sql);
+
+  for (const pattern of NUMERIC_PATTERNS) {
+    for (const match of sql.matchAll(pattern)) {
+      if (!isInsideProtectedRange(match.index, protectedRanges)) {
+        inferred[match[1]] = "NUMERIC";
+      }
+    }
+  }
+
+  return inferred;
+}
+
 /**
  * Generate query schemas from a folder of SQL files
  * It uses DESCRIBE QUERY to get the schema without executing the query
@@ -228,7 +322,33 @@ export async function generateQueriesFromDescribe(
       });
       logEntries.push({ queryName, status: "HIT" });
     } else {
-      const sqlWithDefaults = sql.replace(/:([a-zA-Z_]\w*)/g, "''");
+      const protectedRanges = getProtectedRanges(sql);
+      const annotatedTypes = extractParameterTypes(sql);
+      const inferredTypes = inferParameterTypes(sql, protectedRanges);
+      const parameterTypes = { ...inferredTypes, ...annotatedTypes };
+      const sqlWithDefaults = sql.replace(
+        /(?<!:):([a-zA-Z_]\w*)/g,
+        (original, paramName, offset) => {
+          if (isInsideProtectedRange(offset, protectedRanges)) {
+            return original;
+          }
+          return defaultForType(parameterTypes[paramName]);
+        },
+      );
+
+      // Warn about unresolved parameters
+      const allParams = extractParameters(sql, protectedRanges);
+      for (const param of allParams) {
+        if (SERVER_INJECTED_PARAMS.includes(param)) continue;
+        if (parameterTypes[param]) continue;
+        logger.warn(
+          '%s: parameter ":%s" has no type annotation or inference. Add %s to the query file.',
+          queryFiles[i],
+          param,
+          `-- @param ${param} <TYPE>`,
+        );
+      }
+
       const cleanedSql = sqlWithDefaults.trim().replace(/;\s*$/, "");
       uncachedQueries.push({ index: i, queryName, sql, sqlHash, cleanedSql });
     }

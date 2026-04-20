@@ -1,3 +1,4 @@
+import { STATUS_CODES } from "node:http";
 import { Readable } from "node:stream";
 import { ApiError } from "@databricks/sdk-experimental";
 import type express from "express";
@@ -424,6 +425,13 @@ export class FilesPlugin extends Plugin {
     res.status(500).json({ error: fallbackMessage, plugin: this.name });
   }
 
+  private _sendStatusError(res: express.Response, status: number): void {
+    res.status(status).json({
+      error: STATUS_CODES[status] ?? "Unknown Error",
+      plugin: this.name,
+    });
+  }
+
   private async _handleList(
     req: express.Request,
     res: express.Response,
@@ -445,11 +453,11 @@ export class FilesPlugin extends Plugin {
         ]),
       );
 
-      if (result === undefined) {
-        res.status(500).json({ error: "List failed", plugin: this.name });
+      if (!result.ok) {
+        this._sendStatusError(res, result.status);
         return;
       }
-      res.json(result);
+      res.json(result.data);
     } catch (error) {
       this._handleApiError(res, error, "List failed");
     }
@@ -481,11 +489,11 @@ export class FilesPlugin extends Plugin {
         ]),
       );
 
-      if (result === undefined) {
-        res.status(500).json({ error: "Read failed", plugin: this.name });
+      if (!result.ok) {
+        this._sendStatusError(res, result.status);
         return;
       }
-      res.type("text/plain").send(result);
+      res.type("text/plain").send(result.data);
     } catch (error) {
       this._handleApiError(res, error, "Read failed");
     }
@@ -545,8 +553,8 @@ export class FilesPlugin extends Plugin {
         return connector.download(getWorkspaceClient(), path);
       }, settings);
 
-      if (response === undefined) {
-        res.status(500).json({ error: `${label} failed`, plugin: this.name });
+      if (!response.ok) {
+        this._sendStatusError(res, response.status);
         return;
       }
 
@@ -575,16 +583,14 @@ export class FilesPlugin extends Plugin {
         );
       }
 
-      if (response.contents) {
+      if (response.data.contents) {
         const nodeStream = Readable.fromWeb(
-          response.contents as import("node:stream/web").ReadableStream,
+          response.data.contents as import("node:stream/web").ReadableStream,
         );
         nodeStream.on("error", (err) => {
           logger.error("Stream error during %s: %O", opts.mode, err);
           if (!res.headersSent) {
-            res
-              .status(500)
-              .json({ error: `${label} failed`, plugin: this.name });
+            this._sendStatusError(res, 500);
           } else {
             res.destroy();
           }
@@ -624,13 +630,11 @@ export class FilesPlugin extends Plugin {
         ]),
       );
 
-      if (result === undefined) {
-        res
-          .status(500)
-          .json({ error: "Exists check failed", plugin: this.name });
+      if (!result.ok) {
+        this._sendStatusError(res, result.status);
         return;
       }
-      res.json({ exists: result });
+      res.json({ exists: result.data });
     } catch (error) {
       this._handleApiError(res, error, "Exists check failed");
     }
@@ -662,13 +666,11 @@ export class FilesPlugin extends Plugin {
         ]),
       );
 
-      if (result === undefined) {
-        res
-          .status(500)
-          .json({ error: "Metadata fetch failed", plugin: this.name });
+      if (!result.ok) {
+        this._sendStatusError(res, result.status);
         return;
       }
-      res.json(result);
+      res.json(result.data);
     } catch (error) {
       this._handleApiError(res, error, "Metadata fetch failed");
     }
@@ -700,11 +702,11 @@ export class FilesPlugin extends Plugin {
         ]),
       );
 
-      if (result === undefined) {
-        res.status(500).json({ error: "Preview failed", plugin: this.name });
+      if (!result.ok) {
+        this._sendStatusError(res, result.status);
         return;
       }
-      res.json(result);
+      res.json(result.data);
     } catch (error) {
       this._handleApiError(res, error, "Preview failed");
     }
@@ -791,7 +793,7 @@ export class FilesPlugin extends Plugin {
         connector,
       );
 
-      if (result === undefined) {
+      if (!result.ok) {
         logger.error(
           req,
           "Upload failed: volume=%s path=%s, size=%d bytes",
@@ -799,12 +801,12 @@ export class FilesPlugin extends Plugin {
           path,
           contentLength ?? 0,
         );
-        res.status(500).json({ error: "Upload failed", plugin: this.name });
+        this._sendStatusError(res, result.status);
         return;
       }
 
       logger.debug(req, "Upload complete: volume=%s path=%s", volumeKey, path);
-      res.json(result);
+      res.json(result.data);
     } catch (error) {
       if (
         error instanceof Error &&
@@ -851,14 +853,12 @@ export class FilesPlugin extends Plugin {
         connector,
       );
 
-      if (result === undefined) {
-        res
-          .status(500)
-          .json({ error: "Create directory failed", plugin: this.name });
+      if (!result.ok) {
+        this._sendStatusError(res, result.status);
         return;
       }
 
-      res.json(result);
+      res.json(result.data);
     } catch (error) {
       this._handleApiError(res, error, "Create directory failed");
     }
@@ -898,12 +898,12 @@ export class FilesPlugin extends Plugin {
         connector,
       );
 
-      if (result === undefined) {
-        res.status(500).json({ error: "Delete failed", plugin: this.name });
+      if (!result.ok) {
+        this._sendStatusError(res, result.status);
         return;
       }
 
-      res.json(result);
+      res.json(result.data);
     } catch (error) {
       this._handleApiError(res, error, "Delete failed");
     }

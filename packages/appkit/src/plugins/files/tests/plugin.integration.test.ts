@@ -567,7 +567,7 @@ describe("Files Plugin Integration", () => {
 
       expect(response.status).toBe(500);
       const data = (await response.json()) as { error: string; plugin: string };
-      expect(data.error).toBe("Metadata fetch failed");
+      expect(data.error).toBe("Internal Server Error");
       expect(data.plugin).toBe("files");
     });
 
@@ -583,11 +583,11 @@ describe("Files Plugin Integration", () => {
 
       expect(response.status).toBe(500);
       const data = (await response.json()) as { error: string; plugin: string };
-      expect(data.error).toBe("List failed");
+      expect(data.error).toBe("Internal Server Error");
       expect(data.plugin).toBe("files");
     });
 
-    test("ApiError 404 is swallowed and returns 500", async () => {
+    test("ApiError 404 preserves upstream status code", async () => {
       mockFilesApi.getMetadata.mockRejectedValue(
         new MockApiError("Not found", 404),
       );
@@ -597,16 +597,16 @@ describe("Files Plugin Integration", () => {
         { headers: MOCK_AUTH_HEADERS },
       );
 
-      expect(response.status).toBe(500);
+      expect(response.status).toBe(404);
       const data = (await response.json()) as {
         error: string;
         plugin: string;
       };
-      expect(data.error).toBe("Metadata fetch failed");
+      expect(data.error).toBe("Not Found");
       expect(data.plugin).toBe("files");
     });
 
-    test("ApiError 409 is swallowed and returns 500", async () => {
+    test("ApiError 409 preserves upstream status code", async () => {
       mockFilesApi.createDirectory.mockRejectedValue(
         new MockApiError("Conflict", 409),
       );
@@ -617,12 +617,12 @@ describe("Files Plugin Integration", () => {
         body: JSON.stringify({ path: "/Volumes/catalog/schema/vol/existing" }),
       });
 
-      expect(response.status).toBe(500);
+      expect(response.status).toBe(409);
       const data = (await response.json()) as {
         error: string;
         plugin: string;
       };
-      expect(data.error).toBe("Create directory failed");
+      expect(data.error).toBe("Conflict");
       expect(data.plugin).toBe("files");
     });
   });

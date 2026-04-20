@@ -17,6 +17,12 @@ import { GeniePage } from './pages/genie/GeniePage';
 {{- if .plugins.files}}
 import { FilesPage } from './pages/files/FilesPage';
 {{- end}}
+{{- if .plugins.serving}}
+import { ServingPage } from './pages/serving/ServingPage';
+{{- end}}
+{{- if .plugins.vectorSearch}}
+import { VectorSearchPage } from './pages/vector-search/VectorSearchPage';
+{{- end}}
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
@@ -54,6 +60,16 @@ function Layout() {
             Files
           </NavLink>
 {{- end}}
+{{- if .plugins.serving}}
+          <NavLink to="/serving" className={navLinkClass}>
+            Serving
+          </NavLink>
+{{- end}}
+{{- if .plugins.vectorSearch}}
+          <NavLink to="/vector-search" className={navLinkClass}>
+            Vector Search
+          </NavLink>
+{{- end}}
         </nav>
       </header>
 
@@ -80,6 +96,12 @@ const router = createBrowserRouter([
 {{- end}}
 {{- if .plugins.files}}
       { path: '/files', element: <FilesPage /> },
+{{- end}}
+{{- if .plugins.serving}}
+      { path: '/serving', element: <ServingPage /> },
+{{- end}}
+{{- if .plugins.vectorSearch}}
+      { path: '/vector-search', element: <VectorSearchPage /> },
 {{- end}}
     ],
   },

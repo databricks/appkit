@@ -16,6 +16,7 @@ export const SSEErrorCode = {
   INVALID_REQUEST: "INVALID_REQUEST",
   STREAM_ABORTED: "STREAM_ABORTED",
   STREAM_EVICTED: "STREAM_EVICTED",
+  UPSTREAM_ERROR: "UPSTREAM_ERROR",
 } as const satisfies Record<string, string>;
 
 export type SSEErrorCode = (typeof SSEErrorCode)[keyof typeof SSEErrorCode];

@@ -1,0 +1,105 @@
+name: Prepare Release Lakebase
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'packages/lakebase/**'
+
+concurrency:
+  group: prepare-release-lakebase
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  prepare:
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Setup JFrog npm
+        uses: ./.github/actions/setup-jfrog-npm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check for releasable commits
+        id: version
+        working-directory: packages/lakebase
+        run: |
+          VERSION=$(pnpm exec release-it --release-version --ci) || true
+          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "Next version: $VERSION"
+          else
+            echo "No releasable commits — skipping release preparation"
+            echo "version=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate changelog
+        if: steps.version.outputs.version != ''
+        working-directory: packages/lakebase
+        run: |
+          pnpm exec release-it ${{ steps.version.outputs.version }} --ci
+      - name: Build
+        if: steps.version.outputs.version != ''
+        run: pnpm --filter=@databricks/lakebase build:package
+
+      - name: Dist
+        if: steps.version.outputs.version != ''
+        run: pnpm --filter=@databricks/lakebase dist
+
+      - name: SBOM
+        if: steps.version.outputs.version != ''
+        run: pnpm --filter=@databricks/lakebase release:sbom
+
+      - name: Pack
+        if: steps.version.outputs.version != ''
+        run: npm pack packages/lakebase/tmp
+
+      - name: Generate SHA256
+        if: steps.version.outputs.version != ''
+        run: sha256sum *.tgz > SHA256SUMS
+
+      - name: Write version file
+        if: steps.version.outputs.version != ''
+        run: echo "${{ steps.version.outputs.version }}" > VERSION
+
+      - name: Upload release metadata
+        if: steps.version.outputs.version != ''
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: lakebase-release-meta-${{ github.run_number }}
+          retention-days: 7
+          path: VERSION
+
+      - name: Upload release artifacts
+        if: steps.version.outputs.version != ''
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: lakebase-release-${{ github.run_number }}
+          retention-days: 7
+          path: |
+            *.tgz
+            packages/lakebase/changelog-diff.md
+            VERSION
+            SHA256SUMS

@@ -1,8 +1,11 @@
 import { describe, expect, test } from "vitest";
 import {
   convertToQueryType,
+  defaultForType,
   extractParameters,
   extractParameterTypes,
+  getProtectedRanges,
+  inferParameterTypes,
   normalizeTypeName,
   SERVER_INJECTED_PARAMS,
 } from "../query-registry";
@@ -78,6 +81,42 @@ describe("extractParameters", () => {
     expect(params).toContain("startDate");
     expect(params).toContain("workspaceId");
   });
+
+  test("skips parameters inside string literals", () => {
+    const sql = "SELECT * FROM t WHERE name = ':fake' AND id = :real";
+    const params = extractParameters(sql);
+
+    expect(params).toEqual(["real"]);
+  });
+
+  test("skips parameters inside single-line comments", () => {
+    const sql = "-- filter by :commented\nSELECT * FROM t WHERE id = :actual";
+    const params = extractParameters(sql);
+
+    expect(params).toEqual(["actual"]);
+  });
+
+  test("skips params in both strings and comments, keeps real ones", () => {
+    const sql = `-- :hidden
+SELECT * FROM t WHERE x = ':also_hidden' AND y = :visible`;
+    const params = extractParameters(sql);
+
+    expect(params).toEqual(["visible"]);
+  });
+
+  test("extracts params after a string containing --", () => {
+    const sql = "SELECT '--' AS marker, :id FROM t";
+    const params = extractParameters(sql);
+
+    expect(params).toEqual(["id"]);
+  });
+
+  test("handles escaped quotes in string literals", () => {
+    const sql = "SELECT * FROM t WHERE name = 'it''s fine' AND id = :userId";
+    const params = extractParameters(sql);
+
+    expect(params).toEqual(["userId"]);
+  });
 });
 
 describe("SERVER_INJECTED_PARAMS", () => {
@@ -146,6 +185,43 @@ SELECT 1`;
     expect(types.validString).toBe("STRING");
     expect(types.invalidParam).toBeUndefined();
     expect(Object.keys(types).length).toBe(2);
+  });
+});
+
+describe("defaultForType", () => {
+  test("returns '0' for NUMERIC", () => {
+    expect(defaultForType("NUMERIC")).toBe("0");
+  });
+
+  test("returns empty string literal for STRING", () => {
+    expect(defaultForType("STRING")).toBe("''");
+  });
+
+  test("returns 'true' for BOOLEAN", () => {
+    expect(defaultForType("BOOLEAN")).toBe("true");
+  });
+
+  test("returns date literal for DATE", () => {
+    expect(defaultForType("DATE")).toBe("'2000-01-01'");
+  });
+
+  test("returns timestamp literal for TIMESTAMP", () => {
+    expect(defaultForType("TIMESTAMP")).toBe("'2000-01-01T00:00:00Z'");
+  });
+
+  test("returns binary literal for BINARY", () => {
+    expect(defaultForType("BINARY")).toBe("X'00'");
+  });
+
+  test("returns empty string literal for undefined (unknown fallback)", () => {
+    expect(defaultForType(undefined)).toBe("''");
+  });
+
+  test("is case insensitive", () => {
+    expect(defaultForType("numeric")).toBe("0");
+    expect(defaultForType("Numeric")).toBe("0");
+    expect(defaultForType("boolean")).toBe("true");
+    expect(defaultForType("date")).toBe("'2000-01-01'");
   });
 });
 
@@ -269,5 +345,205 @@ SELECT * FROM users WHERE date = :startDate AND count = :count AND name = :name`
       "test",
     );
     expect(hasResults).toBe(false);
+  });
+});
+
+describe("inferParameterTypes", () => {
+  test("infers NUMERIC from LIMIT :count", () => {
+    const result = inferParameterTypes("SELECT * FROM t LIMIT :count");
+    expect(result).toEqual({ count: "NUMERIC" });
+  });
+
+  test("infers NUMERIC from OFFSET :skip", () => {
+    const result = inferParameterTypes("SELECT * FROM t LIMIT 10 OFFSET :skip");
+    expect(result).toEqual({ skip: "NUMERIC" });
+  });
+
+  test("infers NUMERIC from TOP :n", () => {
+    const result = inferParameterTypes("SELECT TOP :n * FROM t");
+    expect(result).toEqual({ n: "NUMERIC" });
+  });
+
+  test("infers NUMERIC from FETCH FIRST :pageSize ROWS", () => {
+    const result = inferParameterTypes(
+      "SELECT * FROM t FETCH FIRST :pageSize ROWS ONLY",
+    );
+    expect(result).toEqual({ pageSize: "NUMERIC" });
+  });
+
+  test("infers NUMERIC from arithmetic operators", () => {
+    const sql = "SELECT price + :tax, quantity * :factor FROM orders";
+    const result = inferParameterTypes(sql);
+    expect(result.tax).toBe("NUMERIC");
+    expect(result.factor).toBe("NUMERIC");
+  });
+
+  test("infers NUMERIC from subtraction and division", () => {
+    const sql = "SELECT total - :discount, amount / :divisor FROM orders";
+    const result = inferParameterTypes(sql);
+    expect(result.discount).toBe("NUMERIC");
+    expect(result.divisor).toBe("NUMERIC");
+  });
+
+  test("does NOT infer params inside string literals", () => {
+    const sql = "SELECT * FROM t WHERE name = 'LIMIT :fake'";
+    const result = inferParameterTypes(sql);
+    expect(result).toEqual({});
+  });
+
+  test("does NOT infer params inside SQL comments", () => {
+    const sql = "-- LIMIT :fake\nSELECT * FROM t LIMIT :real";
+    const result = inferParameterTypes(sql);
+    expect(result).toEqual({ real: "NUMERIC" });
+    expect(result.fake).toBeUndefined();
+  });
+
+  test("handles multiple params in one query with mixed contexts", () => {
+    const sql = "SELECT * FROM t WHERE name = :name LIMIT :count OFFSET :skip";
+    const result = inferParameterTypes(sql);
+    expect(result.count).toBe("NUMERIC");
+    expect(result.skip).toBe("NUMERIC");
+    expect(result.name).toBeUndefined();
+  });
+
+  test("same param in multiple inferrable positions resolves consistently", () => {
+    const sql = "SELECT * FROM t LIMIT :n OFFSET :n";
+    const result = inferParameterTypes(sql);
+    expect(result.n).toBe("NUMERIC");
+  });
+
+  test("annotations override inferences when merged", () => {
+    const sql = `-- @param count STRING
+SELECT * FROM t LIMIT :count`;
+    const inferred = inferParameterTypes(sql);
+    const annotated = extractParameterTypes(sql);
+    const merged = { ...inferred, ...annotated };
+    // Annotation wins
+    expect(merged.count).toBe("STRING");
+  });
+
+  test("returns empty object for params not in any pattern", () => {
+    const sql = "SELECT * FROM t WHERE id = :userId";
+    const result = inferParameterTypes(sql);
+    expect(result).toEqual({});
+  });
+
+  test("is case insensitive for SQL keywords", () => {
+    expect(inferParameterTypes("select * from t limit :x")).toEqual({
+      x: "NUMERIC",
+    });
+    expect(inferParameterTypes("SELECT * FROM t LIMIT :x")).toEqual({
+      x: "NUMERIC",
+    });
+    expect(inferParameterTypes("Select * From t Limit :x")).toEqual({
+      x: "NUMERIC",
+    });
+  });
+});
+
+describe("getProtectedRanges", () => {
+  test("returns ranges for string literals", () => {
+    const sql = "SELECT * FROM t WHERE name = 'hello'";
+    const ranges = getProtectedRanges(sql);
+
+    expect(ranges).toHaveLength(1);
+    expect(sql.slice(ranges[0][0], ranges[0][1])).toBe("'hello'");
+  });
+
+  test("returns ranges for single-line comments", () => {
+    const sql = "-- this is a comment\nSELECT 1";
+    const ranges = getProtectedRanges(sql);
+
+    expect(ranges).toHaveLength(1);
+    expect(sql.slice(ranges[0][0], ranges[0][1])).toBe("-- this is a comment");
+  });
+
+  test("returns ranges for both literals and comments", () => {
+    const sql = "-- comment\nSELECT * FROM t WHERE x = 'val'";
+    const ranges = getProtectedRanges(sql);
+
+    expect(ranges).toHaveLength(2);
+    const texts = ranges.map(([s, e]) => sql.slice(s, e));
+    expect(texts).toContain("-- comment");
+    expect(texts).toContain("'val'");
+  });
+
+  test("returns empty array when no literals or comments", () => {
+    expect(getProtectedRanges("SELECT 1")).toEqual([]);
+  });
+
+  test("handles multiple string literals", () => {
+    const sql = "SELECT * FROM t WHERE a = 'x' AND b = 'y'";
+    const ranges = getProtectedRanges(sql);
+
+    expect(ranges).toHaveLength(2);
+    const texts = ranges.map(([s, e]) => sql.slice(s, e));
+    expect(texts).toContain("'x'");
+    expect(texts).toContain("'y'");
+  });
+
+  test("does not treat -- inside a string literal as a comment", () => {
+    const sql = "SELECT '--' AS marker, :id FROM t";
+    const ranges = getProtectedRanges(sql);
+
+    // Should only have the string literal, not a comment range
+    const texts = ranges.map(([s, e]) => sql.slice(s, e));
+    expect(texts).toEqual(["'--'"]);
+  });
+
+  test("does not treat apostrophes inside comments as string starts", () => {
+    const sql = "-- it's the user's filter\nSELECT * FROM t WHERE x = 'val'";
+    const ranges = getProtectedRanges(sql);
+
+    const texts = ranges.map(([s, e]) => sql.slice(s, e));
+    expect(texts).toContain("-- it's the user's filter");
+    expect(texts).toContain("'val'");
+    expect(ranges).toHaveLength(2);
+  });
+
+  test("handles escaped quotes (doubled single quotes)", () => {
+    const sql = "SELECT * FROM t WHERE name = 'it''s fine' AND id = :real";
+    const ranges = getProtectedRanges(sql);
+
+    const texts = ranges.map(([s, e]) => sql.slice(s, e));
+    expect(texts).toEqual(["'it''s fine'"]);
+  });
+});
+
+describe("substitution skips protected ranges", () => {
+  test("does not substitute params inside string literals", () => {
+    const sql = "SELECT * FROM t WHERE x = ':fake' AND y = :real";
+    const ranges = getProtectedRanges(sql);
+    const result = sql.replace(
+      /:([a-zA-Z_]\w*)/g,
+      (original, _paramName, offset) => {
+        if (ranges.some(([s, e]) => offset >= s && offset < e)) {
+          return original;
+        }
+        return "''";
+      },
+    );
+
+    expect(result).toContain("':fake'");
+    expect(result).toContain("y = ''");
+    expect(result).not.toContain(":real");
+  });
+
+  test("does not substitute params inside comments", () => {
+    const sql = "-- :skip_me\nSELECT * FROM t WHERE id = :keep";
+    const ranges = getProtectedRanges(sql);
+    const result = sql.replace(
+      /:([a-zA-Z_]\w*)/g,
+      (original, _paramName, offset) => {
+        if (ranges.some(([s, e]) => offset >= s && offset < e)) {
+          return original;
+        }
+        return "''";
+      },
+    );
+
+    expect(result).toContain(":skip_me");
+    expect(result).not.toContain(":keep");
+    expect(result).toContain("id = ''");
   });
 });

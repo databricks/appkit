@@ -1,0 +1,70 @@
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "name": "vector-search",
+  "displayName": "Vector Search Plugin",
+  "hidden": true,
+  "description": "Query Databricks Vector Search indexes with built-in hybrid search, reranking, and pagination",
+  "resources": {
+    "required": [
+      {
+        "type": "vector_search_index",
+        "alias": "Vector Search Index",
+        "resourceKey": "vector-search-index",
+        "description": "A Databricks Vector Search index to query. Index names configured via plugin config.",
+        "permission": "SELECT",
+        "fields": {
+          "indexName": {
+            "env": "DATABRICKS_VS_INDEX_NAME",
+            "description": "Three-level UC name of the default index (catalog.schema.index_name)"
+          },
+          "endpointName": {
+            "env": "DATABRICKS_VS_ENDPOINT_NAME",
+            "description": "Vector Search endpoint name (required for pagination)"
+          }
+        }
+      }
+    ],
+    "optional": []
+  },
+  "config": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "indexes": {
+          "type": "object",
+          "description": "Map of alias names to index configurations",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "indexName": {
+                "type": "string",
+                "description": "Three-level UC name: catalog.schema.index_name"
+              },
+              "columns": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Columns to return in results"
+              },
+              "queryType": {
+                "type": "string",
+                "enum": ["ann", "hybrid", "full_text"],
+                "default": "hybrid"
+              },
+              "numResults": {
+                "type": "number",
+                "default": 20
+              }
+            },
+            "required": ["indexName", "columns"]
+          }
+        },
+        "timeout": {
+          "type": "number",
+          "default": 30000,
+          "description": "Query execution timeout in milliseconds"
+        }
+      },
+      "required": ["indexes"]
+    }
+  }
+}

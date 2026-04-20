@@ -136,7 +136,7 @@ function SpendTable() {
 Augment the `QueryRegistry` interface to get full type inference on parameters and results:
 
 ```ts
-// config/appKitTypes.d.ts
+// client/src/appkit-types/analytics.d.ts
 declare module "@databricks/appkit-ui/react" {
   interface QueryRegistry {
     spend_summary: {

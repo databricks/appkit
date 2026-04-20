@@ -47,8 +47,19 @@ export {
   ValidationError,
 } from "./errors";
 // Plugin authoring
-export { Plugin, type ToPlugin, toPlugin } from "./plugin";
-export { analytics, files, genie, lakebase, server } from "./plugins";
+export {
+  type ExecutionResult,
+  Plugin,
+  type ToPlugin,
+  toPlugin,
+} from "./plugin";
+export { analytics, files, genie, lakebase, server, serving } from "./plugins";
+export type {
+  EndpointConfig,
+  ServingEndpointEntry,
+  ServingEndpointRegistry,
+  ServingFactory,
+} from "./plugins/serving/types";
 // Registry types and utilities for plugin manifests
 export type {
   ConfigSchema,
@@ -75,6 +86,10 @@ export {
   SpanStatusCode,
   type TelemetryConfig,
 } from "./telemetry";
-
+export {
+  extractServingEndpoints,
+  findServerFile,
+} from "./type-generator/serving/server-file-extractor";
+export { appKitServingTypesPlugin } from "./type-generator/serving/vite-plugin";
 // Vite plugin and type generation
 export { appKitTypesPlugin } from "./type-generator/vite-plugin";

@@ -104,6 +104,22 @@ function RootComponent() {
                     Files
                   </Button>
                 </Link>
+                <Link to="/serving" className="no-underline">
+                  <Button
+                    variant="ghost"
+                    className="text-foreground hover:text-secondary-foreground"
+                  >
+                    Serving
+                  </Button>
+                </Link>
+                <Link to="/vector-search" className="no-underline">
+                  <Button
+                    variant="ghost"
+                    className="text-foreground hover:text-secondary-foreground"
+                  >
+                    Vector Search
+                  </Button>
+                </Link>
                 <ThemeSelector />
               </div>
             </nav>

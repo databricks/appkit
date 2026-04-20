@@ -49,6 +49,8 @@ Examples:
   - generate-app-templates.ts        - Generate app templates
   - check-licenses.ts                - License compliance checks
   - build-notice.ts                  - Build NOTICE.md from dependencies
+  - check-template-deps.ts           - Validate template package.json dependencies are pinned
+  - finalize-release.ts              - Apply release changes (changelog, versions, tags) for secure repo
 ```
 
 ## Development Commands
@@ -142,52 +144,35 @@ pnpm clean:full       # Remove build artifacts + node_modules
 
 ### Releasing
 
-This project uses [release-it](https://github.com/release-it/release-it) with [conventional-changelog](https://www.conventionalcommits.org/) for automated releases. Both packages (`appkit` and `appkit-ui`) are always released together with the same version.
+This project uses a two-stage release pipeline. Both packages (`appkit` and `appkit-ui`) are always released together with the same version. `@databricks/lakebase` is released independently.
 
-#### GitHub Actions (Recommended)
+#### Stage 1: Prepare (this repo)
 
-Releases are automated via GitHub Actions and trigger in two ways:
+The `prepare-release` workflow runs automatically on push to `main`:
+1. Determines version from conventional commits using [release-it](https://github.com/release-it/release-it) with `.release-it.json`
+2. Generates changelog diff
+3. Builds, packs, and uploads artifacts (`.tgz`, changelog, SHA256 digests)
+4. **Does NOT** commit, tag, push, or publish — only uploads artifacts
 
-**Automatic (on merge to main):**
-- When PRs are merged to `main`, the workflow automatically runs
-- Analyzes commits since last release using conventional commits
-- If there are `feat:` or `fix:` commits, both packages are released together
-- If no releasable commits, the release is skipped
+Lakebase has a separate `prepare-release-lakebase` workflow triggered by changes to `packages/lakebase/**`.
 
-**Manual (workflow_dispatch):**
-1. Go to **Actions → Release → Run workflow**
-2. Optionally enable "Dry run" to preview without publishing
-3. Click "Run workflow"
+#### Stage 2: Publish (secure repo)
 
-**Permissions (already configured, no secrets needed):**
-- `contents: write` - to push commits and tags
-- `id-token: write` - for npm OIDC/provenance publishing
+A private secure release repo polls for new artifacts every 15 minutes:
+1. Downloads and verifies SHA256 digests (fail-closed)
+2. Runs security scan
+3. Publishes to npm via OIDC Trusted Publishing (no stored tokens)
+4. Applies changelog, bumps versions, commits, tags, and pushes back to this repo via GitHub App
+5. Creates GitHub Release
+6. Runs template sync
 
-Both `GITHUB_TOKEN` and npm OIDC are provided automatically by GitHub Actions.
+Manual fallback: `workflow_dispatch` with a specific run ID on the secure repo.
 
-The workflow automatically:
-- Builds all packages
-- Bumps version based on conventional commits
-- Updates `CHANGELOG.md`
-- Creates git tag and GitHub release
-- Publishes to npm
-
-#### Local Release (Alternative)
-
-**Prerequisites:**
-- Be on `main` branch with a clean working directory
-- Set `GITHUB_TOKEN` environment variable
-- Be logged in to npm (`npm login`)
+#### Local Preview
 
 ```bash
-# Dry run (preview what will happen without making changes)
+# Preview next version and changelog (no side effects)
 pnpm release:dry
-
-# Interactive release (prompts for version bump)
-pnpm release
-
-# CI release (non-interactive, for automation)
-pnpm release:ci
 ```
 
 #### Version Bumps (Conventional Commits)

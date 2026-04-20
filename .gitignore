@@ -9,3 +9,5 @@ coverage
 *.tsbuildinfo
 
 .turbo
+
+.databricks
