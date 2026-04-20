@@ -10,7 +10,7 @@ createApp({
 {{- end}}
   ],
 {{- if .plugins.lakebase}}
-  async customize(appkit) {
+  async onPluginsReady(appkit) {
     await setupSampleLakebaseRoutes(appkit);
   },
 {{- end}}

@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
+import { codemodCommand } from "./commands/codemod/index.js";
 import { docsCommand } from "./commands/docs.js";
 import { generateTypesCommand } from "./commands/generate-types.js";
 import { lintCommand } from "./commands/lint.js";
@@ -26,5 +27,6 @@ cmd.addCommand(generateTypesCommand);
 cmd.addCommand(lintCommand);
 cmd.addCommand(docsCommand);
 cmd.addCommand(pluginCommand);
+cmd.addCommand(codemodCommand);
 
 cmd.parse();

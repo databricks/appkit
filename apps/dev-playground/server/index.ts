@@ -95,7 +95,7 @@ createApp({
     // }),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
-  customize(appkit) {
+  onPluginsReady(appkit) {
     appkit.server.extend((app) => {
       app.get("/sp", (_req, res) => {
         appkit.analytics
