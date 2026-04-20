@@ -15,4 +15,4 @@ Adapts based on the `ServingEndpointRegistry` state:
 - **Single key:** alias optional — `serving()` returns the typed handle for the only endpoint.
 - **Multiple keys:** alias required — must specify which endpoint.
 
-Run `appKitServingTypesPlugin()` in your Vite config to generate the registry.
+Run `npx appkit generate-types` or start the dev server to generate the registry.
