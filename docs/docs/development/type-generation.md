@@ -10,7 +10,7 @@ AppKit can automatically generate TypeScript types for your SQL queries, providi
 
 Generate type-safe TypeScript declarations for query keys, parameters, and result rows.
 
-All generated files live in `client/src/appkit-types/`, one per plugin (e.g. `analytics.d.ts`). They use [`declare module`](https://www.typescriptlang.org/docs/handbook/declaration-merging.html#module-augmentation) to augment existing interfaces, so the types apply globally — you never need to import them. TypeScript auto-discovers them through `"include": ["src"]` in your tsconfig.
+All generated files live in `shared/appkit-types/`, one per plugin (e.g. `analytics.d.ts`). They use [`declare module`](https://www.typescriptlang.org/docs/handbook/declaration-merging.html#module-augmentation) to augment existing interfaces, so the types apply globally — you never need to import them. TypeScript auto-discovers them through `"include": ["shared/appkit-types"]` in your tsconfig.
 
 ## Vite plugin: `appKitTypesPlugin`
 
@@ -18,7 +18,7 @@ The recommended approach is to use the Vite plugin, which watches your SQL files
 
 ### Configuration
 
-- `outFile?: string` - Output file path (default: `src/appkit-types/analytics.d.ts`)
+- `outFile?: string` - Output file path (default: `shared/appkit-types/analytics.d.ts`)
 - `watchFolders?: string[]` - Folders to watch for SQL files (default: `["../config/queries"]`)
 
 ### Example
@@ -33,7 +33,6 @@ export default defineConfig({
   plugins: [
     react(),
     appKitTypesPlugin({
-      outFile: "src/appkit-types/analytics.d.ts",
       watchFolders: ["../config/queries"],
     }),
   ],
@@ -58,13 +57,13 @@ npx @databricks/appkit generate-types [rootDir] [outFile] [warehouseId]
 - Generate types using warehouse ID from environment
 
   ```bash
-  npx @databricks/appkit generate-types . client/src/appkit-types/analytics.d.ts
+  npx @databricks/appkit generate-types . shared/appkit-types/analytics.d.ts
   ```
 
 - Generate types using warehouse ID explicitly
 
   ```bash
-  npx @databricks/appkit generate-types . client/src/appkit-types/analytics.d.ts abc123...
+  npx @databricks/appkit generate-types . shared/appkit-types/analytics.d.ts abc123...
   ```
 
 - Force regeneration (skip cache)

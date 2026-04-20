@@ -2,6 +2,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import dotenv from "dotenv";
 import { createLogger } from "../logging/logger";
+import {
+  migrateProjectConfig,
+  removeOldGeneratedTypes,
+  resolveProjectRoot,
+} from "./migration";
 import { generateQueriesFromDescribe } from "./query-registry";
 import { generateServingTypes as generateServingTypesImpl } from "./serving/generator";
 import type { QuerySchema } from "./types";
@@ -54,6 +59,7 @@ export async function generateFromEntryPoint(options: {
   noCache?: boolean;
 }) {
   const { outFile, queryFolder, warehouseId, noCache } = options;
+  const projectRoot = resolveProjectRoot(outFile);
 
   logger.debug("Starting type generation...");
 
@@ -86,6 +92,10 @@ export async function generateFromEntryPoint(options: {
 
   await fs.mkdir(path.dirname(outFile), { recursive: true });
   await fs.writeFile(outFile, typeDeclarations, "utf-8");
+
+  // One-time migration: remove old generated file and patch project configs
+  await removeOldGeneratedTypes(projectRoot, "appKitTypes.d.ts");
+  await migrateProjectConfig(projectRoot);
 
   logger.debug("Type generation complete!");
 }

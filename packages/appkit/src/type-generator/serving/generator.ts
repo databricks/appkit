@@ -5,6 +5,11 @@ import pc from "picocolors";
 import { createLogger } from "../../logging/logger";
 import type { EndpointConfig } from "../../plugins/serving/types";
 import {
+  migrateProjectConfig,
+  removeOldGeneratedTypes,
+  resolveProjectRoot,
+} from "../migration";
+import {
   CACHE_VERSION,
   hashSchema,
   loadServingCache,
@@ -18,6 +23,10 @@ import {
   extractRequestKeys,
 } from "./converter";
 import { fetchOpenApiSchema } from "./fetcher";
+import {
+  extractServingEndpoints,
+  findServerFile,
+} from "./server-file-extractor";
 
 const logger = createLogger("type-generator:serving");
 
@@ -34,14 +43,22 @@ interface GenerateServingTypesOptions {
 /**
  * Generates TypeScript type declarations for serving endpoints
  * by fetching their OpenAPI schemas and converting to TypeScript.
+ *
+ * Endpoint discovery order (when `endpoints` is not provided):
+ * 1. AST extraction from server file (server/index.ts or server/server.ts)
+ * 2. DATABRICKS_SERVING_ENDPOINT_NAME env var (single default endpoint)
  */
 export async function generateServingTypes(
   options: GenerateServingTypesOptions,
 ): Promise<void> {
   const { outFile, noCache } = options;
+  const projectRoot = resolveProjectRoot(outFile);
 
-  // Resolve endpoints from config or env
-  const endpoints = options.endpoints ?? resolveDefaultEndpoints();
+  // Resolve endpoints: explicit > AST extraction from server file > env var fallback
+  const endpoints =
+    options.endpoints ??
+    resolveEndpointsFromServerFile() ??
+    resolveDefaultEndpoints();
   if (Object.keys(endpoints).length === 0) {
     logger.debug("No serving endpoints configured, skipping type generation");
     return;
@@ -76,6 +93,10 @@ export async function generateServingTypes(
   const output = generateTypeDeclarations(registryEntries);
   await fs.mkdir(path.dirname(outFile), { recursive: true });
   await fs.writeFile(outFile, output, "utf-8");
+
+  // One-time migration: remove old generated file and patch project configs
+  await removeOldGeneratedTypes(projectRoot, "appKitServingTypes.d.ts");
+  await migrateProjectConfig(projectRoot);
 
   if (registryEntries.length === 0) {
     logger.debug(
@@ -225,6 +246,22 @@ function printLogTable(
     `  ${newCount} new, ${cacheCount} from cache. ${pc.dim(`${elapsed}s`)}`,
   );
   console.log("");
+}
+
+function resolveEndpointsFromServerFile():
+  | Record<string, EndpointConfig>
+  | undefined {
+  try {
+    const serverFile = findServerFile(process.cwd());
+    if (!serverFile) return undefined;
+    return extractServingEndpoints(serverFile) ?? undefined;
+  } catch (error) {
+    logger.debug(
+      "Failed to extract endpoints from server file: %s",
+      (error as Error).message,
+    );
+    return undefined;
+  }
 }
 
 function resolveDefaultEndpoints(): Record<string, EndpointConfig> {
