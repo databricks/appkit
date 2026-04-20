@@ -26,7 +26,10 @@ Reference guide for building AppKit plugins. Every guideline is prefixed with a 
 
 **SHOULD** set `hidden: true` on infrastructure plugins (like `server`) that should not appear in the template manifest.
 
-**MUST** use `getResourceRequirements(config)` for resources that depend on runtime config. Declare them as `optional` in the static manifest, then return them as `required: true` from the static method. See `FilesPlugin.getResourceRequirements` for the canonical pattern.
+**MUST** use `getResourceRequirements(config)` for resources that depend on runtime config. Two variants:
+
+- **Config-gated flip** — when a resource is only needed if a config flag is set: declare it as `optional` in the manifest (so CLI and docs can see it) and return it with `required: true` from the static method when the flag is on. See the "Config-dependent resources" example in `docs/docs/plugins/custom-plugins.md`.
+- **Dynamic discovery** — when concrete resources can't be enumerated statically (one per env var, one per config entry, etc.): keep a single required placeholder in the manifest so `apps init` can prompt for at least one, and emit the full dynamic set from `getResourceRequirements`. See `FilesPlugin` and `ServingPlugin`.
 
 ---
 
