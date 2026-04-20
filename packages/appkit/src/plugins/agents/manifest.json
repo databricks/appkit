@@ -1,0 +1,10 @@
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "name": "agent",
+  "displayName": "Agents Plugin",
+  "description": "AI agents driven by markdown configs or code, with auto-tool-discovery from registered plugins",
+  "resources": {
+    "required": [],
+    "optional": []
+  }
+}

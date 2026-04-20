@@ -10,7 +10,7 @@ import { z } from "zod";
 import { GenieConnector } from "../../connectors";
 import { getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging";
-import { Plugin, toPlugin } from "../../plugin";
+import { Plugin, toPluginWithInstance } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import {
   defineTool,
@@ -18,6 +18,7 @@ import {
   type ToolRegistry,
   toolsFromRegistry,
 } from "../agent/tools/define-tool";
+import { buildToolkitEntries } from "../agents/build-toolkit";
 import { genieStreamDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import type {
@@ -359,6 +360,10 @@ export class GeniePlugin extends Plugin implements ToolProvider {
     return executeFromRegistry(this.tools, name, args, signal);
   }
 
+  toolkit(opts?: import("../agents/types").ToolkitOptions) {
+    return buildToolkitEntries(this.name, this.tools, opts);
+  }
+
   exports() {
     return {
       sendMessage: this.sendMessage,
@@ -370,4 +375,4 @@ export class GeniePlugin extends Plugin implements ToolProvider {
 /**
  * @internal
  */
-export const genie = toPlugin(GeniePlugin);
+export const genie = toPluginWithInstance(GeniePlugin, ["toolkit"] as const);

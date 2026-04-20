@@ -753,5 +753,9 @@ export class AgentPlugin extends Plugin {
 
 /**
  * @internal
+ * @deprecated Use `agents()` (plural) from `@databricks/appkit` instead. The
+ *   new plugin supports per-agent tool indexes, the keyed `tools: { ... }`
+ *   record shape, and the `createAgent(def)` pure factory. This export stays
+ *   for migration; it will be removed in a future release.
  */
 export const agent = toPlugin(AgentPlugin);

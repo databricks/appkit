@@ -87,6 +87,12 @@ export interface AgentHandle {
  * });
  * ```
  */
+/**
+ * @deprecated Use `createAgent(def)` (pure factory) + `agents()` plugin +
+ *   `createApp()` instead. The new shape separates agent *definition* from
+ *   *app composition*. Re-exported as `createAgentApp` in the main package
+ *   index for migration; will be removed in a future release.
+ */
 export async function createAgent(
   config: CreateAgentConfig = {},
 ): Promise<AgentHandle> {

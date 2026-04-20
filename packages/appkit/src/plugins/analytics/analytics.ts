@@ -12,13 +12,14 @@ import { z } from "zod";
 import { SQLWarehouseConnector } from "../../connectors";
 import { getWarehouseId, getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging/logger";
-import { Plugin, toPlugin } from "../../plugin";
+import { Plugin, toPluginWithInstance } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import {
   defineTool,
   executeFromRegistry,
   toolsFromRegistry,
 } from "../agent/tools/define-tool";
+import { buildToolkitEntries } from "../agents/build-toolkit";
 import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import { QueryProcessor } from "./query";
@@ -299,6 +300,23 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
   }
 
   /**
+   * Returns the plugin's tools as a keyed record of `ToolkitEntry` markers,
+   * suitable for spreading into an `AgentDefinition.tools` record.
+   *
+   * @example
+   * ```ts
+   * const analyticsP = analytics();
+   * createAgent({
+   *   instructions: "...",
+   *   tools: { ...analyticsP.toolkit({ only: ["query"] }) },
+   * });
+   * ```
+   */
+  toolkit(opts?: import("../agents/types").ToolkitOptions) {
+    return buildToolkitEntries(this.name, this.tools, opts);
+  }
+
+  /**
    * Returns the public exports for the analytics plugin.
    * Note: `asUser()` is automatically added by AppKit.
    */
@@ -315,4 +333,6 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
 /**
  * @internal
  */
-export const analytics = toPlugin(AnalyticsPlugin);
+export const analytics = toPluginWithInstance(AnalyticsPlugin, [
+  "toolkit",
+] as const);

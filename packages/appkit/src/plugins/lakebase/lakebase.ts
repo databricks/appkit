@@ -8,13 +8,14 @@ import {
   getUsernameWithApiLookup,
 } from "../../connectors/lakebase";
 import { createLogger } from "../../logging/logger";
-import { Plugin, toPlugin } from "../../plugin";
+import { Plugin, toPluginWithInstance } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import {
   defineTool,
   executeFromRegistry,
   toolsFromRegistry,
 } from "../agent/tools/define-tool";
+import { buildToolkitEntries } from "../agents/build-toolkit";
 import manifest from "./manifest.json";
 import type { ILakebaseConfig } from "./types";
 
@@ -149,6 +150,10 @@ class LakebasePlugin extends Plugin implements ToolProvider {
     return executeFromRegistry(this.tools, name, args, signal);
   }
 
+  toolkit(opts?: import("../agents/types").ToolkitOptions) {
+    return buildToolkitEntries(this.name, this.tools, opts);
+  }
+
   exports() {
     return {
       // biome-ignore lint/style/noNonNullAssertion: pool is guaranteed non-null after setup(), which AppKit always awaits before exposing the plugin API
@@ -163,4 +168,6 @@ class LakebasePlugin extends Plugin implements ToolProvider {
 /**
  * @internal
  */
-export const lakebase = toPlugin(LakebasePlugin);
+export const lakebase = toPluginWithInstance(LakebasePlugin, [
+  "toolkit",
+] as const);

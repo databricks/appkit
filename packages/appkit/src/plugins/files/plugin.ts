@@ -18,7 +18,7 @@ import {
 import { getWorkspaceClient, isInUserContext } from "../../context";
 import { AuthenticationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
-import { Plugin, toPlugin } from "../../plugin";
+import { Plugin, toPluginWithInstance } from "../../plugin";
 import type { PluginManifest, ResourceRequirement } from "../../registry";
 import { ResourceType } from "../../registry";
 import {
@@ -27,6 +27,7 @@ import {
   type ToolRegistry,
   toolsFromRegistry,
 } from "../agent/tools/define-tool";
+import { buildToolkitEntries } from "../agents/build-toolkit";
 import {
   FILES_DOWNLOAD_DEFAULTS,
   FILES_MAX_UPLOAD_SIZE,
@@ -1049,6 +1050,10 @@ export class FilesPlugin extends Plugin implements ToolProvider {
     return executeFromRegistry(this.tools, name, args, signal);
   }
 
+  toolkit(opts?: import("../agents/types").ToolkitOptions) {
+    return buildToolkitEntries(this.name, this.tools, opts);
+  }
+
   exports(): FilesExport {
     const resolveVolume = (volumeKey: string): VolumeHandle => {
       if (!this.volumeKeys.includes(volumeKey)) {
@@ -1084,4 +1089,4 @@ export class FilesPlugin extends Plugin implements ToolProvider {
 /**
  * @internal
  */
-export const files = toPlugin(FilesPlugin);
+export const files = toPluginWithInstance(FilesPlugin, ["toolkit"] as const);

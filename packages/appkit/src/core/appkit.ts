@@ -76,7 +76,10 @@ export class AppKit<TPlugins extends InputPluginMap> {
       name,
       ...extraData,
     };
-    const pluginInstance = new Plugin(baseConfig);
+    // If the factory eagerly constructed an instance (via
+    // `toPluginWithInstance`), reuse it; otherwise construct now.
+    const preBuilt = (pluginData as { instance?: BasePlugin }).instance;
+    const pluginInstance = preBuilt ?? new Plugin(baseConfig);
 
     if (typeof pluginInstance.attachContext === "function") {
       pluginInstance.attachContext({
