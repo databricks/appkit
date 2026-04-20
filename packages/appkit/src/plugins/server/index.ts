@@ -59,6 +59,10 @@ export class ServerPlugin extends Plugin {
     this.serverApplication = express();
     this.server = null;
     this.serverExtensions = [];
+  }
+
+  attachContext(deps: Parameters<Plugin["attachContext"]>[0] = {}): void {
+    super.attachContext(deps);
     this.telemetry.registerInstrumentations([
       instrumentations.http,
       instrumentations.express,
@@ -68,9 +72,21 @@ export class ServerPlugin extends Plugin {
 
   /** Setup the server plugin. */
   async setup() {
-    if (this.shouldAutoStart()) {
-      await this.start();
+    if (!this.shouldAutoStart()) return;
+    if (this.context) {
+      // Defer the actual listen+extendRoutes to the `setup:complete` lifecycle
+      // hook. That way every plugin (including other deferred-phase plugins
+      // like `agents`) is already registered in PluginContext by the time
+      // extendRoutes() iterates. Otherwise plugins declared after server()
+      // in the plugin array would be silently dropped from /api/* mounts.
+      this.context.onLifecycle("setup:complete", async () => {
+        await this.start();
+      });
+      return;
     }
+    // No plugin context (e.g. tests constructing ServerPlugin directly) —
+    // start immediately.
+    await this.start();
   }
 
   /** Get the server configuration. */

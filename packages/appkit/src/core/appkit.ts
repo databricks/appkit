@@ -78,6 +78,13 @@ export class AppKit<TPlugins extends InputPluginMap> {
     };
     const pluginInstance = new Plugin(baseConfig);
 
+    if (typeof pluginInstance.attachContext === "function") {
+      pluginInstance.attachContext({
+        context: this.#context,
+        telemetryConfig: baseConfig.telemetry,
+      });
+    }
+
     this.#pluginInstances[name] = pluginInstance;
 
     this.#context.registerPlugin(name, pluginInstance);
