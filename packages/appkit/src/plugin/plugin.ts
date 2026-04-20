@@ -1,3 +1,4 @@
+import { context as otelContext } from "@opentelemetry/api";
 import type express from "express";
 import type {
   BasePlugin,
@@ -409,6 +410,9 @@ export abstract class Plugin<
     const effectiveUserKey = userKey ?? getCurrentUserId();
 
     const self = this;
+    // capture the active OTel context (HTTP span) before entering the async generator,
+    // where it would otherwise be lost across the async boundary
+    const parentOtelContext = otelContext.active();
 
     // wrapper function to ensure it returns a generator
     const asyncWrapperFn = async function* (streamSignal?: AbortSignal) {
@@ -428,11 +432,14 @@ export abstract class Plugin<
         return result;
       };
 
-      // execute the function with interceptors
-      const result = await self._executeWithInterceptors(
-        wrappedFn as (signal?: AbortSignal) => Promise<T>,
-        interceptors,
-        context,
+      // execute the function with interceptors, restoring the parent OTel context
+      // so telemetry spans are linked as children of the HTTP request span
+      const result = await otelContext.with(parentOtelContext, () =>
+        self._executeWithInterceptors(
+          wrappedFn as (signal?: AbortSignal) => Promise<T>,
+          interceptors,
+          context,
+        ),
       );
 
       // check if result is a generator
