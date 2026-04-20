@@ -8,7 +8,7 @@ import { describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { createAgent } from "../../../core/create-agent-def";
 import { runAgent } from "../../../core/run-agent";
-import { tool } from "../../agent/tools/tool";
+import { tool } from "../tools/tool";
 import type { ToolkitEntry } from "../types";
 
 function scriptedAdapter(events: AgentEvent[]): AgentAdapter {

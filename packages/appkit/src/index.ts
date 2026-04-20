@@ -89,15 +89,6 @@ export {
   serving,
 } from "./plugins";
 export {
-  type FunctionTool,
-  type HostedTool,
-  isFunctionTool,
-  isHostedTool,
-  mcpServer,
-  type ToolConfig,
-  tool,
-} from "./plugins/agent/tools";
-export {
   type AgentDefinition,
   type AgentsPluginConfig,
   type AgentTool,
@@ -110,6 +101,15 @@ export {
   type ToolkitEntry,
   type ToolkitOptions,
 } from "./plugins/agents";
+export {
+  type FunctionTool,
+  type HostedTool,
+  isFunctionTool,
+  isHostedTool,
+  mcpServer,
+  type ToolConfig,
+  tool,
+} from "./plugins/agents/tools";
 export type {
   EndpointConfig,
   ServingEndpointEntry,

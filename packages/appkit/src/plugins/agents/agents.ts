@@ -17,14 +17,13 @@ import type {
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
-import { agentStreamDefaults } from "../agent/defaults";
-import { AgentEventTranslator } from "../agent/event-translator";
-import { chatRequestSchema, invocationsRequestSchema } from "../agent/schemas";
-import {
-  buildBaseSystemPrompt,
-  composeSystemPrompt,
-} from "../agent/system-prompt";
-import { InMemoryThreadStore } from "../agent/thread-store";
+import { agentStreamDefaults } from "./defaults";
+import { AgentEventTranslator } from "./event-translator";
+import { loadAgentsFromDir } from "./load-agents";
+import manifest from "./manifest.json";
+import { chatRequestSchema, invocationsRequestSchema } from "./schemas";
+import { buildBaseSystemPrompt, composeSystemPrompt } from "./system-prompt";
+import { InMemoryThreadStore } from "./thread-store";
 import {
   AppKitMcpClient,
   type FunctionTool,
@@ -32,9 +31,7 @@ import {
   isFunctionTool,
   isHostedTool,
   resolveHostedTools,
-} from "../agent/tools";
-import { loadAgentsFromDir } from "./load-agents";
-import manifest from "./manifest.json";
+} from "./tools";
 import type {
   AgentDefinition,
   AgentsPluginConfig,
@@ -296,8 +293,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     }
 
     // 2. Explicit tools (toolkit entries, function tools, hosted tools)
-    const hostedToCollect: import("../agent/tools/hosted-tools").HostedTool[] =
-      [];
+    const hostedToCollect: import("./tools/hosted-tools").HostedTool[] = [];
     for (const [key, tool] of Object.entries(def.tools ?? {})) {
       if (isToolkitEntry(tool)) {
         index.set(key, {
@@ -381,7 +377,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   }
 
   private async connectHostedTools(
-    hostedTools: import("../agent/tools/hosted-tools").HostedTool[],
+    hostedTools: import("./tools/hosted-tools").HostedTool[],
     index: Map<string, ResolvedToolEntry>,
   ): Promise<void> {
     let host: string | undefined;

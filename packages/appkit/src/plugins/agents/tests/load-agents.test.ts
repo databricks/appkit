@@ -3,14 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { z } from "zod";
-import { defineTool, type ToolRegistry } from "../../agent/tools/define-tool";
-import { tool } from "../../agent/tools/tool";
 import { buildToolkitEntries } from "../build-toolkit";
 import {
   loadAgentFromFile,
   loadAgentsFromDir,
   parseFrontmatter,
 } from "../load-agents";
+import { defineTool, type ToolRegistry } from "../tools/define-tool";
+import { tool } from "../tools/tool";
 
 let workDir: string;
 

@@ -1,6 +1,6 @@
 import type { AgentToolDefinition } from "shared";
 import { toJSONSchema } from "zod";
-import type { ToolRegistry } from "../agent/tools/define-tool";
+import type { ToolRegistry } from "./tools/define-tool";
 import type { ToolkitEntry, ToolkitOptions } from "./types";
 
 /**

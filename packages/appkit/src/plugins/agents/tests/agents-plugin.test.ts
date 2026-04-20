@@ -11,10 +11,10 @@ import type {
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { CacheManager } from "../../../cache";
-import { defineTool, type ToolRegistry } from "../../agent/tools/define-tool";
 // Import the class directly so we can construct it without a createApp
 import { AgentsPlugin } from "../agents";
 import { buildToolkitEntries } from "../build-toolkit";
+import { defineTool, type ToolRegistry } from "../tools/define-tool";
 import type { AgentsPluginConfig, ToolkitEntry } from "../types";
 import { isToolkitEntry } from "../types";
 

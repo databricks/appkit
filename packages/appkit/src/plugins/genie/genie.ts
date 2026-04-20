@@ -12,13 +12,13 @@ import { getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging";
 import { Plugin, toPluginWithInstance } from "../../plugin";
 import type { PluginManifest } from "../../registry";
+import { buildToolkitEntries } from "../agents/build-toolkit";
 import {
   defineTool,
   executeFromRegistry,
   type ToolRegistry,
   toolsFromRegistry,
-} from "../agent/tools/define-tool";
-import { buildToolkitEntries } from "../agents/build-toolkit";
+} from "../agents/tools/define-tool";
 import { genieStreamDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import type {

@@ -5,8 +5,8 @@ import type {
   ThreadStore,
   ToolAnnotations,
 } from "shared";
-import type { FunctionTool } from "../agent/tools/function-tool";
-import type { HostedTool } from "../agent/tools/hosted-tools";
+import type { FunctionTool } from "./tools/function-tool";
+import type { HostedTool } from "./tools/hosted-tools";
 
 /**
  * A tool reference produced by a plugin's `.toolkit()` call. The agents plugin

@@ -21,13 +21,13 @@ import { createLogger } from "../../logging/logger";
 import { Plugin, toPluginWithInstance } from "../../plugin";
 import type { PluginManifest, ResourceRequirement } from "../../registry";
 import { ResourceType } from "../../registry";
+import { buildToolkitEntries } from "../agents/build-toolkit";
 import {
   defineTool,
   executeFromRegistry,
   type ToolRegistry,
   toolsFromRegistry,
-} from "../agent/tools/define-tool";
-import { buildToolkitEntries } from "../agents/build-toolkit";
+} from "../agents/tools/define-tool";
 import {
   FILES_DOWNLOAD_DEFAULTS,
   FILES_MAX_UPLOAD_SIZE,

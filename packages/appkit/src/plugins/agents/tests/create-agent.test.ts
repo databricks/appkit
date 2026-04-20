@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createAgent } from "../../../core/create-agent-def";
-import { tool } from "../../agent/tools/tool";
+import { tool } from "../tools/tool";
 import type { AgentDefinition } from "../types";
 
 describe("createAgent", () => {

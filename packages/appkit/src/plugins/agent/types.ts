@@ -4,8 +4,8 @@ import type {
   BasePluginConfig,
   ThreadStore,
 } from "shared";
-import type { FunctionTool } from "./tools/function-tool";
-import type { HostedTool } from "./tools/hosted-tools";
+import type { FunctionTool } from "../agents/tools/function-tool";
+import type { HostedTool } from "../agents/tools/hosted-tools";
 
 export type AgentTool = FunctionTool | HostedTool;
 

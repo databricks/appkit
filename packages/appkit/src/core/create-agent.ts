@@ -7,8 +7,8 @@ import type {
   PluginData,
 } from "shared";
 import { agent } from "../plugins/agent";
-import type { FunctionTool } from "../plugins/agent/tools/function-tool";
 import type { AgentTool } from "../plugins/agent/types";
+import type { FunctionTool } from "../plugins/agents/tools/function-tool";
 import { server } from "../plugins/server";
 import type { TelemetryConfig } from "../telemetry";
 import { createApp } from "./appkit";

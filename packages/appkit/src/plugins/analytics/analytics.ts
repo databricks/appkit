@@ -14,12 +14,12 @@ import { getWarehouseId, getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPluginWithInstance } from "../../plugin";
 import type { PluginManifest } from "../../registry";
+import { buildToolkitEntries } from "../agents/build-toolkit";
 import {
   defineTool,
   executeFromRegistry,
   toolsFromRegistry,
-} from "../agent/tools/define-tool";
-import { buildToolkitEntries } from "../agents/build-toolkit";
+} from "../agents/tools/define-tool";
 import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import { QueryProcessor } from "./query";

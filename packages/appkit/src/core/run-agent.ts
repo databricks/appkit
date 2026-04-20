@@ -9,8 +9,8 @@ import {
   type FunctionTool,
   functionToolToDefinition,
   isFunctionTool,
-} from "../plugins/agent/tools/function-tool";
-import { isHostedTool } from "../plugins/agent/tools/hosted-tools";
+} from "../plugins/agents/tools/function-tool";
+import { isHostedTool } from "../plugins/agents/tools/hosted-tools";
 import type {
   AgentDefinition,
   AgentTool,

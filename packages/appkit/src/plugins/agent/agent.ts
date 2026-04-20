@@ -13,13 +13,14 @@ import type {
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
-import { loadAgentConfigs } from "./config-loader";
-import { agentStreamDefaults } from "./defaults";
-import { AgentEventTranslator } from "./event-translator";
-import manifest from "./manifest.json";
-import { chatRequestSchema, invocationsRequestSchema } from "./schemas";
-import { buildBaseSystemPrompt, composeSystemPrompt } from "./system-prompt";
-import { InMemoryThreadStore } from "./thread-store";
+import { agentStreamDefaults } from "../agents/defaults";
+import { AgentEventTranslator } from "../agents/event-translator";
+import { chatRequestSchema, invocationsRequestSchema } from "../agents/schemas";
+import {
+  buildBaseSystemPrompt,
+  composeSystemPrompt,
+} from "../agents/system-prompt";
+import { InMemoryThreadStore } from "../agents/thread-store";
 import {
   AppKitMcpClient,
   type FunctionTool,
@@ -27,7 +28,9 @@ import {
   isFunctionTool,
   isHostedTool,
   resolveHostedTools,
-} from "./tools";
+} from "../agents/tools";
+import { loadAgentConfigs } from "./config-loader";
+import manifest from "./manifest.json";
 import type { AgentPluginConfig, RegisteredAgent, ToolEntry } from "./types";
 
 const logger = createLogger("agent");
@@ -254,7 +257,7 @@ export class AgentPlugin extends Plugin {
   }
 
   private async connectHostedTools(
-    hostedTools: import("./tools/hosted-tools").HostedTool[],
+    hostedTools: import("../agents/tools/hosted-tools").HostedTool[],
   ) {
     let host: string | undefined;
     let authenticate: () => Promise<Record<string, string>>;
