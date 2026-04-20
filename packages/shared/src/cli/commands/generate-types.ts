@@ -82,8 +82,8 @@ export const generateTypesCommand = new Command("generate-types")
     `
 Examples:
   $ appkit generate-types
-  $ appkit generate-types . client/src/types.d.ts
-  $ appkit generate-types . client/src/types.d.ts my-warehouse-id
+  $ appkit generate-types . shared/appkit-types/analytics.d.ts
+  $ appkit generate-types . shared/appkit-types/analytics.d.ts my-warehouse-id
   $ appkit generate-types --no-cache`,
   )
   .action(runGenerateTypes);

@@ -306,7 +306,7 @@ describe("migrateProjectConfig", () => {
     await expect(migrateProjectConfig(tmpDir)).resolves.not.toThrow();
   });
 
-  test("runs only once per session (dedup flag)", async () => {
+  test("runs only once per project root (dedup)", async () => {
     await writeFile(
       "tsconfig.client.json",
       JSON.stringify({ include: ["client/src"] }, null, 2),
@@ -324,10 +324,44 @@ describe("migrateProjectConfig", () => {
       JSON.stringify({ include: ["client/src"] }, null, 2),
     );
 
-    // Second call should be a no-op (flag is set)
+    // Second call with same projectRoot should be a no-op (already migrated)
     await migrateProjectConfig(tmpDir);
     result = JSON.parse(await readFile("tsconfig.client.json"));
     expect(result.include).not.toContain("shared/appkit-types");
+  });
+
+  test("migrates different project roots independently", async () => {
+    const tmpDir2 = await fsp.mkdtemp(
+      path.join(os.tmpdir(), "appkit-migration-test2-"),
+    );
+
+    try {
+      // Set up both projects
+      await writeFile(
+        "tsconfig.client.json",
+        JSON.stringify({ include: ["client/src"] }, null, 2),
+      );
+      await fsp.writeFile(
+        path.join(tmpDir2, "tsconfig.client.json"),
+        JSON.stringify({ include: ["client/src"] }, null, 2),
+        "utf-8",
+      );
+
+      // Migrate first project
+      await migrateProjectConfig(tmpDir);
+
+      // Second project should still migrate independently
+      await migrateProjectConfig(tmpDir2);
+
+      const result1 = JSON.parse(await readFile("tsconfig.client.json"));
+      const result2 = JSON.parse(
+        await fsp.readFile(path.join(tmpDir2, "tsconfig.client.json"), "utf-8"),
+      );
+      expect(result1.include).toContain("shared/appkit-types");
+      expect(result2.include).toContain("shared/appkit-types");
+    } finally {
+      await fsp.rm(tmpDir2, { recursive: true, force: true });
+    }
   });
 
   test("respects appkit.autoMigrate: false opt-out", async () => {

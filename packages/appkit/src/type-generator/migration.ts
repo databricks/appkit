@@ -1,3 +1,4 @@
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import pc from "picocolors";
@@ -9,9 +10,21 @@ const logger = createLogger("type-generator:migration");
  * Derive project root from an outFile path.
  * outFile is always `<projectRoot>/shared/appkit-types/<file>` — both the Vite plugins
  * and the CLI construct it this way, so going up two levels is safe.
+ *
+ * Validates that the resolved root contains a package.json — if not, logs a warning
+ * so custom outFile paths don't silently operate on the wrong directory.
  */
 export function resolveProjectRoot(outFile: string): string {
-  return path.resolve(path.dirname(outFile), "..", "..");
+  const root = path.resolve(path.dirname(outFile), "..", "..");
+  if (!fsSync.existsSync(path.join(root, "package.json"))) {
+    logger.warn(
+      "Resolved project root %s has no package.json — migration may target the wrong directory. " +
+        "Check your outFile path: %s",
+      root,
+      outFile,
+    );
+  }
+  return root;
 }
 
 /**
@@ -39,16 +52,18 @@ export async function removeOldGeneratedTypes(
 
 // ── Project config migration ────────────────────────────────────────────
 
-let migrationDone = false;
+const migratedProjects = new Set<string>();
 
 /**
  * One-time config migration: update tsconfig and package.json for shared/ types output.
  * Idempotent — each sub-migration checks current file state and skips if already migrated.
+ * Deduplicates per project root so monorepo builds migrate each app independently.
  * Opt-out: set `"appkit": { "autoMigrate": false }` in package.json.
  */
 export async function migrateProjectConfig(projectRoot: string): Promise<void> {
-  if (migrationDone) return;
-  migrationDone = true;
+  const resolved = path.resolve(projectRoot);
+  if (migratedProjects.has(resolved)) return;
+  migratedProjects.add(resolved);
 
   if (await isAutoMigrateDisabled(projectRoot)) {
     logger.debug("Auto-migration disabled via package.json appkit.autoMigrate");
@@ -68,7 +83,7 @@ export async function migrateProjectConfig(projectRoot: string): Promise<void> {
 
 /** Exported for testing only. */
 export function _resetMigrationState(): void {
-  migrationDone = false;
+  migratedProjects.clear();
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -123,8 +138,11 @@ async function migrateTsconfigClient(
       file: "tsconfig.client.json",
       action: 'added "shared/appkit-types" to include',
     });
-  } catch {
-    // File missing or unparseable — skip silently
+  } catch (err) {
+    logger.warn(
+      "Failed to migrate tsconfig.client.json: %s",
+      (err as Error).message,
+    );
   }
 
   return results;
@@ -160,8 +178,11 @@ async function migrateTsconfigServer(
       file: "tsconfig.server.json",
       action: "switched to noEmit mode",
     });
-  } catch {
-    // File missing or unparseable — skip silently
+  } catch (err) {
+    logger.warn(
+      "Failed to migrate tsconfig.server.json: %s",
+      (err as Error).message,
+    );
   }
 
   return results;
@@ -215,8 +236,11 @@ async function migratePackageJsonScripts(
       file: "package.json",
       action: `updated ${updated.join(" and ")} scripts`,
     });
-  } catch {
-    // File missing or unparseable — skip silently
+  } catch (err) {
+    logger.warn(
+      "Failed to migrate package.json scripts: %s",
+      (err as Error).message,
+    );
   }
 
   return results;
