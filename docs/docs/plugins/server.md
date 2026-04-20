@@ -38,14 +38,14 @@ await createApp({
 
 ## Custom routes example
 
-Use the `customize` callback to extend Express with custom routes before the server starts:
+Use the `onPluginsReady` callback to extend Express with custom routes before the server starts:
 
 ```ts
 import { createApp, server } from "@databricks/appkit";
 
 await createApp({
   plugins: [server()],
-  customize(appkit) {
+  onPluginsReady(appkit) {
     appkit.server.extend((app) => {
       app.get("/custom", (_req, res) => res.json({ ok: true }));
     });
@@ -53,12 +53,12 @@ await createApp({
 });
 ```
 
-The `customize` callback also supports async operations:
+The `onPluginsReady` callback also supports async operations:
 
 ```ts
 await createApp({
   plugins: [server()],
-  async customize(appkit) {
+  async onPluginsReady(appkit) {
     const pool = await initializeDatabase();
     appkit.server.extend((app) => {
       app.get("/data", async (_req, res) => {

@@ -167,7 +167,7 @@ describe("ServerPlugin with custom plugin", () => {
   });
 });
 
-describe("ServerPlugin with extend() via customize", () => {
+describe("ServerPlugin with extend() via onPluginsReady", () => {
   let server: Server;
   let baseUrl: string;
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
@@ -185,7 +185,7 @@ describe("ServerPlugin with extend() via customize", () => {
           host: "127.0.0.1",
         }),
       ],
-      customize(appkit) {
+      onPluginsReady(appkit) {
         appkit.server.extend((expressApp) => {
           expressApp.get("/custom", (_req, res) => {
             res.json({ custom: true });
@@ -212,7 +212,7 @@ describe("ServerPlugin with extend() via customize", () => {
     }
   });
 
-  test("custom route via extend() in customize callback works", async () => {
+  test("custom route via extend() in onPluginsReady callback works", async () => {
     const response = await fetch(`${baseUrl}/custom`);
 
     expect(response.status).toBe(200);
@@ -222,7 +222,7 @@ describe("ServerPlugin with extend() via customize", () => {
   });
 });
 
-describe("createApp with async customize callback", () => {
+describe("createApp with async onPluginsReady callback", () => {
   let server: Server;
   let baseUrl: string;
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
@@ -240,7 +240,7 @@ describe("createApp with async customize callback", () => {
           host: "127.0.0.1",
         }),
       ],
-      async customize(appkit) {
+      async onPluginsReady(appkit) {
         await new Promise((resolve) => setTimeout(resolve, 10));
         appkit.server.extend((expressApp) => {
           expressApp.get("/async-custom", (_req, res) => {
@@ -268,7 +268,7 @@ describe("createApp with async customize callback", () => {
     }
   });
 
-  test("async customize callback runs before server starts", async () => {
+  test("async onPluginsReady callback runs before server starts", async () => {
     const response = await fetch(`${baseUrl}/async-custom`);
 
     expect(response.status).toBe(200);
@@ -280,7 +280,7 @@ describe("createApp with async customize callback", () => {
 
 describe("createApp without server plugin", () => {
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
-  let customizeWasCalled = false;
+  let onPluginsReadyWasCalled = false;
 
   beforeAll(async () => {
     setupDatabricksEnv();
@@ -289,8 +289,8 @@ describe("createApp without server plugin", () => {
 
     await createApp({
       plugins: [],
-      customize() {
-        customizeWasCalled = true;
+      onPluginsReady() {
+        onPluginsReadyWasCalled = true;
       },
     });
   });
@@ -299,7 +299,7 @@ describe("createApp without server plugin", () => {
     serviceContextMock?.restore();
   });
 
-  test("customize callback is still called without server plugin", () => {
-    expect(customizeWasCalled).toBe(true);
+  test("onPluginsReady callback is still called without server plugin", () => {
+    expect(onPluginsReadyWasCalled).toBe(true);
   });
 });

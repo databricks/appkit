@@ -167,7 +167,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
       telemetry?: TelemetryConfig;
       cache?: CacheConfig;
       client?: WorkspaceClient;
-      customize?: (appkit: PluginMap<T>) => void | Promise<void>;
+      onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
     } = {},
   ): Promise<PluginMap<T>> {
     // Initialize core services
@@ -203,7 +203,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
     const handle = instance as unknown as PluginMap<T>;
 
-    await config.customize?.(handle);
+    await config.onPluginsReady?.(handle);
 
     const serverPlugin = instance.#pluginInstances.server;
     if (serverPlugin && typeof (serverPlugin as any).start === "function") {
@@ -232,7 +232,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
  *
  * Initializes telemetry, cache, and service context, then registers plugins
  * in phase order (core, normal, deferred) and awaits their setup.
- * If a `customize` callback is provided it runs after plugin setup but
+ * If a `onPluginsReady` callback is provided it runs after plugin setup but
  * before the server starts, giving you access to the full appkit handle
  * for registering custom routes or performing async setup.
  * The returned object maps each plugin name to its `exports()` API,
@@ -249,13 +249,13 @@ export class AppKit<TPlugins extends InputPluginMap> {
  * });
  * ```
  *
- * @example Server with custom routes via customize
+ * @example Server with custom routes via onPluginsReady
  * ```ts
  * import { createApp, server, analytics } from "@databricks/appkit";
  *
  * await createApp({
  *   plugins: [server(), analytics({})],
- *   customize(appkit) {
+ *   onPluginsReady(appkit) {
  *     appkit.server.extend((app) => {
  *       app.get("/custom", (_req, res) => res.json({ ok: true }));
  *     });
@@ -271,7 +271,7 @@ export async function createApp<
     telemetry?: TelemetryConfig;
     cache?: CacheConfig;
     client?: WorkspaceClient;
-    customize?: (appkit: PluginMap<T>) => void | Promise<void>;
+    onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
   } = {},
 ): Promise<PluginMap<T>> {
   return AppKit._createApp(config);

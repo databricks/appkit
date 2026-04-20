@@ -203,6 +203,12 @@ describe("ServerPlugin", () => {
       expect(config.port).toBe(3000);
       expect(config.host).toBe("127.0.0.1");
     });
+
+    test("should throw when autoStart is passed", () => {
+      expect(() => new ServerPlugin({ autoStart: false } as any)).toThrow(
+        "server({ autoStart }) has been removed",
+      );
+    });
   });
 
   describe("DEFAULT_CONFIG", () => {
@@ -472,6 +478,15 @@ describe("ServerPlugin", () => {
       await plugin.start();
 
       expect(extensionFn).toHaveBeenCalled();
+    });
+  });
+
+  describe("exports().start() trap", () => {
+    test("should throw migration error when start() is called via exports", () => {
+      const plugin = new ServerPlugin({});
+      const exported = plugin.exports();
+
+      expect(() => exported.start()).toThrow("server.start() has been removed");
     });
   });
 
