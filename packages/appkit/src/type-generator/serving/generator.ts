@@ -95,7 +95,7 @@ export async function generateServingTypes(
   await fs.writeFile(outFile, output, "utf-8");
 
   // One-time migration: remove old generated file and patch project configs
-  await removeOldGeneratedTypes(projectRoot, "serving.d.ts");
+  await removeOldGeneratedTypes(projectRoot, "appKitServingTypes.d.ts");
   await migrateProjectConfig(projectRoot);
 
   if (registryEntries.length === 0) {

@@ -28,20 +28,14 @@ export function resolveProjectRoot(outFile: string): string {
 }
 
 /**
- * Remove old generated types from client/src/appkit-types/ (pre-shared/ location).
+ * Remove old generated types from client/src/ (pre-shared/ location).
  * Best-effort: silently ignores missing files.
  */
 export async function removeOldGeneratedTypes(
   projectRoot: string,
   filename: string,
 ): Promise<void> {
-  const oldFile = path.join(
-    projectRoot,
-    "client",
-    "src",
-    "appkit-types",
-    filename,
-  );
+  const oldFile = path.join(projectRoot, "client", "src", filename);
   try {
     await fs.unlink(oldFile);
     logger.debug("Removed old types at %s", oldFile);

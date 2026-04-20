@@ -94,7 +94,7 @@ export async function generateFromEntryPoint(options: {
   await fs.writeFile(outFile, typeDeclarations, "utf-8");
 
   // One-time migration: remove old generated file and patch project configs
-  await removeOldGeneratedTypes(projectRoot, "analytics.d.ts");
+  await removeOldGeneratedTypes(projectRoot, "appKitTypes.d.ts");
   await migrateProjectConfig(projectRoot);
 
   logger.debug("Type generation complete!");

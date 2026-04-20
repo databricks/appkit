@@ -11,7 +11,7 @@ import {
 const logger = createLogger("type-generator:serving:vite-plugin");
 
 interface AppKitServingTypesPluginOptions {
-  /** Path to the output .d.ts file (relative to client root). Default: "src/appKitServingTypes.d.ts" */
+  /** Path to the output .d.ts file (relative to project root). */
   outFile?: string;
   /** Endpoint config override. If omitted, auto-discovers from the server file or falls back to DATABRICKS_SERVING_ENDPOINT_NAME env var. */
   endpoints?: Record<string, EndpointConfig>;
