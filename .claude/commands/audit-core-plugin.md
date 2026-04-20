@@ -108,6 +108,8 @@ A category with no findings is a pass. A category with only SHOULD findings is a
 | 9 | Type Safety | {status} | {count} |
 ```
 
+> Category 0 (Structural Completeness) is a file-layout pre-check from Step 4 and has no corresponding section in `plugin-best-practices.md`. Categories 1–9 mirror sections 1–9 of the best-practices reference.
+
 Where `{status}` is one of:
 - Pass — no findings
 - Warn — SHOULD-only findings
