@@ -1,6 +1,7 @@
 import { type Span, SpanStatusCode } from "@opentelemetry/api";
 import type { TelemetryConfig } from "shared";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import * as executionContext from "../../context/execution-context";
 import { TelemetryInterceptor } from "../../plugin/interceptors/telemetry";
 import type { InterceptorContext } from "../../plugin/interceptors/types";
 import type { ITelemetry } from "../types";
@@ -130,5 +131,37 @@ describe("TelemetryInterceptor", () => {
 
     // Verify end was called despite the error
     expect(mockSpan.end).toHaveBeenCalledTimes(1);
+  });
+
+  test("should set execution context as 'service' when not in user context", async () => {
+    vi.spyOn(executionContext, "isInUserContext").mockReturnValue(false);
+    const interceptor = new TelemetryInterceptor(mockTelemetry);
+    const fn = vi.fn().mockResolvedValue("result");
+
+    await interceptor.intercept(fn, context);
+
+    expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+      "execution.context",
+      "service",
+    );
+    expect(mockSpan.setAttribute).toHaveBeenCalledWith("caller.id", "test");
+  });
+
+  test("should set execution context as 'user' when in user context", async () => {
+    vi.spyOn(executionContext, "isInUserContext").mockReturnValue(true);
+    const interceptor = new TelemetryInterceptor(mockTelemetry);
+    const fn = vi.fn().mockResolvedValue("result");
+    const userContext: InterceptorContext = {
+      metadata: new Map(),
+      userKey: "user-123",
+    };
+
+    await interceptor.intercept(fn, userContext);
+
+    expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+      "execution.context",
+      "user",
+    );
+    expect(mockSpan.setAttribute).toHaveBeenCalledWith("caller.id", "user-123");
   });
 });

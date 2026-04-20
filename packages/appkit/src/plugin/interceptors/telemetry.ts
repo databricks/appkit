@@ -1,4 +1,5 @@
 import type { TelemetryConfig } from "shared";
+import { isInUserContext } from "../../context/execution-context";
 import type { ITelemetry, Span } from "../../telemetry";
 import { SpanStatusCode } from "../../telemetry";
 import type { ExecutionInterceptor, InterceptorContext } from "./types";
@@ -24,6 +25,12 @@ export class TelemetryInterceptor implements ExecutionInterceptor {
       spanName,
       { attributes: this.config?.attributes },
       async (span: Span) => {
+        span.setAttribute(
+          "execution.context",
+          isInUserContext() ? "user" : "service",
+        );
+        span.setAttribute("caller.id", context.userKey);
+
         let abortHandler: (() => void) | undefined;
         let isAborted = false;
 
