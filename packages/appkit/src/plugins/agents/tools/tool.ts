@@ -1,5 +1,6 @@
-import { toJSONSchema, type z } from "zod";
+import type { z } from "zod";
 import type { FunctionTool } from "./function-tool";
+import { toToolJSONSchema } from "./json-schema";
 
 export interface ToolConfig<S extends z.ZodType> {
   name: string;
@@ -18,7 +19,7 @@ export interface ToolConfig<S extends z.ZodType> {
  *   can self-correct on its next turn.
  */
 export function tool<S extends z.ZodType>(config: ToolConfig<S>): FunctionTool {
-  const parameters = toJSONSchema(config.schema) as unknown as Record<
+  const parameters = toToolJSONSchema(config.schema) as unknown as Record<
     string,
     unknown
   >;

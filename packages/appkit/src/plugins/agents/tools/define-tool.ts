@@ -1,5 +1,6 @@
 import type { AgentToolDefinition, ToolAnnotations } from "shared";
-import { toJSONSchema, type z } from "zod";
+import type { z } from "zod";
+import { toToolJSONSchema } from "./json-schema";
 import { formatZodError } from "./tool";
 
 /**
@@ -67,7 +68,7 @@ export function toolsFromRegistry(
   registry: ToolRegistry,
 ): AgentToolDefinition[] {
   return Object.entries(registry).map(([name, entry]) => {
-    const parameters = toJSONSchema(
+    const parameters = toToolJSONSchema(
       entry.schema,
     ) as unknown as AgentToolDefinition["parameters"];
     const def: AgentToolDefinition = {

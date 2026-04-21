@@ -1,6 +1,6 @@
 import type { AgentToolDefinition } from "shared";
-import { toJSONSchema } from "zod";
 import type { ToolRegistry } from "./tools/define-tool";
+import { toToolJSONSchema } from "./tools/json-schema";
 import type { ToolkitEntry, ToolkitOptions } from "./types";
 
 /**
@@ -36,7 +36,7 @@ export function buildToolkitEntries(
     const keyAfterPrefix = `${prefix}${localName}`;
     const key = rename[localName] ?? keyAfterPrefix;
 
-    const parameters = toJSONSchema(
+    const parameters = toToolJSONSchema(
       entry.schema,
     ) as unknown as AgentToolDefinition["parameters"];
 
