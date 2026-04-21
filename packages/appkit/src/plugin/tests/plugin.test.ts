@@ -1,3 +1,9 @@
+import {
+  type ContextManager,
+  createContextKey,
+  context as otelContext,
+} from "@opentelemetry/api";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { createMockTelemetry, mockServiceContext } from "@tools/test-helpers";
 import type express from "express";
 import type {
@@ -5,7 +11,16 @@ import type {
   IAppResponse,
   PluginExecuteConfig,
 } from "shared";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from "vitest";
 import { AppManager } from "../../app";
 import { CacheManager } from "../../cache";
 import { ServiceContext } from "../../context/service-context";
@@ -20,7 +35,7 @@ import { StreamManager } from "../../stream";
 import type { ITelemetry, TelemetryProvider } from "../../telemetry";
 import { TelemetryManager } from "../../telemetry";
 import type { InterceptorContext } from "../interceptors/types";
-import { Plugin } from "../plugin";
+import { isDevOboFallback, Plugin } from "../plugin";
 
 const { MockApiError } = vi.hoisted(() => {
   class MockApiError extends Error {
@@ -145,6 +160,20 @@ class PluginWithRoutes extends TestPlugin {
   injectRoutes(_router: express.Router) {
     this.routesInjected = true;
     // Mock route injection
+  }
+}
+
+class OboTestPlugin extends Plugin<BasePluginConfig> {
+  lastOboFallbackValue: boolean | undefined;
+
+  async captureOboFallback(): Promise<string> {
+    this.lastOboFallbackValue = isDevOboFallback();
+    return "captured";
+  }
+
+  syncCapture(): string {
+    this.lastOboFallbackValue = isDevOboFallback();
+    return "sync-captured";
   }
 }
 
@@ -914,6 +943,166 @@ describe("Plugin", () => {
       });
 
       expect(result).toEqual({ ok: true, data: "integration-result" });
+    });
+  });
+
+  describe("asUser() dev fallback", () => {
+    let originalNodeEnv: string | undefined;
+    let contextManager: ContextManager;
+
+    beforeAll(() => {
+      otelContext.disable();
+      contextManager = new AsyncLocalStorageContextManager().enable();
+      otelContext.setGlobalContextManager(contextManager);
+    });
+
+    afterAll(() => {
+      otelContext.disable();
+    });
+
+    beforeEach(() => {
+      originalNodeEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = "development";
+      vi.useRealTimers();
+    });
+
+    afterEach(() => {
+      process.env.NODE_ENV = originalNodeEnv;
+    });
+
+    function createMockReqWithoutToken(): express.Request {
+      return {
+        header: vi.fn().mockReturnValue(undefined),
+      } as unknown as express.Request;
+    }
+
+    test("should return a Proxy (different reference) in dev mode without token", () => {
+      const plugin = new TestPlugin(config);
+      const proxied = plugin.asUser(createMockReqWithoutToken());
+
+      expect(proxied).not.toBe(plugin);
+      expect(proxied).toBeInstanceOf(TestPlugin);
+    });
+
+    test("should pass through non-function properties unchanged", () => {
+      const plugin = new TestPlugin(config);
+      const proxied = plugin.asUser(createMockReqWithoutToken());
+
+      expect(proxied.name).toBe(plugin.name);
+    });
+
+    test("should preserve return values from proxied async methods", async () => {
+      const plugin = new TestPlugin(config);
+      const proxied = plugin.asUser(createMockReqWithoutToken());
+
+      const result = await proxied.customMethod("value");
+      expect(result).toBe("processed-value");
+    });
+
+    test("should preserve return values from proxied sync methods", () => {
+      const plugin = new TestPlugin(config);
+      const proxied = plugin.asUser(createMockReqWithoutToken());
+
+      const result = proxied.syncMethod("value");
+      expect(result).toBe("sync-value");
+    });
+
+    test("should set isDevOboFallback() to true inside proxied method", async () => {
+      const plugin = new OboTestPlugin(config);
+      const proxied = plugin.asUser(createMockReqWithoutToken());
+
+      await proxied.captureOboFallback();
+
+      expect(plugin.lastOboFallbackValue).toBe(true);
+    });
+
+    test("should set isDevOboFallback() to true inside proxied sync method", () => {
+      const plugin = new OboTestPlugin(config);
+      const proxied = plugin.asUser(createMockReqWithoutToken());
+
+      proxied.syncCapture();
+
+      expect(plugin.lastOboFallbackValue).toBe(true);
+    });
+
+    test("should not set OBO fallback for excluded methods (setup)", async () => {
+      const plugin = new OboTestPlugin(config);
+      // Override setup to capture OBO fallback
+      plugin.setup = async () => {
+        plugin.lastOboFallbackValue = isDevOboFallback();
+      };
+
+      const proxied = plugin.asUser(createMockReqWithoutToken());
+      await proxied.setup();
+
+      expect(plugin.lastOboFallbackValue).toBe(false);
+    });
+
+    test("isDevOboFallback() should return false outside proxy context", () => {
+      expect(isDevOboFallback()).toBe(false);
+    });
+  });
+
+  describe("executeStream OTel context preservation", () => {
+    let contextManager: ContextManager;
+
+    beforeAll(() => {
+      otelContext.disable();
+      contextManager = new AsyncLocalStorageContextManager().enable();
+      otelContext.setGlobalContextManager(contextManager);
+    });
+
+    afterAll(() => {
+      otelContext.disable();
+    });
+
+    beforeEach(() => {
+      vi.useRealTimers();
+    });
+
+    test("should preserve parent OTel context inside async generator", async () => {
+      const plugin = new TestPlugin(config);
+      const mockResponse = {} as IAppResponse;
+
+      const TEST_KEY = createContextKey("test.parent.context");
+      const parentCtx = otelContext.active().setValue(TEST_KEY, "parent-value");
+
+      let capturedContextValue: unknown;
+
+      const mockFn = vi.fn().mockImplementation(async () => {
+        capturedContextValue = otelContext.active().getValue(TEST_KEY);
+        return "stream-result";
+      });
+
+      // Capture the generator function passed to streamManager.stream
+      let capturedGeneratorFn: any;
+      vi.mocked(mockStreamManager.stream).mockImplementation(
+        async (_res, genFn) => {
+          capturedGeneratorFn = genFn;
+        },
+      );
+
+      // Execute within the parent context
+      await otelContext.with(parentCtx, () =>
+        (plugin as any).executeStream(mockResponse, mockFn, {
+          default: {},
+          stream: {},
+        }),
+      );
+
+      // Invoke the captured generator OUTSIDE the parent context scope
+      // The generator should restore parentOtelContext internally
+      const gen = capturedGeneratorFn();
+      await gen.next();
+
+      expect(capturedContextValue).toBe("parent-value");
+    });
+
+    test("should not have parent context without the fix (baseline)", async () => {
+      const TEST_KEY = createContextKey("test.baseline.context");
+
+      // Outside any context, the value should not exist
+      expect(otelContext.active().getValue(TEST_KEY)).toBeUndefined();
     });
   });
 });
