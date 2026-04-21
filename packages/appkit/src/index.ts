@@ -7,11 +7,20 @@
 
 // Types from shared
 export type {
+  AgentAdapter,
+  AgentEvent,
+  AgentInput,
+  AgentRunContext,
+  AgentToolDefinition,
   BasePluginConfig,
   CacheConfig,
   IAppRouter,
+  Message,
   PluginData,
   StreamExecutionSettings,
+  Thread,
+  ThreadStore,
+  ToolProvider,
 } from "shared";
 export { isSQLTypeMarker, sql } from "shared";
 export { CacheManager } from "./cache";
@@ -54,6 +63,21 @@ export {
   toPlugin,
 } from "./plugin";
 export { analytics, files, genie, lakebase, server, serving } from "./plugins";
+export {
+  type AgentTool,
+  isToolkitEntry,
+  type ToolkitEntry,
+  type ToolkitOptions,
+} from "./plugins/agents/types";
+export {
+  type FunctionTool,
+  type HostedTool,
+  isFunctionTool,
+  isHostedTool,
+  mcpServer,
+  type ToolConfig,
+  tool,
+} from "./plugins/agents/tools";
 export type {
   EndpointConfig,
   ServingEndpointEntry,
