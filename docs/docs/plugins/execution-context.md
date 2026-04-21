@@ -52,6 +52,8 @@ The `plugin.execute` span created by the execution interceptor chain includes th
 | `caller.id` | `string` | The user ID (OBO) or service principal ID |
 | `execution.obo_dev_fallback` | `boolean` | Set to `true` when an OBO call falls back to service principal in development mode |
 
+These attributes are automatically added when your plugin uses `execute()` or `executeStream()`. All built-in plugins use these methods for their OBO operations. Custom plugins should do the same to get automatic telemetry instrumentation.
+
 ## Development mode behavior
 
 In local development (`NODE_ENV=development`), if `asUser(req)` is called without a user token, it logs a warning and skips user impersonation — the operation runs with the default credentials configured for the app instead. The telemetry span will show `execution.context: "service"` with `execution.obo_dev_fallback: true` to distinguish these from regular service principal calls.
