@@ -45,6 +45,7 @@ const devListenPortSpan = 100;
  *   },
  * });
  * ```
+ *
  */
 export class ServerPlugin extends Plugin {
   public static DEFAULT_CONFIG = {
@@ -66,6 +67,7 @@ export class ServerPlugin extends Plugin {
   static phase: PluginPhase = "deferred";
 
   constructor(config: ServerConfig) {
+    super(config);
     if ("autoStart" in config) {
       throw new ServerError(
         "server({ autoStart }) has been removed. " +
@@ -73,17 +75,22 @@ export class ServerPlugin extends Plugin {
           "Run `npx appkit codemod on-plugins-ready --write` to auto-migrate.",
       );
     }
-    super(config);
     this.config = config;
     this.serverApplication = express();
     this.server = null;
     this.serverExtensions = [];
+  }
+
+  attachContext(deps: Parameters<Plugin["attachContext"]>[0] = {}): void {
+    super.attachContext(deps);
     this.telemetry.registerInstrumentations([
       instrumentations.http,
       instrumentations.express,
     ]);
+    this.context?.registerAsRouteTarget(this);
   }
 
+  /** Setup the server plugin. */
   async setup() {}
 
   /** Get the server configuration. */
@@ -185,6 +192,16 @@ export class ServerPlugin extends Plugin {
   }
 
   /**
+   * Register a server extension from another plugin during setup.
+   * Unlike extend(), this is designed for internal plugin-to-plugin
+   * coordination where extensions are registered before the server starts
+   * listening — typically called by PluginContext when flushing buffered routes.
+   */
+  addExtension(fn: (app: express.Application) => void) {
+    this.serverExtensions.push(fn);
+  }
+
+  /**
    * Setup the routes with the plugins.
    *
    * This method goes through all the plugins and injects the routes into the server application.
@@ -198,14 +215,15 @@ export class ServerPlugin extends Plugin {
     const endpoints: PluginEndpoints = {};
     const pluginConfigs: PluginClientConfigs = {};
 
-    if (!this.config.plugins) return { endpoints, pluginConfigs };
+    const plugins = this.context?.getPlugins();
+    if (!plugins || plugins.size === 0) return { endpoints, pluginConfigs };
 
     this.serverApplication.get("/health", (_, res) => {
       res.status(200).json({ status: "ok" });
     });
     this.registerEndpoint("health", "/health");
 
-    for (const plugin of Object.values(this.config.plugins)) {
+    for (const plugin of plugins.values()) {
       if (EXCLUDED_PLUGINS.includes(plugin.name)) continue;
 
       if (plugin?.injectRoutes && typeof plugin.injectRoutes === "function") {
@@ -383,8 +401,9 @@ export class ServerPlugin extends Plugin {
     }
 
     // 1. abort active operations from plugins
-    if (this.config.plugins) {
-      for (const plugin of Object.values(this.config.plugins)) {
+    const shutdownPlugins = this.context?.getPlugins();
+    if (shutdownPlugins) {
+      for (const plugin of shutdownPlugins.values()) {
         if (plugin.abortActiveOperations) {
           try {
             plugin.abortActiveOperations();

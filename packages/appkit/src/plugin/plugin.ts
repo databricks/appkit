@@ -20,6 +20,7 @@ import {
   ServiceContext,
   type UserContext,
 } from "../context";
+import type { PluginContext } from "../core/plugin-context";
 import { AppKitError, AuthenticationError } from "../errors";
 import { createLogger } from "../logging/logger";
 import { StreamManager } from "../stream";
@@ -178,11 +179,12 @@ export abstract class Plugin<
 > implements BasePlugin
 {
   protected isReady = false;
-  protected cache: CacheManager;
+  protected cache!: CacheManager;
   protected app: AppManager;
   protected devFileReader: DevFileReader;
   protected streamManager: StreamManager;
-  protected telemetry: ITelemetry;
+  protected telemetry!: ITelemetry;
+  protected context?: PluginContext;
 
   /** Registered endpoints for this plugin */
   private registeredEndpoints: PluginEndpointMap = {};
@@ -208,12 +210,58 @@ export abstract class Plugin<
       config.name ??
       (this.constructor as { manifest?: { name: string } }).manifest?.name ??
       "plugin";
-    this.telemetry = TelemetryManager.getProvider(this.name, config.telemetry);
     this.streamManager = new StreamManager();
-    this.cache = CacheManager.getInstanceSync();
     this.app = new AppManager();
     this.devFileReader = DevFileReader.getInstance();
+    this.context = (config as Record<string, unknown>).context as
+      | PluginContext
+      | undefined;
 
+    // Eagerly bind telemetry + cache if the core services have already been
+    // initialized (normal createApp path, or tests that mock CacheManager).
+    // If they haven't, we leave these undefined and rely on `attachContext`
+    // being called later — this lets factories eagerly construct plugin
+    // instances at module top-level before `createApp` has run.
+    this.tryAttachContext();
+  }
+
+  private tryAttachContext(): void {
+    try {
+      this.cache = CacheManager.getInstanceSync();
+    } catch {
+      return;
+    }
+    this.telemetry = TelemetryManager.getProvider(
+      this.name,
+      this.config.telemetry,
+    );
+    this.isReady = true;
+  }
+
+  /**
+   * Binds runtime dependencies (telemetry provider, cache, plugin context) to
+   * this plugin. Called by `AppKit._createApp` after construction and before
+   * `setup()`. Idempotent: safe to call if the constructor already bound them
+   * eagerly. Kept separate so factories can eagerly construct plugin instances
+   * without running this before `TelemetryManager.initialize()` /
+   * `CacheManager.getInstance()` have run.
+   */
+  attachContext(
+    deps: {
+      context?: unknown;
+      telemetryConfig?: BasePluginConfig["telemetry"];
+    } = {},
+  ): void {
+    if (!this.cache) {
+      this.cache = CacheManager.getInstanceSync();
+    }
+    this.telemetry = TelemetryManager.getProvider(
+      this.name,
+      deps.telemetryConfig ?? this.config.telemetry,
+    );
+    if (deps.context !== undefined) {
+      this.context = deps.context as PluginContext;
+    }
     this.isReady = true;
   }
 
