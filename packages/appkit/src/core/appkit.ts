@@ -10,9 +10,12 @@ import type {
 } from "shared";
 import { CacheManager } from "../cache";
 import { ServiceContext } from "../context";
+import { createLogger } from "../logging/logger";
 import { ResourceRegistry, ResourceType } from "../registry";
 import type { TelemetryConfig } from "../telemetry";
 import { TelemetryManager } from "../telemetry";
+
+const logger = createLogger("appkit");
 
 export class AppKit<TPlugins extends InputPluginMap> {
   #pluginInstances: Record<string, BasePlugin> = {};
@@ -203,7 +206,11 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
     const handle = instance as unknown as PluginMap<T>;
 
-    await config.onPluginsReady?.(handle);
+    if (config.onPluginsReady) {
+      logger.debug("Running onPluginsReady hook");
+      await config.onPluginsReady(handle);
+      logger.debug("onPluginsReady hook completed");
+    }
 
     const serverPlugin = instance.#pluginInstances.server;
     if (serverPlugin && typeof (serverPlugin as any).start === "function") {
