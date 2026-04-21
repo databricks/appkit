@@ -167,10 +167,12 @@ function migratePatternA(content: string): MigrationResult {
 
   let callbackBody = content.slice(bodyOpenBrace + 1, bodyCloseBrace).trim();
 
-  // Remove .start() calls from the body
+  // Remove entire statements that are just .start() calls (e.g. `await appkit.server.start();`)
   callbackBody = callbackBody
+    .replace(/^\s*(?:await\s+)?\w+\.server\s*\.\s*start\(\s*\)\s*;?\s*$/gm, "")
     .replace(/\n\s*\.start\(\s*\)\s*;?/g, ";")
     .replace(/\.start\(\s*\)/g, "")
+    .replace(/\n\s*\n\s*\n/g, "\n\n")
     .trim();
 
   // Clean up trailing semicolons
@@ -179,6 +181,9 @@ function migratePatternA(content: string): MigrationResult {
   } else if (!callbackBody.endsWith("}")) {
     callbackBody += ";";
   }
+
+  // Detect if the callback was async
+  const isAsync = /^async\s/.test(thenInner.trim());
 
   // Check for .catch() after .then(...) using brace-aware parsing
   const afterThenClose = content.slice(thenCloseParen + 1);
@@ -219,7 +224,8 @@ function migratePatternA(content: string): MigrationResult {
     .map((line) => `    ${line.trimStart()}`)
     .join("\n");
 
-  const onPluginsReadyProp = `${needsComma}\n  onPluginsReady(${paramName}) {\n${indentedBody}\n  },`;
+  const asyncPrefix = isAsync ? "async " : "";
+  const onPluginsReadyProp = `${needsComma}\n  ${asyncPrefix}onPluginsReady(${paramName}) {\n${indentedBody}\n  },`;
   const newConfig = `${beforeLastBrace}${onPluginsReadyProp}\n}`;
 
   // Build the replacement
