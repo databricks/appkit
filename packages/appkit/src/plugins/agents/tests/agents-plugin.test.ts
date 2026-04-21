@@ -14,9 +14,17 @@ import { CacheManager } from "../../../cache";
 // Import the class directly so we can construct it without a createApp
 import { AgentsPlugin } from "../agents";
 import { buildToolkitEntries } from "../build-toolkit";
+import { fromPlugin } from "../from-plugin";
 import { defineTool, type ToolRegistry } from "../tools/define-tool";
+import { tool } from "../tools/tool";
 import type { AgentsPluginConfig, ToolkitEntry } from "../types";
 import { isToolkitEntry } from "../types";
+
+function namedFactory(name: string) {
+  const f = () => ({ name });
+  Object.defineProperty(f, "pluginName", { value: name, enumerable: true });
+  return f as typeof f & { readonly pluginName: string };
+}
 
 interface FakeContext {
   providers: Array<{ name: string; provider: ToolProvider }>;
@@ -285,5 +293,203 @@ describe("AgentsPlugin", () => {
     expect(isToolkitEntry(entry)).toBe(true);
     expect(isToolkitEntry({ foo: 1 })).toBe(false);
     expect(isToolkitEntry(null)).toBe(false);
+  });
+
+  describe("fromPlugin markers", () => {
+    test("spreading fromPlugin registers all tools from the referenced plugin", async () => {
+      const registry: ToolRegistry = {
+        query: defineTool({
+          description: "q",
+          schema: z.object({ sql: z.string() }),
+          handler: () => "ok",
+        }),
+      };
+      const ctx = fakeContext([
+        {
+          name: "analytics",
+          provider: makeToolProvider("analytics", registry),
+        },
+      ]);
+
+      const plugin = instantiate(
+        {
+          dir: false,
+          agents: {
+            support: {
+              instructions: "...",
+              model: stubAdapter(),
+              tools: { ...fromPlugin(namedFactory("analytics")) },
+            },
+          },
+        },
+        ctx,
+      );
+      await plugin.setup();
+
+      const api = plugin.exports() as {
+        get: (name: string) => { toolIndex: Map<string, unknown> } | null;
+      };
+      const agent = api.get("support");
+      expect(agent?.toolIndex.has("analytics.query")).toBe(true);
+    });
+
+    test("mixed inline + fromPlugin tools coexist", async () => {
+      const registry: ToolRegistry = {
+        query: defineTool({
+          description: "q",
+          schema: z.object({ sql: z.string() }),
+          handler: () => "ok",
+        }),
+      };
+      const ctx = fakeContext([
+        {
+          name: "analytics",
+          provider: makeToolProvider("analytics", registry),
+        },
+      ]);
+
+      const plugin = instantiate(
+        {
+          dir: false,
+          agents: {
+            support: {
+              instructions: "...",
+              model: stubAdapter(),
+              tools: {
+                ...fromPlugin(namedFactory("analytics")),
+                get_weather: tool({
+                  name: "get_weather",
+                  description: "Weather",
+                  schema: z.object({ city: z.string() }),
+                  execute: async ({ city }) => `Sunny in ${city}`,
+                }),
+              },
+            },
+          },
+        },
+        ctx,
+      );
+      await plugin.setup();
+
+      const api = plugin.exports() as {
+        get: (name: string) => { toolIndex: Map<string, unknown> } | null;
+      };
+      const agent = api.get("support");
+      expect(agent?.toolIndex.has("analytics.query")).toBe(true);
+      expect(agent?.toolIndex.has("get_weather")).toBe(true);
+    });
+
+    test("missing plugin throws at setup with Available: listing", async () => {
+      const ctx = fakeContext([
+        {
+          name: "files",
+          provider: makeToolProvider("files", {}),
+        },
+      ]);
+
+      const plugin = instantiate(
+        {
+          dir: false,
+          agents: {
+            support: {
+              instructions: "...",
+              model: stubAdapter(),
+              tools: { ...fromPlugin(namedFactory("analytics")) },
+            },
+          },
+        },
+        ctx,
+      );
+      await expect(plugin.setup()).rejects.toThrow(/analytics/);
+      await expect(plugin.setup()).rejects.toThrow(/Available:/);
+      await expect(plugin.setup()).rejects.toThrow(/files/);
+    });
+
+    test("symbol-only tools record disables auto-inherit", async () => {
+      const analyticsReg: ToolRegistry = {
+        query: defineTool({
+          description: "q",
+          schema: z.object({ sql: z.string() }),
+          handler: () => "ok",
+        }),
+      };
+      const filesReg: ToolRegistry = {
+        list: defineTool({
+          description: "l",
+          schema: z.object({}),
+          handler: () => [],
+        }),
+      };
+      const ctx = fakeContext([
+        {
+          name: "analytics",
+          provider: makeToolProvider("analytics", analyticsReg),
+        },
+        {
+          name: "files",
+          provider: makeToolProvider("files", filesReg),
+        },
+      ]);
+
+      const plugin = instantiate(
+        {
+          dir: false,
+          autoInheritTools: { code: true },
+          agents: {
+            support: {
+              instructions: "...",
+              model: stubAdapter(),
+              tools: { ...fromPlugin(namedFactory("analytics")) },
+            },
+          },
+        },
+        ctx,
+      );
+      await plugin.setup();
+
+      const api = plugin.exports() as {
+        get: (name: string) => { toolIndex: Map<string, unknown> } | null;
+      };
+      const agent = api.get("support");
+      const toolNames = Array.from(agent?.toolIndex.keys() ?? []);
+      expect(toolNames.some((n) => n.startsWith("analytics."))).toBe(true);
+      expect(toolNames.some((n) => n.startsWith("files."))).toBe(false);
+    });
+
+    test("falls back to getAgentTools() for providers without toolkit()", async () => {
+      // Provider lacks .toolkit() — only getAgentTools/executeAgentTool.
+      const bareProvider: ToolProvider = {
+        getAgentTools: () => [
+          {
+            name: "ping",
+            description: "ping",
+            parameters: { type: "object", properties: {} },
+          },
+        ],
+        executeAgentTool: vi.fn(async () => "pong"),
+      };
+      const ctx = fakeContext([{ name: "bare", provider: bareProvider }]);
+
+      const plugin = instantiate(
+        {
+          dir: false,
+          agents: {
+            support: {
+              instructions: "...",
+              model: stubAdapter(),
+              tools: { ...fromPlugin(namedFactory("bare")) },
+            },
+          },
+        },
+        ctx,
+      );
+      await plugin.setup();
+
+      const api = plugin.exports() as {
+        get: (name: string) => { toolIndex: Map<string, unknown> } | null;
+      };
+      const agent = api.get("support");
+      expect(agent?.toolIndex.has("bare.ping")).toBe(true);
+    });
   });
 });

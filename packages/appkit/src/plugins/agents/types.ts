@@ -5,6 +5,7 @@ import type {
   ThreadStore,
   ToolAnnotations,
 } from "shared";
+import type { FromPluginMarker } from "./from-plugin";
 import type { FunctionTool } from "./tools/function-tool";
 import type { HostedTool } from "./tools/hosted-tools";
 
@@ -54,6 +55,16 @@ export type BaseSystemPromptOption =
   | string
   | ((ctx: PromptContext) => string);
 
+/**
+ * Per-agent tool record. String keys map to inline tools, toolkit entries,
+ * hosted tools, etc. Symbol keys hold `FromPluginMarker` references produced
+ * by `fromPlugin(factory)` spreads — these are resolved at
+ * `AgentsPlugin.setup()` time against registered `ToolProvider` plugins.
+ */
+export type AgentTools = { [key: string]: AgentTool } & {
+  [key: symbol]: FromPluginMarker;
+};
+
 export interface AgentDefinition {
   /** Filled in from the enclosing key when used in `agents: { foo: def }`. */
   name?: string;
@@ -66,7 +77,7 @@ export interface AgentDefinition {
    */
   model?: AgentAdapter | Promise<AgentAdapter> | string;
   /** Per-agent tool record. Key is the LLM-visible tool-call name. */
-  tools?: Record<string, AgentTool>;
+  tools?: AgentTools;
   /** Sub-agents, exposed as `agent-<key>` tools on this agent. */
   agents?: Record<string, AgentDefinition>;
   /** Override the plugin's baseSystemPrompt for this agent only. */
