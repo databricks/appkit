@@ -139,14 +139,6 @@ export type ConfigFor<T> = T extends { DEFAULT_CONFIG: infer D }
 export type OptionalConfigPluginDef<P extends PluginConstructor> = {
   plugin: P;
   config?: Partial<ConfigFor<P>>;
-  /**
-   * Pre-built plugin instance, populated by factories like
-   * `toPluginWithInstance` that eagerly construct the plugin. When present,
-   * AppKit reuses this instance instead of constructing a new one so that
-   * the handle a user holds at module scope is the same object that answers
-   * runtime requests.
-   */
-  instance?: BasePlugin;
 };
 
 // Input plugin map type (used internally by AppKit)

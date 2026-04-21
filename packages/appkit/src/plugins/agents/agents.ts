@@ -25,6 +25,7 @@ import manifest from "./manifest.json";
 import { chatRequestSchema, invocationsRequestSchema } from "./schemas";
 import { buildBaseSystemPrompt, composeSystemPrompt } from "./system-prompt";
 import { InMemoryThreadStore } from "./thread-store";
+import { resolveToolkitFromProvider } from "./toolkit-resolver";
 import {
   AppKitMcpClient,
   type FunctionTool,
@@ -40,8 +41,6 @@ import type {
   PromptContext,
   RegisteredAgent,
   ResolvedToolEntry,
-  ToolkitEntry,
-  ToolkitOptions,
 } from "./types";
 import { isToolkitEntry } from "./types";
 
@@ -989,49 +988,6 @@ function normalizeAutoInherit(value: AgentsPluginConfig["autoInheritTools"]): {
   if (value === undefined) return { file: true, code: false };
   if (typeof value === "boolean") return { file: value, code: value };
   return { file: value.file ?? true, code: value.code ?? false };
-}
-
-/**
- * Extract a plugin's toolkit as a keyed record of `ToolkitEntry`s. Prefers the
- * plugin's own `.toolkit(opts)` method; falls back to walking `getAgentTools()`
- * and synthesizing namespaced keys (`${pluginName}.${localName}`) with
- * `only` / `except` filtering. Shared between `applyAutoInherit` and
- * `resolveFromPluginMarkers` so both paths treat third-party ToolProviders
- * without `.toolkit()` the same way.
- */
-function resolveToolkitFromProvider(
-  pluginName: string,
-  provider: ToolProvider,
-  opts?: ToolkitOptions,
-): Record<string, ToolkitEntry> {
-  const withToolkit = provider as ToolProvider & {
-    toolkit?: (opts?: ToolkitOptions) => Record<string, ToolkitEntry>;
-  };
-  if (typeof withToolkit.toolkit === "function") {
-    return withToolkit.toolkit(opts);
-  }
-
-  const only = opts?.only ? new Set(opts.only) : null;
-  const except = opts?.except ? new Set(opts.except) : null;
-  const rename = opts?.rename ?? {};
-  const prefix = opts?.prefix ?? `${pluginName}.`;
-
-  const out: Record<string, ToolkitEntry> = {};
-  for (const tool of provider.getAgentTools()) {
-    if (only && !only.has(tool.name)) continue;
-    if (except?.has(tool.name)) continue;
-
-    const keyAfterPrefix = `${prefix}${tool.name}`;
-    const key = rename[tool.name] ?? keyAfterPrefix;
-
-    out[key] = {
-      __toolkitRef: true,
-      pluginName,
-      localName: tool.name,
-      def: { ...tool, name: key },
-    };
-  }
-  return out;
 }
 
 function composePromptForAgent(

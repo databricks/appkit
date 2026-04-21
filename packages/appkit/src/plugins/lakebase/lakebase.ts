@@ -8,7 +8,7 @@ import {
   getUsernameWithApiLookup,
 } from "../../connectors/lakebase";
 import { createLogger } from "../../logging/logger";
-import { Plugin, toPluginWithInstance } from "../../plugin";
+import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import { buildToolkitEntries } from "../agents/build-toolkit";
 import {
@@ -168,6 +168,4 @@ class LakebasePlugin extends Plugin implements ToolProvider {
 /**
  * @internal
  */
-export const lakebase = toPluginWithInstance(LakebasePlugin, [
-  "toolkit",
-] as const);
+export const lakebase = toPlugin(LakebasePlugin);

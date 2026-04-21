@@ -120,10 +120,6 @@ For plugins that don't expose a `.toolkit()` method (e.g., third-party `ToolProv
 
 If a referenced plugin is not registered in `createApp({ plugins })`, the agents plugin throws at setup with an `Available: …` listing so you can fix the wiring before the first request.
 
-### Using `.toolkit()` directly (advanced)
-
-`.toolkit()` is still available on `analytics()`, `files()`, `genie()`, and `lakebase()` handles. Use it when you need to rename tools individually or bind them under a custom record key — anything `fromPlugin` can't express. In the common case, prefer `fromPlugin`.
-
 ## Level 4: sub-agents
 
 ```ts

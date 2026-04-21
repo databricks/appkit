@@ -36,9 +36,9 @@ export type FromPluginSpread = { readonly [key: symbol]: FromPluginMarker };
  * symbol-keyed marker that the agents plugin resolves against registered
  * `ToolProvider`s at setup time.
  *
- * The factory argument must come from `toPlugin` / `toPluginWithInstance` (or
- * any function that carries a `pluginName` field). `fromPlugin` reads
- * `factory.pluginName` synchronously — it does not construct an instance.
+ * The factory argument must come from `toPlugin` (or any function that
+ * carries a `pluginName` field). `fromPlugin` reads `factory.pluginName`
+ * synchronously — it does not construct an instance.
  *
  * If the referenced plugin is also registered in `createApp({ plugins })`, the
  * same runtime instance is used for dispatch. If the plugin is missing,
@@ -58,8 +58,8 @@ export type FromPluginSpread = { readonly [key: symbol]: FromPluginMarker };
  * });
  * ```
  *
- * @param factory A plugin factory produced by `toPlugin` or
- *   `toPluginWithInstance`. Must expose a `pluginName` field.
+ * @param factory A plugin factory produced by `toPlugin`. Must expose a
+ *   `pluginName` field.
  * @param opts Optional toolkit scoping — `prefix`, `only`, `except`, `rename`.
  *   Same shape as the `.toolkit()` method.
  */
@@ -69,7 +69,7 @@ export function fromPlugin<F extends NamedPluginFactory>(
 ): FromPluginSpread {
   if (!factory || typeof factory.pluginName !== "string" || !factory.pluginName) {
     throw new Error(
-      "fromPlugin(): factory is missing pluginName. Pass a factory created by toPlugin() or toPluginWithInstance().",
+      "fromPlugin(): factory is missing pluginName. Pass a factory created by toPlugin().",
     );
   }
   const pluginName = factory.pluginName;

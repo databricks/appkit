@@ -1,8 +1,4 @@
 export type { ToPlugin } from "shared";
 export type { ExecutionResult } from "./execution-result";
 export { Plugin } from "./plugin";
-export {
-  type NamedPluginFactory,
-  toPlugin,
-  toPluginWithInstance,
-} from "./to-plugin";
+export { type NamedPluginFactory, toPlugin } from "./to-plugin";

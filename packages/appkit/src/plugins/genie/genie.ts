@@ -10,7 +10,7 @@ import { z } from "zod";
 import { GenieConnector } from "../../connectors";
 import { getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging";
-import { Plugin, toPluginWithInstance } from "../../plugin";
+import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import { buildToolkitEntries } from "../agents/build-toolkit";
 import {
@@ -375,4 +375,4 @@ export class GeniePlugin extends Plugin implements ToolProvider {
 /**
  * @internal
  */
-export const genie = toPluginWithInstance(GeniePlugin, ["toolkit"] as const);
+export const genie = toPlugin(GeniePlugin);

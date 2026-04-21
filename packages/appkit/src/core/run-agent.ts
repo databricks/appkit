@@ -3,13 +3,13 @@ import type {
   AgentAdapter,
   AgentEvent,
   AgentToolDefinition,
-  BasePlugin,
   Message,
   PluginConstructor,
   PluginData,
   ToolProvider,
 } from "shared";
 import { isFromPluginMarker } from "../plugins/agents/from-plugin";
+import { resolveToolkitFromProvider } from "../plugins/agents/toolkit-resolver";
 import {
   type FunctionTool,
   functionToolToDefinition,
@@ -20,7 +20,6 @@ import type {
   AgentDefinition,
   AgentTool,
   ToolkitEntry,
-  ToolkitOptions,
 } from "../plugins/agents/types";
 import { isToolkitEntry } from "../plugins/agents/types";
 
@@ -32,9 +31,9 @@ export interface RunAgentInput {
   /**
    * Optional plugin list used to resolve `fromPlugin` markers in `def.tools`.
    * Required when the def contains any `...fromPlugin(factory)` spreads;
-   * ignored otherwise. `runAgent` reuses eagerly-constructed instances
-   * (from `toPluginWithInstance`) and constructs fresh ones for plain
-   * `toPlugin` factories.
+   * ignored otherwise. `runAgent` constructs a fresh instance per plugin
+   * and dispatches tool calls against it as the service principal (no
+   * OBO — there is no HTTP request in standalone mode).
    */
   plugins?: PluginData<PluginConstructor, unknown, string>[];
 }
@@ -215,7 +214,7 @@ function buildStandaloneToolIndex(
         plugins,
         providerCache,
       );
-      const entries = synthesizeToolkit(
+      const entries = resolveToolkitFromProvider(
         marker.pluginName,
         provider,
         marker.opts,
@@ -332,9 +331,10 @@ function resolveStandaloneProvider(
     );
   }
 
-  const preBuilt = (match as { instance?: BasePlugin }).instance;
-  const instance =
-    preBuilt ?? new match.plugin({ ...(match.config ?? {}), name: pluginName });
+  const instance = new match.plugin({
+    ...(match.config ?? {}),
+    name: pluginName,
+  });
   const provider = instance as unknown as ToolProvider;
   if (
     typeof (provider as { getAgentTools?: unknown }).getAgentTools !==
@@ -352,37 +352,3 @@ function resolveStandaloneProvider(
   return provider;
 }
 
-function synthesizeToolkit(
-  pluginName: string,
-  provider: ToolProvider,
-  opts?: ToolkitOptions,
-): Record<string, ToolkitEntry> {
-  const withToolkit = provider as ToolProvider & {
-    toolkit?: (opts?: ToolkitOptions) => Record<string, ToolkitEntry>;
-  };
-  if (typeof withToolkit.toolkit === "function") {
-    return withToolkit.toolkit(opts);
-  }
-
-  const only = opts?.only ? new Set(opts.only) : null;
-  const except = opts?.except ? new Set(opts.except) : null;
-  const rename = opts?.rename ?? {};
-  const prefix = opts?.prefix ?? `${pluginName}.`;
-
-  const out: Record<string, ToolkitEntry> = {};
-  for (const tool of provider.getAgentTools()) {
-    if (only && !only.has(tool.name)) continue;
-    if (except?.has(tool.name)) continue;
-
-    const keyAfterPrefix = `${prefix}${tool.name}`;
-    const key = rename[tool.name] ?? keyAfterPrefix;
-
-    out[key] = {
-      __toolkitRef: true,
-      pluginName,
-      localName: tool.name,
-      def: { ...tool, name: key },
-    };
-  }
-  return out;
-}

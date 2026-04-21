@@ -12,7 +12,7 @@ import { z } from "zod";
 import { SQLWarehouseConnector } from "../../connectors";
 import { getWarehouseId, getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging/logger";
-import { Plugin, toPluginWithInstance } from "../../plugin";
+import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import { buildToolkitEntries } from "../agents/build-toolkit";
 import {
@@ -300,17 +300,11 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
   }
 
   /**
-   * Returns the plugin's tools as a keyed record of `ToolkitEntry` markers,
-   * suitable for spreading into an `AgentDefinition.tools` record.
-   *
-   * @example
-   * ```ts
-   * const analyticsP = analytics();
-   * createAgent({
-   *   instructions: "...",
-   *   tools: { ...analyticsP.toolkit({ only: ["query"] }) },
-   * });
-   * ```
+   * Returns the plugin's tools as a keyed record of `ToolkitEntry` markers.
+   * Called by the agents plugin (via `resolveToolkitFromProvider`) to spread
+   * a filtered, renamed view of the plugin's tools into an agent's tool
+   * index. Most callers should go through `fromPlugin(analytics, opts)` at
+   * module scope instead of reaching for this directly.
    */
   toolkit(opts?: import("../agents/types").ToolkitOptions) {
     return buildToolkitEntries(this.name, this.tools, opts);
@@ -333,6 +327,4 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
 /**
  * @internal
  */
-export const analytics = toPluginWithInstance(AnalyticsPlugin, [
-  "toolkit",
-] as const);
+export const analytics = toPlugin(AnalyticsPlugin);

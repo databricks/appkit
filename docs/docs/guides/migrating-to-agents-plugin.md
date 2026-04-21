@@ -136,27 +136,7 @@ Engineers declare tools in code; prompt authors pick from a menu in frontmatter.
 
 ## Scoping tools in code with `fromPlugin`
 
-Earlier alphas of the new API required a three-touch dance for every plugin whose tools you wanted on a code-defined agent:
-
-```ts
-// Before: intermediate variable + .toolkit() + a second entry in plugins[]
-const analyticsP = analytics();
-const filesP = files();
-
-const support = createAgent({
-  instructions: "…",
-  tools: {
-    ...analyticsP.toolkit(),
-    ...filesP.toolkit({ only: ["uploads.read"] }),
-  },
-});
-
-await createApp({
-  plugins: [server(), analyticsP, filesP, agents({ agents: { support } })],
-});
-```
-
-`fromPlugin(factory, opts?)` collapses this to a single reference per plugin:
+Code-defined agents pull plugin tools in via `fromPlugin(factory, opts?)`. The marker is resolved against registered plugins at `agents()` setup time — you write each plugin factory twice (once inside `fromPlugin`, once in `plugins: [...]`), and nothing more.
 
 ```ts
 import { agents, analytics, createAgent, createApp, files, fromPlugin, server } from "@databricks/appkit";
@@ -174,9 +154,7 @@ await createApp({
 });
 ```
 
-`fromPlugin` returns a spread-friendly, symbol-keyed marker. The agents plugin resolves it at setup against registered `ToolProvider`s and throws a clear `Available: …` error if the referenced plugin is missing from `plugins: [...]`.
-
-`.toolkit()` is **not deprecated** — use it when you need to rename individual tools or combine fine-grained scoping that `fromPlugin`'s options can't express. For the 90% case where you want "all tools from this plugin", prefer `fromPlugin`.
+`fromPlugin` accepts the same scoping options as markdown frontmatter toolkits (`only` / `except` / `prefix` / `rename`). If a referenced plugin isn't in `plugins: [...]`, `agents()` throws at setup with an `Available: …` listing.
 
 ## Standalone runs
 

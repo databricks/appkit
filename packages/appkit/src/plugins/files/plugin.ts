@@ -18,7 +18,7 @@ import {
 import { getWorkspaceClient, isInUserContext } from "../../context";
 import { AuthenticationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
-import { Plugin, toPluginWithInstance } from "../../plugin";
+import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest, ResourceRequirement } from "../../registry";
 import { ResourceType } from "../../registry";
 import { buildToolkitEntries } from "../agents/build-toolkit";
@@ -1089,4 +1089,4 @@ export class FilesPlugin extends Plugin implements ToolProvider {
 /**
  * @internal
  */
-export const files = toPluginWithInstance(FilesPlugin, ["toolkit"] as const);
+export const files = toPlugin(FilesPlugin);
