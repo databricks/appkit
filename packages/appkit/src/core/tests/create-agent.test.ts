@@ -147,8 +147,46 @@ describe("createAgent", () => {
     expect(tools).toBeInstanceOf(Array);
   });
 
-  test("throws when model is missing and no adapter provided", async () => {
-    await expect(createAgent({})).rejects.toThrow("'model' is required");
+  test("throws when none of model, agents, or adapter provided", async () => {
+    await expect(createAgent({} as any)).rejects.toThrow(
+      "one of 'model', 'agents', or 'adapter' is required",
+    );
+  });
+
+  test("throws when model and agents are both provided", async () => {
+    await expect(
+      createAgent({
+        model: "some-model",
+        agents: { a: { model: "m1" } },
+      } as any),
+    ).rejects.toThrow("mutually exclusive");
+  });
+
+  test("throws when adapter and agents are both provided", async () => {
+    await expect(
+      createAgent({
+        adapter: createMockAdapter(),
+        agents: { a: { model: "m1" } },
+      } as any),
+    ).rejects.toThrow("mutually exclusive");
+  });
+
+  test("throws when model and adapter are both provided", async () => {
+    await expect(
+      createAgent({
+        model: "some-model",
+        adapter: createMockAdapter(),
+      } as any),
+    ).rejects.toThrow("mutually exclusive");
+  });
+
+  test("throws when defaultAgent is set without agents", async () => {
+    await expect(
+      createAgent({
+        adapter: createMockAdapter(),
+        defaultAgent: "main",
+      } as any),
+    ).rejects.toThrow("'defaultAgent' requires 'agents'");
   });
 
   test("plugins namespace excludes agent and server", async () => {
@@ -187,18 +225,38 @@ describe("createAgent", () => {
     expect(handle.getTools).toBeTypeOf("function");
   });
 
-  test("tools config accepts SupervisorApiHostedTool format", async () => {
-    const handle = await createAgent({
-      adapter: createMockAdapter(),
+  test("SingleAgentConfig accepts tools in SupervisorApiHostedTool format", () => {
+    const config: import("../create-agent").SingleAgentConfig = {
+      model: "test-model",
       tools: [
         {
           type: "genie_space",
           genie_space: { id: "space-1", description: "SQL queries" },
         },
       ],
+    };
+    expect(config.tools).toHaveLength(1);
+  });
+
+  test("agents record creates multiple named agents", async () => {
+    const handle = await createAgent({
+      adapter: createMockAdapter(),
     });
 
-    expect(handle).toBeDefined();
+    handle.registerAgent("helper", createMockAdapter());
+    expect(handle.getTools).toBeTypeOf("function");
+  });
+
+  test("agents record accepts custom adapter descriptors", async () => {
+    const handle = await createAgent({
+      agents: {
+        main: { adapter: createMockAdapter() },
+        secondary: { adapter: Promise.resolve(createMockAdapter()) },
+      },
+      defaultAgent: "main",
+    });
+
+    expect(handle.registerAgent).toBeTypeOf("function");
   });
 
   test("addTools is exposed on AgentHandle", async () => {

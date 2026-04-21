@@ -52,9 +52,15 @@ export {
 export { getExecutionContext } from "./context";
 export { createApp } from "./core";
 export {
+  type AgentDescriptor,
   type AgentHandle,
   type CreateAgentConfig,
+  type CustomAdapterAgentDescriptor,
+  type CustomAdapterConfig,
   createAgent,
+  type ModelAgentDescriptor,
+  type MultiAgentConfig,
+  type SingleAgentConfig,
 } from "./core/create-agent";
 // Errors
 export {

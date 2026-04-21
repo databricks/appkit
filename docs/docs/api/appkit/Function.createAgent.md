@@ -9,8 +9,8 @@ Creates an agent-powered app with batteries included.
 Wraps `createApp` with `server()` and `agent()` pre-configured.
 Automatically starts an HTTP server with agent chat routes.
 
-When no `adapter` is provided, a `SupervisorApiAdapter` is created
-automatically using `model`, `instructions`, and `tools` from config.
+Three flavors: single agent shorthand (`model`), multiple named agents (`agents`),
+or a fully custom adapter (`adapter`). These are mutually exclusive.
 
 For apps that need custom routes or manual server control,
 use `createApp` with `server()` and `agent()` directly.
@@ -28,6 +28,7 @@ use `createApp` with `server()` and `agent()` directly.
 ## Examples
 
 ```ts
+// Single agent (shorthand)
 import { createAgent, analytics } from "@databricks/appkit";
 
 createAgent({
@@ -41,7 +42,25 @@ createAgent({
 ```
 
 ```ts
-import { createAgent } from "@databricks/appkit";
+// Multiple agents
+createAgent({
+  plugins: [analytics(), files()],
+  agents: {
+    assistant: {
+      model: "databricks-claude-sonnet-4-5",
+      instructions: "You are a data assistant...",
+    },
+    helper: {
+      model: "databricks-gpt-5-2",
+      instructions: "You are a code helper...",
+    },
+  },
+  defaultAgent: "assistant",
+});
+```
+
+```ts
+// Custom adapter
 import { VercelAIAdapter } from "@databricks/appkit/agents/vercel-ai";
 
 createAgent({
