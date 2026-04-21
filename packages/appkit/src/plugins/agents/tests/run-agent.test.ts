@@ -139,7 +139,11 @@ describe("runAgent", () => {
       },
     });
 
-    const pluginData = factory() as PluginData<PluginConstructor, unknown, string>;
+    const pluginData = factory() as PluginData<
+      PluginConstructor,
+      unknown,
+      string
+    >;
 
     await runAgent(def, { messages: "hi", plugins: [pluginData] });
     expect(capturedCtx).not.toBeNull();
@@ -170,9 +174,7 @@ describe("runAgent", () => {
       },
     });
 
-    await expect(runAgent(def, { messages: "hi" })).rejects.toThrow(
-      /absent/,
-    );
+    await expect(runAgent(def, { messages: "hi" })).rejects.toThrow(/absent/);
     await expect(runAgent(def, { messages: "hi" })).rejects.toThrow(
       /Available:/,
     );

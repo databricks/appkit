@@ -67,7 +67,11 @@ export function fromPlugin<F extends NamedPluginFactory>(
   factory: F,
   opts?: ToolkitOptions,
 ): FromPluginSpread {
-  if (!factory || typeof factory.pluginName !== "string" || !factory.pluginName) {
+  if (
+    !factory ||
+    typeof factory.pluginName !== "string" ||
+    !factory.pluginName
+  ) {
     throw new Error(
       "fromPlugin(): factory is missing pluginName. Pass a factory created by toPlugin().",
     );

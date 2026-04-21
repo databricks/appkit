@@ -351,4 +351,3 @@ function resolveStandaloneProvider(
   cache.set(pluginName, provider);
   return provider;
 }
-

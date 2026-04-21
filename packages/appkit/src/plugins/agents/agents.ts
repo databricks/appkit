@@ -389,8 +389,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
       const providerEntry = providers.find((p) => p.name === marker.pluginName);
       if (!providerEntry) {
-        const available =
-          providers.map((p) => p.name).join(", ") || "(none)";
+        const available = providers.map((p) => p.name).join(", ") || "(none)";
         throw new Error(
           `Agent '${agentName}' references plugin '${marker.pluginName}' via ` +
             `fromPlugin(), but that plugin is not registered in createApp. ` +
