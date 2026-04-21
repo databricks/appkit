@@ -1,5 +1,8 @@
 import type { TelemetryConfig } from "shared";
-import { isInUserContext } from "../../context/execution-context";
+import {
+  getCurrentUserId,
+  isInUserContext,
+} from "../../context/execution-context";
 import type { ITelemetry, Span } from "../../telemetry";
 import { SpanStatusCode } from "../../telemetry";
 import { isDevOboFallback } from "../plugin";
@@ -30,7 +33,7 @@ export class TelemetryInterceptor implements ExecutionInterceptor {
           "execution.context",
           isInUserContext() ? "user" : "service",
         );
-        span.setAttribute("caller.id", context.userKey);
+        span.setAttribute("caller.id", getCurrentUserId());
         if (isDevOboFallback()) {
           span.setAttribute("execution.obo_dev_fallback", true);
         }
