@@ -1,4 +1,6 @@
+import type { BasePlugin } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { PluginContext } from "../../../core/plugin-context";
 
 // Use vi.hoisted for mocks that need to be available before module loading
 const {
@@ -171,6 +173,14 @@ import { RemoteTunnelController } from "../remote-tunnel/remote-tunnel-controlle
 import { StaticServer } from "../static-server";
 import { ViteDevServer } from "../vite-dev-server";
 
+function createContextWithPlugins(plugins: Record<string, any>): PluginContext {
+  const ctx = new PluginContext();
+  for (const [name, instance] of Object.entries(plugins)) {
+    ctx.registerPlugin(name, instance as BasePlugin);
+  }
+  return ctx;
+}
+
 describe("ServerPlugin", () => {
   let originalEnv: NodeJS.ProcessEnv;
 
@@ -340,7 +350,7 @@ describe("ServerPlugin", () => {
       process.env.NODE_ENV = "production";
 
       const injectRoutes = vi.fn();
-      const plugins: any = {
+      const testPlugins: any = {
         "test-plugin": {
           name: "test-plugin",
           injectRoutes,
@@ -348,7 +358,10 @@ describe("ServerPlugin", () => {
         },
       };
 
-      const plugin = new ServerPlugin({ autoStart: false, plugins });
+      const plugin = new ServerPlugin({
+        autoStart: false,
+        context: createContextWithPlugins(testPlugins),
+      } as any);
       await plugin.start();
 
       const routerFn = (express as any).Router as ReturnType<typeof vi.fn>;
@@ -386,7 +399,10 @@ describe("ServerPlugin", () => {
         },
       };
 
-      const plugin = new ServerPlugin({ autoStart: false, plugins });
+      const plugin = new ServerPlugin({
+        autoStart: false,
+        context: createContextWithPlugins(plugins),
+      } as any);
       await plugin.start();
 
       expect(plugins["plugin-a"].clientConfig).toHaveBeenCalled();
@@ -413,7 +429,10 @@ describe("ServerPlugin", () => {
         },
       };
 
-      const plugin = new ServerPlugin({ autoStart: false, plugins });
+      const plugin = new ServerPlugin({
+        autoStart: false,
+        context: createContextWithPlugins(plugins),
+      } as any);
       await plugin.start();
 
       expect(plugins["plugin-null"].clientConfig).toHaveBeenCalled();
@@ -444,7 +463,10 @@ describe("ServerPlugin", () => {
         },
       };
 
-      const plugin = new ServerPlugin({ autoStart: false, plugins });
+      const plugin = new ServerPlugin({
+        autoStart: false,
+        context: createContextWithPlugins(plugins),
+      } as any);
       await expect(plugin.start()).resolves.toBeDefined();
       expect(mockLoggerError).toHaveBeenCalledWith(
         "Plugin '%s' clientConfig() failed, skipping its config: %O",
@@ -608,19 +630,19 @@ describe("ServerPlugin", () => {
 
       const plugin = new ServerPlugin({
         autoStart: false,
-        plugins: {
+        context: createContextWithPlugins({
           ok: {
             name: "ok",
             abortActiveOperations: vi.fn(),
-          } as any,
+          },
           bad: {
             name: "bad",
             abortActiveOperations: vi.fn(() => {
               throw new Error("boom");
             }),
-          } as any,
-        },
-      });
+          },
+        }),
+      } as any);
 
       // pretend started
       (plugin as any).server = mockHttpServer;

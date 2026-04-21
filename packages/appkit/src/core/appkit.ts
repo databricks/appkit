@@ -13,13 +13,17 @@ import { ServiceContext } from "../context";
 import { ResourceRegistry, ResourceType } from "../registry";
 import type { TelemetryConfig } from "../telemetry";
 import { TelemetryManager } from "../telemetry";
+import { isToolProvider, PluginContext } from "./plugin-context";
 
 export class AppKit<TPlugins extends InputPluginMap> {
   #pluginInstances: Record<string, BasePlugin> = {};
   #setupPromises: Promise<void>[] = [];
+  #context: PluginContext;
 
   private constructor(config: { plugins: TPlugins }) {
     const { plugins, ...globalConfig } = config;
+
+    this.#context = new PluginContext();
 
     const pluginEntries = Object.entries(plugins);
 
@@ -35,20 +39,24 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
     for (const [name, pluginData] of corePlugins) {
       if (pluginData) {
-        this.createAndRegisterPlugin(globalConfig, name, pluginData);
+        this.createAndRegisterPlugin(globalConfig, name, pluginData, {
+          context: this.#context,
+        });
       }
     }
 
     for (const [name, pluginData] of normalPlugins) {
       if (pluginData) {
-        this.createAndRegisterPlugin(globalConfig, name, pluginData);
+        this.createAndRegisterPlugin(globalConfig, name, pluginData, {
+          context: this.#context,
+        });
       }
     }
 
     for (const [name, pluginData] of deferredPlugins) {
       if (pluginData) {
         this.createAndRegisterPlugin(globalConfig, name, pluginData, {
-          plugins: this.#pluginInstances,
+          context: this.#context,
         });
       }
     }
@@ -70,7 +78,19 @@ export class AppKit<TPlugins extends InputPluginMap> {
     };
     const pluginInstance = new Plugin(baseConfig);
 
+    if (typeof pluginInstance.attachContext === "function") {
+      pluginInstance.attachContext({
+        context: this.#context,
+        telemetryConfig: baseConfig.telemetry,
+      });
+    }
+
     this.#pluginInstances[name] = pluginInstance;
+
+    this.#context.registerPlugin(name, pluginInstance);
+    if (isToolProvider(pluginInstance)) {
+      this.#context.registerToolProvider(name, pluginInstance);
+    }
 
     this.#setupPromises.push(pluginInstance.setup());
 
@@ -199,6 +219,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
     const instance = new AppKit(mergedConfig);
 
     await Promise.all(instance.#setupPromises);
+    await instance.#context.emitLifecycle("setup:complete");
 
     return instance as unknown as PluginMap<T>;
   }
