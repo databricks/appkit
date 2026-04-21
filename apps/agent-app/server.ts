@@ -4,6 +4,7 @@ import {
   createAgent,
   createApp,
   files,
+  fromPlugin,
   mcpServer,
   server,
   tool,
@@ -25,12 +26,14 @@ const get_weather = tool({
 
 // Code-defined agent. Overrides config/agents/support.md if a file with that
 // name exists. Tools here are explicit; defaults are strict (no auto-inherit
-// for code-defined agents).
+// for code-defined agents), so we pull analytics + files in via fromPlugin.
 const support = createAgent({
   instructions:
     "You help customers with data analysis, file browsing, and general questions. " +
     "Use the available tools as needed and summarize results concisely.",
   tools: {
+    ...fromPlugin(analytics),
+    ...fromPlugin(files),
     get_weather,
     "mcp.vector-search": mcpServer(
       "vector-search",

@@ -3,11 +3,16 @@ import type {
   AgentEvent,
   AgentInput,
   AgentRunContext,
+  AgentToolDefinition,
+  PluginConstructor,
+  PluginData,
+  ToolProvider,
 } from "shared";
 import { describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { createAgent } from "../../../core/create-agent-def";
 import { runAgent } from "../../../core/run-agent";
+import { fromPlugin } from "../from-plugin";
 import { tool } from "../tools/tool";
 import type { ToolkitEntry } from "../types";
 
@@ -82,6 +87,95 @@ describe("runAgent", () => {
     });
     expect(result).toBe("Sunny in NYC");
     expect(weatherFn).toHaveBeenCalledWith({ city: "NYC" });
+  });
+
+  test("resolves fromPlugin markers against RunAgentInput.plugins", async () => {
+    const pingExec = vi.fn(async () => "pong");
+    class FakePlugin implements ToolProvider {
+      static manifest = { name: "ping" };
+      static DEFAULT_CONFIG = {};
+      name = "ping";
+      constructor(public config: unknown) {}
+      async setup() {}
+      injectRoutes() {}
+      getEndpoints() {
+        return {};
+      }
+      getAgentTools(): AgentToolDefinition[] {
+        return [
+          {
+            name: "ping",
+            description: "ping",
+            parameters: { type: "object", properties: {} },
+          },
+        ];
+      }
+      executeAgentTool = pingExec;
+    }
+
+    const factory = () => ({
+      plugin: FakePlugin as unknown as PluginConstructor,
+      config: {},
+      name: "ping" as const,
+    });
+    Object.defineProperty(factory, "pluginName", {
+      value: "ping",
+      enumerable: true,
+    });
+
+    let capturedCtx: AgentRunContext | null = null;
+    const adapter: AgentAdapter = {
+      async *run(_input, context) {
+        capturedCtx = context;
+        yield { type: "message_delta", content: "" };
+      },
+    };
+
+    const def = createAgent({
+      instructions: "x",
+      model: adapter,
+      tools: {
+        ...fromPlugin(factory as unknown as { readonly pluginName: string }),
+      },
+    });
+
+    const pluginData = factory() as PluginData<PluginConstructor, unknown, string>;
+
+    await runAgent(def, { messages: "hi", plugins: [pluginData] });
+    expect(capturedCtx).not.toBeNull();
+    // biome-ignore lint/style/noNonNullAssertion: asserted above
+    const result = await capturedCtx!.executeTool("ping.ping", {});
+    expect(result).toBe("pong");
+    expect(pingExec).toHaveBeenCalled();
+  });
+
+  test("throws with guidance when fromPlugin marker has no matching plugin", async () => {
+    const factory = () => ({ name: "absent" as const });
+    Object.defineProperty(factory, "pluginName", {
+      value: "absent",
+      enumerable: true,
+    });
+
+    const adapter: AgentAdapter = {
+      async *run(_input, _context) {
+        yield { type: "message_delta", content: "" };
+      },
+    };
+
+    const def = createAgent({
+      instructions: "x",
+      model: adapter,
+      tools: {
+        ...fromPlugin(factory as unknown as { readonly pluginName: string }),
+      },
+    });
+
+    await expect(runAgent(def, { messages: "hi" })).rejects.toThrow(
+      /absent/,
+    );
+    await expect(runAgent(def, { messages: "hi" })).rejects.toThrow(
+      /Available:/,
+    );
   });
 
   test("throws a clear error when a ToolkitEntry is invoked", async () => {

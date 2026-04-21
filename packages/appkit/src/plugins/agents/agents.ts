@@ -19,6 +19,7 @@ import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import { agentStreamDefaults } from "./defaults";
 import { AgentEventTranslator } from "./event-translator";
+import { isFromPluginMarker } from "./from-plugin";
 import { loadAgentsFromDir } from "./load-agents";
 import manifest from "./manifest.json";
 import { chatRequestSchema, invocationsRequestSchema } from "./schemas";
@@ -39,6 +40,8 @@ import type {
   PromptContext,
   RegisteredAgent,
   ResolvedToolEntry,
+  ToolkitEntry,
+  ToolkitOptions,
 } from "./types";
 import { isToolkitEntry } from "./types";
 
@@ -253,7 +256,11 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     src: AgentSource,
   ): Promise<Map<string, ResolvedToolEntry>> {
     const index = new Map<string, ResolvedToolEntry>();
-    const hasExplicitTools = def.tools && Object.keys(def.tools).length > 0;
+    const toolsRecord = def.tools ?? {};
+    const hasExplicitTools =
+      def.tools !== undefined &&
+      (Object.keys(toolsRecord).length > 0 ||
+        Object.getOwnPropertySymbols(toolsRecord).length > 0);
     const hasExplicitSubAgents =
       def.agents && Object.keys(def.agents).length > 0;
 
@@ -292,9 +299,13 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       });
     }
 
-    // 2. Explicit tools (toolkit entries, function tools, hosted tools)
+    // 2. fromPlugin markers — resolve against registered ToolProviders first so
+    //    explicit string-keyed tools can still overwrite on the same key.
+    this.resolveFromPluginMarkers(agentName, toolsRecord, index);
+
+    // 3. Explicit tools (toolkit entries, function tools, hosted tools)
     const hostedToCollect: import("./tools/hosted-tools").HostedTool[] = [];
-    for (const [key, tool] of Object.entries(def.tools ?? {})) {
+    for (const [key, tool] of Object.entries(toolsRecord)) {
       if (isToolkitEntry(tool)) {
         index.set(key, {
           source: "toolkit",
@@ -338,31 +349,13 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       provider,
     } of this.context.getToolProviders()) {
       if (pluginName === this.name) continue;
-      const withToolkit = provider as ToolProvider & {
-        toolkit?: (opts?: unknown) => Record<string, unknown>;
-      };
-      if (typeof withToolkit.toolkit === "function") {
-        const entries = withToolkit.toolkit() as Record<string, unknown>;
-        for (const [key, maybeEntry] of Object.entries(entries)) {
-          if (!isToolkitEntry(maybeEntry)) continue;
-          index.set(key, {
-            source: "toolkit",
-            pluginName: maybeEntry.pluginName,
-            localName: maybeEntry.localName,
-            def: { ...maybeEntry.def, name: key },
-          });
-        }
-        continue;
-      }
-      // Fallback: providers without a toolkit() still expose getAgentTools();
-      // dispatch goes through PluginContext.executeTool by plugin name.
-      for (const tool of provider.getAgentTools()) {
-        const qualifiedName = `${pluginName}.${tool.name}`;
-        index.set(qualifiedName, {
+      const entries = resolveToolkitFromProvider(pluginName, provider);
+      for (const [key, entry] of Object.entries(entries)) {
+        index.set(key, {
           source: "toolkit",
-          pluginName,
-          localName: tool.name,
-          def: { ...tool, name: qualifiedName },
+          pluginName: entry.pluginName,
+          localName: entry.localName,
+          def: { ...entry.def, name: key },
         });
       }
     }
@@ -373,6 +366,52 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         agentName,
         aliased.length,
       );
+    }
+  }
+
+  /**
+   * Walks the symbol-keyed `fromPlugin` markers in an agent's `tools` record
+   * and resolves each one against a registered `ToolProvider`. Throws with a
+   * helpful `Available: …` listing if a referenced plugin isn't registered.
+   */
+  private resolveFromPluginMarkers(
+    agentName: string,
+    toolsRecord: Record<string | symbol, unknown>,
+    index: Map<string, ResolvedToolEntry>,
+  ): void {
+    const symbolKeys = Object.getOwnPropertySymbols(toolsRecord);
+    if (symbolKeys.length === 0) return;
+
+    const providers = this.context?.getToolProviders() ?? [];
+
+    for (const sym of symbolKeys) {
+      const marker = (toolsRecord as Record<symbol, unknown>)[sym];
+      if (!isFromPluginMarker(marker)) continue;
+
+      const providerEntry = providers.find((p) => p.name === marker.pluginName);
+      if (!providerEntry) {
+        const available =
+          providers.map((p) => p.name).join(", ") || "(none)";
+        throw new Error(
+          `Agent '${agentName}' references plugin '${marker.pluginName}' via ` +
+            `fromPlugin(), but that plugin is not registered in createApp. ` +
+            `Available: ${available}.`,
+        );
+      }
+
+      const entries = resolveToolkitFromProvider(
+        marker.pluginName,
+        providerEntry.provider,
+        marker.opts,
+      );
+      for (const [key, entry] of Object.entries(entries)) {
+        index.set(key, {
+          source: "toolkit",
+          pluginName: entry.pluginName,
+          localName: entry.localName,
+          def: { ...entry.def, name: key },
+        });
+      }
     }
   }
 
@@ -950,6 +989,49 @@ function normalizeAutoInherit(value: AgentsPluginConfig["autoInheritTools"]): {
   if (value === undefined) return { file: true, code: false };
   if (typeof value === "boolean") return { file: value, code: value };
   return { file: value.file ?? true, code: value.code ?? false };
+}
+
+/**
+ * Extract a plugin's toolkit as a keyed record of `ToolkitEntry`s. Prefers the
+ * plugin's own `.toolkit(opts)` method; falls back to walking `getAgentTools()`
+ * and synthesizing namespaced keys (`${pluginName}.${localName}`) with
+ * `only` / `except` filtering. Shared between `applyAutoInherit` and
+ * `resolveFromPluginMarkers` so both paths treat third-party ToolProviders
+ * without `.toolkit()` the same way.
+ */
+function resolveToolkitFromProvider(
+  pluginName: string,
+  provider: ToolProvider,
+  opts?: ToolkitOptions,
+): Record<string, ToolkitEntry> {
+  const withToolkit = provider as ToolProvider & {
+    toolkit?: (opts?: ToolkitOptions) => Record<string, ToolkitEntry>;
+  };
+  if (typeof withToolkit.toolkit === "function") {
+    return withToolkit.toolkit(opts);
+  }
+
+  const only = opts?.only ? new Set(opts.only) : null;
+  const except = opts?.except ? new Set(opts.except) : null;
+  const rename = opts?.rename ?? {};
+  const prefix = opts?.prefix ?? `${pluginName}.`;
+
+  const out: Record<string, ToolkitEntry> = {};
+  for (const tool of provider.getAgentTools()) {
+    if (only && !only.has(tool.name)) continue;
+    if (except?.has(tool.name)) continue;
+
+    const keyAfterPrefix = `${prefix}${tool.name}`;
+    const key = rename[tool.name] ?? keyAfterPrefix;
+
+    out[key] = {
+      __toolkitRef: true,
+      pluginName,
+      localName: tool.name,
+      def: { ...tool, name: key },
+    };
+  }
+  return out;
 }
 
 function composePromptForAgent(

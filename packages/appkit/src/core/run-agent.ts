@@ -3,8 +3,13 @@ import type {
   AgentAdapter,
   AgentEvent,
   AgentToolDefinition,
+  BasePlugin,
   Message,
+  PluginConstructor,
+  PluginData,
+  ToolProvider,
 } from "shared";
+import { isFromPluginMarker } from "../plugins/agents/from-plugin";
 import {
   type FunctionTool,
   functionToolToDefinition,
@@ -15,6 +20,7 @@ import type {
   AgentDefinition,
   AgentTool,
   ToolkitEntry,
+  ToolkitOptions,
 } from "../plugins/agents/types";
 import { isToolkitEntry } from "../plugins/agents/types";
 
@@ -23,6 +29,14 @@ export interface RunAgentInput {
   messages: string | Message[];
   /** Abort signal for cancellation. */
   signal?: AbortSignal;
+  /**
+   * Optional plugin list used to resolve `fromPlugin` markers in `def.tools`.
+   * Required when the def contains any `...fromPlugin(factory)` spreads;
+   * ignored otherwise. `runAgent` reuses eagerly-constructed instances
+   * (from `toPluginWithInstance`) and constructs fresh ones for plain
+   * `toPlugin` factories.
+   */
+  plugins?: PluginData<PluginConstructor, unknown, string>[];
 }
 
 export interface RunAgentResult {
@@ -39,11 +53,12 @@ export interface RunAgentResult {
  * Limitations vs. running through the agents() plugin:
  * - No OBO: there is no HTTP request, so plugin tools run as the service
  *   principal (when they work at all).
- * - Plugin tools (`ToolkitEntry`) are not supported — they require a live
- *   `PluginContext` that only exists when registered in a `createApp`
- *   instance. This function throws a clear error if encountered.
+ * - Hosted tools (MCP) are not supported — they require a live MCP client
+ *   that only exists inside the agents plugin.
  * - Sub-agents (`agents: { ... }` on the def) are executed as nested
  *   `runAgent` calls with no shared thread state.
+ * - Plugin tools (`fromPlugin` markers or `ToolkitEntry` spreads) require
+ *   passing `plugins: [...]` via `RunAgentInput`.
  */
 export async function runAgent(
   def: AgentDefinition,
@@ -51,7 +66,7 @@ export async function runAgent(
 ): Promise<RunAgentResult> {
   const adapter = await resolveAdapter(def);
   const messages = normalizeMessages(input.messages, def.instructions);
-  const toolIndex = buildStandaloneToolIndex(def);
+  const toolIndex = buildStandaloneToolIndex(def, input.plugins ?? []);
   const tools = Array.from(toolIndex.values()).map((e) => e.def);
 
   const signal = input.signal;
@@ -62,6 +77,13 @@ export async function runAgent(
     if (entry.kind === "function") {
       return entry.tool.execute(args as Record<string, unknown>);
     }
+    if (entry.kind === "toolkit") {
+      return entry.provider.executeAgentTool(
+        entry.localName,
+        args as Record<string, unknown>,
+        signal,
+      );
+    }
     if (entry.kind === "subagent") {
       const subInput: RunAgentInput = {
         messages:
@@ -71,13 +93,14 @@ export async function runAgent(
             ? (args as { input: string }).input
             : JSON.stringify(args),
         signal,
+        plugins: input.plugins,
       };
       const res = await runAgent(entry.agentDef, subInput);
       return res.text;
     }
     throw new Error(
       `runAgent: tool "${name}" is a ${entry.kind} tool. ` +
-        "Plugin toolkits and MCP tools are only usable via createApp({ plugins: [..., agents(...)] }).",
+        "Hosted/MCP tools are only usable via createApp({ plugins: [..., agents(...)] }).",
     );
   };
 
@@ -158,20 +181,61 @@ type StandaloneEntry =
   | {
       kind: "toolkit";
       def: AgentToolDefinition;
-      entry: ToolkitEntry;
+      provider: ToolProvider;
+      pluginName: string;
+      localName: string;
     }
   | {
       kind: "hosted";
       def: AgentToolDefinition;
     };
 
+/**
+ * Resolves `def.tools` (string-keyed entries + symbol-keyed `fromPlugin`
+ * markers) and `def.agents` (sub-agents) into a flat dispatch index.
+ * Symbol-keyed markers are resolved against `plugins`; missing references
+ * throw with an `Available: …` listing.
+ */
 function buildStandaloneToolIndex(
   def: AgentDefinition,
+  plugins: PluginData<PluginConstructor, unknown, string>[],
 ): Map<string, StandaloneEntry> {
   const index = new Map<string, StandaloneEntry>();
+  const tools = def.tools;
 
-  for (const [key, tool] of Object.entries(def.tools ?? {})) {
-    index.set(key, classifyTool(key, tool));
+  const symbolKeys = tools ? Object.getOwnPropertySymbols(tools) : [];
+  if (symbolKeys.length > 0) {
+    const providerCache = new Map<string, ToolProvider>();
+    for (const sym of symbolKeys) {
+      const marker = (tools as Record<symbol, unknown>)[sym];
+      if (!isFromPluginMarker(marker)) continue;
+
+      const provider = resolveStandaloneProvider(
+        marker.pluginName,
+        plugins,
+        providerCache,
+      );
+      const entries = synthesizeToolkit(
+        marker.pluginName,
+        provider,
+        marker.opts,
+      );
+      for (const [key, entry] of Object.entries(entries)) {
+        index.set(key, {
+          kind: "toolkit",
+          provider,
+          pluginName: entry.pluginName,
+          localName: entry.localName,
+          def: { ...entry.def, name: key },
+        });
+      }
+    }
+  }
+
+  if (tools) {
+    for (const [key, tool] of Object.entries(tools)) {
+      index.set(key, classifyTool(key, tool));
+    }
   }
 
   for (const [childKey, child] of Object.entries(def.agents ?? {})) {
@@ -203,7 +267,7 @@ function buildStandaloneToolIndex(
 
 function classifyTool(key: string, tool: AgentTool): StandaloneEntry {
   if (isToolkitEntry(tool)) {
-    return { kind: "toolkit", def: { ...tool.def, name: key }, entry: tool };
+    return toolkitEntryToStandalone(key, tool);
   }
   if (isFunctionTool(tool)) {
     return {
@@ -223,4 +287,102 @@ function classifyTool(key: string, tool: AgentTool): StandaloneEntry {
     };
   }
   throw new Error(`runAgent: unrecognized tool shape at key "${key}"`);
+}
+
+/**
+ * Pre-`fromPlugin` code could reach a `ToolkitEntry` by calling
+ * `.toolkit()` at module scope (which requires an instance). Those entries
+ * still flow through `def.tools` but without a provider we can dispatch
+ * against — runAgent cannot execute them and errors clearly.
+ */
+function toolkitEntryToStandalone(
+  key: string,
+  entry: ToolkitEntry,
+): StandaloneEntry {
+  const def: AgentToolDefinition = { ...entry.def, name: key };
+  return {
+    kind: "hosted",
+    def: {
+      ...def,
+      description:
+        `${def.description ?? ""} ` +
+        `[runAgent: this ToolkitEntry refers to plugin '${entry.pluginName}' but ` +
+        "runAgent cannot dispatch it without the plugin instance. Pass the " +
+        "plugin via plugins: [...] and use fromPlugin(factory) instead of " +
+        ".toolkit() spreads.]".trim(),
+    },
+  };
+}
+
+function resolveStandaloneProvider(
+  pluginName: string,
+  plugins: PluginData<PluginConstructor, unknown, string>[],
+  cache: Map<string, ToolProvider>,
+): ToolProvider {
+  const cached = cache.get(pluginName);
+  if (cached) return cached;
+
+  const match = plugins.find((p) => p.name === pluginName);
+  if (!match) {
+    const available = plugins.map((p) => p.name).join(", ") || "(none)";
+    throw new Error(
+      `runAgent: agent references plugin '${pluginName}' via fromPlugin(), but ` +
+        "that plugin is missing from RunAgentInput.plugins. " +
+        `Available: ${available}.`,
+    );
+  }
+
+  const preBuilt = (match as { instance?: BasePlugin }).instance;
+  const instance =
+    preBuilt ?? new match.plugin({ ...(match.config ?? {}), name: pluginName });
+  const provider = instance as unknown as ToolProvider;
+  if (
+    typeof (provider as { getAgentTools?: unknown }).getAgentTools !==
+      "function" ||
+    typeof (provider as { executeAgentTool?: unknown }).executeAgentTool !==
+      "function"
+  ) {
+    throw new Error(
+      `runAgent: plugin '${pluginName}' is not a ToolProvider ` +
+        "(missing getAgentTools/executeAgentTool). Only ToolProvider plugins " +
+        "are supported via fromPlugin() in runAgent.",
+    );
+  }
+  cache.set(pluginName, provider);
+  return provider;
+}
+
+function synthesizeToolkit(
+  pluginName: string,
+  provider: ToolProvider,
+  opts?: ToolkitOptions,
+): Record<string, ToolkitEntry> {
+  const withToolkit = provider as ToolProvider & {
+    toolkit?: (opts?: ToolkitOptions) => Record<string, ToolkitEntry>;
+  };
+  if (typeof withToolkit.toolkit === "function") {
+    return withToolkit.toolkit(opts);
+  }
+
+  const only = opts?.only ? new Set(opts.only) : null;
+  const except = opts?.except ? new Set(opts.except) : null;
+  const rename = opts?.rename ?? {};
+  const prefix = opts?.prefix ?? `${pluginName}.`;
+
+  const out: Record<string, ToolkitEntry> = {};
+  for (const tool of provider.getAgentTools()) {
+    if (only && !only.has(tool.name)) continue;
+    if (except?.has(tool.name)) continue;
+
+    const keyAfterPrefix = `${prefix}${tool.name}`;
+    const key = rename[tool.name] ?? keyAfterPrefix;
+
+    out[key] = {
+      __toolkitRef: true,
+      pluginName,
+      localName: tool.name,
+      def: { ...tool, name: key },
+    };
+  }
+  return out;
 }

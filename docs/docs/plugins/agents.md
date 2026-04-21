@@ -75,34 +75,54 @@ import {
   createAgent,
   createApp,
   files,
+  fromPlugin,
   server,
   tool,
 } from "@databricks/appkit";
 import { z } from "zod";
 
-const analyticsP = analytics();
-const filesP = files();
-
 const support = createAgent({
   instructions: "You help customers with data and files.",
-  model: "databricks-claude-sonnet-4-5",           // string sugar
+  model: "databricks-claude-sonnet-4-5",                  // string sugar
   tools: {
+    ...fromPlugin(analytics),                             // all analytics tools
+    ...fromPlugin(files, { only: ["uploads.read"] }),     // filtered subset
     get_weather: tool({
+      name: "get_weather",
       description: "Weather",
       schema: z.object({ city: z.string() }),
       execute: async ({ city }) => `Sunny in ${city}`,
     }),
-    ...analyticsP.toolkit(),                        // spread plugin tools
-    ...filesP.toolkit({ only: ["uploads.read"] }),  // filtered
   },
 });
 
 await createApp({
-  plugins: [server(), analyticsP, filesP, agents({ agents: { support } })],
+  plugins: [server(), analytics(), files(), agents({ agents: { support } })],
 });
 ```
 
-Code-defined agents start with no tools by default. Spread `.toolkit()` outputs into `tools: { ... }` explicitly. The asymmetry (file: auto-inherit, code: strict) matches the personas: prompt authors want zero ceremony, engineers want no surprises.
+Code-defined agents start with no tools by default. `fromPlugin(factory)` is the primary way to pull in a plugin's tools — it returns a spread-friendly marker that the agents plugin resolves against registered `ToolProvider`s at setup time. No intermediate variable, no duplicate `plugins: [analyticsP, filesP, ...]` dance: you write the factory reference once inside `fromPlugin` and again in `plugins: [...]`.
+
+The asymmetry (file: auto-inherit, code: strict) matches the personas: prompt authors want zero ceremony, engineers want no surprises.
+
+### Scoping tools in code
+
+`fromPlugin(factory, opts?)` accepts the same `ToolkitOptions` as markdown frontmatter:
+
+| Option | Example | Meaning |
+|---|---|---|
+| `only` | `{ only: ["query"] }` | Allowlist of local tool names |
+| `except` | `{ except: ["legacy"] }` | Denylist of local tool names |
+| `prefix` | `{ prefix: "" }` | Drop the `${pluginName}.` prefix |
+| `rename` | `{ rename: { query: "q" } }` | Remap specific local names |
+
+For plugins that don't expose a `.toolkit()` method (e.g., third-party `ToolProvider` plugins authored with plain `toPlugin`), `fromPlugin` falls back to walking `getAgentTools()` and synthesizing namespaced keys (`${pluginName}.${localName}`). The fallback respects `only` / `except` / `rename` / `prefix` the same way.
+
+If a referenced plugin is not registered in `createApp({ plugins })`, the agents plugin throws at setup with an `Available: …` listing so you can fix the wiring before the first request.
+
+### Using `.toolkit()` directly (advanced)
+
+`.toolkit()` is still available on `analytics()`, `files()`, `genie()`, and `lakebase()` handles. Use it when you need to rename tools individually or bind them under a custom record key — anything `fromPlugin` can't express. In the common case, prefer `fromPlugin`.
 
 ## Level 4: sub-agents
 
@@ -156,7 +176,24 @@ for (const ticket of tickets) {
 }
 ```
 
-`runAgent` drives the adapter without `createApp` or HTTP. Limitation: plugin toolkits (`ToolkitEntry`) require a live `PluginContext`, so they only work when invoked through `agents()` + `createApp`. Inline `tool()` and `mcpServer()` both work standalone.
+`runAgent` drives the adapter without `createApp` or HTTP. Inline `tool()` calls work standalone as shown above. To use plugin tools in standalone mode, pass the plugin factories through `RunAgentInput.plugins` — `runAgent` will resolve any `fromPlugin` markers in the def against that list:
+
+```ts
+import { analytics, createAgent, fromPlugin, runAgent } from "@databricks/appkit";
+
+const classifier = createAgent({
+  instructions: "Classify tickets. Use analytics.query for historical data.",
+  model: "databricks-claude-sonnet-4-5",
+  tools: { ...fromPlugin(analytics) },
+});
+
+const result = await runAgent(classifier, {
+  messages: "is ticket 42 a duplicate?",
+  plugins: [analytics()],
+});
+```
+
+Hosted tools (MCP) are still `agents()`-only since they require the live MCP client. Plugin tool dispatch in standalone mode runs as the service principal (no OBO) since there is no HTTP request.
 
 ## Configuration reference
 

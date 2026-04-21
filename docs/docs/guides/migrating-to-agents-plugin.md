@@ -136,6 +136,50 @@ You are a read-only data assistant.
 
 Engineers declare tools in code; prompt authors pick from a menu in frontmatter. No YAML-as-code ceremony required.
 
+## Scoping tools in code with `fromPlugin`
+
+Earlier alphas of the new API required a three-touch dance for every plugin whose tools you wanted on a code-defined agent:
+
+```ts
+// Before: intermediate variable + .toolkit() + a second entry in plugins[]
+const analyticsP = analytics();
+const filesP = files();
+
+const support = createAgent({
+  instructions: "…",
+  tools: {
+    ...analyticsP.toolkit(),
+    ...filesP.toolkit({ only: ["uploads.read"] }),
+  },
+});
+
+await createApp({
+  plugins: [server(), analyticsP, filesP, agents({ agents: { support } })],
+});
+```
+
+`fromPlugin(factory, opts?)` collapses this to a single reference per plugin:
+
+```ts
+import { agents, analytics, createAgent, createApp, files, fromPlugin, server } from "@databricks/appkit";
+
+const support = createAgent({
+  instructions: "…",
+  tools: {
+    ...fromPlugin(analytics),
+    ...fromPlugin(files, { only: ["uploads.read"] }),
+  },
+});
+
+await createApp({
+  plugins: [server(), analytics(), files(), agents({ agents: { support } })],
+});
+```
+
+`fromPlugin` returns a spread-friendly, symbol-keyed marker. The agents plugin resolves it at setup against registered `ToolProvider`s and throws a clear `Available: …` error if the referenced plugin is missing from `plugins: [...]`.
+
+`.toolkit()` is **not deprecated** — use it when you need to rename individual tools or combine fine-grained scoping that `fromPlugin`'s options can't express. For the 90% case where you want "all tools from this plugin", prefer `fromPlugin`.
+
 ## Standalone runs
 
 The old `createAgent` returned a running HTTP app. Sometimes you want to run an agent in a script, cron, or test without HTTP. Use `runAgent`:
@@ -153,7 +197,24 @@ const result = await runAgent(classifier, { messages: "Billing issue please help
 console.log(result.text);
 ```
 
-Plugin toolkits (`ToolkitEntry` from `.toolkit()`) require `createApp`; `runAgent` throws a clear error if invoked with one.
+To use plugin tools in standalone mode, pass the plugin factories through `plugins: [...]`. `runAgent` resolves any `fromPlugin` markers in the def against that list and dispatches tool calls as the service principal:
+
+```ts
+import { analytics, createAgent, fromPlugin, runAgent } from "@databricks/appkit";
+
+const classifier = createAgent({
+  instructions: "Classify tickets. Use analytics.query for historical data.",
+  model: "databricks-claude-sonnet-4-5",
+  tools: { ...fromPlugin(analytics) },
+});
+
+await runAgent(classifier, {
+  messages: "is ticket 42 a duplicate?",
+  plugins: [analytics()],
+});
+```
+
+Hosted/MCP tools are still `agents()`-only (they need the live MCP client). Raw `ToolkitEntry` spreads from `.toolkit()` can't be dispatched standalone — `runAgent` throws a clear error pointing you at `fromPlugin`.
 
 ## Gradual migration
 
