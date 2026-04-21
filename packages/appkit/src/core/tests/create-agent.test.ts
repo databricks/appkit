@@ -147,25 +147,8 @@ describe("createAgent", () => {
     expect(tools).toBeInstanceOf(Array);
   });
 
-  test("agents record is passed through", async () => {
-    const handle = await createAgent({
-      agents: {
-        main: createMockAdapter(),
-        secondary: createMockAdapter(),
-      },
-      defaultAgent: "main",
-    });
-
-    expect(handle.getTools).toBeTypeOf("function");
-  });
-
-  test("throws when both adapter and agents are provided", async () => {
-    await expect(
-      createAgent({
-        adapter: createMockAdapter(),
-        agents: { other: createMockAdapter() },
-      }),
-    ).rejects.toThrow("mutually exclusive");
+  test("throws when model is missing and no adapter provided", async () => {
+    await expect(createAgent({})).rejects.toThrow("'model' is required");
   });
 
   test("plugins namespace excludes agent and server", async () => {
@@ -204,22 +187,18 @@ describe("createAgent", () => {
     expect(handle.getTools).toBeTypeOf("function");
   });
 
-  test("tools config is forwarded to agent plugin", async () => {
+  test("tools config accepts SupervisorApiHostedTool format", async () => {
     const handle = await createAgent({
       adapter: createMockAdapter(),
       tools: [
         {
-          type: "function" as const,
-          name: "greet",
-          description: "Say hello",
-          parameters: { type: "object", properties: {} },
-          execute: async () => "hello",
+          type: "genie_space",
+          genie_space: { id: "space-1", description: "SQL queries" },
         },
       ],
     });
 
-    const tools = handle.getTools();
-    expect(tools.some((t) => t.name === "greet")).toBe(true);
+    expect(handle).toBeDefined();
   });
 
   test("addTools is exposed on AgentHandle", async () => {

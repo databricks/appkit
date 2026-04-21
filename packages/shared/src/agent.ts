@@ -204,9 +204,17 @@ export interface AgentRunContext {
   signal?: AbortSignal;
 }
 
+export interface AgentAdapterConfig {
+  /** Explicit tools from createAgent({ tools: [...] }) — HostedTool and FunctionTool entries. */
+  tools?: unknown[];
+  /** Tool definitions discovered from plugins (analytics, files, etc.) via ToolProvider. */
+  toolDefinitions?: AgentToolDefinition[];
+}
+
 export interface AgentAdapter {
   run(
     input: AgentInput,
     context: AgentRunContext,
   ): AsyncGenerator<AgentEvent, void, unknown>;
+  configure?(config: AgentAdapterConfig): Promise<void>;
 }

@@ -9,6 +9,9 @@ Creates an agent-powered app with batteries included.
 Wraps `createApp` with `server()` and `agent()` pre-configured.
 Automatically starts an HTTP server with agent chat routes.
 
+When no `adapter` is provided, a `SupervisorApiAdapter` is created
+automatically using `model`, `instructions`, and `tools` from config.
+
 For apps that need custom routes or manual server control,
 use `createApp` with `server()` and `agent()` directly.
 
@@ -26,27 +29,23 @@ use `createApp` with `server()` and `agent()` directly.
 
 ```ts
 import { createAgent, analytics } from "@databricks/appkit";
-import { DatabricksAdapter } from "@databricks/appkit/agents/databricks";
 
 createAgent({
   plugins: [analytics()],
-  adapter: DatabricksAdapter.fromServingEndpoint({
-    workspaceClient: new WorkspaceClient({}),
-    endpointName: "databricks-claude-sonnet-4-5",
-    systemPrompt: "You are a data assistant...",
-  }),
-}).then(agent => {
-  console.log("Tools:", agent.getTools());
+  model: "databricks-claude-sonnet-4-5",
+  instructions: "You are a data assistant...",
+  tools: [
+    { type: "genie_space", genie_space: { id: "...", description: "..." } },
+  ],
 });
 ```
 
 ```ts
+import { createAgent } from "@databricks/appkit";
+import { VercelAIAdapter } from "@databricks/appkit/agents/vercel-ai";
+
 createAgent({
-  plugins: [analytics(), files()],
-  agents: {
-    assistant: DatabricksAdapter.fromServingEndpoint({ ... }),
-    autocomplete: DatabricksAdapter.fromServingEndpoint({ ... }),
-  },
-  defaultAgent: "assistant",
+  plugins: [analytics()],
+  adapter: new VercelAIAdapter({ model }),
 });
 ```

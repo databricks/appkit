@@ -299,46 +299,6 @@ describe("DatabricksAdapter", () => {
   });
 });
 
-describe("DatabricksAdapter.fromServingEndpoint", () => {
-  const originalFetch = globalThis.fetch;
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-  });
-
-  test("builds endpointUrl from config host and endpoint name", async () => {
-    globalThis.fetch = mockFetch([textDelta("Hi"), sseChunk("[DONE]")]);
-
-    const mockConfig = {
-      host: "https://my-workspace.databricks.com",
-      ensureResolved: vi.fn().mockResolvedValue(undefined),
-      authenticate: vi.fn().mockImplementation(async (h: Headers) => {
-        h.set("Authorization", "Bearer fresh-token");
-      }),
-    };
-
-    const adapter = await DatabricksAdapter.fromServingEndpoint({
-      workspaceClient: { config: mockConfig },
-      endpointName: "my-model",
-    });
-
-    for await (const _ of adapter.run(
-      { messages: createTestMessages(), tools: [], threadId: "t1" },
-      { executeTool: vi.fn() },
-    )) {
-      // drain
-    }
-
-    const [url, init] = (globalThis.fetch as any).mock.calls[0];
-    expect(url).toBe(
-      "https://my-workspace.databricks.com/serving-endpoints/my-model/invocations",
-    );
-    expect(init.headers.authorization).toBe("Bearer fresh-token");
-    expect(mockConfig.ensureResolved).toHaveBeenCalled();
-    expect(mockConfig.authenticate).toHaveBeenCalled();
-  });
-});
-
 describe("parseTextToolCalls", () => {
   test("parses Llama JSON format", () => {
     const text =

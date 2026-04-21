@@ -23,6 +23,14 @@ export type {
   ToolProvider,
 } from "shared";
 export { isSQLTypeMarker, sql } from "shared";
+export type {
+  AppTool,
+  GenieSpaceTool,
+  KnowledgeAssistantTool,
+  SupervisorApiHostedTool,
+  UcConnectionTool,
+  UcFunctionTool,
+} from "./agents/responses";
 export { CacheManager } from "./cache";
 export type {
   DatabaseCredential,
@@ -63,10 +71,6 @@ export {
 // Plugin authoring
 export { Plugin, type ToPlugin, toPlugin } from "./plugin";
 export { agent, analytics, files, genie, lakebase, server } from "./plugins";
-export { isFunctionTool, isHostedTool } from "./plugins/agent/tools";
-export type { FunctionTool } from "./plugins/agent/tools/function-tool";
-export type { HostedTool } from "./plugins/agent/tools/hosted-tools";
-export type { AgentTool } from "./plugins/agent/types";
 // Registry types and utilities for plugin manifests
 export type {
   ConfigSchema,

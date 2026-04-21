@@ -17,14 +17,7 @@ import { AgentEventTranslator } from "./event-translator";
 import manifest from "./manifest.json";
 import { chatRequestSchema, invocationsRequestSchema } from "./schemas";
 import { InMemoryThreadStore } from "./thread-store";
-import {
-  AppKitMcpClient,
-  type FunctionTool,
-  functionToolToDefinition,
-  isFunctionTool,
-  isHostedTool,
-  resolveHostedTools,
-} from "./tools";
+import { type FunctionTool, functionToolToDefinition } from "./tools";
 import type { AgentPluginConfig, RegisteredAgent, ToolEntry } from "./types";
 
 const logger = createLogger("agent");
@@ -40,7 +33,6 @@ export class AgentPlugin extends Plugin {
   private toolIndex = new Map<string, ToolEntry>();
   private threadStore;
   private activeStreams = new Map<string, AbortController>();
-  private mcpClient: AppKitMcpClient | null = null;
 
   constructor(config: AgentPluginConfig) {
     super(config);
@@ -71,6 +63,7 @@ export class AgentPlugin extends Plugin {
       this.defaultAgentName = this.config.defaultAgent;
     }
 
+    await this.configureAdapters();
     this.mountInvocationsRoute();
   }
 
@@ -88,8 +81,25 @@ export class AgentPlugin extends Plugin {
     logger.info("Registered POST /invocations route via PluginContext");
   }
 
+  private async configureAdapters() {
+    const toolDefinitions = this.getAllToolDefinitions();
+
+    for (const { name, adapter } of this.agents.values()) {
+      if (adapter.configure) {
+        try {
+          await adapter.configure({ toolDefinitions });
+        } catch (error) {
+          logger.error(
+            "Adapter '%s' configure() failed — it may not function correctly: %O",
+            name,
+            error,
+          );
+        }
+      }
+    }
+  }
+
   private async collectTools() {
-    // 1. Auto-discover from sibling ToolProvider plugins via PluginContext
     if (this.context) {
       for (const {
         name: pluginName,
@@ -111,22 +121,6 @@ export class AgentPlugin extends Plugin {
           tools.length,
           pluginName,
         );
-      }
-    }
-
-    // 2. Process explicit tools from config
-    if (this.config.tools) {
-      const hostedTools = this.config.tools.filter(isHostedTool);
-      const functionTools = this.config.tools.filter(isFunctionTool);
-
-      // 2a. Resolve HostedTools via MCP client
-      if (hostedTools.length > 0) {
-        await this.connectHostedTools(hostedTools);
-      }
-
-      // 2b. Add FunctionTools
-      for (const ft of functionTools) {
-        this.addFunctionToolToIndex(ft);
       }
     }
 
@@ -177,59 +171,6 @@ export class AgentPlugin extends Plugin {
 
     console.log(`  ${separator}`);
     console.log("");
-  }
-
-  private async connectHostedTools(
-    hostedTools: import("./tools/hosted-tools").HostedTool[],
-  ) {
-    let host: string | undefined;
-    let authenticate: () => Promise<Record<string, string>>;
-
-    try {
-      const { getWorkspaceClient } = await import("../../context");
-      const wsClient = getWorkspaceClient();
-      await wsClient.config.ensureResolved();
-      host = wsClient.config.host;
-      authenticate = async (): Promise<Record<string, string>> => {
-        const headers = new Headers();
-        await wsClient.config.authenticate(headers);
-        return Object.fromEntries(headers.entries());
-      };
-    } catch {
-      host = process.env.DATABRICKS_HOST;
-      authenticate = async (): Promise<Record<string, string>> => {
-        const token = process.env.DATABRICKS_TOKEN;
-        if (token) return { Authorization: `Bearer ${token}` };
-        return {};
-      };
-    }
-
-    if (!host) {
-      logger.warn(
-        "No Databricks host available — skipping %d hosted tools",
-        hostedTools.length,
-      );
-      return;
-    }
-
-    this.mcpClient = new AppKitMcpClient(host, authenticate);
-
-    const endpoints = resolveHostedTools(hostedTools);
-    await this.mcpClient.connectAll(endpoints);
-
-    for (const def of this.mcpClient.getAllToolDefinitions()) {
-      this.toolIndex.set(def.name, {
-        source: "mcp",
-        mcpToolName: def.name,
-        def,
-      });
-    }
-
-    logger.info(
-      "Connected %d MCP tools from %d hosted tool(s)",
-      this.mcpClient.getAllToolDefinitions().length,
-      hostedTools.length,
-    );
   }
 
   private addFunctionToolToIndex(ft: FunctionTool) {
@@ -399,21 +340,10 @@ export class AgentPlugin extends Plugin {
                 return entry.functionTool.execute(
                   args as Record<string, unknown>,
                 );
-              case "mcp": {
-                if (!self.mcpClient) {
-                  throw new Error("MCP client not connected");
-                }
-                const oboToken = req.headers["x-forwarded-access-token"];
-                const mcpAuth =
-                  typeof oboToken === "string"
-                    ? { Authorization: `Bearer ${oboToken}` }
-                    : undefined;
-                return self.mcpClient.callTool(
-                  entry.mcpToolName,
-                  args,
-                  mcpAuth,
+              case "mcp":
+                throw new Error(
+                  `MCP tool "${qualifiedName}" cannot be executed locally — use the Supervisor API adapter for hosted tools`,
                 );
-              }
             }
           },
           {
@@ -630,10 +560,7 @@ export class AgentPlugin extends Plugin {
   }
 
   async shutdown() {
-    if (this.mcpClient) {
-      await this.mcpClient.close();
-      this.mcpClient = null;
-    }
+    // No-op — cleanup if needed in the future
   }
 
   exports() {

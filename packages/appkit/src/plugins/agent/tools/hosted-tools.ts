@@ -1,24 +1,24 @@
-export interface GenieTool {
+interface GenieTool {
   type: "genie-space";
   genie_space: { id: string };
 }
 
-export interface VectorSearchIndexTool {
+interface VectorSearchIndexTool {
   type: "vector_search_index";
   vector_search_index: { name: string };
 }
 
-export interface CustomMcpServerTool {
+interface CustomMcpServerTool {
   type: "custom_mcp_server";
   custom_mcp_server: { app_name: string; app_url: string };
 }
 
-export interface ExternalMcpServerTool {
+interface ExternalMcpServerTool {
   type: "external_mcp_server";
   external_mcp_server: { connection_name: string };
 }
 
-export type HostedTool =
+type HostedTool =
   | GenieTool
   | VectorSearchIndexTool
   | CustomMcpServerTool
@@ -37,7 +37,7 @@ export function isHostedTool(value: unknown): value is HostedTool {
   return typeof obj.type === "string" && HOSTED_TOOL_TYPES.has(obj.type);
 }
 
-export interface McpEndpointConfig {
+interface McpEndpointConfig {
   name: string;
   /** Absolute URL or path relative to workspace host */
   url: string;

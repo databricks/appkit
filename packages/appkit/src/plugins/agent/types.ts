@@ -5,16 +5,11 @@ import type {
   ThreadStore,
 } from "shared";
 import type { FunctionTool } from "./tools/function-tool";
-import type { HostedTool } from "./tools/hosted-tools";
-
-export type AgentTool = FunctionTool | HostedTool;
 
 export interface AgentPluginConfig extends BasePluginConfig {
   agents?: Record<string, AgentAdapter | Promise<AgentAdapter>>;
   defaultAgent?: string;
   threadStore?: ThreadStore;
-  tools?: AgentTool[];
-  plugins?: Record<string, any>;
 }
 
 export type ToolEntry =

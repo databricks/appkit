@@ -6,22 +6,24 @@ import type {
   PluginConstructor,
   PluginData,
 } from "shared";
+import type { SupervisorApiHostedTool } from "../agents/responses";
 import { agent } from "../plugins/agent";
 import type { FunctionTool } from "../plugins/agent/tools/function-tool";
-import type { AgentTool } from "../plugins/agent/types";
 import { server } from "../plugins/server";
 import type { TelemetryConfig } from "../telemetry";
 import { createApp } from "./appkit";
 
 export interface CreateAgentConfig {
-  /** Single agent adapter (mutually exclusive with `agents`). Registered as "assistant". */
-  adapter?: AgentAdapter | Promise<AgentAdapter>;
-  /** Multiple named agents (mutually exclusive with `adapter`). */
-  agents?: Record<string, AgentAdapter | Promise<AgentAdapter>>;
-  /** Which agent to use when the client doesn't specify one. */
-  defaultAgent?: string;
   /** Tool-providing plugins (analytics, files, genie, lakebase, etc.) */
   plugins?: PluginData<PluginConstructor, unknown, string>[];
+  /** Model name for the default Supervisor API adapter (e.g. "databricks-claude-sonnet-4-5"). Ignored when `adapter` is provided. */
+  model?: string;
+  /** System instructions for the default Supervisor API adapter. Ignored when `adapter` is provided. */
+  instructions?: string;
+  /** Tools in Supervisor API format (genie_space, uc_function, app, etc.). Passed inline with every request. */
+  tools?: SupervisorApiHostedTool[];
+  /** Custom adapter — when provided, bypasses the default Supervisor API adapter. */
+  adapter?: AgentAdapter | Promise<AgentAdapter>;
   /** Server port. Defaults to DATABRICKS_APP_PORT or 8000. */
   port?: number;
   /** Server host. Defaults to FLASK_RUN_HOST or 0.0.0.0. */
@@ -30,16 +32,14 @@ export interface CreateAgentConfig {
   telemetry?: TelemetryConfig;
   /** Cache configuration. */
   cache?: CacheConfig;
-  /** Explicit tools (FunctionTool, HostedTool) alongside auto-discovered ToolProvider tools. */
-  tools?: AgentTool[];
-  /** Pre-configured WorkspaceClient. */
+  /** Pre-configured WorkspaceClient. Falls back to `new WorkspaceClient({})` when omitted. */
   client?: WorkspaceClient;
 }
 
 export interface AgentHandle {
   /** Register an additional agent at runtime. */
   registerAgent: (name: string, adapter: AgentAdapter) => void;
-  /** Add function tools at runtime (HostedTools must be configured at setup). */
+  /** Add function tools at runtime. */
   addTools: (tools: FunctionTool[]) => void;
   /** Get all tool definitions available to agents. */
   getTools: () => AgentToolDefinition[];
@@ -55,56 +55,54 @@ export interface AgentHandle {
  * Wraps `createApp` with `server()` and `agent()` pre-configured.
  * Automatically starts an HTTP server with agent chat routes.
  *
- * For apps that need custom routes or manual server control,
- * use `createApp` with `server()` and `agent()` directly.
+ * When no `adapter` is provided, a `SupervisorApiAdapter` is created
+ * automatically using `model`, `instructions`, and `tools` from config.
  *
- * @example Single agent
+ * @example Default Supervisor API adapter
  * ```ts
  * import { createAgent, analytics } from "@databricks/appkit";
- * import { DatabricksAdapter } from "@databricks/appkit/agents/databricks";
  *
  * createAgent({
  *   plugins: [analytics()],
- *   adapter: DatabricksAdapter.fromServingEndpoint({
- *     workspaceClient: new WorkspaceClient({}),
- *     endpointName: "databricks-claude-sonnet-4-5",
- *     systemPrompt: "You are a data assistant...",
- *   }),
- * }).then(agent => {
- *   console.log("Tools:", agent.getTools());
+ *   model: "databricks-claude-sonnet-4-5",
+ *   instructions: "You are a data assistant...",
+ *   tools: [
+ *     { type: "genie_space", genie_space: { id: "...", description: "..." } },
+ *   ],
  * });
  * ```
  *
- * @example Multiple agents
+ * @example Custom adapter
  * ```ts
+ * import { createAgent } from "@databricks/appkit";
+ * import { VercelAIAdapter } from "@databricks/appkit/agents/vercel-ai";
+ *
  * createAgent({
- *   plugins: [analytics(), files()],
- *   agents: {
- *     assistant: DatabricksAdapter.fromServingEndpoint({ ... }),
- *     autocomplete: DatabricksAdapter.fromServingEndpoint({ ... }),
- *   },
- *   defaultAgent: "assistant",
+ *   plugins: [analytics()],
+ *   adapter: new VercelAIAdapter({ model }),
  * });
  * ```
  */
 export async function createAgent(
   config: CreateAgentConfig,
 ): Promise<AgentHandle> {
-  if (config.adapter && config.agents) {
-    throw new Error(
-      "createAgent: 'adapter' and 'agents' are mutually exclusive. " +
-        "Use 'adapter' for a single agent or 'agents' for multiple.",
-    );
-  }
+  let resolvedAdapter: AgentAdapter | Promise<AgentAdapter>;
 
-  const agents = config.adapter ? { assistant: config.adapter } : config.agents;
+  if (config.adapter) {
+    resolvedAdapter = config.adapter;
+  } else {
+    if (!config.model) {
+      throw new Error(
+        "createAgent: 'model' is required when no custom 'adapter' is provided.",
+      );
+    }
+    resolvedAdapter = buildDefaultAdapter(config, config.model);
+  }
 
   const appkit = await createApp({
     plugins: [
       agent({
-        agents,
-        defaultAgent: config.defaultAgent,
-        tools: config.tools,
+        agents: { assistant: resolvedAdapter },
       }),
       ...(config.plugins ?? []),
       server({
@@ -135,4 +133,26 @@ export async function createAgent(
     getThreads: agentExports.getThreads,
     plugins,
   };
+}
+
+async function buildDefaultAdapter(
+  config: CreateAgentConfig,
+  model: string,
+): Promise<AgentAdapter> {
+  const { SupervisorApiAdapter } = await import("../agents/responses");
+
+  let workspaceClient: { config: any };
+  if (config.client) {
+    workspaceClient = config.client;
+  } else {
+    const { WorkspaceClient } = await import("@databricks/sdk-experimental");
+    workspaceClient = new WorkspaceClient({});
+  }
+
+  return SupervisorApiAdapter.create({
+    workspaceClient,
+    model,
+    instructions: config.instructions,
+    tools: config.tools,
+  });
 }

@@ -23,9 +23,30 @@ function createMockClient() {
   return client;
 }
 
-const wsClient = new WorkspaceClient({});
 const endpointName =
   process.env.DATABRICKS_AGENT_ENDPOINT ?? "databricks-claude-sonnet-4-5";
+
+const resolvedConfig = (async () => {
+  const wsClient = new WorkspaceClient({});
+  await wsClient.config.ensureResolved();
+  return wsClient.config;
+})();
+
+async function makeAdapter(
+  name: string,
+  opts?: { systemPrompt?: string; maxSteps?: number },
+) {
+  const config = await resolvedConfig;
+  return new DatabricksAdapter({
+    endpointUrl: `${config.host}/serving-endpoints/${name}/invocations`,
+    authenticate: async () => {
+      const headers = new Headers();
+      await config.authenticate(headers);
+      return Object.fromEntries(headers.entries());
+    },
+    ...opts,
+  });
+}
 
 createApp({
   plugins: [
@@ -40,15 +61,11 @@ createApp({
     files(),
     agent({
       agents: {
-        assistant: DatabricksAdapter.fromServingEndpoint({
-          workspaceClient: wsClient,
-          endpointName,
+        assistant: makeAdapter(endpointName, {
           systemPrompt:
             "You are a helpful data assistant. Use the available tools to query data and help users with their analysis.",
         }),
-        autocomplete: DatabricksAdapter.fromServingEndpoint({
-          workspaceClient: wsClient,
-          endpointName: "databricks-gemini-3-1-flash-lite",
+        autocomplete: makeAdapter("databricks-gemini-3-1-flash-lite", {
           systemPrompt: [
             "You are an autocomplete engine.",
             "The user will give you the beginning of a sentence or paragraph.",
