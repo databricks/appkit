@@ -78,8 +78,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
     };
     // If the factory eagerly constructed an instance (via
     // `toPluginWithInstance`), reuse it; otherwise construct now.
-    const preBuilt = (pluginData as { instance?: BasePlugin }).instance;
-    const pluginInstance = preBuilt ?? new Plugin(baseConfig);
+    const pluginInstance = pluginData.instance ?? new Plugin(baseConfig);
 
     if (typeof pluginInstance.attachContext === "function") {
       pluginInstance.attachContext({
@@ -232,9 +231,11 @@ export class AppKit<TPlugins extends InputPluginMap> {
   ) {
     const result: InputPluginMap = {};
     for (const currentPlugin of plugins) {
+      const instance = (currentPlugin as { instance?: BasePlugin }).instance;
       result[currentPlugin.name] = {
         plugin: currentPlugin.plugin,
         config: currentPlugin.config as Record<string, unknown>,
+        instance,
       };
     }
     return result;
