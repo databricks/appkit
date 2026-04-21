@@ -2,6 +2,10 @@
 
 Base configuration interface for AppKit plugins
 
+## Extended by
+
+- [`AgentsPluginConfig`](Interface.AgentsPluginConfig.md)
+
 ## Indexable
 
 ```ts

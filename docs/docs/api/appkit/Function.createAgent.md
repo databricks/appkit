@@ -1,52 +1,35 @@
 # Function: createAgent()
 
 ```ts
-function createAgent(config: CreateAgentConfig): Promise<AgentHandle>;
+function createAgent(def: AgentDefinition): AgentDefinition;
 ```
 
-Creates an agent-powered app with batteries included.
+Pure factory for agent definitions. Returns the passed-in definition after
+cycle-detecting the sub-agent graph. Accepts the full `AgentDefinition` shape
+and is safe to call at module top-level.
 
-Wraps `createApp` with `server()` and `agent()` pre-configured.
-Automatically starts an HTTP server with agent chat routes.
-
-For apps that need custom routes or manual server control,
-use `createApp` with `server()` and `agent()` directly.
+The returned value is a plain `AgentDefinition` — no adapter construction,
+no side effects. Register it with `agents({ agents: { name: def } })` or run
+it standalone via `runAgent(def, input)`.
 
 ## Parameters
 
 | Parameter | Type |
 | ------ | ------ |
-| `config` | [`CreateAgentConfig`](Interface.CreateAgentConfig.md) |
+| `def` | [`AgentDefinition`](Interface.AgentDefinition.md) |
 
 ## Returns
 
-`Promise`\<[`AgentHandle`](Interface.AgentHandle.md)\>
+[`AgentDefinition`](Interface.AgentDefinition.md)
 
-## Examples
-
-```ts
-import { createAgent, analytics } from "@databricks/appkit";
-import { DatabricksAdapter } from "@databricks/appkit/agents/databricks";
-
-createAgent({
-  plugins: [analytics()],
-  adapter: DatabricksAdapter.fromServingEndpoint({
-    workspaceClient: new WorkspaceClient({}),
-    endpointName: "databricks-claude-sonnet-4-5",
-    systemPrompt: "You are a data assistant...",
-  }),
-}).then(agent => {
-  console.log("Tools:", agent.getTools());
-});
-```
+## Example
 
 ```ts
-createAgent({
-  plugins: [analytics(), files()],
-  agents: {
-    assistant: DatabricksAdapter.fromServingEndpoint({ ... }),
-    autocomplete: DatabricksAdapter.fromServingEndpoint({ ... }),
+const support = createAgent({
+  instructions: "You help customers.",
+  model: "databricks-claude-sonnet-4-5",
+  tools: {
+    get_weather: tool({ ... }),
   },
-  defaultAgent: "assistant",
 });
 ```

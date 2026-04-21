@@ -89,8 +89,8 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Interface.AgentHandle",
-          label: "AgentHandle"
+          id: "api/appkit/Interface.AgentDefinition",
+          label: "AgentDefinition"
         },
         {
           type: "doc",
@@ -101,6 +101,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.AgentRunContext",
           label: "AgentRunContext"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.AgentsPluginConfig",
+          label: "AgentsPluginConfig"
         },
         {
           type: "doc",
@@ -119,11 +124,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Interface.CreateAgentConfig",
-          label: "CreateAgentConfig"
-        },
-        {
-          type: "doc",
           id: "api/appkit/Interface.DatabaseCredential",
           label: "DatabaseCredential"
         },
@@ -131,6 +131,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.EndpointConfig",
           label: "EndpointConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.FromPluginMarker",
+          label: "FromPluginMarker"
         },
         {
           type: "doc",
@@ -164,6 +169,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.PromptContext",
+          label: "PromptContext"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.RequestedClaims",
           label: "RequestedClaims"
         },
@@ -186,6 +196,16 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.ResourceRequirement",
           label: "ResourceRequirement"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.RunAgentInput",
+          label: "RunAgentInput"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.RunAgentResult",
+          label: "RunAgentResult"
         },
         {
           type: "doc",
@@ -224,6 +244,16 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.ToolkitEntry",
+          label: "ToolkitEntry"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ToolkitOptions",
+          label: "ToolkitOptions"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.ToolProvider",
           label: "ToolProvider"
         },
@@ -247,6 +277,16 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.AgentTool",
           label: "AgentTool"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.AgentTools",
+          label: "AgentTools"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.BaseSystemPromptOption",
+          label: "BaseSystemPromptOption"
         },
         {
           type: "doc",
@@ -296,6 +336,11 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
+          id: "api/appkit/Variable.agents",
+          label: "agents"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Variable.sql",
           label: "sql"
         }
@@ -342,6 +387,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.fromPlugin",
+          label: "fromPlugin"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.generateDatabaseCredential",
           label: "generateDatabaseCredential"
         },
@@ -382,6 +432,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.isFromPluginMarker",
+          label: "isFromPluginMarker"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.isFunctionTool",
           label: "isFunctionTool"
         },
@@ -397,8 +452,28 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.isToolkitEntry",
+          label: "isToolkitEntry"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.loadAgentFromFile",
+          label: "loadAgentFromFile"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.loadAgentsFromDir",
+          label: "loadAgentsFromDir"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.mcpServer",
           label: "mcpServer"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.runAgent",
+          label: "runAgent"
         },
         {
           type: "doc",
