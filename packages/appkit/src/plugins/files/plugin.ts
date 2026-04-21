@@ -773,9 +773,18 @@ export class FilesPlugin extends Plugin {
     const volumeCfg = this.volumeConfigs[volumeKey];
     const maxSize = volumeCfg.maxUploadSize ?? FILES_MAX_UPLOAD_SIZE;
     const rawContentLength = req.headers["content-length"];
-    const contentLength = rawContentLength
-      ? parseInt(rawContentLength, 10)
-      : undefined;
+    let contentLength: number | undefined;
+
+    if (typeof rawContentLength === "string" && rawContentLength.length > 0) {
+      if (!/^\d+$/.test(rawContentLength)) {
+        res.status(400).json({
+          error: "Invalid Content-Length header.",
+          plugin: this.name,
+        });
+        return;
+      }
+      contentLength = Number(rawContentLength);
+    }
 
     if (
       !(await this._enforcePolicy(req, res, volumeKey, "upload", path, {
@@ -784,11 +793,7 @@ export class FilesPlugin extends Plugin {
     )
       return;
 
-    if (
-      contentLength !== undefined &&
-      !Number.isNaN(contentLength) &&
-      contentLength > maxSize
-    ) {
+    if (contentLength !== undefined && contentLength > maxSize) {
       res.status(413).json({
         error: `File size (${contentLength} bytes) exceeds maximum allowed size (${maxSize} bytes).`,
         plugin: this.name,

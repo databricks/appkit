@@ -1163,6 +1163,71 @@ describe("FilesPlugin", () => {
       }
     });
 
+    test("upload with malformed content-length → rejected with 400", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "post", "/upload");
+      const res = mockRes();
+
+      await handler(
+        mockReq("open", {
+          query: { path: "/test.bin" },
+          headers: {
+            "content-length": "abc",
+            "x-forwarded-user": "test-user",
+            "x-forwarded-access-token": "test-token",
+          },
+        }),
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: "Invalid Content-Length header.",
+        }),
+      );
+    });
+
+    test("upload with negative content-length → rejected with 400", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "post", "/upload");
+      const res = mockRes();
+
+      await handler(
+        mockReq("open", {
+          query: { path: "/test.bin" },
+          headers: {
+            "content-length": "-1",
+            "x-forwarded-user": "test-user",
+            "x-forwarded-access-token": "test-token",
+          },
+        }),
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    test("upload with partially numeric content-length → rejected with 400", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "post", "/upload");
+      const res = mockRes();
+
+      await handler(
+        mockReq("open", {
+          query: { path: "/test.bin" },
+          headers: {
+            "content-length": "123abc",
+            "x-forwarded-user": "test-user",
+            "x-forwarded-access-token": "test-token",
+          },
+        }),
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
     test("SDK asUser(req) on policy volume → policy-wrapped API works", async () => {
       const plugin = new FilesPlugin(POLICY_CONFIG);
       const exported = plugin.exports();
