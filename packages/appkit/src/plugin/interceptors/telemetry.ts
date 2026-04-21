@@ -2,6 +2,7 @@ import type { TelemetryConfig } from "shared";
 import { isInUserContext } from "../../context/execution-context";
 import type { ITelemetry, Span } from "../../telemetry";
 import { SpanStatusCode } from "../../telemetry";
+import { isDevOboFallback } from "../plugin";
 import type { ExecutionInterceptor, InterceptorContext } from "./types";
 
 export class TelemetryInterceptor implements ExecutionInterceptor {
@@ -30,6 +31,9 @@ export class TelemetryInterceptor implements ExecutionInterceptor {
           isInUserContext() ? "user" : "service",
         );
         span.setAttribute("caller.id", context.userKey);
+        if (isDevOboFallback()) {
+          span.setAttribute("execution.obo_dev_fallback", true);
+        }
 
         let abortHandler: (() => void) | undefined;
         let isAborted = false;

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import * as executionContext from "../../context/execution-context";
 import { TelemetryInterceptor } from "../../plugin/interceptors/telemetry";
 import type { InterceptorContext } from "../../plugin/interceptors/types";
+import * as pluginModule from "../../plugin/plugin";
 import type { ITelemetry } from "../types";
 
 describe("TelemetryInterceptor", () => {
@@ -163,5 +164,37 @@ describe("TelemetryInterceptor", () => {
       "user",
     );
     expect(mockSpan.setAttribute).toHaveBeenCalledWith("caller.id", "user-123");
+  });
+
+  test("should set execution.obo_dev_fallback when in dev OBO fallback", async () => {
+    vi.spyOn(executionContext, "isInUserContext").mockReturnValue(false);
+    vi.spyOn(pluginModule, "isDevOboFallback").mockReturnValue(true);
+    const interceptor = new TelemetryInterceptor(mockTelemetry);
+    const fn = vi.fn().mockResolvedValue("result");
+
+    await interceptor.intercept(fn, context);
+
+    expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+      "execution.context",
+      "service",
+    );
+    expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+      "execution.obo_dev_fallback",
+      true,
+    );
+  });
+
+  test("should not set execution.obo_dev_fallback when not in dev fallback", async () => {
+    vi.spyOn(executionContext, "isInUserContext").mockReturnValue(false);
+    vi.spyOn(pluginModule, "isDevOboFallback").mockReturnValue(false);
+    const interceptor = new TelemetryInterceptor(mockTelemetry);
+    const fn = vi.fn().mockResolvedValue("result");
+
+    await interceptor.intercept(fn, context);
+
+    expect(mockSpan.setAttribute).not.toHaveBeenCalledWith(
+      "execution.obo_dev_fallback",
+      expect.anything(),
+    );
   });
 });
