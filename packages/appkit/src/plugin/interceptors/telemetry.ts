@@ -29,15 +29,6 @@ export class TelemetryInterceptor implements ExecutionInterceptor {
       spanName,
       { attributes: this.config?.attributes },
       async (span: Span) => {
-        span.setAttribute(
-          "execution.context",
-          isInUserContext() ? "user" : "service",
-        );
-        span.setAttribute("caller.id", getCurrentUserId());
-        if (isDevOboFallback()) {
-          span.setAttribute("execution.obo_dev_fallback", true);
-        }
-
         let abortHandler: (() => void) | undefined;
         let isAborted = false;
 
@@ -59,6 +50,15 @@ export class TelemetryInterceptor implements ExecutionInterceptor {
         }
 
         try {
+          span.setAttribute(
+            "execution.context",
+            isInUserContext() ? "user" : "service",
+          );
+          span.setAttribute("caller.id", getCurrentUserId());
+          if (isDevOboFallback()) {
+            span.setAttribute("execution.obo_dev_fallback", true);
+          }
+
           const result = await fn();
           if (!isAborted) {
             span.setStatus({ code: SpanStatusCode.OK });
