@@ -6,6 +6,19 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.24.0](https://github.com/databricks/appkit/compare/v0.23.0...v0.24.0) (2026-04-20)
+
+* add AST extraction to serving type generator and move types to shared/ ([#279](https://github.com/databricks/appkit/issues/279)) ([422afb3](https://github.com/databricks/appkit/commit/422afb38aa73f8adb94e091225dc3381bd92cfcd))
+* ci on main ([#277](https://github.com/databricks/appkit/issues/277)) ([30a0a24](https://github.com/databricks/appkit/commit/30a0a248e0ab6bac50e8698e33eb5c46ca957aea))
+* add Vector Search plugin ([#200](https://github.com/databricks/appkit/issues/200)) ([279954e](https://github.com/databricks/appkit/commit/279954eca9a82c02af639aa006aa9f968bd60517))
+
+### cli
+
+* **cli:** add non-interactive flags and help examples for agent readiness ([#252](https://github.com/databricks/appkit/issues/252)) ([f803a8b](https://github.com/databricks/appkit/commit/f803a8b445fba043186407af96f7402b57e8ff6e))
+
+
 ## [0.23.0](https://github.com/databricks/appkit/compare/v0.22.0...v0.23.0) (2026-04-14)
 
 ### appkit
