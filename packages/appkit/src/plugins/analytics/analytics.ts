@@ -45,7 +45,10 @@ export class AnalyticsPlugin extends Plugin {
   }
 
   injectRoutes(router: IAppRouter) {
-    // Service principal endpoints
+    // Arrow data downloads always run as service principal and bypass the
+    // interceptor chain (execute/executeStream). The original query execution
+    // handles OBO via executeStream(); this endpoint fetches pre-computed
+    // results by job ID.
     this.route(router, {
       name: "arrow",
       method: "get",
