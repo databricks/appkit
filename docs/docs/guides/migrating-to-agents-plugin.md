@@ -1,14 +1,12 @@
 # Migrating to the `agents()` plugin
 
-The old `createAgent({ adapter, port, tools, plugins })` shortcut from the agent PR stack is deprecated. The new shape splits agent *definition* (pure data) from app *composition* (plugin registration).
-
-The old exports still work — they're kept side-by-side until a future removal release. This guide shows how to port code incrementally.
+The old `createAgent({ adapter, port, tools, plugins })` shortcut has been removed. The new shape splits agent *definition* (pure data) from app *composition* (plugin registration).
 
 ## Name changes at a glance
 
 | Old | New |
 |---|---|
-| `createAgent(config)` (app shortcut) | `createAgentApp(config)` (deprecated) |
+| `createAgent(config)` (app shortcut) | `createApp({ plugins: [..., agents()] })` |
 | — | `createAgent(def)` (pure factory, **same name, new meaning**) |
 | `agent()` plugin | `agents()` plugin (plural) |
 | `tools: AgentTool[]` | `tools: Record<string, AgentTool>` |
@@ -215,20 +213,3 @@ await runAgent(classifier, {
 ```
 
 Hosted/MCP tools are still `agents()`-only (they need the live MCP client). Raw `ToolkitEntry` spreads from `.toolkit()` can't be dispatched standalone — `runAgent` throws a clear error pointing you at `fromPlugin`.
-
-## Gradual migration
-
-Both APIs coexist. You can land the dependency bump today, keep using `createAgentApp` (the renamed old shortcut), and migrate call sites one at a time:
-
-```ts
-import { createAgentApp, analytics, tool } from "@databricks/appkit";
-
-// Old shape still works, just renamed:
-createAgentApp({ plugins: [analytics()], tools: [/* ... */] });
-```
-
-When you're ready, switch the import to `createApp({ plugins: [..., agents()] })` and remove the `createAgentApp` call. No other code needs to change.
-
-## Removal timeline
-
-The old `agent()` and `createAgentApp` exports remain until feedback on the new shape stabilizes. A follow-up PR will remove them in a future release; use of the deprecated exports surfaces via IDE strikethrough (JSDoc `@deprecated`) but does not log runtime warnings.

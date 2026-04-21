@@ -43,16 +43,6 @@ export {
 } from "./connectors/lakebase";
 export { getExecutionContext } from "./context";
 export { createApp } from "./core";
-export type { AgentHandle, CreateAgentConfig } from "./core/create-agent";
-/**
- * @deprecated Use `createAgent(def)` (pure factory) together with the
- *   `agents()` plugin and `createApp`. This shortcut composes server +
- *   agent plugins in a single call; the new shape separates those concerns.
- *   Import path preserved for backward compatibility during migration.
- */
-export { createAgent as createAgentApp } from "./core/create-agent";
-// New pure-data agent factory (replaces the old createAgent shortcut once
-// callers migrate — they coexist during the deprecation window).
 export { createAgent } from "./core/create-agent-def";
 export {
   type RunAgentInput,
@@ -79,8 +69,6 @@ export {
   toPlugin,
 } from "./plugin";
 export {
-  /** @deprecated Use `agents()` (plural) instead. Kept for migration. */
-  agent,
   analytics,
   files,
   genie,
