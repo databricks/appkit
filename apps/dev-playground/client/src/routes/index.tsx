@@ -222,17 +222,18 @@ function IndexRoute() {
           <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
             <div className="flex flex-col h-full">
               <h3 className="text-2xl font-semibold text-foreground mb-3">
-                Model Serving
+                Custom Agent
               </h3>
               <p className="text-muted-foreground mb-6 flex-grow">
-                Chat with a Databricks Model Serving endpoint using streaming
-                completions with real-time SSE responses.
+                AI agent powered by Databricks Model Serving with
+                auto-discovered tools from all AppKit plugins. Chat with your
+                data using natural language.
               </p>
               <Button
-                onClick={() => navigate({ to: "/serving" })}
+                onClick={() => navigate({ to: "/agent" })}
                 className="w-full"
               >
-                Try Model Serving
+                Chat with Agent
               </Button>
             </div>
           </Card>

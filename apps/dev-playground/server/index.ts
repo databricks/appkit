@@ -1,15 +1,17 @@
 import "reflect-metadata";
 import {
+  agents,
   analytics,
+  createAgent,
   createApp,
   files,
+  fromPlugin,
   genie,
   server,
-  serving,
+  tool,
 } from "@databricks/appkit";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
-// TODO: re-enable once vector-search is exported from @databricks/appkit
-// import { vectorSearch } from "@databricks/appkit";
+import { z } from "zod";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
@@ -24,6 +26,23 @@ function createMockClient() {
   return client;
 }
 
+// Code-defined demo agent showing the fromPlugin() API alongside the
+// markdown-driven agents in config/agents/.
+const helper = createAgent({
+  instructions:
+    "You are a demo helper. Use analytics tools to answer data questions, " +
+    "or get_weather for light small-talk.",
+  tools: {
+    ...fromPlugin(analytics),
+    get_weather: tool({
+      name: "get_weather",
+      description: "Get the current weather for a city",
+      schema: z.object({ city: z.string().describe("City name") }),
+      execute: async ({ city }) => `The weather in ${city} is sunny, 22°C`,
+    }),
+  },
+});
+
 createApp({
   plugins: [
     server({ autoStart: false }),
@@ -35,18 +54,7 @@ createApp({
     }),
     lakebaseExamples(),
     files(),
-    serving(),
-    // TODO: re-enable once vector-search is exported from @databricks/appkit
-    // vectorSearch({
-    //   indexes: {
-    //     demo: {
-    //       indexName:
-    //         process.env.DATABRICKS_VS_INDEX_NAME ?? "catalog.schema.index",
-    //       columns: ["id", "text", "title"],
-    //       queryType: "hybrid",
-    //     },
-    //   },
-    // }),
+    agents({ agents: { helper } }),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
 }).then((appkit) => {

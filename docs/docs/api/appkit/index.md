@@ -30,31 +30,54 @@ plugin architecture, and React integration.
 
 | Interface | Description |
 | ------ | ------ |
+| [AgentAdapter](Interface.AgentAdapter.md) | - |
+| [AgentDefinition](Interface.AgentDefinition.md) | - |
+| [AgentInput](Interface.AgentInput.md) | - |
+| [AgentRunContext](Interface.AgentRunContext.md) | - |
+| [AgentsPluginConfig](Interface.AgentsPluginConfig.md) | Base configuration interface for AppKit plugins |
+| [AgentToolDefinition](Interface.AgentToolDefinition.md) | - |
 | [BasePluginConfig](Interface.BasePluginConfig.md) | Base configuration interface for AppKit plugins |
 | [CacheConfig](Interface.CacheConfig.md) | Configuration for the CacheInterceptor. Controls TTL, size limits, storage backend, and probabilistic cleanup. |
 | [DatabaseCredential](Interface.DatabaseCredential.md) | Database credentials with OAuth token for Postgres connection |
 | [EndpointConfig](Interface.EndpointConfig.md) | - |
+| [FromPluginMarker](Interface.FromPluginMarker.md) | A lazy reference to a plugin's tools, produced by [fromPlugin](Function.fromPlugin.md) and resolved to concrete `ToolkitEntry`s at `AgentsPlugin.setup()` time. |
+| [FunctionTool](Interface.FunctionTool.md) | - |
 | [GenerateDatabaseCredentialRequest](Interface.GenerateDatabaseCredentialRequest.md) | Request parameters for generating database OAuth credentials |
 | [ITelemetry](Interface.ITelemetry.md) | Plugin-facing interface for OpenTelemetry instrumentation. Provides a thin abstraction over OpenTelemetry APIs for plugins. |
 | [LakebasePoolConfig](Interface.LakebasePoolConfig.md) | Configuration for creating a Lakebase connection pool |
+| [Message](Interface.Message.md) | - |
 | [PluginManifest](Interface.PluginManifest.md) | Plugin manifest that declares metadata and resource requirements. Attached to plugin classes as a static property. Extends the shared PluginManifest with strict resource types. |
+| [PromptContext](Interface.PromptContext.md) | Context passed to `baseSystemPrompt` callbacks. |
 | [RequestedClaims](Interface.RequestedClaims.md) | Optional claims for fine-grained Unity Catalog table permissions When specified, the returned token will be scoped to only the requested tables |
 | [RequestedResource](Interface.RequestedResource.md) | Resource to request permissions for in Unity Catalog |
 | [ResourceEntry](Interface.ResourceEntry.md) | Internal representation of a resource in the registry. Extends ResourceRequirement with resolution state and plugin ownership. |
 | [ResourceFieldEntry](Interface.ResourceFieldEntry.md) | Defines a single field for a resource. Each field has its own environment variable and optional description. Single-value types use one key (e.g. id); multi-value types (database, secret) use multiple (e.g. instance_name, database_name or scope, key). |
 | [ResourceRequirement](Interface.ResourceRequirement.md) | Declares a resource requirement for a plugin. Can be defined statically in a manifest or dynamically via getResourceRequirements(). Narrows the generated base: type → ResourceType enum, permission → ResourcePermission union. |
+| [RunAgentInput](Interface.RunAgentInput.md) | - |
+| [RunAgentResult](Interface.RunAgentResult.md) | - |
 | [ServingEndpointEntry](Interface.ServingEndpointEntry.md) | Shape of a single registry entry. |
 | [ServingEndpointRegistry](Interface.ServingEndpointRegistry.md) | Registry interface for serving endpoint type generation. Empty by default — augmented by the Vite type generator's `.d.ts` output via module augmentation. When populated, provides autocomplete for alias names and typed request/response/chunk per endpoint. |
 | [StreamExecutionSettings](Interface.StreamExecutionSettings.md) | Execution settings for streaming endpoints. Extends PluginExecutionSettings with SSE stream configuration. |
 | [TelemetryConfig](Interface.TelemetryConfig.md) | OpenTelemetry configuration for AppKit applications |
+| [Thread](Interface.Thread.md) | - |
+| [ThreadStore](Interface.ThreadStore.md) | - |
+| [ToolConfig](Interface.ToolConfig.md) | - |
+| [ToolkitEntry](Interface.ToolkitEntry.md) | A tool reference produced by a plugin's `.toolkit()` call. The agents plugin recognizes the `__toolkitRef` brand and dispatches tool invocations through `PluginContext.executeTool(req, pluginName, localName, ...)`, preserving OBO (asUser) and telemetry spans. |
+| [ToolkitOptions](Interface.ToolkitOptions.md) | - |
+| [ToolProvider](Interface.ToolProvider.md) | - |
 | [ValidationResult](Interface.ValidationResult.md) | Result of validating all registered resources against the environment. |
 
 ## Type Aliases
 
 | Type Alias | Description |
 | ------ | ------ |
+| [AgentEvent](TypeAlias.AgentEvent.md) | - |
+| [AgentTool](TypeAlias.AgentTool.md) | Any tool an agent can invoke: inline function tools (`tool()`), hosted MCP tools (`mcpServer()` / raw hosted), or toolkit references from plugins (`analytics().toolkit()`). |
+| [AgentTools](TypeAlias.AgentTools.md) | Per-agent tool record. String keys map to inline tools, toolkit entries, hosted tools, etc. Symbol keys hold `FromPluginMarker` references produced by `fromPlugin(factory)` spreads — these are resolved at `AgentsPlugin.setup()` time against registered `ToolProvider` plugins. |
+| [BaseSystemPromptOption](TypeAlias.BaseSystemPromptOption.md) | - |
 | [ConfigSchema](TypeAlias.ConfigSchema.md) | Configuration schema definition for plugin config. Re-exported from the standard JSON Schema Draft 7 types. |
 | [ExecutionResult](TypeAlias.ExecutionResult.md) | Discriminated union for plugin execution results. |
+| [HostedTool](TypeAlias.HostedTool.md) | - |
 | [IAppRouter](TypeAlias.IAppRouter.md) | Express router type for plugin route registration |
 | [PluginData](TypeAlias.PluginData.md) | Tuple of plugin class, config, and name. Created by `toPlugin()` and passed to `createApp()`. |
 | [ResourcePermission](TypeAlias.ResourcePermission.md) | Union of all possible permission levels across all resource types. |
@@ -65,6 +88,7 @@ plugin architecture, and React integration.
 
 | Variable | Description |
 | ------ | ------ |
+| [agents](Variable.agents.md) | Plugin factory for the agents plugin. Reads `config/agents/*.md` by default, resolves toolkits/tools from registered plugins, exposes `appkit.agents.*` runtime API and mounts `/invocations`. |
 | [sql](Variable.sql.md) | SQL helper namespace |
 
 ## Functions
@@ -73,10 +97,12 @@ plugin architecture, and React integration.
 | ------ | ------ |
 | [appKitServingTypesPlugin](Function.appKitServingTypesPlugin.md) | Vite plugin to generate TypeScript types for AppKit serving endpoints. Fetches OpenAPI schemas from Databricks and generates a .d.ts with ServingEndpointRegistry module augmentation. |
 | [appKitTypesPlugin](Function.appKitTypesPlugin.md) | Vite plugin to generate types for AppKit queries. Calls generateFromEntryPoint under the hood. |
+| [createAgent](Function.createAgent.md) | Pure factory for agent definitions. Returns the passed-in definition after cycle-detecting the sub-agent graph. Accepts the full `AgentDefinition` shape and is safe to call at module top-level. |
 | [createApp](Function.createApp.md) | Bootstraps AppKit with the provided configuration. |
 | [createLakebasePool](Function.createLakebasePool.md) | Create a Lakebase pool with appkit's logger integration. Telemetry automatically uses appkit's OpenTelemetry configuration via global registry. |
 | [extractServingEndpoints](Function.extractServingEndpoints.md) | Extract serving endpoint config from a server file by AST-parsing it. Looks for `serving({ endpoints: { alias: { env: "..." }, ... } })` calls and extracts the endpoint alias names and their environment variable mappings. |
 | [findServerFile](Function.findServerFile.md) | Find the server entry file by checking candidate paths in order. |
+| [fromPlugin](Function.fromPlugin.md) | Reference a plugin's tools inside an `AgentDefinition.tools` record without naming the plugin instance. The returned spread-friendly object carries a symbol-keyed marker that the agents plugin resolves against registered `ToolProvider`s at setup time. |
 | [generateDatabaseCredential](Function.generateDatabaseCredential.md) | Generate OAuth credentials for Postgres database connection using the proper Postgres API. |
 | [getExecutionContext](Function.getExecutionContext.md) | Get the current execution context. |
 | [getLakebaseOrmConfig](Function.getLakebaseOrmConfig.md) | Get Lakebase connection configuration for ORMs that don't accept pg.Pool directly. |
@@ -85,4 +111,13 @@ plugin architecture, and React integration.
 | [getResourceRequirements](Function.getResourceRequirements.md) | Gets the resource requirements from a plugin's manifest. |
 | [getUsernameWithApiLookup](Function.getUsernameWithApiLookup.md) | Resolves the PostgreSQL username for a Lakebase connection. |
 | [getWorkspaceClient](Function.getWorkspaceClient.md) | Get workspace client from config or SDK default auth chain |
+| [isFromPluginMarker](Function.isFromPluginMarker.md) | Type guard for [FromPluginMarker](Interface.FromPluginMarker.md). |
+| [isFunctionTool](Function.isFunctionTool.md) | - |
+| [isHostedTool](Function.isHostedTool.md) | - |
 | [isSQLTypeMarker](Function.isSQLTypeMarker.md) | Type guard to check if a value is a SQL type marker |
+| [isToolkitEntry](Function.isToolkitEntry.md) | Type guard for `ToolkitEntry` — used by the agents plugin to differentiate toolkit references from inline tools in a mixed `tools` record. |
+| [loadAgentFromFile](Function.loadAgentFromFile.md) | Loads a single markdown agent file and resolves its frontmatter against registered plugin toolkits + ambient tool library. |
+| [loadAgentsFromDir](Function.loadAgentsFromDir.md) | Scans a directory for `*.md` files and produces an `AgentDefinition` record keyed by file-stem. Throws on frontmatter errors or unresolved references. Returns an empty map if the directory does not exist. |
+| [mcpServer](Function.mcpServer.md) | Factory for declaring a custom MCP server tool. |
+| [runAgent](Function.runAgent.md) | Standalone agent execution without `createApp`. Resolves the adapter, binds inline tools, and drives the adapter's `run()` loop to completion. |
+| [tool](Function.tool.md) | Factory for defining function tools with Zod schemas. |
