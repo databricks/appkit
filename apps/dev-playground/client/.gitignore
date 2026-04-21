@@ -12,9 +12,6 @@ dist
 dist-ssr
 *.local
 
-# Auto-generated types (endpoint-specific, varies per developer)
-src/appkit-types/serving.d.ts
-
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

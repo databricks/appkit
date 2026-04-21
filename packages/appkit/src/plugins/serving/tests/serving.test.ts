@@ -90,6 +90,16 @@ describe("Serving Plugin", () => {
       expect(handlers["POST:/stream"]).toBeDefined();
     });
 
+    test("also registers /:alias/invoke and /:alias/stream for type-generated clients", () => {
+      const plugin = new ServingPlugin({});
+      const { router, handlers } = createMockRouter();
+
+      plugin.injectRoutes(router);
+
+      expect(handlers["POST:/:alias/invoke"]).toBeDefined();
+      expect(handlers["POST:/:alias/stream"]).toBeDefined();
+    });
+
     test("exports returns a factory that provides invoke", () => {
       const plugin = new ServingPlugin({});
       const factory = plugin.exports() as any;

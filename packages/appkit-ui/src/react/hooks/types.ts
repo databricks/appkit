@@ -59,7 +59,7 @@ export interface UseAnalyticsQueryResult<T> {
  *
  * @example
  * ```typescript
- * // config/appKitTypes.d.ts
+ * // shared/appkit-types/analytics.d.ts
  * declare module "@databricks/appkit-ui/react" {
  *   interface QueryRegistry {
  *     apps_list: {
