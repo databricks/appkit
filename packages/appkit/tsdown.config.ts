@@ -4,7 +4,12 @@ export default defineConfig([
   {
     publint: true,
     name: "@databricks/appkit",
-    entry: "src/index.ts",
+    entry: [
+      "src/index.ts",
+      "src/agents/vercel-ai.ts",
+      "src/agents/langchain.ts",
+      "src/agents/databricks.ts",
+    ],
     outDir: "dist",
     hash: false,
     format: "esm",

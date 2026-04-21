@@ -7,7 +7,9 @@
     "docs"
   ],
   "workspaces": {
-    "packages/appkit": {},
+    "packages/appkit": {
+      "ignoreDependencies": ["@langchain/core", "ai"]
+    },
     "packages/appkit-ui": {
       "ignoreDependencies": ["tailwindcss", "tw-animate-css"]
     }
@@ -17,6 +19,11 @@
     "**/*.example.tsx",
     "**/*.css",
     "packages/appkit/src/plugins/vector-search/**",
+    "packages/appkit/src/plugin/index.ts",
+    "packages/appkit/src/plugins/agents/index.ts",
+    "packages/appkit/src/plugins/agents/tools/index.ts",
+    "packages/appkit/src/plugins/agents/from-plugin.ts",
+    "packages/appkit/src/plugins/agents/load-agents.ts",
     "template/**",
     "tools/**",
     "docs/**"
