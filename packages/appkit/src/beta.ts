@@ -52,8 +52,10 @@ export type {
   AgentDefinition,
   AgentsPluginConfig,
   AgentTool,
+  AgentTools,
   AutoInheritToolsConfig,
   BaseSystemPromptOption,
+  FromPluginMarker,
   PromptContext,
   RegisteredAgent,
   ResolvedToolEntry,
@@ -62,6 +64,8 @@ export type {
 } from "./plugins/agents";
 export {
   agentIdFromMarkdownPath,
+  fromPlugin,
+  isFromPluginMarker,
   isToolkitEntry,
   loadAgentFromFile,
   loadAgentsFromDir,

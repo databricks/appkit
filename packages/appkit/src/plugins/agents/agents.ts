@@ -15,11 +15,14 @@ import type {
   ToolProvider,
 } from "shared";
 import { AppKitMcpClient, buildMcpHostPolicy } from "../../connectors/mcp";
+import { getWorkspaceClient } from "../../context";
+import { isFromPluginMarker } from "../../core/agent/from-plugin";
 import { loadAgentsFromDir } from "../../core/agent/load-agents";
 import {
   buildBaseSystemPrompt,
   composeSystemPrompt,
 } from "../../core/agent/system-prompt";
+import { resolveToolkitFromProvider } from "../../core/agent/toolkit-resolver";
 import {
   functionToolToDefinition,
   isFunctionTool,
@@ -38,10 +41,12 @@ import { isToolkitEntry } from "../../core/agent/types";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
+import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
 import { agentStreamDefaults } from "./defaults";
 import { EventChannel } from "./event-channel";
 import { AgentEventTranslator } from "./event-translator";
 import manifest from "./manifest.json";
+import { normalizeToolResult } from "../../core/agent/normalize-result";
 import {
   approvalRequestSchema,
   chatRequestSchema,
@@ -327,7 +332,11 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     src: AgentSource,
   ): Promise<Map<string, ResolvedToolEntry>> {
     const index = new Map<string, ResolvedToolEntry>();
-    const hasExplicitTools = def.tools && Object.keys(def.tools).length > 0;
+    const toolsRecord = def.tools ?? {};
+    const hasExplicitTools =
+      def.tools !== undefined &&
+      (Object.keys(toolsRecord).length > 0 ||
+        Object.getOwnPropertySymbols(toolsRecord).length > 0);
     const hasExplicitSubAgents =
       def.agents && Object.keys(def.agents).length > 0;
 
@@ -366,10 +375,14 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       });
     }
 
-    // 2. Explicit tools (toolkit entries, function tools, hosted tools)
+    // 2. fromPlugin markers — resolve against registered ToolProviders first so
+    //    explicit string-keyed tools can still overwrite on the same key.
+    this.resolveFromPluginMarkers(agentName, toolsRecord, index);
+
+    // 3. Explicit tools (toolkit entries, function tools, hosted tools)
     const hostedToCollect: import("../../core/agent/tools/hosted-tools").HostedTool[] =
       [];
-    for (const [key, tool] of Object.entries(def.tools ?? {})) {
+    for (const [key, tool] of Object.entries(toolsRecord)) {
       if (isToolkitEntry(tool)) {
         index.set(key, {
           source: "toolkit",
@@ -421,32 +434,19 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       provider,
     } of this.context.getToolProviders()) {
       if (pluginName === this.name) continue;
-      const withToolkit = provider as ToolProvider & {
-        toolkit?: (opts?: unknown) => Record<string, unknown>;
-      };
-      if (typeof withToolkit.toolkit === "function") {
-        const entries = withToolkit.toolkit() as Record<string, unknown>;
-        for (const [key, maybeEntry] of Object.entries(entries)) {
-          if (!isToolkitEntry(maybeEntry)) continue;
-          if (maybeEntry.autoInheritable !== true) {
-            recordSkip(maybeEntry.pluginName, maybeEntry.localName);
-            continue;
-          }
-          index.set(key, {
-            source: "toolkit",
-            pluginName: maybeEntry.pluginName,
-            localName: maybeEntry.localName,
-            def: { ...maybeEntry.def, name: key },
-          });
-          inherited.push(key);
+      const entries = resolveToolkitFromProvider(pluginName, provider);
+      for (const [key, entry] of Object.entries(entries)) {
+        if (entry.autoInheritable !== true) {
+          recordSkip(entry.pluginName, entry.localName);
+          continue;
         }
-        continue;
-      }
-      // Fallback: providers without a toolkit() still expose getAgentTools().
-      // These cannot be selectively opted in per tool, so we conservatively
-      // skip them during auto-inherit and require explicit `tools:` wiring.
-      for (const tool of provider.getAgentTools()) {
-        recordSkip(pluginName, tool.name);
+        index.set(key, {
+          source: "toolkit",
+          pluginName: entry.pluginName,
+          localName: entry.localName,
+          def: { ...entry.def, name: key },
+        });
+        inherited.push(key);
       }
     }
 
@@ -471,6 +471,51 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         ),
         summary,
       );
+    }
+  }
+
+  /**
+   * Walks the symbol-keyed `fromPlugin` markers in an agent's `tools` record
+   * and resolves each one against a registered `ToolProvider`. Throws with a
+   * helpful `Available: …` listing if a referenced plugin isn't registered.
+   */
+  private resolveFromPluginMarkers(
+    agentName: string,
+    toolsRecord: Record<string | symbol, unknown>,
+    index: Map<string, ResolvedToolEntry>,
+  ): void {
+    const symbolKeys = Object.getOwnPropertySymbols(toolsRecord);
+    if (symbolKeys.length === 0) return;
+
+    const providers = this.context?.getToolProviders() ?? [];
+
+    for (const sym of symbolKeys) {
+      const marker = (toolsRecord as Record<symbol, unknown>)[sym];
+      if (!isFromPluginMarker(marker)) continue;
+
+      const providerEntry = providers.find((p) => p.name === marker.pluginName);
+      if (!providerEntry) {
+        const available = providers.map((p) => p.name).join(", ") || "(none)";
+        throw new Error(
+          `Agent '${agentName}' references plugin '${marker.pluginName}' via ` +
+            `fromPlugin(), but that plugin is not registered in createApp. ` +
+            `Available: ${available}.`,
+        );
+      }
+
+      const entries = resolveToolkitFromProvider(
+        marker.pluginName,
+        providerEntry.provider,
+        marker.opts,
+      );
+      for (const [key, entry] of Object.entries(entries)) {
+        index.set(key, {
+          source: "toolkit",
+          pluginName: entry.pluginName,
+          localName: entry.localName,
+          def: { ...entry.def, name: key },
+        });
+      }
     }
   }
 

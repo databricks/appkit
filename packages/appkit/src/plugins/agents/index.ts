@@ -1,5 +1,11 @@
-export { AgentsPlugin, agents } from "./agents";
 export { buildToolkitEntries } from "../../core/agent/build-toolkit";
+export {
+  FROM_PLUGIN_MARKER,
+  type FromPluginMarker,
+  type FromPluginSpread,
+  fromPlugin,
+  isFromPluginMarker,
+} from "../../core/agent/from-plugin";
 export {
   agentIdFromMarkdownPath,
   type LoadContext,
@@ -12,6 +18,7 @@ export {
   type AgentDefinition,
   type AgentsPluginConfig,
   type AgentTool,
+  type AgentTools,
   type AutoInheritToolsConfig,
   type BaseSystemPromptOption,
   isToolkitEntry,
@@ -21,3 +28,4 @@ export {
   type ToolkitEntry,
   type ToolkitOptions,
 } from "../../core/agent/types";
+export { AgentsPlugin, agents } from "./agents";
