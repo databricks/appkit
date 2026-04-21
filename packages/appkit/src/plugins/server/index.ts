@@ -64,7 +64,7 @@ export class ServerPlugin extends Plugin {
       throw new ServerError(
         "server({ autoStart }) has been removed. " +
           "The server is now started automatically by createApp.\n\n" +
-          "Run `npx appkit codemod customize-callback --write` to auto-migrate.",
+          "Run `npx appkit codemod on-plugins-ready --write` to auto-migrate.",
       );
     }
     super(config);
@@ -405,7 +405,7 @@ export class ServerPlugin extends Plugin {
             "      appkit.server.extend(...);\n" +
             "    },\n" +
             "  });\n\n" +
-            "Run `npx appkit codemod customize-callback --write` to auto-migrate.",
+            "Run `npx appkit codemod on-plugins-ready --write` to auto-migrate.",
         );
       },
     };
