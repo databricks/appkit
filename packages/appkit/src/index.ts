@@ -43,6 +43,12 @@ export {
 } from "./connectors/lakebase";
 export { getExecutionContext } from "./context";
 export { createApp } from "./core";
+export { createAgent } from "./core/create-agent-def";
+export {
+  type RunAgentInput,
+  type RunAgentResult,
+  runAgent,
+} from "./core/run-agent";
 // Errors
 export {
   AppKitError,
@@ -64,11 +70,18 @@ export {
 } from "./plugin";
 export { analytics, files, genie, lakebase, server, serving } from "./plugins";
 export {
+  type AgentDefinition,
+  type AgentsPluginConfig,
   type AgentTool,
+  agents,
+  type BaseSystemPromptOption,
   isToolkitEntry,
+  loadAgentFromFile,
+  loadAgentsFromDir,
+  type PromptContext,
   type ToolkitEntry,
   type ToolkitOptions,
-} from "./plugins/agents/types";
+} from "./plugins/agents";
 export {
   type FunctionTool,
   type HostedTool,
