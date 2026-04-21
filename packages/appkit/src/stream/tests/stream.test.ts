@@ -193,6 +193,43 @@ describe("StreamManager", () => {
 
       expect(streamManager.getActiveCount()).toBe(0);
     });
+
+    test("should abort generator when last client disconnects", async () => {
+      const { mockRes } = createMockResponse();
+      let closeHandler: (() => void) | undefined;
+
+      mockRes.on.mockImplementation((event: string, handler: () => void) => {
+        if (event === "close") closeHandler = handler;
+      });
+
+      let signalAborted = false;
+
+      async function* generator(signal: AbortSignal) {
+        yield { type: "start" };
+        // Simulate a long-running polling loop that respects the signal
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) {
+            resolve();
+            return;
+          }
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        signalAborted = signal.aborted;
+      }
+
+      const streamPromise = streamManager.stream(mockRes as any, generator);
+
+      // Let the generator yield "start" and enter the signal wait
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Simulate client disconnect
+      if (closeHandler) closeHandler();
+
+      await streamPromise;
+
+      expect(signalAborted).toBe(true);
+      expect(streamManager.getActiveCount()).toBe(0);
+    });
   });
 
   describe("error handling", () => {

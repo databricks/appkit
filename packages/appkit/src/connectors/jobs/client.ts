@@ -55,11 +55,7 @@ export class JobsConnector {
     signal?: AbortSignal,
   ): Promise<jobs.SubmitRunResponse> {
     return this._callApi("submit", async () => {
-      const waiter = await workspaceClient.jobs.submit(
-        request,
-        this._createContext(signal),
-      );
-      return waiter.response;
+      return workspaceClient.jobs.submit(request, this._createContext(signal));
     });
   }
 
@@ -69,11 +65,7 @@ export class JobsConnector {
     signal?: AbortSignal,
   ): Promise<jobs.RunNowResponse> {
     return this._callApi("runNow", async () => {
-      const waiter = await workspaceClient.jobs.runNow(
-        request,
-        this._createContext(signal),
-      );
-      return waiter.response;
+      return workspaceClient.jobs.runNow(request, this._createContext(signal));
     });
   }
 
@@ -106,11 +98,10 @@ export class JobsConnector {
     signal?: AbortSignal,
   ): Promise<void> {
     await this._callApi("cancelRun", async () => {
-      const waiter = await workspaceClient.jobs.cancelRun(
+      return workspaceClient.jobs.cancelRun(
         request,
         this._createContext(signal),
       );
-      return waiter.response;
     });
   }
 
@@ -121,13 +112,13 @@ export class JobsConnector {
   ): Promise<jobs.BaseRun[]> {
     return this._callApi("listRuns", async () => {
       const runs: jobs.BaseRun[] = [];
-      const limit = request.limit;
+      const limit = Math.max(1, Math.min(request.limit ?? 100, 100));
       for await (const run of workspaceClient.jobs.listRuns(
-        request,
+        { ...request, limit },
         this._createContext(signal),
       )) {
         runs.push(run);
-        if (limit && runs.length >= limit) break;
+        if (runs.length >= limit) break;
       }
       return runs;
     });
@@ -141,104 +132,6 @@ export class JobsConnector {
     return this._callApi("getJob", async () => {
       return workspaceClient.jobs.get(request, this._createContext(signal));
     });
-  }
-
-  async createJob(
-    workspaceClient: WorkspaceClient,
-    request: jobs.CreateJob,
-    signal?: AbortSignal,
-  ): Promise<jobs.CreateResponse> {
-    return this._callApi("createJob", async () => {
-      return workspaceClient.jobs.create(request, this._createContext(signal));
-    });
-  }
-
-  async waitForRun(
-    workspaceClient: WorkspaceClient,
-    runId: number,
-    pollIntervalMs = 5000,
-    timeoutMs?: number,
-    signal?: AbortSignal,
-  ): Promise<jobs.Run> {
-    const startTime = Date.now();
-    const timeout = timeoutMs ?? this.config.timeout ?? 600000;
-
-    return this.telemetry.startActiveSpan(
-      "jobs.waitForRun",
-      {
-        kind: SpanKind.CLIENT,
-        attributes: {
-          "jobs.run_id": runId,
-          "jobs.poll_interval_ms": pollIntervalMs,
-          "jobs.timeout_ms": timeout,
-        },
-      },
-      async (span: Span) => {
-        try {
-          let pollCount = 0;
-
-          while (true) {
-            pollCount++;
-            const elapsed = Date.now() - startTime;
-
-            if (elapsed > timeout) {
-              throw ExecutionError.statementFailed(
-                `Job run ${runId} polling timeout after ${timeout}ms`,
-              );
-            }
-
-            if (signal?.aborted) {
-              throw ExecutionError.canceled();
-            }
-
-            span.addEvent("poll.attempt", {
-              "poll.count": pollCount,
-              "poll.elapsed_ms": elapsed,
-            });
-
-            const run = await this.getRun(
-              workspaceClient,
-              { run_id: runId },
-              signal,
-            );
-
-            const lifeCycleState = run.state?.life_cycle_state;
-
-            if (
-              lifeCycleState === "TERMINATED" ||
-              lifeCycleState === "SKIPPED" ||
-              lifeCycleState === "INTERNAL_ERROR"
-            ) {
-              span.setAttribute("jobs.final_state", lifeCycleState);
-              span.setAttribute(
-                "jobs.result_state",
-                run.state?.result_state ?? "",
-              );
-              span.setAttribute("jobs.poll_count", pollCount);
-              span.setStatus({ code: SpanStatusCode.OK });
-              return run;
-            }
-
-            await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-          }
-        } catch (error) {
-          span.recordException(error as Error);
-          span.setStatus({
-            code: SpanStatusCode.ERROR,
-            message: error instanceof Error ? error.message : String(error),
-          });
-          if (error instanceof AppKitError) {
-            throw error;
-          }
-          throw ExecutionError.statementFailed(
-            error instanceof Error ? error.message : String(error),
-          );
-        } finally {
-          span.end();
-        }
-      },
-      { name: this.name, includePrefix: true },
-    );
   }
 
   private async _callApi<T>(
@@ -271,8 +164,17 @@ export class JobsConnector {
           if (error instanceof AppKitError) {
             throw error;
           }
-          throw ExecutionError.statementFailed(
-            error instanceof Error ? error.message : String(error),
+          // Preserve SDK ApiError (and any error with a numeric statusCode)
+          // so Plugin.execute() can map it to the correct HTTP status.
+          if (
+            error instanceof Error &&
+            "statusCode" in error &&
+            typeof (error as Record<string, unknown>).statusCode === "number"
+          ) {
+            throw error;
+          }
+          throw new ExecutionError(
+            `Jobs API call failed: ${error instanceof Error ? error.message : String(error)}`,
           );
         } finally {
           const duration = Date.now() - startTime;
@@ -300,7 +202,11 @@ export class JobsConnector {
   private _createContext(signal?: AbortSignal) {
     return new Context({
       cancellationToken: {
-        isCancellationRequested: signal?.aborted ?? false,
+        // Getter — evaluated on every read so SDK code paths that poll
+        // (rather than subscribe) observe cancellation live.
+        get isCancellationRequested() {
+          return signal?.aborted ?? false;
+        },
         onCancellationRequested: (cb: () => void) => {
           signal?.addEventListener("abort", cb, { once: true });
         },

@@ -5,6 +5,7 @@ import {
   type FilePolicy,
   files,
   genie,
+  jobs,
   PolicyDeniedError,
   server,
   serving,
@@ -81,6 +82,7 @@ createApp({
         implicit: {},
       },
     }),
+    jobs(),
     serving(),
     // TODO: re-enable once vector-search is exported from @databricks/appkit
     // vectorSearch({

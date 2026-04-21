@@ -124,6 +124,11 @@ export class StreamManager {
       streamEntry.clients.delete(res);
       this.activeOperations.delete(streamOperation);
 
+      // Stop the generator when no clients remain
+      if (streamEntry.clients.size === 0 && !streamEntry.isCompleted) {
+        streamEntry.abortController.abort("All clients disconnected");
+      }
+
       // cleanup if stream is completed and no clients are connected
       if (streamEntry.isCompleted && streamEntry.clients.size === 0) {
         setTimeout(() => {
@@ -202,6 +207,12 @@ export class StreamManager {
       clearInterval(heartbeat);
       this.activeOperations.delete(streamOperation);
       streamEntry.clients.delete(res);
+
+      // Stop the generator when no clients remain so polling loops
+      // (e.g. jobs runAndWait) don't keep running in the background.
+      if (streamEntry.clients.size === 0 && !streamEntry.isCompleted) {
+        abortController.abort("Client disconnected");
+      }
     });
 
     await this._processGeneratorInBackground(streamEntry);
