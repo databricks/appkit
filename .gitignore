@@ -11,3 +11,5 @@ coverage
 .turbo
 
 .databricks
+
+.claude/scheduled_tasks.lock
