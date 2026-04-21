@@ -136,6 +136,14 @@ function RootComponent() {
                     Vector Search
                   </Button>
                 </Link>
+                <Link to="/agent" className="no-underline">
+                  <Button
+                    variant="ghost"
+                    className="text-foreground hover:text-secondary-foreground"
+                  >
+                    Agent
+                  </Button>
+                </Link>
                 <ThemeSelector />
               </div>
             </nav>

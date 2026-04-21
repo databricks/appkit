@@ -222,35 +222,18 @@ function IndexRoute() {
           <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
             <div className="flex flex-col h-full">
               <h3 className="text-2xl font-semibold text-foreground mb-3">
-                Lakeflow Jobs
+                Custom Agent
               </h3>
               <p className="text-muted-foreground mb-6 flex-grow">
-                Trigger and monitor Databricks Lakeflow Jobs. View run history,
-                stream live status updates, and cancel in-flight runs.
+                AI agent powered by Databricks Model Serving with
+                auto-discovered tools from all AppKit plugins. Chat with your
+                data using natural language.
               </p>
               <Button
-                onClick={() => navigate({ to: "/jobs" })}
+                onClick={() => navigate({ to: "/agent" })}
                 className="w-full"
               >
-                Manage Jobs
-              </Button>
-            </div>
-          </Card>
-
-          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
-            <div className="flex flex-col h-full">
-              <h3 className="text-2xl font-semibold text-foreground mb-3">
-                Model Serving
-              </h3>
-              <p className="text-muted-foreground mb-6 flex-grow">
-                Chat with a Databricks Model Serving endpoint using streaming
-                completions with real-time SSE responses.
-              </p>
-              <Button
-                onClick={() => navigate({ to: "/serving" })}
-                className="w-full"
-              >
-                Try Model Serving
+                Chat with Agent
               </Button>
             </div>
           </Card>
