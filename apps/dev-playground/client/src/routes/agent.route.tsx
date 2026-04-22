@@ -72,7 +72,7 @@ function useAutocomplete(enabled: boolean) {
         setIsLoading(true);
 
         try {
-          const response = await fetch("/api/agent/chat", {
+          const response = await fetch("/api/agents/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ message: text, agent: "autocomplete" }),
@@ -153,7 +153,7 @@ function AgentRoute() {
       );
       if (!approval) return;
       try {
-        await fetch("/api/agent/approve", {
+        await fetch("/api/agents/approve", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -177,7 +177,7 @@ function AgentRoute() {
   const agentConfig = getPluginClientConfig<{
     agents?: string[];
     defaultAgent?: string;
-  }>("agent");
+  }>("agents");
   const hasAutocomplete = (agentConfig.agents ?? []).includes("autocomplete");
 
   const {
@@ -206,7 +206,7 @@ function AgentRoute() {
     setIsLoading(true);
 
     try {
-      const response = await fetch("/api/agent/chat", {
+      const response = await fetch("/api/agents/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

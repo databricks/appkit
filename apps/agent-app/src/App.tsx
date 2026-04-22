@@ -72,7 +72,7 @@ export default function App() {
       );
       if (!approval) return;
       try {
-        await fetch("/api/agent/approve", {
+        await fetch("/api/agents/approve", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -92,7 +92,7 @@ export default function App() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      fetch("/api/agent/info")
+      fetch("/api/agents/info")
         .then((r) => r.json())
         .then((data) => setToolCount(data.toolCount ?? 0))
         .catch(() => {});
@@ -118,7 +118,7 @@ export default function App() {
     setIsLoading(true);
 
     try {
-      const res = await fetch("/api/agent/chat", {
+      const res = await fetch("/api/agents/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
