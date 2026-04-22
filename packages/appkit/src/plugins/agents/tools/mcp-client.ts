@@ -1,6 +1,12 @@
 import type { AgentToolDefinition } from "shared";
 import { createLogger } from "../../../logging/logger";
 import type { McpEndpointConfig } from "./hosted-tools";
+import {
+  assertResolvedHostSafe,
+  checkMcpUrl,
+  type DnsLookup,
+  type McpHostPolicy,
+} from "./mcp-host-policy";
 
 const logger = createLogger("agent:mcp");
 
@@ -32,6 +38,12 @@ interface McpToolCallResult {
 interface McpServerConnection {
   config: McpEndpointConfig;
   resolvedUrl: string;
+  /**
+   * Whether workspace auth (SP / OBO) may be forwarded to this endpoint's URL.
+   * Decided at `connect()` time via {@link McpHostPolicy} and cached for the
+   * lifetime of the connection.
+   */
+  forwardWorkspaceAuth: boolean;
   tools: Map<string, McpToolSchema>;
 }
 
@@ -41,6 +53,10 @@ interface McpServerConnection {
  * Uses raw fetch() with JSON-RPC 2.0 over HTTP — no @modelcontextprotocol/sdk
  * or LangChain dependency. Supports the Streamable HTTP transport (POST with
  * JSON-RPC request, single JSON-RPC response).
+ *
+ * All outbound URLs are gated by an {@link McpHostPolicy}: unallowlisted hosts
+ * are rejected before the first byte is sent, and workspace credentials are
+ * only forwarded to the same-origin workspace. See `mcp-host-policy.ts`.
  */
 export class AppKitMcpClient {
   private connections = new Map<string, McpServerConnection>();
@@ -51,6 +67,8 @@ export class AppKitMcpClient {
   constructor(
     private workspaceHost: string,
     private authenticate: () => Promise<Record<string, string>>,
+    private policy: McpHostPolicy,
+    private options: { dnsLookup?: DnsLookup; fetchImpl?: typeof fetch } = {},
   ) {}
 
   async connectAll(endpoints: McpEndpointConfig[]): Promise<void> {
@@ -79,27 +97,52 @@ export class AppKitMcpClient {
   }
 
   async connect(endpoint: McpEndpointConfig): Promise<void> {
-    const url = this.resolveUrl(endpoint);
-    logger.info("Connecting to MCP server: %s at %s", endpoint.name, url);
+    const resolvedUrl = this.resolveUrl(endpoint);
+    const check = checkMcpUrl(resolvedUrl, this.policy);
+    if (!check.ok) {
+      throw new Error(
+        `MCP endpoint '${endpoint.name}' refused at connect: ${check.reason}`,
+      );
+    }
+    await assertResolvedHostSafe(
+      check.url.hostname,
+      this.policy,
+      this.options.dnsLookup,
+    );
 
-    const initResponse = await this.sendRpc(url, "initialize", {
-      protocolVersion: "2025-03-26",
-      capabilities: {},
-      clientInfo: { name: "appkit-agent", version: "0.1.0" },
-    });
+    logger.info(
+      "Connecting to MCP server: %s at %s (forwardWorkspaceAuth=%s)",
+      endpoint.name,
+      resolvedUrl,
+      check.forwardWorkspaceAuth,
+    );
+
+    const initResponse = await this.sendRpc(
+      resolvedUrl,
+      "initialize",
+      {
+        protocolVersion: "2025-03-26",
+        capabilities: {},
+        clientInfo: { name: "appkit-agent", version: "0.1.0" },
+      },
+      { forwardWorkspaceAuth: check.forwardWorkspaceAuth },
+    );
 
     if (initResponse.sessionId) {
       this.sessionIds.set(endpoint.name, initResponse.sessionId);
     }
     const sessionId = this.sessionIds.get(endpoint.name);
 
-    await this.sendNotification(url, "notifications/initialized", sessionId);
+    await this.sendNotification(resolvedUrl, "notifications/initialized", {
+      sessionId,
+      forwardWorkspaceAuth: check.forwardWorkspaceAuth,
+    });
 
     const listResponse = await this.sendRpc(
-      url,
+      resolvedUrl,
       "tools/list",
       {},
-      { sessionId },
+      { sessionId, forwardWorkspaceAuth: check.forwardWorkspaceAuth },
     );
     const toolList =
       (listResponse.result as { tools?: McpToolSchema[] })?.tools ?? [];
@@ -111,7 +154,8 @@ export class AppKitMcpClient {
 
     this.connections.set(endpoint.name, {
       config: endpoint,
-      resolvedUrl: url,
+      resolvedUrl,
+      forwardWorkspaceAuth: check.forwardWorkspaceAuth,
       tools,
     });
     logger.info(
@@ -139,6 +183,16 @@ export class AppKitMcpClient {
     return defs;
   }
 
+  /**
+   * Whether the named MCP server may receive workspace-scoped auth headers
+   * (e.g., an OBO bearer token from an end-user request). Callers should gate
+   * auth-forwarding decisions on this to prevent credential exfiltration to
+   * non-workspace hosts.
+   */
+  canForwardWorkspaceAuth(serverName: string): boolean {
+    return this.connections.get(serverName)?.forwardWorkspaceAuth ?? false;
+  }
+
   async callTool(
     qualifiedName: string,
     args: unknown,
@@ -157,23 +211,34 @@ export class AppKitMcpClient {
     }
 
     const sessionId = this.sessionIds.get(serverName);
+    // authHeaders are caller-supplied credentials (typically the OBO token).
+    // Only honor them if the destination URL was admitted with
+    // forwardWorkspaceAuth=true at connect time.
+    const scopedAuthOverride = conn.forwardWorkspaceAuth
+      ? authHeaders
+      : undefined;
+
     const rpcResult = await this.sendRpc(
       conn.resolvedUrl,
       "tools/call",
       { name: toolName, arguments: args },
-      { authOverride: authHeaders, sessionId },
+      {
+        authOverride: scopedAuthOverride,
+        sessionId,
+        forwardWorkspaceAuth: conn.forwardWorkspaceAuth,
+      },
     );
     const result = rpcResult.result as McpToolCallResult;
 
     if (result.isError) {
-      const errText = result.content
+      const errText = (result.content ?? [])
         .filter((c) => c.type === "text")
         .map((c) => c.text)
         .join("\n");
       throw new Error(errText || "MCP tool call failed");
     }
 
-    return result.content
+    return (result.content ?? [])
       .filter((c) => c.type === "text")
       .map((c) => c.text)
       .join("\n");
@@ -182,6 +247,7 @@ export class AppKitMcpClient {
   async close(): Promise<void> {
     this.closed = true;
     this.connections.clear();
+    this.sessionIds.clear();
   }
 
   private async sendRpc(
@@ -191,6 +257,7 @@ export class AppKitMcpClient {
     options?: {
       authOverride?: Record<string, string>;
       sessionId?: string;
+      forwardWorkspaceAuth?: boolean;
     },
   ): Promise<{ result: unknown; sessionId?: string }> {
     if (this.closed) throw new Error("MCP client is closed");
@@ -202,7 +269,7 @@ export class AppKitMcpClient {
       ...(params && { params }),
     };
 
-    const authHeaders = options?.authOverride ?? (await this.authenticate());
+    const authHeaders = await this.resolveAuthHeaders(options);
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
@@ -212,7 +279,8 @@ export class AppKitMcpClient {
       headers["Mcp-Session-Id"] = options.sessionId;
     }
 
-    const response = await fetch(url, {
+    const fetchImpl = this.options.fetchImpl ?? fetch;
+    const response = await fetchImpl(url, {
       method: "POST",
       headers,
       body: JSON.stringify(request),
@@ -254,25 +322,43 @@ export class AppKitMcpClient {
   private async sendNotification(
     url: string,
     method: string,
-    sessionId?: string,
+    options?: {
+      sessionId?: string;
+      forwardWorkspaceAuth?: boolean;
+    },
   ): Promise<void> {
     if (this.closed) return;
 
-    const authHeaders = await this.authenticate();
+    const authHeaders = await this.resolveAuthHeaders(options);
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
       ...authHeaders,
     };
-    if (sessionId) {
-      headers["Mcp-Session-Id"] = sessionId;
+    if (options?.sessionId) {
+      headers["Mcp-Session-Id"] = options.sessionId;
     }
 
-    await fetch(url, {
+    const fetchImpl = this.options.fetchImpl ?? fetch;
+    await fetchImpl(url, {
       method: "POST",
       headers,
       body: JSON.stringify({ jsonrpc: "2.0", method }),
       signal: AbortSignal.timeout(30_000),
     });
+  }
+
+  /**
+   * Return the auth headers to send on an outbound request. Workspace auth
+   * (SP or OBO) is only resolved when `forwardWorkspaceAuth` is true; for
+   * non-workspace hosts no bearer token is attached.
+   */
+  private async resolveAuthHeaders(options?: {
+    authOverride?: Record<string, string>;
+    forwardWorkspaceAuth?: boolean;
+  }): Promise<Record<string, string>> {
+    if (!options?.forwardWorkspaceAuth) return {};
+    if (options.authOverride) return options.authOverride;
+    return this.authenticate();
   }
 }

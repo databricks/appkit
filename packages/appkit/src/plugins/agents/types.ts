@@ -8,6 +8,7 @@ import type {
 import type { FromPluginMarker } from "./from-plugin";
 import type { FunctionTool } from "./tools/function-tool";
 import type { HostedTool } from "./tools/hosted-tools";
+import type { McpHostPolicyConfig } from "./tools/mcp-host-policy";
 
 /**
  * A tool reference produced by a plugin's `.toolkit()` call. The agents plugin
@@ -115,6 +116,13 @@ export interface AgentsPluginConfig extends BasePluginConfig {
   threadStore?: ThreadStore;
   /** Customize or disable the AppKit base system prompt. */
   baseSystemPrompt?: BaseSystemPromptOption;
+  /**
+   * MCP server host policy. By default only same-origin Databricks workspace
+   * URLs may be used as MCP endpoints; custom hosts must be explicitly
+   * allowlisted here. Workspace credentials (SP / OBO) are never forwarded
+   * to non-workspace hosts.
+   */
+  mcp?: McpHostPolicyConfig;
 }
 
 /** Internal tool-index entry after a tool record has been resolved to a dispatchable form. */

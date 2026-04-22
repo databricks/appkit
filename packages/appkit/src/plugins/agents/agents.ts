@@ -34,6 +34,7 @@ import {
   isHostedTool,
   resolveHostedTools,
 } from "./tools";
+import { buildMcpHostPolicy } from "./tools/mcp-host-policy";
 import type {
   AgentDefinition,
   AgentsPluginConfig,
@@ -447,7 +448,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     }
 
     if (!this.mcpClient) {
-      this.mcpClient = new AppKitMcpClient(host, authenticate);
+      const policy = buildMcpHostPolicy(this.config.mcp, host);
+      this.mcpClient = new AppKitMcpClient(host, authenticate, policy);
     }
 
     const endpoints = resolveHostedTools(hostedTools);

@@ -13,9 +13,7 @@ import { toJSONSchema, type z } from "zod";
  * providers either ignore the field or also trip on it, so stripping here is
  * safe across backends.
  */
-export function toToolJSONSchema(
-  schema: z.ZodType,
-): Record<string, unknown> {
+export function toToolJSONSchema(schema: z.ZodType): Record<string, unknown> {
   const raw = toJSONSchema(schema) as Record<string, unknown>;
   const { $schema: _ignored, ...rest } = raw;
   return rest;

@@ -203,10 +203,43 @@ agents({
   autoInheritTools?: boolean | { file?: boolean, code?: boolean },
   threadStore?: ThreadStore,    // default in-memory
   baseSystemPrompt?: false | string | (ctx: PromptContext) => string,
+  mcp?: {
+    trustedHosts?: string[],    // extra hostnames allowed for custom MCP URLs
+    allowLocalhost?: boolean,   // default: NODE_ENV !== "production"
+  },
 })
 ```
 
 `autoInheritTools` defaults to `{ file: true, code: false }`. Boolean shorthand applies to both.
+
+### MCP host policy
+
+AppKit applies a zero-trust policy to every MCP URL used as a hosted tool. By default only **same-origin Databricks workspace URLs** (matching the resolved `DATABRICKS_HOST`) may be reached. Every other host must be explicitly allowlisted via `mcp.trustedHosts`, and workspace credentials (service-principal and on-behalf-of user tokens) are **never** forwarded to those hosts.
+
+```ts
+agents({
+  agents: {
+    support: createAgent({
+      instructions: "…",
+      tools: {
+        "mcp.internal": mcpServer("internal", "https://mcp.corp.internal/mcp"),
+      },
+    }),
+  },
+  mcp: {
+    trustedHosts: ["mcp.corp.internal"],
+  },
+});
+```
+
+The policy enforces four rules at MCP `connect()` time, before any byte is sent:
+
+1. Only `http` and `https` URLs are accepted.
+2. Plaintext `http://` is rejected for everything except `localhost` when `allowLocalhost` is true (default in development, off in production).
+3. The destination hostname must match the workspace host, equal `localhost` (if permitted), or appear in `trustedHosts`.
+4. The resolved DNS address must not fall in loopback, RFC1918, CGNAT (100.64.0.0/10), link-local (169.254.0.0/16 — covers cloud metadata services), ULA, or multicast ranges.
+
+`Authorization` headers carrying workspace credentials are scoped to same-origin workspace URLs. A `mcpServer(name, url)` pointing at a trusted external host must authenticate itself (for example, a custom token baked into `url`).
 
 ## Runtime API
 
