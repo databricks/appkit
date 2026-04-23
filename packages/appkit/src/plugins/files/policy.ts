@@ -57,8 +57,19 @@ export interface FileResource {
 
 /** Minimal user identity passed to the policy function. */
 export interface FilePolicyUser {
+  /**
+   * Identifier of the requesting caller. For end-user HTTP requests this is
+   * the value of the `x-forwarded-user` header; for direct SDK calls and
+   * header-less HTTP requests (which run as the service principal), this is
+   * the service principal's ID.
+   */
   id: string;
-  /** `true` when the caller is the service principal (direct SDK call, not `asUser`). */
+  /**
+   * `true` when the call is executing as the service principal — either a
+   * direct SDK call (`appKit.files(...)`) or an HTTP request that arrived
+   * without an `x-forwarded-user` header. Policy authors typically check
+   * this first to distinguish SP traffic from end-user traffic.
+   */
   isServicePrincipal?: boolean;
 }
 
