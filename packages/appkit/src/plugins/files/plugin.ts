@@ -243,15 +243,11 @@ export class FilesPlugin extends Plugin implements ToolProvider {
         telemetry: config.telemetry,
         customContentTypes: mergedConfig.customContentTypes,
       });
-    }
 
-    for (const volumeKey of this.volumeKeys) {
-      Object.assign(this.tools, this._defineVolumeTools(volumeKey));
-    }
+      Object.assign(this.tools, this._defineVolumeTools(key));
 
-    // Warn at startup for volumes without an explicit policy
-    for (const key of this.volumeKeys) {
-      if (!volumes[key].policy) {
+      // Warn at startup for volumes without an explicit policy
+      if (!volumeCfg.policy) {
         logger.warn(
           'Volume "%s" has no explicit policy — defaulting to publicRead(). ' +
             "Set a policy in files({ volumes: { %s: { policy: ... } } }) to silence this warning.",
