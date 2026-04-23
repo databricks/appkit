@@ -1,6 +1,7 @@
 export { AgentsPlugin, agents } from "./agents";
 export { buildToolkitEntries } from "../../core/agent/build-toolkit";
 export {
+  agentIdFromMarkdownPath,
   type LoadContext,
   type LoadResult,
   loadAgentFromFile,
