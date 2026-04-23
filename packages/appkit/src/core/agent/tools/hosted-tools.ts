@@ -1,3 +1,5 @@
+import type { McpEndpointConfig } from "../../../connectors/mcp";
+
 export interface GenieTool {
   type: "genie-space";
   genie_space: { id: string };
@@ -35,12 +37,6 @@ export function isHostedTool(value: unknown): value is HostedTool {
   if (typeof value !== "object" || value === null) return false;
   const obj = value as Record<string, unknown>;
   return typeof obj.type === "string" && HOSTED_TOOL_TYPES.has(obj.type);
-}
-
-export interface McpEndpointConfig {
-  name: string;
-  /** Absolute URL or path relative to workspace host */
-  url: string;
 }
 
 /**

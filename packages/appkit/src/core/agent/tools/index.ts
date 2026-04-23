@@ -1,4 +1,4 @@
-export { AppKitMcpClient } from "../../../plugins/agents/tools/mcp-client";
+export { AppKitMcpClient } from "../../../connectors/mcp/client";
 export {
   defineTool,
   executeFromRegistry,

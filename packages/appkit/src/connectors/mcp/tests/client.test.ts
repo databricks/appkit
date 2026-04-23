@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { AppKitMcpClient } from "../tools/mcp-client";
-import type { DnsLookup, McpHostPolicy } from "../tools/mcp-host-policy";
+import { AppKitMcpClient } from "../client";
+import type { DnsLookup, McpHostPolicy } from "../host-policy";
 
 const WORKSPACE = "https://test-workspace.cloud.databricks.com";
 

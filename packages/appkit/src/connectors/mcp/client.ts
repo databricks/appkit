@@ -23,16 +23,16 @@
  * transport.
  */
 import type { AgentToolDefinition } from "shared";
-import type { McpEndpointConfig } from "../../../core/agent/tools/hosted-tools";
-import { createLogger } from "../../../logging/logger";
+import { createLogger } from "../../logging/logger";
 import {
   assertResolvedHostSafe,
   checkMcpUrl,
   type DnsLookup,
   type McpHostPolicy,
-} from "./mcp-host-policy";
+} from "./host-policy";
+import type { McpEndpointConfig } from "./types";
 
-const logger = createLogger("agent:mcp");
+const logger = createLogger("connector:mcp");
 
 interface JsonRpcRequest {
   jsonrpc: "2.0";
