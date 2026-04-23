@@ -121,7 +121,7 @@ There are three layers of access control in the files plugin. Understanding how 
 
 - **UC grants** control what the service principal can do at the Databricks level. These are set at deploy time via `app.yaml` resource bindings. The SP needs `WRITE_VOLUME` — the plugin declares this via resource requirements.
 - **Execution identity** determines whose credentials are used for the actual API call. HTTP routes always use the SP. The programmatic API uses SP by default but supports `asUser(req)` for OBO.
-- **File policies** are application-level checks evaluated **before** the API call. They receive the requesting user's identity (from the `x-forwarded-user` header) and decide allow/deny. This is the only gate that distinguishes between users on HTTP routes.
+- **File policies** are application-level checks evaluated **before** the API call. They receive a `FilePolicyUser` describing the caller and decide allow/deny. On HTTP routes the user is extracted from the `x-forwarded-user` header when present; when the header is absent, the policy receives `{ id: <sp-id>, isServicePrincipal: true }` and decides for itself whether to allow service-principal traffic. This is the only gate that distinguishes between users on HTTP routes.
 
 :::warning
 
@@ -233,7 +233,7 @@ Dangerous MIME types (`text/html`, `text/javascript`, `application/javascript`, 
 
 ## HTTP routes
 
-Routes are mounted at `/api/files/*`. All routes execute as the service principal. Policy enforcement checks user identity (from the `x-forwarded-user` header) before allowing operations — see [Access policies](#access-policies).
+Routes are mounted at `/api/files/*`. All routes execute as the service principal. Before each operation the volume policy runs: user identity comes from the `x-forwarded-user` header when present, otherwise the policy is handed `{ id: <sp-id>, isServicePrincipal: true }` and decides whether to allow the call. See [Access policies](#access-policies).
 
 | Method | Path                       | Query / Body                 | Response                                          |
 | ------ | -------------------------- | ---------------------------- | ------------------------------------------------- |
@@ -369,9 +369,18 @@ interface FileResource {
 }
 
 interface FilePolicyUser {
-  /** User ID from the `x-forwarded-user` header. */
+  /**
+   * Identifier of the requesting caller. For end-user HTTP requests this is
+   * the value of the `x-forwarded-user` header; for direct SDK calls and
+   * header-less HTTP requests (which run as the service principal), this
+   * is the service principal's ID.
+   */
   id: string;
-  /** `true` when the caller is the service principal (direct SDK call, not `asUser`). */
+  /**
+   * `true` when the call is executing as the service principal — either a
+   * direct SDK call (`appKit.files(...)`) or an HTTP request that arrived
+   * without an `x-forwarded-user` header.
+   */
   isServicePrincipal?: boolean;
 }
 
@@ -420,9 +429,9 @@ Built-in extensions: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.bmp`, `
 
 ## User context
 
-HTTP routes always execute as the **service principal** — the SP's Databricks credentials are used for all API calls. User identity is extracted from the `x-forwarded-user` header and passed to the volume's [access policy](#access-policies) for authorization. This means UC grants on the SP (not individual users) determine what operations are possible, while policies control what each user is allowed to do through the app.
+HTTP routes always execute as the **service principal** — the SP's Databricks credentials are used for all API calls. User identity is extracted from the `x-forwarded-user` header and passed to the volume's [access policy](#access-policies) for authorization. When the header is absent the policy is handed `{ id: <sp-id>, isServicePrincipal: true }` and decides whether to allow the call — in practice that branch only fires in development without a reverse proxy or when an upstream proxy is misconfigured, since real Databricks Apps runtimes always forward the header. This means UC grants on the SP (not individual users) determine what operations are possible, while policies control what each user is allowed to do through the app.
 
-The programmatic API returns a `VolumeHandle` that exposes all `VolumeAPI` methods directly (service principal) and an `asUser(req)` method for OBO access. Calling any method without `asUser()` logs a warning encouraging OBO usage but does not throw. OBO access is strongly recommended for production use.
+The programmatic API returns a `VolumeHandle` that exposes all `VolumeAPI` methods directly (service principal) and an `asUser(req)` method for OBO access. Calling any method without `asUser()` runs the policy with `isServicePrincipal: true`. `asUser(req)` throws `AuthenticationError.missingToken` when the `x-forwarded-user` header is missing, regardless of `NODE_ENV`. OBO access is strongly recommended for production use.
 
 ## Resource requirements
 
