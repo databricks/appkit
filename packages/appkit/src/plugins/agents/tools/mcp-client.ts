@@ -1,3 +1,27 @@
+/**
+ * Custom MCP over HTTP (Streamable) — not `@modelcontextprotocol/sdk`
+ *
+ * This module implements a tiny JSON-RPC 2.0 client on `fetch` for the subset
+ * of MCP we need: `initialize`, `notifications/initialized`, `tools/list`,
+ * `tools/call` over a single JSON request/response. We do not use the official
+ * SDK because:
+ *
+ * - **Policy and auth are the product** — every outbound URL is checked with
+ *   {@link McpHostPolicy} (allowlist, DNS, private/blocked IP ranges) before
+ *   the first byte is sent, and workspace tokens are only forwarded when
+ *   `forwardWorkspaceAuth` is true for that destination. A generic transport
+ *   from the SDK would still need the same hooks; re-wrapping it would be
+ *   about as much code, with a larger third-party surface to audit.
+ * - **Narrow scope** — we only target Databricks-hosted MCP over Streamable
+ *   HTTP, not stdio, full SSE sessions, or the rest of the protocol. A
+ *   hand-rolled path keeps the call graph obvious in code review.
+ * - **Zero extra runtime dependency** for this path, consistent with other
+ *   small, security-sensitive AppKit pieces.
+ *
+ * Revisit if we add more transports, or if the SDK ships a first-class way to
+ * inject our host policy and per-URL auth without fighting the default
+ * transport.
+ */
 import type { AgentToolDefinition } from "shared";
 import { createLogger } from "../../../logging/logger";
 import type { McpEndpointConfig } from "../../../core/agent/tools/hosted-tools";
@@ -60,22 +84,8 @@ interface McpServerConnection {
  * are rejected before the first byte is sent, and workspace credentials are
  * only forwarded to the same-origin workspace. See `mcp-host-policy.ts`.
  *
- * ### Why not `@modelcontextprotocol/sdk`?
- *
- * Our security model — zero-trust host policy + per-destination auth scoping
- * via `forwardWorkspaceAuth` — is the load-bearing anchor of this module, not
- * the wire protocol. Wrapping the SDK to enforce the same invariants (custom
- * transport + auth plumbing + policy checks before every request) ends up
- * the same size as writing the narrow JSON-RPC subset directly, but with an
- * opaque dependency that's harder to audit. Our entire target surface is
- * Databricks-hosted MCP over Streamable HTTP; we never need stdio, SSE-only
- * transport, or the rest of the protocol the SDK covers.
- *
- * Zero runtime deps matches the rest of AppKit's philosophy
- * (`DatabricksAdapter`, `sql-policy`). Revisit the call if MCP adoption
- * grows beyond Databricks-hosted servers with the transports above, or if
- * the SDK gains transport-level auth hooks that cleanly match our
- * per-destination auth-forwarding model.
+ * Rationale for hand-rolling JSON-RPC instead of `@modelcontextprotocol/sdk`:
+ * see the file-level comment at the top of this module.
  */
 export class AppKitMcpClient {
   private connections = new Map<string, McpServerConnection>();
