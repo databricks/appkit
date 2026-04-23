@@ -27,7 +27,11 @@ import {
   chatRequestSchema,
   invocationsRequestSchema,
 } from "./schemas";
-import { buildBaseSystemPrompt, composeSystemPrompt } from "../../core/agent/system-prompt";
+import {
+  buildBaseSystemPrompt,
+  composeSystemPrompt,
+} from "../../core/agent/system-prompt";
+import { AppKitMcpClient } from "../../connectors/mcp";
 import { InMemoryThreadStore } from "./thread-store";
 import { ToolApprovalGate } from "./tool-approval-gate";
 import {
@@ -1245,7 +1249,7 @@ function composePromptForAgent(
   } else if (typeof resolved === "function") {
     base = resolved(ctx);
   } else {
-    base = buildBaseSystemPrompt(ctx.pluginNames);
+    base = buildBaseSystemPrompt(ctx);
   }
 
   return composeSystemPrompt(base, registered.instructions);
