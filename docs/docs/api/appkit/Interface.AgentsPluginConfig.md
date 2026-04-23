@@ -106,7 +106,7 @@ Default model for agents that don't specify their own (in code or frontmatter).
 optional dir: string | false;
 ```
 
-Directory to scan for markdown agent files. Default `./config/agents`. Set to `false` to disable.
+Directory of agent packages (`<id>/agent.md` each). Default `./config/agents`. Set to `false` to disable.
 
 ***
 

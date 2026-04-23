@@ -1,6 +1,6 @@
 # Agents
 
-The `agents` plugin turns a Databricks AppKit app into an AI-agent host. It loads agent definitions from markdown files (convention: `config/agents/*.md`), from TypeScript (`createAgent(def)`), or both, and exposes them at `POST /invocations` alongside routes for chat, thread management, and cancellation.
+The `agents` plugin turns a Databricks AppKit app into an AI-agent host. It loads agent definitions from markdown on disk (one folder per agent: `config/agents/<id>/agent.md`), from TypeScript (`createAgent(def)`), or both, and exposes them at `POST /invocations` alongside routes for chat, thread management, and cancellation.
 
 This page covers the full lifecycle. For the hand-written primitives (`tool()`, `mcpServer()`), see [tools](./server.md).
 
@@ -18,13 +18,18 @@ await createApp({
 
 That alone gives you a live HTTP server with `POST /invocations` wired to a markdown-driven agent.
 
-## Level 1: drop a markdown file
+## Level 1: drop a markdown agent package
+
+Each agent lives in its own directory with a fixed entry file `agent.md`. A reserved top-level folder named `skills` is ignored until per-agent skills ship (you can add other asset folders beside `agent.md` under each agent id).
+
+**Migrating from flat files:** move `assistant.md` → `assistant/agent.md` (same for every stem). Top-level `*.md` files in `config/agents` are rejected at startup so upgrades are not silently ignored.
 
 ```
 my-app/
   server.ts
   config/agents/
-    assistant.md
+    assistant/
+      agent.md
 ```
 
 ```md
@@ -40,7 +45,7 @@ Use the available tools to query data, browse files, and help users.
 
 On startup the plugin:
 
-1. Discovers the file at `./config/agents/assistant.md`.
+1. Discovers `./config/agents/assistant/agent.md` and registers agent id `assistant`.
 2. Parses the YAML frontmatter and markdown body as the agent's `instructions`.
 3. Resolves the adapter from `endpoint` (or falls back to `DATABRICKS_AGENT_ENDPOINT`).
 4. Auto-inherits every registered ToolProvider plugin's tools (`analytics.*`, `files.*`, …).
@@ -389,7 +394,7 @@ appkit.agents.getThreads(userId);   // list user's threads
 | `model` | string | Same as `endpoint`; either works. |
 | `toolkits` | array of string or `{ name: options }` | Spread plugin toolkits. Supports `only`, `except`, `rename`, `prefix`. |
 | `tools` | array of string | Keys into `agents({ tools: {...} })`. |
-| `default` | boolean | First file with `default: true` becomes the default agent. |
+| `default` | boolean | First agent id (sorted order) with `default: true` becomes the default agent. |
 | `maxSteps` | number | Adapter max-step hint. |
 | `maxTokens` | number | Adapter max-token hint. |
 | `baseSystemPrompt` | false \| string | Per-agent override. `false` disables the AppKit base prompt. |
