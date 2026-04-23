@@ -417,6 +417,11 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
+          id: "api/appkit/Function.agentIdFromMarkdownPath",
+          label: "agentIdFromMarkdownPath"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.appKitServingTypesPlugin",
           label: "appKitServingTypesPlugin"
         },
