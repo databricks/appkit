@@ -14,24 +14,18 @@ import type {
   Thread,
   ToolProvider,
 } from "shared";
-import { createLogger } from "../../logging/logger";
-import { Plugin, toPlugin } from "../../plugin";
-import type { PluginManifest } from "../../registry";
-import { agentStreamDefaults } from "./defaults";
-import { EventChannel } from "./event-channel";
-import { AgentEventTranslator } from "./event-translator";
+import { buildMcpHostPolicy } from "../../connectors/mcp";
 import { loadAgentsFromDir } from "../../core/agent/load-agents";
-import manifest from "./manifest.json";
-import {
-  approvalRequestSchema,
-  chatRequestSchema,
-  invocationsRequestSchema,
-} from "./schemas";
 import {
   buildBaseSystemPrompt,
   composeSystemPrompt,
 } from "../../core/agent/system-prompt";
 import { AppKitMcpClient } from "../../connectors/mcp";
+import {
+  approvalRequestSchema,
+  chatRequestSchema,
+  invocationsRequestSchema,
+} from "./schemas";
 import { InMemoryThreadStore } from "./thread-store";
 import { ToolApprovalGate } from "./tool-approval-gate";
 import {
@@ -40,7 +34,6 @@ import {
   isHostedTool,
   resolveHostedTools,
 } from "../../core/agent/tools";
-import { buildMcpHostPolicy } from "./tools/mcp-host-policy";
 import type {
   AgentDefinition,
   AgentsPluginConfig,
@@ -50,6 +43,20 @@ import type {
   ResolvedToolEntry,
 } from "../../core/agent/types";
 import { isToolkitEntry } from "../../core/agent/types";
+import { createLogger } from "../../logging/logger";
+import { Plugin, toPlugin } from "../../plugin";
+import type { PluginManifest } from "../../registry";
+import { agentStreamDefaults } from "./defaults";
+import { EventChannel } from "./event-channel";
+import { AgentEventTranslator } from "./event-translator";
+import manifest from "./manifest.json";
+import {
+  approvalRequestSchema,
+  chatRequestSchema,
+  invocationsRequestSchema,
+} from "./schemas";
+import { InMemoryThreadStore } from "./thread-store";
+import { ToolApprovalGate } from "./tool-approval-gate";
 
 const logger = createLogger("agents");
 
@@ -368,7 +375,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     }
 
     // 2. Explicit tools (toolkit entries, function tools, hosted tools)
-    const hostedToCollect: import("../../core/agent/tools/hosted-tools").HostedTool[] = [];
+    const hostedToCollect: import("../../core/agent/tools/hosted-tools").HostedTool[] =
+      [];
     for (const [key, tool] of Object.entries(def.tools ?? {})) {
       if (isToolkitEntry(tool)) {
         index.set(key, {

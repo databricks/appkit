@@ -5,9 +5,9 @@ import type {
   ThreadStore,
   ToolAnnotations,
 } from "shared";
+import type { McpHostPolicyConfig } from "../../connectors/mcp";
 import type { FunctionTool } from "./tools/function-tool";
 import type { HostedTool } from "./tools/hosted-tools";
-import type { McpHostPolicyConfig } from "../../plugins/agents/tools/mcp-host-policy";
 
 /**
  * A tool reference produced by a plugin's `.toolkit()` call. The agents plugin

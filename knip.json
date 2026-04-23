@@ -19,13 +19,15 @@
     "packages/appkit/src/plugin/index.ts",
     "packages/appkit/src/plugin/to-plugin.ts",
     "packages/appkit/src/plugins/agents/index.ts",
-    "packages/appkit/src/plugins/agents/tools/index.ts",
-    "packages/appkit/src/plugins/agents/from-plugin.ts",
-    "packages/appkit/src/plugins/agents/load-agents.ts",
     "template/**",
     "tools/**",
     "docs/**",
-    ".github/scripts/**"
+    ".github/scripts/**",
+    "packages/appkit/src/core/agent/tools/index.ts",
+    "packages/appkit/src/core/agent/from-plugin.ts",
+    "packages/appkit/src/core/agent/load-agents.ts",
+    "packages/appkit/src/connectors/mcp/index.ts",
+    "packages/appkit/src/plugin/to-plugin.ts"
   ],
   "ignoreDependencies": ["json-schema-to-typescript"],
   "ignoreBinaries": ["tarball"]
