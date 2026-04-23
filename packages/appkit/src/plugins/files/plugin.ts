@@ -100,19 +100,12 @@ export class FilesPlugin extends Plugin {
   }
 
   /**
-   * Extract user identity from the request.
-   * Falls back to `getCurrentUserId()` in development mode.
+   * Strict extraction for `VolumeHandle.asUser(req)` — throws when the header
+   * is missing. HTTP routes use an inline silent fallback instead.
    */
   private _extractUser(req: express.Request): FilePolicyUser {
     const userId = req.header("x-forwarded-user")?.trim();
     if (userId) return { id: userId };
-    if (process.env.NODE_ENV === "development") {
-      logger.warn(
-        "No x-forwarded-user header — falling back to service principal identity for policy checks. " +
-          "Ensure your proxy forwards user headers to test per-user policies.",
-      );
-      return { id: getCurrentUserId() };
-    }
     throw AuthenticationError.missingToken(
       "Missing x-forwarded-user header. Cannot resolve user ID.",
     );
@@ -152,7 +145,8 @@ export class FilesPlugin extends Plugin {
 
   /**
    * HTTP-level wrapper around `_checkPolicy`.
-   * Extracts user (401 on failure), runs policy (403 on denial).
+   * Resolves the user inline (header when present, otherwise the SP identity),
+   * then runs the volume policy (403 on denial, 500 on unexpected error).
    * Returns `true` if the request may proceed, `false` if a response was sent.
    */
   private async _enforcePolicy(
@@ -163,15 +157,15 @@ export class FilesPlugin extends Plugin {
     path: string,
     resourceOverrides?: Partial<FileResource>,
   ): Promise<boolean> {
+    const headerUserId = req.header("x-forwarded-user")?.trim();
     let user: FilePolicyUser;
-    try {
-      user = this._extractUser(req);
-    } catch (error) {
-      if (error instanceof AuthenticationError) {
-        res.status(401).json({ error: error.message, plugin: this.name });
-        return false;
-      }
-      throw error;
+    if (headerUserId) {
+      user = { id: headerUserId };
+    } else {
+      logger.debug(
+        "No x-forwarded-user header — proceeding with service principal identity for policy evaluation.",
+      );
+      user = { id: getCurrentUserId(), isServicePrincipal: true };
     }
 
     try {
@@ -231,6 +225,7 @@ export class FilesPlugin extends Plugin {
       if (!volumes[key].policy) {
         logger.warn(
           'Volume "%s" has no explicit policy — defaulting to publicRead(). ' +
+            "This also matches header-less HTTP requests (which run as the service principal). " +
             "Set a policy in files({ volumes: { %s: { policy: ... } } }) to silence this warning.",
           key,
           key,

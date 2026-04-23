@@ -271,40 +271,12 @@ describe("FilesPlugin", () => {
       }
     });
 
-    test("asUser without user header in production → throws AuthenticationError", () => {
-      const originalEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = "production";
+    test("asUser without user header → throws AuthenticationError", () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handle = plugin.exports()("uploads");
+      const mockReq = { header: () => undefined } as any;
 
-      try {
-        const plugin = new FilesPlugin(VOLUMES_CONFIG);
-        const handle = plugin.exports()("uploads");
-        const mockReq = { header: () => undefined } as any;
-
-        expect(() => handle.asUser(mockReq)).toThrow(AuthenticationError);
-      } finally {
-        process.env.NODE_ENV = originalEnv;
-      }
-    });
-
-    test("asUser in dev mode returns VolumeAPI with all 9 methods", () => {
-      const originalEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = "development";
-
-      try {
-        const plugin = new FilesPlugin(VOLUMES_CONFIG);
-        const handle = plugin.exports()("uploads");
-        const mockReq = {
-          header: (name: string) =>
-            name === "x-forwarded-user" ? "test-user" : undefined,
-        } as any;
-        const api = handle.asUser(mockReq);
-
-        for (const method of volumeMethods) {
-          expect(typeof (api as any)[method]).toBe("function");
-        }
-      } finally {
-        process.env.NODE_ENV = originalEnv;
-      }
+      expect(() => handle.asUser(mockReq)).toThrow(AuthenticationError);
     });
 
     test("direct methods on handle work as service principal", () => {
@@ -988,19 +960,32 @@ describe("FilesPlugin", () => {
       delete process.env.DATABRICKS_VOLUME_WRITEONLY;
     });
 
-    test("policy volume + no user header (production) → 401", async () => {
-      const originalEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = "production";
+    test("header-less HTTP + default publicRead() + read action → 200 with SP user", async () => {
+      const policySpy = vi.fn().mockReturnValue(true);
+      const spyConfig = {
+        volumes: {
+          spied: { policy: policySpy },
+          uploads: {},
+          exports: {},
+        },
+      };
+      process.env.DATABRICKS_VOLUME_SPIED = "/Volumes/c/s/spied";
+
       try {
-        const plugin = new FilesPlugin(POLICY_CONFIG);
+        const plugin = new FilesPlugin(spyConfig);
         const handler = getRouteHandler(plugin, "get", "/list");
         const res = mockRes();
 
-        // Override both headers to undefined so _extractUser has no user
+        mockClient.files.listDirectoryContents.mockImplementation(
+          async function* () {
+            yield { name: "h.txt", path: "/h.txt", is_directory: false };
+          },
+        );
+
         const noUserHeaders: Record<string, string> = {};
         await handler(
           {
-            params: { volumeKey: "public" },
+            params: { volumeKey: "spied" },
             query: {},
             headers: noUserHeaders,
             header: (name: string) => noUserHeaders[name.toLowerCase()],
@@ -1008,9 +993,169 @@ describe("FilesPlugin", () => {
           res,
         );
 
-        expect(res.status).toHaveBeenCalledWith(401);
+        const statusCodes = (res.status.mock.calls as number[][]).map(
+          (c) => c[0],
+        );
+        expect(statusCodes).not.toContain(401);
+        expect(statusCodes).not.toContain(403);
+        expect(policySpy).toHaveBeenCalledWith(
+          "list",
+          expect.objectContaining({ volume: "spied" }),
+          expect.objectContaining({
+            id: "test-service-principal",
+            isServicePrincipal: true,
+          }),
+        );
       } finally {
-        process.env.NODE_ENV = originalEnv;
+        delete process.env.DATABRICKS_VOLUME_SPIED;
+      }
+    });
+
+    test("header-less HTTP + default publicRead() + write action → 403 with SP user", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "post", "/upload");
+      const res = mockRes();
+
+      const noUserHeaders: Record<string, string> = {
+        "content-length": "100",
+      };
+      await handler(
+        {
+          params: { volumeKey: "uploads" },
+          query: { path: "/test.bin" },
+          headers: noUserHeaders,
+          header: (name: string) => noUserHeaders[name.toLowerCase()],
+        },
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+        }),
+      );
+    });
+
+    test("header-less HTTP + denyAll() → 403 with SP user observed by policy", async () => {
+      const policySpy = vi.fn(policy.denyAll());
+      const spyConfig = {
+        volumes: {
+          denied: { policy: policySpy },
+          uploads: {},
+          exports: {},
+        },
+      };
+      process.env.DATABRICKS_VOLUME_DENIED = "/Volumes/c/s/denied";
+
+      try {
+        const plugin = new FilesPlugin(spyConfig);
+        const handler = getRouteHandler(plugin, "get", "/list");
+        const res = mockRes();
+
+        const noUserHeaders: Record<string, string> = {};
+        await handler(
+          {
+            params: { volumeKey: "denied" },
+            query: {},
+            headers: noUserHeaders,
+            header: (name: string) => noUserHeaders[name.toLowerCase()],
+          },
+          res,
+        );
+
+        expect(res.status).toHaveBeenCalledWith(403);
+        expect(policySpy).toHaveBeenCalledWith(
+          "list",
+          expect.objectContaining({ volume: "denied" }),
+          expect.objectContaining({ isServicePrincipal: true }),
+        );
+      } finally {
+        delete process.env.DATABRICKS_VOLUME_DENIED;
+      }
+    });
+
+    test("header-less HTTP request → policy spy observes { isServicePrincipal: true } and decision is honored", async () => {
+      const allowSpy = vi.fn().mockResolvedValue(true);
+      const allowConfig = {
+        volumes: {
+          gated: { policy: allowSpy },
+          uploads: {},
+          exports: {},
+        },
+      };
+      process.env.DATABRICKS_VOLUME_GATED = "/Volumes/c/s/gated";
+
+      try {
+        const plugin = new FilesPlugin(allowConfig);
+        const handler = getRouteHandler(plugin, "get", "/list");
+        const res = mockRes();
+
+        mockClient.files.listDirectoryContents.mockImplementation(
+          async function* () {
+            yield { name: "g.txt", path: "/g.txt", is_directory: false };
+          },
+        );
+
+        const noUserHeaders: Record<string, string> = {};
+        await handler(
+          {
+            params: { volumeKey: "gated" },
+            query: {},
+            headers: noUserHeaders,
+            header: (name: string) => noUserHeaders[name.toLowerCase()],
+          },
+          res,
+        );
+
+        expect(allowSpy).toHaveBeenCalledTimes(1);
+        const userArg = allowSpy.mock.calls[0][2];
+        expect(userArg.isServicePrincipal).toBe(true);
+        expect(userArg.id).toBe("test-service-principal");
+
+        const statusCodes = (res.status.mock.calls as number[][]).map(
+          (c) => c[0],
+        );
+        expect(statusCodes).not.toContain(401);
+        expect(statusCodes).not.toContain(403);
+      } finally {
+        delete process.env.DATABRICKS_VOLUME_GATED;
+      }
+    });
+
+    test("header-less HTTP request + policy returns false → 403 (decision honored)", async () => {
+      const denySpy = vi.fn().mockResolvedValue(false);
+      const denyConfig = {
+        volumes: {
+          gated: { policy: denySpy },
+          uploads: {},
+          exports: {},
+        },
+      };
+      process.env.DATABRICKS_VOLUME_GATED = "/Volumes/c/s/gated";
+
+      try {
+        const plugin = new FilesPlugin(denyConfig);
+        const handler = getRouteHandler(plugin, "get", "/list");
+        const res = mockRes();
+
+        const noUserHeaders: Record<string, string> = {};
+        await handler(
+          {
+            params: { volumeKey: "gated" },
+            query: {},
+            headers: noUserHeaders,
+            header: (name: string) => noUserHeaders[name.toLowerCase()],
+          },
+          res,
+        );
+
+        expect(denySpy).toHaveBeenCalledTimes(1);
+        const userArg = denySpy.mock.calls[0][2];
+        expect(userArg.isServicePrincipal).toBe(true);
+        expect(res.status).toHaveBeenCalledWith(403);
+      } finally {
+        delete process.env.DATABRICKS_VOLUME_GATED;
       }
     });
 
