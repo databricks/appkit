@@ -101,27 +101,21 @@ export async function runAgent(
   };
 
   const events: AgentEvent[] = [];
-  let text = "";
-
-  const stream = adapter.run(
+  const text = await consumeAdapterStream(
+    adapter.run(
+      {
+        messages,
+        tools,
+        threadId: randomUUID(),
+        signal,
+      },
+      { executeTool, signal },
+    ),
     {
-      messages,
-      tools,
-      threadId: randomUUID(),
       signal,
+      onEvent: (event) => events.push(event),
     },
-    { executeTool, signal },
   );
-
-  for await (const event of stream) {
-    if (signal?.aborted) break;
-    events.push(event);
-    if (event.type === "message_delta") {
-      text += event.content;
-    } else if (event.type === "message") {
-      text = event.content;
-    }
-  }
 
   return { text, events };
 }
