@@ -271,12 +271,35 @@ describe("FilesPlugin", () => {
       }
     });
 
-    test("asUser without user header → throws AuthenticationError", () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
-      const handle = plugin.exports()("uploads");
-      const mockReq = { header: () => undefined } as any;
+    test("asUser without user header in production → throws AuthenticationError", () => {
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = "production";
+      try {
+        const plugin = new FilesPlugin(VOLUMES_CONFIG);
+        const handle = plugin.exports()("uploads");
+        const mockReq = { header: () => undefined } as any;
 
-      expect(() => handle.asUser(mockReq)).toThrow(AuthenticationError);
+        expect(() => handle.asUser(mockReq)).toThrow(AuthenticationError);
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+      }
+    });
+
+    test("asUser without user header in development → falls back to SP identity", () => {
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = "development";
+      try {
+        const plugin = new FilesPlugin(VOLUMES_CONFIG);
+        const handle = plugin.exports()("uploads");
+        const mockReq = { header: () => undefined } as any;
+
+        // Does not throw; returns a VolumeAPI that will run the policy with
+        // { isServicePrincipal: true } (matching the HTTP-path collapsed semantic).
+        const api = handle.asUser(mockReq);
+        expect(typeof api.list).toBe("function");
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+      }
     });
 
     test("direct methods on handle work as service principal", () => {

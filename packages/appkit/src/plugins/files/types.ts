@@ -88,8 +88,10 @@ export interface FilePreview extends FileMetadata {
  * All methods execute as the service principal and enforce the volume's
  * policy (if configured) with `{ isServicePrincipal: true }`.
  * `asUser(req)` re-wraps with the real user identity for per-user policy
- * checks; it throws `AuthenticationError.missingToken` when the
- * `x-forwarded-user` header is missing, regardless of `NODE_ENV`.
+ * checks. In production it throws `AuthenticationError.missingToken` when
+ * the `x-forwarded-user` header is missing; in development
+ * (`NODE_ENV === "development"`) it falls back to the service principal so
+ * local testing without a reverse proxy continues to work.
  */
 export type VolumeHandle = VolumeAPI & {
   asUser: (req: IAppRequest) => VolumeAPI;

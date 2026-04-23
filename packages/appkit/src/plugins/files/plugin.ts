@@ -100,12 +100,20 @@ export class FilesPlugin extends Plugin {
   }
 
   /**
-   * Strict extraction for `VolumeHandle.asUser(req)` — throws when the header
-   * is missing. HTTP routes use an inline silent fallback instead.
+   * Extraction for `VolumeHandle.asUser(req)`. Throws in production when the
+   * header is missing. In development (`NODE_ENV === "development"`) falls
+   * back to the service principal so local testing without a reverse proxy
+   * works. HTTP routes use an inline silent fallback regardless of NODE_ENV.
    */
   private _extractUser(req: express.Request): FilePolicyUser {
     const userId = req.header("x-forwarded-user")?.trim();
     if (userId) return { id: userId };
+    if (process.env.NODE_ENV === "development") {
+      logger.debug(
+        "No x-forwarded-user header on asUser(req) — falling back to service principal identity (dev mode).",
+      );
+      return { id: getCurrentUserId(), isServicePrincipal: true };
+    }
     throw AuthenticationError.missingToken(
       "Missing x-forwarded-user header. Cannot resolve user ID.",
     );
