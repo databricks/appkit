@@ -102,6 +102,12 @@ function instantiate(config: AgentsPluginConfig, ctx?: FakeContext) {
   return plugin;
 }
 
+function writeMarkdownAgent(dir: string, id: string, content: string) {
+  const folder = path.join(dir, id);
+  fs.mkdirSync(folder, { recursive: true });
+  fs.writeFileSync(path.join(folder, "agent.md"), content, "utf-8");
+}
+
 describe("AgentsPlugin", () => {
   test("registers code-defined agents and exposes them via exports", async () => {
     const plugin = instantiate({
@@ -124,10 +130,10 @@ describe("AgentsPlugin", () => {
   });
 
   test("loads markdown agents from a directory", async () => {
-    fs.writeFileSync(
-      path.join(tmpDir, "assistant.md"),
+    writeMarkdownAgent(
+      tmpDir,
+      "assistant",
       "---\ndefault: true\n---\nYou are helpful.",
-      "utf-8",
     );
     const plugin = instantiate({
       dir: tmpDir,
@@ -144,11 +150,7 @@ describe("AgentsPlugin", () => {
   });
 
   test("code definitions override markdown on key collision", async () => {
-    fs.writeFileSync(
-      path.join(tmpDir, "support.md"),
-      "---\n---\nFrom markdown.",
-      "utf-8",
-    );
+    writeMarkdownAgent(tmpDir, "support", "---\n---\nFrom markdown.");
     const plugin = instantiate({
       dir: tmpDir,
       defaultModel: stubAdapter(),
@@ -179,11 +181,7 @@ describe("AgentsPlugin", () => {
     const provider = makeToolProvider("analytics", registry);
     const ctx = fakeContext([{ name: "analytics", provider }]);
 
-    fs.writeFileSync(
-      path.join(tmpDir, "assistant.md"),
-      "---\n---\nYou are helpful.",
-      "utf-8",
-    );
+    writeMarkdownAgent(tmpDir, "assistant", "---\n---\nYou are helpful.");
 
     const plugin = instantiate(
       {
@@ -228,11 +226,7 @@ describe("AgentsPlugin", () => {
     const provider = makeToolProvider("analytics", registry);
     const ctx = fakeContext([{ name: "analytics", provider }]);
 
-    fs.writeFileSync(
-      path.join(tmpDir, "assistant.md"),
-      "---\n---\nYou are helpful.",
-      "utf-8",
-    );
+    writeMarkdownAgent(tmpDir, "assistant", "---\n---\nYou are helpful.");
 
     const plugin = instantiate(
       {
@@ -313,10 +307,10 @@ describe("AgentsPlugin", () => {
       { name: "files", provider: makeToolProvider("files", registry2) },
     ]);
 
-    fs.writeFileSync(
-      path.join(tmpDir, "analyst.md"),
+    writeMarkdownAgent(
+      tmpDir,
+      "analyst",
       "---\ntoolkits: [analytics]\n---\nAnalyst.",
-      "utf-8",
     );
 
     const plugin = instantiate(

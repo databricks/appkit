@@ -36,9 +36,9 @@ export interface LoadContext {
 }
 
 export interface LoadResult {
-  /** Agent definitions keyed by file-stem name. */
+  /** Agent definitions keyed by agent id (directory name under `dir`). */
   defs: Record<string, AgentDefinition>;
-  /** First file with `default: true` frontmatter, or `null`. */
+  /** First agent with `default: true` frontmatter (sorted id order), or `null`. */
   defaultAgent: string | null;
 }
 
@@ -48,11 +48,10 @@ interface Frontmatter {
   toolkits?: ToolkitSpec[];
   tools?: string[];
   /**
-   * Sibling file-stems to expose as sub-agents. Each becomes an
-   * `agent-<stem>` tool on this agent at runtime. Resolution happens at
-   * directory-load time in {@link loadAgentsFromDir}; the single-file
-   * {@link loadAgentFromFile} path rejects non-empty values since there
-   * are no siblings to resolve against.
+   * Other agent ids to expose as sub-agents. Each becomes an `agent-<id>`
+   * tool at runtime. Resolution happens at directory-load time in
+   * {@link loadAgentsFromDir}; the single-file {@link loadAgentFromFile} path
+   * rejects non-empty values since there are no siblings to resolve against.
    */
   agents?: string[];
   maxSteps?: number;
@@ -63,6 +62,21 @@ interface Frontmatter {
 }
 
 type ToolkitSpec = string | { [pluginName: string]: ToolkitOptions | string[] };
+
+/**
+ * Derives the logical agent id from a markdown path. When the file is named
+ * `agent.md`, the id is the parent directory name (folder-based layout);
+ * otherwise the id is the file stem (e.g. legacy single-file paths).
+ */
+export function agentIdFromMarkdownPath(filePath: string): string {
+  const normalized = path.normalize(filePath);
+  const base = path.basename(normalized);
+  const parent = path.basename(path.dirname(normalized));
+  if (base === "agent.md" && parent && parent !== "." && parent !== "..") {
+    return parent;
+  }
+  return path.basename(normalized, ".md");
+}
 
 const ALLOWED_KEYS = new Set([
   "endpoint",
@@ -90,7 +104,7 @@ export async function loadAgentFromFile(
   ctx: LoadContext,
 ): Promise<AgentDefinition> {
   const raw = fs.readFileSync(filePath, "utf-8");
-  const name = path.basename(filePath, ".md");
+  const name = agentIdFromMarkdownPath(filePath);
   const { data } = parseFrontmatter(raw, filePath);
   if (Array.isArray(data?.agents) && data.agents.length > 0) {
     throw new Error(
@@ -103,15 +117,19 @@ export async function loadAgentFromFile(
 }
 
 /**
- * Scans a directory for `*.md` files and produces an `AgentDefinition` record
- * keyed by file-stem. Throws on frontmatter errors or unresolved references.
- * Returns an empty map if the directory does not exist.
+ * Scans a directory for one subdirectory per agent, each containing
+ * `agent.md` (frontmatter + body). Produces an `AgentDefinition` record keyed
+ * by agent id (folder name). Throws on frontmatter errors or unresolved
+ * references. Returns an empty map if the directory does not exist.
+ *
+ * Legacy top-level `*.md` files are rejected with an error — migrate each to
+ * `<id>/agent.md` under a sibling folder named for the agent id.
  *
  * Runs in two passes so sub-agent references in frontmatter (`agents: [...]`)
- * can be resolved regardless of file-system iteration order:
+ * can be resolved regardless of directory iteration order:
  *
- * 1. Build every agent's definition from its own file.
- * 2. Walk `agents:` references and wire `def.agents = { sibling: siblingDef }`
+ * 1. Build every agent's definition from its own `agent.md`.
+ * 2. Walk `agents:` references and wire `def.agents = { child: childDef }`
  *    by looking them up in the complete map. Dangling names and
  *    self-references fail loudly; mutual delegation is allowed and bounded
  *    at runtime by `limits.maxSubAgentDepth`.
@@ -123,37 +141,56 @@ export async function loadAgentsFromDir(
   if (!fs.existsSync(dir)) {
     return { defs: {}, defaultAgent: null };
   }
-  // Sort so `default: true` resolution is deterministic across platforms —
-  // `readdirSync` order is filesystem-dependent (macOS alphabetical, ext4
-  // inode order, etc.).
-  const files = fs
-    .readdirSync(dir)
-    .filter((f) => f.endsWith(".md"))
+
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const orphanMd = entries
+    .filter((e) => e.isFile() && e.name.endsWith(".md"))
+    .map((e) => e.name)
     .sort();
+
+  if (orphanMd.length > 0) {
+    const hint = orphanMd
+      .map((f) => `${path.basename(f, ".md")}/agent.md`)
+      .join(", ");
+    throw new Error(
+      `Agents directory contains unsupported top-level markdown file(s): ${orphanMd.join(", ")}. ` +
+        `Use one folder per agent with a fixed entry file, e.g. ${hint}.`,
+    );
+  }
+
+  /** Reserved folder name until per-agent skills land; not an agent package. */
+  const RESERVED_DIRS = new Set(["skills"]);
+
+  const agentIds = entries
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .filter((name) => !RESERVED_DIRS.has(name))
+    .sort();
+
   const defs: Record<string, AgentDefinition> = {};
   const subAgentRefs: Record<string, string[]> = {};
   let defaultAgent: string | null = null;
 
-  // Pass 1: build every agent's definition; collect unresolved sibling refs.
-  for (const file of files) {
-    const fullPath = path.join(dir, file);
-    const raw = fs.readFileSync(fullPath, "utf-8");
-    const name = path.basename(file, ".md");
-    defs[name] = buildDefinition(name, raw, fullPath, ctx);
-    const { data } = parseFrontmatter(raw, fullPath);
-    if (data?.agents !== undefined) {
-      subAgentRefs[name] = normalizeAgentsFrontmatter(
-        data.agents,
-        name,
-        fullPath,
+  // Pass 1: build every agent's definition; collect sub-agent refs.
+  for (const id of agentIds) {
+    const agentPath = path.join(dir, id, "agent.md");
+    if (!fs.existsSync(agentPath)) {
+      throw new Error(
+        `Agents subdirectory '${path.join(dir, id)}' must contain agent.md.`,
       );
     }
+    const raw = fs.readFileSync(agentPath, "utf-8");
+    defs[id] = buildDefinition(id, raw, agentPath, ctx);
+    const { data } = parseFrontmatter(raw, agentPath);
+    if (data?.agents !== undefined) {
+      subAgentRefs[id] = normalizeAgentsFrontmatter(data.agents, id, agentPath);
+    }
     if (data?.default === true && !defaultAgent) {
-      defaultAgent = name;
+      defaultAgent = id;
     }
   }
 
-  // Pass 2: resolve sibling references against the complete defs map.
+  // Pass 2: resolve sub-agent references against the complete defs map.
   // Code-defined agents (ctx.codeAgents) take precedence over markdown ones
   // with the same name, matching the plugin's top-level merge behaviour.
   for (const [name, refs] of Object.entries(subAgentRefs)) {
@@ -163,7 +200,7 @@ export async function loadAgentsFromDir(
     for (const ref of refs) {
       if (ref === name) {
         throw new Error(
-          `Agent '${name}' (${path.join(dir, `${name}.md`)}) cannot reference itself in 'agents:'.`,
+          `Agent '${name}' (${path.join(dir, name, "agent.md")}) cannot reference itself in 'agents:'.`,
         );
       }
       const sibling = ctx.codeAgents?.[ref] ?? defs[ref];
@@ -203,7 +240,7 @@ function normalizeAgentsFrontmatter(
   if (!Array.isArray(value)) {
     throw new Error(
       `Agent '${agentName}' (${filePath}) has invalid 'agents:' frontmatter: ` +
-        `expected an array of sibling file-stems, got ${typeof value}.`,
+        `expected an array of sibling agent ids, got ${typeof value}.`,
     );
   }
   const out: string[] = [];

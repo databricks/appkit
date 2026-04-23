@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { z } from "zod";
 import { buildToolkitEntries } from "../../../core/agent/build-toolkit";
 import {
+  agentIdFromMarkdownPath,
   loadAgentFromFile,
   loadAgentsFromDir,
   parseFrontmatter,
@@ -23,10 +24,32 @@ afterEach(() => {
   fs.rmSync(workDir, { recursive: true, force: true });
 });
 
-function write(name: string, content: string) {
+/** Flat file under workDir (for legacy loadAgentFromFile tests). */
+function writeRoot(name: string, content: string) {
   fs.writeFileSync(path.join(workDir, name), content, "utf-8");
   return path.join(workDir, name);
 }
+
+/** Folder layout: `<id>/agent.md`. */
+function writeAgent(id: string, content: string) {
+  const dir = path.join(workDir, id);
+  fs.mkdirSync(dir, { recursive: true });
+  const p = path.join(dir, "agent.md");
+  fs.writeFileSync(p, content, "utf-8");
+  return p;
+}
+
+describe("agentIdFromMarkdownPath", () => {
+  test("uses parent folder name when file is agent.md", () => {
+    expect(agentIdFromMarkdownPath("/foo/bar/assistant/agent.md")).toBe(
+      "assistant",
+    );
+  });
+
+  test("uses file stem for other .md names", () => {
+    expect(agentIdFromMarkdownPath("/tmp/assistant.md")).toBe("assistant");
+  });
+});
 
 describe("parseFrontmatter", () => {
   test("parses a simple object", () => {
@@ -57,7 +80,7 @@ describe("parseFrontmatter", () => {
 
 describe("loadAgentFromFile", () => {
   test("returns AgentDefinition with body as instructions", async () => {
-    const p = write(
+    const p = writeRoot(
       "assistant.md",
       "---\nendpoint: e-1\n---\nYou are helpful.",
     );
@@ -65,6 +88,13 @@ describe("loadAgentFromFile", () => {
     expect(def.name).toBe("assistant");
     expect(def.instructions).toBe("You are helpful.");
     expect(def.model).toBe("e-1");
+  });
+
+  test("derives agent id from folder when path ends with agent.md", async () => {
+    const p = writeAgent("router", "---\nendpoint: e-1\n---\nRoute traffic.");
+    const def = await loadAgentFromFile(p, {});
+    expect(def.name).toBe("router");
+    expect(def.instructions).toBe("Route traffic.");
   });
 });
 
@@ -75,23 +105,44 @@ describe("loadAgentsFromDir", () => {
     expect(res.defaultAgent).toBeNull();
   });
 
-  test("loads all .md files keyed by file-stem", async () => {
-    write("support.md", "---\nendpoint: e-1\n---\nSupport prompt.");
-    write("sales.md", "---\nendpoint: e-2\n---\nSales prompt.");
+  test("loads each subdirectory with agent.md keyed by folder name", async () => {
+    writeAgent("support", "---\nendpoint: e-1\n---\nSupport prompt.");
+    writeAgent("sales", "---\nendpoint: e-2\n---\nSales prompt.");
     const res = await loadAgentsFromDir(workDir, {});
     expect(Object.keys(res.defs).sort()).toEqual(["sales", "support"]);
   });
 
-  test("picks up default: true from frontmatter", async () => {
-    write("one.md", "---\nendpoint: a\n---\nOne.");
-    write("two.md", "---\nendpoint: b\ndefault: true\n---\nTwo.");
+  test("throws when legacy top-level .md exists", async () => {
+    writeRoot("assistant.md", "---\nendpoint: e\n---\nLegacy flat file.");
+    await expect(loadAgentsFromDir(workDir, {})).rejects.toThrow(
+      /unsupported top-level markdown file\(s\): assistant\.md.*assistant\/agent\.md/s,
+    );
+  });
+
+  test("throws when a subdirectory lacks agent.md", async () => {
+    fs.mkdirSync(path.join(workDir, "broken"), { recursive: true });
+    await expect(loadAgentsFromDir(workDir, {})).rejects.toThrow(
+      /must contain agent\.md/,
+    );
+  });
+
+  test("ignores reserved skills directory without agent.md", async () => {
+    fs.mkdirSync(path.join(workDir, "skills"), { recursive: true });
+    writeAgent("solo", "---\nendpoint: e\n---\nOnly real agent.");
+    const res = await loadAgentsFromDir(workDir, {});
+    expect(Object.keys(res.defs)).toEqual(["solo"]);
+  });
+
+  test("picks up default: true from frontmatter (deterministic sorted ids)", async () => {
+    writeAgent("one", "---\nendpoint: a\n---\nOne.");
+    writeAgent("two", "---\nendpoint: b\ndefault: true\n---\nTwo.");
     const res = await loadAgentsFromDir(workDir, {});
     expect(res.defaultAgent).toBe("two");
   });
 
   test("throws when frontmatter references an unregistered plugin", async () => {
-    write(
-      "broken.md",
+    writeAgent(
+      "broken",
       "---\nendpoint: e\ntoolkits: [missing]\n---\nBroken agent.",
     );
     await expect(loadAgentsFromDir(workDir, {})).rejects.toThrow(
@@ -100,7 +151,10 @@ describe("loadAgentsFromDir", () => {
   });
 
   test("throws when frontmatter references an unknown ambient tool", async () => {
-    write("broken.md", "---\nendpoint: e\ntools: [unknown_tool]\n---\nBroken.");
+    writeAgent(
+      "broken",
+      "---\nendpoint: e\ntools: [unknown_tool]\n---\nBroken.",
+    );
     await expect(loadAgentsFromDir(workDir, {})).rejects.toThrow(
       /references tool 'unknown_tool'/,
     );
@@ -134,8 +188,8 @@ describe("loadAgentsFromDir", () => {
       execute: async () => "sunny",
     });
 
-    write(
-      "analyst.md",
+    writeAgent(
+      "analyst",
       "---\nendpoint: e\ntoolkits:\n  - analytics\ntools:\n  - get_weather\n---\nBody.",
     );
     const res = await loadAgentsFromDir(workDir, {
@@ -150,15 +204,13 @@ describe("loadAgentsFromDir", () => {
   });
 
   describe("agents: sibling sub-agent references", () => {
-    test("resolves sibling references into def.agents regardless of file order", async () => {
-      // Names chosen so alphabetical iteration puts `dispatcher` *before*
-      // its siblings — pass-1 populates defs in any order, pass-2 resolves.
-      write(
-        "dispatcher.md",
+    test("resolves sibling references into def.agents regardless of folder order", async () => {
+      writeAgent(
+        "dispatcher",
         "---\nendpoint: e\nagents:\n  - analyst\n  - writer\n---\nRoute work.",
       );
-      write("analyst.md", "---\nendpoint: e\n---\nAnalyst.");
-      write("writer.md", "---\nendpoint: e\n---\nWriter.");
+      writeAgent("analyst", "---\nendpoint: e\n---\nAnalyst.");
+      writeAgent("writer", "---\nendpoint: e\n---\nWriter.");
 
       const res = await loadAgentsFromDir(workDir, {});
       expect(Object.keys(res.defs.dispatcher.agents ?? {}).sort()).toEqual([
@@ -167,14 +219,13 @@ describe("loadAgentsFromDir", () => {
       ]);
       expect(res.defs.dispatcher.agents?.analyst).toBe(res.defs.analyst);
       expect(res.defs.dispatcher.agents?.writer).toBe(res.defs.writer);
-      // Leaves with no `agents:` retain undefined — only declared keys wire.
       expect(res.defs.analyst.agents).toBeUndefined();
       expect(res.defs.writer.agents).toBeUndefined();
     });
 
     test("mutual delegation is allowed (runtime depth cap handles cycles)", async () => {
-      write("a.md", "---\nendpoint: e\nagents:\n  - b\n---\nA.");
-      write("b.md", "---\nendpoint: e\nagents:\n  - a\n---\nB.");
+      writeAgent("a", "---\nendpoint: e\nagents:\n  - b\n---\nA.");
+      writeAgent("b", "---\nendpoint: e\nagents:\n  - a\n---\nB.");
 
       const res = await loadAgentsFromDir(workDir, {});
       expect(res.defs.a.agents?.b).toBe(res.defs.b);
@@ -182,16 +233,16 @@ describe("loadAgentsFromDir", () => {
     });
 
     test("throws with available list when a sibling is missing", async () => {
-      write("dispatcher.md", "---\nendpoint: e\nagents:\n  - ghost\n---\nD.");
-      write("analyst.md", "---\nendpoint: e\n---\nAnalyst.");
+      writeAgent("dispatcher", "---\nendpoint: e\nagents:\n  - ghost\n---\nD.");
+      writeAgent("analyst", "---\nendpoint: e\n---\nAnalyst.");
       await expect(loadAgentsFromDir(workDir, {})).rejects.toThrow(
         /references sub-agent\(s\) 'ghost'.*Available: analyst, dispatcher/s,
       );
     });
 
     test("reports every missing sibling in one error, not just the first", async () => {
-      write(
-        "dispatcher.md",
+      writeAgent(
+        "dispatcher",
         "---\nendpoint: e\nagents:\n  - ghost1\n  - ghost2\n---\nD.",
       );
       await expect(loadAgentsFromDir(workDir, {})).rejects.toThrow(
@@ -200,33 +251,33 @@ describe("loadAgentsFromDir", () => {
     });
 
     test("throws on self-reference", async () => {
-      write("solo.md", "---\nendpoint: e\nagents:\n  - solo\n---\nSolo.");
+      writeAgent("solo", "---\nendpoint: e\nagents:\n  - solo\n---\nSolo.");
       await expect(loadAgentsFromDir(workDir, {})).rejects.toThrow(
         /'solo'.*cannot reference itself/s,
       );
     });
 
     test("throws on non-array 'agents:' value", async () => {
-      write("bad.md", "---\nendpoint: e\nagents: analyst\n---\nBad.");
-      write("analyst.md", "---\nendpoint: e\n---\nAnalyst.");
+      writeAgent("bad", "---\nendpoint: e\nagents: analyst\n---\nBad.");
+      writeAgent("analyst", "---\nendpoint: e\n---\nAnalyst.");
       await expect(loadAgentsFromDir(workDir, {})).rejects.toThrow(
         /invalid 'agents:' frontmatter/,
       );
     });
 
     test("throws on non-string entries in 'agents:'", async () => {
-      write("bad.md", "---\nendpoint: e\nagents:\n  - 42\n---\nBad.");
+      writeAgent("bad", "---\nendpoint: e\nagents:\n  - 42\n---\nBad.");
       await expect(loadAgentsFromDir(workDir, {})).rejects.toThrow(
         /invalid 'agents:' entry/,
       );
     });
 
     test("deduplicates repeated entries silently", async () => {
-      write(
-        "dispatcher.md",
+      writeAgent(
+        "dispatcher",
         "---\nendpoint: e\nagents:\n  - analyst\n  - analyst\n---\nD.",
       );
-      write("analyst.md", "---\nendpoint: e\n---\nAnalyst.");
+      writeAgent("analyst", "---\nendpoint: e\n---\nAnalyst.");
       const res = await loadAgentsFromDir(workDir, {});
       expect(Object.keys(res.defs.dispatcher.agents ?? {})).toEqual([
         "analyst",
@@ -234,13 +285,16 @@ describe("loadAgentsFromDir", () => {
     });
 
     test("empty array yields no sub-agents (no-op)", async () => {
-      write("dispatcher.md", "---\nendpoint: e\nagents: []\n---\nD.");
+      writeAgent("dispatcher", "---\nendpoint: e\nagents: []\n---\nD.");
       const res = await loadAgentsFromDir(workDir, {});
       expect(res.defs.dispatcher.agents).toBeUndefined();
     });
 
     test("resolves 'agents:' references against codeAgents when provided", async () => {
-      write("dispatcher.md", "---\nendpoint: e\nagents:\n  - support\n---\nD.");
+      writeAgent(
+        "dispatcher",
+        "---\nendpoint: e\nagents:\n  - support\n---\nD.",
+      );
       const support: AgentDefinition = {
         name: "support",
         instructions: "Code-defined support.",
@@ -252,8 +306,11 @@ describe("loadAgentsFromDir", () => {
     });
 
     test("codeAgents takes precedence over markdown sibling with the same name", async () => {
-      write("dispatcher.md", "---\nendpoint: e\nagents:\n  - support\n---\nD.");
-      write("support.md", "---\nendpoint: e\n---\nMarkdown support.");
+      writeAgent(
+        "dispatcher",
+        "---\nendpoint: e\nagents:\n  - support\n---\nD.",
+      );
+      writeAgent("support", "---\nendpoint: e\n---\nMarkdown support.");
       const codeSupport: AgentDefinition = {
         name: "support",
         instructions: "Code support.",
@@ -261,8 +318,6 @@ describe("loadAgentsFromDir", () => {
       const res = await loadAgentsFromDir(workDir, {
         codeAgents: { support: codeSupport },
       });
-      // Reference binds to code version, matching the plugin's top-level
-      // `code wins` merge behaviour.
       expect(res.defs.dispatcher.agents?.support).toBe(codeSupport);
       expect(res.defs.dispatcher.agents?.support.instructions).toBe(
         "Code support.",
@@ -270,8 +325,8 @@ describe("loadAgentsFromDir", () => {
     });
 
     test("missing-sibling error lists both markdown and code agent names", async () => {
-      write("dispatcher.md", "---\nendpoint: e\nagents:\n  - ghost\n---\nD.");
-      write("analyst.md", "---\nendpoint: e\n---\nAnalyst.");
+      writeAgent("dispatcher", "---\nendpoint: e\nagents:\n  - ghost\n---\nD.");
+      writeAgent("analyst", "---\nendpoint: e\n---\nAnalyst.");
       const codeAgent: AgentDefinition = {
         name: "writer",
         instructions: "Writer.",
@@ -285,7 +340,7 @@ describe("loadAgentsFromDir", () => {
 
 describe("loadAgentFromFile — sub-agent refs rejected", () => {
   test("throws when 'agents:' is non-empty in a single-file load", async () => {
-    const p = write(
+    const p = writeRoot(
       "lonely.md",
       "---\nendpoint: e\nagents:\n  - ghost\n---\nLonely.",
     );
@@ -295,7 +350,10 @@ describe("loadAgentFromFile — sub-agent refs rejected", () => {
   });
 
   test("ignores empty 'agents:' array (treated as absent)", async () => {
-    const p = write("lonely.md", "---\nendpoint: e\nagents: []\n---\nLonely.");
+    const p = writeRoot(
+      "lonely.md",
+      "---\nendpoint: e\nagents: []\n---\nLonely.",
+    );
     const def = await loadAgentFromFile(p, {});
     expect(def.agents).toBeUndefined();
   });

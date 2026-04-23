@@ -110,7 +110,7 @@ export interface AutoInheritToolsConfig {
 }
 
 export interface AgentsPluginConfig extends BasePluginConfig {
-  /** Directory to scan for markdown agent files. Default `./config/agents`. Set to `false` to disable. */
+  /** Directory of agent packages (`<id>/agent.md` each). Default `./config/agents`. Set to `false` to disable. */
   dir?: string | false;
   /** Code-defined agents, merged with file-loaded ones (code wins on key collision). */
   agents?: Record<string, AgentDefinition>;
