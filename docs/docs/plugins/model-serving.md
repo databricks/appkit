@@ -2,7 +2,7 @@
 sidebar_position: 7
 ---
 
-# Serving plugin
+# Model Serving plugin
 
 Provides an authenticated proxy to [Databricks Model Serving](https://docs.databricks.com/aws/en/machine-learning/model-serving) endpoints, with invoke and streaming support.
 

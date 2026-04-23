@@ -16,7 +16,7 @@ AppKit provides built-in integrations with the following Databricks services via
 | [Lakebase](./plugins/lakebase) | Lakebase Autoscaling (PostgreSQL) | Relational database access via standard pg.Pool with automatic OAuth token refresh |
 | [Genie](./plugins/genie) | AI/BI Genie Spaces | Natural language data queries with conversation management and streaming |
 | [Files](./plugins/files) | Unity Catalog Volumes | Multi-volume file operations (list, read, upload, download, delete, preview) |
-| [Serving](./plugins/serving) | Model Serving | Authenticated proxy to Model Serving endpoints with invoke and streaming support |
+| [Model Serving](./plugins/model-serving) | Model Serving | Authenticated proxy to Model Serving endpoints with invoke and streaming support |
 | [Server](./plugins/server) | N/A | Express HTTP server with static file serving, Vite dev mode, and plugin route injection |
 
 Stay tuned for new plugins as we constantly expand integrations!
