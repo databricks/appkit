@@ -5,6 +5,20 @@
   "description": "AI agents driven by markdown configs or code, with auto-tool-discovery from registered plugins",
   "resources": {
     "required": [],
-    "optional": []
+    "optional": [
+      {
+        "type": "serving_endpoint",
+        "alias": "Model Serving (agents)",
+        "resourceKey": "agents-serving-endpoint",
+        "description": "Databricks Model Serving endpoint for agent runs that use workspace-hosted models (DatabricksAdapter, optional default serving endpoint env, or markdown configs that resolve to serving). Omit when agents rely only on external/custom model adapters.",
+        "permission": "CAN_QUERY",
+        "fields": {
+          "name": {
+            "env": "DATABRICKS_SERVING_ENDPOINT_NAME",
+            "description": "Serving endpoint name used for agent LLM inference when configured for Databricks Model Serving"
+          }
+        }
+      }
+    ]
   }
 }
