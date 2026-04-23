@@ -2,11 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
-# Changelog
+## Unreleased
 
-# Changelog
+### appkit
 
-# Changelog
+* **appkit:** **Breaking change:** markdown agents must live under `config/agents/<id>/agent.md`. Top-level `config/agents/*.md` is no longer discovered; migrate each file to `<stem>/agent.md`. The reserved folder `config/agents/skills` is ignored until per-agent skills ship.
+
+## [0.25.1](https://github.com/databricks/appkit/compare/v0.25.0...v0.25.1) (2026-04-27)
+
+### appkit
+
+* **appkit:** check isRetryable before retrying in interceptor ([#276](https://github.com/databricks/appkit/issues/276)) ([1c994a6](https://github.com/databricks/appkit/commit/1c994a6d99f397b56e90f1b53df06a61f02b9e82))
+
+
+## [0.25.0](https://github.com/databricks/appkit/compare/v0.24.0...v0.25.0) (2026-04-23)
+
+### files
+
+* **files:** per-volume in-app policy enforcement ([#197](https://github.com/databricks/appkit/issues/197)) ([f54dca5](https://github.com/databricks/appkit/commit/f54dca5da5af5368c7bcb18745715b54a99d47e9))
 
 # Changelog
 

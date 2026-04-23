@@ -12,7 +12,7 @@ import { z } from "zod";
 
 const port = Number(process.env.DATABRICKS_APP_PORT) || 8003;
 
-// Ambient function tool. Referenced from `config/agents/support.md` under
+// Ambient function tool. Referenced from `config/agents/support/agent.md` under
 // `tools: [get_weather]`. Markdown frontmatter looks up this name against
 // the `tools:` record passed to `agents({ tools: { get_weather } })` below.
 const get_weather = tool({
