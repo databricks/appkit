@@ -217,3 +217,40 @@ jobs:
             exit 1
           fi
 
+  devhub-validation:
+    name: DevHub Build Validation
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docs == 'true'
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup JFrog npm
+        uses: ./.github/actions/setup-jfrog-npm
+
+      - name: Clone DevHub
+        # TODO: switch to main once databricks/devhub#58 merges (adds APPKIT_BRANCH env var support)
+        run: git clone --depth 1 --branch pkosiec/appkit-docs-sync https://github.com/databricks/devhub.git /tmp/devhub
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Install DevHub dependencies
+        working-directory: /tmp/devhub
+        run: npm install
+
+      - name: Sync AppKit docs from PR branch
+        working-directory: /tmp/devhub
+        env:
+          APPKIT_REMOTE: ${{ github.event.pull_request.head.repo.clone_url || format('https://github.com/{0}.git', github.repository) }}
+          APPKIT_BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: node scripts/sync-appkit-docs.mjs --force
+
+      - name: Build DevHub
+        working-directory: /tmp/devhub
+        run: npm run build
+
