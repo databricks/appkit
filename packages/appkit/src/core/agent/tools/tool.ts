@@ -1,3 +1,4 @@
+import type { ToolAnnotations } from "shared";
 import type { z } from "zod";
 import type { FunctionTool } from "./function-tool";
 import { toToolJSONSchema } from "./json-schema";
@@ -6,6 +7,14 @@ export interface ToolConfig<S extends z.ZodType> {
   name: string;
   description?: string;
   schema: S;
+  /**
+   * Behavioural flags forwarded to the resolved tool definition. Required
+   * for the agents plugin to gate destructive tools through the approval
+   * card, surface `readOnly` tools to auto-inherit, etc. Dropped silently
+   * before the fix that added this field — any tool wanting HITL must
+   * set `annotations: { destructive: true }` here.
+   */
+  annotations?: ToolAnnotations;
   execute: (args: z.infer<S>) => Promise<string> | string;
 }
 
@@ -29,6 +38,7 @@ export function tool<S extends z.ZodType>(config: ToolConfig<S>): FunctionTool {
     name: config.name,
     description: config.description ?? config.name,
     parameters,
+    ...(config.annotations ? { annotations: config.annotations } : {}),
     execute: async (args: Record<string, unknown>) => {
       const parsed = config.schema.safeParse(args);
       if (!parsed.success) {
