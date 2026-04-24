@@ -7,11 +7,13 @@ export interface FunctionTool {
   parameters?: Record<string, unknown> | null;
   strict?: boolean | null;
   /**
-   * Behavioural flags that drive the agents plugin's approval gate and
-   * auto-inherit filtering. `destructive: true` forces HITL approval
-   * before execute() runs; `readOnly: true` marks safe-by-default tools.
-   * Must be preserved through {@link functionToolToDefinition} so the
-   * plugin sees them when building agent tool indexes.
+   * Behavioural hints that drive the agents plugin's approval gate and the
+   * client's approval-card styling. Prefer setting `effect` (one of
+   * `"read" | "write" | "update" | "destructive"`) — any mutating value
+   * forces HITL approval before `execute()` runs. Legacy `destructive: true`
+   * is still honoured. Must be preserved through {@link
+   * functionToolToDefinition} so the plugin sees them when building agent
+   * tool indexes.
    */
   annotations?: ToolAnnotations;
   execute: (args: Record<string, unknown>) => Promise<string> | string;

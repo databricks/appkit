@@ -8,11 +8,12 @@ export interface ToolConfig<S extends z.ZodType> {
   description?: string;
   schema: S;
   /**
-   * Behavioural flags forwarded to the resolved tool definition. Required
-   * for the agents plugin to gate destructive tools through the approval
-   * card, surface `readOnly` tools to auto-inherit, etc. Dropped silently
-   * before the fix that added this field — any tool wanting HITL must
-   * set `annotations: { destructive: true }` here.
+   * Behavioural hints forwarded to the resolved tool definition. Prefer
+   * `effect` (`"read" | "write" | "update" | "destructive"`) — any mutating
+   * value forces the agents-plugin approval gate before `execute()` runs
+   * and the client's approval card will colour itself accordingly. Legacy
+   * `destructive: true` still gates. Dropped silently before the fix that
+   * added this field.
    */
   annotations?: ToolAnnotations;
   execute: (args: z.infer<S>) => Promise<string> | string;
