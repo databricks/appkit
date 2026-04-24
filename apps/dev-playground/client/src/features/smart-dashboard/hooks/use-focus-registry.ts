@@ -11,7 +11,27 @@ import { useEffect, useRef, useState } from "react";
  */
 const registry = new Map<string, () => void>();
 
-export type FocusableChartId = "kpis" | "trips_over_time" | "fare_distribution";
+export type FocusableChartId =
+  | "kpis"
+  | "trips_over_time"
+  | "fare_distribution"
+  | "hourly_heatmap"
+  | "top_zones";
+
+export const FOCUSABLE_CHART_IDS: FocusableChartId[] = [
+  "kpis",
+  "trips_over_time",
+  "fare_distribution",
+  "hourly_heatmap",
+  "top_zones",
+];
+
+export function isFocusableChartId(id: unknown): id is FocusableChartId {
+  return (
+    typeof id === "string" &&
+    (FOCUSABLE_CHART_IDS as readonly string[]).includes(id)
+  );
+}
 
 export function focusChart(id: FocusableChartId): void {
   registry.get(id)?.();

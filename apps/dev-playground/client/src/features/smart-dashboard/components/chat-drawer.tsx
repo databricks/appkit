@@ -26,6 +26,11 @@ interface ChatDrawerProps {
   pendingApprovals: PendingApproval[];
   /** Floating affordance: the toggle button also shows a pending-approval dot. */
   unreadCount?: number;
+  /** Controlled open state so the parent can auto-open the drawer when a
+   *  dashboard interaction (chips, heatmap cells, quick actions, follow-ups)
+   *  dispatches a turn the user needs to see. */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }
 
 const EXAMPLE_QUERIES = [
@@ -49,8 +54,9 @@ export function ChatDrawer({
   approvalCardForMessage,
   pendingApprovals,
   unreadCount,
+  open,
+  onOpenChange,
 }: ChatDrawerProps) {
-  const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [showTips, setShowTips] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -64,21 +70,21 @@ export function ChatDrawer({
         !e.shiftKey
       ) {
         e.preventDefault();
-        setOpen((v) => !v);
+        onOpenChange(!open);
       } else if (e.key === "Escape" && open) {
-        setOpen(false);
+        onOpenChange(false);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, onOpenChange]);
 
   // Auto-open when a new approval arrives so users don't miss it.
   useEffect(() => {
-    if (pendingApprovals.length > 0) setOpen(true);
-  }, [pendingApprovals.length]);
+    if (pendingApprovals.length > 0) onOpenChange(true);
+  }, [pendingApprovals.length, onOpenChange]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on new messages
   useEffect(() => {
@@ -110,7 +116,7 @@ export function ChatDrawer({
     <>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => onOpenChange(!open)}
         aria-label="Toggle chat (⌘J)"
         title="Chat with the agent (⌘J)"
         className="fixed bottom-4 right-20 z-30 rounded-full bg-primary text-primary-foreground shadow-lg hover:bg-primary/90 transition-colors p-3 flex items-center gap-1.5"
@@ -138,7 +144,7 @@ export function ChatDrawer({
             </div>
             <button
               type="button"
-              onClick={() => setOpen(false)}
+              onClick={() => onOpenChange(false)}
               className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
               aria-label="Close chat"
             >
