@@ -128,9 +128,10 @@ export function ApprovalCard({
       onSaved?.({ name, volumePath: uploadJson.volumePath });
       onDecide(approval.approvalId, "approve");
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       setPhase({
         kind: "error",
-        message: err instanceof Error ? err.message : String(err),
+        message: msg,
       });
     }
   }, [
