@@ -1,8 +1,15 @@
-import { CheckCircle2Icon, ShieldAlertIcon } from "lucide-react";
+import {
+  CheckCircle2Icon,
+  PencilIcon,
+  PlusCircleIcon,
+  ShieldAlertIcon,
+} from "lucide-react";
 import { useCallback, useState } from "react";
 import type { Highlight } from "../hooks/use-action-dispatcher";
 import type { DashboardFilters } from "../hooks/use-dashboard-data";
 import { captureDashboardAsDataUrl } from "../lib/capture-dashboard";
+
+type ToolEffect = "read" | "write" | "update" | "destructive";
 
 export interface PendingApproval {
   approvalId: string;
@@ -10,11 +17,63 @@ export interface PendingApproval {
   toolName: string;
   args: unknown;
   annotations?: {
+    effect?: ToolEffect;
     readOnly?: boolean;
     destructive?: boolean;
     idempotent?: boolean;
   };
 }
+
+/**
+ * Resolve the semantic tier we should render for this approval. Prefers
+ * the explicit `effect` label; falls back to the legacy `destructive` flag
+ * so tools that haven't migrated yet keep their red treatment. Anything
+ * with no mutation hint at all falls through as `write` — the approval
+ * gate fired for a reason, and `write` is the lowest-severity default.
+ */
+function resolveEffect(
+  ann: PendingApproval["annotations"],
+): Exclude<ToolEffect, "read"> {
+  if (ann?.effect && ann.effect !== "read") return ann.effect;
+  if (ann?.destructive === true) return "destructive";
+  return "write";
+}
+
+interface EffectTheme {
+  icon: typeof ShieldAlertIcon;
+  container: string;
+  iconColor: string;
+  badge: string;
+  badgeLabel: string;
+  verb: string;
+}
+
+const EFFECT_THEMES: Record<Exclude<ToolEffect, "read">, EffectTheme> = {
+  write: {
+    icon: PlusCircleIcon,
+    container: "border-blue-500/40 bg-blue-500/[0.06]",
+    iconColor: "text-blue-500",
+    badge: "bg-blue-500/20 text-blue-600 dark:text-blue-400",
+    badgeLabel: "writes",
+    verb: "Approving creates new state in Databricks.",
+  },
+  update: {
+    icon: PencilIcon,
+    container: "border-amber-500/40 bg-amber-500/[0.06]",
+    iconColor: "text-amber-500",
+    badge: "bg-amber-500/20 text-amber-700 dark:text-amber-400",
+    badgeLabel: "updates",
+    verb: "Approving modifies existing state in Databricks.",
+  },
+  destructive: {
+    icon: ShieldAlertIcon,
+    container: "border-red-500/40 bg-red-500/[0.06]",
+    iconColor: "text-red-500",
+    badge: "bg-red-500/20 text-red-600 dark:text-red-400",
+    badgeLabel: "destructive",
+    verb: "Approving deletes or irreversibly changes state. Double-check first.",
+  },
+};
 
 interface ApprovalCardProps {
   approval: PendingApproval;
@@ -57,7 +116,9 @@ export function ApprovalCard({
     typeof approval.args === "object" && approval.args !== null
       ? (approval.args as Record<string, unknown>)
       : {};
-  const isDestructive = approval.annotations?.destructive === true;
+  const effect = resolveEffect(approval.annotations);
+  const theme = EFFECT_THEMES[effect];
+  const EffectIcon = theme.icon;
   const isSaveView = approval.toolName === "save_view";
 
   const [phase, setPhase] = useState<
@@ -148,19 +209,22 @@ export function ApprovalCard({
   const busy = phase.kind === "capturing" || phase.kind === "uploading";
 
   return (
-    <div className="rounded-xl border border-red-500/40 bg-red-500/[0.06] p-4 shadow-sm">
+    <div
+      className={`rounded-xl border p-4 shadow-sm ${theme.container}`}
+      data-effect={effect}
+    >
       <div className="flex items-start gap-2 mb-3">
-        <ShieldAlertIcon className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
+        <EffectIcon className={`h-4 w-4 mt-0.5 shrink-0 ${theme.iconColor}`} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <h3 className="font-semibold text-sm text-foreground">
               Approval required
             </h3>
-            {isDestructive && (
-              <span className="text-[10px] uppercase tracking-wide bg-red-500/20 text-red-600 px-2 py-0.5 rounded-full font-medium">
-                destructive
-              </span>
-            )}
+            <span
+              className={`text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full font-medium ${theme.badge}`}
+            >
+              {theme.badgeLabel}
+            </span>
           </div>
           <p className="text-xs text-muted-foreground">
             The agent wants to call{" "}
@@ -169,7 +233,7 @@ export function ApprovalCard({
             </code>
             {isSaveView
               ? ". Approving captures the current dashboard and uploads it as a saved view."
-              : ". Review the arguments before approving."}
+              : `. ${theme.verb}`}
           </p>
         </div>
       </div>

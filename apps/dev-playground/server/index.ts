@@ -253,14 +253,17 @@ const clear_zone_highlights = tool({
   execute: async () => "Zone highlights cleared.",
 });
 
-// Destructive tool: exercises the approval gate. Server handler is a
-// stub — no view persistence — but `destructive: true` forces the
-// human-in-the-loop flow before the agent can call it.
+// Write tool: exercises the approval gate. Server handler is a stub —
+// no view persistence — but `effect: "write"` forces the human-in-the-loop
+// flow before the agent can call it. We pick `write` (not `destructive`)
+// because capturing a view CREATES a new file; nothing is deleted or
+// overwritten. The approval card will render the low-severity blue
+// "writes" treatment rather than the alarming red "destructive" one.
 const save_view = tool({
   name: "save_view",
   description:
-    "Persist the current dashboard configuration (filters + highlights) as a named view the user can recall later. Destructive because it writes persistent user state; always surfaces the approval gate.",
-  annotations: { destructive: true, readOnly: false },
+    "Persist the current dashboard configuration (filters + highlights) as a named view the user can recall later. Always surfaces the approval gate as a write action.",
+  annotations: { effect: "write" },
   schema: z.object({
     name: z.string().describe("Short human-readable name for the saved view"),
     description: z
@@ -302,7 +305,7 @@ const dashboard_pilot = createAgent({
     "- `clear_zone_highlights()` — remove all ZIP emphasis rings.",
     "Focus & save:",
     "- `focus_chart({chart_id})` — scroll the viewport to one of `kpis`, `trips_over_time`, `fare_distribution`, `hourly_heatmap`, `top_zones` and briefly pulse it.",
-    "- `save_view({name, description?})` — persist the current configuration. Destructive; the user will see an approval card.",
+    "- `save_view({name, description?})` — persist the current configuration. Write action; the user will see an approval card.",
     "- `load_view({name, filters, highlights})` — restore a previously saved view. Always pass the resolved state; never leave fields unset.",
     "Rules:",
     "1. Pick the single tool that matches the user's intent. Do not chain filters unless the user asks for a compound filter.",
