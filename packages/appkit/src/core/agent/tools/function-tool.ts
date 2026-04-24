@@ -1,4 +1,4 @@
-import type { AgentToolDefinition } from "shared";
+import type { AgentToolDefinition, ToolAnnotations } from "shared";
 
 export interface FunctionTool {
   type: "function";
@@ -6,6 +6,14 @@ export interface FunctionTool {
   description?: string | null;
   parameters?: Record<string, unknown> | null;
   strict?: boolean | null;
+  /**
+   * Behavioural flags that drive the agents plugin's approval gate and
+   * auto-inherit filtering. `destructive: true` forces HITL approval
+   * before execute() runs; `readOnly: true` marks safe-by-default tools.
+   * Must be preserved through {@link functionToolToDefinition} so the
+   * plugin sees them when building agent tool indexes.
+   */
+  annotations?: ToolAnnotations;
   execute: (args: Record<string, unknown>) => Promise<string> | string;
 }
 
@@ -29,5 +37,6 @@ export function functionToolToDefinition(
       type: "object",
       properties: {},
     },
+    ...(tool.annotations ? { annotations: tool.annotations } : {}),
   };
 }
