@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { beginStreamRun, recordStreamEvent } from "./use-stream-inspector";
 
 export interface SSEEvent {
   type: string;
@@ -18,6 +19,16 @@ export interface SSEEvent {
   error?: string;
   sequence_number?: number;
   output_index?: number;
+  // appkit.approval_pending payload
+  approval_id?: string;
+  stream_id?: string;
+  tool_name?: string;
+  args?: unknown;
+  annotations?: {
+    readOnly?: boolean;
+    destructive?: boolean;
+    idempotent?: boolean;
+  };
 }
 
 interface UseAgentStreamOptions {
@@ -25,12 +36,21 @@ interface UseAgentStreamOptions {
   onEvent?: (event: SSEEvent) => void;
 }
 
+interface SendOptions {
+  /**
+   * Text prepended to the user's message on the wire. Used by the Smart
+   * Dashboard route to inject active filters / highlights into the system
+   * prompt so the agent always knows what the user is looking at.
+   */
+  contextPrefix?: string;
+}
+
 interface UseAgentStreamReturn {
   content: string;
   events: SSEEvent[];
   isLoading: boolean;
   threadId: string | null;
-  send: (message: string) => Promise<void>;
+  send: (message: string, opts?: SendOptions) => Promise<void>;
   reset: () => void;
 }
 
@@ -53,18 +73,24 @@ export function useAgentStream({
   }, []);
 
   const send = useCallback(
-    async (message: string) => {
+    async (message: string, opts?: SendOptions) => {
       setIsLoading(true);
       setContent("");
       setEvents([]);
       contentRef.current = "";
+
+      const wire = opts?.contextPrefix
+        ? `${opts.contextPrefix}${message}`
+        : message;
+
+      const runId = beginStreamRun(`${agentName}: ${message.slice(0, 80)}`);
 
       try {
         const res = await fetch("/api/agents/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            message,
+            message: wire,
             agent: agentName,
             ...(threadId && { threadId }),
           }),
@@ -102,6 +128,7 @@ export function useAgentStream({
               const event: SSEEvent = JSON.parse(data);
               if (!event.type) continue;
               setEvents((prev) => [...prev, event]);
+              recordStreamEvent(runId, event);
               onEventRef.current?.(event);
 
               if (event.type === "appkit.metadata" && event.data?.threadId) {

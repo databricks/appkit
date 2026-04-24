@@ -48,6 +48,94 @@ declare module "@databricks/appkit-ui/react" {
           dummy: number;
         }>;
       };
+    dashboard_fare_distribution: {
+        name: "dashboard_fare_distribution";
+        parameters: {
+          /** STRING - use sql.string() */
+          dateFrom: SQLStringMarker;
+          /** STRING - use sql.string() */
+          dateTo: SQLStringMarker;
+          /** STRING - use sql.string() */
+          pickupZip: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          fare_bucket: string;
+          /** @sqlType BIGINT */
+          trip_count: number;
+          /** @sqlType DOUBLE */
+          avg_distance: number;
+        }>;
+      };
+    dashboard_kpis: {
+        name: "dashboard_kpis";
+        parameters: {
+          /** STRING - use sql.string() */
+          dateFrom: SQLStringMarker;
+          /** STRING - use sql.string() */
+          dateTo: SQLStringMarker;
+          /** STRING - use sql.string() */
+          pickupZip: SQLStringMarker;
+          /** STRING - use sql.string() */
+          fareMin: SQLStringMarker;
+          /** STRING - use sql.string() */
+          fareMax: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType BIGINT */
+          total_trips: number;
+          /** @sqlType DOUBLE */
+          avg_fare: number;
+          /** @sqlType DOUBLE */
+          avg_distance: number;
+          /** @sqlType DOUBLE */
+          max_fare: number;
+          /** @sqlType DOUBLE */
+          min_fare: number;
+        }>;
+      };
+    dashboard_top_zone: {
+        name: "dashboard_top_zone";
+        parameters: {
+          /** STRING - use sql.string() */
+          dateFrom: SQLStringMarker;
+          /** STRING - use sql.string() */
+          dateTo: SQLStringMarker;
+          /** STRING - use sql.string() */
+          pickupZip: SQLStringMarker;
+          /** STRING - use sql.string() */
+          fareMin: SQLStringMarker;
+          /** STRING - use sql.string() */
+          fareMax: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType INT */
+          pickup_zip: number;
+          /** @sqlType BIGINT */
+          trip_count: number;
+        }>;
+      };
+    dashboard_trips_over_time: {
+        name: "dashboard_trips_over_time";
+        parameters: {
+          /** STRING - use sql.string() */
+          dateFrom: SQLStringMarker;
+          /** STRING - use sql.string() */
+          dateTo: SQLStringMarker;
+          /** STRING - use sql.string() */
+          pickupZip: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType DATE */
+          trip_date: string;
+          /** @sqlType BIGINT */
+          trip_count: number;
+          /** @sqlType DOUBLE */
+          avg_fare: number;
+          /** @sqlType DOUBLE */
+          total_revenue: number;
+        }>;
+      };
     example: {
         name: "example";
         parameters: Record<string, never>;
