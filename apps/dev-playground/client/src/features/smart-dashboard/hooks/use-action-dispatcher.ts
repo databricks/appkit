@@ -1,0 +1,227 @@
+import { useCallback, useRef } from "react";
+import type { SSEEvent } from "./use-agent-stream";
+import type { DashboardFilters } from "./use-dashboard-data";
+import { type FocusableChartId, focusChart } from "./use-focus-registry";
+
+export interface Highlight {
+  start: string;
+  end: string;
+  color: "blue" | "red" | "yellow";
+  label?: string;
+}
+
+const DASHBOARD_TOOLS = new Set<string>([
+  "filter_by_date_range",
+  "filter_by_pickup_zip",
+  "filter_by_fare",
+  "clear_filters",
+  "highlight_period",
+  "clear_highlights",
+  "focus_chart",
+]);
+
+interface UseActionDispatcherOptions {
+  /** Receives an updater fn; avoids stale-closure bugs when the agent fires multiple tool calls back-to-back. */
+  onFilterUpdate: (
+    updater: (prev: DashboardFilters) => DashboardFilters,
+  ) => void;
+  onAddHighlight: (highlight: Highlight) => void;
+  onClearFilters: () => void;
+  onClearHighlights: () => void;
+  /** Called once per applied action with a short human-readable summary. Route surfaces it as a toast. */
+  onAction?: (summary: string) => void;
+  /** Called when the dispatcher receives a tool it doesn't know how to handle. Lets the route warn visibly. */
+  onUnknownTool?: (name: string, args: unknown) => void;
+}
+
+function parseArgs(raw: string | undefined): Record<string, unknown> | null {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return typeof parsed === "object" && parsed !== null
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+const CALL_ID_LRU_CAP = 128;
+
+/**
+ * Translates `function_call` tool events from the agent's SSE stream into
+ * dashboard state mutations.
+ *
+ * Correctness rules (learned the hard way):
+ *
+ * - Only acts on `response.output_item.done`, never `.added`. `.added` fires
+ *   with incomplete `arguments`, causing spurious JSON parse failures and,
+ *   worse, double-firing: `highlight_period` used to append the same band
+ *   twice because both events passed.
+ * - Dedupes by `call_id`. Keeps a bounded LRU so memory stays finite across
+ *   a long session. A new run clears the cache on `appkit.metadata` (the
+ *   first event of every stream carries the new threadId).
+ * - Uses updater callbacks (`onFilterUpdate(prev => ...)`) instead of reading
+ *   `currentFilters` from props. Multi-tool-call runs within a single
+ *   render cycle would otherwise see stale filter state.
+ * - Emits a summary for every applied action via `onAction`. Silent success
+ *   is the worst failure mode here — if the user can't see what changed,
+ *   they can't tell whether the agent misfired.
+ */
+export function useActionDispatcher({
+  onFilterUpdate,
+  onAddHighlight,
+  onClearFilters,
+  onClearHighlights,
+  onAction,
+  onUnknownTool,
+}: UseActionDispatcherOptions) {
+  const seen = useRef<string[]>([]);
+
+  const markSeen = useCallback((callId: string): boolean => {
+    if (seen.current.includes(callId)) return true;
+    seen.current.push(callId);
+    if (seen.current.length > CALL_ID_LRU_CAP) {
+      seen.current.splice(0, seen.current.length - CALL_ID_LRU_CAP);
+    }
+    return false;
+  }, []);
+
+  const handleEvent = useCallback(
+    (event: SSEEvent) => {
+      // New run → fresh dedupe cache. `appkit.metadata` is the very first
+      // event the agents plugin emits for each stream.
+      if (event.type === "appkit.metadata") {
+        seen.current = [];
+        return;
+      }
+
+      if (event.type !== "response.output_item.done") return;
+      if (event.item?.type !== "function_call") return;
+
+      const name = event.item.name;
+      if (!name) return;
+
+      // Tools not owned by the dashboard (e.g. `analytics.query`, sub-agent
+      // `agent-sql_analyst`) flow through without a dispatcher side-effect.
+      if (!DASHBOARD_TOOLS.has(name)) return;
+
+      const callId = event.item.call_id;
+      if (callId && markSeen(callId)) return;
+
+      const args = parseArgs(event.item.arguments);
+      if (args === null) {
+        onUnknownTool?.(name, event.item.arguments);
+        return;
+      }
+
+      switch (name) {
+        case "filter_by_date_range": {
+          const start = args.start;
+          const end = args.end;
+          if (typeof start !== "string" || typeof end !== "string") {
+            onUnknownTool?.(name, args);
+            return;
+          }
+          onFilterUpdate((prev) => ({
+            ...prev,
+            date_from: start,
+            date_to: end,
+          }));
+          onAction?.(`Filtered to ${start} → ${end}`);
+          return;
+        }
+        case "filter_by_pickup_zip": {
+          const zip = args.zip;
+          if (typeof zip !== "string") {
+            onUnknownTool?.(name, args);
+            return;
+          }
+          onFilterUpdate((prev) => ({ ...prev, pickup_zip: zip }));
+          onAction?.(`Filtered to pickup ZIP ${zip}`);
+          return;
+        }
+        case "filter_by_fare": {
+          const min = typeof args.min === "number" ? args.min : undefined;
+          const max = typeof args.max === "number" ? args.max : undefined;
+          if (min === undefined && max === undefined) {
+            onUnknownTool?.(name, args);
+            return;
+          }
+          onFilterUpdate((prev) => ({
+            ...prev,
+            ...(min !== undefined ? { fare_min: String(min) } : {}),
+            ...(max !== undefined ? { fare_max: String(max) } : {}),
+          }));
+          const parts: string[] = [];
+          if (min !== undefined) parts.push(`≥ $${min}`);
+          if (max !== undefined) parts.push(`≤ $${max}`);
+          onAction?.(`Filtered by fare ${parts.join(" and ")}`);
+          return;
+        }
+        case "clear_filters": {
+          onClearFilters();
+          onAction?.("Filters cleared");
+          return;
+        }
+        case "highlight_period": {
+          const start = args.start;
+          const end = args.end;
+          if (typeof start !== "string" || typeof end !== "string") {
+            onUnknownTool?.(name, args);
+            return;
+          }
+          const color =
+            args.color === "red" || args.color === "yellow"
+              ? args.color
+              : "blue";
+          const label =
+            typeof args.label === "string" && args.label !== ""
+              ? args.label
+              : undefined;
+          onAddHighlight({ start, end, color, label });
+          onAction?.(
+            `Highlighted ${start} → ${end}${label ? ` (${label})` : ""}`,
+          );
+          return;
+        }
+        case "clear_highlights": {
+          onClearHighlights();
+          onAction?.("Highlights cleared");
+          return;
+        }
+        case "focus_chart": {
+          const id = args.chart_id;
+          if (
+            id !== "kpis" &&
+            id !== "trips_over_time" &&
+            id !== "fare_distribution"
+          ) {
+            onUnknownTool?.(name, args);
+            return;
+          }
+          focusChart(id as FocusableChartId);
+          onAction?.(`Focused ${id.replace(/_/g, " ")}`);
+          return;
+        }
+        default: {
+          // DASHBOARD_TOOLS membership already filtered unknowns; this branch
+          // is a compile-time exhaustiveness check.
+          onUnknownTool?.(name, args);
+          return;
+        }
+      }
+    },
+    [
+      markSeen,
+      onFilterUpdate,
+      onAddHighlight,
+      onClearFilters,
+      onClearHighlights,
+      onAction,
+      onUnknownTool,
+    ],
+  );
+
+  return { handleEvent };
+}
