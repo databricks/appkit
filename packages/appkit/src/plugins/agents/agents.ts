@@ -14,20 +14,12 @@ import type {
   Thread,
   ToolProvider,
 } from "shared";
-import { buildMcpHostPolicy } from "../../connectors/mcp";
+import { AppKitMcpClient, buildMcpHostPolicy } from "../../connectors/mcp";
 import { loadAgentsFromDir } from "../../core/agent/load-agents";
 import {
   buildBaseSystemPrompt,
   composeSystemPrompt,
 } from "../../core/agent/system-prompt";
-import { AppKitMcpClient } from "../../connectors/mcp";
-import {
-  approvalRequestSchema,
-  chatRequestSchema,
-  invocationsRequestSchema,
-} from "./schemas";
-import { InMemoryThreadStore } from "./thread-store";
-import { ToolApprovalGate } from "./tool-approval-gate";
 import {
   functionToolToDefinition,
   isFunctionTool,

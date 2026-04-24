@@ -4,8 +4,40 @@ import type { JSONSchema7 } from "json-schema";
 // Tool definitions
 // ---------------------------------------------------------------------------
 
+/**
+ * Semantic hint for what the tool does to the world. Drives both the
+ * agents-plugin approval gate and the client's approval-card styling.
+ *
+ * - `read` — observes only; never needs approval.
+ * - `write` — creates or appends new state (e.g. saving a new view). Approval
+ *   required by default. Rendered as a low-severity "writes" card.
+ * - `update` — mutates existing state in place (e.g. renaming, toggling).
+ *   Approval required. Rendered as a medium-severity "updates" card.
+ * - `destructive` — deletes or irreversibly mutates (e.g. dropping a view).
+ *   Approval required. Rendered as a high-severity "destructive" card.
+ *
+ * Prefer this over the legacy `readOnly`/`destructive` booleans: it lets the
+ * UI distinguish "captured a screenshot" from "deleted a dashboard", both of
+ * which today are lumped under a single red "destructive" label.
+ */
+export type ToolEffect = "read" | "write" | "update" | "destructive";
+
 export interface ToolAnnotations {
+  /**
+   * Preferred semantic label. When set, drives both the approval gate (fires
+   * for `write`/`update`/`destructive`) and the approval-card styling.
+   */
+  effect?: ToolEffect;
+  /**
+   * @deprecated Prefer {@link effect}. Retained for backward compatibility
+   * with tools authored against the original flags and for MCP interop.
+   */
   readOnly?: boolean;
+  /**
+   * @deprecated Prefer {@link effect} with value `"destructive"`. Retained
+   * so existing annotations continue to force the approval gate, and so
+   * MCP-style consumers that only read `destructive` still see the hint.
+   */
   destructive?: boolean;
   idempotent?: boolean;
   requiresUserContext?: boolean;

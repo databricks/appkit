@@ -15,6 +15,7 @@ export type {
   Message,
   Thread,
   ThreadStore,
+  ToolAnnotations,
   ToolProvider,
 } from "shared";
 export { DatabricksAdapter, parseTextToolCalls } from "./agents/databricks";
