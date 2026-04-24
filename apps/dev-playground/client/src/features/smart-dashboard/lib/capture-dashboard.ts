@@ -1,4 +1,4 @@
-import html2canvas from "html2canvas";
+import html2canvas from "html2canvas-pro";
 
 /**
  * Captures an element to a compressed JPEG data URL.
@@ -13,6 +13,10 @@ import html2canvas from "html2canvas";
  *
  * If the payload ever needs to grow (higher fidelity, larger viewports),
  * switch to a raw body route (`express.raw`) with an explicit larger limit.
+ *
+ * `html2canvas-pro` (drop-in fork of html2canvas) is required because
+ * Tailwind v4 emits `oklch()` colors throughout the computed styles of
+ * every node, which the original html2canvas 1.x cannot parse.
  */
 export async function captureDashboardAsDataUrl(
   el: HTMLElement,
@@ -20,13 +24,12 @@ export async function captureDashboardAsDataUrl(
 ): Promise<{ dataUrl: string; widthPx: number; heightPx: number }> {
   const quality = opts.quality ?? 0.85;
   const scale = opts.scale ?? 1;
+  const backgroundColor = readCssVar(el, "--background") ?? "#ffffff";
 
   const canvas = await html2canvas(el, {
-    backgroundColor: readCssVar(el, "--background") ?? "#ffffff",
+    backgroundColor,
     scale,
-    // Disable CORS image proxying — charts are same-origin SVG/canvas.
     useCORS: true,
-    // Don't taint; we only render DOM we own.
     allowTaint: false,
     logging: false,
   });
