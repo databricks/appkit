@@ -13,6 +13,7 @@ import { Route as VectorSearchRouteRouteImport } from './routes/vector-search.ro
 import { Route as TypeSafetyRouteRouteImport } from './routes/type-safety.route'
 import { Route as TelemetryRouteRouteImport } from './routes/telemetry.route'
 import { Route as SqlHelpersRouteRouteImport } from './routes/sql-helpers.route'
+import { Route as SmartDashboardRouteRouteImport } from './routes/smart-dashboard.route'
 import { Route as ServingRouteRouteImport } from './routes/serving.route'
 import { Route as ReconnectRouteRouteImport } from './routes/reconnect.route'
 import { Route as PolicyMatrixRouteRouteImport } from './routes/policy-matrix.route'
@@ -45,6 +46,11 @@ const TelemetryRouteRoute = TelemetryRouteRouteImport.update({
 const SqlHelpersRouteRoute = SqlHelpersRouteRouteImport.update({
   id: '/sql-helpers',
   path: '/sql-helpers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SmartDashboardRouteRoute = SmartDashboardRouteRouteImport.update({
+  id: '/smart-dashboard',
+  path: '/smart-dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ServingRouteRoute = ServingRouteRouteImport.update({
@@ -127,6 +133,7 @@ export interface FileRoutesByFullPath {
   '/policy-matrix': typeof PolicyMatrixRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
   '/serving': typeof ServingRouteRoute
+  '/smart-dashboard': typeof SmartDashboardRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
   '/type-safety': typeof TypeSafetyRouteRoute
@@ -146,6 +153,7 @@ export interface FileRoutesByTo {
   '/policy-matrix': typeof PolicyMatrixRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
   '/serving': typeof ServingRouteRoute
+  '/smart-dashboard': typeof SmartDashboardRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
   '/type-safety': typeof TypeSafetyRouteRoute
@@ -166,6 +174,7 @@ export interface FileRoutesById {
   '/policy-matrix': typeof PolicyMatrixRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
   '/serving': typeof ServingRouteRoute
+  '/smart-dashboard': typeof SmartDashboardRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
   '/type-safety': typeof TypeSafetyRouteRoute
@@ -187,6 +196,7 @@ export interface FileRouteTypes {
     | '/policy-matrix'
     | '/reconnect'
     | '/serving'
+    | '/smart-dashboard'
     | '/sql-helpers'
     | '/telemetry'
     | '/type-safety'
@@ -206,6 +216,7 @@ export interface FileRouteTypes {
     | '/policy-matrix'
     | '/reconnect'
     | '/serving'
+    | '/smart-dashboard'
     | '/sql-helpers'
     | '/telemetry'
     | '/type-safety'
@@ -225,6 +236,7 @@ export interface FileRouteTypes {
     | '/policy-matrix'
     | '/reconnect'
     | '/serving'
+    | '/smart-dashboard'
     | '/sql-helpers'
     | '/telemetry'
     | '/type-safety'
@@ -245,6 +257,7 @@ export interface RootRouteChildren {
   PolicyMatrixRouteRoute: typeof PolicyMatrixRouteRoute
   ReconnectRouteRoute: typeof ReconnectRouteRoute
   ServingRouteRoute: typeof ServingRouteRoute
+  SmartDashboardRouteRoute: typeof SmartDashboardRouteRoute
   SqlHelpersRouteRoute: typeof SqlHelpersRouteRoute
   TelemetryRouteRoute: typeof TelemetryRouteRoute
   TypeSafetyRouteRoute: typeof TypeSafetyRouteRoute
@@ -279,6 +292,13 @@ declare module '@tanstack/react-router' {
       path: '/sql-helpers'
       fullPath: '/sql-helpers'
       preLoaderRoute: typeof SqlHelpersRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/smart-dashboard': {
+      id: '/smart-dashboard'
+      path: '/smart-dashboard'
+      fullPath: '/smart-dashboard'
+      preLoaderRoute: typeof SmartDashboardRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/serving': {
@@ -389,6 +409,7 @@ const rootRouteChildren: RootRouteChildren = {
   PolicyMatrixRouteRoute: PolicyMatrixRouteRoute,
   ReconnectRouteRoute: ReconnectRouteRoute,
   ServingRouteRoute: ServingRouteRoute,
+  SmartDashboardRouteRoute: SmartDashboardRouteRoute,
   SqlHelpersRouteRoute: SqlHelpersRouteRoute,
   TelemetryRouteRoute: TelemetryRouteRoute,
   TypeSafetyRouteRoute: TypeSafetyRouteRoute,
