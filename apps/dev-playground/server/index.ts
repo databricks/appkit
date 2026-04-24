@@ -541,7 +541,19 @@ createApp({
       app.get("/api/dashboard/saved-views", async (req, res) => {
         try {
           const volume = appkit.files("files").asUser(req);
-          const entries = await volume.list("saved-views");
+          let entries: Awaited<ReturnType<typeof volume.list>>;
+          try {
+            entries = await volume.list("saved-views");
+          } catch (err) {
+            // Fresh volume — the `saved-views/` subdirectory only exists
+            // after the first save. Treat "not found" as an empty list so
+            // the panel renders cleanly instead of showing a 500.
+            if (isNotFoundError(err)) {
+              res.json({ views: [] });
+              return;
+            }
+            throw err;
+          }
           const pngs = new Map<string, (typeof entries)[number]>();
           const metas = new Map<string, (typeof entries)[number]>();
           for (const e of entries) {
@@ -627,6 +639,22 @@ createApp({
     })
     .start();
 });
+
+/**
+ * Heuristic match for Databricks Files API's "directory not found" error.
+ * The SDK surfaces it as a wrapped Error whose message contains the
+ * `FILES_API_DIRECTORY_IS_NOT_FOUND` reason + `NOT_FOUND` error code.
+ * Happy to be more specific if the SDK exposes a typed error class later.
+ */
+function isNotFoundError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message;
+  return (
+    msg.includes("FILES_API_DIRECTORY_IS_NOT_FOUND") ||
+    msg.includes("directory being accessed is not found") ||
+    /\bNOT_FOUND\b/.test(msg)
+  );
+}
 
 function toSlug(s: string): string {
   return (
