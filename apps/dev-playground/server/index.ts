@@ -219,10 +219,38 @@ const focus_chart = tool({
     "Scroll the user's viewport to a specific chart on the dashboard and briefly pulse it to draw attention. Use when the user asks to 'look at' or 'focus on' a specific visualization.",
   schema: z.object({
     chart_id: z
-      .enum(["kpis", "trips_over_time", "fare_distribution"])
+      .enum([
+        "kpis",
+        "trips_over_time",
+        "fare_distribution",
+        "hourly_heatmap",
+        "top_zones",
+      ])
       .describe("Which chart to focus on"),
   }),
   execute: async ({ chart_id }) => `Focused on ${chart_id}.`,
+});
+
+const highlight_zone = tool({
+  name: "highlight_zone",
+  description:
+    "Draw an emphasis ring around a specific pickup ZIP on the Top Pickup Zones chart. Use this to call attention to a standout zone without filtering the whole dashboard to that ZIP.",
+  schema: z.object({
+    zip: z.string().describe("Pickup ZIP code to highlight (e.g. '10017')"),
+    label: z
+      .string()
+      .optional()
+      .describe("Optional short label shown inside the highlighted bar"),
+  }),
+  execute: async ({ zip, label }) =>
+    `Highlighted pickup ZIP ${zip}${label ? ` (${label})` : ""}.`,
+});
+
+const clear_zone_highlights = tool({
+  name: "clear_zone_highlights",
+  description: "Remove all emphasis rings from the Top Pickup Zones chart.",
+  schema: z.object({}),
+  execute: async () => "Zone highlights cleared.",
 });
 
 // Destructive tool: exercises the approval gate. Server handler is a
@@ -268,16 +296,19 @@ const dashboard_pilot = createAgent({
     "- `filter_by_fare({min?, max?})` — narrow by fare range (at least one bound required).",
     "- `clear_filters()` — remove all active filters.",
     "Highlights:",
-    "- `highlight_period({start, end, color?, label?})` — shade a date window on the trips chart.",
-    "- `clear_highlights()` — remove all shaded overlays.",
+    "- `highlight_period({start, end, color?, label?})` — shade a date window on the Trips Over Time chart.",
+    "- `clear_highlights()` — remove all shaded overlays from the trips chart.",
+    "- `highlight_zone({zip, label?})` — draw an emphasis ring around a specific ZIP on the Top Pickup Zones chart.",
+    "- `clear_zone_highlights()` — remove all ZIP emphasis rings.",
     "Focus & save:",
-    "- `focus_chart({chart_id})` — scroll the viewport to `kpis`, `trips_over_time`, or `fare_distribution` and briefly pulse it.",
+    "- `focus_chart({chart_id})` — scroll the viewport to one of `kpis`, `trips_over_time`, `fare_distribution`, `hourly_heatmap`, `top_zones` and briefly pulse it.",
     "- `save_view({name, description?})` — persist the current configuration. Destructive; the user will see an approval card.",
     "- `load_view({name, filters, highlights})` — restore a previously saved view. Always pass the resolved state; never leave fields unset.",
     "Rules:",
     "1. Pick the single tool that matches the user's intent. Do not chain filters unless the user asks for a compound filter.",
     "2. Briefly state what you did after the tool returns. Do not narrate before calling the tool.",
     "3. If the user's request is ambiguous (e.g. 'filter to last month' without a 2016 context), ask one clarifying question before calling any tool.",
+    "4. For standout ZIPs, prefer `highlight_zone` over `filter_by_pickup_zip` so the rest of the dashboard stays in context. Only filter when the user explicitly asks to narrow the whole dashboard.",
   ].join("\n"),
   tools: {
     filter_by_date_range,
@@ -286,6 +317,8 @@ const dashboard_pilot = createAgent({
     clear_filters,
     highlight_period,
     clear_highlights,
+    highlight_zone,
+    clear_zone_highlights,
     focus_chart,
     save_view,
     load_view,

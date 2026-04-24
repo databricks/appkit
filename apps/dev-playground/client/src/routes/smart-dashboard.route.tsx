@@ -14,6 +14,7 @@ import {
 } from "@/features/smart-dashboard/components/chat-drawer";
 import { FareChart } from "@/features/smart-dashboard/components/fare-chart";
 import { FocusableChart } from "@/features/smart-dashboard/components/focusable-chart";
+import { HourlyHeatmap } from "@/features/smart-dashboard/components/hourly-heatmap";
 import { InspectorToggle } from "@/features/smart-dashboard/components/inspector-toggle";
 import { KPICards } from "@/features/smart-dashboard/components/kpi-cards";
 import { QuickActionsBar } from "@/features/smart-dashboard/components/quick-actions-bar";
@@ -22,15 +23,21 @@ import {
   SavedViewsPanel,
 } from "@/features/smart-dashboard/components/saved-views-panel";
 import { StreamInspector } from "@/features/smart-dashboard/components/stream-inspector";
+import { TopZonesChart } from "@/features/smart-dashboard/components/top-zones-chart";
 import { TripChart } from "@/features/smart-dashboard/components/trip-chart";
-import type { Highlight } from "@/features/smart-dashboard/hooks/use-action-dispatcher";
+import type {
+  Highlight,
+  HighlightedZone,
+} from "@/features/smart-dashboard/hooks/use-action-dispatcher";
 import { useActionDispatcher } from "@/features/smart-dashboard/hooks/use-action-dispatcher";
 import type { SSEEvent } from "@/features/smart-dashboard/hooks/use-agent-stream";
 import { useAgentStream } from "@/features/smart-dashboard/hooks/use-agent-stream";
 import type { DashboardFilters } from "@/features/smart-dashboard/hooks/use-dashboard-data";
 import { useDashboardData } from "@/features/smart-dashboard/hooks/use-dashboard-data";
+import { focusChart } from "@/features/smart-dashboard/hooks/use-focus-registry";
 import { useInspectorShortcuts } from "@/features/smart-dashboard/hooks/use-stream-inspector";
 import { buildDashboardContext } from "@/features/smart-dashboard/lib/dashboard-context";
+import type { FeedAction } from "@/features/smart-dashboard/lib/feed-actions";
 
 export const Route = createFileRoute("/smart-dashboard")({
   component: SmartDashboardRoute,
@@ -46,6 +53,9 @@ const nextMessageId = (): string =>
 function SmartDashboardRoute() {
   const [filters, setFilters] = useState<DashboardFilters>({});
   const [highlights, setHighlights] = useState<Highlight[]>([]);
+  const [highlightedZones, setHighlightedZones] = useState<HighlightedZone[]>(
+    [],
+  );
   const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>(
     [],
   );
@@ -63,12 +73,21 @@ function SmartDashboardRoute() {
   // refresh without pushing props down through ApprovalCard manually.
   const [savedViewsVersion, setSavedViewsVersion] = useState(0);
 
+  // Chat-drawer open state is hoisted up so agent-dispatching UI actions
+  // (feed action chips, heatmap cells, quick actions, sidebar follow-ups)
+  // can auto-open the drawer — otherwise an async agent run would stream
+  // out of sight and the user would think nothing happened.
+  const [isChatOpen, setIsChatOpen] = useState(false);
+
   useInspectorShortcuts();
 
   const {
     kpis,
     tripsOverTime,
     fareDistribution,
+    heatmap,
+    topZones,
+    sparklines,
     isLoading: dataLoading,
     error: dataError,
   } = useDashboardData(filters);
@@ -96,12 +115,24 @@ function SmartDashboardRoute() {
   }, []);
   const handleClearFilters = useCallback(() => setFilters({}), []);
   const handleClearHighlights = useCallback(() => setHighlights([]), []);
+  const handleAddZoneHighlight = useCallback((z: HighlightedZone) => {
+    setHighlightedZones((prev) => {
+      const without = prev.filter((p) => p.zip !== z.zip);
+      return [...without, z];
+    });
+  }, []);
+  const handleClearZoneHighlights = useCallback(
+    () => setHighlightedZones([]),
+    [],
+  );
 
-  const { handleEvent: handleDispatcherEvent } = useActionDispatcher({
+  const { handleEvent: handleDispatcherEvent, dispatch } = useActionDispatcher({
     onFilterUpdate: handleFilterUpdate,
     onAddHighlight: handleAddHighlight,
     onClearFilters: handleClearFilters,
     onClearHighlights: handleClearHighlights,
+    onAddZoneHighlight: handleAddZoneHighlight,
+    onClearZoneHighlights: handleClearZoneHighlights,
     onAction: pushAction,
     onUnknownTool: pushUnknown,
   });
@@ -228,9 +259,61 @@ function SmartDashboardRoute() {
         { id: userMsgId, role: "user", content: message },
         { id: assistantMsgId, role: "assistant", content: "", streaming: true },
       ]);
+      // Every agent dispatch auto-opens the drawer so the streaming
+      // response is visible. A closed drawer would silently swallow the
+      // turn — the user sees a filter change appear later with no context.
+      setIsChatOpen(true);
       send(message, { contextPrefix: contextPrefixRef.current });
     },
     [send],
+  );
+
+  /**
+   * Apply a feed action directly (no LLM round-trip). Each structured
+   * {@link FeedAction} from the ephemeral agents maps to a dashboard tool
+   * we already implement, so we translate the shape and re-enter the same
+   * `dispatch` code path that the SSE stream uses.
+   */
+  const applyFeedAction = useCallback(
+    (action: FeedAction) => {
+      switch (action.kind) {
+        case "filter_date":
+          dispatch("filter_by_date_range", {
+            start: action.start,
+            end: action.end,
+          });
+          return;
+        case "filter_zip":
+          dispatch("filter_by_pickup_zip", { zip: action.zip });
+          return;
+        case "filter_fare":
+          dispatch("filter_by_fare", {
+            ...(action.min !== undefined ? { min: action.min } : {}),
+            ...(action.max !== undefined ? { max: action.max } : {}),
+          });
+          return;
+        case "highlight_period":
+          dispatch("highlight_period", {
+            start: action.start,
+            end: action.end,
+            color: action.color ?? "blue",
+            label: action.label,
+          });
+          return;
+        case "highlight_zone":
+          dispatch("highlight_zone", {
+            zip: action.zip,
+            label: action.note ?? action.label,
+          });
+          focusChart("top_zones");
+          return;
+        case "focus_chart":
+          dispatch("focus_chart", { chart_id: action.chart_id });
+          return;
+        // `ask` is handled by onAsk -> dispatchToAgent, never lands here.
+      }
+    },
+    [dispatch],
   );
 
   /**
@@ -271,6 +354,7 @@ function SmartDashboardRoute() {
 
     setFilters(nextFilters);
     setHighlights(nextHighlights);
+    setHighlightedZones([]);
 
     const viewName = meta.name ?? "saved view";
     const summary = [
@@ -305,7 +389,24 @@ function SmartDashboardRoute() {
   const handleClearAllFilters = useCallback(() => {
     setFilters({});
     setHighlights([]);
+    setHighlightedZones([]);
   }, []);
+
+  const handleHeatmapCellClick = useCallback(
+    (label: string) => {
+      dispatchToAgent(
+        `Investigate pickups on ${label} in the current dashboard slice. Why is this slot notable?`,
+      );
+    },
+    [dispatchToAgent],
+  );
+
+  const handleZipClick = useCallback(
+    (zip: string) => {
+      dispatch("filter_by_pickup_zip", { zip });
+    },
+    [dispatch],
+  );
 
   // Ref to the captured region for save_view. Kept on the dashboard body
   // (not the header/chat) so the screenshot is the analytics surface only.
@@ -359,7 +460,7 @@ function SmartDashboardRoute() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <div className="max-w-[1400px] mx-auto px-4 py-4">
+      <div className="max-w-[1600px] mx-auto px-4 py-4">
         <header className="flex items-center gap-3 mb-4">
           <div className="rounded-lg bg-primary/10 p-2">
             <LayoutDashboardIcon className="h-5 w-5 text-primary" />
@@ -412,12 +513,16 @@ function SmartDashboardRoute() {
         <div ref={dashboardRef}>
           <div className="mb-5">
             <FocusableChart chartId="kpis">
-              <KPICards data={kpis} isLoading={dataLoading} />
+              <KPICards
+                data={kpis}
+                sparklines={sparklines}
+                isLoading={dataLoading}
+              />
             </FocusableChart>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5 mb-5">
-            <div className="space-y-5">
+          <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-5 items-start">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 auto-rows-min content-start">
               <FocusableChart chartId="trips_over_time">
                 <TripChart
                   data={tripsOverTime}
@@ -425,19 +530,41 @@ function SmartDashboardRoute() {
                   isLoading={dataLoading}
                 />
               </FocusableChart>
+              <FocusableChart chartId="hourly_heatmap">
+                <HourlyHeatmap
+                  data={heatmap}
+                  isLoading={dataLoading}
+                  onCellClick={handleHeatmapCellClick}
+                />
+              </FocusableChart>
               <FocusableChart chartId="fare_distribution">
                 <FareChart data={fareDistribution} isLoading={dataLoading} />
               </FocusableChart>
+              <FocusableChart chartId="top_zones">
+                <TopZonesChart
+                  data={topZones}
+                  highlightedZones={highlightedZones}
+                  isLoading={dataLoading}
+                  onZipClick={handleZipClick}
+                />
+              </FocusableChart>
             </div>
-            <div className="lg:h-[580px]">
-              <AgentSidebar kpis={kpis} kpisLoaded={!dataLoading} />
+            <div className="xl:h-auto xl:min-h-[680px]">
+              <AgentSidebar
+                kpis={kpis}
+                kpisLoaded={!dataLoading}
+                filters={filters}
+                highlights={highlights}
+                onAction={applyFeedAction}
+                onAsk={dispatchToAgent}
+              />
             </div>
           </div>
         </div>
 
         {/* Any approvals not pinned to a chat message (defensive fallback). */}
         {looseApprovals.length > 0 && (
-          <div className="space-y-3">
+          <div className="space-y-3 mt-4">
             {looseApprovals.map((approval) => (
               <ApprovalCard
                 key={approval.approvalId}
@@ -464,6 +591,8 @@ function SmartDashboardRoute() {
         approvalCardForMessage={approvalCardForMessage}
         pendingApprovals={pendingApprovals}
         unreadCount={pendingApprovals.length}
+        open={isChatOpen}
+        onOpenChange={setIsChatOpen}
       />
     </div>
   );

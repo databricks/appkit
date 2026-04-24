@@ -33,6 +33,28 @@ export interface FareBucket {
   avg_distance: number;
 }
 
+export interface HeatmapCell {
+  day_of_week: number;
+  hour_of_day: number;
+  trip_count: number;
+  avg_fare: number;
+}
+
+export interface TopZoneRow {
+  pickup_zip: string;
+  trip_count: number;
+  total_revenue: number;
+  avg_fare: number;
+}
+
+export interface SparklineRow {
+  trip_date: string;
+  trip_count: number;
+  total_revenue: number;
+  avg_fare: number;
+  avg_distance: number;
+}
+
 export interface DashboardFilters {
   date_from?: string;
   date_to?: string;
@@ -103,6 +125,36 @@ export function useDashboardData(filters: DashboardFilters) {
     error: string | null;
   };
 
+  const {
+    data: heatmap,
+    loading: heatmapLoading,
+    error: heatmapError,
+  } = useAnalyticsQuery("dashboard_hourly_heatmap", params) as {
+    data: HeatmapCell[] | null;
+    loading: boolean;
+    error: string | null;
+  };
+
+  const {
+    data: topZones,
+    loading: topZonesLoading,
+    error: topZonesError,
+  } = useAnalyticsQuery("dashboard_top_zones", params) as {
+    data: TopZoneRow[] | null;
+    loading: boolean;
+    error: string | null;
+  };
+
+  const {
+    data: sparklines,
+    loading: sparklinesLoading,
+    error: sparklinesError,
+  } = useAnalyticsQuery("dashboard_kpi_sparklines", params) as {
+    data: SparklineRow[] | null;
+    loading: boolean;
+    error: string | null;
+  };
+
   const kpis = useMemo(() => {
     if (!kpisRaw || kpisRaw.length === 0) return null;
     const row = kpisRaw[0];
@@ -115,13 +167,29 @@ export function useDashboardData(filters: DashboardFilters) {
   }, [kpisRaw, topZoneRaw]);
 
   const isLoading =
-    kpisLoading || topZoneLoading || tripsLoading || fareLoading;
-  const error = kpisError || topZoneError || tripsError || fareError;
+    kpisLoading ||
+    topZoneLoading ||
+    tripsLoading ||
+    fareLoading ||
+    heatmapLoading ||
+    topZonesLoading ||
+    sparklinesLoading;
+  const error =
+    kpisError ||
+    topZoneError ||
+    tripsError ||
+    fareError ||
+    heatmapError ||
+    topZonesError ||
+    sparklinesError;
 
   return {
     kpis,
     tripsOverTime: tripsOverTime ?? [],
     fareDistribution: fareDistribution ?? [],
+    heatmap: heatmap ?? [],
+    topZones: topZones ?? [],
+    sparklines: sparklines ?? [],
     isLoading,
     error,
   };

@@ -16,12 +16,14 @@ fit.
   questions ("how many trips last Friday?", "top 5 pickup zones by revenue").
   Use for any analytical query that requires reading the database.
 - `agent-dashboard_pilot` — manipulates the dashboard UI directly: applies
-  or clears filters, highlights or clears time ranges, focuses a specific
-  chart, and saves the current configuration as a named view. Use when
-  the user says "show me…", "filter to…", "highlight…", "focus on…",
-  "clear…", "save…", or any request to modify the dashboard's visual
-  state. Do not answer these yourself — always delegate to the pilot
-  even if you think you lack the tool.
+  or clears filters, highlights or clears time ranges, highlights standout
+  pickup ZIPs on the Top Zones chart, focuses any of the dashboard's five
+  charts (KPIs, Trips Over Time, Fare Distribution, Hourly Heatmap, Top
+  Pickup Zones), and saves the current configuration as a named view. Use
+  when the user says "show me…", "filter to…", "highlight…", "focus on…",
+  "zoom in on…", "point at…", "clear…", "save…", or any request to modify
+  the dashboard's visual state. Do not answer these yourself — always
+  delegate to the pilot even if you think you lack the tool.
 
 The specialists stream their own confirmation text back to the user
 while they work — their text is already visible in the chat by the time

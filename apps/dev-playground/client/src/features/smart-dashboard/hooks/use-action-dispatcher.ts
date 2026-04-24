@@ -1,12 +1,17 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import type { SSEEvent } from "./use-agent-stream";
 import type { DashboardFilters } from "./use-dashboard-data";
-import { type FocusableChartId, focusChart } from "./use-focus-registry";
+import { focusChart, isFocusableChartId } from "./use-focus-registry";
 
 export interface Highlight {
   start: string;
   end: string;
   color: "blue" | "red" | "yellow";
+  label?: string;
+}
+
+export interface HighlightedZone {
+  zip: string;
   label?: string;
 }
 
@@ -17,6 +22,8 @@ const DASHBOARD_TOOLS = new Set<string>([
   "clear_filters",
   "highlight_period",
   "clear_highlights",
+  "highlight_zone",
+  "clear_zone_highlights",
   "focus_chart",
   "load_view",
 ]);
@@ -29,6 +36,8 @@ interface UseActionDispatcherOptions {
   onAddHighlight: (highlight: Highlight) => void;
   onClearFilters: () => void;
   onClearHighlights: () => void;
+  onAddZoneHighlight: (zone: HighlightedZone) => void;
+  onClearZoneHighlights: () => void;
   /** Called once per applied action with a short human-readable summary. Route surfaces it as a toast. */
   onAction?: (summary: string) => void;
   /** Called when the dispatcher receives a tool it doesn't know how to handle. Lets the route warn visibly. */
@@ -51,7 +60,9 @@ const CALL_ID_LRU_CAP = 128;
 
 /**
  * Translates `function_call` tool events from the agent's SSE stream into
- * dashboard state mutations.
+ * dashboard state mutations. Exposes the same per-tool mutations as a
+ * synchronous {@link dispatch} function so the agent-feed action chips can
+ * reuse the identical code path without going through an LLM round-trip.
  *
  * Correctness rules (learned the hard way):
  *
@@ -69,14 +80,18 @@ const CALL_ID_LRU_CAP = 128;
  *   is the worst failure mode here — if the user can't see what changed,
  *   they can't tell whether the agent misfired.
  */
-export function useActionDispatcher({
-  onFilterUpdate,
-  onAddHighlight,
-  onClearFilters,
-  onClearHighlights,
-  onAction,
-  onUnknownTool,
-}: UseActionDispatcherOptions) {
+export function useActionDispatcher(opts: UseActionDispatcherOptions) {
+  const {
+    onFilterUpdate,
+    onAddHighlight,
+    onClearFilters,
+    onClearHighlights,
+    onAddZoneHighlight,
+    onClearZoneHighlights,
+    onAction,
+    onUnknownTool,
+  } = opts;
+
   const seen = useRef<string[]>([]);
 
   const markSeen = useCallback((callId: string): boolean => {
@@ -88,31 +103,10 @@ export function useActionDispatcher({
     return false;
   }, []);
 
-  const handleEvent = useCallback(
-    (event: SSEEvent) => {
-      // New run → fresh dedupe cache. `appkit.metadata` is the very first
-      // event the agents plugin emits for each stream.
-      if (event.type === "appkit.metadata") {
-        seen.current = [];
-        return;
-      }
-
-      if (event.type !== "response.output_item.done") return;
-      if (event.item?.type !== "function_call") return;
-
-      const name = event.item.name;
-      if (!name) return;
-
-      // Tools not owned by the dashboard (e.g. `analytics.query`, sub-agent
-      // `agent-sql_analyst`) flow through without a dispatcher side-effect.
-      if (!DASHBOARD_TOOLS.has(name)) return;
-
-      const callId = event.item.call_id;
-      if (callId && markSeen(callId)) return;
-
-      const args = parseArgs(event.item.arguments);
-      if (args === null) {
-        onUnknownTool?.(name, event.item.arguments);
+  const dispatch = useCallback(
+    (name: string, args: Record<string, unknown>): void => {
+      if (!DASHBOARD_TOOLS.has(name)) {
+        onUnknownTool?.(name, args);
         return;
       }
 
@@ -191,18 +185,33 @@ export function useActionDispatcher({
           onAction?.("Highlights cleared");
           return;
         }
-        case "focus_chart": {
-          const id = args.chart_id;
-          if (
-            id !== "kpis" &&
-            id !== "trips_over_time" &&
-            id !== "fare_distribution"
-          ) {
+        case "highlight_zone": {
+          const zip = args.zip;
+          if (typeof zip !== "string" || zip === "") {
             onUnknownTool?.(name, args);
             return;
           }
-          focusChart(id as FocusableChartId);
-          onAction?.(`Focused ${id.replace(/_/g, " ")}`);
+          const label =
+            typeof args.label === "string" && args.label !== ""
+              ? args.label
+              : undefined;
+          onAddZoneHighlight({ zip, label });
+          onAction?.(`Highlighted ZIP ${zip}${label ? ` (${label})` : ""}`);
+          return;
+        }
+        case "clear_zone_highlights": {
+          onClearZoneHighlights();
+          onAction?.("Zone highlights cleared");
+          return;
+        }
+        case "focus_chart": {
+          const id = args.chart_id;
+          if (!isFocusableChartId(id)) {
+            onUnknownTool?.(name, args);
+            return;
+          }
+          focusChart(id);
+          onAction?.(`Focused ${String(id).replace(/_/g, " ")}`);
           return;
         }
         case "load_view": {
@@ -236,6 +245,7 @@ export function useActionDispatcher({
           // shot so partial states don't linger.
           onClearFilters();
           onClearHighlights();
+          onClearZoneHighlights();
           if (Object.keys(nextFilters).length > 0) {
             onFilterUpdate(() => nextFilters);
           }
@@ -248,23 +258,53 @@ export function useActionDispatcher({
           return;
         }
         default: {
-          // DASHBOARD_TOOLS membership already filtered unknowns; this branch
-          // is a compile-time exhaustiveness check.
           onUnknownTool?.(name, args);
           return;
         }
       }
     },
     [
-      markSeen,
       onFilterUpdate,
       onAddHighlight,
       onClearFilters,
       onClearHighlights,
+      onAddZoneHighlight,
+      onClearZoneHighlights,
       onAction,
       onUnknownTool,
     ],
   );
 
-  return { handleEvent };
+  const handleEvent = useCallback(
+    (event: SSEEvent) => {
+      if (event.type === "appkit.metadata") {
+        seen.current = [];
+        return;
+      }
+
+      if (event.type !== "response.output_item.done") return;
+      if (event.item?.type !== "function_call") return;
+
+      const name = event.item.name;
+      if (!name) return;
+
+      // Tools not owned by the dashboard (e.g. `analytics.query`, sub-agent
+      // `agent-sql_analyst`) flow through without a dispatcher side-effect.
+      if (!DASHBOARD_TOOLS.has(name)) return;
+
+      const callId = event.item.call_id;
+      if (callId && markSeen(callId)) return;
+
+      const args = parseArgs(event.item.arguments);
+      if (args === null) {
+        onUnknownTool?.(name, event.item.arguments);
+        return;
+      }
+
+      dispatch(name, args);
+    },
+    [dispatch, markSeen, onUnknownTool],
+  );
+
+  return useMemo(() => ({ handleEvent, dispatch }), [handleEvent, dispatch]);
 }

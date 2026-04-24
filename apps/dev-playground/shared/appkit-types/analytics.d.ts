@@ -67,6 +67,58 @@ declare module "@databricks/appkit-ui/react" {
           avg_distance: number;
         }>;
       };
+    dashboard_hourly_heatmap: {
+        name: "dashboard_hourly_heatmap";
+        parameters: {
+          /** STRING - use sql.string() */
+          dateFrom: SQLStringMarker;
+          /** STRING - use sql.string() */
+          dateTo: SQLStringMarker;
+          /** STRING - use sql.string() */
+          pickupZip: SQLStringMarker;
+          /** STRING - use sql.string() */
+          fareMin: SQLStringMarker;
+          /** STRING - use sql.string() */
+          fareMax: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType INT */
+          day_of_week: number;
+          /** @sqlType INT */
+          hour_of_day: number;
+          /** @sqlType BIGINT */
+          trip_count: number;
+          /** @sqlType DOUBLE */
+          avg_fare: number;
+        }>;
+      };
+    dashboard_kpi_sparklines: {
+        name: "dashboard_kpi_sparklines";
+        parameters: {
+          /** STRING - use sql.string() */
+          dateFrom: SQLStringMarker;
+          /** STRING - use sql.string() */
+          dateTo: SQLStringMarker;
+          /** STRING - use sql.string() */
+          pickupZip: SQLStringMarker;
+          /** STRING - use sql.string() */
+          fareMin: SQLStringMarker;
+          /** STRING - use sql.string() */
+          fareMax: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType DATE */
+          trip_date: string;
+          /** @sqlType BIGINT */
+          trip_count: number;
+          /** @sqlType DOUBLE */
+          total_revenue: number;
+          /** @sqlType DOUBLE */
+          avg_fare: number;
+          /** @sqlType DOUBLE */
+          avg_distance: number;
+        }>;
+      };
     dashboard_kpis: {
         name: "dashboard_kpis";
         parameters: {
@@ -113,6 +165,31 @@ declare module "@databricks/appkit-ui/react" {
           pickup_zip: number;
           /** @sqlType BIGINT */
           trip_count: number;
+        }>;
+      };
+    dashboard_top_zones: {
+        name: "dashboard_top_zones";
+        parameters: {
+          /** STRING - use sql.string() */
+          dateFrom: SQLStringMarker;
+          /** STRING - use sql.string() */
+          dateTo: SQLStringMarker;
+          /** STRING - use sql.string() */
+          pickupZip: SQLStringMarker;
+          /** STRING - use sql.string() */
+          fareMin: SQLStringMarker;
+          /** STRING - use sql.string() */
+          fareMax: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          pickup_zip: string;
+          /** @sqlType BIGINT */
+          trip_count: number;
+          /** @sqlType DOUBLE */
+          total_revenue: number;
+          /** @sqlType DOUBLE */
+          avg_fare: number;
         }>;
       };
     dashboard_trips_over_time: {
