@@ -1,8 +1,0 @@
-command: ['node', '--import', 'tsx', 'server.ts']
-env:
-  - name: DATABRICKS_WAREHOUSE_ID
-    valueFrom: sql-warehouse
-  - name: DATABRICKS_AGENT_ENDPOINT
-    valueFrom: serving-endpoint
-  - name: DATABRICKS_VOLUME_FILES
-    valueFrom: volume

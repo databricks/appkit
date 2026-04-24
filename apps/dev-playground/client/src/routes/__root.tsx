@@ -144,6 +144,14 @@ function RootComponent() {
                     Agent
                   </Button>
                 </Link>
+                <Link to="/smart-dashboard" className="no-underline">
+                  <Button
+                    variant="ghost"
+                    className="text-foreground hover:text-secondary-foreground"
+                  >
+                    Smart Dashboard
+                  </Button>
+                </Link>
                 <ThemeSelector />
               </div>
             </nav>

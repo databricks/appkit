@@ -69,6 +69,93 @@ const helper = createAgent({
   },
 });
 
+/*
+ * Smart-Dashboard agents.
+ *
+ * The three agents form a dispatcher pattern for the /smart-dashboard route.
+ * The `query` agent (markdown, in config/agents/query/) routes user
+ * questions to one of two specialists:
+ *
+ * - `sql_analyst` — writes Databricks SQL against `samples.nyctaxi.trips`
+ *   using the analytics plugin's query tool.
+ * - `dashboard_pilot` — emits UI-action tool calls (`apply_filter`,
+ *   `highlight_period`) that the client reads off the SSE stream and
+ *   translates into React state mutations. The server-side handlers are
+ *   intentionally stubs — the tool-call JSON is the action payload.
+ */
+
+const apply_filter = tool({
+  name: "apply_filter",
+  description:
+    "Apply a filter to the dashboard data. This updates the KPIs and charts to reflect only the filtered data.",
+  schema: z.object({
+    field: z
+      .enum(["date", "pickup_zone", "dropoff_zone", "fare_range"])
+      .describe("The field to filter on"),
+    operator: z
+      .enum(["eq", "gt", "lt", "between", "in"])
+      .describe("The comparison operator"),
+    value: z
+      .union([z.string(), z.array(z.string())])
+      .describe(
+        "Filter value. For 'between', use an array of two values [start, end]. For 'in', use an array of values.",
+      ),
+  }),
+  execute: async ({ field, operator, value }) => {
+    const valueStr = Array.isArray(value) ? value.join(" to ") : value;
+    return `Filter applied: ${field} ${operator} ${valueStr}. The dashboard will update to reflect this filter.`;
+  },
+});
+
+const highlight_period = tool({
+  name: "highlight_period",
+  description:
+    "Highlight a time period on the dashboard charts to draw attention to a specific date range.",
+  schema: z.object({
+    start: z.string().describe("Start date in ISO format (YYYY-MM-DD)"),
+    end: z.string().describe("End date in ISO format (YYYY-MM-DD)"),
+    color: z
+      .enum(["blue", "red", "yellow"])
+      .optional()
+      .describe("Highlight color. Defaults to blue."),
+    label: z
+      .string()
+      .optional()
+      .describe("Optional label for the highlighted period"),
+  }),
+  execute: async ({ start, end, color: _color, label }) => {
+    const suffix = label ? ` (${label})` : "";
+    return `Highlighted period ${start} to ${end}${suffix} on the dashboard charts.`;
+  },
+});
+
+const sql_analyst = createAgent({
+  instructions: [
+    "You are a SQL expert for NYC taxi trip data (`samples.nyctaxi.trips`).",
+    "Write Databricks SQL to answer the user's question and summarize the results clearly.",
+    "IMPORTANT: The dataset only contains trips from 2016. Always add `WHERE tpep_pickup_datetime >= '2016-01-01' AND tpep_pickup_datetime < '2017-01-01'` unless the user specifies a narrower date range within 2016.",
+    "If the user asks about dates outside 2016, say the dataset only covers 2016.",
+    "Available columns: tpep_pickup_datetime, tpep_dropoff_datetime, trip_distance, fare_amount, pickup_zip, dropoff_zip.",
+  ].join(" "),
+  tools: {
+    ...fromPlugin(analytics),
+  },
+});
+
+const dashboard_pilot = createAgent({
+  instructions: [
+    "You are the Smart Dashboard pilot. You do not query data — you manipulate the UI.",
+    "Use `apply_filter` to filter the dashboard by date range, zone, or fare range.",
+    "Use `highlight_period` to highlight a time range on the charts.",
+    "When the user asks to 'show me', 'filter to', or 'highlight' something, pick the matching tool and call it.",
+    "Always briefly state what you did after applying an action.",
+  ].join(" "),
+  tools: {
+    apply_filter,
+    highlight_period,
+  },
+});
+
 createApp({
   plugins: [
     server(),
@@ -104,7 +191,12 @@ createApp({
     }),
     jobs(),
     serving(),
-    agents({ agents: { helper } }),
+    agents({
+      agents: { helper, sql_analyst, dashboard_pilot },
+      // `query` (markdown dispatcher) + `sql_analyst` + `dashboard_pilot`
+      // wire the /smart-dashboard route. `insights` and `anomaly` are
+      // ephemeral markdown agents auto-fired by the route's AgentSidebar.
+    }),
     // TODO: re-enable once vector-search is exported from @databricks/appkit
     // vectorSearch({
     //   indexes: {
