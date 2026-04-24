@@ -242,8 +242,6 @@ const save_view = tool({
   }),
   execute: async ({ name, description }) => {
     const suffix = description ? `: ${description}` : "";
-    // Stub for the demo. A real impl would insert into a views table.
-    console.log(`[save_view] Saving view "${name}"${suffix}`);
     return `Saved view "${name}"${suffix}.`;
   },
 });
@@ -525,7 +523,6 @@ createApp({
             metadata,
           });
         } catch (err) {
-          console.error("[save-view] upload failed:", err);
           const msg = err instanceof Error ? err.message : String(err);
           res.status(500).json({ error: `Upload failed: ${msg}` });
         }
@@ -612,24 +609,36 @@ createApp({
         }
         try {
           const volume = appkit.files("files").asUser(req);
-          const contents = await volume.download(path);
-          res.setHeader("Content-Type", "image/png");
-          res.setHeader("Cache-Control", "private, max-age=60");
-          if (contents instanceof Uint8Array || Buffer.isBuffer(contents)) {
-            res.end(contents);
-          } else if (typeof contents === "string") {
-            res.end(contents);
-          } else {
-            // ReadableStream fallback
-            const reader = (contents as ReadableStream<Uint8Array>).getReader();
-            const chunks: Uint8Array[] = [];
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              if (value) chunks.push(value);
-            }
-            res.end(Buffer.concat(chunks));
+          /**
+           * Databricks `FilesAPI.download` returns a wrapper:
+           *   { contents: ReadableStream, "content-type": string, ... }
+           * NOT the stream itself. We must unwrap `.contents` and drain it
+           * before writing to the Express response. Using the server-reported
+           * content-type (our captures are JPEG under a `.png` key, historical).
+           */
+          const response = (await volume.download(path)) as unknown as {
+            contents?: ReadableStream<Uint8Array>;
+            "content-type"?: string;
+          };
+          const stream = response.contents;
+          if (!stream) {
+            res.status(404).json({ error: "empty download response" });
+            return;
           }
+          const chunks: Uint8Array[] = [];
+          const reader = stream.getReader();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) chunks.push(value);
+          }
+          const body = Buffer.concat(chunks);
+          res.setHeader(
+            "Content-Type",
+            response["content-type"] ?? "image/png",
+          );
+          res.setHeader("Cache-Control", "private, max-age=60");
+          res.end(body);
         } catch (err) {
           console.error("[saved-view-png] fetch failed:", err);
           const msg = err instanceof Error ? err.message : String(err);
