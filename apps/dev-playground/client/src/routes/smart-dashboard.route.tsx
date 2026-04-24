@@ -148,26 +148,36 @@ function SmartDashboardRoute() {
 
       // Capture pending approvals and pin them to the user turn that
       // triggered them so the ChatDrawer can render the card inline.
-      if (
-        event.type === "appkit.approval_pending" &&
-        event.approval_id &&
-        event.stream_id &&
-        event.tool_name
-      ) {
-        const pinnedToMessageId = lastUserMessageIdRef.current;
-        setPendingApprovals((prev) => [
-          ...prev,
-          {
-            approvalId: event.approval_id as string,
-            streamId: event.stream_id as string,
-            toolName: event.tool_name as string,
-            args: event.args,
-            annotations: event.annotations,
-            ...(pinnedToMessageId
-              ? { _pinnedToMessageId: pinnedToMessageId }
-              : {}),
-          } as PendingApproval & { _pinnedToMessageId?: string },
-        ]);
+      if (event.type === "appkit.approval_pending") {
+        const e = event as SSEEvent & {
+          streamId?: string;
+          toolName?: string;
+        };
+        const approvalId = e.approval_id;
+        const streamId = e.stream_id ?? e.streamId;
+        const toolName = e.tool_name ?? e.toolName;
+        if (
+          typeof approvalId === "string" &&
+          approvalId &&
+          toolName &&
+          typeof streamId === "string" &&
+          streamId
+        ) {
+          const pinnedToMessageId = lastUserMessageIdRef.current;
+          setPendingApprovals((prev) => [
+            ...prev,
+            {
+              approvalId,
+              streamId,
+              toolName,
+              args: e.args,
+              annotations: e.annotations,
+              ...(pinnedToMessageId
+                ? { _pinnedToMessageId: pinnedToMessageId }
+                : {}),
+            } as PendingApproval & { _pinnedToMessageId?: string },
+          ]);
+        }
       }
 
       // Stream assistant text into the in-progress assistant message.
@@ -223,13 +233,58 @@ function SmartDashboardRoute() {
     [send],
   );
 
-  const handleLoadSavedView = useCallback(
-    (view: SavedView) => {
-      const name = view.metadata.name ?? "saved view";
-      dispatchToAgent(`Load the saved view '${name}'`);
-    },
-    [dispatchToAgent],
-  );
+  /**
+   * Apply a saved view directly from its stored metadata. We don't round-trip
+   * through the agent here because the agent has no tool to fetch saved-view
+   * metadata — it would have to guess filters/highlights from the name alone.
+   * The client already holds the full authoritative state, so just apply it.
+   */
+  const handleLoadSavedView = useCallback((view: SavedView) => {
+    const meta = view.metadata;
+    const rawFilters = (meta.filters ?? {}) as Record<string, unknown>;
+    const nextFilters: DashboardFilters = {};
+    if (typeof rawFilters.date_from === "string")
+      nextFilters.date_from = rawFilters.date_from;
+    if (typeof rawFilters.date_to === "string")
+      nextFilters.date_to = rawFilters.date_to;
+    if (typeof rawFilters.pickup_zip === "string")
+      nextFilters.pickup_zip = rawFilters.pickup_zip;
+    if (typeof rawFilters.fare_min === "string")
+      nextFilters.fare_min = rawFilters.fare_min;
+    if (typeof rawFilters.fare_max === "string")
+      nextFilters.fare_max = rawFilters.fare_max;
+
+    const rawHighlights = Array.isArray(meta.highlights) ? meta.highlights : [];
+    const nextHighlights: Highlight[] = rawHighlights.flatMap((h) => {
+      if (typeof h !== "object" || h === null) return [];
+      const entry = h as Record<string, unknown>;
+      const start = entry.start;
+      const end = entry.end;
+      if (typeof start !== "string" || typeof end !== "string") return [];
+      const color: Highlight["color"] =
+        entry.color === "red" || entry.color === "yellow"
+          ? entry.color
+          : "blue";
+      const label = typeof entry.label === "string" ? entry.label : undefined;
+      return [{ start, end, color, label }];
+    });
+
+    setFilters(nextFilters);
+    setHighlights(nextHighlights);
+
+    const viewName = meta.name ?? "saved view";
+    const summary = [
+      Object.keys(nextFilters).length > 0
+        ? `${Object.keys(nextFilters).length} filter(s)`
+        : null,
+      nextHighlights.length > 0
+        ? `${nextHighlights.length} highlight(s)`
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" + ");
+    setLastAction(`Loaded "${viewName}"${summary ? ` (${summary})` : ""}`);
+  }, []);
 
   const handleSavedNotification = useCallback(
     (info: { name: string; volumePath: string }) => {
