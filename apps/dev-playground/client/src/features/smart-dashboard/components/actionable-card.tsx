@@ -26,9 +26,21 @@ interface ActionableCardProps {
   onAsk: (prompt: string) => void;
 }
 
+// Backgrounds are written as arbitrary 8-digit hex (e.g. `bg-[#eff6ff80]`)
+// instead of Tailwind's `/N` alpha shorthand. Rationale: `bg-blue-50/50`
+// compiles in Tailwind v4 to a pair — an sRGB hex fallback and a
+// `@supports (color-mix)` override that re-mixes in oklab over the oklch
+// palette token. Browsers that support `color-mix` (recent Chrome/Arc) take
+// the oklab path; older embedded Chromiums (e.g. Cursor's built-in browser
+// at the time of writing) fall through to the sRGB hex. Because oklab and
+// sRGB interpolation produce visibly different tints — especially against
+// the dark `--card` token — the same card ends up looking different in each
+// browser. Pinning the colour to a literal hex (no `/N`, no @supports
+// override) keeps all browsers on the same sRGB path and therefore the same
+// visual result.
 const INSIGHT_STYLES = {
   border: "border-blue-200 dark:border-blue-900",
-  bg: "bg-blue-50/50 dark:bg-blue-950/30",
+  bg: "bg-[#eff6ff80] dark:bg-[#1624564d]",
   icon: "text-blue-500",
 };
 
@@ -38,21 +50,21 @@ const ANOMALY_STYLES: Record<
 > = {
   low: {
     border: "border-yellow-200 dark:border-yellow-900",
-    bg: "bg-yellow-50/50 dark:bg-yellow-950/30",
+    bg: "bg-[#fefce880] dark:bg-[#4320044d]",
     icon: "text-yellow-500",
     badge:
       "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/50 dark:text-yellow-400",
   },
   medium: {
     border: "border-orange-200 dark:border-orange-900",
-    bg: "bg-orange-50/50 dark:bg-orange-950/30",
+    bg: "bg-[#fff7ed80] dark:bg-[#4413064d]",
     icon: "text-orange-500",
     badge:
       "bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-400",
   },
   high: {
     border: "border-red-200 dark:border-red-900",
-    bg: "bg-red-50/50 dark:bg-red-950/30",
+    bg: "bg-[#fef2f280] dark:bg-[#4608094d]",
     icon: "text-red-500",
     badge: "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-400",
   },
