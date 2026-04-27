@@ -790,15 +790,16 @@ async function runPluginsSync(options: {
       const newNames = new Set(Object.keys(plugins));
       for (const name of oldNames) {
         if (newNames.has(name)) continue;
-        const oldPlugin = oldManifest.plugins[name];
+        const oldPlugin = oldManifest.plugins?.[name];
+        if (!oldPlugin || typeof oldPlugin !== "object") continue;
         const envVars: string[] = [];
         for (const res of [
           ...(oldPlugin.resources?.required ?? []),
           ...(oldPlugin.resources?.optional ?? []),
         ]) {
-          if (res.fields) {
+          if (res?.fields) {
             for (const field of Object.values(res.fields)) {
-              if (field.env) envVars.push(field.env);
+              if (field?.env) envVars.push(field.env);
             }
           }
         }
