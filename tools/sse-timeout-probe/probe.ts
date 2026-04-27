@@ -32,10 +32,16 @@ interface ProbeConfig {
   jsonOutput: boolean;
 }
 
-interface ProbeResult {
+export interface ProbeResult {
   targetDurationMs: number;
   actualLifetimeMs: number;
-  outcome: "completed" | "server-close" | "network-error" | "client-hard-timeout";
+  outcome:
+    | "completed"
+    | "server-close"
+    | "network-error"
+    | "client-hard-timeout"
+    | "auth-redirect"
+    | "wrong-content-type";
   detail?: string;
   bytesReceived: number;
   firstByteMs?: number;
@@ -46,13 +52,56 @@ interface ProbeResult {
 // the target counts as completed.
 const COMPLETION_TOLERANCE_MS = 500;
 
+// Sentinel attached to AbortController.abort(reason) when the client-side
+// safety timer fires. Node 22's fetch throws this reason DIRECTLY (not as an
+// AbortError with a `.cause` chain), so callers must compare against it via
+// signal.reason or a reference-equality check on the thrown value.
+export const PROBE_HARD_TIMEOUT = Symbol("probe-hard-timeout");
+
+/**
+ * Classify an exception thrown by `fetch` (or by the body reader) into a
+ * ProbeResult outcome. Pure / side-effect-free so it can be unit-tested
+ * without network IO.
+ *
+ * @param err     The thrown value.
+ * @param signal  The AbortSignal that was passed to fetch. Its `.reason` is
+ *                authoritative for distinguishing user-aborts from network
+ *                errors.
+ * @param streamStarted  Whether we already read at least one byte of the SSE
+ *                       body. Mid-stream proxy resets are reported as
+ *                       `server-close`; failures before any bytes arrive are
+ *                       `network-error`.
+ */
+export function classifyFetchError(
+  err: unknown,
+  signal: AbortSignal,
+  streamStarted: boolean,
+): { outcome: ProbeResult["outcome"]; detail: string } {
+  if (signal.aborted && signal.reason === PROBE_HARD_TIMEOUT) {
+    return {
+      outcome: "client-hard-timeout",
+      detail:
+        "client-side hard-timeout fired (server never closed the connection)",
+    };
+  }
+  const e = err as Error & { cause?: { message?: string; code?: string } };
+  // Node's native fetch wraps the underlying socket error in `cause`; surface
+  // the inner message instead of an opaque "fetch failed".
+  const detail = e?.cause?.message ?? e?.message ?? String(err);
+  return {
+    outcome: streamStarted ? "server-close" : "network-error",
+    detail,
+  };
+}
+
 function parseArgs(argv: string[]): ProbeConfig {
   const args = new Map<string, string>();
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a.startsWith("--")) {
       const key = a.slice(2);
-      const value = argv[i + 1] && !argv[i + 1].startsWith("--") ? argv[++i] : "true";
+      const value =
+        argv[i + 1] && !argv[i + 1].startsWith("--") ? argv[++i] : "true";
       args.set(key, value);
     }
   }
@@ -89,12 +138,20 @@ function parseArgs(argv: string[]): ProbeConfig {
     }
   }
 
-  const durations = (
-    args.get("durations") ?? "30000,60000,90000,120000,150000,180000,240000,300000"
-  )
+  const rawDurations =
+    args.get("durations") ??
+    "30000,60000,90000,120000,150000,180000,240000,300000";
+  const durations = rawDurations
     .split(",")
     .map((s) => Number.parseInt(s.trim(), 10))
     .filter((n) => Number.isFinite(n) && n > 0);
+  if (durations.length === 0) {
+    process.stderr.write(
+      `--durations resolved to an empty list (input: "${rawDurations}"). ` +
+        "Provide one or more positive integer milliseconds.\n",
+    );
+    process.exit(2);
+  }
 
   return {
     baseUrl: args.get("base-url")!.replace(/\/$/, ""),
@@ -106,14 +163,20 @@ function parseArgs(argv: string[]): ProbeConfig {
   };
 }
 
-async function probeOnce(config: ProbeConfig, targetDurationMs: number): Promise<ProbeResult> {
+export async function probeOnce(
+  config: ProbeConfig,
+  targetDurationMs: number,
+): Promise<ProbeResult> {
   const url = new URL(config.path, config.baseUrl);
   url.searchParams.set("hold-ms", String(targetDurationMs));
   url.searchParams.set("heartbeat-ms", String(config.heartbeatMs));
 
   const start = performance.now();
   const controller = new AbortController();
-  const hardTimeout = setTimeout(() => controller.abort(new Error("probe-hard-timeout")), targetDurationMs + 15_000);
+  const hardTimeout = setTimeout(
+    () => controller.abort(PROBE_HARD_TIMEOUT),
+    targetDurationMs + 15_000,
+  );
 
   let bytesReceived = 0;
   let firstByteMs: number | undefined;
@@ -129,7 +192,26 @@ async function probeOnce(config: ProbeConfig, targetDurationMs: number): Promise
         ...config.headers,
       },
       signal: controller.signal,
+      // Don't follow redirects: oauth2-proxy will 302 to a login page when
+      // the session cookie has expired, and following that would mask an
+      // auth error as a short-lived "stream".
+      redirect: "manual",
     });
+
+    if (
+      resp.type === "opaqueredirect" ||
+      (resp.status >= 300 && resp.status < 400)
+    ) {
+      return {
+        targetDurationMs,
+        actualLifetimeMs: performance.now() - start,
+        outcome: "auth-redirect",
+        detail: `HTTP ${resp.status} ${resp.statusText} -> ${
+          resp.headers.get("location") ?? "(no Location header)"
+        }`,
+        bytesReceived: 0,
+      };
+    }
 
     if (!resp.ok) {
       return {
@@ -137,6 +219,17 @@ async function probeOnce(config: ProbeConfig, targetDurationMs: number): Promise
         actualLifetimeMs: performance.now() - start,
         outcome: "server-close",
         detail: `HTTP ${resp.status} ${resp.statusText}`,
+        bytesReceived: 0,
+      };
+    }
+
+    const ct = resp.headers.get("content-type") ?? "";
+    if (!ct.toLowerCase().startsWith("text/event-stream")) {
+      return {
+        targetDurationMs,
+        actualLifetimeMs: performance.now() - start,
+        outcome: "wrong-content-type",
+        detail: `expected text/event-stream, got "${ct || "(none)"}"`,
         bytesReceived: 0,
       };
     }
@@ -155,24 +248,26 @@ async function probeOnce(config: ProbeConfig, targetDurationMs: number): Promise
     // eslint-disable-next-line no-constant-condition
     while (true) {
       const { value, done } = await reader.read();
-      if (firstByteMs === undefined && value) firstByteMs = performance.now() - start;
+      if (firstByteMs === undefined && value)
+        firstByteMs = performance.now() - start;
       if (done) {
         const lifetimeMs = performance.now() - start;
         outcome =
-          lifetimeMs >= targetDurationMs - COMPLETION_TOLERANCE_MS ? "completed" : "server-close";
+          lifetimeMs >= targetDurationMs - COMPLETION_TOLERANCE_MS
+            ? "completed"
+            : "server-close";
         break;
       }
       if (value) bytesReceived += value.byteLength;
     }
   } catch (err) {
-    const e = err as Error;
-    if (e.name === "AbortError" && (e as Error & { cause?: Error }).cause?.message === "probe-hard-timeout") {
-      outcome = "client-hard-timeout";
-      detail = "client-side hard-timeout fired (server never closed the connection)";
-    } else {
-      outcome = "network-error";
-      detail = e.message;
-    }
+    const classified = classifyFetchError(
+      err,
+      controller.signal,
+      bytesReceived > 0,
+    );
+    outcome = classified.outcome;
+    detail = classified.detail;
   } finally {
     clearTimeout(hardTimeout);
   }
@@ -198,9 +293,15 @@ async function main(): Promise<void> {
   const config = parseArgs(process.argv.slice(2));
 
   if (!config.jsonOutput) {
-    process.stdout.write(`sse-timeout-probe → ${config.baseUrl}${config.path}\n`);
-    process.stdout.write(`  durations: ${config.durationsMs.map((d) => `${d / 1000}s`).join(", ")}\n`);
-    process.stdout.write(`  heartbeat: ${config.heartbeatMs === 0 ? "none (fully idle)" : `${config.heartbeatMs}ms`}\n\n`);
+    process.stdout.write(
+      `sse-timeout-probe → ${config.baseUrl}${config.path}\n`,
+    );
+    process.stdout.write(
+      `  durations: ${config.durationsMs.map((d) => `${d / 1000}s`).join(", ")}\n`,
+    );
+    process.stdout.write(
+      `  heartbeat: ${config.heartbeatMs === 0 ? "none (fully idle)" : `${config.heartbeatMs}ms`}\n\n`,
+    );
   }
 
   for (const duration of config.durationsMs) {
@@ -213,7 +314,15 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  process.stderr.write(`probe failed: ${(err as Error).message}\n`);
-  process.exit(1);
-});
+// Only run as a CLI when invoked directly. When imported by tests, this
+// guard prevents `parseArgs` from blowing up on missing --base-url.
+const invokedDirectly =
+  typeof require !== "undefined"
+    ? require.main === module
+    : import.meta.url === `file://${process.argv[1]}`;
+if (invokedDirectly) {
+  main().catch((err) => {
+    process.stderr.write(`probe failed: ${(err as Error).message}\n`);
+    process.exit(1);
+  });
+}
