@@ -117,12 +117,26 @@ export interface FilePreview extends FileMetadata {
  *   an HTTP route handler execute as the end user (the route wires the
  *   request token into a `runInUserContext` scope before calling SDK code).
  *
- * `asUser(req)` re-wraps the API with the real user identity from the
- * request — useful for per-user policy checks when calling the API outside
- * an HTTP route. In production it throws `AuthenticationError.missingToken`
- * when the `x-forwarded-user` header is missing; in development
- * (`NODE_ENV === "development"`) it falls back to the service principal so
- * local testing without a reverse proxy continues to work.
+ * `asUser(req)` is a hard override: regardless of the volume's `auth`
+ * setting (SP or OBO), the returned API runs every SDK call inside
+ * `runInUserContext` with the user identity extracted from the request,
+ * so the underlying `WorkspaceClient` is the user-token client. This makes
+ * `appKit.files("sp-vol").asUser(req).list()` actually execute as the end
+ * user, even on a service-principal-configured volume.
+ *
+ * In production `asUser` throws `AuthenticationError.missingToken` when the
+ * `x-forwarded-user` header is missing. In development
+ * (`NODE_ENV === "development"`) it logs a warning and falls back to the
+ * service principal so local testing without a reverse proxy continues to
+ * work — in that fallback no `runInUserContext` wrap is applied and SDK
+ * calls execute as the SP, identical to pre-OBO behavior.
+ *
+ * @remarks Behavior change: prior to OBO support, `asUser(req)` only
+ * influenced the policy user passed to the volume policy — the underlying
+ * SDK call still ran as the service principal. With OBO support landed,
+ * `asUser` now also forces the SDK call to run as the user. Any caller
+ * that relied on the pre-OBO behavior (policy sees user, SDK runs as SP)
+ * must remove the `asUser` wrap.
  */
 export type VolumeHandle = VolumeAPI & {
   asUser: (req: IAppRequest) => VolumeAPI;

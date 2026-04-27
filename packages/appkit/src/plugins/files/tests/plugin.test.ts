@@ -2855,6 +2855,194 @@ describe("FilesPlugin", () => {
     });
   });
 
+  describe("VolumeHandle.asUser SDK identity", () => {
+    /**
+     * Replace the default `getWorkspaceClient` mock with the real
+     * implementation so that calls inside `runInUserContext` return the
+     * UserContext's `client` (the user-token-authenticated WorkspaceClient)
+     * while calls outside the user context fall back to the
+     * service-principal client from `ServiceContext.get()`.
+     */
+    async function useRealGetWorkspaceClient() {
+      const actual =
+        await vi.importActual<typeof import("../../../context")>(
+          "../../../context",
+        );
+      const ctx = await import("../../../context");
+      vi.mocked(ctx.getWorkspaceClient).mockImplementation(
+        actual.getWorkspaceClient,
+      );
+    }
+
+    /**
+     * Build a minimal mock express.Request with the supplied headers. Only
+     * `header(name)` is consulted by `VolumeHandle.asUser`.
+     */
+    function mockReq(headers: Record<string, string>) {
+      return {
+        header: (name: string) => headers[name.toLowerCase()],
+      } as any;
+    }
+
+    let originalNodeEnv: string | undefined;
+
+    beforeEach(async () => {
+      originalNodeEnv = process.env.NODE_ENV;
+      // Restore the default `getWorkspaceClient(() => mockClient)` mock in
+      // case a previous test in this block called `useRealGetWorkspaceClient`
+      // — Vitest's `vi.clearAllMocks` clears call history but not impls.
+      const ctx = await import("../../../context");
+      vi.mocked(ctx.getWorkspaceClient).mockImplementation(
+        () => mockClient as any,
+      );
+    });
+
+    afterEach(() => {
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+    });
+
+    test("asUser on SP-configured volume → SDK call goes through user-token client (hard override)", async () => {
+      // Use the real ALS-driven `getWorkspaceClient` so that calls inside
+      // `runInUserContext` resolve to the wrapped UserContext's client and
+      // calls outside fall through to ServiceContext.client (which lacks
+      // `.files` — making any leak through the SP path crash loudly).
+      await useRealGetWorkspaceClient();
+
+      // Distinct user-token client whose `listDirectoryContents` is the
+      // one we expect `asUser` to route through.
+      const userListSpy = vi.fn(async function* () {
+        yield { name: "user.txt", path: "/user.txt", is_directory: false };
+      });
+      const userClient = {
+        config: {
+          host: "https://test.databricks.com",
+          authenticate: vi.fn(),
+        },
+        files: { listDirectoryContents: userListSpy },
+      };
+
+      // Wire `_buildUserContextOrNull → ServiceContext.createUserContext` to
+      // return a UserContext whose `client` is our user-token client.
+      serviceContextMock.createUserContextSpy.mockImplementation(
+        (_token: string, userId: string) => ({
+          client: userClient as any,
+          userId,
+          warehouseId: serviceContextMock.serviceContext.warehouseId,
+          workspaceId: serviceContextMock.serviceContext.workspaceId,
+          isUserContext: true,
+        }),
+      );
+
+      // Set the SP volume's default path BEFORE plugin construction so the
+      // connector picks it up.
+      process.env.DATABRICKS_VOLUME_SP_VOL = "/Volumes/c/s/sp";
+      try {
+        const plugin = new FilesPlugin({
+          volumes: {
+            // SP-configured volume (the auth: "service-principal" default).
+            sp_vol: { auth: "service-principal", policy: policy.allowAll() },
+            uploads: {},
+            exports: {},
+          },
+        });
+
+        const handle = plugin.exports()("sp_vol");
+        const userApi = handle.asUser(
+          mockReq({
+            "x-forwarded-access-token": "alice-token",
+            "x-forwarded-user": "alice@example.com",
+          }),
+        );
+
+        // Materialize the async iterator — the connector iterates the SDK
+        // generator and aggregates results.
+        await userApi.list("subdir");
+
+        // The user-token client served the SDK call (proof the
+        // `runInUserContext` wrap took effect).
+        expect(userListSpy).toHaveBeenCalledTimes(1);
+        // Defense-in-depth: a UserContext was constructed for the request.
+        expect(serviceContextMock.createUserContextSpy).toHaveBeenCalledTimes(
+          1,
+        );
+      } finally {
+        delete process.env.DATABRICKS_VOLUME_SP_VOL;
+      }
+    });
+
+    test("programmatic call on OBO volume without asUser → no runInUserContext wrap; SDK runs through default getWorkspaceClient (SP at top level)", async () => {
+      // Discovery note: programmatic calls (no `req`) cannot synthesize a
+      // user identity. The OBO-volume "execute as user" behavior is wired
+      // through the HTTP route layer's `_runWithAuth`, which builds a
+      // UserContext from the request headers. There is no equivalent for
+      // the programmatic path — `appKit.files("obo-vol").list()` (no
+      // `asUser`) executes against whatever `getWorkspaceClient()` returns
+      // in the current ALS scope, which at the top level is the SP client.
+      // This test pins that reality. The task spec's framing of "OBO
+      // default executes as user via volume default" is HTTP-only.
+
+      // We rely on the default mocked `getWorkspaceClient(() => mockClient)`
+      // so the SP client returned is the file-aware fixture.
+      const spListSpy = vi.fn(async function* () {
+        yield { name: "sp.txt", path: "/sp.txt", is_directory: false };
+      });
+      mockClient.files.listDirectoryContents.mockImplementation(spListSpy);
+
+      // Spy on createUserContext to confirm no wrap happened.
+      serviceContextMock.createUserContextSpy.mockClear();
+
+      process.env.DATABRICKS_VOLUME_OBO_VOL = "/Volumes/c/s/obo";
+      try {
+        const plugin = new FilesPlugin({
+          volumes: {
+            obo_vol: {
+              auth: "on-behalf-of-user",
+              policy: policy.allowAll(),
+            },
+            uploads: {},
+            exports: {},
+          },
+        });
+
+        const handle = plugin.exports()("obo_vol");
+        await handle.list("subdir"); // no asUser; pure programmatic call
+
+        // The default `mockClient` (SP fixture) served the call. No
+        // user-context wrap exists at the top of the call stack — the OBO
+        // semantic only applies on the HTTP route path.
+        expect(spListSpy).toHaveBeenCalledTimes(1);
+        expect(serviceContextMock.createUserContextSpy).not.toHaveBeenCalled();
+      } finally {
+        delete process.env.DATABRICKS_VOLUME_OBO_VOL;
+      }
+    });
+
+    test("programmatic call on SP volume without asUser → SDK runs as SP; runInUserContext is not invoked (status-quo guard)", async () => {
+      // Default mocked `getWorkspaceClient(() => mockClient)`; no
+      // ALS-driven dispatch.
+      const spListSpy = vi.fn(async function* () {
+        yield { name: "sp.txt", path: "/sp.txt", is_directory: false };
+      });
+      mockClient.files.listDirectoryContents.mockImplementation(spListSpy);
+
+      serviceContextMock.createUserContextSpy.mockClear();
+
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handle = plugin.exports()("uploads");
+      await handle.list("subdir"); // no asUser; pure SP path
+
+      // The SP client served the SDK call.
+      expect(spListSpy).toHaveBeenCalledTimes(1);
+      // No UserContext was ever built — the SP default path shouldn't go
+      // anywhere near `createUserContext`.
+      expect(serviceContextMock.createUserContextSpy).not.toHaveBeenCalled();
+    });
+  });
+
   describe("Upload Stream Size Limiter", () => {
     test("stream under limit passes through all chunks", async () => {
       const maxSize = 100;

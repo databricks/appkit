@@ -1101,6 +1101,38 @@ export class FilesPlugin extends Plugin {
   }
 
   /**
+   * Wrap each `VolumeAPI` method so its execution runs inside
+   * `runInUserContext(userCtx, ...)`. Used by `VolumeHandle.asUser(req)` to
+   * force the SDK identity to the end user regardless of the volume's
+   * `auth` setting. The policy check baked into each method (via
+   * `createVolumeAPI`) runs inside the same scope, so `getCurrentUserId()`
+   * and any cache `userKey` derived from it also resolve to the user.
+   */
+  private _wrapVolumeAPIInUserContext(
+    api: VolumeAPI,
+    userCtx: UserContext,
+  ): VolumeAPI {
+    const wrap =
+      <Args extends unknown[], R>(
+        fn: (...args: Args) => Promise<R>,
+      ): ((...args: Args) => Promise<R>) =>
+      (...args: Args) =>
+        runInUserContext(userCtx, () => fn(...args));
+
+    return {
+      list: wrap(api.list),
+      read: wrap(api.read),
+      download: wrap(api.download),
+      exists: wrap(api.exists),
+      metadata: wrap(api.metadata),
+      upload: wrap(api.upload),
+      createDirectory: wrap(api.createDirectory),
+      delete: wrap(api.delete),
+      preview: wrap(api.preview),
+    };
+  }
+
+  /**
    * Creates a VolumeAPI for a specific volume key.
    *
    * Enforces the volume's policy before each operation.
@@ -1196,14 +1228,18 @@ export class FilesPlugin extends Plugin {
    * service principal. OBO volumes (`auth: "on-behalf-of-user"`) executed
    * through the HTTP routes run as the end user; for programmatic calls
    * outside a route, use `asUser(req)` to opt into per-user execution.
-   * Policies control per-user access in either mode.
+   * `asUser(req)` is a hard override at the SDK level: it forces every
+   * subsequent call to execute as the end user inside `runInUserContext`,
+   * regardless of the volume's `auth` setting. Policies control per-user
+   * access in either mode.
    *
    * @example
    * ```ts
    * // Service principal access
    * appKit.files("uploads").list()
    *
-   * // With policy: pass user identity for access control
+   * // With policy: pass user identity for access control. The SDK call
+   * // also executes as the user (not the service principal).
    * appKit.files("uploads").asUser(req).list()
    * ```
    */
@@ -1229,7 +1265,17 @@ export class FilesPlugin extends Plugin {
         ...spApi,
         asUser: (req: express.Request) => {
           const user = this._extractUser(req);
-          return this.createVolumeAPI(volumeKey, user);
+          const api = this.createVolumeAPI(volumeKey, user);
+          // Force OBO at the SDK level regardless of the volume's `auth`
+          // setting: each method runs inside `runInUserContext` so
+          // `getWorkspaceClient()` returns the user-token client. When no
+          // user token is available (only reachable in dev mode after the
+          // strict `_extractUser` falls back to the SP identity), we skip
+          // the wrap so the SDK call continues to execute as the SP — the
+          // pre-OBO behavior.
+          const userCtx = this._buildUserContextOrNull(req);
+          if (!userCtx) return api;
+          return this._wrapVolumeAPIInUserContext(api, userCtx);
         },
       };
     };
