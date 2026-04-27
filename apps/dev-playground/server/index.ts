@@ -330,7 +330,7 @@ const dashboard_pilot = createAgent({
 
 createApp({
   plugins: [
-    server({ autoStart: false }),
+    server(),
     reconnect(),
     telemetryExamples(),
     analytics({}),
@@ -385,9 +385,8 @@ createApp({
     // }),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
-}).then((appkit) => {
-  appkit.server
-    .extend((app) => {
+  async onPluginsReady(appkit) {
+    appkit.server.extend((app) => {
       app.get("/sp", (_req, res) => {
         appkit.analytics
           .query("SELECT * FROM samples.nyctaxi.trips;")
@@ -681,9 +680,9 @@ createApp({
           res.status(404).json({ error: msg });
         }
       });
-    })
-    .start();
-});
+    });
+  },
+}).catch(console.error);
 
 /**
  * Heuristic match for Databricks Files API's "directory not found" error.
