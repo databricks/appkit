@@ -222,6 +222,235 @@ describe("Analytics Plugin", () => {
       expect((plugin as any).app.getAppQuery).not.toHaveBeenCalled();
     });
 
+    test("/query/:query_key should return canonical 400 when a parameter value is an array", async () => {
+      // The body schema restricts parameter values to JSON primitives
+      // (string, number, boolean, null) or SQLTypeMarker objects. Arrays
+      // are neither — they have to be rejected at the HTTP boundary so
+      // oversized nested payloads never reach the query processor.
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      const executeMock = vi.fn();
+      (plugin as any).SQLClient.executeStatement = executeMock;
+      (plugin as any).app.getAppQuery = vi.fn();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: { key: ["array", "value"] } },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: "Invalid request body",
+          code: "VALIDATION_ERROR",
+        }),
+      );
+      expect(executeMock).not.toHaveBeenCalled();
+      expect((plugin as any).app.getAppQuery).not.toHaveBeenCalled();
+    });
+
+    test("/query/:query_key should accept SQLTypeMarker values in parameters", async () => {
+      // The body schema accepts SQLTypeMarker objects (sql.string(),
+      // sql.number(), etc.) at value position alongside JSON primitives.
+      // The handler must run, the marker must pass through to the query
+      // processor, and the SQL parameter list must reflect the marker's
+      // type.
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM users WHERE id = :user_id",
+        isAsUser: false,
+      });
+
+      const executeMock = vi.fn().mockResolvedValue({
+        result: { data: [{ id: 5 }] },
+      });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "user_lookup" },
+        body: { parameters: { user_id: sql.number(5) } },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      // Handler reaches SQL execution — marker passes through validation.
+      expect(executeMock).toHaveBeenCalledTimes(1);
+      expect(executeMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          statement: "SELECT * FROM users WHERE id = :user_id",
+          parameters: expect.arrayContaining([
+            expect.objectContaining({
+              name: "user_id",
+              value: "5",
+              type: "NUMERIC",
+            }),
+          ]),
+        }),
+        expect.any(AbortSignal),
+      );
+    });
+
+    test("/query/:query_key should return canonical 400 for malformed marker (unknown __sql_type)", async () => {
+      // Markers with an unknown discriminant value must be rejected by
+      // the schema. The handler body must never run.
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      const executeMock = vi.fn();
+      (plugin as any).SQLClient.executeStatement = executeMock;
+      (plugin as any).app.getAppQuery = vi.fn();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: {
+          parameters: { user_id: { __sql_type: "NOT_A_TYPE", value: "5" } },
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: "Invalid request body",
+          code: "VALIDATION_ERROR",
+        }),
+      );
+      expect(executeMock).not.toHaveBeenCalled();
+      expect((plugin as any).app.getAppQuery).not.toHaveBeenCalled();
+    });
+
+    test("/query/:query_key should return canonical 400 for marker with extra unknown field", async () => {
+      // The marker schema is `.strict()` — unknown fields must be
+      // rejected so callers can't smuggle additional keys past
+      // validation.
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      const executeMock = vi.fn();
+      (plugin as any).SQLClient.executeStatement = executeMock;
+      (plugin as any).app.getAppQuery = vi.fn();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: {
+          parameters: {
+            user_id: { __sql_type: "STRING", value: "x", evil: true },
+          },
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: "Invalid request body",
+          code: "VALIDATION_ERROR",
+        }),
+      );
+      expect(executeMock).not.toHaveBeenCalled();
+      expect((plugin as any).app.getAppQuery).not.toHaveBeenCalled();
+    });
+
+    test("/query/:query_key should return canonical 400 for oversized marker value", async () => {
+      // Marker `value` is capped at 4096 characters. Oversized payloads
+      // must be rejected at the HTTP boundary before the query processor
+      // ever sees them.
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      const executeMock = vi.fn();
+      (plugin as any).SQLClient.executeStatement = executeMock;
+      (plugin as any).app.getAppQuery = vi.fn();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: {
+          parameters: {
+            big: { __sql_type: "STRING", value: "a".repeat(4097) },
+          },
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: "Invalid request body",
+          code: "VALIDATION_ERROR",
+        }),
+      );
+      expect(executeMock).not.toHaveBeenCalled();
+      expect((plugin as any).app.getAppQuery).not.toHaveBeenCalled();
+    });
+
+    test("/query/:query_key should accept primitive values in parameters", async () => {
+      // JSON primitives (string, number, boolean, null) must continue to
+      // pass through validation alongside SQLTypeMarker shapes.
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT 1",
+        isAsUser: false,
+      });
+
+      const executeMock = vi.fn().mockResolvedValue({
+        result: { data: [{ id: 1 }] },
+      });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: {
+          parameters: {
+            str: "hello",
+            num: 42,
+            bool: true,
+            nullish: null,
+          },
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      // Validation lets the request through; the handler runs and tries
+      // to dispatch to executeStream.
+      expect((plugin as any).app.getAppQuery).toHaveBeenCalledTimes(1);
+    });
+
     test("/query/:query_key should apply format default of JSON when omitted", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();

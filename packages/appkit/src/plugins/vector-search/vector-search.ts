@@ -30,12 +30,16 @@ import type {
  */
 const searchFiltersSchema = z
   .record(
-    z.string(),
+    // Bound keys and string/array values so a client cannot send a
+    // megabyte-scale filter payload or balloon a single string entry.
+    z
+      .string()
+      .max(255),
     z.union([
-      z.string(),
+      z.string().max(1024),
       z.number(),
       z.boolean(),
-      z.array(z.union([z.string(), z.number()])),
+      z.array(z.union([z.string().max(1024), z.number()])).max(100),
     ]),
   )
   .refine((obj) => Object.keys(obj).length <= 50, {

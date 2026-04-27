@@ -475,6 +475,34 @@ describe("VectorSearchPlugin", () => {
         expect(mockRes.status).toHaveBeenCalledWith(400);
         expect(mockRequest).not.toHaveBeenCalled();
       });
+
+      it("rejects filter string value longer than 1024 characters", async () => {
+        const plugin = buildPlugin();
+        await plugin.setup();
+        const { router, getHandler } = createMockRouter();
+        plugin.injectRoutes(router);
+
+        const handler = getHandler("POST", "/:alias/query");
+        const mockReq = createMockRequest({
+          params: { alias: "products" },
+          body: {
+            queryText: "hello",
+            filters: { category: "a".repeat(1025) },
+          },
+        });
+        const mockRes = createMockResponse();
+
+        await handler(mockReq, mockRes);
+
+        expect(mockRes.status).toHaveBeenCalledWith(400);
+        expect(mockRes.json).toHaveBeenCalledWith(
+          expect.objectContaining({
+            error: "Invalid request body",
+            code: "VALIDATION_ERROR",
+          }),
+        );
+        expect(mockRequest).not.toHaveBeenCalled();
+      });
     });
 
     describe("POST /:alias/next-page", () => {

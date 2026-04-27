@@ -140,7 +140,9 @@ type SendMessageBody = z.infer<typeof sendMessageBody>;
 
 class MyPlugin extends Plugin {
   injectRoutes(router) {
-    this.route<SendMessageBody>(router, {
+    // TypeScript infers the body type from `sendMessageBody`'s output,
+    // so the explicit generic is unnecessary.
+    this.route(router, {
       name: "sendMessage",
       method: "post",
       path: "/messages",
@@ -180,7 +182,7 @@ On validation failure the framework responds with:
 - `issues` is included when `NODE_ENV !== "production"`. In production the `issues` field is omitted by default to avoid leaking schema internals. Set `exposeValidationErrors: true` on the route config to opt into including `issues` in production responses.
 
 ```typescript
-this.route<SendMessageBody>(router, {
+this.route(router, {
   name: "sendMessage",
   method: "post",
   path: "/messages",
@@ -189,6 +191,24 @@ this.route<SendMessageBody>(router, {
   handler: async (req, res) => { /* ... */ },
 });
 ```
+
+### When to opt into `exposeValidationErrors`
+
+`exposeValidationErrors: true` surfaces the full Standard Schema `issues` array to clients in every environment, including production. That array contains field names, types, constraint messages, and any refinement text your schema carries.
+
+**Security caveat — read before enabling.** Body validation runs BEFORE plugin-level authentication. Plugins typically authenticate inside the handler (for example with `this.asUser(req)`), but the route's `body` schema is evaluated before the handler is ever invoked. If you set `exposeValidationErrors: true` on an otherwise-protected route, **anonymous attackers in production can enumerate your schema** by submitting crafted payloads and reading the `issues` field of the resulting 400s. They can discover:
+
+- every field name in your schema,
+- the constraints on each field (`min(1)`, `max(4096)`, enum values, etc.),
+- the exact message text you configured in refinements (often useful reconnaissance in its own right).
+
+For most server-side routes the right default is to leave `exposeValidationErrors` unset. The server-side log is always populated with the full `issues` array keyed by `requestId`, so operators retain full diagnostics even when clients receive only the canonical error envelope.
+
+Opt in only when:
+
+- The route is intentionally public and pre-auth (for example a newsletter sign-up or a status-page feedback form), and
+- Field-level feedback is valuable to end users (clients can't easily guess how to fix their payload without it), and
+- The schema itself is not sensitive (no internal-only field names, no validation messages that hint at backend internals).
 
 ## Key extension points
 

@@ -59,6 +59,10 @@ class TestPlugin extends Plugin<BasePluginConfig> {
   // Expose protected route() for testing. Overload signatures mirror the
   // real `route()` so callers get the same TBody inference rules as
   // plugin authors see in production.
+  public exposedRoute<TBody>(
+    router: express.Router,
+    config: Omit<RouteConfig<TBody>, "body"> & { body?: undefined },
+  ): void;
   public exposedRoute<TSchema extends StandardSchemaV1<unknown, any>>(
     router: express.Router,
     config: RouteConfig<StandardSchemaV1.InferOutput<TSchema>> & {
@@ -67,13 +71,9 @@ class TestPlugin extends Plugin<BasePluginConfig> {
   ): void;
   public exposedRoute(
     router: express.Router,
-    config: Omit<RouteConfig<unknown>, "body"> & { body?: undefined },
-  ): void;
-  public exposedRoute(
-    router: express.Router,
     config:
       | (RouteConfig<any> & { body: StandardSchemaV1<unknown, any> })
-      | (Omit<RouteConfig<unknown>, "body"> & { body?: undefined }),
+      | (Omit<RouteConfig<any>, "body"> & { body?: undefined }),
   ): void {
     // biome-ignore lint/complexity/useLiteralKeys: calling protected member from subclass
     this["route"](router, config as any);
@@ -683,5 +683,175 @@ describe("route body validation", () => {
         handler: vi.fn(),
       }),
     ).toThrow(/Standard Schema v1 compliant/);
+  });
+
+  // Malformed validator results must not slip into the success path.
+  // These tests cover schemas that return shapes outside the Standard
+  // Schema discriminated union (neither a clean `{ value }` success nor a
+  // `{ issues: [nonEmpty] }` failure). A loose `if (result.issues)` check
+  // would misroute these and let `result.value === undefined` reach the
+  // handler; the wrapper must fail closed with a canonical 500.
+  test("malformed: returns canonical 500 when validator returns { issues: undefined }", async () => {
+    process.env.NODE_ENV = "development";
+    const plugin = createTestPlugin();
+    const { router, getHandler } = createMockRouter();
+
+    const malformed: StandardSchemaV1<unknown, unknown> = {
+      "~standard": {
+        version: 1,
+        vendor: "test",
+        // Intentionally malformed: `issues` present but undefined, no `value`.
+        validate: () => ({ issues: undefined }) as any,
+      },
+    };
+
+    const handlerSpy = vi.fn();
+
+    plugin.exposedRoute(router, {
+      name: "bad",
+      method: "post",
+      path: "/bad",
+      body: malformed,
+      handler: handlerSpy,
+    });
+
+    const handler = getHandler("POST", "/bad");
+    const originalBody = { sentinel: "should-not-be-mutated" };
+    const req = createMockRequest({ body: originalBody });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(handlerSpy).not.toHaveBeenCalled();
+    // req.body must not be mutated into the malformed value.
+    expect(req.body).toBe(originalBody);
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: "Internal validation error",
+        code: "VALIDATION_INTERNAL_ERROR",
+        requestId: expect.any(String),
+      }),
+    );
+  });
+
+  test("malformed: returns canonical 500 when validator returns {}", async () => {
+    process.env.NODE_ENV = "development";
+    const plugin = createTestPlugin();
+    const { router, getHandler } = createMockRouter();
+
+    const malformed: StandardSchemaV1<unknown, unknown> = {
+      "~standard": {
+        version: 1,
+        vendor: "test",
+        // Intentionally malformed: no `value`, no `issues`.
+        validate: () => ({}) as any,
+      },
+    };
+
+    const handlerSpy = vi.fn();
+
+    plugin.exposedRoute(router, {
+      name: "bad",
+      method: "post",
+      path: "/bad",
+      body: malformed,
+      handler: handlerSpy,
+    });
+
+    const handler = getHandler("POST", "/bad");
+    const originalBody = { sentinel: "should-not-be-mutated" };
+    const req = createMockRequest({ body: originalBody });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(handlerSpy).not.toHaveBeenCalled();
+    expect(req.body).toBe(originalBody);
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: "Internal validation error",
+        code: "VALIDATION_INTERNAL_ERROR",
+        requestId: expect.any(String),
+      }),
+    );
+  });
+
+  test("empty issues array counts as success: handler is called", async () => {
+    process.env.NODE_ENV = "development";
+    const plugin = createTestPlugin();
+    const { router, getHandler } = createMockRouter();
+
+    const emptyIssues: StandardSchemaV1<unknown, unknown> = {
+      "~standard": {
+        version: 1,
+        vendor: "test",
+        // Empty issues array is treated as success — "no issues found".
+        validate: () => ({ issues: [] }) as any,
+      },
+    };
+
+    const handlerSpy = vi.fn(async (_req: any, res: any) => {
+      res.status(200).json({ ok: true });
+    });
+
+    plugin.exposedRoute(router, {
+      name: "good",
+      method: "post",
+      path: "/good",
+      body: emptyIssues,
+      handler: handlerSpy,
+    });
+
+    const handler = getHandler("POST", "/good");
+    const req = createMockRequest({ body: { any: "thing" } });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(handlerSpy).toHaveBeenCalledTimes(1);
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  test("non-empty issues array is a validation failure (canonical 400)", async () => {
+    process.env.NODE_ENV = "development";
+    const plugin = createTestPlugin();
+    const { router, getHandler } = createMockRouter();
+
+    const failing: StandardSchemaV1<unknown, unknown> = {
+      "~standard": {
+        version: 1,
+        vendor: "test",
+        validate: () => ({
+          issues: [{ message: "nope", path: ["field"] }],
+        }),
+      },
+    };
+
+    const handlerSpy = vi.fn();
+
+    plugin.exposedRoute(router, {
+      name: "fail",
+      method: "post",
+      path: "/fail",
+      body: failing,
+      handler: handlerSpy,
+    });
+
+    const handler = getHandler("POST", "/fail");
+    const req = createMockRequest({ body: {} });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(handlerSpy).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: "Invalid request body",
+        code: "VALIDATION_ERROR",
+      }),
+    );
   });
 });

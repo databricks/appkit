@@ -22,13 +22,40 @@ import type { IAnalyticsConfig } from "./types";
  * Request body for POST /query/:query_key. Validated via Standard Schema
  * (Zod natively implements `~standard` from v3.24+). The `format` field
  * defaults to "JSON" via the schema so the handler sees a fully-populated
- * body with no manual fallback needed. `parameters` accepts any value
- * shape — per-query parameter schemas are the application's concern, not
- * the plugin's.
+ * body with no manual fallback needed.
+ *
+ * `parameters` accepts both JSON primitives (string, number, boolean,
+ * null) AND `SQLTypeMarker` objects produced by `sql.string()`,
+ * `sql.number()`, `sql.date()`, `sql.timestamp()`, `sql.boolean()`. The
+ * marker shape is `{ __sql_type, value }` and its `value` field is capped
+ * at 4096 characters. `.strict()` on the marker schema rejects unknown
+ * fields so callers can't smuggle additional keys past validation.
+ *
+ * Per-query parameter shape validation remains the application's concern;
+ * this schema is the minimum safety net the plugin enforces for every
+ * route — it caps total key count, value sizes, and rejects malformed
+ * markers up front so megabyte-scale payloads never reach the query
+ * processor.
  */
+const sqlTypeMarkerSchema = z
+  .object({
+    __sql_type: z.enum(["STRING", "NUMERIC", "BOOLEAN", "DATE", "TIMESTAMP"]),
+    value: z.string().max(4096),
+  })
+  .strict();
+
 const queryBodySchema = z.object({
   parameters: z
-    .record(z.string(), z.unknown())
+    .record(
+      z.string().max(255),
+      z.union([
+        z.string().max(4096),
+        z.number(),
+        z.boolean(),
+        z.null(),
+        sqlTypeMarkerSchema,
+      ]),
+    )
     .refine((obj) => Object.keys(obj).length <= 100, {
       message: "parameters may not contain more than 100 keys",
     })
@@ -208,8 +235,15 @@ export class AnalyticsPlugin extends Plugin {
     await executor.executeStream(
       res,
       async (signal) => {
-        // The body schema validates shape only; per-value SQL type checks
-        // happen inside QueryProcessor via isSQLTypeMarker.
+        // Body schema accepts string | number | boolean | null |
+        // SQLTypeMarker. `QueryProcessor.processQueryParams` is typed
+        // narrower — `Record<string, SQLTypeMarker | null | undefined>`
+        // — so we cast the validated input down to that shape. The
+        // processor's `isSQLTypeMarker` guard re-validates each value
+        // before trusting it: primitives reaching the processor today
+        // surface as a runtime ValidationError there. Bridging primitives
+        // to markers (or rejecting them at the handler) is a separate
+        // concern; see the corresponding test.
         const processedParams = await this.queryProcessor.processQueryParams(
           query,
           parameters as Record<string, SQLTypeMarker | null | undefined>,

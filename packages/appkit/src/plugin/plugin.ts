@@ -571,10 +571,14 @@ export abstract class Plugin<
    * `handler: (req: IAppRequestWithBody<TBody>, …)`. Without overloads,
    * plugin authors can pass a schema whose output diverges from the
    * declared handler body type; the compiler stays quiet and runtime
-   * narrowing silently disagrees. The overloads below tie `TBody` to the
-   * schema's `InferOutput` when `body` is present, so the handler always
-   * sees the schema's real output type. When `body` is absent, `TBody`
-   * resolves to `unknown` so handlers must narrow before use.
+   * narrowing silently disagrees.
+   *
+   * The schema-bearing overload ties `TBody` to the schema's `InferOutput`
+   * when `body` is present, so the handler always sees the schema's real
+   * output type. The body-less overload keeps a free `TBody` generic for
+   * backward compatibility with call sites that threaded a generic through
+   * `route<T>(...)` (historically that slot was abused for response-side
+   * typing — `RouteConfig<TBody = any>` default keeps this harmless).
    *
    * Note: `RouteConfig<TBody = any>` default is load-bearing for backward
    * compat with handlers typed as plain `express.Request`. DO NOT "fix"
@@ -584,6 +588,10 @@ export abstract class Plugin<
    * enforce that `TBody` equals `StandardSchemaV1.InferOutput<typeof body>`
    * when both are separate type parameters on the same function.
    */
+  protected route<TBody>(
+    router: express.Router,
+    config: Omit<RouteConfig<TBody>, "body"> & { body?: undefined },
+  ): void;
   protected route<TSchema extends StandardSchemaV1<unknown, any>>(
     router: express.Router,
     config: RouteConfig<StandardSchemaV1.InferOutput<TSchema>> & {
@@ -592,13 +600,9 @@ export abstract class Plugin<
   ): void;
   protected route(
     router: express.Router,
-    config: Omit<RouteConfig<unknown>, "body"> & { body?: undefined },
-  ): void;
-  protected route(
-    router: express.Router,
     config:
       | (RouteConfig<any> & { body: StandardSchemaV1<unknown, any> })
-      | (Omit<RouteConfig<unknown>, "body"> & { body?: undefined }),
+      | (Omit<RouteConfig<any>, "body"> & { body?: undefined }),
   ): void {
     const { name, method, path, handler } = config;
 
@@ -677,13 +681,40 @@ export abstract class Plugin<
         return;
       }
 
-      if (result.issues) {
+      // Strict discriminated-union shape check per the Standard Schema
+      // spec: only `{ value }` (with no issues or an empty issues array)
+      // is success; only `{ issues: [nonEmpty] }` is failure; anything
+      // else is a validator programmer error (malformed shape) that must
+      // route to a canonical 500 — never the success path, which would
+      // otherwise let a `result.value === undefined` crash the handler.
+      const resultObject =
+        typeof result === "object" && result !== null
+          ? (result as { value?: unknown; issues?: unknown })
+          : undefined;
+      const issuesField = resultObject?.issues;
+      const issuesArray: ReadonlyArray<StandardSchemaV1.Issue> | undefined =
+        Array.isArray(issuesField)
+          ? (issuesField as ReadonlyArray<StandardSchemaV1.Issue>)
+          : undefined;
+      const hasNonEmptyIssues =
+        issuesArray !== undefined && issuesArray.length > 0;
+      const hasValueField =
+        resultObject !== undefined && "value" in resultObject;
+      const isValidationFailure = hasNonEmptyIssues;
+      // Empty issues array counts as success per the review spec, even
+      // though no `value` is promised by the validator in that case.
+      const isSuccess =
+        !hasNonEmptyIssues &&
+        (hasValueField ||
+          (issuesArray !== undefined && issuesArray.length === 0));
+
+      if (isValidationFailure && issuesArray !== undefined) {
         const requestId = resolveRequestId(req);
-        const totalIssueCount = result.issues.length;
+        const totalIssueCount = issuesArray.length;
         const truncated = totalIssueCount > MAX_VALIDATION_ISSUES;
         const retained = truncated
-          ? result.issues.slice(0, MAX_VALIDATION_ISSUES)
-          : result.issues;
+          ? issuesArray.slice(0, MAX_VALIDATION_ISSUES)
+          : issuesArray;
 
         // Normalize Standard Schema path segments: spec allows either a
         // PropertyKey or an object with a `key` field. Callers expect a
@@ -739,10 +770,36 @@ export abstract class Plugin<
         return;
       }
 
-      // Narrow req.body to the validated value. This preserves any
+      if (!isSuccess) {
+        // Validator returned a shape that is neither `{ value }` nor a
+        // non-empty `{ issues: [...] }` — e.g. `{ issues: undefined }`,
+        // `{}`, or `null`. Treat it as a validator programmer error and
+        // fail closed with a 500. Never invoke the handler; never mutate
+        // `req.body`.
+        const requestId = resolveRequestId(req);
+        logger.error("validation schema returned malformed result", {
+          plugin: this.name,
+          requestId,
+        });
+        res.status(500).json({
+          error: "Internal validation error",
+          code: "VALIDATION_INTERNAL_ERROR",
+          requestId,
+        });
+        return;
+      }
+
+      // Success. Narrow req.body to the validated value when the result
+      // carries one; for the rare `{ issues: [] }` shape (empty issues =
+      // no issues found, per the review spec), leave `req.body` as-is so
+      // the handler sees the original body. This preserves any
       // transformation performed by the schema (e.g. coercion), though
       // v1 docs advise against relying on transforms.
-      (req as { body: unknown }).body = result.value;
+      if (hasValueField) {
+        (req as { body: unknown }).body = (
+          resultObject as { value: TBody }
+        ).value;
+      }
 
       await handler(req as IAppRequestWithBody<TBody>, res);
     };

@@ -252,10 +252,21 @@ export type RouteConfig<TBody = any> = {
    */
   body?: StandardSchemaV1<unknown, TBody>;
   /**
-   * When true, the canonical 400 response includes the full `issues` array
-   * even in production (default: only included when `NODE_ENV !== "production"`).
-   * Use sparingly — surfacing detailed validation issues in production can
-   * leak schema internals to clients.
+   * When `true`, validation-failure responses include the Standard Schema
+   * `issues` array in all environments (including production). Default:
+   * issues are only included when `NODE_ENV !== "production"`.
+   *
+   * Security warning: Body validation runs BEFORE plugin-level
+   * authentication (which typically lives inside the handler via
+   * `asUser(req)`). Setting this flag to `true` therefore exposes your
+   * schema structure — field names, types, constraint messages,
+   * refinement text — to anonymous callers in production. Attackers can
+   * submit crafted payloads pre-auth and enumerate the schema shape from
+   * the responses.
+   *
+   * Only enable on routes that are intentionally public, or where the
+   * schema shape is not sensitive (e.g. a public contact form). When in
+   * doubt, leave unset.
    */
   exposeValidationErrors?: boolean;
 };
