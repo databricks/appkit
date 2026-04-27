@@ -1,3 +1,4 @@
+import { Table, tableToIPC, vectorFromArray } from "apache-arrow";
 import { describe, expect, test } from "vitest";
 import {
   convertToQueryType,
@@ -10,6 +11,20 @@ import {
   SERVER_INJECTED_PARAMS,
 } from "../query-registry";
 import type { DatabricksStatementExecutionResponse } from "../types";
+
+// Build a base64 Arrow IPC payload that mimics a DESCRIBE QUERY response —
+// a result *table* with columns (col_name, data_type, comment) describing
+// the user query's output schema.
+function describeQueryAttachment(
+  rows: Array<{ col_name: string; data_type: string; comment: string | null }>,
+): string {
+  const table = new Table({
+    col_name: vectorFromArray(rows.map((r) => r.col_name)),
+    data_type: vectorFromArray(rows.map((r) => r.data_type)),
+    comment: vectorFromArray(rows.map((r) => r.comment ?? "")),
+  });
+  return Buffer.from(tableToIPC(table, "stream")).toString("base64");
+}
 
 describe("normalizeTypeName", () => {
   test("returns simple types unchanged", () => {
@@ -345,6 +360,87 @@ SELECT * FROM users WHERE date = :startDate AND count = :count AND name = :name`
       "test",
     );
     expect(hasResults).toBe(false);
+  });
+
+  describe("ARROW_STREAM attachment fallback (serverless warehouses)", () => {
+    test("decodes column metadata from Arrow IPC data rows, not schema fields", () => {
+      // Critical regression test: it would be a bug to read
+      // `table.schema.fields` here, which would generate types like
+      // { col_name: string; data_type: string; comment: string } for every
+      // query (those are DESCRIBE QUERY's own output columns). We must read
+      // the data rows.
+      const attachment = describeQueryAttachment([
+        { col_name: "user_id", data_type: "BIGINT", comment: null },
+        { col_name: "name", data_type: "STRING", comment: "display name" },
+        { col_name: "active", data_type: "BOOLEAN", comment: null },
+      ]);
+      const response: DatabricksStatementExecutionResponse = {
+        statement_id: "test-arrow",
+        status: { state: "SUCCEEDED" },
+        result: { attachment },
+      };
+
+      const { type, hasResults } = convertToQueryType(
+        response,
+        "SELECT user_id, name, active FROM users",
+        "users",
+      );
+
+      expect(hasResults).toBe(true);
+      // Real query columns appear in the generated type:
+      expect(type).toContain("user_id: number");
+      expect(type).toContain("name: string");
+      expect(type).toContain("active: boolean");
+      // Column comments survive:
+      expect(type).toContain("/** display name");
+      // The DESCRIBE QUERY metadata column names must NOT leak as user types:
+      expect(type).not.toContain("col_name: string");
+      expect(type).not.toContain("data_type: string");
+    });
+
+    test("normalizes lowercase data_type values to uppercase", () => {
+      const attachment = describeQueryAttachment([
+        { col_name: "id", data_type: "int", comment: null },
+      ]);
+      const response: DatabricksStatementExecutionResponse = {
+        statement_id: "test-arrow",
+        status: { state: "SUCCEEDED" },
+        result: { attachment },
+      };
+
+      const { type } = convertToQueryType(response, "SELECT 1", "test");
+      expect(type).toContain("@sqlType INT");
+      expect(type).toContain("id: number");
+    });
+
+    test("prefers data_array over attachment when both are present", () => {
+      const attachment = describeQueryAttachment([
+        { col_name: "from_arrow", data_type: "STRING", comment: null },
+      ]);
+      const response: DatabricksStatementExecutionResponse = {
+        statement_id: "test-both",
+        status: { state: "SUCCEEDED" },
+        result: {
+          data_array: [["from_data_array", "INT", null]],
+          attachment,
+        },
+      };
+
+      const { type } = convertToQueryType(response, "SELECT 1", "test");
+      expect(type).toContain("from_data_array: number");
+      expect(type).not.toContain("from_arrow");
+    });
+
+    test("logs a warning and yields no columns on malformed attachment", () => {
+      const response: DatabricksStatementExecutionResponse = {
+        statement_id: "test-bad",
+        status: { state: "SUCCEEDED" },
+        result: { attachment: "not-valid-arrow-ipc" },
+      };
+
+      const { hasResults } = convertToQueryType(response, "SELECT 1", "test");
+      expect(hasResults).toBe(false);
+    });
   });
 });
 

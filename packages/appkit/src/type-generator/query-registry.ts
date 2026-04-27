@@ -131,55 +131,39 @@ function formatParametersType(sql: string): string {
 }
 
 /**
- * Map Arrow DataType IDs to Databricks SQL type names.
- * Arrow type IDs come from the Arrow spec (apache-arrow TypeId enum).
- * We only need to cover the types that DESCRIBE QUERY can return.
- */
-function arrowTypeToSqlName(arrowType: { typeId: number }): string {
-  switch (arrowType.typeId) {
-    case 1: // Bool
-      return "BOOLEAN";
-    case 2: // Int (covers TINYINT, SMALLINT, INT, BIGINT depending on bitWidth)
-      return "INT";
-    case 3: // Float (covers FLOAT, DOUBLE)
-      return "DOUBLE";
-    case 4: // Decimal
-      return "DECIMAL";
-    case 5: // Utf8
-      return "STRING";
-    case 6: // Binary
-      return "BINARY";
-    case 7: // FixedSizeBinary
-      return "BINARY";
-    case 8: // Date
-      return "DATE";
-    case 10: // Timestamp
-      return "TIMESTAMP";
-    case 12: // List
-      return "ARRAY";
-    case 14: // Struct
-      return "STRUCT";
-    case 15: // Map
-      return "MAP";
-    default:
-      return "STRING";
-  }
-}
-
-/**
- * Decode a base64 Arrow IPC attachment and extract column metadata.
- * Returns the same shape as rows parsed from DESCRIBE QUERY data_array.
+ * Decode a base64 Arrow IPC attachment from a DESCRIBE QUERY response and
+ * extract column metadata. Returns the same shape as rows parsed from the
+ * legacy data_array path.
+ *
+ * IMPORTANT: a DESCRIBE QUERY response is itself a result *table* with rows
+ * shaped like `(col_name, data_type, comment)` describing the user query's
+ * output schema. We must read those rows — NOT `table.schema.fields`, which
+ * would describe DESCRIBE QUERY's own output (`col_name`, `data_type`,
+ * `comment`) and yield bogus types for every query.
  */
 function columnsFromArrowAttachment(
   attachment: string,
 ): Array<{ name: string; type_name: string; comment: string | undefined }> {
   const buf = Buffer.from(attachment, "base64");
   const table = tableFromIPC(buf);
-  return table.schema.fields.map((field) => ({
-    name: field.name,
-    type_name: arrowTypeToSqlName(field.type),
-    comment: undefined,
-  }));
+  return table.toArray().map((row) => {
+    const obj = row.toJSON() as {
+      col_name?: unknown;
+      data_type?: unknown;
+      comment?: unknown;
+    };
+    return {
+      name: typeof obj.col_name === "string" ? obj.col_name : "",
+      type_name:
+        typeof obj.data_type === "string"
+          ? obj.data_type.toUpperCase()
+          : "STRING",
+      comment:
+        typeof obj.comment === "string" && obj.comment !== ""
+          ? obj.comment
+          : undefined,
+    };
+  });
 }
 
 export function convertToQueryType(
@@ -194,9 +178,9 @@ export function convertToQueryType(
     comment: row[2] || undefined,
   }));
 
-  // Fallback: serverless warehouses may return ARROW_STREAM format with an
-  // inline base64 attachment instead of data_array. Decode the Arrow IPC
-  // schema to extract column names and types.
+  // Fallback: serverless warehouses return ARROW_STREAM format with an inline
+  // base64 attachment instead of data_array. Decode the Arrow IPC rows (the
+  // DESCRIBE QUERY result table) to extract column names and types.
   if (columns.length === 0 && result.result?.attachment) {
     logger.debug("data_array empty, decoding Arrow IPC attachment for schema");
     try {
