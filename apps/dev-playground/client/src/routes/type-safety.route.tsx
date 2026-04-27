@@ -454,7 +454,7 @@ function TypeSafetyRoute() {
             <CardHeader>
               <CardTitle>2. Generated Types</CardTitle>
               <CardDescription>
-                Vite plugin or npx command generates appKitTypes.d.ts at build
+                Vite plugin or npx command generates analytics types at build
                 time
               </CardDescription>
             </CardHeader>
@@ -507,7 +507,7 @@ export default defineConfig({
   plugins: [
     appKitTypesPlugin(),
     // Optional: appKitTypesPlugin({
-    //   outputFile: 'src/appKitTypes.d.ts',
+    //   outFile: 'shared/appkit-types/analytics.d.ts',
     //   watchFolders: ['../config/queries'],
     // }),
   ],

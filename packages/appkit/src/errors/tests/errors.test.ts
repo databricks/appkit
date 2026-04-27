@@ -348,12 +348,6 @@ describe("ServerError", () => {
     expect(error.isRetryable).toBe(false);
   });
 
-  test("autoStartConflict should create proper error", () => {
-    const error = ServerError.autoStartConflict("get server");
-    expect(error.message).toBe("Cannot get server when autoStart is true");
-    expect(error.context?.operation).toBe("get server");
-  });
-
   test("notStarted should create proper error", () => {
     const error = ServerError.notStarted();
     expect(error.message).toContain("Server not started");

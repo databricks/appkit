@@ -63,13 +63,18 @@ function resolveManifestPaths(
   return out;
 }
 
+interface ValidateOptions {
+  allowJsManifest?: boolean;
+  json?: boolean;
+}
+
 async function runPluginValidate(
   paths: string[],
-  options: { allowJsManifest?: boolean },
+  options: ValidateOptions,
 ): Promise<void> {
   const cwd = process.cwd();
   const allowJsManifest = Boolean(options.allowJsManifest);
-  if (allowJsManifest) {
+  if (allowJsManifest && !options.json) {
     console.warn(
       "Warning: --allow-js-manifest executes manifest.js/manifest.cjs files. Only use with trusted code.",
     );
@@ -78,18 +83,34 @@ async function runPluginValidate(
   const manifestPaths = resolveManifestPaths(toValidate, cwd, allowJsManifest);
 
   if (manifestPaths.length === 0) {
-    console.error("No manifest files to validate.");
+    if (options.json) {
+      console.log("[]");
+    } else {
+      console.error("No manifest files to validate.");
+    }
     process.exit(1);
   }
 
   let hasFailure = false;
+  const jsonResults: { path: string; valid: boolean; errors?: string[] }[] = [];
+
   for (const { path: manifestPath, type } of manifestPaths) {
+    const relativePath = path.relative(cwd, manifestPath);
     let obj: unknown;
     try {
       obj = await loadManifestFromFile(manifestPath, type, { allowJsManifest });
     } catch (err) {
-      console.error(`✗ ${manifestPath}`);
-      console.error(`  ${err instanceof Error ? err.message : String(err)}`);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (options.json) {
+        jsonResults.push({
+          path: relativePath,
+          valid: false,
+          errors: [errMsg],
+        });
+      } else {
+        console.error(`✗ ${manifestPath}`);
+        console.error(`  ${errMsg}`);
+      }
       hasFailure = true;
       continue;
     }
@@ -100,16 +121,36 @@ async function runPluginValidate(
         ? validateTemplateManifest(obj)
         : validateManifest(obj);
 
-    const relativePath = path.relative(cwd, manifestPath);
     if (result.valid) {
-      console.log(`✓ ${relativePath}`);
+      if (options.json) {
+        jsonResults.push({ path: relativePath, valid: true });
+      } else {
+        console.log(`✓ ${relativePath}`);
+      }
     } else {
-      console.error(`✗ ${relativePath}`);
-      if (result.errors?.length) {
-        console.error(formatValidationErrors(result.errors, obj));
+      if (options.json) {
+        const errors = result.errors?.length
+          ? formatValidationErrors(result.errors, obj)
+              .split("\n")
+              .filter(Boolean)
+          : [];
+        jsonResults.push({
+          path: relativePath,
+          valid: false,
+          ...(errors.length > 0 && { errors }),
+        });
+      } else {
+        console.error(`✗ ${relativePath}`);
+        if (result.errors?.length) {
+          console.error(formatValidationErrors(result.errors, obj));
+        }
       }
       hasFailure = true;
     }
+  }
+
+  if (options.json) {
+    console.log(JSON.stringify(jsonResults, null, 2));
   }
 
   process.exit(hasFailure ? 1 : 0);
@@ -127,7 +168,18 @@ export const pluginValidateCommand = new Command("validate")
     "--allow-js-manifest",
     "Allow reading manifest.js/manifest.cjs (executes code; use only with trusted plugins)",
   )
-  .action((paths: string[], opts: { allowJsManifest?: boolean }) =>
+  .option("--json", "Output validation results as JSON")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ appkit plugin validate
+  $ appkit plugin validate plugins/my-plugin
+  $ appkit plugin validate plugins/my-plugin plugins/other
+  $ appkit plugin validate appkit.plugins.json
+  $ appkit plugin validate --json`,
+  )
+  .action((paths: string[], opts: ValidateOptions) =>
     runPluginValidate(paths, opts).catch((err) => {
       console.error(err);
       process.exit(1);

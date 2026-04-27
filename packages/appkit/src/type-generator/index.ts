@@ -1,7 +1,14 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import dotenv from "dotenv";
 import { createLogger } from "../logging/logger";
+import {
+  migrateProjectConfig,
+  removeOldGeneratedTypes,
+  resolveProjectRoot,
+} from "./migration";
 import { generateQueriesFromDescribe } from "./query-registry";
+import { generateServingTypes as generateServingTypesImpl } from "./serving/generator";
 import type { QuerySchema } from "./types";
 
 dotenv.config();
@@ -52,6 +59,7 @@ export async function generateFromEntryPoint(options: {
   noCache?: boolean;
 }) {
   const { outFile, queryFolder, warehouseId, noCache } = options;
+  const projectRoot = resolveProjectRoot(outFile);
 
   logger.debug("Starting type generation...");
 
@@ -65,9 +73,41 @@ export async function generateFromEntryPoint(options: {
       },
     );
 
+  const failedQueries = queryRegistry.filter((q) =>
+    q.type.includes("result: unknown"),
+  );
+  if (failedQueries.length > 0) {
+    const names = failedQueries.map((q) => q.name).join(", ");
+    throw new Error(
+      [
+        `Type generation failed: ${failedQueries.length} ${failedQueries.length === 1 ? "query" : "queries"} could not be described: ${names}.`,
+        `DESCRIBE QUERY failed for these queries — see the error codes above for details.`,
+        `Common causes: SQL syntax errors, missing tables/views, or warehouse format incompatibilities.`,
+        `To debug: run the failing query directly in a SQL editor against warehouse ${warehouseId}.`,
+      ].join("\n"),
+    );
+  }
+
   const typeDeclarations = generateTypeDeclarations(queryRegistry);
 
+  await fs.mkdir(path.dirname(outFile), { recursive: true });
   await fs.writeFile(outFile, typeDeclarations, "utf-8");
+
+  // One-time migration: remove old generated file and patch project configs
+  await removeOldGeneratedTypes(projectRoot, "appKitTypes.d.ts");
+  await migrateProjectConfig(projectRoot);
 
   logger.debug("Type generation complete!");
 }
+
+// Rolldown tree-shaking only preserves "own exports" (locally defined) — not re-exports.
+// A local binding ensures the serving vite plugin's import keeps this in the dependency graph,
+// mirroring how generateFromEntryPoint (also defined here) is preserved via the analytics vite plugin.
+export const generateServingTypes = generateServingTypesImpl;
+
+/** Directory name for generated AppKit type declaration files. */
+export const TYPES_DIR = "appkit-types";
+/** Default filename for analytics query type declarations. */
+export const ANALYTICS_TYPES_FILE = "analytics.d.ts";
+/** Default filename for serving endpoint type declarations. */
+export const SERVING_TYPES_FILE = "serving.d.ts";

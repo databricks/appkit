@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { ApiError, WorkspaceClient } from "@databricks/sdk-experimental";
 import type { CacheConfig, CacheStorage } from "shared";
-import { createLakebasePool } from "@/connectors/lakebase";
+import { createLakebasePool } from "../connectors/lakebase";
 import { AppKitError, ExecutionError, InitializationError } from "../errors";
 import { createLogger } from "../logging/logger";
 import type { Counter, TelemetryProvider } from "../telemetry";

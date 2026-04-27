@@ -10,17 +10,28 @@ AppKit includes a CLI for managing plugins. All commands are available under `np
 
 ## Create a plugin
 
-Scaffold a new plugin interactively:
+Scaffold a new plugin interactively or via flags:
 
 ```bash
+# Interactive mode (prompts for all options)
 npx @databricks/appkit plugin create
+
+# Non-interactive mode (all required flags provided)
+npx @databricks/appkit plugin create \
+  --placement in-repo \
+  --path plugins/my-plugin \
+  --name my-plugin \
+  --description "My custom plugin" \
+  --resources sql_warehouse \
+  --force
 ```
 
-The wizard walks you through:
+In interactive mode, the wizard walks you through:
 - **Placement**: In your repository (e.g. `plugins/my-plugin`) or as a standalone package
 - **Metadata**: Name, display name, description
 - **Resources**: Which Databricks resources the plugin needs (SQL Warehouse, Secret, etc.) and whether each is required or optional
-- **Optional fields**: Author, version, license
+
+In non-interactive mode, `--placement`, `--path`, `--name`, and `--description` are required. Resources can be specified as a comma-separated list (`--resources sql_warehouse,volume`) or as JSON for full control (`--resources-json '[{"type":"sql_warehouse","permission":"CAN_MANAGE"}]'`). For all available options, run `npx @databricks/appkit plugin create --help`.
 
 The command generates a complete plugin scaffold with `manifest.json` and a TypeScript plugin class that imports the manifest directly — ready to register in your app.
 
@@ -88,11 +99,16 @@ npx @databricks/appkit plugin list --json
 
 ## Add a resource to a plugin
 
-Interactively add a new resource requirement to an existing plugin manifest. **Requires `manifest.json`** in the plugin directory (the command edits it in place; it does not modify `manifest.js`):
+Add a new resource requirement to an existing plugin manifest. **Requires `manifest.json`** in the plugin directory (the command edits it in place; it does not modify `manifest.js`):
 
 ```bash
+# Interactive mode
 npx @databricks/appkit plugin add-resource
-
-# Or specify the plugin directory
 npx @databricks/appkit plugin add-resource --path plugins/my-plugin
+
+# Non-interactive mode (--type triggers flag-based mode)
+npx @databricks/appkit plugin add-resource --path plugins/my-plugin --type sql_warehouse
+npx @databricks/appkit plugin add-resource --path plugins/my-plugin --type volume --no-required --dry-run
 ```
+
+In non-interactive mode, only `--type` is required — all other fields (permission, resource key, field env vars) default to sensible values from the schema. Use `--dry-run` to preview the updated manifest without writing. For all available options, run `npx @databricks/appkit plugin add-resource --help`.

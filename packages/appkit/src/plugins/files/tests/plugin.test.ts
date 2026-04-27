@@ -9,6 +9,7 @@ import {
   FILES_WRITE_DEFAULTS,
 } from "../defaults";
 import { FilesPlugin, files } from "../plugin";
+import { PolicyDeniedError, policy } from "../policy";
 
 const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
   const mockFilesApi = {
@@ -60,7 +61,7 @@ vi.mock("../../../context", async (importOriginal) => {
   return {
     ...actual,
     getWorkspaceClient: vi.fn(() => mockClient),
-    isInUserContext: vi.fn(() => true),
+    getCurrentUserId: vi.fn(() => "test-service-principal"),
   };
 });
 
@@ -72,8 +73,8 @@ vi.mock("../../../cache", () => ({
 
 const VOLUMES_CONFIG = {
   volumes: {
-    uploads: { maxUploadSize: 100_000_000 },
-    exports: {},
+    uploads: { maxUploadSize: 100_000_000, policy: policy.allowAll() },
+    exports: { policy: policy.allowAll() },
   },
 };
 
@@ -247,7 +248,7 @@ describe("FilesPlugin", () => {
     });
   });
 
-  describe("OBO and service principal access", () => {
+  describe("Service principal access", () => {
     const volumeMethods = [
       "list",
       "read",
@@ -270,7 +271,7 @@ describe("FilesPlugin", () => {
       }
     });
 
-    test("asUser throws AuthenticationError without token in production", () => {
+    test("asUser without user header in production → throws AuthenticationError", () => {
       const originalEnv = process.env.NODE_ENV;
       process.env.NODE_ENV = "production";
 
@@ -292,7 +293,10 @@ describe("FilesPlugin", () => {
       try {
         const plugin = new FilesPlugin(VOLUMES_CONFIG);
         const handle = plugin.exports()("uploads");
-        const mockReq = { header: () => undefined } as any;
+        const mockReq = {
+          header: (name: string) =>
+            name === "x-forwarded-user" ? "test-user" : undefined,
+        } as any;
         const api = handle.asUser(mockReq);
 
         for (const method of volumeMethods) {
@@ -303,17 +307,12 @@ describe("FilesPlugin", () => {
       }
     });
 
-    test("direct methods on handle throw without user context (OBO enforced)", async () => {
-      const { isInUserContext } = await import("../../../context");
-      (isInUserContext as ReturnType<typeof vi.fn>).mockReturnValue(false);
-
+    test("direct methods on handle work as service principal", () => {
       const plugin = new FilesPlugin(VOLUMES_CONFIG);
       const handle = plugin.exports()("uploads");
 
-      // Direct call without user context should throw synchronously
-      expect(() => handle.list()).toThrow(
-        'app.files("uploads").list() called without user context (service principal). Use OBO instead: app.files("uploads").asUser(req).list()',
-      );
+      // Direct call executes as service principal (returns a promise, does not throw)
+      expect(typeof handle.list).toBe("function");
     });
   });
 
@@ -446,11 +445,16 @@ describe("FilesPlugin", () => {
       const res = mockRes();
 
       // uploads has maxUploadSize: 100_000_000
+      const headers: Record<string, string> = {
+        "content-length": String(200_000_000),
+        "x-forwarded-user": "test-user",
+      };
       await handler(
         {
           params: { volumeKey: "uploads" },
           query: { path: "/large.bin" },
-          headers: { "content-length": String(200_000_000) },
+          headers,
+          header: (name: string) => headers[name.toLowerCase()],
         },
         res,
       );
@@ -470,11 +474,16 @@ describe("FilesPlugin", () => {
       const res = mockRes();
 
       // exports has no maxUploadSize, uses default 5GB
+      const headers: Record<string, string> = {
+        "content-length": String(6 * 1024 * 1024 * 1024),
+        "x-forwarded-user": "test-user",
+      };
       await handler(
         {
           params: { volumeKey: "exports" },
           query: { path: "/large.bin" },
-          headers: { "content-length": String(6 * 1024 * 1024 * 1024) },
+          headers,
+          header: (name: string) => headers[name.toLowerCase()],
         },
         res,
       );
@@ -493,11 +502,16 @@ describe("FilesPlugin", () => {
       const handler = getUploadHandler(plugin);
       const res = mockRes();
 
+      const headers: Record<string, string> = {
+        "content-length": String(100_000_000),
+        "x-forwarded-user": "test-user",
+      };
       await handler(
         {
           params: { volumeKey: "uploads" },
           query: { path: "/file.bin" },
-          headers: { "content-length": String(100_000_000) },
+          headers,
+          header: (name: string) => headers[name.toLowerCase()],
         },
         res,
       );
@@ -515,11 +529,15 @@ describe("FilesPlugin", () => {
       const handler = getUploadHandler(plugin);
       const res = mockRes();
 
+      const headers: Record<string, string> = {
+        "x-forwarded-user": "test-user",
+      };
       await handler(
         {
           params: { volumeKey: "uploads" },
           query: { path: "/file.bin" },
-          headers: {},
+          headers,
+          header: (name: string) => headers[name.toLowerCase()],
         },
         res,
       );
@@ -644,6 +662,8 @@ describe("FilesPlugin", () => {
 
       const handlerPromise = handler(mockReq("uploads"), res);
 
+      // Flush microtasks (policy check) before advancing timers
+      await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(100);
       await handlerPromise;
 
@@ -674,7 +694,7 @@ describe("FilesPlugin", () => {
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith(
         expect.objectContaining({
-          error: "List failed",
+          error: "Internal Server Error",
           plugin: "files",
         }),
       );
@@ -698,7 +718,7 @@ describe("FilesPlugin", () => {
 
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({ error: "Read failed" }),
+        expect.objectContaining({ error: "Internal Server Error" }),
       );
     });
 
@@ -722,7 +742,7 @@ describe("FilesPlugin", () => {
 
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({ error: "Exists check failed" }),
+        expect.objectContaining({ error: "Internal Server Error" }),
       );
     });
 
@@ -746,7 +766,7 @@ describe("FilesPlugin", () => {
 
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({ error: "Metadata fetch failed" }),
+        expect.objectContaining({ error: "Internal Server Error" }),
       );
     });
 
@@ -768,7 +788,7 @@ describe("FilesPlugin", () => {
 
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({ error: "Download failed" }),
+        expect.objectContaining({ error: "Internal Server Error" }),
       );
     });
 
@@ -791,7 +811,7 @@ describe("FilesPlugin", () => {
 
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({ error: "Create directory failed" }),
+        expect.objectContaining({ error: "Internal Server Error" }),
       );
     });
 
@@ -835,7 +855,7 @@ describe("FilesPlugin", () => {
       await handlerPromise;
 
       const errorBody = res.json.mock.calls[0][0];
-      expect(errorBody.error).toBe("List failed");
+      expect(errorBody.error).toBe("Internal Server Error");
       expect(errorBody.error).not.toContain("secret");
       expect(errorBody.error).not.toContain("internal");
     });
@@ -869,6 +889,8 @@ describe("FilesPlugin", () => {
 
       const handlerPromise = handler(mockReq("uploads"), res);
 
+      // Flush microtasks (policy check) before advancing timers
+      await vi.advanceTimersByTimeAsync(0);
       // Advance past read-tier timeout (30s)
       await vi.advanceTimersByTimeAsync(31_000);
       await handlerPromise;
@@ -876,7 +898,7 @@ describe("FilesPlugin", () => {
       expect(signalWasAborted).toBe(true);
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({ error: "List failed" }),
+        expect.objectContaining({ error: "Internal Server Error" }),
       );
     });
 
@@ -890,6 +912,764 @@ describe("FilesPlugin", () => {
 
     test("timeout defaults: write-tier uses 600s", () => {
       expect(FILES_WRITE_DEFAULTS.timeout).toBe(600_000);
+    });
+  });
+
+  describe("Policy enforcement", () => {
+    const POLICY_CONFIG = {
+      volumes: {
+        public: { policy: policy.publicRead() },
+        locked: { policy: policy.denyAll() },
+        open: { policy: policy.allowAll() },
+        writeonly: { policy: policy.not(policy.publicRead()) },
+        uploads: {},
+        exports: {},
+      },
+    };
+
+    function getRouteHandler(
+      plugin: FilesPlugin,
+      method: "get" | "post" | "delete",
+      pathSuffix: string,
+    ) {
+      const mockRouter = {
+        use: vi.fn(),
+        get: vi.fn(),
+        post: vi.fn(),
+        put: vi.fn(),
+        delete: vi.fn(),
+        patch: vi.fn(),
+      } as any;
+      plugin.injectRoutes(mockRouter);
+      const call = mockRouter[method].mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === "string" && (c[0] as string).endsWith(pathSuffix),
+      );
+      return call[call.length - 1] as (req: any, res: any) => Promise<void>;
+    }
+
+    function mockRes() {
+      const res: any = { headersSent: false };
+      res.status = vi.fn().mockReturnValue(res);
+      res.json = vi.fn().mockReturnValue(res);
+      res.type = vi.fn().mockReturnValue(res);
+      res.send = vi.fn().mockReturnValue(res);
+      res.setHeader = vi.fn().mockReturnValue(res);
+      res.end = vi.fn();
+      return res;
+    }
+
+    function mockReq(volumeKey: string, overrides: Record<string, any> = {}) {
+      const headers: Record<string, string> = {
+        "x-forwarded-access-token": "test-token",
+        "x-forwarded-user": "test-user",
+        ...(overrides.headers ?? {}),
+      };
+      return {
+        params: { volumeKey },
+        query: {},
+        ...overrides,
+        headers,
+        header: (name: string) => headers[name.toLowerCase()],
+      };
+    }
+
+    beforeEach(() => {
+      process.env.DATABRICKS_VOLUME_PUBLIC = "/Volumes/c/s/public";
+      process.env.DATABRICKS_VOLUME_LOCKED = "/Volumes/c/s/locked";
+      process.env.DATABRICKS_VOLUME_OPEN = "/Volumes/c/s/open";
+      process.env.DATABRICKS_VOLUME_WRITEONLY = "/Volumes/c/s/writeonly";
+    });
+
+    afterEach(() => {
+      delete process.env.DATABRICKS_VOLUME_PUBLIC;
+      delete process.env.DATABRICKS_VOLUME_LOCKED;
+      delete process.env.DATABRICKS_VOLUME_OPEN;
+      delete process.env.DATABRICKS_VOLUME_WRITEONLY;
+    });
+
+    test("policy volume + no user header (production) → 401", async () => {
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = "production";
+      try {
+        const plugin = new FilesPlugin(POLICY_CONFIG);
+        const handler = getRouteHandler(plugin, "get", "/list");
+        const res = mockRes();
+
+        // Override both headers to undefined so _extractUser has no user
+        const noUserHeaders: Record<string, string> = {};
+        await handler(
+          {
+            params: { volumeKey: "public" },
+            query: {},
+            headers: noUserHeaders,
+            header: (name: string) => noUserHeaders[name.toLowerCase()],
+          },
+          res,
+        );
+
+        expect(res.status).toHaveBeenCalledWith(401);
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+      }
+    });
+
+    test("policy volume + policy returns false → 403", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "get", "/list");
+      const res = mockRes();
+
+      await handler(mockReq("locked"), res);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+        }),
+      );
+    });
+
+    test("policy volume + policy returns true → 200, runs as SP", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "get", "/list");
+      const res = mockRes();
+
+      mockClient.files.listDirectoryContents.mockImplementation(
+        async function* () {
+          yield { name: "a.txt", path: "/a.txt", is_directory: false };
+        },
+      );
+
+      await handler(mockReq("public", { query: {} }), res);
+
+      expect(res.json).toHaveBeenCalledWith(
+        expect.arrayContaining([expect.objectContaining({ name: "a.txt" })]),
+      );
+      // Should NOT have received a 401 or 403
+      const statusCodes = (res.status.mock.calls as number[][]).map(
+        (c) => c[0],
+      );
+      expect(statusCodes).not.toContain(401);
+      expect(statusCodes).not.toContain(403);
+    });
+
+    test("policy volume + async policy → works", async () => {
+      const asyncConfig = {
+        volumes: {
+          async_vol: {
+            policy: async () => true,
+          },
+          uploads: {},
+          exports: {},
+        },
+      };
+      process.env.DATABRICKS_VOLUME_ASYNC_VOL = "/Volumes/c/s/async";
+
+      try {
+        const plugin = new FilesPlugin(asyncConfig);
+        const handler = getRouteHandler(plugin, "get", "/list");
+        const res = mockRes();
+
+        mockClient.files.listDirectoryContents.mockImplementation(
+          async function* () {
+            yield { name: "b.txt", path: "/b.txt", is_directory: false };
+          },
+        );
+
+        await handler(mockReq("async_vol"), res);
+
+        expect(res.json).toHaveBeenCalledWith(
+          expect.arrayContaining([expect.objectContaining({ name: "b.txt" })]),
+        );
+      } finally {
+        delete process.env.DATABRICKS_VOLUME_ASYNC_VOL;
+      }
+    });
+
+    test("default publicRead() volume → reads succeed", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "get", "/list");
+      const res = mockRes();
+
+      mockClient.files.listDirectoryContents.mockImplementation(
+        async function* () {
+          yield { name: "c.txt", path: "/c.txt", is_directory: false };
+        },
+      );
+
+      await handler(mockReq("uploads"), res);
+
+      // Should succeed (reads allowed by publicRead default)
+      expect(res.json).toHaveBeenCalledWith(
+        expect.arrayContaining([expect.objectContaining({ name: "c.txt" })]),
+      );
+    });
+
+    test("default publicRead() volume → writes denied with 403", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "post", "/mkdir");
+      const res = mockRes();
+
+      await handler(
+        mockReq("uploads", {
+          body: { path: "/newdir" },
+        }),
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+        }),
+      );
+    });
+
+    test("upload with policy → policy receives size in resource", async () => {
+      const policySpy = vi.fn().mockReturnValue(true);
+      const sizeConfig = {
+        volumes: {
+          sized: { policy: policySpy },
+          uploads: {},
+          exports: {},
+        },
+      };
+      process.env.DATABRICKS_VOLUME_SIZED = "/Volumes/c/s/sized";
+
+      try {
+        const plugin = new FilesPlugin(sizeConfig);
+        const handler = getRouteHandler(plugin, "post", "/upload");
+        const res = mockRes();
+
+        await handler(
+          mockReq("sized", {
+            query: { path: "/test.bin" },
+            headers: {
+              "content-length": "12345",
+              "x-forwarded-user": "test-user",
+              "x-forwarded-access-token": "test-token",
+            },
+          }),
+          res,
+        );
+
+        expect(policySpy).toHaveBeenCalledWith(
+          "upload",
+          expect.objectContaining({ size: 12345 }),
+          expect.objectContaining({ id: "test-user" }),
+        );
+      } finally {
+        delete process.env.DATABRICKS_VOLUME_SIZED;
+      }
+    });
+
+    test("upload with malformed content-length → rejected with 400", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "post", "/upload");
+      const res = mockRes();
+
+      await handler(
+        mockReq("open", {
+          query: { path: "/test.bin" },
+          headers: {
+            "content-length": "abc",
+            "x-forwarded-user": "test-user",
+            "x-forwarded-access-token": "test-token",
+          },
+        }),
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: "Invalid Content-Length header.",
+        }),
+      );
+    });
+
+    test("upload with negative content-length → rejected with 400", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "post", "/upload");
+      const res = mockRes();
+
+      await handler(
+        mockReq("open", {
+          query: { path: "/test.bin" },
+          headers: {
+            "content-length": "-1",
+            "x-forwarded-user": "test-user",
+            "x-forwarded-access-token": "test-token",
+          },
+        }),
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    test("upload with partially numeric content-length → rejected with 400", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "post", "/upload");
+      const res = mockRes();
+
+      await handler(
+        mockReq("open", {
+          query: { path: "/test.bin" },
+          headers: {
+            "content-length": "123abc",
+            "x-forwarded-user": "test-user",
+            "x-forwarded-access-token": "test-token",
+          },
+        }),
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    test("SDK asUser(req) on policy volume → policy-wrapped API works", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const exported = plugin.exports();
+      const handle = exported("public");
+
+      mockClient.files.listDirectoryContents.mockImplementation(
+        async function* () {
+          yield { name: "d.txt", path: "/d.txt", is_directory: false };
+        },
+      );
+
+      const mockReqObj = {
+        header: (name: string) => {
+          if (name === "x-forwarded-user") return "test-user";
+          if (name === "x-forwarded-access-token") return "test-token";
+          return undefined;
+        },
+      } as any;
+
+      const api = handle.asUser(mockReqObj);
+      const result = await api.list();
+      expect(result).toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: "d.txt" })]),
+      );
+    });
+
+    test("SDK asUser(req) on policy volume + deny → throws PolicyDeniedError", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const exported = plugin.exports();
+      const handle = exported("locked");
+
+      const mockReqObj = {
+        header: (name: string) => {
+          if (name === "x-forwarded-user") return "test-user";
+          if (name === "x-forwarded-access-token") return "test-token";
+          return undefined;
+        },
+      } as any;
+
+      const api = handle.asUser(mockReqObj);
+      await expect(api.list()).rejects.toThrow(PolicyDeniedError);
+    });
+
+    test("SDK asUser(req) + denyAll() → delete throws PolicyDeniedError", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handle = plugin.exports()("locked");
+
+      const mockReqObj = {
+        header: (name: string) => {
+          if (name === "x-forwarded-user") return "test-user";
+          if (name === "x-forwarded-access-token") return "test-token";
+          return undefined;
+        },
+      } as any;
+
+      await expect(
+        handle.asUser(mockReqObj).delete("/secret.txt"),
+      ).rejects.toThrow(PolicyDeniedError);
+    });
+
+    test("SDK asUser(req) + publicRead() → upload throws PolicyDeniedError", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handle = plugin.exports()("public");
+
+      const mockReqObj = {
+        header: (name: string) => {
+          if (name === "x-forwarded-user") return "test-user";
+          if (name === "x-forwarded-access-token") return "test-token";
+          return undefined;
+        },
+      } as any;
+
+      await expect(
+        handle.asUser(mockReqObj).upload("/file.bin", Buffer.from("data")),
+      ).rejects.toThrow(PolicyDeniedError);
+    });
+
+    test("direct call on policy volume → enforces policy as SP", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handle = plugin.exports()("open");
+
+      // Direct call on allowAll() volume succeeds (policy is checked but allows)
+      const result = await handle.list();
+      expect(result).toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: "d.txt" })]),
+      );
+    });
+
+    test("direct SP call on denyAll() volume → throws PolicyDeniedError", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handle = plugin.exports()("locked");
+
+      await expect(handle.list()).rejects.toThrow(PolicyDeniedError);
+    });
+
+    test("direct SP call → policy receives { isServicePrincipal: true }", async () => {
+      const policySpy = vi.fn().mockReturnValue(true);
+      const spyConfig = {
+        volumes: {
+          spied: { policy: policySpy },
+          uploads: {},
+          exports: {},
+        },
+      };
+      process.env.DATABRICKS_VOLUME_SPIED = "/Volumes/c/s/spied";
+
+      try {
+        const plugin = new FilesPlugin(spyConfig);
+        const handle = plugin.exports()("spied");
+        await handle.list();
+
+        expect(policySpy).toHaveBeenCalledWith(
+          "list",
+          expect.objectContaining({ volume: "spied" }),
+          expect.objectContaining({ isServicePrincipal: true }),
+        );
+      } finally {
+        delete process.env.DATABRICKS_VOLUME_SPIED;
+      }
+    });
+
+    test("asUser() call → policy receives user without isServicePrincipal", async () => {
+      const policySpy = vi.fn().mockReturnValue(true);
+      const spyConfig = {
+        volumes: {
+          spied: { policy: policySpy },
+          uploads: {},
+          exports: {},
+        },
+      };
+      process.env.DATABRICKS_VOLUME_SPIED = "/Volumes/c/s/spied";
+
+      try {
+        const plugin = new FilesPlugin(spyConfig);
+        const handle = plugin.exports()("spied");
+        const mockReqObj = {
+          header: (name: string) => {
+            if (name === "x-forwarded-user") return "test-user";
+            if (name === "x-forwarded-access-token") return "test-token";
+            return undefined;
+          },
+        } as any;
+
+        await handle.asUser(mockReqObj).list();
+
+        expect(policySpy).toHaveBeenCalledWith(
+          "list",
+          expect.objectContaining({ volume: "spied" }),
+          expect.objectContaining({ id: "test-user" }),
+        );
+        // Should NOT have isServicePrincipal set
+        const userArg = policySpy.mock.calls[0][2];
+        expect(userArg.isServicePrincipal).toBeUndefined();
+      } finally {
+        delete process.env.DATABRICKS_VOLUME_SPIED;
+      }
+    });
+
+    test("denyAll() volume → read denied with 403", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "get", "/read");
+      const res = mockRes();
+
+      await handler(mockReq("locked", { query: { path: "/test.txt" } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+        }),
+      );
+    });
+
+    test("publicRead() volume → read allowed", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "get", "/read");
+      const res = mockRes();
+
+      mockClient.files.download.mockResolvedValue({
+        contents: new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("file content"));
+            controller.close();
+          },
+        }),
+      });
+
+      await handler(mockReq("public", { query: { path: "/test.txt" } }), res);
+
+      const statusCodes = (res.status.mock.calls as number[][]).map(
+        (c) => c[0],
+      );
+      expect(statusCodes).not.toContain(401);
+      expect(statusCodes).not.toContain(403);
+    });
+
+    test("denyAll() volume → download denied with 403", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "get", "/download");
+      const res = mockRes();
+
+      await handler(mockReq("locked", { query: { path: "/test.bin" } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+        }),
+      );
+    });
+
+    test("denyAll() volume → raw denied with 403", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "get", "/raw");
+      const res = mockRes();
+
+      await handler(mockReq("locked", { query: { path: "/test.txt" } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+        }),
+      );
+    });
+
+    test("denyAll() volume → exists denied with 403", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "get", "/exists");
+      const res = mockRes();
+
+      await handler(mockReq("locked", { query: { path: "/test.txt" } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+        }),
+      );
+    });
+
+    test("denyAll() volume → metadata denied with 403", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "get", "/metadata");
+      const res = mockRes();
+
+      await handler(mockReq("locked", { query: { path: "/test.txt" } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+        }),
+      );
+    });
+
+    test("denyAll() volume → preview denied with 403", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "get", "/preview");
+      const res = mockRes();
+
+      await handler(mockReq("locked", { query: { path: "/test.txt" } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+        }),
+      );
+    });
+
+    test("denyAll() volume → delete denied with 403", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "delete", "/:volumeKey");
+      const res = mockRes();
+
+      await handler(mockReq("locked", { query: { path: "/test.txt" } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+        }),
+      );
+    });
+
+    test("denyAll() volume → upload denied with 403", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "post", "/upload");
+      const res = mockRes();
+
+      await handler(
+        mockReq("locked", {
+          query: { path: "/test.bin" },
+          headers: {
+            "content-length": "100",
+            "x-forwarded-user": "test-user",
+            "x-forwarded-access-token": "test-token",
+          },
+        }),
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+        }),
+      );
+    });
+
+    test("not(publicRead()) volume → read denied with 403", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "get", "/list");
+      const res = mockRes();
+
+      await handler(mockReq("writeonly"), res);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+        }),
+      );
+    });
+
+    test("not(publicRead()) volume → write allowed", async () => {
+      const plugin = new FilesPlugin(POLICY_CONFIG);
+      const handler = getRouteHandler(plugin, "post", "/mkdir");
+      const res = mockRes();
+
+      mockClient.files.createDirectory.mockResolvedValue(undefined);
+
+      await handler(mockReq("writeonly", { body: { path: "/dropbox" } }), res);
+
+      // Should not receive 403
+      const statusCodes = (res.status.mock.calls as number[][]).map(
+        (c) => c[0],
+      );
+      expect(statusCodes).not.toContain(403);
+    });
+
+    test("policy that throws → HTTP route returns 500 (fail closed)", async () => {
+      const brokenConfig = {
+        volumes: {
+          broken: {
+            policy: () => {
+              throw new Error("policy crashed");
+            },
+          },
+          uploads: {},
+          exports: {},
+        },
+      };
+      process.env.DATABRICKS_VOLUME_BROKEN = "/Volumes/c/s/broken";
+
+      try {
+        const plugin = new FilesPlugin(brokenConfig);
+        const handler = getRouteHandler(plugin, "get", "/list");
+        const res = mockRes();
+
+        await handler(mockReq("broken"), res);
+
+        expect(res.status).toHaveBeenCalledWith(500);
+        expect(res.json).toHaveBeenCalledWith(
+          expect.objectContaining({
+            error: "Policy evaluation failed",
+            plugin: "files",
+          }),
+        );
+        // Must NOT be 403 — a broken policy is not a denial, it's a server error
+        const statusCodes = (res.status.mock.calls as number[][]).map(
+          (c) => c[0],
+        );
+        expect(statusCodes).not.toContain(403);
+      } finally {
+        delete process.env.DATABRICKS_VOLUME_BROKEN;
+      }
+    });
+
+    test("policy that throws → programmatic API propagates the error", async () => {
+      const brokenConfig = {
+        volumes: {
+          broken: {
+            policy: () => {
+              throw new Error("policy crashed");
+            },
+          },
+          uploads: {},
+          exports: {},
+        },
+      };
+      process.env.DATABRICKS_VOLUME_BROKEN = "/Volumes/c/s/broken";
+
+      try {
+        const plugin = new FilesPlugin(brokenConfig);
+        const handle = plugin.exports()("broken");
+
+        await expect(handle.list()).rejects.toThrow("policy crashed");
+        await expect(handle.list()).rejects.not.toBeInstanceOf(
+          PolicyDeniedError,
+        );
+      } finally {
+        delete process.env.DATABRICKS_VOLUME_BROKEN;
+      }
+    });
+
+    test("async policy that rejects → HTTP route returns 500 (fail closed)", async () => {
+      const brokenConfig = {
+        volumes: {
+          broken: {
+            policy: async () => {
+              throw new Error("async policy crashed");
+            },
+          },
+          uploads: {},
+          exports: {},
+        },
+      };
+      process.env.DATABRICKS_VOLUME_BROKEN = "/Volumes/c/s/broken";
+
+      try {
+        const plugin = new FilesPlugin(brokenConfig);
+        const handler = getRouteHandler(plugin, "get", "/list");
+        const res = mockRes();
+
+        await handler(mockReq("broken"), res);
+
+        expect(res.status).toHaveBeenCalledWith(500);
+        expect(res.json).toHaveBeenCalledWith(
+          expect.objectContaining({
+            error: "Policy evaluation failed",
+            plugin: "files",
+          }),
+        );
+        const statusCodes = (res.status.mock.calls as number[][]).map(
+          (c) => c[0],
+        );
+        expect(statusCodes).not.toContain(403);
+      } finally {
+        delete process.env.DATABRICKS_VOLUME_BROKEN;
+      }
     });
   });
 

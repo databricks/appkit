@@ -1,33 +1,22 @@
 {
   "$schema": "https://unpkg.com/release-it@19/schema/release-it.json",
   "git": {
-    "commitMessage": "chore: release v${version} [skip ci]",
-    "tagName": "v${version}",
-    "tagMatch": "v*",
-    "tagAnnotation": "Release v${version}",
-    "requireBranch": "main",
-    "requireCleanWorkingDir": true,
+    "commit": false,
+    "tag": false,
+    "push": false,
+    "requireBranch": false,
+    "requireCleanWorkingDir": false,
     "requireCommits": true,
     "requireCommitsFail": false,
-    "commitsPath": "packages/appkit packages/appkit-ui packages/shared",
-    "push": true,
-    "pushArgs": ["--follow-tags"]
+    "tagMatch": "v*",
+    "getLatestTagFromAllRefs": true,
+    "commitsPath": "packages/appkit packages/appkit-ui packages/shared"
   },
   "github": {
-    "release": true,
-    "releaseName": "AppKit v${version}",
-    "autoGenerate": false,
-    "draft": false,
-    "preRelease": false,
-    "tokenRef": "GITHUB_TOKEN"
+    "release": false
   },
   "npm": false,
-  "hooks": {
-    "before:init": "pnpm audit --audit-level=high --prod",
-    "after:bump": "tsx tools/sync-versions.ts ${version} && pnpm build:notice && git add NOTICE.md",
-    "before:release": "pnpm build && pnpm --filter=docs build && pnpm --filter=@databricks/appkit dist && pnpm --filter=@databricks/appkit-ui dist && pnpm release:sbom",
-    "after:release": "npm publish packages/appkit/tmp --access public --provenance && npm publish packages/appkit-ui/tmp --access public --provenance"
-  },
+  "hooks": {},
   "plugins": {
     "@release-it/conventional-changelog": {
       "preset": {
@@ -39,8 +28,7 @@
         "commitGroupsSort": ["appkit", "appkit-ui"],
         "commitsSort": ["type", "subject"]
       },
-      "infile": "CHANGELOG.md",
-      "header": "# Changelog\n\nAll notable changes to this project will be documented in this file.",
+      "infile": "changelog-diff.md",
       "gitRawCommitsOpts": {
         "path": ["packages/appkit", "packages/appkit-ui", "packages/shared"]
       },

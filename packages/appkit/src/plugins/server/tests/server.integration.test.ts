@@ -29,13 +29,10 @@ describe("ServerPlugin Integration", () => {
         serverPlugin({
           port: TEST_PORT,
           host: "127.0.0.1",
-          autoStart: false,
         }),
       ],
     });
 
-    // Start server manually
-    await app.server.start();
     server = app.server.getServer();
     baseUrl = `http://127.0.0.1:${TEST_PORT}`;
 
@@ -124,13 +121,11 @@ describe("ServerPlugin with custom plugin", () => {
         serverPlugin({
           port: TEST_PORT,
           host: "127.0.0.1",
-          autoStart: false,
         }),
         testPlugin({}),
       ],
     });
 
-    await app.server.start();
     server = app.server.getServer();
     baseUrl = `http://127.0.0.1:${TEST_PORT}`;
 
@@ -172,7 +167,7 @@ describe("ServerPlugin with custom plugin", () => {
   });
 });
 
-describe("ServerPlugin with extend()", () => {
+describe("ServerPlugin with extend() via onPluginsReady", () => {
   let server: Server;
   let baseUrl: string;
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
@@ -188,19 +183,17 @@ describe("ServerPlugin with extend()", () => {
         serverPlugin({
           port: TEST_PORT,
           host: "127.0.0.1",
-          autoStart: false,
         }),
       ],
+      onPluginsReady(appkit) {
+        appkit.server.extend((expressApp) => {
+          expressApp.get("/custom", (_req, res) => {
+            res.json({ custom: true });
+          });
+        });
+      },
     });
 
-    // Add custom route via extend()
-    app.server.extend((expressApp) => {
-      expressApp.get("/custom", (_req, res) => {
-        res.json({ custom: true });
-      });
-    });
-
-    await app.server.start();
     server = app.server.getServer();
     baseUrl = `http://127.0.0.1:${TEST_PORT}`;
 
@@ -219,12 +212,94 @@ describe("ServerPlugin with extend()", () => {
     }
   });
 
-  test("custom route via extend() works", async () => {
+  test("custom route via extend() in onPluginsReady callback works", async () => {
     const response = await fetch(`${baseUrl}/custom`);
 
     expect(response.status).toBe(200);
 
     const data = await response.json();
     expect(data).toEqual({ custom: true });
+  });
+});
+
+describe("createApp with async onPluginsReady callback", () => {
+  let server: Server;
+  let baseUrl: string;
+  let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
+  const TEST_PORT = 9885;
+
+  beforeAll(async () => {
+    setupDatabricksEnv();
+    ServiceContext.reset();
+    serviceContextMock = await mockServiceContext();
+
+    const app = await createApp({
+      plugins: [
+        serverPlugin({
+          port: TEST_PORT,
+          host: "127.0.0.1",
+        }),
+      ],
+      async onPluginsReady(appkit) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        appkit.server.extend((expressApp) => {
+          expressApp.get("/async-custom", (_req, res) => {
+            res.json({ asyncSetup: true });
+          });
+        });
+      },
+    });
+
+    server = app.server.getServer();
+    baseUrl = `http://127.0.0.1:${TEST_PORT}`;
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  });
+
+  afterAll(async () => {
+    serviceContextMock?.restore();
+    if (server) {
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+    }
+  });
+
+  test("async onPluginsReady callback runs before server starts", async () => {
+    const response = await fetch(`${baseUrl}/async-custom`);
+
+    expect(response.status).toBe(200);
+
+    const data = await response.json();
+    expect(data).toEqual({ asyncSetup: true });
+  });
+});
+
+describe("createApp without server plugin", () => {
+  let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
+  let onPluginsReadyWasCalled = false;
+
+  beforeAll(async () => {
+    setupDatabricksEnv();
+    ServiceContext.reset();
+    serviceContextMock = await mockServiceContext();
+
+    await createApp({
+      plugins: [],
+      onPluginsReady() {
+        onPluginsReadyWasCalled = true;
+      },
+    });
+  });
+
+  afterAll(async () => {
+    serviceContextMock?.restore();
+  });
+
+  test("onPluginsReady callback is still called without server plugin", () => {
+    expect(onPluginsReadyWasCalled).toBe(true);
   });
 });

@@ -7,11 +7,7 @@ import type {
   StreamExecutionSettings,
 } from "shared";
 import { SQLWarehouseConnector } from "../../connectors";
-import {
-  getCurrentUserId,
-  getWarehouseId,
-  getWorkspaceClient,
-} from "../../context";
+import { getWarehouseId, getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
@@ -152,8 +148,7 @@ export class AnalyticsPlugin extends Plugin {
 
     // get execution context - user-scoped if .obo.sql, otherwise service principal
     const executor = isAsUser ? this.asUser(req) : this;
-    const userKey = getCurrentUserId();
-    const executorKey = isAsUser ? userKey : "global";
+    const executorKey = isAsUser ? this.resolveUserId(req) : "global";
 
     const queryParameters =
       format === "ARROW"

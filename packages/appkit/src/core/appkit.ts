@@ -10,9 +10,12 @@ import type {
 } from "shared";
 import { CacheManager } from "../cache";
 import { ServiceContext } from "../context";
+import { createLogger } from "../logging/logger";
 import { ResourceRegistry, ResourceType } from "../registry";
 import type { TelemetryConfig } from "../telemetry";
 import { TelemetryManager } from "../telemetry";
+
+const logger = createLogger("appkit");
 
 export class AppKit<TPlugins extends InputPluginMap> {
   #pluginInstances: Record<string, BasePlugin> = {};
@@ -167,6 +170,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
       telemetry?: TelemetryConfig;
       cache?: CacheConfig;
       client?: WorkspaceClient;
+      onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
     } = {},
   ): Promise<PluginMap<T>> {
     // Initialize core services
@@ -200,7 +204,20 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
     await Promise.all(instance.#setupPromises);
 
-    return instance as unknown as PluginMap<T>;
+    const handle = instance as unknown as PluginMap<T>;
+
+    if (config.onPluginsReady) {
+      logger.debug("Running onPluginsReady hook");
+      await config.onPluginsReady(handle);
+      logger.debug("onPluginsReady hook completed");
+    }
+
+    const serverPlugin = instance.#pluginInstances.server;
+    if (serverPlugin && typeof (serverPlugin as any).start === "function") {
+      await (serverPlugin as any).start();
+    }
+
+    return handle;
   }
 
   private static preparePlugins(
@@ -222,6 +239,9 @@ export class AppKit<TPlugins extends InputPluginMap> {
  *
  * Initializes telemetry, cache, and service context, then registers plugins
  * in phase order (core, normal, deferred) and awaits their setup.
+ * If a `onPluginsReady` callback is provided it runs after plugin setup but
+ * before the server starts, giving you access to the full appkit handle
+ * for registering custom routes or performing async setup.
  * The returned object maps each plugin name to its `exports()` API,
  * with an `asUser(req)` method for user-scoped execution.
  *
@@ -236,18 +256,18 @@ export class AppKit<TPlugins extends InputPluginMap> {
  * });
  * ```
  *
- * @example Extended Server with analytics and custom endpoint
+ * @example Server with custom routes via onPluginsReady
  * ```ts
  * import { createApp, server, analytics } from "@databricks/appkit";
  *
- * const appkit = await createApp({
- *   plugins: [server({ autoStart: false }), analytics({})],
+ * await createApp({
+ *   plugins: [server(), analytics({})],
+ *   onPluginsReady(appkit) {
+ *     appkit.server.extend((app) => {
+ *       app.get("/custom", (_req, res) => res.json({ ok: true }));
+ *     });
+ *   },
  * });
- *
- * appkit.server.extend((app) => {
- *   app.get("/custom", (_req, res) => res.json({ ok: true }));
- * });
- * await appkit.server.start();
  * ```
  */
 export async function createApp<
@@ -258,6 +278,7 @@ export async function createApp<
     telemetry?: TelemetryConfig;
     cache?: CacheConfig;
     client?: WorkspaceClient;
+    onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
   } = {},
 ): Promise<PluginMap<T>> {
   return AppKit._createApp(config);

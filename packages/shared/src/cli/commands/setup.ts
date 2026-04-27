@@ -58,7 +58,7 @@ ${links}
 For enhanced AI assistance with Databricks CLI operations, authentication, data exploration, and app development, install the Databricks skills:
 
 \`\`\`bash
-databricks experimental aitools skills install
+databricks experimental aitools install
 \`\`\`
 ${SECTION_END}`;
 }
@@ -88,7 +88,7 @@ ${links}
 For enhanced AI assistance with Databricks CLI operations, authentication, data exploration, and app development, install the Databricks skills:
 
 \`\`\`bash
-databricks experimental aitools skills install
+databricks experimental aitools install
 \`\`\`
 ${SECTION_END}
 `;
@@ -126,10 +126,10 @@ function runSetup(options: { write?: boolean }) {
 
   if (installed.length === 0) {
     console.log("No @databricks/appkit packages found in node_modules.");
-    console.log("\nMake sure you've installed at least one of:");
-    PACKAGES.forEach((pkg) => {
-      console.log(`  - ${pkg.name}`);
-    });
+    console.log("\nInstall at least one of:");
+    for (const pkg of PACKAGES) {
+      console.log(`  npm install ${pkg.name}`);
+    }
     process.exit(1);
   }
 
@@ -182,4 +182,11 @@ function runSetup(options: { write?: boolean }) {
 export const setupCommand = new Command("setup")
   .description("Setup CLAUDE.md with AppKit package references")
   .option("-w, --write", "Create or update CLAUDE.md file in current directory")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ appkit setup
+  $ appkit setup --write`,
+  )
   .action(runSetup);

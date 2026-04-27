@@ -12,36 +12,46 @@ async function runGenerateTypes(
   options?: { noCache?: boolean },
 ) {
   try {
+    const resolvedRootDir = rootDir || process.cwd();
+    const noCache = options?.noCache || false;
+
+    const typeGen = await import("@databricks/appkit/type-generator");
+
+    // Generate analytics query types (requires warehouse ID)
     const resolvedWarehouseId =
       warehouseId || process.env.DATABRICKS_WAREHOUSE_ID;
 
-    if (!resolvedWarehouseId) {
-      process.exit(0);
-    }
+    if (resolvedWarehouseId) {
+      const resolvedOutFile =
+        outFile ||
+        path.join(process.cwd(), "shared/appkit-types/analytics.d.ts");
 
-    // Try to import the type generator from @databricks/appkit
-    const { generateFromEntryPoint } = await import(
-      "@databricks/appkit/type-generator"
-    );
-
-    const resolvedRootDir = rootDir || process.cwd();
-    const resolvedOutFile =
-      outFile || path.join(process.cwd(), "client/src/appKitTypes.d.ts");
-
-    const queryFolder = path.join(resolvedRootDir, "config/queries");
-    if (!fs.existsSync(queryFolder)) {
-      console.warn(
-        `Warning: No queries found at ${queryFolder}. Skipping type generation.`,
+      const queryFolder = path.join(resolvedRootDir, "config/queries");
+      if (fs.existsSync(queryFolder)) {
+        await typeGen.generateFromEntryPoint({
+          queryFolder,
+          outFile: resolvedOutFile,
+          warehouseId: resolvedWarehouseId,
+          noCache,
+        });
+        console.log(`Generated query types: ${resolvedOutFile}`);
+      }
+    } else {
+      console.error(
+        "Skipping query type generation: no warehouse ID. Set DATABRICKS_WAREHOUSE_ID or pass as argument.",
       );
-      return;
     }
 
-    await generateFromEntryPoint({
-      queryFolder,
-      outFile: resolvedOutFile,
-      warehouseId: resolvedWarehouseId,
-      noCache: options?.noCache || false,
+    // Generate serving endpoint types (no warehouse required)
+    const servingOutFile = path.join(
+      process.cwd(),
+      "shared/appkit-types/serving.d.ts",
+    );
+    await typeGen.generateServingTypes({
+      outFile: servingOutFile,
+      noCache,
     });
+    console.log(`Generated serving types: ${servingOutFile}`);
   } catch (error) {
     if (
       error instanceof Error &&
@@ -63,8 +73,17 @@ export const generateTypesCommand = new Command("generate-types")
   .argument(
     "[outFile]",
     "Output file path",
-    path.join(process.cwd(), "client/src/appKitTypes.d.ts"),
+    path.join(process.cwd(), "shared/appkit-types/analytics.d.ts"),
   )
   .argument("[warehouseId]", "Databricks warehouse ID")
   .option("--no-cache", "Disable caching for type generation")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ appkit generate-types
+  $ appkit generate-types . shared/appkit-types/analytics.d.ts
+  $ appkit generate-types . shared/appkit-types/analytics.d.ts my-warehouse-id
+  $ appkit generate-types --no-cache`,
+  )
   .action(runGenerateTypes);

@@ -55,21 +55,23 @@ const FEATURE_DEPENDENCIES: Record<string, string> = {
   files: "Volume",
   genie: "Genie Space",
   lakebase: "Database",
+  serving: "Serving Endpoint",
 };
 
 const APP_TEMPLATES: AppTemplate[] = [
   {
     name: "appkit-all-in-one",
-    features: ["analytics", "files", "genie", "lakebase"],
+    features: ["analytics", "files", "genie", "lakebase", "serving"],
     set: {
       "analytics.sql-warehouse.id": "placeholder",
       "files.files.path": "placeholder",
       "genie.genie-space.id": "placeholder",
       "lakebase.postgres.branch": "placeholder",
       "lakebase.postgres.database": "placeholder",
+      "serving.serving-endpoint.name": "placeholder",
     },
     description:
-      "Full-stack Node.js app with SQL analytics dashboards, file browser, Genie AI conversations, and Lakebase Autoscaling (Postgres) CRUD",
+      "Full-stack Node.js app with SQL analytics dashboards, file browser, Genie AI conversations, Lakebase Autoscaling (Postgres) CRUD, and Model Serving",
   },
   {
     name: "appkit-analytics",
@@ -95,6 +97,15 @@ const APP_TEMPLATES: AppTemplate[] = [
       "files.files.path": "placeholder",
     },
     description: "Node.js app with file browser for Databricks Volumes",
+  },
+  {
+    name: "appkit-serving",
+    features: ["serving"],
+    set: {
+      "serving.serving-endpoint.name": "placeholder",
+    },
+    description:
+      "Node.js app with Databricks Model Serving endpoint integration",
   },
   {
     name: "appkit-lakebase",

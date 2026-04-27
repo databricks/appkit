@@ -13,7 +13,7 @@ export interface StreamConfig {
   maxActiveStreams?: number;
 }
 
-/** Retry configuration for the RetryInterceptor. Uses exponential backoff between attempts. */
+/** Retry configuration for the RetryInterceptor. Uses exponential backoff with full jitter between attempts. */
 export interface RetryConfig {
   enabled?: boolean;
   attempts?: number;

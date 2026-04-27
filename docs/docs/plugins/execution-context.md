@@ -41,7 +41,6 @@ Exported from `@databricks/appkit`:
 - `getWorkspaceClient()`: Returns the appropriate WorkspaceClient for current context
 - `getWarehouseId()`: `Promise<string>` (from `DATABRICKS_WAREHOUSE_ID` or auto-selected in dev)
 - `getWorkspaceId()`: `Promise<string>` (from `DATABRICKS_WORKSPACE_ID` or fetched)
-- `isInUserContext()`: Returns `true` if currently executing in user context
 
 ## Development mode behavior
 

@@ -81,11 +81,3 @@ export function getWarehouseId(): Promise<string> {
 export function getWorkspaceId(): Promise<string> {
   return getExecutionContext().workspaceId;
 }
-
-/**
- * Check if currently running in a user context.
- */
-export function isInUserContext(): boolean {
-  const ctx = executionContextStorage.getStore();
-  return ctx !== undefined;
-}

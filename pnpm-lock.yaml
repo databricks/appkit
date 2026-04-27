@@ -242,6 +242,9 @@ importers:
 
   packages/appkit:
     dependencies:
+      '@ast-grep/napi':
+        specifier: 0.37.0
+        version: 0.37.0
       '@databricks/lakebase':
         specifier: workspace:*
         version: link:../lakebase

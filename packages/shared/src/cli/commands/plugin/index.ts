@@ -20,4 +20,14 @@ export const pluginCommand = new Command("plugin")
   .addCommand(pluginCreateCommand)
   .addCommand(pluginValidateCommand)
   .addCommand(pluginListCommand)
-  .addCommand(pluginAddResourceCommand);
+  .addCommand(pluginAddResourceCommand)
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ appkit plugin sync --write
+  $ appkit plugin create --placement in-repo --path plugins/my-plugin --name my-plugin --description "Does X"
+  $ appkit plugin validate .
+  $ appkit plugin list --json
+  $ appkit plugin add-resource --path plugins/my-plugin --type sql_warehouse`,
+  );

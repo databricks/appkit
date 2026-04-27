@@ -3,13 +3,6 @@ import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import { ApiClient, Config } from "@databricks/sdk-experimental";
 import pg from "pg";
 import {
-  type Counter,
-  type Histogram,
-  SpanStatusCode,
-  TelemetryManager,
-  type TelemetryProvider,
-} from "@/telemetry";
-import {
   AppKitError,
   AuthenticationError,
   ConfigurationError,
@@ -17,6 +10,13 @@ import {
   ValidationError,
 } from "../../errors";
 import { createLogger } from "../../logging/logger";
+import {
+  type Counter,
+  type Histogram,
+  SpanStatusCode,
+  TelemetryManager,
+  type TelemetryProvider,
+} from "../../telemetry";
 import { deepMerge } from "../../utils";
 import { lakebaseV1Defaults } from "./defaults";
 import type {

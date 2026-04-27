@@ -9,10 +9,13 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as VectorSearchRouteRouteImport } from './routes/vector-search.route'
 import { Route as TypeSafetyRouteRouteImport } from './routes/type-safety.route'
 import { Route as TelemetryRouteRouteImport } from './routes/telemetry.route'
 import { Route as SqlHelpersRouteRouteImport } from './routes/sql-helpers.route'
+import { Route as ServingRouteRouteImport } from './routes/serving.route'
 import { Route as ReconnectRouteRouteImport } from './routes/reconnect.route'
+import { Route as PolicyMatrixRouteRouteImport } from './routes/policy-matrix.route'
 import { Route as LakebaseRouteRouteImport } from './routes/lakebase.route'
 import { Route as GenieRouteRouteImport } from './routes/genie.route'
 import { Route as FilesRouteRouteImport } from './routes/files.route'
@@ -22,6 +25,11 @@ import { Route as ArrowAnalyticsRouteRouteImport } from './routes/arrow-analytic
 import { Route as AnalyticsRouteRouteImport } from './routes/analytics.route'
 import { Route as IndexRouteImport } from './routes/index'
 
+const VectorSearchRouteRoute = VectorSearchRouteRouteImport.update({
+  id: '/vector-search',
+  path: '/vector-search',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TypeSafetyRouteRoute = TypeSafetyRouteRouteImport.update({
   id: '/type-safety',
   path: '/type-safety',
@@ -37,9 +45,19 @@ const SqlHelpersRouteRoute = SqlHelpersRouteRouteImport.update({
   path: '/sql-helpers',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ServingRouteRoute = ServingRouteRouteImport.update({
+  id: '/serving',
+  path: '/serving',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ReconnectRouteRoute = ReconnectRouteRouteImport.update({
   id: '/reconnect',
   path: '/reconnect',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PolicyMatrixRouteRoute = PolicyMatrixRouteRouteImport.update({
+  id: '/policy-matrix',
+  path: '/policy-matrix',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LakebaseRouteRoute = LakebaseRouteRouteImport.update({
@@ -92,10 +110,13 @@ export interface FileRoutesByFullPath {
   '/files': typeof FilesRouteRoute
   '/genie': typeof GenieRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
+  '/policy-matrix': typeof PolicyMatrixRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
+  '/serving': typeof ServingRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
   '/type-safety': typeof TypeSafetyRouteRoute
+  '/vector-search': typeof VectorSearchRouteRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -106,10 +127,13 @@ export interface FileRoutesByTo {
   '/files': typeof FilesRouteRoute
   '/genie': typeof GenieRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
+  '/policy-matrix': typeof PolicyMatrixRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
+  '/serving': typeof ServingRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
   '/type-safety': typeof TypeSafetyRouteRoute
+  '/vector-search': typeof VectorSearchRouteRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -121,10 +145,13 @@ export interface FileRoutesById {
   '/files': typeof FilesRouteRoute
   '/genie': typeof GenieRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
+  '/policy-matrix': typeof PolicyMatrixRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
+  '/serving': typeof ServingRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
   '/type-safety': typeof TypeSafetyRouteRoute
+  '/vector-search': typeof VectorSearchRouteRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -137,10 +164,13 @@ export interface FileRouteTypes {
     | '/files'
     | '/genie'
     | '/lakebase'
+    | '/policy-matrix'
     | '/reconnect'
+    | '/serving'
     | '/sql-helpers'
     | '/telemetry'
     | '/type-safety'
+    | '/vector-search'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -151,10 +181,13 @@ export interface FileRouteTypes {
     | '/files'
     | '/genie'
     | '/lakebase'
+    | '/policy-matrix'
     | '/reconnect'
+    | '/serving'
     | '/sql-helpers'
     | '/telemetry'
     | '/type-safety'
+    | '/vector-search'
   id:
     | '__root__'
     | '/'
@@ -165,10 +198,13 @@ export interface FileRouteTypes {
     | '/files'
     | '/genie'
     | '/lakebase'
+    | '/policy-matrix'
     | '/reconnect'
+    | '/serving'
     | '/sql-helpers'
     | '/telemetry'
     | '/type-safety'
+    | '/vector-search'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -180,14 +216,24 @@ export interface RootRouteChildren {
   FilesRouteRoute: typeof FilesRouteRoute
   GenieRouteRoute: typeof GenieRouteRoute
   LakebaseRouteRoute: typeof LakebaseRouteRoute
+  PolicyMatrixRouteRoute: typeof PolicyMatrixRouteRoute
   ReconnectRouteRoute: typeof ReconnectRouteRoute
+  ServingRouteRoute: typeof ServingRouteRoute
   SqlHelpersRouteRoute: typeof SqlHelpersRouteRoute
   TelemetryRouteRoute: typeof TelemetryRouteRoute
   TypeSafetyRouteRoute: typeof TypeSafetyRouteRoute
+  VectorSearchRouteRoute: typeof VectorSearchRouteRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/vector-search': {
+      id: '/vector-search'
+      path: '/vector-search'
+      fullPath: '/vector-search'
+      preLoaderRoute: typeof VectorSearchRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/type-safety': {
       id: '/type-safety'
       path: '/type-safety'
@@ -209,11 +255,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SqlHelpersRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/serving': {
+      id: '/serving'
+      path: '/serving'
+      fullPath: '/serving'
+      preLoaderRoute: typeof ServingRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/reconnect': {
       id: '/reconnect'
       path: '/reconnect'
       fullPath: '/reconnect'
       preLoaderRoute: typeof ReconnectRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/policy-matrix': {
+      id: '/policy-matrix'
+      path: '/policy-matrix'
+      fullPath: '/policy-matrix'
+      preLoaderRoute: typeof PolicyMatrixRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/lakebase': {
@@ -284,10 +344,13 @@ const rootRouteChildren: RootRouteChildren = {
   FilesRouteRoute: FilesRouteRoute,
   GenieRouteRoute: GenieRouteRoute,
   LakebaseRouteRoute: LakebaseRouteRoute,
+  PolicyMatrixRouteRoute: PolicyMatrixRouteRoute,
   ReconnectRouteRoute: ReconnectRouteRoute,
+  ServingRouteRoute: ServingRouteRoute,
   SqlHelpersRouteRoute: SqlHelpersRouteRoute,
   TelemetryRouteRoute: TelemetryRouteRoute,
   TypeSafetyRouteRoute: TypeSafetyRouteRoute,
+  VectorSearchRouteRoute: VectorSearchRouteRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

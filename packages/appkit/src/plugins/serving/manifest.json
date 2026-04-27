@@ -1,0 +1,54 @@
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "name": "serving",
+  "displayName": "Model Serving Plugin",
+  "description": "Authenticated proxy to Databricks Model Serving endpoints",
+  "resources": {
+    "required": [
+      {
+        "type": "serving_endpoint",
+        "alias": "Serving Endpoint",
+        "resourceKey": "serving-endpoint",
+        "description": "Model Serving endpoint for inference",
+        "permission": "CAN_QUERY",
+        "fields": {
+          "name": {
+            "env": "DATABRICKS_SERVING_ENDPOINT_NAME",
+            "description": "Serving endpoint name"
+          }
+        }
+      }
+    ],
+    "optional": []
+  },
+  "config": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "endpoints": {
+          "type": "object",
+          "description": "Map of alias names to endpoint configurations",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "env": {
+                "type": "string",
+                "description": "Environment variable holding the endpoint name"
+              },
+              "servedModel": {
+                "type": "string",
+                "description": "Target a specific served model (bypasses traffic routing)"
+              }
+            },
+            "required": ["env"]
+          }
+        },
+        "timeout": {
+          "type": "number",
+          "default": 120000,
+          "description": "Request timeout in ms. Default: 120000 (2 min)"
+        }
+      }
+    }
+  }
+}

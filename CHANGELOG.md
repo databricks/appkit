@@ -2,6 +2,71 @@
 
 All notable changes to this project will be documented in this file.
 
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+## [0.26.0](https://github.com/databricks/appkit/compare/v0.25.1...v0.26.0) (2026-04-27)
+
+* add appkit codemod on-plugins-ready CLI ([#291](https://github.com/databricks/appkit/issues/291)) ([f2f0504](https://github.com/databricks/appkit/commit/f2f05044f3216b1eafcd118bd995960c35392020))
+* add onPluginsReady callback to createApp, remove autoStart ([#280](https://github.com/databricks/appkit/issues/280)) ([a06b6e3](https://github.com/databricks/appkit/commit/a06b6e392de2bab2004e7ea2ccf8bb080dfea545))
+
+
+## [0.25.1](https://github.com/databricks/appkit/compare/v0.25.0...v0.25.1) (2026-04-27)
+
+### appkit
+
+* **appkit:** check isRetryable before retrying in interceptor ([#276](https://github.com/databricks/appkit/issues/276)) ([1c994a6](https://github.com/databricks/appkit/commit/1c994a6d99f397b56e90f1b53df06a61f02b9e82))
+
+
+## [0.25.0](https://github.com/databricks/appkit/compare/v0.24.0...v0.25.0) (2026-04-23)
+
+### files
+
+* **files:** per-volume in-app policy enforcement ([#197](https://github.com/databricks/appkit/issues/197)) ([f54dca5](https://github.com/databricks/appkit/commit/f54dca5da5af5368c7bcb18745715b54a99d47e9))
+
+
+## [0.24.0](https://github.com/databricks/appkit/compare/v0.23.0...v0.24.0) (2026-04-20)
+
+* add AST extraction to serving type generator and move types to shared/ ([#279](https://github.com/databricks/appkit/issues/279)) ([422afb3](https://github.com/databricks/appkit/commit/422afb38aa73f8adb94e091225dc3381bd92cfcd))
+* ci on main ([#277](https://github.com/databricks/appkit/issues/277)) ([30a0a24](https://github.com/databricks/appkit/commit/30a0a248e0ab6bac50e8698e33eb5c46ca957aea))
+* add Vector Search plugin ([#200](https://github.com/databricks/appkit/issues/200)) ([279954e](https://github.com/databricks/appkit/commit/279954eca9a82c02af639aa006aa9f968bd60517))
+
+### cli
+
+* **cli:** add non-interactive flags and help examples for agent readiness ([#252](https://github.com/databricks/appkit/issues/252)) ([f803a8b](https://github.com/databricks/appkit/commit/f803a8b445fba043186407af96f7402b57e8ff6e))
+
+
+## [0.23.0](https://github.com/databricks/appkit/compare/v0.22.0...v0.23.0) (2026-04-14)
+
+### appkit
+
+* **appkit:** add jitter to RetryInterceptor exponential backoff ([#269](https://github.com/databricks/appkit/issues/269)) ([bdf2ea3](https://github.com/databricks/appkit/commit/bdf2ea335b11b09e772081890e1e75ec778f4ec2))
+
+* typegen queries ([#251](https://github.com/databricks/appkit/issues/251)) ([9dd7fa3](https://github.com/databricks/appkit/commit/9dd7fa36e0f76a64dbd11fac42a9c10be836b688))
+* use end-user ID in OBO analytics cache key ([#268](https://github.com/databricks/appkit/issues/268)) ([a8e9f6e](https://github.com/databricks/appkit/commit/a8e9f6e4c6d3e1cfd6d7b74da2ce1772ecba1757))
+* add Model Serving connector and plugin ([#239](https://github.com/databricks/appkit/issues/239)) ([9dc35f1](https://github.com/databricks/appkit/commit/9dc35f1fa9f316dd9806a3a2e3d78be8302c47c4))
+* add serving type generator, Vite plugin, and UI hooks ([#240](https://github.com/databricks/appkit/issues/240)) ([c4285af](https://github.com/databricks/appkit/commit/c4285af958556fcb4770e4cfa96dd6071dee66b3))
+* Improve error handling from 3P requests on interceptor ([#238](https://github.com/databricks/appkit/issues/238)) ([e72bee4](https://github.com/databricks/appkit/commit/e72bee476fa3ecccee6ad184cf930fd2b56d2ed6)), closes [#258](https://github.com/databricks/appkit/issues/258)
+
+
+## [0.22.0](https://github.com/databricks/appkit/compare/v0.21.0...v0.22.0) (2026-04-09)
+
+* correct misleading asUser() log message in development mode ([#250](https://github.com/databricks/appkit/issues/250)) ([ee05c8a](https://github.com/databricks/appkit/commit/ee05c8af61f8b63ea9a7fad8be93b4f5358fce41))
+* fail typegen build when queries produce unknown result types ([#254](https://github.com/databricks/appkit/issues/254)) ([f2d44ae](https://github.com/databricks/appkit/commit/f2d44ae74e35ef8b9f5b027658690aef2efc390b))
+* Genie plugin — handle in-progress messages on reload and fix message overflow ([#196](https://github.com/databricks/appkit/issues/196)) ([f94b3e2](https://github.com/databricks/appkit/commit/f94b3e230fe211c4b3406151a361477119e2af7f))
+* harden cookie flags, sanitize Genie markdown output, fix remote tunnel ([#216](https://github.com/databricks/appkit/issues/216)) ([c39b88b](https://github.com/databricks/appkit/commit/c39b88bebc81abc137351ab3be54d50aa8a04e16))
+* plugin client config ([#190](https://github.com/databricks/appkit/issues/190)) ([03f4b97](https://github.com/databricks/appkit/commit/03f4b977ecde284f0e920213329ed7fb67facf2d))
+
+
 ## [0.21.0](https://github.com/databricks/appkit/compare/v0.20.3...v0.21.0) (2026-03-17)
 
 * allow users to change the inferred chart type ([#191](https://github.com/databricks/appkit/issues/191)) ([4c090f3](https://github.com/databricks/appkit/commit/4c090f383380b05aa304831a9bf10228e376e65d))
