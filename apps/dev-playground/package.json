@@ -23,6 +23,9 @@
   "author": "",
   "license": "ISC",
   "description": "",
+  "appkit": {
+    "autoMigrate": false
+  },
   "dependencies": {
     "@databricks/appkit": "workspace:*",
     "drizzle-orm": "0.45.1",
