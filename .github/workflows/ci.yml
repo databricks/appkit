@@ -232,8 +232,7 @@ jobs:
         uses: ./.github/actions/setup-jfrog-npm
 
       - name: Clone DevHub
-        # TODO: switch to main once databricks/devhub#58 merges (adds APPKIT_BRANCH env var support)
-        run: git clone --depth 1 --branch pkosiec/appkit-docs-sync https://github.com/databricks/devhub.git /tmp/devhub
+        run: git clone --depth 1 https://github.com/databricks/devhub.git /tmp/devhub
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
