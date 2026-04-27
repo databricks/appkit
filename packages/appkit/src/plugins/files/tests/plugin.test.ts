@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ServiceContext } from "../../../context/service-context";
@@ -2507,6 +2508,406 @@ describe("FilesPlugin", () => {
       // runs in the SP's serviceUserId.
       const userKeys = calls.map((c: unknown[]) => c[2]);
       expect(userKeys[0]).not.toEqual(userKeys[1]);
+    });
+  });
+
+  describe("OBO write routes", () => {
+    function getRouteHandler(
+      plugin: FilesPlugin,
+      method: "get" | "post" | "delete",
+      pathSuffix: string,
+    ) {
+      const mockRouter = {
+        use: vi.fn(),
+        get: vi.fn(),
+        post: vi.fn(),
+        put: vi.fn(),
+        delete: vi.fn(),
+        patch: vi.fn(),
+      } as any;
+      plugin.injectRoutes(mockRouter);
+      const call = mockRouter[method].mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === "string" && (c[0] as string).endsWith(pathSuffix),
+      );
+      return call[call.length - 1] as (req: any, res: any) => Promise<void>;
+    }
+
+    function mockRes() {
+      const res: any = { headersSent: false };
+      res.status = vi.fn().mockReturnValue(res);
+      res.json = vi.fn().mockReturnValue(res);
+      res.type = vi.fn().mockReturnValue(res);
+      res.send = vi.fn().mockReturnValue(res);
+      res.setHeader = vi.fn().mockReturnValue(res);
+      res.end = vi.fn();
+      return res;
+    }
+
+    /**
+     * `_handleUpload` calls `Readable.toWeb(req)` on the express request, so
+     * the mock req must be (or extend) a real Node Readable stream. Build one
+     * from the supplied body bytes and tack on the express-shaped helpers.
+     */
+    function mockUploadReq(
+      volumeKey: string,
+      headers: Record<string, string>,
+      body: string | Buffer = "",
+      overrides: Record<string, any> = {},
+    ) {
+      const buf = Buffer.isBuffer(body) ? body : Buffer.from(body);
+      const stream = Readable.from([buf]) as Readable & {
+        params?: any;
+        query?: any;
+        headers?: any;
+        header?: (name: string) => string | undefined;
+      };
+      stream.params = { volumeKey };
+      // Relative path so the connector's `resolvePath` joins it with the
+      // volume's defaultVolume from `DATABRICKS_VOLUME_OBO_VOL`.
+      stream.query = { path: "upload-target.bin" };
+      stream.headers = headers;
+      stream.header = (name: string) => headers[name.toLowerCase()];
+      Object.assign(stream, overrides);
+      return stream;
+    }
+
+    function mockReq(
+      volumeKey: string,
+      headers: Record<string, string>,
+      overrides: Record<string, any> = {},
+    ) {
+      return {
+        params: { volumeKey },
+        query: {},
+        body: {},
+        ...overrides,
+        headers,
+        header: (name: string) => headers[name.toLowerCase()],
+      };
+    }
+
+    /**
+     * Replace the default `getCurrentUserId` mock with the real implementation
+     * so calls inside `runInUserContext` resolve to the wrapped UserContext's
+     * `userId` (mirrors the helper used by the `OBO read routes` block).
+     */
+    async function useRealGetCurrentUserId() {
+      const actual =
+        await vi.importActual<typeof import("../../../context")>(
+          "../../../context",
+        );
+      const ctx = await import("../../../context");
+      vi.mocked(ctx.getCurrentUserId).mockImplementation(
+        actual.getCurrentUserId,
+      );
+    }
+
+    /**
+     * Replace the default `getWorkspaceClient` mock with the real
+     * implementation so that calls inside `runInUserContext` return the
+     * UserContext's `client` (the user-token-authenticated WorkspaceClient)
+     * while calls outside the user context fall back to the
+     * service-principal client from `ServiceContext.get()`. Required to
+     * exercise the real `_runWithAuth → runInUserContext → getWorkspaceClient
+     * → client.config.authenticate → fetch headers` chain.
+     */
+    async function useRealGetWorkspaceClient() {
+      const actual =
+        await vi.importActual<typeof import("../../../context")>(
+          "../../../context",
+        );
+      const ctx = await import("../../../context");
+      vi.mocked(ctx.getWorkspaceClient).mockImplementation(
+        actual.getWorkspaceClient,
+      );
+    }
+
+    let originalNodeEnv: string | undefined;
+
+    beforeEach(() => {
+      originalNodeEnv = process.env.NODE_ENV;
+      process.env.DATABRICKS_VOLUME_OBO_VOL = "/Volumes/c/s/obo";
+    });
+
+    afterEach(() => {
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+      delete process.env.DATABRICKS_VOLUME_OBO_VOL;
+      vi.unstubAllGlobals();
+    });
+
+    /**
+     * NON-NEGOTIABLE upload-headers contract.
+     *
+     * `_handleUpload` does a hand-rolled `fetch PUT` (not a typed SDK call)
+     * via the connector's `upload()`. Inside `_runWithAuth` on an OBO volume,
+     * the chain is:
+     *
+     *     getWorkspaceClient()           → user-token WorkspaceClient
+     *     client.config.authenticate(h)  → injects "Bearer <user-token>"
+     *     fetch(url, { headers })        → outgoing request as the user
+     *
+     * This test pins that chain end-to-end. If any future SDK upgrade or
+     * refactor changes `client.config.authenticate`'s signature, removes the
+     * `runInUserContext` wrap from `_handleUpload`, or rewires
+     * `getWorkspaceClient()` so it returns the SP client inside the OBO
+     * scope, the user-token Authorization header will not reach `fetch` and
+     * this assertion fails. SP-token would silently leak to UC otherwise.
+     */
+    test("OBO upload: outgoing fetch PUT carries user-token Authorization header (not SP)", async () => {
+      await useRealGetCurrentUserId();
+      await useRealGetWorkspaceClient();
+
+      // SP-token marker — what the existing mockClient would inject if the
+      // OBO wrap leaked. We assert this NEVER reaches the outgoing fetch.
+      mockClient.config.authenticate.mockImplementation(
+        async (headers: Headers) => {
+          headers.set("Authorization", "Bearer SP-TOKEN");
+        },
+      );
+
+      // User-token marker — what the OBO scope MUST inject.
+      const userClient = {
+        config: {
+          host: "https://test.databricks.com",
+          authenticate: vi.fn(async (headers: Headers) => {
+            headers.set("Authorization", "Bearer USER-TOKEN-FOO");
+          }),
+        },
+        // `_handleUpload` only routes through the connector's `upload()`,
+        // which uses host + authenticate + fetch. No `files.*` accessor is
+        // touched on the user client during this path.
+      };
+
+      // Wire `_buildUserContextOrNull → ServiceContext.createUserContext` to
+      // return a UserContext whose `client` is our user-token client. This
+      // is the same hook `mockServiceContext` already installs; we just
+      // override its impl for this test.
+      serviceContextMock.createUserContextSpy.mockImplementation(
+        (_token: string, userId: string) => ({
+          client: userClient as any,
+          userId,
+          warehouseId: serviceContextMock.serviceContext.warehouseId,
+          workspaceId: serviceContextMock.serviceContext.workspaceId,
+          isUserContext: true,
+        }),
+      );
+
+      // Capture the outgoing PUT.
+      const fetchSpy = vi
+        .fn()
+        .mockResolvedValue({ ok: true, status: 200, text: async () => "" });
+      vi.stubGlobal("fetch", fetchSpy);
+
+      const plugin = new FilesPlugin({
+        volumes: {
+          obo_vol: {
+            auth: "on-behalf-of-user",
+            policy: policy.allowAll(),
+          },
+          uploads: {},
+          exports: {},
+        },
+      });
+      const handler = getRouteHandler(plugin, "post", "/upload");
+      const res = mockRes();
+
+      await handler(
+        mockUploadReq(
+          "obo_vol",
+          {
+            "x-forwarded-access-token": "alice-token",
+            "x-forwarded-user": "alice@example.com",
+            "content-length": "5",
+          },
+          "hello",
+        ),
+        res,
+      );
+
+      // The user-token authenticator was consulted exactly when upload ran.
+      expect(userClient.config.authenticate).toHaveBeenCalledTimes(1);
+
+      // The hand-rolled fetch PUT happened exactly once.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const fetchArgs = fetchSpy.mock.calls[0];
+      const init = fetchArgs[1] as RequestInit & { headers: Headers };
+      expect(init.method).toBe("PUT");
+
+      // The contract — proves the user-token Authorization header reached
+      // fetch. Toggling the `_runWithAuth` wrap off in `_handleUpload`
+      // breaks this assertion (fetch would carry "Bearer SP-TOKEN" instead).
+      expect(init.headers.get("Authorization")).toBe("Bearer USER-TOKEN-FOO");
+      expect(init.headers.get("Authorization")).not.toBe("Bearer SP-TOKEN");
+
+      // Defense-in-depth: SP authenticator was NOT called along the OBO path.
+      expect(mockClient.config.authenticate).not.toHaveBeenCalled();
+    });
+
+    test("OBO upload + missing token + NODE_ENV=production → 401 before any SDK or fetch call", async () => {
+      process.env.NODE_ENV = "production";
+
+      const fetchSpy = vi.fn();
+      vi.stubGlobal("fetch", fetchSpy);
+
+      const plugin = new FilesPlugin({
+        volumes: {
+          obo_vol: {
+            auth: "on-behalf-of-user",
+            policy: policy.allowAll(),
+          },
+          uploads: {},
+          exports: {},
+        },
+      });
+      const handler = getRouteHandler(plugin, "post", "/upload");
+      const res = mockRes();
+
+      // No x-forwarded-access-token header.
+      await handler(
+        mockUploadReq(
+          "obo_vol",
+          {
+            "x-forwarded-user": "alice@example.com",
+            "content-length": "5",
+          },
+          "hello",
+        ),
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(401);
+      const errBody = res.json.mock.calls[0][0];
+      expect(errBody).toEqual(
+        expect.objectContaining({
+          error: expect.stringContaining("Missing"),
+          plugin: "files",
+        }),
+      );
+      expect(errBody.error).toMatch(/x-forwarded-access-token/);
+
+      // Neither the SDK upload nor the hand-rolled fetch ran.
+      expect(mockClient.files.upload).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    test("OBO mkdir + policy denies → 403 PolicyDeniedError; SDK not invoked", async () => {
+      const policySpy = vi.fn().mockReturnValue(false);
+      const plugin = new FilesPlugin({
+        volumes: {
+          obo_vol: { auth: "on-behalf-of-user", policy: policySpy },
+          uploads: {},
+          exports: {},
+        },
+      });
+      const handler = getRouteHandler(plugin, "post", "/mkdir");
+      const res = mockRes();
+
+      const fetchSpy = vi.fn();
+      vi.stubGlobal("fetch", fetchSpy);
+
+      await handler(
+        mockReq(
+          "obo_vol",
+          {
+            "x-forwarded-access-token": "alice-token",
+            "x-forwarded-user": "alice@example.com",
+          },
+          { body: { path: "/new-dir" } },
+        ),
+        res,
+      );
+
+      // Policy was consulted with the OBO identity.
+      expect(policySpy).toHaveBeenCalledTimes(1);
+      const userArg = policySpy.mock.calls[0][2];
+      expect(userArg).toEqual({
+        id: "alice@example.com",
+        isServicePrincipal: false,
+      });
+
+      // 403 PolicyDeniedError shape.
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+          plugin: "files",
+        }),
+      );
+
+      // SDK + fetch not invoked.
+      expect(mockClient.files.createDirectory).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    test("OBO delete + valid token + UC denies → user-token client invoked, error propagated", async () => {
+      await useRealGetCurrentUserId();
+      await useRealGetWorkspaceClient();
+
+      // Distinct user-token client with a `files.delete` that mimics a UC
+      // failure (e.g. 403 from UC because the user lacks privilege).
+      const userClient = {
+        config: {
+          host: "https://test.databricks.com",
+          authenticate: vi.fn(async (h: Headers) => {
+            h.set("Authorization", "Bearer USER-TOKEN-DEL");
+          }),
+        },
+        files: {
+          delete: vi.fn(async () => {
+            throw new MockApiError("UC denied", 403);
+          }),
+        },
+      };
+
+      serviceContextMock.createUserContextSpy.mockImplementation(
+        (_token: string, userId: string) => ({
+          client: userClient as any,
+          userId,
+          warehouseId: serviceContextMock.serviceContext.warehouseId,
+          workspaceId: serviceContextMock.serviceContext.workspaceId,
+          isUserContext: true,
+        }),
+      );
+
+      const plugin = new FilesPlugin({
+        volumes: {
+          obo_vol: {
+            auth: "on-behalf-of-user",
+            policy: policy.allowAll(),
+          },
+          uploads: {},
+          exports: {},
+        },
+      });
+      const handler = getRouteHandler(plugin, "delete", "/:volumeKey");
+      const res = mockRes();
+
+      await handler(
+        mockReq(
+          "obo_vol",
+          {
+            "x-forwarded-access-token": "alice-token",
+            "x-forwarded-user": "alice@example.com",
+          },
+          { query: { path: "doomed.txt" } },
+        ),
+        res,
+      );
+
+      // The user-token client was used, not the SP one.
+      expect(userClient.files.delete).toHaveBeenCalledTimes(1);
+      expect(mockClient.files.delete).not.toHaveBeenCalled();
+
+      // The UC error surfaced as 403 (the ApiError statusCode).
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ plugin: "files" }),
+      );
     });
   });
 

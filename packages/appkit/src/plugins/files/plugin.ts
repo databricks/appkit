@@ -896,70 +896,82 @@ export class FilesPlugin extends Plugin implements ToolProvider {
 
     logger.debug(req, "Upload started: volume=%s path=%s", volumeKey, path);
 
-    try {
-      const rawStream: ReadableStream<Uint8Array> = Readable.toWeb(req);
+    await this._runWithAuth(req, volumeKey, async () => {
+      try {
+        const rawStream: ReadableStream<Uint8Array> = Readable.toWeb(req);
 
-      let bytesReceived = 0;
-      const webStream = rawStream.pipeThrough(
-        new TransformStream<Uint8Array, Uint8Array>({
-          transform(chunk, controller) {
-            bytesReceived += chunk.byteLength;
-            if (bytesReceived > maxSize) {
-              controller.error(
-                new Error(
-                  `Upload stream exceeds maximum allowed size (${maxSize} bytes)`,
-                ),
-              );
-              return;
-            }
-            controller.enqueue(chunk);
-          },
-        }),
-      );
+        let bytesReceived = 0;
+        const webStream = rawStream.pipeThrough(
+          new TransformStream<Uint8Array, Uint8Array>({
+            transform(chunk, controller) {
+              bytesReceived += chunk.byteLength;
+              if (bytesReceived > maxSize) {
+                controller.error(
+                  new Error(
+                    `Upload stream exceeds maximum allowed size (${maxSize} bytes)`,
+                  ),
+                );
+                return;
+              }
+              controller.enqueue(chunk);
+            },
+          }),
+        );
 
-      logger.debug(
-        req,
-        "Upload body received: volume=%s path=%s, size=%d bytes",
-        volumeKey,
-        path,
-        contentLength ?? 0,
-      );
-      const settings: PluginExecutionSettings = {
-        default: FILES_WRITE_DEFAULTS,
-      };
-      const result = await this.trackWrite(() =>
-        this.execute(async () => {
-          await connector.upload(getWorkspaceClient(), path, webStream);
-          return { success: true as const };
-        }, settings),
-      );
-
-      this._invalidateListCache(volumeKey, path, connector);
-
-      if (!result.ok) {
-        logger.error(
+        logger.debug(
           req,
-          "Upload failed: volume=%s path=%s, size=%d bytes",
+          "Upload body received: volume=%s path=%s, size=%d bytes",
           volumeKey,
           path,
           contentLength ?? 0,
         );
-        this._sendStatusError(res, result.status);
-        return;
-      }
+        const settings: PluginExecutionSettings = {
+          default: FILES_WRITE_DEFAULTS,
+        };
+        // The connector's `upload` resolves `getWorkspaceClient()` and
+        // `client.config.authenticate(headers)` synchronously inside this
+        // callback. When `_runWithAuth` wraps us in `runInUserContext`, that
+        // chain produces user-token Authorization headers on the outgoing
+        // `fetch PUT`. The OBO upload-headers test pins this contract.
+        const result = await this.trackWrite(() =>
+          this.execute(async () => {
+            await connector.upload(getWorkspaceClient(), path, webStream);
+            return { success: true as const };
+          }, settings),
+        );
 
-      logger.debug(req, "Upload complete: volume=%s path=%s", volumeKey, path);
-      res.json(result.data);
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message.includes("exceeds maximum allowed size")
-      ) {
-        res.status(413).json({ error: error.message, plugin: this.name });
-        return;
+        this._invalidateListCache(volumeKey, path, connector);
+
+        if (!result.ok) {
+          logger.error(
+            req,
+            "Upload failed: volume=%s path=%s, size=%d bytes",
+            volumeKey,
+            path,
+            contentLength ?? 0,
+          );
+          this._sendStatusError(res, result.status);
+          return;
+        }
+
+        logger.debug(
+          req,
+          "Upload complete: volume=%s path=%s",
+          volumeKey,
+          path,
+        );
+        res.json(result.data);
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message.includes("exceeds maximum allowed size")
+        ) {
+          res.status(413).json({ error: error.message, plugin: this.name });
+          return;
+        }
+        this._handleApiError(res, error, "Upload failed");
       }
-      this._handleApiError(res, error, "Upload failed");
-    }
+    });
   }
 
   private async _handleMkdir(
@@ -980,28 +992,30 @@ export class FilesPlugin extends Plugin implements ToolProvider {
     if (!(await this._enforcePolicy(req, res, volumeKey, "mkdir", dirPath)))
       return;
 
-    try {
-      const settings: PluginExecutionSettings = {
-        default: FILES_WRITE_DEFAULTS,
-      };
-      const result = await this.trackWrite(() =>
-        this.execute(async () => {
-          await connector.createDirectory(getWorkspaceClient(), dirPath);
-          return { success: true as const };
-        }, settings),
-      );
+    await this._runWithAuth(req, volumeKey, async () => {
+      try {
+        const settings: PluginExecutionSettings = {
+          default: FILES_WRITE_DEFAULTS,
+        };
+        const result = await this.trackWrite(() =>
+          this.execute(async () => {
+            await connector.createDirectory(getWorkspaceClient(), dirPath);
+            return { success: true as const };
+          }, settings),
+        );
 
-      this._invalidateListCache(volumeKey, dirPath, connector);
+        this._invalidateListCache(volumeKey, dirPath, connector);
 
-      if (!result.ok) {
-        this._sendStatusError(res, result.status);
-        return;
+        if (!result.ok) {
+          this._sendStatusError(res, result.status);
+          return;
+        }
+
+        res.json(result.data);
+      } catch (error) {
+        this._handleApiError(res, error, "Create directory failed");
       }
-
-      res.json(result.data);
-    } catch (error) {
-      this._handleApiError(res, error, "Create directory failed");
-    }
+    });
   }
 
   private async _handleDelete(
@@ -1022,28 +1036,30 @@ export class FilesPlugin extends Plugin implements ToolProvider {
     if (!(await this._enforcePolicy(req, res, volumeKey, "delete", path)))
       return;
 
-    try {
-      const settings: PluginExecutionSettings = {
-        default: FILES_WRITE_DEFAULTS,
-      };
-      const result = await this.trackWrite(() =>
-        this.execute(async () => {
-          await connector.delete(getWorkspaceClient(), path);
-          return { success: true as const };
-        }, settings),
-      );
+    await this._runWithAuth(req, volumeKey, async () => {
+      try {
+        const settings: PluginExecutionSettings = {
+          default: FILES_WRITE_DEFAULTS,
+        };
+        const result = await this.trackWrite(() =>
+          this.execute(async () => {
+            await connector.delete(getWorkspaceClient(), path);
+            return { success: true as const };
+          }, settings),
+        );
 
-      this._invalidateListCache(volumeKey, path, connector);
+        this._invalidateListCache(volumeKey, path, connector);
 
-      if (!result.ok) {
-        this._sendStatusError(res, result.status);
-        return;
+        if (!result.ok) {
+          this._sendStatusError(res, result.status);
+          return;
+        }
+
+        res.json(result.data);
+      } catch (error) {
+        this._handleApiError(res, error, "Delete failed");
       }
-
-      res.json(result.data);
-    } catch (error) {
-      this._handleApiError(res, error, "Delete failed");
-    }
+    });
   }
 
   private _resolveAuth(
