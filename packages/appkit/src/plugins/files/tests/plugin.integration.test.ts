@@ -65,11 +65,33 @@ const MOCK_AUTH_HEADERS = {
 /** Volume key used in all integration tests. */
 const VOL = "files";
 
+/**
+ * Wait for the supplied server to finish binding, then return the
+ * OS-assigned port. Required when tests pass `port: 0` to `serverPlugin`
+ * — `appkit.server.start()` returns as soon as `listen()` is invoked but
+ * before the bind completes, so `server.address()` returns `null` until
+ * the `listening` event fires.
+ */
+async function getListeningPort(server: Server): Promise<number> {
+  const addr = server.address();
+  if (addr && typeof addr === "object" && typeof addr.port === "number") {
+    return addr.port;
+  }
+  await new Promise<void>((resolve, reject) => {
+    server.once("listening", () => resolve());
+    server.once("error", (err) => reject(err));
+  });
+  const ready = server.address();
+  if (!ready || typeof ready !== "object") {
+    throw new Error("Server is listening but address() returned null");
+  }
+  return ready.port;
+}
+
 describe("Files Plugin Integration", () => {
   let server: Server;
   let baseUrl: string;
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
-  const TEST_PORT = 9880;
 
   beforeAll(async () => {
     setupDatabricksEnv({
@@ -84,8 +106,10 @@ describe("Files Plugin Integration", () => {
 
     const appkit = await createApp({
       plugins: [
+        // port: 0 → OS assigns an ephemeral port. Avoids EADDRINUSE
+        // when concurrent CI runs or stale processes hold a fixed port.
         serverPlugin({
-          port: TEST_PORT,
+          port: 0,
           host: "127.0.0.1",
           autoStart: false,
         }),
@@ -95,7 +119,8 @@ describe("Files Plugin Integration", () => {
 
     await appkit.server.start();
     server = appkit.server.getServer();
-    baseUrl = `http://127.0.0.1:${TEST_PORT}`;
+    const port = await getListeningPort(server);
+    baseUrl = `http://127.0.0.1:${port}`;
   });
 
   afterAll(async () => {
@@ -477,7 +502,7 @@ describe("Files Plugin Integration", () => {
       const appkit = await createApp({
         plugins: [
           serverPlugin({
-            port: TEST_PORT + 1,
+            port: 0,
             host: "127.0.0.1",
             autoStart: false,
           }),
@@ -491,7 +516,8 @@ describe("Files Plugin Integration", () => {
 
       try {
         await appkit.server.start();
-        const localBase = `http://127.0.0.1:${TEST_PORT + 1}`;
+        const port = await getListeningPort(appkit.server.getServer());
+        const localBase = `http://127.0.0.1:${port}`;
 
         const response = await fetch(
           `${localBase}/api/files/${VOL}/list?path=denied`,
@@ -516,7 +542,7 @@ describe("Files Plugin Integration", () => {
       const appkit = await createApp({
         plugins: [
           serverPlugin({
-            port: TEST_PORT + 2,
+            port: 0,
             host: "127.0.0.1",
             autoStart: false,
           }),
@@ -530,7 +556,8 @@ describe("Files Plugin Integration", () => {
 
       try {
         await appkit.server.start();
-        const localBase = `http://127.0.0.1:${TEST_PORT + 2}`;
+        const port = await getListeningPort(appkit.server.getServer());
+        const localBase = `http://127.0.0.1:${port}`;
 
         mockFilesApi.listDirectoryContents.mockReturnValue(
           (async function* () {

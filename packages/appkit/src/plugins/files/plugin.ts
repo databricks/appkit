@@ -580,13 +580,17 @@ export class FilesPlugin extends Plugin {
    * missed delete only costs read freshness, not correctness, and
    * propagating the error would convert a successful write into an HTTP
    * 500.
+   *
+   * Returns a `Promise<void>`; callers MUST `await` this before sending the
+   * HTTP success response so a follow-up `GET /list` issued in the same tick
+   * cannot race the underlying `cache.delete()` and observe stale data.
    */
-  private _invalidateListCache(
+  private async _invalidateListCache(
     volumeKey: string,
     writtenPath: string,
     connector: FilesConnector,
     mode: "service-principal" | "on-behalf-of-user" = "service-principal",
-  ): void {
+  ): Promise<void> {
     if (mode === "on-behalf-of-user") {
       // OBO read cache is disabled — nothing to invalidate. Skipping here
       // also prevents accidentally caching a wrong-namespace delete that
@@ -601,9 +605,9 @@ export class FilesPlugin extends Plugin {
     // relative root-level files like `bar.txt`. Both map to the sentinel.
     const isRootLevel = !parent || parent === "/";
     const userKey = getCurrentUserId();
-    const tryDelete = (segment: string) => {
+    const tryDelete = async (segment: string): Promise<void> => {
       try {
-        this.cache.delete(
+        await this.cache.delete(
           this.cache.generateKey([`files:${volumeKey}:list`, segment], userKey),
         );
       } catch (err) {
@@ -618,7 +622,7 @@ export class FilesPlugin extends Plugin {
 
     if (isRootLevel) {
       // A rootless `list()` produced the `"__root__"` key.
-      tryDelete("__root__");
+      await tryDelete("__root__");
       return;
     }
 
@@ -634,7 +638,7 @@ export class FilesPlugin extends Plugin {
       );
       return;
     }
-    tryDelete(resolved);
+    await tryDelete(resolved);
   }
 
   private _handleApiError(
@@ -1070,7 +1074,10 @@ export class FilesPlugin extends Plugin {
           }, settings),
         );
 
-        this._invalidateListCache(volumeKey, path, connector, mode);
+        // Awaited before sending the response so that a follow-up
+        // `GET /list` issued in the same tick cannot race the
+        // underlying `cache.delete()` and observe pre-write data.
+        await this._invalidateListCache(volumeKey, path, connector, mode);
 
         if (!result.ok) {
           logger.error(
@@ -1133,7 +1140,10 @@ export class FilesPlugin extends Plugin {
           }, settings),
         );
 
-        this._invalidateListCache(volumeKey, dirPath, connector, mode);
+        // Awaited before sending the response so that a follow-up
+        // `GET /list` issued in the same tick cannot race the
+        // underlying `cache.delete()` and observe pre-write data.
+        await this._invalidateListCache(volumeKey, dirPath, connector, mode);
 
         if (!result.ok) {
           this._sendStatusError(res, result.status);
@@ -1176,7 +1186,10 @@ export class FilesPlugin extends Plugin {
           }, settings),
         );
 
-        this._invalidateListCache(volumeKey, path, connector, mode);
+        // Awaited before sending the response so that a follow-up
+        // `GET /list` issued in the same tick cannot race the
+        // underlying `cache.delete()` and observe pre-write data.
+        await this._invalidateListCache(volumeKey, path, connector, mode);
 
         if (!result.ok) {
           this._sendStatusError(res, result.status);
