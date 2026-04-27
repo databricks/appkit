@@ -26,6 +26,42 @@ import { executeStatementDefaults } from "./defaults";
 
 const logger = createLogger("connectors:sql-warehouse");
 
+/**
+ * Recursively converts BigInt values to strings so that Arrow IPC rows can be
+ * passed through `JSON.stringify` (used by the SSE stream encoder). Also
+ * flattens apache-arrow `Vector`s (which `row.toJSON()` leaves in place for
+ * LIST columns) into plain arrays — both so the result is valid JSON and so
+ * downstream consumers see the same shape as the legacy data_array path.
+ */
+function deepStringifyBigInts(value: unknown): unknown {
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+  if (Array.isArray(value)) {
+    return value.map(deepStringifyBigInts);
+  }
+  if (
+    value !== null &&
+    typeof value === "object" &&
+    typeof (value as { toArray?: unknown }).toArray === "function"
+  ) {
+    // Apache Arrow Vector — produced by `row.toJSON()` for LIST columns.
+    // `Array.from` (rather than `.toArray()`) so we get a plain Array we can
+    // map over: `.toArray()` on an Int64 vector returns a `BigInt64Array`
+    // typed array, which preserves its element type through `.map()` and
+    // would re-throw on bigint→string assignment.
+    return Array.from(value as Iterable<unknown>).map(deepStringifyBigInts);
+  }
+  if (value !== null && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = deepStringifyBigInts(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 interface SQLWarehouseConfig {
   timeout?: number;
   telemetry?: TelemetryOptions;
@@ -393,6 +429,16 @@ export class SQLWarehouseConnector {
   }
 
   private _transformDataArray(response: sql.StatementResponse) {
+    // Serverless warehouses return ARROW_STREAM with INLINE disposition: the
+    // data is base64 Arrow IPC under `result.attachment` instead of
+    // `result.data_array`. Decode it before falling through to the legacy
+    // ARROW_STREAM branch (which only handles EXTERNAL_LINKS).
+    const attachment = (response.result as undefined | { attachment?: string })
+      ?.attachment;
+    if (attachment) {
+      return this._transformArrowAttachment(response, attachment);
+    }
+
     if (response.manifest?.format === "ARROW_STREAM") {
       return this.updateWithArrowStatus(response);
     }
@@ -449,19 +495,23 @@ export class SQLWarehouseConnector {
     response: sql.StatementResponse,
     attachment: string,
   ) {
-    const buf = Buffer.from(attachment, "base64");
-    const table = tableFromIPC(buf);
-    const data = table.toArray().map((row) => {
-      const obj = row.toJSON();
-      // Convert BigInt values to strings to avoid JSON.stringify failures
-      for (const key of Object.keys(obj)) {
-        if (typeof obj[key] === "bigint") {
-          obj[key] = obj[key].toString();
-        }
-      }
-      return obj;
-    });
-    const { attachment: _att, ...restResult } = response.result as any;
+    let data: unknown[];
+    try {
+      const buf = Buffer.from(attachment, "base64");
+      const table = tableFromIPC(buf);
+      data = table.toArray().map((row) => deepStringifyBigInts(row.toJSON()));
+    } catch (err) {
+      throw ExecutionError.statementFailed(
+        `Failed to decode Arrow IPC attachment: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+
+    const result = response.result as
+      | (NonNullable<sql.StatementResponse["result"]> & { attachment?: string })
+      | undefined;
+    const { attachment: _att, ...restResult } = result ?? {};
     return {
       ...response,
       result: {
