@@ -213,6 +213,22 @@ Resources that must be available for the plugin to function
 
 ***
 
+### stability?
+
+```ts
+optional stability: "experimental" | "preview" | "stable";
+```
+
+Plugin stability level. Experimental plugins are very unstable and may be dropped. Preview plugins may have breaking API changes between minor releases but are on a path to stable. Stable plugins follow semver strictly.
+
+#### Inherited from
+
+```ts
+Omit.stability
+```
+
+***
+
 ### version?
 
 ```ts
