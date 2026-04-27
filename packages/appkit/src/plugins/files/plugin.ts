@@ -120,6 +120,34 @@ export class FilesPlugin extends Plugin {
   }
 
   /**
+   * Extraction for OBO (on-behalf-of-user) volumes on the HTTP path. Both the
+   * `x-forwarded-access-token` and `x-forwarded-user` headers must be present
+   * for a valid end-user identity. When the token is missing:
+   * - In production we throw `AuthenticationError.missingToken` so the route
+   *   responds with 401 (no SDK call is made).
+   * - In development (`NODE_ENV === "development"`) we emit a single warning
+   *   and fall back to the service principal identity so local testing
+   *   without a reverse proxy continues to work.
+   */
+  private _extractObiUser(req: express.Request): FilePolicyUser {
+    const token = req.header("x-forwarded-access-token")?.trim();
+    const userId = req.header("x-forwarded-user")?.trim();
+    if (token && userId) {
+      return { id: userId, isServicePrincipal: false };
+    }
+    if (!token && process.env.NODE_ENV === "development") {
+      logger.warn(
+        "OBO volume requested without x-forwarded-access-token — falling back to service principal identity (dev mode). " +
+          "In production this request would 401.",
+      );
+      return { id: getCurrentUserId(), isServicePrincipal: true };
+    }
+    throw AuthenticationError.missingToken(
+      "Missing x-forwarded-access-token header for on-behalf-of-user volume.",
+    );
+  }
+
+  /**
    * Check the policy for a volume. No-op if no policy is configured.
    * Throws `PolicyDeniedError` if denied.
    */
@@ -153,9 +181,20 @@ export class FilesPlugin extends Plugin {
 
   /**
    * HTTP-level wrapper around `_checkPolicy`.
-   * Resolves the user inline (header when present, otherwise the SP identity),
-   * then runs the volume policy (403 on denial, 500 on unexpected error).
+   * Selects the policy user based on the volume's auth mode (resolved via
+   * `_resolveAuth`):
+   * - `"service-principal"` (default): use the `x-forwarded-user` header when
+   *   present, otherwise fall back to the SP identity (legacy behavior).
+   * - `"on-behalf-of-user"`: require `x-forwarded-access-token` (and the
+   *   matching `x-forwarded-user`); 401 in production when missing,
+   *   dev-fallback to SP identity in development.
+   * Then runs the volume policy (403 on denial, 500 on unexpected error).
    * Returns `true` if the request may proceed, `false` if a response was sent.
+   *
+   * NOTE: This method only selects which identity the policy sees. It does
+   * NOT change which `WorkspaceClient` the SDK calls execute against — that
+   * still uses the service principal until a later phase wires the actual
+   * OBO `runInUserContext` plumbing.
    */
   private async _enforcePolicy(
     req: express.Request,
@@ -165,15 +204,28 @@ export class FilesPlugin extends Plugin {
     path: string,
     resourceOverrides?: Partial<FileResource>,
   ): Promise<boolean> {
-    const headerUserId = req.header("x-forwarded-user")?.trim();
     let user: FilePolicyUser;
-    if (headerUserId) {
-      user = { id: headerUserId };
-    } else {
-      logger.debug(
-        "No x-forwarded-user header — proceeding with service principal identity for policy evaluation.",
-      );
-      user = { id: getCurrentUserId(), isServicePrincipal: true };
+    try {
+      const auth = this._resolveAuth(volumeKey);
+      if (auth === "on-behalf-of-user") {
+        user = this._extractObiUser(req);
+      } else {
+        const headerUserId = req.header("x-forwarded-user")?.trim();
+        if (headerUserId) {
+          user = { id: headerUserId };
+        } else {
+          logger.debug(
+            "No x-forwarded-user header — proceeding with service principal identity for policy evaluation.",
+          );
+          user = { id: getCurrentUserId(), isServicePrincipal: true };
+        }
+      }
+    } catch (error) {
+      if (error instanceof AuthenticationError) {
+        res.status(401).json({ error: error.message, plugin: this.name });
+        return false;
+      }
+      throw error;
     }
 
     try {

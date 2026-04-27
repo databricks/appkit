@@ -69,6 +69,11 @@ export interface FilePolicyUser {
    * direct SDK call (`appKit.files(...)`) or an HTTP request that arrived
    * without an `x-forwarded-user` header. Policy authors typically check
    * this first to distinguish SP traffic from end-user traffic.
+   *
+   * `false` is set explicitly on the OBO (on-behalf-of-user) HTTP path when
+   * a valid `x-forwarded-access-token` and `x-forwarded-user` were both
+   * present on the request — i.e. the policy is running with a real
+   * end-user identity rather than the service principal.
    */
   isServicePrincipal?: boolean;
 }

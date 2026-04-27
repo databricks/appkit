@@ -1933,6 +1933,243 @@ describe("FilesPlugin", () => {
     });
   });
 
+  describe("OBO identity selection", () => {
+    function getRouteHandler(
+      plugin: FilesPlugin,
+      method: "get" | "post" | "delete",
+      pathSuffix: string,
+    ) {
+      const mockRouter = {
+        use: vi.fn(),
+        get: vi.fn(),
+        post: vi.fn(),
+        put: vi.fn(),
+        delete: vi.fn(),
+        patch: vi.fn(),
+      } as any;
+      plugin.injectRoutes(mockRouter);
+      const call = mockRouter[method].mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === "string" && (c[0] as string).endsWith(pathSuffix),
+      );
+      return call[call.length - 1] as (req: any, res: any) => Promise<void>;
+    }
+
+    function mockRes() {
+      const res: any = { headersSent: false };
+      res.status = vi.fn().mockReturnValue(res);
+      res.json = vi.fn().mockReturnValue(res);
+      res.type = vi.fn().mockReturnValue(res);
+      res.send = vi.fn().mockReturnValue(res);
+      res.setHeader = vi.fn().mockReturnValue(res);
+      res.end = vi.fn();
+      return res;
+    }
+
+    function mockReq(
+      volumeKey: string,
+      headers: Record<string, string>,
+      overrides: Record<string, any> = {},
+    ) {
+      return {
+        params: { volumeKey },
+        query: {},
+        ...overrides,
+        headers,
+        header: (name: string) => headers[name.toLowerCase()],
+      };
+    }
+
+    let originalNodeEnv: string | undefined;
+
+    beforeEach(() => {
+      originalNodeEnv = process.env.NODE_ENV;
+      process.env.DATABRICKS_VOLUME_OBO_VOL = "/Volumes/c/s/obo";
+    });
+
+    afterEach(() => {
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+      delete process.env.DATABRICKS_VOLUME_OBO_VOL;
+    });
+
+    test("OBO volume + valid token → policy receives { isServicePrincipal: false, id: <x-forwarded-user> }", async () => {
+      const policySpy = vi.fn().mockReturnValue(true);
+      const plugin = new FilesPlugin({
+        volumes: {
+          obo_vol: { auth: "on-behalf-of-user", policy: policySpy },
+          uploads: {},
+          exports: {},
+        },
+      });
+      const handler = getRouteHandler(plugin, "get", "/list");
+      const res = mockRes();
+
+      mockClient.files.listDirectoryContents.mockImplementation(
+        async function* () {
+          yield { name: "o.txt", path: "/o.txt", is_directory: false };
+        },
+      );
+
+      await handler(
+        mockReq("obo_vol", {
+          "x-forwarded-access-token": "test-token",
+          "x-forwarded-user": "alice@example.com",
+        }),
+        res,
+      );
+
+      expect(policySpy).toHaveBeenCalledTimes(1);
+      const userArg = policySpy.mock.calls[0][2];
+      expect(userArg).toEqual({
+        id: "alice@example.com",
+        isServicePrincipal: false,
+      });
+
+      const statusCodes = (res.status.mock.calls as number[][]).map(
+        (c) => c[0],
+      );
+      expect(statusCodes).not.toContain(401);
+      expect(statusCodes).not.toContain(403);
+    });
+
+    test("OBO volume + missing token + NODE_ENV != 'development' → 401, no SDK call", async () => {
+      process.env.NODE_ENV = "production";
+      const policySpy = vi.fn().mockReturnValue(true);
+      const plugin = new FilesPlugin({
+        volumes: {
+          obo_vol: { auth: "on-behalf-of-user", policy: policySpy },
+          uploads: {},
+          exports: {},
+        },
+      });
+      const handler = getRouteHandler(plugin, "get", "/list");
+      const res = mockRes();
+
+      // No x-forwarded-access-token header.
+      await handler(
+        mockReq("obo_vol", {
+          "x-forwarded-user": "alice@example.com",
+        }),
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(401);
+      const errBody = res.json.mock.calls[0][0];
+      expect(errBody).toEqual(
+        expect.objectContaining({
+          error: expect.stringContaining("Missing"),
+          plugin: "files",
+        }),
+      );
+      // The error shape comes from AuthenticationError.missingToken (mentions
+      // x-forwarded-access-token in our message).
+      expect(errBody.error).toMatch(/x-forwarded-access-token/);
+
+      // Policy must not have been evaluated and the SDK must not have been
+      // called.
+      expect(policySpy).not.toHaveBeenCalled();
+      expect(mockClient.files.listDirectoryContents).not.toHaveBeenCalled();
+    });
+
+    test("OBO volume + missing token + NODE_ENV === 'development' → exactly one warn, SP fallback proceeds", async () => {
+      process.env.NODE_ENV = "development";
+      const policySpy = vi.fn().mockReturnValue(true);
+      const plugin = new FilesPlugin({
+        volumes: {
+          obo_vol: { auth: "on-behalf-of-user", policy: policySpy },
+          uploads: {},
+          exports: {},
+        },
+      });
+      const handler = getRouteHandler(plugin, "get", "/list");
+      const res = mockRes();
+
+      mockClient.files.listDirectoryContents.mockImplementation(
+        async function* () {
+          yield { name: "d.txt", path: "/d.txt", is_directory: false };
+        },
+      );
+
+      // The plugin's logger.warn delegates to console.warn. Spy on console.warn
+      // and filter for the unique substring of our dev-fallback message.
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      try {
+        await handler(
+          mockReq("obo_vol", {
+            "x-forwarded-user": "alice@example.com",
+          }),
+          res,
+        );
+
+        const matchingWarns = warnSpy.mock.calls.filter((args) =>
+          args.some(
+            (a) =>
+              typeof a === "string" &&
+              a.includes(
+                "OBO volume requested without x-forwarded-access-token",
+              ),
+          ),
+        );
+        expect(matchingWarns).toHaveLength(1);
+      } finally {
+        warnSpy.mockRestore();
+      }
+
+      expect(policySpy).toHaveBeenCalledTimes(1);
+      const userArg = policySpy.mock.calls[0][2];
+      expect(userArg).toEqual(
+        expect.objectContaining({ isServicePrincipal: true }),
+      );
+
+      const statusCodes = (res.status.mock.calls as number[][]).map(
+        (c) => c[0],
+      );
+      expect(statusCodes).not.toContain(401);
+      expect(statusCodes).not.toContain(403);
+    });
+
+    test("OBO volume + valid token + policy denies → 403 PolicyDeniedError", async () => {
+      const policySpy = vi.fn().mockReturnValue(false);
+      const plugin = new FilesPlugin({
+        volumes: {
+          obo_vol: { auth: "on-behalf-of-user", policy: policySpy },
+          uploads: {},
+          exports: {},
+        },
+      });
+      const handler = getRouteHandler(plugin, "get", "/list");
+      const res = mockRes();
+
+      await handler(
+        mockReq("obo_vol", {
+          "x-forwarded-access-token": "test-token",
+          "x-forwarded-user": "alice@example.com",
+        }),
+        res,
+      );
+
+      expect(policySpy).toHaveBeenCalledTimes(1);
+      const userArg = policySpy.mock.calls[0][2];
+      expect(userArg).toEqual({
+        id: "alice@example.com",
+        isServicePrincipal: false,
+      });
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("Policy denied"),
+          plugin: "files",
+        }),
+      );
+    });
+  });
+
   describe("Upload Stream Size Limiter", () => {
     test("stream under limit passes through all chunks", async () => {
       const maxSize = 100;
