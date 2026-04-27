@@ -6,17 +6,15 @@ import { resolveManifestInDir } from "../manifest-resolve";
 import { isWithinDirectory } from "../sync/sync";
 import { shouldAllowJsManifestForDir } from "../trusted-js-manifest";
 
-type Stability = "experimental" | "preview" | "stable";
+type Stability = "beta" | "stable";
 
 const TIER_ORDER: Record<Stability, number> = {
-  experimental: 0,
-  preview: 1,
-  stable: 2,
+  beta: 0,
+  stable: 1,
 };
 
 const IMPORT_PATH_MAP: Record<Stability, string> = {
-  experimental: "/experimental",
-  preview: "/preview",
+  beta: "/beta",
   stable: "",
 };
 
@@ -78,7 +76,7 @@ function validatePluginName(pluginName: string): void {
 }
 
 function isStability(value: unknown): value is Stability {
-  return value === "experimental" || value === "preview" || value === "stable";
+  return value === "beta" || value === "stable";
 }
 
 function findPluginManifest(
@@ -252,7 +250,7 @@ async function runPromote(
 
   if (!isStability(options.to)) {
     console.error(
-      `Invalid target tier "${options.to}". Must be one of: experimental, preview, stable.`,
+      `Invalid target tier "${options.to}". Must be one of: beta, stable.`,
     );
     process.exit(1);
   }
@@ -298,7 +296,7 @@ async function runPromote(
   if (!isStability(rawStability)) {
     console.error(
       `Manifest at ${path.relative(cwd, manifestPath)} has an invalid stability value "${String(rawStability)}". ` +
-        `Must be one of: experimental, preview, stable (or omitted for stable).`,
+        `Must be one of: beta, stable (or omitted for stable).`,
     );
     process.exit(1);
   }
@@ -399,10 +397,7 @@ export {
 export const pluginPromoteCommand = new Command("promote")
   .description("Promote a plugin to a higher stability tier")
   .argument("<plugin-name>", "Plugin name to promote")
-  .requiredOption(
-    "--to <tier>",
-    "Target stability tier (experimental, preview, stable)",
-  )
+  .requiredOption("--to <tier>", "Target stability tier (beta, stable)")
   .option("--dry-run", "Show what would change without modifying files")
   .option("--skip-imports", "Only update manifest, skip import path rewriting")
   .option("--skip-sync", "Don't auto-run plugin sync after promotion")

@@ -4,7 +4,7 @@ export default defineConfig([
   {
     publint: true,
     name: "@databricks/appkit",
-    entry: ["src/index.ts", "src/experimental.ts", "src/preview.ts"],
+    entry: ["src/index.ts", "src/beta.ts"],
     outDir: "dist",
     hash: false,
     format: "esm",

@@ -4,26 +4,23 @@ sidebar_position: 2
 
 # Plugin Stability Tiers
 
-AppKit plugins have a three-tier stability system that communicates API maturity and breaking-change expectations.
+AppKit plugins have a two-tier stability system that communicates API maturity and breaking-change expectations.
 
 ## Tiers
 
 | Tier | Import Path | Contract |
 |------|------------|---------|
-| **Experimental** | `@databricks/appkit/experimental` | Very unstable. May be dropped entirely. No guarantee of promotion. |
-| **Preview** | `@databricks/appkit/preview` | API may change between minor releases. On a path to stable. |
+| **Beta** | `@databricks/appkit/beta` | API may change between minor releases. On a path to stable. |
 | **Stable** | `@databricks/appkit` | Production ready. Follows semver strictly. |
 
-The import path is the primary stability signal. Importing from `/experimental` or `/preview` is explicit consent to potential breaking changes.
+The import path is the primary stability signal. Importing from `/beta` is explicit consent to potential breaking changes.
 
 ## Promotion Path
 
 Promotion is one-way. Plugins can enter at any tier.
 
 ```
-experimental ──→ preview ──→ stable
-      │
-      └──→ (dropped)
+beta ──→ stable
 ```
 
 ## Usage
@@ -34,11 +31,8 @@ experimental ──→ preview ──→ stable
 // Stable plugins
 import { server, analytics } from "@databricks/appkit";
 
-// Preview plugins
-import { somePreviewPlugin } from "@databricks/appkit/preview";
-
-// Experimental plugins
-import { someExperimentalPlugin } from "@databricks/appkit/experimental";
+// Beta plugins
+import { someBetaPlugin } from "@databricks/appkit/beta";
 ```
 
 ### UI Components
@@ -46,8 +40,8 @@ import { someExperimentalPlugin } from "@databricks/appkit/experimental";
 `@databricks/appkit-ui` mirrors the same pattern:
 
 ```typescript
-import { SomeComponent } from "@databricks/appkit-ui/react/preview";
-import { someUtil } from "@databricks/appkit-ui/js/experimental";
+import { SomeComponent } from "@databricks/appkit-ui/react/beta";
+import { someUtil } from "@databricks/appkit-ui/js/beta";
 ```
 
 ## CLI Commands
@@ -71,14 +65,11 @@ The interactive flow prompts for a stability level (defaults to stable).
 ### Promoting a Plugin
 
 ```bash
-# Promote from experimental to preview
-npx appkit plugin promote my-plugin --to preview
-
-# Promote from preview to stable
+# Promote from beta to stable
 npx appkit plugin promote my-plugin --to stable
 
 # Preview changes without modifying files
-npx appkit plugin promote my-plugin --to preview --dry-run
+npx appkit plugin promote my-plugin --to stable --dry-run
 ```
 
 The promote command:
@@ -90,6 +81,7 @@ The promote command:
 - `--dry-run` -- Show what would change without writing
 - `--skip-imports` -- Only update the manifest
 - `--skip-sync` -- Don't auto-run sync
+- `--allow-installed` -- Allow promoting a plugin that lives only under `node_modules` (advanced)
 
 ## Manifest Field
 
@@ -99,13 +91,13 @@ The `stability` field in `manifest.json` is optional. When absent, the plugin is
 {
   "name": "my-plugin",
   "displayName": "My Plugin",
-  "description": "An experimental feature",
-  "stability": "experimental",
+  "description": "An in-development feature",
+  "stability": "beta",
   "resources": { "required": [], "optional": [] }
 }
 ```
 
-Valid values: `"experimental"`, `"preview"`, `"stable"`.
+Valid values: `"beta"`, `"stable"`.
 
 ## Template Manifest (appkit.plugins.json)
 
@@ -117,7 +109,7 @@ When `plugin sync` discovers non-stable plugins, it includes their stability in 
   "plugins": {
     "my-plugin": {
       "name": "my-plugin",
-      "stability": "experimental",
+      "stability": "beta",
       "package": "@databricks/appkit"
     }
   }
@@ -128,7 +120,7 @@ Only stable plugins can be marked `requiredByTemplate`. Non-stable plugins alway
 
 ## For Third-Party Plugin Authors
 
-The import paths (`/experimental`, `/preview`) only apply to first-party plugins shipped inside `@databricks/appkit`. Third-party plugins declare stability via the `stability` field in their `manifest.json`. CLI tooling (`plugin list`, `plugin sync`) surfaces this information to users.
+The import path (`/beta`) only applies to first-party plugins shipped inside `@databricks/appkit`. Third-party plugins declare stability via the `stability` field in their `manifest.json`. CLI tooling (`plugin list`, `plugin sync`) surfaces this information to users.
 
 ## Current Plugins by Tier
 

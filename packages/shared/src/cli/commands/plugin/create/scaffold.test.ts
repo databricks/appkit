@@ -236,38 +236,21 @@ describe("scaffold", () => {
       expect(manifest.stability).toBeUndefined();
     });
 
-    it('includes stability: "preview" when set', () => {
+    it('includes stability: "beta" when set', () => {
       const tmp = makeTempDir();
       tempDirs.push(tmp);
       const targetDir = path.join(tmp, "test");
 
       scaffoldPlugin(
         targetDir,
-        { ...BASE_ANSWERS, stability: "preview" },
+        { ...BASE_ANSWERS, stability: "beta" },
         { isolated: false },
       );
 
       const manifest = JSON.parse(
         fs.readFileSync(path.join(targetDir, "manifest.json"), "utf-8"),
       );
-      expect(manifest.stability).toBe("preview");
-    });
-
-    it('includes stability: "experimental" when set', () => {
-      const tmp = makeTempDir();
-      tempDirs.push(tmp);
-      const targetDir = path.join(tmp, "test");
-
-      scaffoldPlugin(
-        targetDir,
-        { ...BASE_ANSWERS, stability: "experimental" },
-        { isolated: false },
-      );
-
-      const manifest = JSON.parse(
-        fs.readFileSync(path.join(targetDir, "manifest.json"), "utf-8"),
-      );
-      expect(manifest.stability).toBe("experimental");
+      expect(manifest.stability).toBe("beta");
     });
   });
 

@@ -333,22 +333,17 @@ async function runInteractive(): Promise<void> {
       process.exit(0);
     }
 
-    const stability = await select<"stable" | "preview" | "experimental">({
+    const stability = await select<"stable" | "beta">({
       message: "Plugin stability level",
       options: [
         { value: "stable", label: "Stable", hint: "API follows semver" },
         {
-          value: "preview",
-          label: "Preview",
+          value: "beta",
+          label: "Beta",
           hint: "Heading to stable, API may change",
         },
-        {
-          value: "experimental",
-          label: "Experimental",
-          hint: "Very unstable, may be dropped",
-        },
       ],
-      initialValue: "stable" as "stable" | "preview" | "experimental",
+      initialValue: "stable" as "stable" | "beta",
     });
     if (isCancel(stability)) {
       cancel("Cancelled.");

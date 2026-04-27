@@ -98,9 +98,9 @@
     },
     "stability": {
       "type": "string",
-      "enum": ["experimental", "preview", "stable"],
+      "enum": ["beta", "stable"],
       "default": "stable",
-      "description": "Plugin stability level. Experimental plugins are very unstable and may be dropped. Preview plugins may have breaking API changes between minor releases but are on a path to stable. Stable plugins follow semver strictly."
+      "description": "Plugin stability level. Beta plugins may have breaking API changes between minor releases but are on a path to stable. Stable plugins follow semver strictly."
     }
   },
   "additionalProperties": false,

@@ -86,7 +86,7 @@ async function loadPluginEntry(
       }),
       ...(manifest.stability &&
         manifest.stability !== "stable" && {
-          stability: manifest.stability as "experimental" | "preview",
+          stability: manifest.stability as "beta",
         }),
     },
   ];

@@ -23,7 +23,7 @@ export interface CreateAnswers {
   displayName: string;
   description: string;
   /** Only set when non-stable. Absent = "stable" (default). */
-  stability?: "experimental" | "preview";
+  stability?: "beta";
   resources: SelectedResource[];
   author?: string;
   version: string;

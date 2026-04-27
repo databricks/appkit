@@ -33,5 +33,5 @@ Examples:
   $ appkit plugin validate .
   $ appkit plugin list --json
   $ appkit plugin add-resource --path plugins/my-plugin --type sql_warehouse
-  $ appkit plugin promote my-plugin --to preview`,
+  $ appkit plugin promote my-plugin --to stable`,
   );

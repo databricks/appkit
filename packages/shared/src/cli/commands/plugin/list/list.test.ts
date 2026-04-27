@@ -143,18 +143,11 @@ describe("list", () => {
         version: "1.1",
         plugins: {
           ...TEMPLATE_MANIFEST_JSON.plugins,
-          preview: {
-            name: "preview-plugin",
-            displayName: "Preview Plugin",
+          beta: {
+            name: "beta-plugin",
+            displayName: "Beta Plugin",
             package: "@databricks/appkit",
-            stability: "preview",
-            resources: { required: [], optional: [] },
-          },
-          experimental: {
-            name: "exp-plugin",
-            displayName: "Experimental Plugin",
-            package: "@databricks/appkit",
-            stability: "experimental",
+            stability: "beta",
             resources: { required: [], optional: [] },
           },
         },
@@ -163,12 +156,10 @@ describe("list", () => {
       fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
       const rows = listFromManifestFile(manifestPath);
-      const previewRow = rows.find((r) => r.name === "preview-plugin");
-      const expRow = rows.find((r) => r.name === "exp-plugin");
+      const betaRow = rows.find((r) => r.name === "beta-plugin");
       const stableRow = rows.find((r) => r.name === "server");
 
-      expect(previewRow?.stability).toBe("preview");
-      expect(expRow?.stability).toBe("experimental");
+      expect(betaRow?.stability).toBe("beta");
       expect(stableRow?.stability).toBe("stable");
     });
   });
@@ -227,21 +218,21 @@ describe("list", () => {
     it("reads stability from manifest in directory scan", async () => {
       const tmp = makeTempDir("list-dir-stability");
       tempDirs.push(tmp);
-      const pluginDir = path.join(tmp, "preview-plugin");
+      const pluginDir = path.join(tmp, "beta-plugin");
       fs.mkdirSync(pluginDir, { recursive: true });
       fs.writeFileSync(
         path.join(pluginDir, "manifest.json"),
         JSON.stringify({
           ...PLUGIN_MANIFEST_JSON,
-          name: "preview-feature",
-          stability: "preview",
+          name: "beta-feature",
+          stability: "beta",
         }),
       );
 
       const rows = await listFromDirectory(tmp, path.dirname(tmp));
 
       expect(rows).toHaveLength(1);
-      expect(rows[0].stability).toBe("preview");
+      expect(rows[0].stability).toBe("beta");
     });
 
     it("defaults stability to stable in directory scan when absent", async () => {
