@@ -538,7 +538,8 @@ describe("route body validation", () => {
     });
 
     const handler = getHandler("POST", "/messages");
-    const longId = "a".repeat(101);
+    // 129 chars — one over the 128-char cap.
+    const longId = "a".repeat(129);
     const req = createMockRequest({
       body: {},
       headers: { "x-request-id": longId },
@@ -550,6 +551,126 @@ describe("route body validation", () => {
     const body = (res.json as any).mock.calls[0][0];
     expect(body.requestId).not.toBe(longId);
     expect(body.requestId).toMatch(/^req_[A-Fa-f0-9-]+$/);
+  });
+
+  test("accepts x-request-id with dots (unified allowlist)", async () => {
+    // Wide-event logger has always allowed dots; the validator wrapper
+    // now agrees so operators can grep both wide-events and 4xx
+    // responses with the same correlation token.
+    process.env.NODE_ENV = "development";
+    const plugin = createTestPlugin();
+    const { router, getHandler } = createMockRouter();
+
+    const schema = z.object({ content: z.string().min(1) });
+    plugin.exposedRoute(router, {
+      name: "sendMessage",
+      method: "post",
+      path: "/messages",
+      body: schema,
+      handler: vi.fn(),
+    });
+
+    const handler = getHandler("POST", "/messages");
+    const req = createMockRequest({
+      body: {},
+      headers: { "x-request-id": "trace.abc-123" },
+    });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "trace.abc-123",
+      }),
+    );
+  });
+
+  test("rejects x-request-id starting with a dash", async () => {
+    // Leading `-`/`_`/`.` could be misinterpreted as a flag if the
+    // requestId ever flows into a shell pipeline an operator runs.
+    process.env.NODE_ENV = "development";
+    const plugin = createTestPlugin();
+    const { router, getHandler } = createMockRouter();
+
+    const schema = z.object({ content: z.string().min(1) });
+    plugin.exposedRoute(router, {
+      name: "sendMessage",
+      method: "post",
+      path: "/messages",
+      body: schema,
+      handler: vi.fn(),
+    });
+
+    const handler = getHandler("POST", "/messages");
+    const req = createMockRequest({
+      body: {},
+      headers: { "x-request-id": "--rf" },
+    });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    const body = (res.json as any).mock.calls[0][0];
+    expect(body.requestId).not.toBe("--rf");
+    expect(body.requestId).toMatch(/^req_[A-Fa-f0-9-]+$/);
+  });
+
+  test("rejects x-request-id starting with a dot", async () => {
+    process.env.NODE_ENV = "development";
+    const plugin = createTestPlugin();
+    const { router, getHandler } = createMockRouter();
+
+    const schema = z.object({ content: z.string().min(1) });
+    plugin.exposedRoute(router, {
+      name: "sendMessage",
+      method: "post",
+      path: "/messages",
+      body: schema,
+      handler: vi.fn(),
+    });
+
+    const handler = getHandler("POST", "/messages");
+    const req = createMockRequest({
+      body: {},
+      headers: { "x-request-id": ".bad" },
+    });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    const body = (res.json as any).mock.calls[0][0];
+    expect(body.requestId).not.toBe(".bad");
+    expect(body.requestId).toMatch(/^req_[A-Fa-f0-9-]+$/);
+  });
+
+  test("generated fallback requestId has 16 hex chars of entropy", async () => {
+    // 64-bit entropy keeps birthday collisions astronomically unlikely
+    // (~4 billion IDs) while staying short enough to skim in logs.
+    process.env.NODE_ENV = "development";
+    const plugin = createTestPlugin();
+    const { router, getHandler } = createMockRouter();
+
+    const schema = z.object({ content: z.string().min(1) });
+    plugin.exposedRoute(router, {
+      name: "sendMessage",
+      method: "post",
+      path: "/messages",
+      body: schema,
+      handler: vi.fn(),
+    });
+
+    const handler = getHandler("POST", "/messages");
+    // No x-request-id header → wrapper generates the fallback.
+    const req = createMockRequest({ body: {} });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    const body = (res.json as any).mock.calls[0][0];
+    // randomUUID().slice(0, 16) is `xxxxxxxx-xxxx-xx` — 14 hex chars
+    // plus 2 hyphens, all matching `[a-f0-9-]`, total length 16.
+    expect(body.requestId).toMatch(/^req_[a-f0-9-]{16}$/);
   });
 
   test("truncates the issues array to 20 entries and flags issuesTruncated", async () => {

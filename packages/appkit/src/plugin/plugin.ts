@@ -24,6 +24,7 @@ import {
 } from "../context";
 import { AppKitError, AuthenticationError } from "../errors";
 import { createLogger } from "../logging/logger";
+import { sanitizeRequestId } from "../logging/request-id";
 import { StreamManager } from "../stream";
 import {
   type ITelemetry,
@@ -59,32 +60,28 @@ function hasHttpStatusCode(
 }
 
 /**
- * Character allowlist for incoming `x-request-id` headers. Restricts to
- * URL-safe ASCII + underscore/hyphen and caps length at 100 characters so
- * client-supplied values can never contain CRLF (log-injection / CWE-117)
- * or blow up server memory.
- */
-const REQUEST_ID_HEADER_PATTERN = /^[A-Za-z0-9_-]{1,100}$/;
-
-/**
  * Resolve a request ID from the `x-request-id` header (if present), falling
  * back to a freshly generated UUID-derived token. Used by the body
  * validation wrapper so operators can correlate a client-facing 400 with
  * the full server-side issue log.
  *
- * The header value is validated against a strict allowlist. Invalid values
- * are silently discarded — they are never logged or reflected anywhere —
- * and a fresh ID is generated instead.
+ * The header value is validated against the shared {@link sanitizeRequestId}
+ * allowlist (also used by the wide-event logger), so a value accepted here
+ * matches the `request_id` recorded server-side. Invalid values are silently
+ * discarded — they are never logged or reflected anywhere — and a fresh ID
+ * is generated instead. The fallback uses 16 hex characters (~64 bits) so
+ * birthday collisions stay astronomically unlikely while keeping IDs short
+ * enough to skim in logs.
  */
 function resolveRequestId(req: express.Request): string {
   const headerId = req.header("x-request-id");
-  if (
-    typeof headerId === "string" &&
-    REQUEST_ID_HEADER_PATTERN.test(headerId)
-  ) {
-    return headerId;
+  if (typeof headerId === "string") {
+    const sanitized = sanitizeRequestId(headerId);
+    if (sanitized !== undefined) {
+      return sanitized;
+    }
   }
-  return `req_${randomUUID().slice(0, 8)}`;
+  return `req_${randomUUID().slice(0, 16)}`;
 }
 
 /** Maximum number of Standard Schema issues retained on a validation failure. */
@@ -665,9 +662,9 @@ export abstract class Plugin<
           maybePromise instanceof Promise ? await maybePromise : maybePromise;
       } catch (error) {
         const requestId = resolveRequestId(req);
-        // Log via AppKitError-compatible path so sensitive values inside
-        // `context` are redacted. The thrown error's free-form message is
-        // intentionally omitted to avoid leaking refinement internals.
+        // No redactor; do not pass user-supplied values. The thrown
+        // error's free-form message is intentionally omitted to avoid
+        // leaking refinement internals.
         logger.error("validation schema threw unexpectedly", {
           plugin: this.name,
           requestId,
