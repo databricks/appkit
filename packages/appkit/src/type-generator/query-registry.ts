@@ -386,32 +386,16 @@ export async function generateQueriesFromDescribe(
       sqlHash,
       cleanedSql,
     }: (typeof uncachedQueries)[number]): Promise<DescribeResult> => {
-      let result: DatabricksStatementExecutionResponse;
-      try {
-        // Prefer JSON_ARRAY for predictable data_array parsing.
-        result = (await client.statementExecution.executeStatement({
-          statement: `DESCRIBE QUERY ${cleanedSql}`,
-          warehouse_id: warehouseId,
-          format: "JSON_ARRAY",
-          disposition: "INLINE",
-        })) as DatabricksStatementExecutionResponse;
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes("ARROW_STREAM") || msg.includes("JSON_ARRAY")) {
-          // Warehouse doesn't support JSON_ARRAY inline — retry with no format
-          // to let it use its default (typically ARROW_STREAM inline).
-          logger.debug(
-            "Warehouse rejected JSON_ARRAY for %s, retrying with default format",
-            queryName,
-          );
-          result = (await client.statementExecution.executeStatement({
-            statement: `DESCRIBE QUERY ${cleanedSql}`,
-            warehouse_id: warehouseId,
-          })) as DatabricksStatementExecutionResponse;
-        } else {
-          throw err;
-        }
-      }
+      // Always request JSON_ARRAY + INLINE so the downstream caller can parse
+      // `data_array` predictably. If the warehouse rejects this combination,
+      // let the error propagate — the surrounding `Promise.allSettled` will
+      // generate `unknown` types via `generateUnknownResultQuery`.
+      const result = (await client.statementExecution.executeStatement({
+        statement: `DESCRIBE QUERY ${cleanedSql}`,
+        warehouse_id: warehouseId,
+        format: "JSON_ARRAY",
+        disposition: "INLINE",
+      })) as DatabricksStatementExecutionResponse;
 
       completed++;
       spinner.update(

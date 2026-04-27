@@ -119,6 +119,13 @@ export class AnalyticsPlugin extends Plugin {
     const { parameters, format = "JSON_ARRAY" } =
       req.body as IAnalyticsQueryRequest;
 
+    if (format !== "JSON_ARRAY" && format !== "ARROW_STREAM") {
+      res.status(400).json({
+        error: `Invalid format: ${String(format)}. Expected "JSON_ARRAY" or "ARROW_STREAM".`,
+      });
+      return;
+    }
+
     // Request-scoped logging with WideEvent tracking
     logger.debug(req, "Executing query: %s (format=%s)", query_key, format);
 
@@ -154,19 +161,27 @@ export class AnalyticsPlugin extends Plugin {
 
     const hashedQuery = this.queryProcessor.hashQuery(query);
 
+    // ARROW_STREAM may resolve to EXTERNAL_LINKS, which returns pre-signed URLs
+    // that typically expire well before queryDefaults.cache.ttl. Disable cache
+    // for ARROW_STREAM to avoid handing out dead URLs from cache.
+    const cacheConfig =
+      format === "ARROW_STREAM"
+        ? { ...queryDefaults.cache, enabled: false }
+        : {
+            ...queryDefaults.cache,
+            cacheKey: [
+              "analytics:query",
+              query_key,
+              JSON.stringify(parameters),
+              format,
+              hashedQuery,
+              executorKey,
+            ],
+          };
+
     const defaultConfig: PluginExecuteConfig = {
       ...queryDefaults,
-      cache: {
-        ...queryDefaults.cache,
-        cacheKey: [
-          "analytics:query",
-          query_key,
-          JSON.stringify(parameters),
-          JSON.stringify(format),
-          hashedQuery,
-          executorKey,
-        ],
-      },
+      cache: cacheConfig,
     };
 
     const streamExecutionSettings: StreamExecutionSettings = {
@@ -230,17 +245,17 @@ export class AnalyticsPlugin extends Plugin {
       );
       return { type: "result", ...result };
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      const isFormatError =
-        msg.includes("ARROW_STREAM") ||
-        msg.includes("INLINE") ||
-        msg.includes("INVALID_PARAMETER_VALUE") ||
-        msg.includes("NOT_IMPLEMENTED");
-
-      if (!isFormatError) {
+      // If the request was aborted, do not retry — the signal is dead and
+      // a second statement would be billed but never read.
+      if (signal?.aborted) {
         throw err;
       }
 
+      if (!_isInlineArrowUnsupported(err)) {
+        throw err;
+      }
+
+      const msg = err instanceof Error ? err.message : String(err);
       logger.warn(
         "ARROW_STREAM INLINE rejected by warehouse, falling back to EXTERNAL_LINKS: %s",
         msg,
@@ -324,6 +339,35 @@ export class AnalyticsPlugin extends Plugin {
       query: this.query,
     };
   }
+}
+
+/**
+ * Determine whether a warehouse error indicates that ARROW_STREAM + INLINE
+ * is unsupported, vs an unrelated SQL/permission error that happens to mention
+ * one of the keywords. Requires both "INLINE" and "ARROW_STREAM" in the message
+ * plus a marker phrase, or a structured `error_code` (e.g. from a wrapped JSON
+ * response of the form `Response from server (Bad Request) {"error_code":...}`).
+ */
+function _isInlineArrowUnsupported(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+
+  const errorCodeMatch = msg.match(/"error_code"\s*:\s*"([^"]+)"/);
+  const errorCode = errorCodeMatch?.[1];
+  if (
+    errorCode === "INVALID_PARAMETER_VALUE" ||
+    errorCode === "NOT_IMPLEMENTED"
+  ) {
+    return msg.includes("INLINE") || msg.includes("ARROW_STREAM");
+  }
+
+  if (!msg.includes("INLINE") || !msg.includes("ARROW_STREAM")) {
+    return false;
+  }
+  return (
+    msg.includes("not supported") ||
+    msg.includes("INVALID_PARAMETER_VALUE") ||
+    msg.includes("NOT_IMPLEMENTED")
+  );
 }
 
 /**

@@ -26,6 +26,32 @@ import { executeStatementDefaults } from "./defaults";
 
 const logger = createLogger("connectors:sql-warehouse");
 
+/** Maximum decoded size for inline Arrow IPC attachments (64 MiB). */
+const MAX_INLINE_ATTACHMENT_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Convert Arrow row values to JSON-serializable shapes.
+ * `apache-arrow` returns `BigInt` for INT64/DECIMAL columns, which `JSON.stringify`
+ * cannot serialize. Convert BigInts to a Number when in safe-integer range,
+ * otherwise to a string to preserve precision. `Date` objects serialize fine
+ * (ISO string) and are left alone.
+ */
+function normalizeArrowRow(
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  for (const key in row) {
+    const v = row[key];
+    if (typeof v === "bigint") {
+      row[key] =
+        v <= BigInt(Number.MAX_SAFE_INTEGER) &&
+        v >= BigInt(Number.MIN_SAFE_INTEGER)
+          ? Number(v)
+          : v.toString();
+    }
+  }
+  return row;
+}
+
 interface SQLWarehouseConfig {
   timeout?: number;
   telemetry?: TelemetryOptions;
@@ -394,20 +420,23 @@ export class SQLWarehouseConnector {
 
   private _transformDataArray(response: sql.StatementResponse) {
     if (response.manifest?.format === "ARROW_STREAM") {
-      const result = response.result as any;
+      const result = response.result as
+        | (sql.ResultData & { attachment?: string })
+        | undefined;
 
       // Inline Arrow: some warehouses return base64 Arrow IPC in `attachment`.
       if (result?.attachment) {
         return this._transformArrowAttachment(response, result.attachment);
       }
 
-      // Inline data_array: fall through to the row transform below.
-      if (result?.data_array) {
-        // Fall through.
-      } else {
-        // External links: data fetched separately via statement_id.
+      // External links: data fetched separately via statement_id.
+      if (result?.external_links) {
         return this.updateWithArrowStatus(response);
       }
+
+      // Inline data_array: fall through to the row transform below.
+      // (Anything else — empty result with no attachment, data_array, or
+      // external_links — also falls through and produces { data: [] }.)
     }
 
     if (!response.result?.data_array || !response.manifest?.schema?.columns) {
@@ -462,10 +491,30 @@ export class SQLWarehouseConnector {
     response: sql.StatementResponse,
     attachment: string,
   ) {
-    const buf = Buffer.from(attachment, "base64");
-    const table = tableFromIPC(buf);
-    const data = table.toArray().map((row) => row.toJSON());
-    const { attachment: _att, ...restResult } = response.result as any;
+    // Cap the decoded size to protect against unbounded inline payloads from
+    // misbehaving warehouses. 64 MiB is well above the typical inline limit
+    // (~16 MiB) but bounds memory if a server returns a runaway response.
+    const decodedSize = Math.ceil((attachment.length * 3) / 4);
+    if (decodedSize > MAX_INLINE_ATTACHMENT_BYTES) {
+      throw ExecutionError.statementFailed(
+        `Inline Arrow attachment exceeds maximum size (${decodedSize} > ${MAX_INLINE_ATTACHMENT_BYTES} bytes)`,
+      );
+    }
+
+    let data: Record<string, unknown>[];
+    try {
+      const buf = Buffer.from(attachment, "base64");
+      const table = tableFromIPC(buf);
+      data = table.toArray().map((row) => normalizeArrowRow(row.toJSON()));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw ExecutionError.statementFailed(
+        `Failed to decode inline Arrow attachment: ${msg}`,
+      );
+    }
+    const { attachment: _att, ...restResult } = response.result as {
+      attachment?: string;
+    } & sql.ResultData;
     return {
       ...response,
       result: {
