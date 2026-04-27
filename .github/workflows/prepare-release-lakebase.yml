@@ -9,7 +9,7 @@ on:
 
 concurrency:
   group: prepare-release-lakebase
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
