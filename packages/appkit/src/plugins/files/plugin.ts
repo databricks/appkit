@@ -217,6 +217,7 @@ export class FilesPlugin extends Plugin {
         customContentTypes:
           volumeCfg.customContentTypes ?? config.customContentTypes,
         policy: volumeCfg.policy ?? policy.publicRead(),
+        auth: volumeCfg.auth,
       };
       this.volumeConfigs[key] = mergedConfig;
 
@@ -956,27 +957,31 @@ export class FilesPlugin extends Plugin {
     }
   }
 
+  private _resolveAuth(
+    volumeKey: string,
+  ): "service-principal" | "on-behalf-of-user" {
+    return (
+      this.volumeConfigs[volumeKey]?.auth ??
+      this.config.auth ??
+      "service-principal"
+    );
+  }
+
   /**
    * Creates a VolumeAPI for a specific volume key.
    *
-   * By default, enforces the volume's policy before each operation.
-   * Pass `bypassPolicy: true` to skip policy checks — useful for
-   * background jobs or migrations that should bypass user-facing policies.
-   *
-   * @security When `bypassPolicy` is `true`, no policy enforcement runs.
-   * Do not expose bypassed APIs to HTTP routes or end-user code paths.
+   * Enforces the volume's policy before each operation.
    */
   protected createVolumeAPI(
     volumeKey: string,
     user: FilePolicyUser,
-    options?: { bypassPolicy?: boolean },
   ): VolumeAPI {
     const connector = this.volumeConnectors[volumeKey];
-    const noop = () => Promise.resolve();
-    const check = options?.bypassPolicy
-      ? noop
-      : (action: FileAction, path: string, overrides?: Partial<FileResource>) =>
-          this._checkPolicy(volumeKey, action, path, user, overrides);
+    const check = (
+      action: FileAction,
+      path: string,
+      overrides?: Partial<FileResource>,
+    ) => this._checkPolicy(volumeKey, action, path, user, overrides);
 
     return {
       list: async (directoryPath?: string) => {

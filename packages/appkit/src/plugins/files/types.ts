@@ -15,6 +15,13 @@ export interface VolumeConfig {
    * service principal and the policy decides whether the action is allowed.
    */
   policy?: FilePolicy;
+  /**
+   * Per-volume auth mode. When `"on-behalf-of-user"`, route handlers and
+   * programmatic calls execute Unity Catalog SDK operations as the end user
+   * instead of the service principal. Inherits from `IFilesConfig.auth` if
+   * not set; defaults to `"service-principal"`.
+   */
+  auth?: "service-principal" | "on-behalf-of-user";
 }
 
 /**
@@ -50,6 +57,11 @@ export interface IFilesConfig extends BasePluginConfig {
   customContentTypes?: Record<string, string>;
   /** Maximum upload size in bytes. Defaults to 5 GB (Databricks Files API v2 limit). */
   maxUploadSize?: number;
+  /**
+   * Plugin-level default auth mode for all volumes. Each volume can override
+   * via `VolumeConfig.auth`. Defaults to `"service-principal"` if not set.
+   */
+  auth?: "service-principal" | "on-behalf-of-user";
 }
 
 /** A single entry returned when listing a directory. Re-exported from `@databricks/sdk-experimental`. */

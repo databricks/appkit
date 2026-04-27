@@ -1,6 +1,7 @@
 import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ServiceContext } from "../../../context/service-context";
+import { createApp } from "../../../core";
 import { AuthenticationError } from "../../../errors";
 import { ResourceType } from "../../../registry";
 import {
@@ -68,6 +69,7 @@ vi.mock("../../../context", async (importOriginal) => {
 vi.mock("../../../cache", () => ({
   CacheManager: {
     getInstanceSync: vi.fn(() => mockCacheInstance),
+    getInstance: vi.fn(async () => mockCacheInstance),
   },
 }));
 
@@ -1837,6 +1839,96 @@ describe("FilesPlugin", () => {
         expect(statusCodes).not.toContain(403);
       } finally {
         delete process.env.DATABRICKS_VOLUME_BROKEN;
+      }
+    });
+  });
+
+  describe("_resolveAuth config inheritance", () => {
+    test("volume-level auth overrides plugin default", () => {
+      const plugin = new FilesPlugin({
+        auth: "service-principal",
+        volumes: {
+          uploads: { auth: "on-behalf-of-user" },
+          exports: {},
+        },
+      });
+      expect((plugin as any)._resolveAuth("uploads")).toBe("on-behalf-of-user");
+    });
+
+    test("volume without auth inherits plugin default", () => {
+      const plugin = new FilesPlugin({
+        auth: "on-behalf-of-user",
+        volumes: {
+          uploads: {},
+          exports: {},
+        },
+      });
+      expect((plugin as any)._resolveAuth("exports")).toBe("on-behalf-of-user");
+    });
+
+    test("neither volume nor plugin sets auth → defaults to service-principal", () => {
+      const plugin = new FilesPlugin({
+        volumes: {
+          uploads: {},
+          exports: {},
+        },
+      });
+      expect((plugin as any)._resolveAuth("uploads")).toBe("service-principal");
+    });
+
+    test("createApp round-trip preserves auth field through public factory", async () => {
+      // Satisfy the manifest's static `Files` resource requirement so
+      // ResourceRegistry.enforceValidation passes during createApp.
+      process.env.DATABRICKS_VOLUME_FILES = "/Volumes/catalog/schema/files";
+
+      // Capture the FilesPlugin instance constructed by createApp by spying on
+      // exports() (called when AppKit's plugin getter fires). This exercises
+      // the public construction path so any future runtime config validator
+      // (e.g. Zod) that drops the `auth` field would break this test.
+      let captured: FilesPlugin | undefined;
+      const exportsSpy = vi
+        .spyOn(FilesPlugin.prototype, "exports")
+        .mockImplementation(function (this: FilesPlugin) {
+          captured = this;
+          // Return a minimal stub; we only care about capturing `this`.
+          const stub = (() => {
+            throw new Error("not used in this test");
+          }) as unknown as ReturnType<FilesPlugin["exports"]>;
+          (stub as any).volume = () => {
+            throw new Error("not used in this test");
+          };
+          return stub;
+        });
+
+      try {
+        const appkit = await createApp({
+          plugins: [
+            files({
+              auth: "on-behalf-of-user",
+              volumes: {
+                uploads: { auth: "service-principal" },
+                exports: {},
+              },
+            }),
+          ],
+        });
+
+        // Trigger the AppKit getter so wrapWithAsUser invokes exports()
+        // and our spy captures the FilesPlugin instance.
+        void (appkit as unknown as { files: unknown }).files;
+
+        expect(captured).toBeInstanceOf(FilesPlugin);
+        // Volume override wins over plugin-level default.
+        expect((captured as any)._resolveAuth("uploads")).toBe(
+          "service-principal",
+        );
+        // Volume with no explicit auth inherits the plugin default.
+        expect((captured as any)._resolveAuth("exports")).toBe(
+          "on-behalf-of-user",
+        );
+      } finally {
+        exportsSpy.mockRestore();
+        delete process.env.DATABRICKS_VOLUME_FILES;
       }
     });
   });
