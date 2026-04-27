@@ -28,7 +28,6 @@ const server = createServer((req, res) => {
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache, no-transform",
-    Connection: "keep-alive",
     "X-Accel-Buffering": "no",
   });
 
@@ -36,20 +35,36 @@ const server = createServer((req, res) => {
   res.write(`event: probe-start\ndata: ${JSON.stringify({ holdMs, heartbeatMs })}\n\n`);
 
   let heartbeat: NodeJS.Timeout | undefined;
+  const stopHeartbeat = (): void => {
+    if (heartbeat) {
+      clearInterval(heartbeat);
+      heartbeat = undefined;
+    }
+  };
   if (heartbeatMs > 0) {
     heartbeat = setInterval(() => {
-      res.write(`: heartbeat ${Date.now()}\n\n`);
+      // A proxy may half-close the connection between intervals; the next write
+      // would then throw asynchronously. Stop the interval if so.
+      try {
+        res.write(`: heartbeat ${Date.now()}\n\n`);
+      } catch {
+        stopHeartbeat();
+      }
     }, heartbeatMs);
   }
 
   const stop = setTimeout(() => {
-    if (heartbeat) clearInterval(heartbeat);
-    res.write(`event: probe-end\ndata: ${JSON.stringify({ reason: "hold-elapsed" })}\n\n`);
-    res.end();
+    stopHeartbeat();
+    try {
+      res.write(`event: probe-end\ndata: ${JSON.stringify({ reason: "hold-elapsed" })}\n\n`);
+      res.end();
+    } catch {
+      // already closed by client/proxy — nothing to do.
+    }
   }, holdMs);
 
   req.on("close", () => {
-    if (heartbeat) clearInterval(heartbeat);
+    stopHeartbeat();
     clearTimeout(stop);
   });
 });

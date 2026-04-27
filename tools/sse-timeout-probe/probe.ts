@@ -35,11 +35,16 @@ interface ProbeConfig {
 interface ProbeResult {
   targetDurationMs: number;
   actualLifetimeMs: number;
-  outcome: "completed" | "server-close" | "network-error" | "timeout-header";
+  outcome: "completed" | "server-close" | "network-error" | "client-hard-timeout";
   detail?: string;
   bytesReceived: number;
   firstByteMs?: number;
 }
+
+// Tolerance for distinguishing "server held the full target duration" from "server closed early":
+// network/event-loop jitter can shave tens of ms off a clean run, so anything within 500ms of
+// the target counts as completed.
+const COMPLETION_TOLERANCE_MS = 500;
 
 function parseArgs(argv: string[]): ProbeConfig {
   const args = new Map<string, string>();
@@ -76,11 +81,6 @@ function parseArgs(argv: string[]): ProbeConfig {
   }
 
   const headers: Record<string, string> = {};
-  for (const raw of argv.filter((a) => a.startsWith("--header"))) {
-    // handled below via repeated flag — placeholder to satisfy linter
-    void raw;
-  }
-  // repeat-flag parser
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--header" && argv[i + 1]) {
       const [k, ...rest] = argv[i + 1].split("=");
@@ -157,7 +157,9 @@ async function probeOnce(config: ProbeConfig, targetDurationMs: number): Promise
       const { value, done } = await reader.read();
       if (firstByteMs === undefined && value) firstByteMs = performance.now() - start;
       if (done) {
-        outcome = "server-close";
+        const lifetimeMs = performance.now() - start;
+        outcome =
+          lifetimeMs >= targetDurationMs - COMPLETION_TOLERANCE_MS ? "completed" : "server-close";
         break;
       }
       if (value) bytesReceived += value.byteLength;
@@ -165,8 +167,8 @@ async function probeOnce(config: ProbeConfig, targetDurationMs: number): Promise
   } catch (err) {
     const e = err as Error;
     if (e.name === "AbortError" && (e as Error & { cause?: Error }).cause?.message === "probe-hard-timeout") {
-      outcome = "timeout-header";
-      detail = "probe hard-timeout triggered (connection never closed)";
+      outcome = "client-hard-timeout";
+      detail = "client-side hard-timeout fired (server never closed the connection)";
     } else {
       outcome = "network-error";
       detail = e.message;
