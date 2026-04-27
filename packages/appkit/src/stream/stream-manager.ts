@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { context } from "@opentelemetry/api";
 import type { IAppResponse, StreamConfig } from "shared";
+import { createLogger } from "../logging/logger";
 import { EventRingBuffer } from "./buffers";
 import { streamDefaults } from "./defaults";
-import { createLogger } from "../logging/logger";
 import { SSEWriter } from "./sse-writer";
 import { StreamRegistry } from "./stream-registry";
 import { SSEErrorCode, type StreamEntry, type StreamOperation } from "./types";
@@ -263,7 +263,16 @@ export class StreamManager {
         const errorEventId = randomUUID();
         const errorCode = this._categorizeError(error);
 
-        logger.error("Stream execution failed: %s (code=%s)", errorMsg, errorCode);
+        // client cancellation is a normal control-flow signal, not a failure
+        if (errorCode === SSEErrorCode.STREAM_ABORTED) {
+          logger.info("Stream aborted by client (code=%s)", errorCode);
+        } else {
+          logger.error(
+            "Stream execution failed: %s (code=%s)",
+            errorMsg,
+            errorCode,
+          );
+        }
 
         // buffer error event
         streamEntry.eventBuffer.add({

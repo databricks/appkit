@@ -104,9 +104,10 @@ describe("SQLWarehouseConnector", () => {
         .map((call) => call.join(" "))
         .join(" ");
 
-      // Should log the error message and statement ID
+      // Errors raised inside polling bubble up to executeStatement's catch,
+      // which is the single point that logs (gated on isAborted). The poll
+      // layer no longer logs to avoid double-logging the same failure.
       expect(loggedOutput).toContain("polling timeout");
-      expect(loggedOutput).toContain("stmt-123");
 
       // Should NOT log the SQL statement
       expect(loggedOutput).not.toContain("secret_data");

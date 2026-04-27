@@ -252,6 +252,50 @@ describe("LakebaseV1Connector", () => {
 
       errorSpy.mockRestore();
     });
+
+    // Locks in the contract for pg-shaped errors so a future change to e.g.
+    // `String(error)` cannot silently re-introduce `error.query` /
+    // `error.parameters` into the log output. The error code and a stable
+    // message prefix are kept (debugging signal); the bound parameter values
+    // and full query string are not.
+    test("redacts pg-shaped error fields when message also leaks the literal", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const sensitiveLiteral = "9d4f3a72-aaaa-bbbb-cccc-deadbeefcafe";
+      const pgError = new Error(
+        `invalid input syntax for type uuid: "${sensitiveLiteral}"`,
+      ) as any;
+      pgError.code = "22P02";
+      pgError.query =
+        "SELECT api_key FROM secrets WHERE owner_id = $1 AND tenant = $2";
+      pgError.parameters = [sensitiveLiteral, "tenant-acme"];
+      pgError.routine = "string_to_uuid";
+      pgError.severity = "ERROR";
+
+      mockQuery.mockRejectedValue(pgError);
+
+      await expect(
+        connector.query(
+          "SELECT api_key FROM secrets WHERE owner_id = $1 AND tenant = $2",
+          [sensitiveLiteral, "tenant-acme"],
+        ),
+      ).rejects.toThrow("Query failed");
+
+      const loggedOutput = errorSpy.mock.calls
+        .map((call) => call.join(" "))
+        .join(" ");
+
+      // Code is logged (stable class label, safe for monitoring)
+      expect(loggedOutput).toContain("22P02");
+      // Message prefix is logged (no sensitive literal in this stable portion)
+      expect(loggedOutput).toContain("invalid input syntax for type uuid");
+      // The raw query string and other sensitive parameter values stay out
+      expect(loggedOutput).not.toContain("api_key");
+      expect(loggedOutput).not.toContain("FROM secrets");
+      expect(loggedOutput).not.toContain("tenant-acme");
+
+      errorSpy.mockRestore();
+    });
   });
 
   describe("transaction", () => {

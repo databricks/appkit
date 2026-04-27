@@ -382,12 +382,7 @@ export class SQLWarehouseConnector {
             message: error instanceof Error ? error.message : String(error),
           });
 
-          logger.error(
-            "Statement polling failed for %s: %s",
-            statementId,
-            error instanceof Error ? error.message : String(error),
-          );
-
+          // error logging is handled by executeStatement's catch block (gated on isAborted)
           if (error instanceof AppKitError) {
             throw error;
           }
