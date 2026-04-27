@@ -19,6 +19,9 @@ import {
   getCurrentUserId,
   getExecutionContext,
   getWorkspaceClient,
+  runInUserContext,
+  ServiceContext,
+  type UserContext,
 } from "../../context";
 import { isUserContext } from "../../context/user-context";
 import { buildToolkitEntries } from "../../core/agent/build-toolkit";
@@ -486,9 +489,13 @@ export class FilesPlugin extends Plugin implements ToolProvider {
    * Uses the same cache-key format as `_handleList`: resolved path for
    * subdirectories, `"__root__"` for the volume root.
    *
-   * Cache keys include `getCurrentUserId()` — must match the identity used
-   * by `this.execute()` in `_handleList`. Both run in service-principal
-   * context; wrapping either in `runInUserContext` would break invalidation.
+   * Cache keys include `getCurrentUserId()`, so reads and the subsequent
+   * invalidation stay consistent across auth modes: on SP volumes both run as
+   * the service principal, and on OBO volumes both run inside the same
+   * `runInUserContext` scope so `getCurrentUserId()` resolves to the end
+   * user's ID for both the cached read and the matching invalidation. The
+   * user identity propagates transparently through `getCurrentUserId()`, so
+   * no explicit user ID needs to be threaded through this function.
    */
   private _invalidateListCache(
     volumeKey: string,
@@ -561,23 +568,25 @@ export class FilesPlugin extends Plugin implements ToolProvider {
     if (!(await this._enforcePolicy(req, res, volumeKey, "list", path ?? "/")))
       return;
 
-    try {
-      const result = await this.execute(
-        async () => connector.list(getWorkspaceClient(), path),
-        this._readSettings([
-          `files:${volumeKey}:list`,
-          path ? connector.resolvePath(path) : "__root__",
-        ]),
-      );
+    await this._runWithAuth(req, volumeKey, async () => {
+      try {
+        const result = await this.execute(
+          async () => connector.list(getWorkspaceClient(), path),
+          this._readSettings([
+            `files:${volumeKey}:list`,
+            path ? connector.resolvePath(path) : "__root__",
+          ]),
+        );
 
-      if (!result.ok) {
-        this._sendStatusError(res, result.status);
-        return;
+        if (!result.ok) {
+          this._sendStatusError(res, result.status);
+          return;
+        }
+        res.json(result.data);
+      } catch (error) {
+        this._handleApiError(res, error, "List failed");
       }
-      res.json(result.data);
-    } catch (error) {
-      this._handleApiError(res, error, "List failed");
-    }
+    });
   }
 
   private async _handleRead(
@@ -596,23 +605,25 @@ export class FilesPlugin extends Plugin implements ToolProvider {
 
     if (!(await this._enforcePolicy(req, res, volumeKey, "read", path))) return;
 
-    try {
-      const result = await this.execute(
-        async () => connector.read(getWorkspaceClient(), path),
-        this._readSettings([
-          `files:${volumeKey}:read`,
-          connector.resolvePath(path),
-        ]),
-      );
+    await this._runWithAuth(req, volumeKey, async () => {
+      try {
+        const result = await this.execute(
+          async () => connector.read(getWorkspaceClient(), path),
+          this._readSettings([
+            `files:${volumeKey}:read`,
+            connector.resolvePath(path),
+          ]),
+        );
 
-      if (!result.ok) {
-        this._sendStatusError(res, result.status);
-        return;
+        if (!result.ok) {
+          this._sendStatusError(res, result.status);
+          return;
+        }
+        res.type("text/plain").send(result.data);
+      } catch (error) {
+        this._handleApiError(res, error, "Read failed");
       }
-      res.type("text/plain").send(result.data);
-    } catch (error) {
-      this._handleApiError(res, error, "Read failed");
-    }
+    });
   }
 
   private async _handleDownload(
@@ -663,64 +674,66 @@ export class FilesPlugin extends Plugin implements ToolProvider {
     const label = opts.mode === "download" ? "Download" : "Raw fetch";
     const volumeCfg = this.volumeConfigs[volumeKey];
 
-    try {
-      const settings: PluginExecutionSettings = {
-        default: FILES_DOWNLOAD_DEFAULTS,
-      };
-      const response = await this.execute(
-        async () => connector.download(getWorkspaceClient(), path),
-        settings,
-      );
+    await this._runWithAuth(req, volumeKey, async () => {
+      try {
+        const settings: PluginExecutionSettings = {
+          default: FILES_DOWNLOAD_DEFAULTS,
+        };
+        const response = await this.execute(
+          async () => connector.download(getWorkspaceClient(), path),
+          settings,
+        );
 
-      if (!response.ok) {
-        this._sendStatusError(res, response.status);
-        return;
-      }
+        if (!response.ok) {
+          this._sendStatusError(res, response.status);
+          return;
+        }
 
-      const resolvedType = contentTypeFromPath(
-        path,
-        undefined,
-        volumeCfg.customContentTypes,
-      );
-      const fileName = sanitizeFilename(path.split("/").pop() ?? "download");
+        const resolvedType = contentTypeFromPath(
+          path,
+          undefined,
+          volumeCfg.customContentTypes,
+        );
+        const fileName = sanitizeFilename(path.split("/").pop() ?? "download");
 
-      res.setHeader("Content-Type", resolvedType);
-      res.setHeader("X-Content-Type-Options", "nosniff");
+        res.setHeader("Content-Type", resolvedType);
+        res.setHeader("X-Content-Type-Options", "nosniff");
 
-      if (opts.mode === "raw") {
-        res.setHeader("Content-Security-Policy", "sandbox");
-        if (!isSafeInlineContentType(resolvedType)) {
+        if (opts.mode === "raw") {
+          res.setHeader("Content-Security-Policy", "sandbox");
+          if (!isSafeInlineContentType(resolvedType)) {
+            res.setHeader(
+              "Content-Disposition",
+              `attachment; filename="${fileName}"`,
+            );
+          }
+        } else {
           res.setHeader(
             "Content-Disposition",
             `attachment; filename="${fileName}"`,
           );
         }
-      } else {
-        res.setHeader(
-          "Content-Disposition",
-          `attachment; filename="${fileName}"`,
-        );
-      }
 
-      if (response.data.contents) {
-        const nodeStream = Readable.fromWeb(
-          response.data.contents as import("node:stream/web").ReadableStream,
-        );
-        nodeStream.on("error", (err) => {
-          logger.error("Stream error during %s: %O", opts.mode, err);
-          if (!res.headersSent) {
-            this._sendStatusError(res, 500);
-          } else {
-            res.destroy();
-          }
-        });
-        nodeStream.pipe(res);
-      } else {
-        res.end();
+        if (response.data.contents) {
+          const nodeStream = Readable.fromWeb(
+            response.data.contents as import("node:stream/web").ReadableStream,
+          );
+          nodeStream.on("error", (err) => {
+            logger.error("Stream error during %s: %O", opts.mode, err);
+            if (!res.headersSent) {
+              this._sendStatusError(res, 500);
+            } else {
+              res.destroy();
+            }
+          });
+          nodeStream.pipe(res);
+        } else {
+          res.end();
+        }
+      } catch (error) {
+        this._handleApiError(res, error, `${label} failed`);
       }
-    } catch (error) {
-      this._handleApiError(res, error, `${label} failed`);
-    }
+    });
   }
 
   private async _handleExists(
@@ -740,23 +753,25 @@ export class FilesPlugin extends Plugin implements ToolProvider {
     if (!(await this._enforcePolicy(req, res, volumeKey, "exists", path)))
       return;
 
-    try {
-      const result = await this.execute(
-        async () => connector.exists(getWorkspaceClient(), path),
-        this._readSettings([
-          `files:${volumeKey}:exists`,
-          connector.resolvePath(path),
-        ]),
-      );
+    await this._runWithAuth(req, volumeKey, async () => {
+      try {
+        const result = await this.execute(
+          async () => connector.exists(getWorkspaceClient(), path),
+          this._readSettings([
+            `files:${volumeKey}:exists`,
+            connector.resolvePath(path),
+          ]),
+        );
 
-      if (!result.ok) {
-        this._sendStatusError(res, result.status);
-        return;
+        if (!result.ok) {
+          this._sendStatusError(res, result.status);
+          return;
+        }
+        res.json({ exists: result.data });
+      } catch (error) {
+        this._handleApiError(res, error, "Exists check failed");
       }
-      res.json({ exists: result.data });
-    } catch (error) {
-      this._handleApiError(res, error, "Exists check failed");
-    }
+    });
   }
 
   private async _handleMetadata(
@@ -776,23 +791,25 @@ export class FilesPlugin extends Plugin implements ToolProvider {
     if (!(await this._enforcePolicy(req, res, volumeKey, "metadata", path)))
       return;
 
-    try {
-      const result = await this.execute(
-        async () => connector.metadata(getWorkspaceClient(), path),
-        this._readSettings([
-          `files:${volumeKey}:metadata`,
-          connector.resolvePath(path),
-        ]),
-      );
+    await this._runWithAuth(req, volumeKey, async () => {
+      try {
+        const result = await this.execute(
+          async () => connector.metadata(getWorkspaceClient(), path),
+          this._readSettings([
+            `files:${volumeKey}:metadata`,
+            connector.resolvePath(path),
+          ]),
+        );
 
-      if (!result.ok) {
-        this._sendStatusError(res, result.status);
-        return;
+        if (!result.ok) {
+          this._sendStatusError(res, result.status);
+          return;
+        }
+        res.json(result.data);
+      } catch (error) {
+        this._handleApiError(res, error, "Metadata fetch failed");
       }
-      res.json(result.data);
-    } catch (error) {
-      this._handleApiError(res, error, "Metadata fetch failed");
-    }
+    });
   }
 
   private async _handlePreview(
@@ -812,23 +829,25 @@ export class FilesPlugin extends Plugin implements ToolProvider {
     if (!(await this._enforcePolicy(req, res, volumeKey, "preview", path)))
       return;
 
-    try {
-      const result = await this.execute(
-        async () => connector.preview(getWorkspaceClient(), path),
-        this._readSettings([
-          `files:${volumeKey}:preview`,
-          connector.resolvePath(path),
-        ]),
-      );
+    await this._runWithAuth(req, volumeKey, async () => {
+      try {
+        const result = await this.execute(
+          async () => connector.preview(getWorkspaceClient(), path),
+          this._readSettings([
+            `files:${volumeKey}:preview`,
+            connector.resolvePath(path),
+          ]),
+        );
 
-      if (!result.ok) {
-        this._sendStatusError(res, result.status);
-        return;
+        if (!result.ok) {
+          this._sendStatusError(res, result.status);
+          return;
+        }
+        res.json(result.data);
+      } catch (error) {
+        this._handleApiError(res, error, "Preview failed");
       }
-      res.json(result.data);
-    } catch (error) {
-      this._handleApiError(res, error, "Preview failed");
-    }
+    });
   }
 
   private async _handleUpload(
@@ -1035,6 +1054,49 @@ export class FilesPlugin extends Plugin implements ToolProvider {
       this.config.auth ??
       "service-principal"
     );
+  }
+
+  /**
+   * Build a `UserContext` from request headers when both
+   * `x-forwarded-access-token` and `x-forwarded-user` are present, otherwise
+   * return `null`. Used by OBO route handlers to wrap SDK calls in the
+   * end-user's identity. A `null` result means "fall back to the service
+   * principal client" — for OBO volumes in production, `_enforcePolicy` will
+   * already have responded 401 before we get here, so `null` is reachable
+   * only on the dev-fallback path.
+   */
+  private _buildUserContextOrNull(req: express.Request): UserContext | null {
+    const token = req.header("x-forwarded-access-token")?.trim();
+    const userId = req.header("x-forwarded-user")?.trim();
+    if (!token || !userId) return null;
+    return ServiceContext.createUserContext(token, userId);
+  }
+
+  /**
+   * Run `fn` under the correct execution context for `volumeKey`.
+   * - SP volumes (`auth: "service-principal"`): invokes `fn` directly so the
+   *   service-principal `WorkspaceClient` and `getCurrentUserId()` are used —
+   *   identical behavior to pre-OBO releases.
+   * - OBO volumes (`auth: "on-behalf-of-user"`): wraps `fn` in
+   *   `runInUserContext` with a `UserContext` built from the request headers,
+   *   so SDK calls execute as the end user and `getCurrentUserId()` (and
+   *   therefore cache keys) resolve to the user's ID. Falls back to the SP
+   *   path when no user context can be built — only reachable in dev mode,
+   *   since `_enforcePolicy` 401s in production when the OBO headers are
+   *   missing.
+   */
+  private async _runWithAuth(
+    req: express.Request,
+    volumeKey: string,
+    fn: () => Promise<void>,
+  ): Promise<void> {
+    if (this._resolveAuth(volumeKey) === "on-behalf-of-user") {
+      const userCtx = this._buildUserContextOrNull(req);
+      if (userCtx) {
+        return runInUserContext(userCtx, fn);
+      }
+    }
+    return fn();
   }
 
   /**
@@ -1247,8 +1309,11 @@ export class FilesPlugin extends Plugin implements ToolProvider {
    * Returns the programmatic API for the Files plugin.
    * Callable with a volume key to get a volume-scoped handle.
    *
-   * All operations execute as the service principal.
-   * Use policies to control per-user access.
+   * SP volumes (`auth: "service-principal"`, the default) execute as the
+   * service principal. OBO volumes (`auth: "on-behalf-of-user"`) executed
+   * through the HTTP routes run as the end user; for programmatic calls
+   * outside a route, use `asUser(req)` to opt into per-user execution.
+   * Policies control per-user access in either mode.
    *
    * @example
    * ```ts

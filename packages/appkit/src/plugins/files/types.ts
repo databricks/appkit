@@ -26,8 +26,20 @@ export interface VolumeConfig {
 
 /**
  * User-facing API for a single volume.
- * All operations execute as the service principal. When a policy is
- * configured on the volume, every call is checked against that policy.
+ *
+ * Which identity executes each operation depends on the volume's effective
+ * `auth` mode (resolved from `VolumeConfig.auth` ?? `IFilesConfig.auth` ??
+ * `"service-principal"`):
+ * - SP volumes (`auth: "service-principal"`): operations execute as the
+ *   service principal.
+ * - OBO volumes (`auth: "on-behalf-of-user"`): operations invoked through
+ *   the HTTP routes execute as the end user (the token from
+ *   `x-forwarded-access-token` is used to build the SDK client). For
+ *   programmatic calls outside an HTTP route, see `VolumeHandle.asUser(req)`
+ *   to opt into per-user execution explicitly.
+ *
+ * When a policy is configured on the volume, every call is checked against
+ * that policy with the appropriate identity (service principal vs end user).
  */
 export interface VolumeAPI {
   list(directoryPath?: string): Promise<DirectoryEntry[]>;
@@ -97,11 +109,18 @@ export interface FilePreview extends FileMetadata {
 /**
  * Volume handle returned by `app.files("volumeKey")`.
  *
- * All methods execute as the service principal and enforce the volume's
- * policy (if configured) with `{ isServicePrincipal: true }`.
- * `asUser(req)` re-wraps with the real user identity for per-user policy
- * checks. In production it throws `AuthenticationError.missingToken` when
- * the `x-forwarded-user` header is missing; in development
+ * Default execution identity follows the volume's effective `auth` mode:
+ * - SP volumes (`auth: "service-principal"`): methods execute as the service
+ *   principal and the volume policy (if configured) sees
+ *   `{ isServicePrincipal: true }`.
+ * - OBO volumes (`auth: "on-behalf-of-user"`): methods invoked from inside
+ *   an HTTP route handler execute as the end user (the route wires the
+ *   request token into a `runInUserContext` scope before calling SDK code).
+ *
+ * `asUser(req)` re-wraps the API with the real user identity from the
+ * request — useful for per-user policy checks when calling the API outside
+ * an HTTP route. In production it throws `AuthenticationError.missingToken`
+ * when the `x-forwarded-user` header is missing; in development
  * (`NODE_ENV === "development"`) it falls back to the service principal so
  * local testing without a reverse proxy continues to work.
  */

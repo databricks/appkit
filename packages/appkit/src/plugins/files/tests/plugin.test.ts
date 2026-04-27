@@ -2226,6 +2226,290 @@ describe("FilesPlugin", () => {
     });
   });
 
+  describe("OBO read routes", () => {
+    function getRouteHandler(
+      plugin: FilesPlugin,
+      method: "get" | "post" | "delete",
+      pathSuffix: string,
+    ) {
+      const mockRouter = {
+        use: vi.fn(),
+        get: vi.fn(),
+        post: vi.fn(),
+        put: vi.fn(),
+        delete: vi.fn(),
+        patch: vi.fn(),
+      } as any;
+      plugin.injectRoutes(mockRouter);
+      const call = mockRouter[method].mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === "string" && (c[0] as string).endsWith(pathSuffix),
+      );
+      return call[call.length - 1] as (req: any, res: any) => Promise<void>;
+    }
+
+    function mockRes() {
+      const res: any = { headersSent: false };
+      res.status = vi.fn().mockReturnValue(res);
+      res.json = vi.fn().mockReturnValue(res);
+      res.type = vi.fn().mockReturnValue(res);
+      res.send = vi.fn().mockReturnValue(res);
+      res.setHeader = vi.fn().mockReturnValue(res);
+      res.end = vi.fn();
+      return res;
+    }
+
+    function mockReq(
+      volumeKey: string,
+      headers: Record<string, string>,
+      overrides: Record<string, any> = {},
+    ) {
+      return {
+        params: { volumeKey },
+        query: {},
+        ...overrides,
+        headers,
+        header: (name: string) => headers[name.toLowerCase()],
+      };
+    }
+
+    /**
+     * Replace the default `getCurrentUserId` mock with one that delegates to
+     * the real implementation, so that calls inside `runInUserContext` resolve
+     * to the wrapped UserContext's `userId` (and the per-user cache key
+     * derived from it).
+     */
+    async function useRealGetCurrentUserId() {
+      const actual =
+        await vi.importActual<typeof import("../../../context")>(
+          "../../../context",
+        );
+      const ctx = await import("../../../context");
+      vi.mocked(ctx.getCurrentUserId).mockImplementation(
+        actual.getCurrentUserId,
+      );
+    }
+
+    let originalNodeEnv: string | undefined;
+
+    beforeEach(() => {
+      originalNodeEnv = process.env.NODE_ENV;
+      process.env.DATABRICKS_VOLUME_OBO_VOL = "/Volumes/c/s/obo";
+    });
+
+    afterEach(() => {
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+      delete process.env.DATABRICKS_VOLUME_OBO_VOL;
+    });
+
+    test("OBO list + valid token wraps SDK call in user context (alice's userId resolves inside the wrapped fn)", async () => {
+      await useRealGetCurrentUserId();
+      const policySpy = vi.fn().mockReturnValue(true);
+      const plugin = new FilesPlugin({
+        volumes: {
+          obo_vol: { auth: "on-behalf-of-user", policy: policySpy },
+          uploads: {},
+          exports: {},
+        },
+      });
+      const handler = getRouteHandler(plugin, "get", "/list");
+      const res = mockRes();
+
+      // Snapshot the user IDs observed inside each SDK invocation so we can
+      // assert that the SDK call ran inside `runInUserContext` with the
+      // expected user identity.
+      const observedUserIds: string[] = [];
+      mockClient.files.listDirectoryContents.mockImplementation(
+        async function* () {
+          // getCurrentUserId() inside the wrapped fn should resolve to alice.
+          const ctx = await import("../../../context");
+          observedUserIds.push(ctx.getCurrentUserId());
+          yield { name: "o.txt", path: "/o.txt", is_directory: false };
+        },
+      );
+
+      await handler(
+        mockReq("obo_vol", {
+          "x-forwarded-access-token": "test-token",
+          "x-forwarded-user": "alice@example.com",
+        }),
+        res,
+      );
+
+      expect(observedUserIds).toEqual(["alice@example.com"]);
+
+      const statusCodes = (res.status.mock.calls as number[][]).map(
+        (c) => c[0],
+      );
+      expect(statusCodes).not.toContain(401);
+      expect(statusCodes).not.toContain(403);
+      expect(statusCodes).not.toContain(500);
+    });
+
+    test("OBO read happy path: valid token + policy allows + UC allows → 200", async () => {
+      const policySpy = vi.fn().mockReturnValue(true);
+      const plugin = new FilesPlugin({
+        volumes: {
+          obo_vol: { auth: "on-behalf-of-user", policy: policySpy },
+          uploads: {},
+          exports: {},
+        },
+      });
+      const handler = getRouteHandler(plugin, "get", "/read");
+      const res = mockRes();
+
+      // The connector reads via files.download — return a valid 200-ish
+      // response with content body.
+      mockClient.files.download.mockImplementation(async () => ({
+        contents: new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("hello"));
+            controller.close();
+          },
+        }),
+      }));
+
+      await handler(
+        mockReq(
+          "obo_vol",
+          {
+            "x-forwarded-access-token": "test-token",
+            "x-forwarded-user": "alice@example.com",
+          },
+          { query: { path: "hello.txt" } },
+        ),
+        res,
+      );
+
+      // Both gates passed: policy was consulted with OBO identity, and the
+      // SDK's response was relayed back to the client.
+      expect(policySpy).toHaveBeenCalledTimes(1);
+      const userArg = policySpy.mock.calls[0][2];
+      expect(userArg).toEqual({
+        id: "alice@example.com",
+        isServicePrincipal: false,
+      });
+
+      // 2xx path: handler called res.type/send rather than res.status(non-2xx).
+      const statusCodes = (res.status.mock.calls as number[][]).map(
+        (c) => c[0],
+      );
+      expect(statusCodes).not.toContain(401);
+      expect(statusCodes).not.toContain(403);
+      expect(statusCodes).not.toContain(500);
+      expect(res.send).toHaveBeenCalled();
+    });
+
+    test("Cache isolation: same path, two users on OBO volume → two distinct cache keys", async () => {
+      await useRealGetCurrentUserId();
+      const policySpy = vi.fn().mockReturnValue(true);
+      const plugin = new FilesPlugin({
+        volumes: {
+          obo_vol: { auth: "on-behalf-of-user", policy: policySpy },
+          uploads: {},
+          exports: {},
+        },
+      });
+      const handler = getRouteHandler(plugin, "get", "/list");
+
+      mockClient.files.listDirectoryContents.mockImplementation(
+        async function* () {
+          yield { name: "f.txt", path: "/f.txt", is_directory: false };
+        },
+      );
+
+      // Alice's request.
+      await handler(
+        mockReq("obo_vol", {
+          "x-forwarded-access-token": "alice-token",
+          "x-forwarded-user": "alice@example.com",
+        }),
+        mockRes(),
+      );
+
+      // Bob's request — same volume, same path.
+      await handler(
+        mockReq("obo_vol", {
+          "x-forwarded-access-token": "bob-token",
+          "x-forwarded-user": "bob@example.com",
+        }),
+        mockRes(),
+      );
+
+      // The cache layer is consulted via getOrExecute(cacheKey, fn, userKey).
+      // For OBO volumes the `userKey` argument must be the real user's ID
+      // (resolved by getCurrentUserId() inside the runInUserContext scope),
+      // so the two requests produce two distinct cache entries.
+      const userKeys = mockCacheInstance.getOrExecute.mock.calls.map(
+        (c: unknown[]) => c[2],
+      );
+      expect(userKeys).toEqual(["alice@example.com", "bob@example.com"]);
+      expect(new Set(userKeys).size).toBe(2);
+    });
+
+    test("SP/OBO cache no-collide: same path on SP volume vs OBO volume → distinct cache keys", async () => {
+      await useRealGetCurrentUserId();
+      const plugin = new FilesPlugin({
+        volumes: {
+          obo_vol: {
+            auth: "on-behalf-of-user",
+            policy: policy.allowAll(),
+          },
+          // SP-mode volume (default auth).
+          uploads: { policy: policy.allowAll() },
+          exports: {},
+        },
+      });
+
+      const listHandler = getRouteHandler(plugin, "get", "/list");
+
+      mockClient.files.listDirectoryContents.mockImplementation(
+        async function* () {
+          yield { name: "f.txt", path: "/f.txt", is_directory: false };
+        },
+      );
+
+      // SP volume request — `getCurrentUserId()` outside any user context
+      // returns the service principal's identity (the underlying real impl
+      // reads `ServiceContext.serviceUserId`).
+      await listHandler(
+        mockReq("uploads", {
+          "x-forwarded-access-token": "sp-token-ignored",
+          "x-forwarded-user": "alice@example.com",
+        }),
+        mockRes(),
+      );
+
+      // OBO volume request — same human user, but execution is wrapped in
+      // runInUserContext so `userKey` resolves to alice's ID, not the SP's.
+      await listHandler(
+        mockReq("obo_vol", {
+          "x-forwarded-access-token": "alice-token",
+          "x-forwarded-user": "alice@example.com",
+        }),
+        mockRes(),
+      );
+
+      const calls = mockCacheInstance.getOrExecute.mock.calls;
+      expect(calls).toHaveLength(2);
+
+      // The cacheKey is the first arg — the SP and OBO volumes already
+      // namespace cache entries by `volumeKey`, so the array form differs.
+      const cacheKeys = calls.map((c: unknown[]) => c[0]);
+      expect(cacheKeys[0]).not.toEqual(cacheKeys[1]);
+
+      // Defense-in-depth: even if the array-form cacheKey matched, the
+      // userKey differs because OBO runs under runInUserContext while SP
+      // runs in the SP's serviceUserId.
+      const userKeys = calls.map((c: unknown[]) => c[2]);
+      expect(userKeys[0]).not.toEqual(userKeys[1]);
+    });
+  });
+
   describe("Upload Stream Size Limiter", () => {
     test("stream under limit passes through all chunks", async () => {
       const maxSize = 100;
