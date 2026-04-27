@@ -239,7 +239,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           isUser
             ? "bg-primary text-primary-foreground rounded-br-sm"
             : "bg-muted text-foreground rounded-bl-sm"
-        } ${message.streaming ? "animate-pulse" : ""}`}
+        }`}
       >
         {message.content || (message.streaming ? "…" : "")}
       </div>
