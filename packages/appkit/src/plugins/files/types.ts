@@ -16,10 +16,50 @@ export interface VolumeConfig {
    */
   policy?: FilePolicy;
   /**
-   * Per-volume auth mode. When `"on-behalf-of-user"`, route handlers and
-   * programmatic calls execute Unity Catalog SDK operations as the end user
-   * instead of the service principal. Inherits from `IFilesConfig.auth` if
-   * not set; defaults to `"service-principal"`.
+   * Per-volume auth mode. When `"on-behalf-of-user"`, HTTP route handlers
+   * execute Unity Catalog SDK operations as the end user (using the
+   * `x-forwarded-access-token` and `x-forwarded-user` headers injected by
+   * the Databricks Apps reverse proxy) instead of the service principal.
+   * Inherits from `IFilesConfig.auth` if not set; defaults to
+   * `"service-principal"`.
+   *
+   * **Permission scope**:
+   * - `"service-principal"`: the app's SP needs `WRITE_VOLUME` (or
+   *   read-equivalent) on the UC volume.
+   * - `"on-behalf-of-user"`: each end user needs `WRITE_VOLUME` (or
+   *   read-equivalent) on the UC volume; the SP itself does not need
+   *   direct volume permissions.
+   *
+   * In production, OBO requests with a missing `x-forwarded-access-token`
+   * return `401`. In development (`NODE_ENV === "development"`) they fall
+   * back to the SP with a single warning so local testing without a
+   * reverse proxy continues to work.
+   *
+   * @example Service-principal volume (default)
+   * ```ts
+   * files({
+   *   volumes: {
+   *     exports: {
+   *       auth: "service-principal", // explicit; same as omitting
+   *       policy: files.policy.publicRead(),
+   *     },
+   *   },
+   * });
+   * ```
+   *
+   * @example On-behalf-of-user volume
+   * ```ts
+   * files({
+   *   volumes: {
+   *     "user-uploads": {
+   *       auth: "on-behalf-of-user",
+   *       // Policies see the real end user identity here.
+   *       policy: (action, _resource, user) =>
+   *         !user.isServicePrincipal,
+   *     },
+   *   },
+   * });
+   * ```
    */
   auth?: "service-principal" | "on-behalf-of-user";
 }
@@ -70,8 +110,39 @@ export interface IFilesConfig extends BasePluginConfig {
   /** Maximum upload size in bytes. Defaults to 5 GB (Databricks Files API v2 limit). */
   maxUploadSize?: number;
   /**
-   * Plugin-level default auth mode for all volumes. Each volume can override
-   * via `VolumeConfig.auth`. Defaults to `"service-principal"` if not set.
+   * Plugin-level default auth mode for all volumes. Volumes without an
+   * explicit `auth` field inherit this default; volumes that set their own
+   * `VolumeConfig.auth` override it. Defaults to `"service-principal"` if
+   * not set.
+   *
+   * Resolution order (per volume):
+   * `VolumeConfig.auth` > `IFilesConfig.auth` > `"service-principal"`.
+   *
+   * @example Mark every volume OBO unless explicitly overridden
+   * ```ts
+   * files({
+   *   auth: "on-behalf-of-user",
+   *   volumes: {
+   *     // Inherits "on-behalf-of-user" from the plugin-level default.
+   *     "user-uploads": { policy: files.policy.allowAll() },
+   *     // Overrides the plugin default to run as the SP.
+   *     reports: {
+   *       auth: "service-principal",
+   *       policy: files.policy.publicRead(),
+   *     },
+   *   },
+   * });
+   * ```
+   *
+   * @example Default to service-principal (the implicit default)
+   * ```ts
+   * files({
+   *   // No `auth` set → all volumes default to "service-principal".
+   *   volumes: {
+   *     exports: { policy: files.policy.publicRead() },
+   *   },
+   * });
+   * ```
    */
   auth?: "service-principal" | "on-behalf-of-user";
 }

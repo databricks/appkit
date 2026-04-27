@@ -8,6 +8,20 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+## Unreleased
+
+### appkit (files plugin) — per-volume auth mode
+
+* **feat(files):** add per-volume `auth` field (`VolumeConfig.auth`) and plugin-level `auth` default (`IFilesConfig.auth`) for selecting between service-principal and on-behalf-of-user execution. Resolution order: `volume.auth ?? plugin.auth ?? "service-principal"`. OBO mode wires HTTP route handlers and `VolumeHandle.asUser` through `runInUserContext` so SDK calls execute as the end user.
+* **feat(files):** add `files.auth_mode` OpenTelemetry span attribute on every operation, set to either `"service-principal"` or `"on-behalf-of-user"` for trace filtering. Programmatic API calls (`appKit.files("vol").<op>()`) now create `files.<op>` spans where they previously did not — minor observability enrichment that respects the plugin's `traces` config (no spans emitted when traces are disabled).
+* **feat(files)!:** `appKit.files("vol").asUser(req).list()` now executes the SDK call as the **end user** (previously the SDK still ran as the service principal — only the policy user was swapped). Programmatic callers that relied on SP credentials post-`asUser(req)` must remove the `asUser` wrap.
+* **chore(files):** remove undocumented `bypassPolicy` option on `createVolumeAPI`. Zero consumers in `packages/` or `apps/`; no migration needed.
+
+#### Honest limitation
+
+Programmatic calls on an OBO volume **without** `asUser(req)` (i.e. `appKit.files("obo-vol").list()`) cannot synthesize a user identity and continue to execute against the service principal client at the call site. For programmatic per-user execution, use `asUser(req)`. The OBO volume default applies to **HTTP route traffic**, where the request headers are available.
+
+
 ## [0.24.0](https://github.com/databricks/appkit/compare/v0.23.0...v0.24.0) (2026-04-20)
 
 * add AST extraction to serving type generator and move types to shared/ ([#279](https://github.com/databricks/appkit/issues/279)) ([422afb3](https://github.com/databricks/appkit/commit/422afb38aa73f8adb94e091225dc3381bd92cfcd))
