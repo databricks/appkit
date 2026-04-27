@@ -1,5 +1,9 @@
 import type { RetryConfig } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { AuthenticationError } from "../../errors/authentication";
+import { ConnectionError } from "../../errors/connection";
+import { ExecutionError } from "../../errors/execution";
+import { ValidationError } from "../../errors/validation";
 import { RetryInterceptor } from "../interceptors/retry";
 import type { InterceptorContext } from "../interceptors/types";
 
@@ -240,5 +244,192 @@ describe("RetryInterceptor", () => {
     expect(fn).toHaveBeenCalledTimes(2);
 
     vi.spyOn(Math, "random").mockRestore();
+  });
+
+  test("should not retry AuthenticationError (isRetryable=false)", async () => {
+    const config: RetryConfig = {
+      enabled: true,
+      attempts: 3,
+      initialDelay: 1000,
+    };
+    const interceptor = new RetryInterceptor(config);
+    const fn = vi.fn().mockRejectedValue(AuthenticationError.missingToken());
+
+    await expect(interceptor.intercept(fn, context)).rejects.toThrow(
+      AuthenticationError,
+    );
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  test("should not retry ValidationError (isRetryable=false)", async () => {
+    const config: RetryConfig = {
+      enabled: true,
+      attempts: 3,
+      initialDelay: 1000,
+    };
+    const interceptor = new RetryInterceptor(config);
+    const fn = vi.fn().mockRejectedValue(ValidationError.missingField("name"));
+
+    await expect(interceptor.intercept(fn, context)).rejects.toThrow(
+      ValidationError,
+    );
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  test("should not retry ExecutionError (isRetryable=false)", async () => {
+    const config: RetryConfig = {
+      enabled: true,
+      attempts: 3,
+      initialDelay: 1000,
+    };
+    const interceptor = new RetryInterceptor(config);
+    const fn = vi
+      .fn()
+      .mockRejectedValue(ExecutionError.statementFailed("syntax error"));
+
+    await expect(interceptor.intercept(fn, context)).rejects.toThrow(
+      ExecutionError,
+    );
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  test("should retry ConnectionError (isRetryable=true)", async () => {
+    const config: RetryConfig = {
+      enabled: true,
+      attempts: 3,
+      initialDelay: 1000,
+    };
+    const interceptor = new RetryInterceptor(config);
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(ConnectionError.queryFailed())
+      .mockResolvedValue("recovered");
+
+    const promise = interceptor.intercept(fn, context);
+    await vi.runAllTimersAsync();
+
+    expect(await promise).toBe("recovered");
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  test("should not retry errors with 4xx statusCode", async () => {
+    const config: RetryConfig = {
+      enabled: true,
+      attempts: 3,
+      initialDelay: 1000,
+    };
+    const interceptor = new RetryInterceptor(config);
+    const error = Object.assign(new Error("bad request"), { statusCode: 400 });
+    const fn = vi.fn().mockRejectedValue(error);
+
+    await expect(interceptor.intercept(fn, context)).rejects.toThrow(
+      "bad request",
+    );
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  test("should retry errors with 5xx statusCode", async () => {
+    const config: RetryConfig = {
+      enabled: true,
+      attempts: 3,
+      initialDelay: 1000,
+    };
+    const interceptor = new RetryInterceptor(config);
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(
+        Object.assign(new Error("internal"), { statusCode: 500 }),
+      )
+      .mockResolvedValue("recovered");
+
+    const promise = interceptor.intercept(fn, context);
+    await vi.runAllTimersAsync();
+
+    expect(await promise).toBe("recovered");
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  test("should retry errors with 429 statusCode (rate limit)", async () => {
+    const config: RetryConfig = {
+      enabled: true,
+      attempts: 3,
+      initialDelay: 1000,
+    };
+    const interceptor = new RetryInterceptor(config);
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(
+        Object.assign(new Error("rate limited"), { statusCode: 429 }),
+      )
+      .mockResolvedValue("recovered");
+
+    const promise = interceptor.intercept(fn, context);
+    await vi.runAllTimersAsync();
+
+    expect(await promise).toBe("recovered");
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  test("should use isRetryable() method when available on error", async () => {
+    const config: RetryConfig = {
+      enabled: true,
+      attempts: 3,
+      initialDelay: 1000,
+    };
+    const interceptor = new RetryInterceptor(config);
+
+    const nonRetryable = Object.assign(new Error("not found"), {
+      statusCode: 404,
+      isRetryable: () => false,
+    });
+    const fn = vi.fn().mockRejectedValue(nonRetryable);
+
+    await expect(interceptor.intercept(fn, context)).rejects.toThrow(
+      "not found",
+    );
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  test("should respect isRetryable() returning true even for 4xx", async () => {
+    const config: RetryConfig = {
+      enabled: true,
+      attempts: 3,
+      initialDelay: 1000,
+    };
+    const interceptor = new RetryInterceptor(config);
+
+    const retryableClientError = Object.assign(new Error("conflict"), {
+      statusCode: 409,
+      isRetryable: () => true,
+    });
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(retryableClientError)
+      .mockResolvedValue("ok");
+
+    const promise = interceptor.intercept(fn, context);
+    await vi.runAllTimersAsync();
+
+    expect(await promise).toBe("ok");
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  test("should still retry plain Error (backward compatibility)", async () => {
+    const config: RetryConfig = {
+      enabled: true,
+      attempts: 3,
+      initialDelay: 1000,
+    };
+    const interceptor = new RetryInterceptor(config);
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("transient"))
+      .mockResolvedValue("ok");
+
+    const promise = interceptor.intercept(fn, context);
+    await vi.runAllTimersAsync();
+
+    expect(await promise).toBe("ok");
+    expect(fn).toHaveBeenCalledTimes(2);
   });
 });
