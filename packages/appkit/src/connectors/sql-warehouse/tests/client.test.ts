@@ -139,7 +139,7 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
   });
 
   describe("serverless warehouse (INLINE + ARROW_STREAM with attachment)", () => {
-    test("decodes base64 Arrow IPC attachment into row objects", () => {
+    test("passes attachment through unchanged for client-side decoding", () => {
       const connector = createConnector();
       // Real response shape from serverless warehouse: INLINE + ARROW_STREAM
       // Data arrives in result.attachment as base64-encoded Arrow IPC, not data_array.
@@ -179,13 +179,13 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
       } as unknown as sql.StatementResponse;
 
       const result = (connector as any)._transformDataArray(response);
-      expect(result.result.data).toEqual([{ test_col: 1, test_col2: 2 }]);
-      expect(result.result.attachment).toBeUndefined();
+      expect(result.result.attachment).toBe(REAL_ARROW_ATTACHMENT);
+      expect(result.result.data).toBeUndefined();
       // Preserves other result fields
       expect(result.result.row_count).toBe(1);
     });
 
-    test("preserves manifest and status alongside decoded data", () => {
+    test("preserves manifest and status alongside attachment", () => {
       const connector = createConnector();
       const response = {
         statement_id: "00000001-test-stmt",
@@ -207,9 +207,26 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
       } as unknown as sql.StatementResponse;
 
       const result = (connector as any)._transformDataArray(response);
-      // Manifest and statement_id are preserved
+      // Manifest, statement_id, and attachment are all preserved
       expect(result.manifest.format).toBe("ARROW_STREAM");
       expect(result.statement_id).toBe("00000001-test-stmt");
+      expect(result.result.attachment).toBe(REAL_ARROW_ATTACHMENT);
+    });
+
+    test("rejects oversized attachments to bound memory", () => {
+      const connector = createConnector();
+      // 64 MiB cap → ~85 MiB of base64 chars decode to >64 MiB.
+      const oversized = "A".repeat(90 * 1024 * 1024);
+      const response = {
+        statement_id: "stmt-oversized",
+        status: { state: "SUCCEEDED" },
+        manifest: { format: "ARROW_STREAM" },
+        result: { attachment: oversized },
+      } as unknown as sql.StatementResponse;
+
+      expect(() => (connector as any)._transformDataArray(response)).toThrow(
+        /exceeds maximum size/,
+      );
     });
   });
 
@@ -279,8 +296,9 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
       } as unknown as sql.StatementResponse;
 
       const result = (connector as any)._transformDataArray(response);
-      // Should use attachment (Arrow IPC), not data_array
-      expect(result.result.data).toEqual([{ test_col: 1, test_col2: 2 }]);
+      // Should pass attachment through (client decodes), not transform data_array
+      expect(result.result.attachment).toBe(REAL_ARROW_ATTACHMENT);
+      expect(result.result.data).toBeUndefined();
     });
   });
 });

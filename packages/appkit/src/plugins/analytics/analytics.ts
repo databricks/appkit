@@ -243,6 +243,13 @@ export class AnalyticsPlugin extends Plugin {
         { disposition: "INLINE", format: "ARROW_STREAM" },
         signal,
       );
+      // INLINE responses with an Arrow IPC attachment are forwarded as base64
+      // for the client to decode into an Arrow Table. Anything else (rare:
+      // data_array under ARROW_STREAM, or an empty result) falls back to the
+      // generic "result" payload.
+      if (result?.attachment) {
+        return { type: "arrow_inline", attachment: result.attachment };
+      }
       return { type: "result", ...result };
     } catch (err: unknown) {
       // If the request was aborted, do not retry — the signal is dead and

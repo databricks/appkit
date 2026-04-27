@@ -69,7 +69,6 @@
     "@opentelemetry/sdk-trace-base": "2.6.0",
     "@opentelemetry/semantic-conventions": "1.38.0",
     "@types/semver": "7.7.1",
-    "apache-arrow": "21.1.0",
     "dotenv": "16.6.1",
     "express": "4.22.0",
     "obug": "2.1.1",

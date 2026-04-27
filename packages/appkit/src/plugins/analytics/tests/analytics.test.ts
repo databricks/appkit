@@ -765,6 +765,108 @@ describe("Analytics Plugin", () => {
       }
     });
 
+    test("/query/:query_key emits arrow_inline SSE event when ARROW_STREAM INLINE returns an attachment", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+
+      const fakeAttachment = "BASE64_ARROW_IPC_BYTES";
+      const executeMock = vi.fn().mockResolvedValue({
+        result: { attachment: fakeAttachment, row_count: 1 },
+      });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {}, format: "ARROW_STREAM" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      // The route should not fall back to EXTERNAL_LINKS — INLINE succeeded.
+      expect(executeMock).toHaveBeenCalledTimes(1);
+      expect(executeMock.mock.calls[0][1]).toMatchObject({
+        disposition: "INLINE",
+        format: "ARROW_STREAM",
+      });
+      // SSE payload should use the new arrow_inline message type.
+      const writeCalls = (mockRes.write as any).mock.calls.map(
+        (c: any[]) => c[0] as string,
+      );
+      const payload = writeCalls.find((s: string) => s.startsWith("data: "));
+      expect(payload).toBeDefined();
+      expect(payload).toContain('"type":"arrow_inline"');
+      expect(payload).toContain(`"attachment":"${fakeAttachment}"`);
+    });
+
+    test("/query/:query_key rejects unknown format values with 400", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      const executeMock = vi.fn();
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {}, format: "JSON" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(executeMock).not.toHaveBeenCalled();
+    });
+
+    test("/query/:query_key does not retry the fallback when the request was aborted", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+
+      const executeMock = vi.fn().mockImplementation((_wc, _opts, signal) => {
+        // Simulate a signal that becomes aborted before the failure surfaces —
+        // e.g. the client cancelled the SSE stream mid-query.
+        signal?.dispatchEvent?.(new Event("abort"));
+        Object.defineProperty(signal, "aborted", { value: true });
+        return Promise.reject(
+          new Error(
+            "INVALID_PARAMETER_VALUE: ARROW_STREAM not supported with INLINE disposition",
+          ),
+        );
+      });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {}, format: "ARROW_STREAM" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      // Even though the error message would normally trigger fallback, the
+      // aborted signal should short-circuit and prevent a second statement.
+      expect(executeMock).toHaveBeenCalledTimes(1);
+    });
+
     test("/query/:query_key should not fall back when format is explicitly JSON_ARRAY", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();

@@ -3,7 +3,6 @@ import {
   type sql,
   type WorkspaceClient,
 } from "@databricks/sdk-experimental";
-import { tableFromIPC } from "apache-arrow";
 import type { TelemetryOptions } from "shared";
 import {
   AppKitError,
@@ -26,31 +25,8 @@ import { executeStatementDefaults } from "./defaults";
 
 const logger = createLogger("connectors:sql-warehouse");
 
-/** Maximum decoded size for inline Arrow IPC attachments (64 MiB). */
+/** Maximum size for inline Arrow IPC attachments (64 MiB decoded). */
 const MAX_INLINE_ATTACHMENT_BYTES = 64 * 1024 * 1024;
-
-/**
- * Convert Arrow row values to JSON-serializable shapes.
- * `apache-arrow` returns `BigInt` for INT64/DECIMAL columns, which `JSON.stringify`
- * cannot serialize. Convert BigInts to a Number when in safe-integer range,
- * otherwise to a string to preserve precision. `Date` objects serialize fine
- * (ISO string) and are left alone.
- */
-function normalizeArrowRow(
-  row: Record<string, unknown>,
-): Record<string, unknown> {
-  for (const key in row) {
-    const v = row[key];
-    if (typeof v === "bigint") {
-      row[key] =
-        v <= BigInt(Number.MAX_SAFE_INTEGER) &&
-        v >= BigInt(Number.MIN_SAFE_INTEGER)
-          ? Number(v)
-          : v.toString();
-    }
-  }
-  return row;
-}
 
 interface SQLWarehouseConfig {
   timeout?: number;
@@ -424,9 +400,12 @@ export class SQLWarehouseConnector {
         | (sql.ResultData & { attachment?: string })
         | undefined;
 
-      // Inline Arrow: some warehouses return base64 Arrow IPC in `attachment`.
+      // Inline Arrow: pass the base64 IPC attachment through unmodified so
+      // the analytics route can stream it to the client, where the existing
+      // ArrowClient infrastructure decodes it into a Table. Validate size
+      // here to fail fast on runaway payloads.
       if (result?.attachment) {
-        return this._transformArrowAttachment(response, result.attachment);
+        return this._validateArrowAttachment(response, result.attachment);
       }
 
       // External links: data fetched separately via statement_id.
@@ -483,15 +462,19 @@ export class SQLWarehouseConnector {
   }
 
   /**
-   * Decode a base64 Arrow IPC attachment into row objects.
+   * Validate (but do not decode) a base64 Arrow IPC attachment.
    * Some serverless warehouses return inline results as Arrow IPC in
-   * `result.attachment` rather than `result.data_array`.
+   * `result.attachment`. We pass the base64 string through to the client,
+   * which decodes it into an Arrow Table via the existing ArrowClient
+   * infrastructure. This keeps the wire contract for ARROW_STREAM
+   * consistent (client always receives an Arrow Table) and avoids
+   * decode/re-encode work on the server.
    */
-  private _transformArrowAttachment(
+  private _validateArrowAttachment(
     response: sql.StatementResponse,
     attachment: string,
   ) {
-    // Cap the decoded size to protect against unbounded inline payloads from
+    // Cap the size to protect against unbounded inline payloads from
     // misbehaving warehouses. 64 MiB is well above the typical inline limit
     // (~16 MiB) but bounds memory if a server returns a runaway response.
     const decodedSize = Math.ceil((attachment.length * 3) / 4);
@@ -500,28 +483,7 @@ export class SQLWarehouseConnector {
         `Inline Arrow attachment exceeds maximum size (${decodedSize} > ${MAX_INLINE_ATTACHMENT_BYTES} bytes)`,
       );
     }
-
-    let data: Record<string, unknown>[];
-    try {
-      const buf = Buffer.from(attachment, "base64");
-      const table = tableFromIPC(buf);
-      data = table.toArray().map((row) => normalizeArrowRow(row.toJSON()));
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      throw ExecutionError.statementFailed(
-        `Failed to decode inline Arrow attachment: ${msg}`,
-      );
-    }
-    const { attachment: _att, ...restResult } = response.result as {
-      attachment?: string;
-    } & sql.ResultData;
-    return {
-      ...response,
-      result: {
-        ...restResult,
-        data,
-      },
-    };
+    return response;
   }
 
   private updateWithArrowStatus(response: sql.StatementResponse): {
