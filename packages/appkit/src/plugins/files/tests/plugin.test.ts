@@ -1576,7 +1576,7 @@ describe("FilesPlugin", () => {
       }
     });
 
-    test("asUser() call → policy receives user without isServicePrincipal", async () => {
+    test("asUser() call with full OBO headers → policy receives { id, isServicePrincipal: false }", async () => {
       const policySpy = vi.fn().mockReturnValue(true);
       const spyConfig = {
         volumes: {
@@ -1605,9 +1605,13 @@ describe("FilesPlugin", () => {
           expect.objectContaining({ volume: "spied" }),
           expect.objectContaining({ id: "test-user" }),
         );
-        // Should NOT have isServicePrincipal set
+        // `_extractUser` MUST mark a real-user identity explicitly so
+        // policies can reliably distinguish user vs SP. Returning
+        // `undefined` here would let `usersOnly`-style policies tied to
+        // `!user.isServicePrincipal` behave inconsistently (the legacy
+        // bug fixed by the asUser hardening).
         const userArg = policySpy.mock.calls[0][2];
-        expect(userArg.isServicePrincipal).toBeUndefined();
+        expect(userArg.isServicePrincipal).toBe(false);
       } finally {
         delete process.env.DATABRICKS_VOLUME_SPIED;
       }
@@ -2405,7 +2409,14 @@ describe("FilesPlugin", () => {
       expect(res.send).toHaveBeenCalled();
     });
 
-    test("Cache isolation: same path, two users on OBO volume → two distinct cache keys", async () => {
+    test("OBO read cache is DISABLED: cross-user reads do not share cache state", async () => {
+      // Per Fix 3: the read cache is keyed by `getCurrentUserId()`, so user
+      // A's writes can only invalidate user A's cache entry. Cross-user
+      // staleness was the bug. The chosen mitigation (Option B) is to
+      // disable the read cache on OBO volumes entirely — this test pins
+      // that contract: OBO reads must NOT consult `getOrExecute`. The
+      // alternative (Option A: per-(volume, path) generation counters)
+      // would re-enable cache here.
       await useRealGetCurrentUserId();
       const policySpy = vi.fn().mockReturnValue(true);
       const plugin = new FilesPlugin({
@@ -2441,18 +2452,13 @@ describe("FilesPlugin", () => {
         mockRes(),
       );
 
-      // The cache layer is consulted via getOrExecute(cacheKey, fn, userKey).
-      // For OBO volumes the `userKey` argument must be the real user's ID
-      // (resolved by getCurrentUserId() inside the runInUserContext scope),
-      // so the two requests produce two distinct cache entries.
-      const userKeys = mockCacheInstance.getOrExecute.mock.calls.map(
-        (c: unknown[]) => c[2],
-      );
-      expect(userKeys).toEqual(["alice@example.com", "bob@example.com"]);
-      expect(new Set(userKeys).size).toBe(2);
+      // Cache is disabled on OBO: `getOrExecute` is bypassed. The SDK
+      // must execute on every request — no cross-user staleness possible.
+      expect(mockCacheInstance.getOrExecute).not.toHaveBeenCalled();
+      expect(mockClient.files.listDirectoryContents).toHaveBeenCalledTimes(2);
     });
 
-    test("SP/OBO cache no-collide: same path on SP volume vs OBO volume → distinct cache keys", async () => {
+    test("SP volume reads still use the cache (cache is only disabled for OBO)", async () => {
       await useRealGetCurrentUserId();
       const plugin = new FilesPlugin({
         volumes: {
@@ -2474,9 +2480,7 @@ describe("FilesPlugin", () => {
         },
       );
 
-      // SP volume request — `getCurrentUserId()` outside any user context
-      // returns the service principal's identity (the underlying real impl
-      // reads `ServiceContext.serviceUserId`).
+      // SP volume request — must consult the cache (cache enabled).
       await listHandler(
         mockReq("uploads", {
           "x-forwarded-access-token": "sp-token-ignored",
@@ -2485,8 +2489,7 @@ describe("FilesPlugin", () => {
         mockRes(),
       );
 
-      // OBO volume request — same human user, but execution is wrapped in
-      // runInUserContext so `userKey` resolves to alice's ID, not the SP's.
+      // OBO volume request — must skip the cache (cache disabled on OBO).
       await listHandler(
         mockReq("obo_vol", {
           "x-forwarded-access-token": "alice-token",
@@ -2496,18 +2499,61 @@ describe("FilesPlugin", () => {
       );
 
       const calls = mockCacheInstance.getOrExecute.mock.calls;
-      expect(calls).toHaveLength(2);
+      // Exactly one cache consultation — the SP volume's. The OBO request
+      // bypassed the cache entirely.
+      expect(calls).toHaveLength(1);
+      const spCacheKey = calls[0][0];
+      // The SP cache entry's array form is namespaced by volumeKey, so the
+      // OBO volume could not have collided even if its read had been
+      // cached.
+      expect(spCacheKey).toEqual(
+        expect.arrayContaining([expect.stringContaining("uploads")]),
+      );
+    });
 
-      // The cacheKey is the first arg — the SP and OBO volumes already
-      // namespace cache entries by `volumeKey`, so the array form differs.
-      const cacheKeys = calls.map((c: unknown[]) => c[0]);
-      expect(cacheKeys[0]).not.toEqual(cacheKeys[1]);
+    /**
+     * Fix 2 regression: every OBO HTTP request must build the UserContext
+     * AT MOST ONCE. The previous implementation invoked
+     * `_effectiveAuthMode` and then `_runWithAuth` separately — each
+     * called `_buildUserContextOrNull`, which calls
+     * `ServiceContext.createUserContext`, which constructs a fresh
+     * `WorkspaceClient`. Two builds per request was pure throwaway
+     * overhead. The single-pass `_resolveAuthForRequest` resolver collapses
+     * them. This test pins the contract: ONE `createUserContext` call per
+     * OBO HTTP request.
+     */
+    test("OBO HTTP request builds the UserContext exactly once (no duplicate WorkspaceClient allocation)", async () => {
+      const policySpy = vi.fn().mockReturnValue(true);
+      const plugin = new FilesPlugin({
+        volumes: {
+          obo_vol: { auth: "on-behalf-of-user", policy: policySpy },
+          uploads: {},
+          exports: {},
+        },
+      });
+      const handler = getRouteHandler(plugin, "get", "/list");
 
-      // Defense-in-depth: even if the array-form cacheKey matched, the
-      // userKey differs because OBO runs under runInUserContext while SP
-      // runs in the SP's serviceUserId.
-      const userKeys = calls.map((c: unknown[]) => c[2]);
-      expect(userKeys[0]).not.toEqual(userKeys[1]);
+      mockClient.files.listDirectoryContents.mockImplementation(
+        async function* () {
+          yield { name: "f.txt", path: "/f.txt", is_directory: false };
+        },
+      );
+
+      // Reset before our request — `mockServiceContext` may have been
+      // consulted during plugin setup in earlier tests in the suite.
+      serviceContextMock.createUserContextSpy.mockClear();
+
+      await handler(
+        mockReq("obo_vol", {
+          "x-forwarded-access-token": "alice-token",
+          "x-forwarded-user": "alice@example.com",
+        }),
+        mockRes(),
+      );
+
+      // Exactly one. Two would mean the duplicate-allocation regression
+      // is back.
+      expect(serviceContextMock.createUserContextSpy).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -2909,6 +2955,210 @@ describe("FilesPlugin", () => {
         expect.objectContaining({ plugin: "files" }),
       );
     });
+
+    /**
+     * Fix 3 regression: SP-volume write to a nested path must invalidate
+     * the parent directory's list cache, not the file path's. The previous
+     * code passed `path` (file path) directly to the cache key as the
+     * "path segment" — so `_handleList` (which keys by directory) and
+     * `_invalidateListCache` (which keyed by file) used different segments.
+     */
+    test("SP write of /Volumes/.../foo/bar.txt invalidates the parent /foo list cache key (not the file path)", async () => {
+      // SP volume — uses the cache.
+      process.env.DATABRICKS_VOLUME_SP_VOL = "/Volumes/c/s/sp";
+      try {
+        const plugin = new FilesPlugin({
+          volumes: {
+            sp_vol: { policy: policy.allowAll() },
+            uploads: {},
+            exports: {},
+          },
+        });
+        const mkdirHandler = getRouteHandler(plugin, "post", "/mkdir");
+
+        mockClient.files.createDirectory.mockResolvedValue(undefined);
+
+        // Track which (parts, userKey) pairs go through generateKey so we
+        // can match the invalidation segment exactly.
+        const generateKeyCalls: Array<{
+          parts: (string | number | object)[];
+          userKey: string;
+        }> = [];
+        mockCacheInstance.generateKey.mockImplementation(
+          (parts: (string | number | object)[], userKey: string) => {
+            generateKeyCalls.push({ parts, userKey });
+            return "stub-key";
+          },
+        );
+
+        await mkdirHandler(
+          mockReq("sp_vol", {}, { body: { path: "/Volumes/c/s/sp/foo/bar" } }),
+          mockRes(),
+        );
+
+        // Exactly one list-cache invalidation key was constructed.
+        const listInvalidations = generateKeyCalls.filter(
+          (c) => Array.isArray(c.parts) && c.parts[0] === "files:sp_vol:list",
+        );
+        expect(listInvalidations).toHaveLength(1);
+
+        // The path-segment is the PARENT directory (resolved), not the
+        // written path. `parentDirectory("/Volumes/c/s/sp/foo/bar")`
+        // returns `"/Volumes/c/s/sp/foo"`, which the connector resolves
+        // unchanged because it's already absolute and starts with /Volumes/.
+        expect(listInvalidations[0].parts[1]).toBe("/Volumes/c/s/sp/foo");
+        // Defense-in-depth: the file path itself must NOT appear as the
+        // segment.
+        expect(listInvalidations[0].parts[1]).not.toBe(
+          "/Volumes/c/s/sp/foo/bar",
+        );
+      } finally {
+        delete process.env.DATABRICKS_VOLUME_SP_VOL;
+      }
+    });
+
+    /**
+     * Fix 3 regression: SP root-level write (e.g. mkdir of a relative path
+     * like "newdir") must invalidate the `"__root__"` sentinel that
+     * `_handleList` uses for rootless listings.
+     */
+    test("SP write of root-level path uses the __root__ sentinel for invalidation (matches _handleList's rootless cache key)", async () => {
+      const plugin = new FilesPlugin({
+        volumes: {
+          uploads: { policy: policy.allowAll() },
+          exports: {},
+        },
+      });
+      const mkdirHandler = getRouteHandler(plugin, "post", "/mkdir");
+
+      mockClient.files.createDirectory.mockResolvedValue(undefined);
+
+      const generateKeyCalls: Array<{
+        parts: (string | number | object)[];
+        userKey: string;
+      }> = [];
+      mockCacheInstance.generateKey.mockImplementation(
+        (parts: (string | number | object)[], userKey: string) => {
+          generateKeyCalls.push({ parts, userKey });
+          return "stub-key";
+        },
+      );
+
+      // Relative path "newdir" → parentDirectory returns "" → root-level
+      // → must use the "__root__" sentinel.
+      await mkdirHandler(
+        mockReq("uploads", {}, { body: { path: "newdir" } }),
+        mockRes(),
+      );
+
+      const listInvalidations = generateKeyCalls.filter(
+        (c) => Array.isArray(c.parts) && c.parts[0] === "files:uploads:list",
+      );
+      expect(listInvalidations).toHaveLength(1);
+      expect(listInvalidations[0].parts[1]).toBe("__root__");
+    });
+
+    /**
+     * Fix 3 regression: cross-user OBO read freshness. The OBO read cache
+     * is keyed by `getCurrentUserId()`, so user A's writes can only
+     * invalidate user A's cache entry. With cache disabled on OBO, user B
+     * must see fresh data after user A writes.
+     */
+    test("OBO write by user A → user B's next read sees fresh data (cross-user freshness; cache disabled on OBO)", async () => {
+      // This test relies on the DEFAULT mocked `getWorkspaceClient` and
+      // `getCurrentUserId` (always returning the SP fixture's
+      // `mockClient`). Earlier tests in this block install the REAL impls
+      // via `useRealGetWorkspaceClient`/`useRealGetCurrentUserId`, and
+      // Vitest's `vi.clearAllMocks` between tests does NOT reset
+      // implementations — so we restore the defaults explicitly.
+      const ctx = await import("../../../context");
+      vi.mocked(ctx.getWorkspaceClient).mockImplementation(
+        () => mockClient as any,
+      );
+      vi.mocked(ctx.getCurrentUserId).mockImplementation(
+        () => "test-service-principal",
+      );
+
+      const plugin = new FilesPlugin({
+        volumes: {
+          obo_vol: {
+            auth: "on-behalf-of-user",
+            policy: policy.allowAll(),
+          },
+          uploads: {},
+          exports: {},
+        },
+      });
+      const listHandler = getRouteHandler(plugin, "get", "/list");
+      const uploadHandler = getRouteHandler(plugin, "post", "/upload");
+
+      // The connector's `list()` aggregates async-iterable yields into an
+      // array. Initial listings return [], the post-upload listing returns
+      // [{...}]. We toggle the return AFTER alice's upload has reached
+      // the SDK to simulate cross-user freshness.
+      let postUploadVisible = false;
+      mockClient.files.listDirectoryContents.mockImplementation(
+        async function* () {
+          if (postUploadVisible) {
+            yield {
+              name: "fresh.txt",
+              path: "/fresh.txt",
+              is_directory: false,
+            };
+          }
+        },
+      );
+      mockClient.config.authenticate.mockImplementation(async (h: Headers) => {
+        h.set("Authorization", "Bearer ALICE");
+      });
+      const fetchSpy = vi
+        .fn()
+        .mockResolvedValue({ ok: true, status: 200, text: async () => "" });
+      vi.stubGlobal("fetch", fetchSpy);
+
+      // Bob's first list — empty.
+      const bobRes1 = mockRes();
+      await listHandler(
+        mockReq("obo_vol", {
+          "x-forwarded-access-token": "bob-token",
+          "x-forwarded-user": "bob@example.com",
+        }),
+        bobRes1,
+      );
+
+      // Alice uploads.
+      postUploadVisible = true;
+      const aliceRes = mockRes();
+      await uploadHandler(
+        mockUploadReq(
+          "obo_vol",
+          {
+            "x-forwarded-access-token": "alice-token",
+            "x-forwarded-user": "alice@example.com",
+            "content-length": "5",
+          },
+          "hello",
+        ),
+        aliceRes,
+      );
+
+      // Bob's second list — must see the fresh file because the OBO read
+      // cache is disabled (cross-user freshness guard).
+      const bobRes2 = mockRes();
+      await listHandler(
+        mockReq("obo_vol", {
+          "x-forwarded-access-token": "bob-token",
+          "x-forwarded-user": "bob@example.com",
+        }),
+        bobRes2,
+      );
+
+      // Bob's first response was empty, second has the fresh entry.
+      const bobJson1 = bobRes1.json.mock.calls[0]?.[0] ?? [];
+      const bobJson2 = bobRes2.json.mock.calls[0]?.[0] ?? [];
+      expect(Array.isArray(bobJson1) ? bobJson1.length : 0).toBe(0);
+      expect(Array.isArray(bobJson2) ? bobJson2.length : 0).toBeGreaterThan(0);
+    });
   });
 
   describe("VolumeHandle.asUser SDK identity", () => {
@@ -3097,36 +3347,129 @@ describe("FilesPlugin", () => {
       // anywhere near `createUserContext`.
       expect(serviceContextMock.createUserContextSpy).not.toHaveBeenCalled();
     });
+
+    /**
+     * Fix 1 regression: in production, `asUser(req)` MUST require both
+     * `x-forwarded-user` and `x-forwarded-access-token`. The previous
+     * implementation only required the user header. With user-only:
+     *   - `_extractUser` returned `{ id: "alice" }` (no isServicePrincipal)
+     *   - `_buildUserContextOrNull` returned `null` (token missing)
+     *   - `asUser` returned the SP-wrapped API (no runInUserContext)
+     * Net effect: policy saw alice as a real user, SDK ran with SP creds.
+     * This test pins the new strict-token contract.
+     */
+    test("asUser in production with x-forwarded-user but no x-forwarded-access-token throws AuthenticationError.missingToken (privilege-confusion guard)", () => {
+      process.env.NODE_ENV = "production";
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handle = plugin.exports()("uploads");
+      const reqWithUserOnly = {
+        header: (name: string) =>
+          ({ "x-forwarded-user": "alice@example.com" })[name.toLowerCase()],
+      } as any;
+
+      expect(() => handle.asUser(reqWithUserOnly)).toThrow(AuthenticationError);
+      try {
+        handle.asUser(reqWithUserOnly);
+      } catch (err) {
+        expect(err).toBeInstanceOf(AuthenticationError);
+        expect((err as Error).message).toMatch(/x-forwarded-access-token/);
+      }
+    });
+
+    /**
+     * Fix 1 regression — dev mode: with only `x-forwarded-user` and no
+     * `x-forwarded-access-token`, asUser must NOT silently expose the SP
+     * client to the user identity. The dev-fallback returns a policy user
+     * marked `isServicePrincipal: true` so a `usersOnly` policy that gates
+     * on `!user.isServicePrincipal` still fails closed (just like
+     * production does, with a 401 there).
+     */
+    test("asUser in development with x-forwarded-user but no x-forwarded-access-token returns SP-marked policy user; SDK runs as SP", async () => {
+      process.env.NODE_ENV = "development";
+      const policySpy = vi.fn().mockReturnValue(true);
+
+      // Use the default mocked SP client; spy on its listDirectoryContents
+      // to confirm the SDK call resolved against the SP path.
+      const spListSpy = vi.fn(async function* () {
+        yield { name: "sp.txt", path: "/sp.txt", is_directory: false };
+      });
+      mockClient.files.listDirectoryContents.mockImplementation(spListSpy);
+
+      serviceContextMock.createUserContextSpy.mockClear();
+
+      const plugin = new FilesPlugin({
+        volumes: {
+          uploads: { policy: policySpy },
+          exports: {},
+        },
+      });
+      const handle = plugin.exports()("uploads");
+
+      const reqWithUserOnly = {
+        header: (name: string) =>
+          ({ "x-forwarded-user": "alice@example.com" })[name.toLowerCase()],
+      } as any;
+
+      const userApi = handle.asUser(reqWithUserOnly);
+      await userApi.list();
+
+      // Policy received an explicitly SP-marked identity — a usersOnly
+      // policy gating on !isServicePrincipal would correctly fail closed.
+      expect(policySpy).toHaveBeenCalledTimes(1);
+      const userArg = policySpy.mock.calls[0][2];
+      expect(userArg.isServicePrincipal).toBe(true);
+
+      // SDK ran via the SP client (no UserContext was built — the
+      // dev-fallback skips runInUserContext).
+      expect(spListSpy).toHaveBeenCalledTimes(1);
+      expect(serviceContextMock.createUserContextSpy).not.toHaveBeenCalled();
+    });
   });
 
   describe("files.auth_mode telemetry attribute", () => {
     /**
-     * Spy on the plugin's telemetry provider so we can inspect the
-     * `attributes` argument passed to `startActiveSpan`. Both the
-     * `TelemetryInterceptor` (HTTP routes) and `_withAuthModeSpan`
-     * (programmatic API) ultimately call `telemetry.startActiveSpan(name,
-     * options, fn)` — `options.attributes["files.auth_mode"]` is the
-     * single point this test pins.
+     * Spy on the plugin's telemetry provider AND every per-volume
+     * `FilesConnector.telemetry` provider so we can inspect every
+     * `startActiveSpan` invocation.
+     *
+     * The plugin's spans come from the `TelemetryInterceptor` (HTTP route
+     * path). Programmatic calls go through the connector's `traced()`
+     * decorator, which creates `files.<op>` spans on the connector's own
+     * provider — and per Fix 4 the auth-mode attribute is now propagated
+     * onto THAT span via AsyncLocalStorage (no duplicate parent span on
+     * the plugin's provider). The test asserts on the merged call list.
      */
     function spyOnTelemetry(plugin: FilesPlugin) {
-      const telemetry = (plugin as any).telemetry as {
-        startActiveSpan: (...args: unknown[]) => Promise<unknown>;
-      };
       const calls: Array<{
         name: string;
         attributes: Record<string, unknown> | undefined;
       }> = [];
-      const original = telemetry.startActiveSpan.bind(telemetry);
-      vi.spyOn(telemetry, "startActiveSpan").mockImplementation(
-        (...args: unknown[]) => {
-          const [name, options] = args as [
-            string,
-            { attributes?: Record<string, unknown> } | undefined,
-          ];
-          calls.push({ name, attributes: options?.attributes });
-          return original(...args);
-        },
-      );
+
+      const wire = (telemetry: {
+        startActiveSpan: (...args: unknown[]) => Promise<unknown>;
+      }) => {
+        const original = telemetry.startActiveSpan.bind(telemetry);
+        vi.spyOn(telemetry, "startActiveSpan").mockImplementation(
+          (...args: unknown[]) => {
+            const [name, options] = args as [
+              string,
+              { attributes?: Record<string, unknown> } | undefined,
+            ];
+            calls.push({ name, attributes: options?.attributes });
+            return original(...args);
+          },
+        );
+      };
+
+      wire((plugin as any).telemetry);
+      const connectors = (plugin as any).volumeConnectors as Record<
+        string,
+        { telemetry: any }
+      >;
+      for (const conn of Object.values(connectors)) {
+        wire(conn.telemetry);
+      }
+
       return calls;
     }
 
@@ -3277,6 +3620,63 @@ describe("FilesPlugin", () => {
       );
       expect(obo).toBeDefined();
       expect(obo?.name).toBe("files.list");
+    });
+
+    /**
+     * Fix 4 regression: programmatic calls produce exactly ONE
+     * `files.<op>` span (the connector's), not two. The previous
+     * `_withAuthModeSpan` helper opened a duplicate parent span with the
+     * same name, doubling allocation/export. The current implementation
+     * propagates `files.auth_mode` onto the connector's existing span via
+     * AsyncLocalStorage. This test pins span count == 1.
+     */
+    test("programmatic asUser().list() produces exactly ONE files.list span (no duplicate parent span)", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const calls = spyOnTelemetry(plugin);
+
+      mockClient.files.listDirectoryContents.mockImplementation(
+        async function* () {
+          yield { name: "f.txt", path: "/f.txt", is_directory: false };
+        },
+      );
+
+      const handle = plugin.exports()("uploads");
+      const userApi = handle.asUser({
+        header: (name: string) =>
+          ({
+            "x-forwarded-access-token": "alice-token",
+            "x-forwarded-user": "alice@example.com",
+          })[name.toLowerCase()],
+      } as any);
+      await userApi.list("subdir");
+
+      const filesListSpans = calls.filter((c) => c.name === "files.list");
+      // Pre-fix: 2 (outer auth-mode span + inner connector span). Now: 1.
+      expect(filesListSpans).toHaveLength(1);
+      // The single span must carry the auth_mode attribute.
+      expect(filesListSpans[0].attributes?.["files.auth_mode"]).toBe(
+        "on-behalf-of-user",
+      );
+    });
+
+    test("programmatic SP-volume .list() produces exactly ONE files.list span tagged service-principal", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const calls = spyOnTelemetry(plugin);
+
+      mockClient.files.listDirectoryContents.mockImplementation(
+        async function* () {
+          yield { name: "f.txt", path: "/f.txt", is_directory: false };
+        },
+      );
+
+      const handle = plugin.exports()("uploads");
+      await handle.list("subdir"); // no asUser → SP path
+
+      const filesListSpans = calls.filter((c) => c.name === "files.list");
+      expect(filesListSpans).toHaveLength(1);
+      expect(filesListSpans[0].attributes?.["files.auth_mode"]).toBe(
+        "service-principal",
+      );
     });
 
     test("OBO volume + HTTP route + dev fallback (no token) → span attribute is 'service-principal'", async () => {
