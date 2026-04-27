@@ -3099,6 +3099,233 @@ describe("FilesPlugin", () => {
     });
   });
 
+  describe("files.auth_mode telemetry attribute", () => {
+    /**
+     * Spy on the plugin's telemetry provider so we can inspect the
+     * `attributes` argument passed to `startActiveSpan`. Both the
+     * `TelemetryInterceptor` (HTTP routes) and `_withAuthModeSpan`
+     * (programmatic API) ultimately call `telemetry.startActiveSpan(name,
+     * options, fn)` — `options.attributes["files.auth_mode"]` is the
+     * single point this test pins.
+     */
+    function spyOnTelemetry(plugin: FilesPlugin) {
+      const telemetry = (plugin as any).telemetry as {
+        startActiveSpan: (...args: unknown[]) => Promise<unknown>;
+      };
+      const calls: Array<{
+        name: string;
+        attributes: Record<string, unknown> | undefined;
+      }> = [];
+      const original = telemetry.startActiveSpan.bind(telemetry);
+      vi.spyOn(telemetry, "startActiveSpan").mockImplementation(
+        (...args: unknown[]) => {
+          const [name, options] = args as [
+            string,
+            { attributes?: Record<string, unknown> } | undefined,
+          ];
+          calls.push({ name, attributes: options?.attributes });
+          return original(...args);
+        },
+      );
+      return calls;
+    }
+
+    function getRouteHandler(
+      plugin: FilesPlugin,
+      method: "get" | "post" | "delete",
+      pathSuffix: string,
+    ) {
+      const mockRouter = {
+        use: vi.fn(),
+        get: vi.fn(),
+        post: vi.fn(),
+        put: vi.fn(),
+        delete: vi.fn(),
+        patch: vi.fn(),
+      } as any;
+      plugin.injectRoutes(mockRouter);
+      const call = mockRouter[method].mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === "string" && (c[0] as string).endsWith(pathSuffix),
+      );
+      return call[call.length - 1] as (req: any, res: any) => Promise<void>;
+    }
+
+    function mockRes() {
+      const res: any = { headersSent: false };
+      res.status = vi.fn().mockReturnValue(res);
+      res.json = vi.fn().mockReturnValue(res);
+      res.type = vi.fn().mockReturnValue(res);
+      res.send = vi.fn().mockReturnValue(res);
+      res.setHeader = vi.fn().mockReturnValue(res);
+      res.end = vi.fn();
+      return res;
+    }
+
+    function mockReq(
+      volumeKey: string,
+      headers: Record<string, string>,
+      overrides: Record<string, any> = {},
+    ) {
+      return {
+        params: { volumeKey },
+        query: {},
+        ...overrides,
+        headers,
+        header: (name: string) => headers[name.toLowerCase()],
+      };
+    }
+
+    let originalNodeEnv: string | undefined;
+
+    beforeEach(() => {
+      originalNodeEnv = process.env.NODE_ENV;
+      process.env.DATABRICKS_VOLUME_OBO_VOL = "/Volumes/c/s/obo";
+    });
+
+    afterEach(() => {
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+      delete process.env.DATABRICKS_VOLUME_OBO_VOL;
+    });
+
+    test("OBO volume + HTTP route + valid token → span attribute is 'on-behalf-of-user'", async () => {
+      const plugin = new FilesPlugin({
+        volumes: {
+          obo_vol: { auth: "on-behalf-of-user", policy: policy.allowAll() },
+          uploads: {},
+          exports: {},
+        },
+      });
+      const calls = spyOnTelemetry(plugin);
+
+      mockClient.files.listDirectoryContents.mockImplementation(
+        async function* () {
+          yield { name: "f.txt", path: "/f.txt", is_directory: false };
+        },
+      );
+
+      const handler = getRouteHandler(plugin, "get", "/list");
+      await handler(
+        mockReq("obo_vol", {
+          "x-forwarded-access-token": "alice-token",
+          "x-forwarded-user": "alice@example.com",
+        }),
+        mockRes(),
+      );
+
+      // The span created by TelemetryInterceptor must carry the OBO marker.
+      const obo = calls.find(
+        (c) => c.attributes?.["files.auth_mode"] === "on-behalf-of-user",
+      );
+      expect(obo).toBeDefined();
+    });
+
+    test("SP volume + HTTP route → span attribute is 'service-principal'", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const calls = spyOnTelemetry(plugin);
+
+      mockClient.files.listDirectoryContents.mockImplementation(
+        async function* () {
+          yield { name: "f.txt", path: "/f.txt", is_directory: false };
+        },
+      );
+
+      const handler = getRouteHandler(plugin, "get", "/list");
+      await handler(mockReq("uploads", {}), mockRes());
+
+      // No OBO span attribute should appear on the SP route path.
+      const oboCall = calls.find(
+        (c) => c.attributes?.["files.auth_mode"] === "on-behalf-of-user",
+      );
+      expect(oboCall).toBeUndefined();
+
+      // At least one span must explicitly tag service-principal.
+      const sp = calls.find(
+        (c) => c.attributes?.["files.auth_mode"] === "service-principal",
+      );
+      expect(sp).toBeDefined();
+    });
+
+    test("appKit.files('sp-vol').asUser(req).list() programmatic → span attribute is 'on-behalf-of-user' (asUser forces it on SP volumes)", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const calls = spyOnTelemetry(plugin);
+
+      mockClient.files.listDirectoryContents.mockImplementation(
+        async function* () {
+          yield { name: "f.txt", path: "/f.txt", is_directory: false };
+        },
+      );
+
+      const handle = plugin.exports()("uploads"); // SP-mode volume
+      const userApi = handle.asUser({
+        header: (name: string) =>
+          ({
+            "x-forwarded-access-token": "alice-token",
+            "x-forwarded-user": "alice@example.com",
+          })[name.toLowerCase()],
+      } as any);
+      await userApi.list("subdir");
+
+      // asUser hard-overrides SP into OBO, so the programmatic span must
+      // carry the OBO marker.
+      const obo = calls.find(
+        (c) => c.attributes?.["files.auth_mode"] === "on-behalf-of-user",
+      );
+      expect(obo).toBeDefined();
+      expect(obo?.name).toBe("files.list");
+    });
+
+    test("OBO volume + HTTP route + dev fallback (no token) → span attribute is 'service-principal'", async () => {
+      // Dev-fallback path: OBO volume, but no x-forwarded-access-token, so
+      // `_buildUserContextOrNull` returns null and `_runWithAuth` falls
+      // through to direct SP execution. The span must reflect what
+      // operationally happened (SP), not what the volume is configured
+      // for (OBO).
+      process.env.NODE_ENV = "development";
+
+      const plugin = new FilesPlugin({
+        volumes: {
+          obo_vol: { auth: "on-behalf-of-user", policy: policy.allowAll() },
+          uploads: {},
+          exports: {},
+        },
+      });
+      const calls = spyOnTelemetry(plugin);
+
+      mockClient.files.listDirectoryContents.mockImplementation(
+        async function* () {
+          yield { name: "f.txt", path: "/f.txt", is_directory: false };
+        },
+      );
+
+      const handler = getRouteHandler(plugin, "get", "/list");
+      // Provide x-forwarded-user (so `_extractObiUser` accepts the dev
+      // fallback identity) but no x-forwarded-access-token.
+      await handler(
+        mockReq("obo_vol", {
+          "x-forwarded-user": "alice@example.com",
+        }),
+        mockRes(),
+      );
+
+      // Span must NOT be tagged on-behalf-of-user when no user context was
+      // built (dev-fallback runs as SP).
+      const obo = calls.find(
+        (c) => c.attributes?.["files.auth_mode"] === "on-behalf-of-user",
+      );
+      expect(obo).toBeUndefined();
+
+      const sp = calls.find(
+        (c) => c.attributes?.["files.auth_mode"] === "service-principal",
+      );
+      expect(sp).toBeDefined();
+    });
+  });
+
   describe("Upload Stream Size Limiter", () => {
     test("stream under limit passes through all chunks", async () => {
       const maxSize = 100;
