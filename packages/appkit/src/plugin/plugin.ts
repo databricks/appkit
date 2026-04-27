@@ -443,8 +443,16 @@ export abstract class Plugin<
       }
     };
 
-    // stream the result to the client
-    await this.streamManager.stream(res, asyncWrapperFn, streamConfig);
+    // stream the result to the client. The effective user key is forwarded
+    // to the stream manager so that reconnections to existing streamIds are
+    // bound to the original creator (prevents cross-user stream takeover via
+    // guessed/leaked IDs).
+    await this.streamManager.stream(
+      res,
+      asyncWrapperFn,
+      streamConfig,
+      effectiveUserKey,
+    );
   }
 
   /**

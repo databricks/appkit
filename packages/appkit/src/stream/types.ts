@@ -16,6 +16,7 @@ export const SSEErrorCode = {
   INVALID_REQUEST: "INVALID_REQUEST",
   STREAM_ABORTED: "STREAM_ABORTED",
   STREAM_EVICTED: "STREAM_EVICTED",
+  STREAM_FORBIDDEN: "STREAM_FORBIDDEN",
   UPSTREAM_ERROR: "UPSTREAM_ERROR",
 } as const satisfies Record<string, string>;
 
@@ -35,6 +36,12 @@ export interface BufferedEvent {
 
 export interface StreamEntry {
   streamId: string;
+  /**
+   * Identifier of the principal that created the stream (e.g. end-user ID
+   * or service principal user ID). When set, only requests sharing the
+   * same owner key may reconnect to the stream.
+   */
+  ownerKey?: string;
   generator: AsyncGenerator<any, void, unknown>;
   eventBuffer: EventRingBuffer;
   clients: Set<IAppResponse>;
