@@ -7,6 +7,7 @@ import {
   contentTypeFromPath,
   FilesConnector,
   isSafeInlineContentType,
+  runWithFilesSpanAttributes,
   validateCustomContentTypes,
 } from "../../connectors/files";
 import {
@@ -37,7 +38,6 @@ import {
   policy,
 } from "./policy";
 import type {
-  DownloadResponse,
   FilesExport,
   IFilesConfig,
   VolumeAPI,
@@ -130,22 +130,42 @@ export class FilesPlugin extends Plugin {
   }
 
   /**
-   * Extraction for `VolumeHandle.asUser(req)`. Throws in production when the
-   * header is missing. In development (`NODE_ENV === "development"`) falls
-   * back to the service principal so local testing without a reverse proxy
-   * works. HTTP routes use an inline silent fallback regardless of NODE_ENV.
+   * Extraction for `VolumeHandle.asUser(req)`. In production we require BOTH
+   * `x-forwarded-user` and `x-forwarded-access-token`, and throw
+   * `AuthenticationError.missingToken` if either is missing — otherwise a
+   * request with only `x-forwarded-user: alice` would let policies see Alice
+   * as a "real user" (`isServicePrincipal: false`) while the SDK call below
+   * falls through to the SP client because `_buildUserContextOrNull` returns
+   * `null`. Net effect: policy approves the user, SDK runs as SP, privilege
+   * confusion (CWE-639/863).
+   *
+   * In development (`NODE_ENV === "development"`) we keep a local-loop
+   * convenience: if either header is missing we emit a single warning and
+   * return a policy user explicitly marked `isServicePrincipal: true`, so
+   * even in dev a `usersOnly`-style policy that gates on
+   * `!user.isServicePrincipal` cannot be tricked. The matching SDK execution
+   * path also falls through to the SP client (no `runInUserContext` wrap),
+   * so the policy user and the SDK identity stay aligned.
    */
   private _extractUser(req: express.Request): FilePolicyUser {
     const userId = req.header("x-forwarded-user")?.trim();
-    if (userId) return { id: userId };
+    const token = req.header("x-forwarded-access-token")?.trim();
+    if (userId && token) return { id: userId, isServicePrincipal: false };
     if (process.env.NODE_ENV === "development") {
-      logger.debug(
-        "No x-forwarded-user header on asUser(req) — falling back to service principal identity (dev mode).",
+      logger.warn(
+        "asUser(req) called without complete x-forwarded-user + x-forwarded-access-token headers — " +
+          "falling back to service principal identity (dev mode). " +
+          "In production this request would 401.",
       );
       return { id: getCurrentUserId(), isServicePrincipal: true };
     }
+    if (!token) {
+      throw AuthenticationError.missingToken(
+        "Missing x-forwarded-access-token header for asUser(req). Both x-forwarded-user and x-forwarded-access-token are required.",
+      );
+    }
     throw AuthenticationError.missingToken(
-      "Missing x-forwarded-user header. Cannot resolve user ID.",
+      "Missing x-forwarded-user header. Cannot resolve user ID for asUser(req).",
     );
   }
 
@@ -486,10 +506,20 @@ export class FilesPlugin extends Plugin {
     cacheKey: (string | number | object)[],
     authMode: "service-principal" | "on-behalf-of-user",
   ): PluginExecutionSettings {
+    // OBO volumes: disable list/read cache. The cache layer is keyed by
+    // `getCurrentUserId()`, so user A's writes can only invalidate user A's
+    // cache entry — user B would continue to see stale data for the same
+    // volume/path until TTL. Disabling caching trades read performance for
+    // correctness; the alternative is a per-(volume, path) generation
+    // counter folded into the cache key on writes (a future enhancement).
+    const isObo = authMode === "on-behalf-of-user";
+    const cache = isObo
+      ? { ...FILES_READ_DEFAULTS.cache, enabled: false, cacheKey }
+      : { ...FILES_READ_DEFAULTS.cache, cacheKey };
     return {
       default: {
         ...FILES_READ_DEFAULTS,
-        cache: { ...FILES_READ_DEFAULTS.cache, cacheKey },
+        cache,
         telemetryInterceptor: {
           attributes: this._authModeAttributes(authMode),
         },
@@ -525,31 +555,86 @@ export class FilesPlugin extends Plugin {
 
   /**
    * Invalidate cached list entries for a directory after a write operation.
-   * Uses the same cache-key format as `_handleList`: resolved path for
-   * subdirectories, `"__root__"` for the volume root.
+   * Must produce the SAME cache-key shape that `_handleList` stored under.
+   * `_handleList` builds its key from `req.query.path`: when `path` is
+   * provided it uses `connector.resolvePath(path)`, otherwise it uses the
+   * sentinel `"__root__"`. The invalidation here must derive the matching
+   * directory from the FILE path being written:
    *
-   * Cache keys include `getCurrentUserId()`, so reads and the subsequent
-   * invalidation stay consistent across auth modes: on SP volumes both run as
-   * the service principal, and on OBO volumes both run inside the same
-   * `runInUserContext` scope so `getCurrentUserId()` resolves to the end
-   * user's ID for both the cached read and the matching invalidation. The
-   * user identity propagates transparently through `getCurrentUserId()`, so
-   * no explicit user ID needs to be threaded through this function.
+   * - `"/Volumes/c/s/v/foo/bar.txt"` → `parentDirectory` returns
+   *   `"/Volumes/c/s/v/foo"` → resolved path key.
+   * - `"/bar.txt"` and `"bar.txt"` → root-level files: matching list cache
+   *   was a rootless `list()` call → `"__root__"` sentinel.
+   *
+   * On OBO volumes the read cache is disabled (see `_readSettings`), so
+   * invalidation is a no-op here for `mode === "on-behalf-of-user"`. The
+   * cache layer is keyed by `getCurrentUserId()`, so user A's writes can
+   * only invalidate user A's cache entry — user B would otherwise see stale
+   * data for the same volume/path until TTL. Disabling the cache on OBO
+   * trades read performance for correctness; the alternative is a
+   * per-(volume, path) generation counter folded into the cache key on
+   * writes (a future enhancement).
+   *
+   * Best-effort: a thrown `connector.resolvePath` (e.g. on malformed input)
+   * is swallowed here. Invalidation is purely an optimization signal — a
+   * missed delete only costs read freshness, not correctness, and
+   * propagating the error would convert a successful write into an HTTP
+   * 500.
    */
   private _invalidateListCache(
     volumeKey: string,
-    parentPath: string,
+    writtenPath: string,
     connector: FilesConnector,
+    mode: "service-principal" | "on-behalf-of-user" = "service-principal",
   ): void {
-    const parent = parentDirectory(parentPath);
-    const cachePathSegment = parent
-      ? connector.resolvePath(parent)
-      : "__root__";
-    const listKey = this.cache.generateKey(
-      [`files:${volumeKey}:list`, cachePathSegment],
-      getCurrentUserId(),
-    );
-    this.cache.delete(listKey);
+    if (mode === "on-behalf-of-user") {
+      // OBO read cache is disabled — nothing to invalidate. Skipping here
+      // also prevents accidentally caching a wrong-namespace delete that
+      // would mask the missing cross-user invalidation if the cache were
+      // ever re-enabled.
+      return;
+    }
+    const parent = parentDirectory(writtenPath);
+    // The list cache stored under `"__root__"` whenever the matching read
+    // came from a rootless `list()` (no `?path=`). `parentDirectory`
+    // returns `"/"` for root-level files like `/bar.txt`, and `""` for
+    // relative root-level files like `bar.txt`. Both map to the sentinel.
+    const isRootLevel = !parent || parent === "/";
+    const userKey = getCurrentUserId();
+    const tryDelete = (segment: string) => {
+      try {
+        this.cache.delete(
+          this.cache.generateKey([`files:${volumeKey}:list`, segment], userKey),
+        );
+      } catch (err) {
+        logger.debug(
+          "List-cache invalidation failed for volume=%s segment=%s: %O",
+          volumeKey,
+          segment,
+          err,
+        );
+      }
+    };
+
+    if (isRootLevel) {
+      // A rootless `list()` produced the `"__root__"` key.
+      tryDelete("__root__");
+      return;
+    }
+
+    let resolved: string;
+    try {
+      resolved = connector.resolvePath(parent);
+    } catch (err) {
+      logger.debug(
+        "List-cache invalidation: resolvePath(%s) failed for volume=%s: %O",
+        parent,
+        volumeKey,
+        err,
+      );
+      return;
+    }
+    tryDelete(resolved);
   }
 
   private _handleApiError(
@@ -607,8 +692,8 @@ export class FilesPlugin extends Plugin {
     if (!(await this._enforcePolicy(req, res, volumeKey, "list", path ?? "/")))
       return;
 
-    const authMode = this._effectiveAuthMode(req, volumeKey);
-    await this._runWithAuth(req, volumeKey, async () => {
+    const { mode, userCtx } = this._resolveAuthForRequest(req, volumeKey);
+    await this._runWithAuth(userCtx, async () => {
       try {
         const result = await this.execute(
           async () => connector.list(getWorkspaceClient(), path),
@@ -617,7 +702,7 @@ export class FilesPlugin extends Plugin {
               `files:${volumeKey}:list`,
               path ? connector.resolvePath(path) : "__root__",
             ],
-            authMode,
+            mode,
           ),
         );
 
@@ -648,14 +733,14 @@ export class FilesPlugin extends Plugin {
 
     if (!(await this._enforcePolicy(req, res, volumeKey, "read", path))) return;
 
-    const authMode = this._effectiveAuthMode(req, volumeKey);
-    await this._runWithAuth(req, volumeKey, async () => {
+    const { mode, userCtx } = this._resolveAuthForRequest(req, volumeKey);
+    await this._runWithAuth(userCtx, async () => {
       try {
         const result = await this.execute(
           async () => connector.read(getWorkspaceClient(), path),
           this._readSettings(
             [`files:${volumeKey}:read`, connector.resolvePath(path)],
-            authMode,
+            mode,
           ),
         );
 
@@ -717,11 +802,11 @@ export class FilesPlugin extends Plugin {
 
     const label = opts.mode === "download" ? "Download" : "Raw fetch";
     const volumeCfg = this.volumeConfigs[volumeKey];
-    const authMode = this._effectiveAuthMode(req, volumeKey);
+    const { mode, userCtx } = this._resolveAuthForRequest(req, volumeKey);
 
-    await this._runWithAuth(req, volumeKey, async () => {
+    await this._runWithAuth(userCtx, async () => {
       try {
-        const settings = this._downloadSettings(authMode);
+        const settings = this._downloadSettings(mode);
         const response = await this.execute(
           async () => connector.download(getWorkspaceClient(), path),
           settings,
@@ -796,14 +881,14 @@ export class FilesPlugin extends Plugin {
     if (!(await this._enforcePolicy(req, res, volumeKey, "exists", path)))
       return;
 
-    const authMode = this._effectiveAuthMode(req, volumeKey);
-    await this._runWithAuth(req, volumeKey, async () => {
+    const { mode, userCtx } = this._resolveAuthForRequest(req, volumeKey);
+    await this._runWithAuth(userCtx, async () => {
       try {
         const result = await this.execute(
           async () => connector.exists(getWorkspaceClient(), path),
           this._readSettings(
             [`files:${volumeKey}:exists`, connector.resolvePath(path)],
-            authMode,
+            mode,
           ),
         );
 
@@ -835,14 +920,14 @@ export class FilesPlugin extends Plugin {
     if (!(await this._enforcePolicy(req, res, volumeKey, "metadata", path)))
       return;
 
-    const authMode = this._effectiveAuthMode(req, volumeKey);
-    await this._runWithAuth(req, volumeKey, async () => {
+    const { mode, userCtx } = this._resolveAuthForRequest(req, volumeKey);
+    await this._runWithAuth(userCtx, async () => {
       try {
         const result = await this.execute(
           async () => connector.metadata(getWorkspaceClient(), path),
           this._readSettings(
             [`files:${volumeKey}:metadata`, connector.resolvePath(path)],
-            authMode,
+            mode,
           ),
         );
 
@@ -874,14 +959,14 @@ export class FilesPlugin extends Plugin {
     if (!(await this._enforcePolicy(req, res, volumeKey, "preview", path)))
       return;
 
-    const authMode = this._effectiveAuthMode(req, volumeKey);
-    await this._runWithAuth(req, volumeKey, async () => {
+    const { mode, userCtx } = this._resolveAuthForRequest(req, volumeKey);
+    await this._runWithAuth(userCtx, async () => {
       try {
         const result = await this.execute(
           async () => connector.preview(getWorkspaceClient(), path),
           this._readSettings(
             [`files:${volumeKey}:preview`, connector.resolvePath(path)],
-            authMode,
+            mode,
           ),
         );
 
@@ -942,8 +1027,8 @@ export class FilesPlugin extends Plugin {
 
     logger.debug(req, "Upload started: volume=%s path=%s", volumeKey, path);
 
-    const authMode = this._effectiveAuthMode(req, volumeKey);
-    await this._runWithAuth(req, volumeKey, async () => {
+    const { mode, userCtx } = this._resolveAuthForRequest(req, volumeKey);
+    await this._runWithAuth(userCtx, async () => {
       try {
         const rawStream: ReadableStream<Uint8Array> = Readable.toWeb(req);
 
@@ -972,7 +1057,7 @@ export class FilesPlugin extends Plugin {
           path,
           contentLength ?? 0,
         );
-        const settings = this._writeSettings(authMode);
+        const settings = this._writeSettings(mode);
         // The connector's `upload` resolves `getWorkspaceClient()` and
         // `client.config.authenticate(headers)` synchronously inside this
         // callback. When `_runWithAuth` wraps us in `runInUserContext`, that
@@ -985,7 +1070,7 @@ export class FilesPlugin extends Plugin {
           }, settings),
         );
 
-        this._invalidateListCache(volumeKey, path, connector);
+        this._invalidateListCache(volumeKey, path, connector, mode);
 
         if (!result.ok) {
           logger.error(
@@ -1037,10 +1122,10 @@ export class FilesPlugin extends Plugin {
     if (!(await this._enforcePolicy(req, res, volumeKey, "mkdir", dirPath)))
       return;
 
-    const authMode = this._effectiveAuthMode(req, volumeKey);
-    await this._runWithAuth(req, volumeKey, async () => {
+    const { mode, userCtx } = this._resolveAuthForRequest(req, volumeKey);
+    await this._runWithAuth(userCtx, async () => {
       try {
-        const settings = this._writeSettings(authMode);
+        const settings = this._writeSettings(mode);
         const result = await this.trackWrite(() =>
           this.execute(async () => {
             await connector.createDirectory(getWorkspaceClient(), dirPath);
@@ -1048,7 +1133,7 @@ export class FilesPlugin extends Plugin {
           }, settings),
         );
 
-        this._invalidateListCache(volumeKey, dirPath, connector);
+        this._invalidateListCache(volumeKey, dirPath, connector, mode);
 
         if (!result.ok) {
           this._sendStatusError(res, result.status);
@@ -1080,10 +1165,10 @@ export class FilesPlugin extends Plugin {
     if (!(await this._enforcePolicy(req, res, volumeKey, "delete", path)))
       return;
 
-    const authMode = this._effectiveAuthMode(req, volumeKey);
-    await this._runWithAuth(req, volumeKey, async () => {
+    const { mode, userCtx } = this._resolveAuthForRequest(req, volumeKey);
+    await this._runWithAuth(userCtx, async () => {
       try {
-        const settings = this._writeSettings(authMode);
+        const settings = this._writeSettings(mode);
         const result = await this.trackWrite(() =>
           this.execute(async () => {
             await connector.delete(getWorkspaceClient(), path);
@@ -1091,7 +1176,7 @@ export class FilesPlugin extends Plugin {
           }, settings),
         );
 
-        this._invalidateListCache(volumeKey, path, connector);
+        this._invalidateListCache(volumeKey, path, connector, mode);
 
         if (!result.ok) {
           this._sendStatusError(res, result.status);
@@ -1150,81 +1235,88 @@ export class FilesPlugin extends Plugin {
   }
 
   /**
-   * Resolve the auth mode that `_runWithAuth` would actually apply to the
-   * request. Mirrors `_runWithAuth`'s decision logic so HTTP handlers can
-   * tag their telemetry spans with the operationally-effective auth mode
-   * before invoking `this.execute(...)`.
+   * One-shot resolver for HTTP route handlers. Builds the request's
+   * `UserContext` AT MOST ONCE (when the volume is OBO and the headers are
+   * present) and returns both the operationally-effective auth mode and the
+   * pre-built `UserContext`.
+   *
+   * Handlers thread the `userCtx` into `_runWithAuth(userCtx, fn)` to avoid
+   * a second `ServiceContext.createUserContext()` allocation — that call
+   * builds a fresh `WorkspaceClient` per invocation, so doing it twice per
+   * request was pure throwaway overhead.
    */
-  private _effectiveAuthMode(
+  private _resolveAuthForRequest(
     req: express.Request,
     volumeKey: string,
-  ): "service-principal" | "on-behalf-of-user" {
+  ): {
+    mode: "service-principal" | "on-behalf-of-user";
+    userCtx: UserContext | null;
+  } {
     if (this._resolveAuth(volumeKey) !== "on-behalf-of-user") {
-      return "service-principal";
+      return { mode: "service-principal", userCtx: null };
     }
-    return this._buildUserContextOrNull(req)
-      ? "on-behalf-of-user"
-      : "service-principal";
+    const userCtx = this._buildUserContextOrNull(req);
+    return userCtx
+      ? { mode: "on-behalf-of-user", userCtx }
+      : { mode: "service-principal", userCtx: null };
   }
 
   /**
-   * Run `fn` under the correct execution context for `volumeKey`.
-   * - SP volumes (`auth: "service-principal"`): invokes `fn` directly so the
-   *   service-principal `WorkspaceClient` and `getCurrentUserId()` are used —
-   *   identical behavior to pre-OBO releases.
-   * - OBO volumes (`auth: "on-behalf-of-user"`): wraps `fn` in
-   *   `runInUserContext` with a `UserContext` built from the request headers,
+   * Run `fn` under the correct execution context.
+   * - `userCtx` is `null`: invokes `fn` directly so the service-principal
+   *   `WorkspaceClient` and `getCurrentUserId()` are used — identical
+   *   behavior to pre-OBO releases. This covers both SP volumes and the
+   *   OBO dev-fallback path (where headers were missing).
+   * - `userCtx` is a `UserContext`: wraps `fn` in `runInUserContext(userCtx)`,
    *   so SDK calls execute as the end user and `getCurrentUserId()` (and
-   *   therefore cache keys) resolve to the user's ID. Falls back to the SP
-   *   path when no user context can be built — only reachable in dev mode,
-   *   since `_enforcePolicy` 401s in production when the OBO headers are
-   *   missing.
+   *   therefore cache keys) resolve to the user's ID.
+   *
+   * The caller is responsible for building `userCtx` exactly once per
+   * request via `_resolveAuthForRequest`; this signature deliberately does
+   * NOT take a `req` so it cannot accidentally re-build the context.
    */
   private async _runWithAuth(
-    req: express.Request,
-    volumeKey: string,
+    userCtx: UserContext | null,
     fn: () => Promise<void>,
   ): Promise<void> {
-    if (this._resolveAuth(volumeKey) === "on-behalf-of-user") {
-      const userCtx = this._buildUserContextOrNull(req);
-      if (userCtx) {
-        return runInUserContext(userCtx, fn);
-      }
+    if (userCtx) {
+      return runInUserContext(userCtx, fn);
     }
     return fn();
   }
 
   /**
-   * Wrap a programmatic VolumeAPI method invocation in a telemetry span
-   * tagged with `files.auth_mode`. Programmatic calls bypass
-   * `this.execute(...)` (and therefore the `TelemetryInterceptor`); this
-   * helper restores the missing span so the `files.auth_mode` attribute
-   * lands consistently across both HTTP and programmatic surfaces.
+   * Tag the span that `FilesConnector.<operation>` opens with
+   * `files.auth_mode`. Programmatic VolumeAPI methods bypass
+   * `this.execute(...)` (and therefore the `TelemetryInterceptor`), so the
+   * connector's own `files.<operation>` span is the natural place to land
+   * this attribute. Rather than opening a parent `files.<operation>` span
+   * (which would duplicate the connector's span — same name, doubled
+   * allocation/export), we propagate the attribute via AsyncLocalStorage
+   * and let the connector merge it into its existing span at creation
+   * time.
+   *
+   * The `operation` parameter is unused by the propagation mechanism (the
+   * connector knows its own operation), but kept in the signature for API
+   * stability with the previous span-creation form.
    */
-  private _withAuthModeSpan<R>(
-    operation: string,
+  private _withAuthModeAttributes<R>(
+    _operation: string,
     authMode: "service-principal" | "on-behalf-of-user",
     fn: () => Promise<R>,
   ): Promise<R> {
-    return this.telemetry.startActiveSpan(
-      `files.${operation}`,
-      { attributes: this._authModeAttributes(authMode) },
-      async (span) => {
-        try {
-          return await fn();
-        } finally {
-          span.end();
-        }
-      },
-    );
+    return runWithFilesSpanAttributes(this._authModeAttributes(authMode), fn);
   }
 
   /**
-   * Wrap each `VolumeAPI` method so its execution is tagged with
-   * `files.auth_mode = "service-principal"`. Used for programmatic calls
-   * that don't go through `asUser(req)`. Each wrapped method runs inside
-   * its own telemetry span so SP-mode invocations are distinguishable in
-   * trace output.
+   * Wrap each `VolumeAPI` method so the `FilesConnector` span it produces is
+   * tagged with `files.auth_mode = "service-principal"`. Used for
+   * programmatic calls that don't go through `asUser(req)`.
+   *
+   * The attribute is attached to the connector's existing span via
+   * AsyncLocalStorage propagation (see `_withAuthModeAttributes`); no
+   * additional parent span is opened, so each call produces exactly one
+   * `files.<operation>` span instead of two.
    */
   private _wrapVolumeAPIWithSPSpan(api: VolumeAPI): VolumeAPI {
     const wrap =
@@ -1233,7 +1325,7 @@ export class FilesPlugin extends Plugin {
         fn: (...args: Args) => Promise<R>,
       ): ((...args: Args) => Promise<R>) =>
       (...args: Args) =>
-        this._withAuthModeSpan(operation, "service-principal", () =>
+        this._withAuthModeAttributes(operation, "service-principal", () =>
           fn(...args),
         );
 
@@ -1256,9 +1348,11 @@ export class FilesPlugin extends Plugin {
    * force the SDK identity to the end user regardless of the volume's
    * `auth` setting. The policy check baked into each method (via
    * `createVolumeAPI`) runs inside the same scope, so `getCurrentUserId()`
-   * and any cache `userKey` derived from it also resolve to the user. Each
-   * wrapped invocation is tagged with `files.auth_mode = "on-behalf-of-user"`
-   * so OBO calls are distinguishable in trace output.
+   * and any cache `userKey` derived from it also resolve to the user.
+   *
+   * Each wrapped invocation tags the connector's span with
+   * `files.auth_mode = "on-behalf-of-user"` via AsyncLocalStorage
+   * propagation — no additional parent span is opened.
    */
   private _wrapVolumeAPIInUserContext(
     api: VolumeAPI,
@@ -1270,7 +1364,7 @@ export class FilesPlugin extends Plugin {
         fn: (...args: Args) => Promise<R>,
       ): ((...args: Args) => Promise<R>) =>
       (...args: Args) =>
-        this._withAuthModeSpan(operation, "on-behalf-of-user", () =>
+        this._withAuthModeAttributes(operation, "on-behalf-of-user", () =>
           runInUserContext(userCtx, () => fn(...args)),
         );
 
