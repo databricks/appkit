@@ -86,9 +86,33 @@ export class FilesPlugin extends Plugin {
   /**
    * Generates resource requirements dynamically from discovered + configured volumes.
    * Each volume key maps to a `DATABRICKS_VOLUME_{KEY_UPPERCASE}` env var.
+   *
+   * ## Per-volume permission scope (SP vs OBO)
+   *
+   * The returned manifest entries describe a single permission grant per
+   * volume, but the *grantee* depends on the volume's `auth` setting at
+   * runtime — and that distinction is **not** expressed in the manifest
+   * today:
+   *
+   * - **Service-principal volumes** (the default, `auth: "service-principal"`):
+   *   the app's service principal needs `WRITE_VOLUME` (or read-equivalent)
+   *   on the UC volume. This matches the manifest entry as written.
+   * - **On-behalf-of-user volumes** (`auth: "on-behalf-of-user"`): SDK calls
+   *   execute as the **end user**, so the *user* — not the SP — must hold
+   *   `WRITE_VOLUME` (or read-equivalent) on the UC volume. The SP only
+   *   needs to be allowed to mint user-token requests; it does not need
+   *   direct volume permissions.
+   *
+   * The static manifest cannot currently express this per-volume split, so
+   * callers configuring OBO volumes must communicate the per-user permission
+   * requirement out-of-band (docs, runbooks, deployment scripts) until the
+   * manifest schema gains a per-volume auth scope field.
    */
   static getResourceRequirements(config: IFilesConfig): ResourceRequirement[] {
     const volumes = FilesPlugin.discoverVolumes(config);
+    // TODO: extend plugin-manifest.schema.json to express per-volume auth
+    // scope so OBO volumes can declare end-user-required permissions in the
+    // manifest itself.
     return Object.keys(volumes).map((key) => ({
       type: ResourceType.VOLUME,
       alias: `volume-${key}`,
@@ -460,11 +484,41 @@ export class FilesPlugin extends Plugin {
 
   private _readSettings(
     cacheKey: (string | number | object)[],
+    authMode: "service-principal" | "on-behalf-of-user",
   ): PluginExecutionSettings {
     return {
       default: {
         ...FILES_READ_DEFAULTS,
         cache: { ...FILES_READ_DEFAULTS.cache, cacheKey },
+        telemetryInterceptor: {
+          attributes: this._authModeAttributes(authMode),
+        },
+      },
+    };
+  }
+
+  private _writeSettings(
+    authMode: "service-principal" | "on-behalf-of-user",
+  ): PluginExecutionSettings {
+    return {
+      default: {
+        ...FILES_WRITE_DEFAULTS,
+        telemetryInterceptor: {
+          attributes: this._authModeAttributes(authMode),
+        },
+      },
+    };
+  }
+
+  private _downloadSettings(
+    authMode: "service-principal" | "on-behalf-of-user",
+  ): PluginExecutionSettings {
+    return {
+      default: {
+        ...FILES_DOWNLOAD_DEFAULTS,
+        telemetryInterceptor: {
+          attributes: this._authModeAttributes(authMode),
+        },
       },
     };
   }
@@ -553,14 +607,18 @@ export class FilesPlugin extends Plugin {
     if (!(await this._enforcePolicy(req, res, volumeKey, "list", path ?? "/")))
       return;
 
+    const authMode = this._effectiveAuthMode(req, volumeKey);
     await this._runWithAuth(req, volumeKey, async () => {
       try {
         const result = await this.execute(
           async () => connector.list(getWorkspaceClient(), path),
-          this._readSettings([
-            `files:${volumeKey}:list`,
-            path ? connector.resolvePath(path) : "__root__",
-          ]),
+          this._readSettings(
+            [
+              `files:${volumeKey}:list`,
+              path ? connector.resolvePath(path) : "__root__",
+            ],
+            authMode,
+          ),
         );
 
         if (!result.ok) {
@@ -590,14 +648,15 @@ export class FilesPlugin extends Plugin {
 
     if (!(await this._enforcePolicy(req, res, volumeKey, "read", path))) return;
 
+    const authMode = this._effectiveAuthMode(req, volumeKey);
     await this._runWithAuth(req, volumeKey, async () => {
       try {
         const result = await this.execute(
           async () => connector.read(getWorkspaceClient(), path),
-          this._readSettings([
-            `files:${volumeKey}:read`,
-            connector.resolvePath(path),
-          ]),
+          this._readSettings(
+            [`files:${volumeKey}:read`, connector.resolvePath(path)],
+            authMode,
+          ),
         );
 
         if (!result.ok) {
@@ -658,12 +717,11 @@ export class FilesPlugin extends Plugin {
 
     const label = opts.mode === "download" ? "Download" : "Raw fetch";
     const volumeCfg = this.volumeConfigs[volumeKey];
+    const authMode = this._effectiveAuthMode(req, volumeKey);
 
     await this._runWithAuth(req, volumeKey, async () => {
       try {
-        const settings: PluginExecutionSettings = {
-          default: FILES_DOWNLOAD_DEFAULTS,
-        };
+        const settings = this._downloadSettings(authMode);
         const response = await this.execute(
           async () => connector.download(getWorkspaceClient(), path),
           settings,
@@ -738,14 +796,15 @@ export class FilesPlugin extends Plugin {
     if (!(await this._enforcePolicy(req, res, volumeKey, "exists", path)))
       return;
 
+    const authMode = this._effectiveAuthMode(req, volumeKey);
     await this._runWithAuth(req, volumeKey, async () => {
       try {
         const result = await this.execute(
           async () => connector.exists(getWorkspaceClient(), path),
-          this._readSettings([
-            `files:${volumeKey}:exists`,
-            connector.resolvePath(path),
-          ]),
+          this._readSettings(
+            [`files:${volumeKey}:exists`, connector.resolvePath(path)],
+            authMode,
+          ),
         );
 
         if (!result.ok) {
@@ -776,14 +835,15 @@ export class FilesPlugin extends Plugin {
     if (!(await this._enforcePolicy(req, res, volumeKey, "metadata", path)))
       return;
 
+    const authMode = this._effectiveAuthMode(req, volumeKey);
     await this._runWithAuth(req, volumeKey, async () => {
       try {
         const result = await this.execute(
           async () => connector.metadata(getWorkspaceClient(), path),
-          this._readSettings([
-            `files:${volumeKey}:metadata`,
-            connector.resolvePath(path),
-          ]),
+          this._readSettings(
+            [`files:${volumeKey}:metadata`, connector.resolvePath(path)],
+            authMode,
+          ),
         );
 
         if (!result.ok) {
@@ -814,14 +874,15 @@ export class FilesPlugin extends Plugin {
     if (!(await this._enforcePolicy(req, res, volumeKey, "preview", path)))
       return;
 
+    const authMode = this._effectiveAuthMode(req, volumeKey);
     await this._runWithAuth(req, volumeKey, async () => {
       try {
         const result = await this.execute(
           async () => connector.preview(getWorkspaceClient(), path),
-          this._readSettings([
-            `files:${volumeKey}:preview`,
-            connector.resolvePath(path),
-          ]),
+          this._readSettings(
+            [`files:${volumeKey}:preview`, connector.resolvePath(path)],
+            authMode,
+          ),
         );
 
         if (!result.ok) {
@@ -881,6 +942,7 @@ export class FilesPlugin extends Plugin {
 
     logger.debug(req, "Upload started: volume=%s path=%s", volumeKey, path);
 
+    const authMode = this._effectiveAuthMode(req, volumeKey);
     await this._runWithAuth(req, volumeKey, async () => {
       try {
         const rawStream: ReadableStream<Uint8Array> = Readable.toWeb(req);
@@ -910,9 +972,7 @@ export class FilesPlugin extends Plugin {
           path,
           contentLength ?? 0,
         );
-        const settings: PluginExecutionSettings = {
-          default: FILES_WRITE_DEFAULTS,
-        };
+        const settings = this._writeSettings(authMode);
         // The connector's `upload` resolves `getWorkspaceClient()` and
         // `client.config.authenticate(headers)` synchronously inside this
         // callback. When `_runWithAuth` wraps us in `runInUserContext`, that
@@ -977,11 +1037,10 @@ export class FilesPlugin extends Plugin {
     if (!(await this._enforcePolicy(req, res, volumeKey, "mkdir", dirPath)))
       return;
 
+    const authMode = this._effectiveAuthMode(req, volumeKey);
     await this._runWithAuth(req, volumeKey, async () => {
       try {
-        const settings: PluginExecutionSettings = {
-          default: FILES_WRITE_DEFAULTS,
-        };
+        const settings = this._writeSettings(authMode);
         const result = await this.trackWrite(() =>
           this.execute(async () => {
             await connector.createDirectory(getWorkspaceClient(), dirPath);
@@ -1021,11 +1080,10 @@ export class FilesPlugin extends Plugin {
     if (!(await this._enforcePolicy(req, res, volumeKey, "delete", path)))
       return;
 
+    const authMode = this._effectiveAuthMode(req, volumeKey);
     await this._runWithAuth(req, volumeKey, async () => {
       try {
-        const settings: PluginExecutionSettings = {
-          default: FILES_WRITE_DEFAULTS,
-        };
+        const settings = this._writeSettings(authMode);
         const result = await this.trackWrite(() =>
           this.execute(async () => {
             await connector.delete(getWorkspaceClient(), path);
@@ -1074,6 +1132,42 @@ export class FilesPlugin extends Plugin {
   }
 
   /**
+   * Build the telemetry attribute hash for the `files.auth_mode` span
+   * attribute. The value reflects what operationally happened — i.e.
+   * whether `runInUserContext` actually wrapped the SDK call:
+   * - HTTP route on OBO volume + valid token → `"on-behalf-of-user"`.
+   * - HTTP route on OBO volume + dev-fallback (no token) →
+   *   `"service-principal"` (the route falls through to the SP client).
+   * - HTTP route on SP volume → `"service-principal"`.
+   * - `asUser(req)` programmatic calls with a real user context →
+   *   `"on-behalf-of-user"`.
+   * - Any unwrapped path → `"service-principal"`.
+   */
+  private _authModeAttributes(
+    authMode: "service-principal" | "on-behalf-of-user",
+  ): { "files.auth_mode": string } {
+    return { "files.auth_mode": authMode };
+  }
+
+  /**
+   * Resolve the auth mode that `_runWithAuth` would actually apply to the
+   * request. Mirrors `_runWithAuth`'s decision logic so HTTP handlers can
+   * tag their telemetry spans with the operationally-effective auth mode
+   * before invoking `this.execute(...)`.
+   */
+  private _effectiveAuthMode(
+    req: express.Request,
+    volumeKey: string,
+  ): "service-principal" | "on-behalf-of-user" {
+    if (this._resolveAuth(volumeKey) !== "on-behalf-of-user") {
+      return "service-principal";
+    }
+    return this._buildUserContextOrNull(req)
+      ? "on-behalf-of-user"
+      : "service-principal";
+  }
+
+  /**
    * Run `fn` under the correct execution context for `volumeKey`.
    * - SP volumes (`auth: "service-principal"`): invokes `fn` directly so the
    *   service-principal `WorkspaceClient` and `getCurrentUserId()` are used —
@@ -1101,12 +1195,70 @@ export class FilesPlugin extends Plugin {
   }
 
   /**
+   * Wrap a programmatic VolumeAPI method invocation in a telemetry span
+   * tagged with `files.auth_mode`. Programmatic calls bypass
+   * `this.execute(...)` (and therefore the `TelemetryInterceptor`); this
+   * helper restores the missing span so the `files.auth_mode` attribute
+   * lands consistently across both HTTP and programmatic surfaces.
+   */
+  private _withAuthModeSpan<R>(
+    operation: string,
+    authMode: "service-principal" | "on-behalf-of-user",
+    fn: () => Promise<R>,
+  ): Promise<R> {
+    return this.telemetry.startActiveSpan(
+      `files.${operation}`,
+      { attributes: this._authModeAttributes(authMode) },
+      async (span) => {
+        try {
+          return await fn();
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  /**
+   * Wrap each `VolumeAPI` method so its execution is tagged with
+   * `files.auth_mode = "service-principal"`. Used for programmatic calls
+   * that don't go through `asUser(req)`. Each wrapped method runs inside
+   * its own telemetry span so SP-mode invocations are distinguishable in
+   * trace output.
+   */
+  private _wrapVolumeAPIWithSPSpan(api: VolumeAPI): VolumeAPI {
+    const wrap =
+      <Args extends unknown[], R>(
+        operation: string,
+        fn: (...args: Args) => Promise<R>,
+      ): ((...args: Args) => Promise<R>) =>
+      (...args: Args) =>
+        this._withAuthModeSpan(operation, "service-principal", () =>
+          fn(...args),
+        );
+
+    return {
+      list: wrap("list", api.list),
+      read: wrap("read", api.read),
+      download: wrap("download", api.download),
+      exists: wrap("exists", api.exists),
+      metadata: wrap("metadata", api.metadata),
+      upload: wrap("upload", api.upload),
+      createDirectory: wrap("createDirectory", api.createDirectory),
+      delete: wrap("delete", api.delete),
+      preview: wrap("preview", api.preview),
+    };
+  }
+
+  /**
    * Wrap each `VolumeAPI` method so its execution runs inside
    * `runInUserContext(userCtx, ...)`. Used by `VolumeHandle.asUser(req)` to
    * force the SDK identity to the end user regardless of the volume's
    * `auth` setting. The policy check baked into each method (via
    * `createVolumeAPI`) runs inside the same scope, so `getCurrentUserId()`
-   * and any cache `userKey` derived from it also resolve to the user.
+   * and any cache `userKey` derived from it also resolve to the user. Each
+   * wrapped invocation is tagged with `files.auth_mode = "on-behalf-of-user"`
+   * so OBO calls are distinguishable in trace output.
    */
   private _wrapVolumeAPIInUserContext(
     api: VolumeAPI,
@@ -1114,21 +1266,24 @@ export class FilesPlugin extends Plugin {
   ): VolumeAPI {
     const wrap =
       <Args extends unknown[], R>(
+        operation: string,
         fn: (...args: Args) => Promise<R>,
       ): ((...args: Args) => Promise<R>) =>
       (...args: Args) =>
-        runInUserContext(userCtx, () => fn(...args));
+        this._withAuthModeSpan(operation, "on-behalf-of-user", () =>
+          runInUserContext(userCtx, () => fn(...args)),
+        );
 
     return {
-      list: wrap(api.list),
-      read: wrap(api.read),
-      download: wrap(api.download),
-      exists: wrap(api.exists),
-      metadata: wrap(api.metadata),
-      upload: wrap(api.upload),
-      createDirectory: wrap(api.createDirectory),
-      delete: wrap(api.delete),
-      preview: wrap(api.preview),
+      list: wrap("list", api.list),
+      read: wrap("read", api.read),
+      download: wrap("download", api.download),
+      exists: wrap("exists", api.exists),
+      metadata: wrap("metadata", api.metadata),
+      upload: wrap("upload", api.upload),
+      createDirectory: wrap("createDirectory", api.createDirectory),
+      delete: wrap("delete", api.delete),
+      preview: wrap("preview", api.preview),
     };
   }
 
@@ -1259,7 +1414,12 @@ export class FilesPlugin extends Plugin {
         },
         isServicePrincipal: true,
       };
-      const spApi = this.createVolumeAPI(volumeKey, spUser);
+      // Default (non-asUser) programmatic surface: every call is tagged
+      // with `files.auth_mode = "service-principal"` for telemetry parity
+      // with the HTTP route path.
+      const spApi = this._wrapVolumeAPIWithSPSpan(
+        this.createVolumeAPI(volumeKey, spUser),
+      );
 
       return {
         ...spApi,
@@ -1271,10 +1431,10 @@ export class FilesPlugin extends Plugin {
           // `getWorkspaceClient()` returns the user-token client. When no
           // user token is available (only reachable in dev mode after the
           // strict `_extractUser` falls back to the SP identity), we skip
-          // the wrap so the SDK call continues to execute as the SP — the
-          // pre-OBO behavior.
+          // the OBO wrap and instead apply the SP-mode span wrap so trace
+          // output reflects the actual SP execution.
           const userCtx = this._buildUserContextOrNull(req);
-          if (!userCtx) return api;
+          if (!userCtx) return this._wrapVolumeAPIWithSPSpan(api);
           return this._wrapVolumeAPIInUserContext(api, userCtx);
         },
       };
