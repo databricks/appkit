@@ -46,13 +46,11 @@ describe("Analytics Plugin Integration", () => {
         serverPlugin({
           port: TEST_PORT,
           host: "127.0.0.1",
-          autoStart: false,
         }),
         analytics({}),
       ],
     });
 
-    await app.server.start();
     server = app.server.getServer();
     baseUrl = `http://127.0.0.1:${TEST_PORT}`;
   });

@@ -27,17 +27,23 @@ const logger = createLogger("server");
  * This plugin is responsible for starting the server and serving the static files.
  * It also handles the remote tunneling for development purposes.
  *
+ * The server is started automatically by `createApp` after all plugins are set up
+ * and the optional `onPluginsReady` callback has run.
+ *
  * @example
  * ```ts
  * createApp({
- *   plugins: [server(), telemetryExamples(), analytics({})],
+ *   plugins: [server(), analytics({})],
+ *   onPluginsReady(appkit) {
+ *     appkit.server.extend((app) => {
+ *       app.get("/custom", (_req, res) => res.json({ ok: true }));
+ *     });
+ *   },
  * });
  * ```
- *
  */
 export class ServerPlugin extends Plugin {
   public static DEFAULT_CONFIG = {
-    autoStart: true,
     host: process.env.FLASK_RUN_HOST || "0.0.0.0",
     port: Number(process.env.DATABRICKS_APP_PORT) || 8000,
   };
@@ -54,6 +60,13 @@ export class ServerPlugin extends Plugin {
   static phase: PluginPhase = "deferred";
 
   constructor(config: ServerConfig) {
+    if ("autoStart" in config) {
+      throw new ServerError(
+        "server({ autoStart }) has been removed. " +
+          "The server is now started automatically by createApp.\n\n" +
+          "Run `npx appkit codemod on-plugins-ready --write` to auto-migrate.",
+      );
+    }
     super(config);
     this.config = config;
     this.serverApplication = express();
@@ -65,23 +78,13 @@ export class ServerPlugin extends Plugin {
     ]);
   }
 
-  /** Setup the server plugin. */
-  async setup() {
-    if (this.shouldAutoStart()) {
-      await this.start();
-    }
-  }
+  async setup() {}
 
   /** Get the server configuration. */
   getConfig() {
     const { plugins: _plugins, ...config } = this.config;
 
     return config;
-  }
-
-  /** Check if the server should auto start. */
-  shouldAutoStart() {
-    return this.config.autoStart;
   }
 
   /**
@@ -148,14 +151,10 @@ export class ServerPlugin extends Plugin {
    *
    * Only use this method if you need to access the server instance for advanced usage like a custom websocket server, etc.
    *
-   * @throws {Error} If the server is not started or autoStart is true.
+   * @throws {Error} If the server has not started yet.
    * @returns {HTTPServer} The server instance.
    */
   getServer(): HTTPServer {
-    if (this.shouldAutoStart()) {
-      throw ServerError.autoStartConflict("get server");
-    }
-
     if (!this.server) {
       throw ServerError.notStarted();
     }
@@ -166,15 +165,13 @@ export class ServerPlugin extends Plugin {
   /**
    * Extend the server with custom routes or middleware.
    *
+   * Call this inside the `onPluginsReady` callback of `createApp` to register
+   * custom Express routes or middleware before the server starts listening.
+   *
    * @param fn - A function that receives the express application.
    * @returns The server plugin instance for chaining.
-   * @throws {Error} If autoStart is true.
    */
   extend(fn: (app: express.Application) => void) {
-    if (this.shouldAutoStart()) {
-      throw ServerError.autoStartConflict("extend server");
-    }
-
     this.serverExtensions.push(fn);
     return this;
   }
@@ -389,8 +386,6 @@ export class ServerPlugin extends Plugin {
   exports() {
     const self = this;
     return {
-      /** Start the server */
-      start: this.start,
       /** Extend the server with custom routes or middleware */
       extend(fn: (app: express.Application) => void) {
         self.extend(fn);
@@ -400,6 +395,19 @@ export class ServerPlugin extends Plugin {
       getServer: this.getServer,
       /** Get the server configuration */
       getConfig: this.getConfig,
+      /** @deprecated Server is now started automatically by createApp. */
+      start() {
+        throw new ServerError(
+          "server.start() has been removed. Use the onPluginsReady callback instead:\n\n" +
+            "  createApp({\n" +
+            "    plugins: [server(), ...],\n" +
+            "    onPluginsReady(appkit) {\n" +
+            "      appkit.server.extend(...);\n" +
+            "    },\n" +
+            "  });\n\n" +
+            "Run `npx appkit codemod on-plugins-ready --write` to auto-migrate.",
+        );
+      },
     };
   }
 }

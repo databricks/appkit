@@ -2,24 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
-# Changelog
-
-# Changelog
-
-# Changelog
-
 ## Unreleased
 
 ### appkit (files plugin) — per-volume auth mode
 
 * **feat(files):** add per-volume `auth` field (`VolumeConfig.auth`) and plugin-level `auth` default (`IFilesConfig.auth`) for selecting between service-principal and on-behalf-of-user execution. Resolution order: `volume.auth ?? plugin.auth ?? "service-principal"`. OBO mode wires HTTP route handlers and `VolumeHandle.asUser` through `runInUserContext` so SDK calls execute as the end user.
-* **feat(files):** add `files.auth_mode` OpenTelemetry span attribute on every operation, set to either `"service-principal"` or `"on-behalf-of-user"` for trace filtering. Programmatic API calls (`appKit.files("vol").<op>()`) now create `files.<op>` spans where they previously did not — minor observability enrichment that respects the plugin's `traces` config (no spans emitted when traces are disabled).
+* **feat(files):** add `files.auth_mode` OpenTelemetry span attribute on every operation, set to either `"service-principal"` or `"on-behalf-of-user"` for trace filtering. The attribute lands on the connector's existing `files.<op>` span (no duplicate spans).
 * **feat(files)!:** `appKit.files("vol").asUser(req).list()` now executes the SDK call as the **end user** (previously the SDK still ran as the service principal — only the policy user was swapped). Programmatic callers that relied on SP credentials post-`asUser(req)` must remove the `asUser` wrap.
+* **fix(files):** `asUser(req)` now requires both `x-forwarded-user` AND `x-forwarded-access-token` in production; throws `AuthenticationError.missingToken` when either is missing. Previously, a request with only the user header silently fell back to SP credentials at the SDK level while the policy saw a real-user identity — a privilege-confusion bug. Dev fallback marks the policy user as `isServicePrincipal: true`.
+* **fix(files):** OBO volume read responses are no longer cached. SP volume reads still cache. Trade-off: every OBO read hits the SDK; in exchange, no cross-user staleness. (Follow-up: per-(volume, path) generation counter for OBO list cache.)
+* **fix(files):** write handlers (`upload`, `mkdir`, `delete`) now `await` cache invalidation before sending the HTTP response, eliminating a write→read race within the same client tick.
 * **chore(files):** remove undocumented `bypassPolicy` option on `createVolumeAPI`. Zero consumers in `packages/` or `apps/`; no migration needed.
 
 #### Honest limitation
 
 Programmatic calls on an OBO volume **without** `asUser(req)` (i.e. `appKit.files("obo-vol").list()`) cannot synthesize a user identity and continue to execute against the service principal client at the call site. For programmatic per-user execution, use `asUser(req)`. The OBO volume default applies to **HTTP route traffic**, where the request headers are available.
+
+## [0.26.0](https://github.com/databricks/appkit/compare/v0.25.1...v0.26.0) (2026-04-27)
+
+* add appkit codemod on-plugins-ready CLI ([#291](https://github.com/databricks/appkit/issues/291)) ([f2f0504](https://github.com/databricks/appkit/commit/f2f05044f3216b1eafcd118bd995960c35392020))
+* add onPluginsReady callback to createApp, remove autoStart ([#280](https://github.com/databricks/appkit/issues/280)) ([a06b6e3](https://github.com/databricks/appkit/commit/a06b6e392de2bab2004e7ea2ccf8bb080dfea545))
+
+
+## [0.25.1](https://github.com/databricks/appkit/compare/v0.25.0...v0.25.1) (2026-04-27)
+
+### appkit
+
+* **appkit:** check isRetryable before retrying in interceptor ([#276](https://github.com/databricks/appkit/issues/276)) ([1c994a6](https://github.com/databricks/appkit/commit/1c994a6d99f397b56e90f1b53df06a61f02b9e82))
+
+
+## [0.25.0](https://github.com/databricks/appkit/compare/v0.24.0...v0.25.0) (2026-04-23)
+
+### files
+
+* **files:** per-volume in-app policy enforcement ([#197](https://github.com/databricks/appkit/issues/197)) ([f54dca5](https://github.com/databricks/appkit/commit/f54dca5da5af5368c7bcb18745715b54a99d47e9))
 
 
 ## [0.24.0](https://github.com/databricks/appkit/compare/v0.23.0...v0.24.0) (2026-04-20)

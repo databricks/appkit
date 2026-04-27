@@ -68,9 +68,9 @@ const VOL = "files";
 /**
  * Wait for the supplied server to finish binding, then return the
  * OS-assigned port. Required when tests pass `port: 0` to `serverPlugin`
- * — `appkit.server.start()` returns as soon as `listen()` is invoked but
- * before the bind completes, so `server.address()` returns `null` until
- * the `listening` event fires.
+ * — `createApp` resolves as soon as `listen()` is invoked but before the
+ * bind completes, so `server.address()` returns `null` until the
+ * `listening` event fires.
  */
 async function getListeningPort(server: Server): Promise<number> {
   const addr = server.address();
@@ -111,13 +111,11 @@ describe("Files Plugin Integration", () => {
         serverPlugin({
           port: 0,
           host: "127.0.0.1",
-          autoStart: false,
         }),
         files(),
       ],
     });
 
-    await appkit.server.start();
     server = appkit.server.getServer();
     const port = await getListeningPort(server);
     baseUrl = `http://127.0.0.1:${port}`;
@@ -504,7 +502,6 @@ describe("Files Plugin Integration", () => {
           serverPlugin({
             port: 0,
             host: "127.0.0.1",
-            autoStart: false,
           }),
           files({
             volumes: {
@@ -515,7 +512,6 @@ describe("Files Plugin Integration", () => {
       });
 
       try {
-        await appkit.server.start();
         const port = await getListeningPort(appkit.server.getServer());
         const localBase = `http://127.0.0.1:${port}`;
 
@@ -544,7 +540,6 @@ describe("Files Plugin Integration", () => {
           serverPlugin({
             port: 0,
             host: "127.0.0.1",
-            autoStart: false,
           }),
           files({
             volumes: {
@@ -555,7 +550,6 @@ describe("Files Plugin Integration", () => {
       });
 
       try {
-        await appkit.server.start();
         const port = await getListeningPort(appkit.server.getServer());
         const localBase = `http://127.0.0.1:${port}`;
 

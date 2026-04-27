@@ -36,22 +36,38 @@ await createApp({
 });
 ```
 
-## Manual server start example
+## Custom routes example
 
-When you need to extend Express with custom routes:
+Use the `onPluginsReady` callback to extend Express with custom routes before the server starts:
 
 ```ts
 import { createApp, server } from "@databricks/appkit";
 
-const appkit = await createApp({
-  plugins: [server({ autoStart: false })],
+await createApp({
+  plugins: [server()],
+  onPluginsReady(appkit) {
+    appkit.server.extend((app) => {
+      app.get("/custom", (_req, res) => res.json({ ok: true }));
+    });
+  },
 });
+```
 
-appkit.server.extend((app) => {
-  app.get("/custom", (_req, res) => res.json({ ok: true }));
+The `onPluginsReady` callback also supports async operations:
+
+```ts
+await createApp({
+  plugins: [server()],
+  async onPluginsReady(appkit) {
+    const pool = await initializeDatabase();
+    appkit.server.extend((app) => {
+      app.get("/data", async (_req, res) => {
+        const result = await pool.query("SELECT 1");
+        res.json(result);
+      });
+    });
+  },
 });
-
-await appkit.server.start();
 ```
 
 ## Configuration options
@@ -64,7 +80,6 @@ await createApp({
     server({
       port: 8000,          // default: Number(process.env.DATABRICKS_APP_PORT) || 8000
       host: "0.0.0.0",     // default: process.env.FLASK_RUN_HOST || "0.0.0.0"
-      autoStart: true,     // default: true
       staticPath: "dist",  // optional: force a specific static directory
     }),
   ],

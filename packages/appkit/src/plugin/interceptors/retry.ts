@@ -1,10 +1,38 @@
 import type { RetryConfig } from "shared";
+import { AppKitError } from "../../errors/base";
 import { createLogger } from "../../logging/logger";
 import type { ExecutionInterceptor, InterceptorContext } from "./types";
 
 const logger = createLogger("interceptors:retry");
 
-// interceptor to handle retry logic
+/**
+ * Determines whether an error is safe to retry.
+ *
+ * Priority:
+ *  1. AppKitError — reads the `isRetryable` boolean property.
+ *  2. Databricks SDK ApiError (duck-typed) — calls `isRetryable()` method,
+ *     or falls back to status-code heuristic (5xx / 429 → retryable).
+ *  3. Unknown errors — treated as retryable to preserve backward compatibility.
+ */
+function isRetryableError(error: unknown): boolean {
+  if (error instanceof AppKitError) {
+    return error.isRetryable;
+  }
+
+  if (error instanceof Error && "statusCode" in error) {
+    const record = error as Record<string, unknown>;
+    if (typeof record.statusCode !== "number") {
+      return true;
+    }
+    if (typeof record.isRetryable === "function") {
+      return (record.isRetryable as () => boolean)();
+    }
+    return record.statusCode >= 500 || record.statusCode === 429;
+  }
+
+  return true;
+}
+
 export class RetryInterceptor implements ExecutionInterceptor {
   private attempts: number;
   private initialDelay: number;
@@ -36,7 +64,6 @@ export class RetryInterceptor implements ExecutionInterceptor {
       } catch (error) {
         lastError = error;
 
-        // last attempt, rethrow the error
         if (attempt === this.attempts) {
           logger.event()?.setExecution({
             retry_attempts: attempt - 1,
@@ -44,8 +71,11 @@ export class RetryInterceptor implements ExecutionInterceptor {
           throw error;
         }
 
-        // don't retry if was already aborted
         if (context.signal?.aborted) {
+          throw error;
+        }
+
+        if (!isRetryableError(error)) {
           throw error;
         }
 
@@ -54,7 +84,6 @@ export class RetryInterceptor implements ExecutionInterceptor {
       }
     }
 
-    // type guard
     throw lastError;
   }
 
