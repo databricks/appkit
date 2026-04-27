@@ -3059,6 +3059,110 @@ describe("FilesPlugin", () => {
     });
 
     /**
+     * Fix A regression: SP-volume writes must AWAIT the underlying
+     * `cache.delete()` BEFORE sending the HTTP success response. Otherwise
+     * a client that fires a follow-up `GET /list` in the same tick can race
+     * the still-pending invalidation and observe pre-write data.
+     *
+     * Structural assertion (timing-independent, bug-sensitive): we install
+     * a `cache.delete` implementation backed by a deferred promise we
+     * control, then dispatch the `mkdir` handler WITHOUT awaiting it.
+     * Once `cache.delete` is observed to have been called, we drain a
+     * generous number of microtasks AND macrotasks while the deferred is
+     * still pending. The contract is that `res.json` MUST NOT fire until
+     * we resolve the deferred — proving the response is gated on the
+     * invalidation having actually completed (not just been issued).
+     *
+     * If anyone reverts to `this._invalidateListCache(...)` without
+     * `await`, `cache.delete()` is left dangling but `res.json` proceeds
+     * synchronously after it — making the "after delete called, before
+     * delete resolved" window observable, and the assertion below would
+     * fail.
+     */
+    test("SP write awaits cache.delete BEFORE sending the response (no write→read race)", async () => {
+      // Restore the default (mocked) `getWorkspaceClient` and
+      // `getCurrentUserId`, since earlier tests in this block install the
+      // REAL implementations and `vi.clearAllMocks` does NOT reset
+      // implementations.
+      const ctx = await import("../../../context");
+      vi.mocked(ctx.getWorkspaceClient).mockImplementation(
+        () => mockClient as any,
+      );
+      vi.mocked(ctx.getCurrentUserId).mockImplementation(
+        () => "test-service-principal",
+      );
+
+      process.env.DATABRICKS_VOLUME_SP_VOL = "/Volumes/c/s/sp";
+      try {
+        const plugin = new FilesPlugin({
+          volumes: {
+            sp_vol: { policy: policy.allowAll() },
+            uploads: {},
+            exports: {},
+          },
+        });
+        const mkdirHandler = getRouteHandler(plugin, "post", "/mkdir");
+
+        mockClient.files.createDirectory.mockResolvedValue(undefined);
+        mockCacheInstance.generateKey.mockReturnValue("stub-key");
+
+        // Deferred promise that gates the cache delete. The handler must
+        // await this before writing the success response.
+        let releaseDelete!: () => void;
+        const deletePending = new Promise<void>((resolve) => {
+          releaseDelete = resolve;
+        });
+        mockCacheInstance.delete.mockImplementation(
+          async () => await deletePending,
+        );
+
+        const res = mockRes();
+
+        // Fire the write WITHOUT awaiting — we want to inspect state while
+        // the handler is parked inside `_invalidateListCache`.
+        const handlerDone = mkdirHandler(
+          mockReq("sp_vol", {}, { body: { path: "/Volumes/c/s/sp/foo/bar" } }),
+          res,
+        );
+
+        // Wait until `cache.delete` is invoked (ie the SDK call has
+        // resolved and the handler has reached the invalidation step).
+        // Polling the mock's call count avoids any fixed-microtask budget
+        // assumptions about how many awaits the interceptor stack adds.
+        // Use setImmediate to also drain macrotask queue items (telemetry/
+        // timeout interceptors may use setTimeout under the hood).
+        const deadline = Date.now() + 1000;
+        while (
+          mockCacheInstance.delete.mock.calls.length === 0 &&
+          Date.now() < deadline
+        ) {
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+
+        expect(mockClient.files.createDirectory).toHaveBeenCalledTimes(1);
+        expect(mockCacheInstance.delete).toHaveBeenCalledTimes(1);
+
+        // Critical assertion: drain plenty of microtasks AND macrotasks
+        // while `cache.delete` is still parked on the deferred. If the
+        // handler was NOT awaiting the invalidation, `res.json` would
+        // already have been called by now (the missing-await bug). With
+        // the fix, the response is gated on `releaseDelete()` below.
+        for (let i = 0; i < 50; i++) {
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+        expect(res.json).not.toHaveBeenCalled();
+
+        // Release the cache delete; the handler now finishes and responds.
+        releaseDelete();
+        await handlerDone;
+
+        expect(res.json).toHaveBeenCalledTimes(1);
+      } finally {
+        delete process.env.DATABRICKS_VOLUME_SP_VOL;
+      }
+    });
+
+    /**
      * Fix 3 regression: cross-user OBO read freshness. The OBO read cache
      * is keyed by `getCurrentUserId()`, so user A's writes can only
      * invalidate user A's cache entry. With cache disabled on OBO, user B
