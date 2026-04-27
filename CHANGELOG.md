@@ -8,6 +8,32 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+# Changelog
+
+## [0.26.0](https://github.com/databricks/appkit/compare/v0.25.1...v0.26.0) (2026-04-27)
+
+* add appkit codemod on-plugins-ready CLI ([#291](https://github.com/databricks/appkit/issues/291)) ([f2f0504](https://github.com/databricks/appkit/commit/f2f05044f3216b1eafcd118bd995960c35392020))
+* add onPluginsReady callback to createApp, remove autoStart ([#280](https://github.com/databricks/appkit/issues/280)) ([a06b6e3](https://github.com/databricks/appkit/commit/a06b6e392de2bab2004e7ea2ccf8bb080dfea545))
+
+
+## [0.25.1](https://github.com/databricks/appkit/compare/v0.25.0...v0.25.1) (2026-04-27)
+
+### appkit
+
+* **appkit:** check isRetryable before retrying in interceptor ([#276](https://github.com/databricks/appkit/issues/276)) ([1c994a6](https://github.com/databricks/appkit/commit/1c994a6d99f397b56e90f1b53df06a61f02b9e82))
+
+
+## [0.25.0](https://github.com/databricks/appkit/compare/v0.24.0...v0.25.0) (2026-04-23)
+
+### files
+
+* **files:** per-volume in-app policy enforcement ([#197](https://github.com/databricks/appkit/issues/197)) ([f54dca5](https://github.com/databricks/appkit/commit/f54dca5da5af5368c7bcb18745715b54a99d47e9))
+
+
 ## [0.24.0](https://github.com/databricks/appkit/compare/v0.23.0...v0.24.0) (2026-04-20)
 
 * add AST extraction to serving type generator and move types to shared/ ([#279](https://github.com/databricks/appkit/issues/279)) ([422afb3](https://github.com/databricks/appkit/commit/422afb38aa73f8adb94e091225dc3381bd92cfcd))

@@ -4,6 +4,7 @@
 function createApp<T>(config: {
   cache?: CacheConfig;
   client?: WorkspaceClient;
+  onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
   plugins?: T;
   telemetry?: TelemetryConfig;
 }): Promise<PluginMap<T>>;
@@ -13,6 +14,9 @@ Bootstraps AppKit with the provided configuration.
 
 Initializes telemetry, cache, and service context, then registers plugins
 in phase order (core, normal, deferred) and awaits their setup.
+If a `onPluginsReady` callback is provided it runs after plugin setup but
+before the server starts, giving you access to the full appkit handle
+for registering custom routes or performing async setup.
 The returned object maps each plugin name to its `exports()` API,
 with an `asUser(req)` method for user-scoped execution.
 
@@ -26,9 +30,10 @@ with an `asUser(req)` method for user-scoped execution.
 
 | Parameter | Type |
 | ------ | ------ |
-| `config` | \{ `cache?`: [`CacheConfig`](Interface.CacheConfig.md); `client?`: `WorkspaceClient`; `plugins?`: `T`; `telemetry?`: [`TelemetryConfig`](Interface.TelemetryConfig.md); \} |
+| `config` | \{ `cache?`: [`CacheConfig`](Interface.CacheConfig.md); `client?`: `WorkspaceClient`; `onPluginsReady?`: (`appkit`: `PluginMap`\<`T`\>) => `void` \| `Promise`\<`void`\>; `plugins?`: `T`; `telemetry?`: [`TelemetryConfig`](Interface.TelemetryConfig.md); \} |
 | `config.cache?` | [`CacheConfig`](Interface.CacheConfig.md) |
 | `config.client?` | `WorkspaceClient` |
+| `config.onPluginsReady?` | (`appkit`: `PluginMap`\<`T`\>) => `void` \| `Promise`\<`void`\> |
 | `config.plugins?` | `T` |
 | `config.telemetry?` | [`TelemetryConfig`](Interface.TelemetryConfig.md) |
 
@@ -51,12 +56,12 @@ await createApp({
 ```ts
 import { createApp, server, analytics } from "@databricks/appkit";
 
-const appkit = await createApp({
-  plugins: [server({ autoStart: false }), analytics({})],
+await createApp({
+  plugins: [server(), analytics({})],
+  onPluginsReady(appkit) {
+    appkit.server.extend((app) => {
+      app.get("/custom", (_req, res) => res.json({ ok: true }));
+    });
+  },
 });
-
-appkit.server.extend((app) => {
-  app.get("/custom", (_req, res) => res.json({ ok: true }));
-});
-await appkit.server.start();
 ```
