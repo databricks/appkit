@@ -5,6 +5,7 @@ import type express from "express";
 import type { IAppRouter, PluginExecutionSettings } from "shared";
 import {
   contentTypeFromPath,
+  FILES_MAX_READ_SIZE,
   FilesConnector,
   isSafeInlineContentType,
   runWithFilesSpanAttributes,
@@ -272,7 +273,12 @@ export class FilesPlugin extends Plugin {
       }
     } catch (error) {
       if (error instanceof AuthenticationError) {
-        res.status(401).json({ error: error.message, plugin: this.name });
+        logger.warn(
+          "Authentication failed during policy evaluation for volume %s: %O",
+          volumeKey,
+          error,
+        );
+        res.status(401).json({ error: "Unauthorized", plugin: this.name });
         return false;
       }
       throw error;
@@ -316,6 +322,7 @@ export class FilesPlugin extends Plugin {
       // Merge per-volume config with plugin-level defaults
       const mergedConfig: VolumeConfig = {
         maxUploadSize: volumeCfg.maxUploadSize ?? config.maxUploadSize,
+        maxReadSize: volumeCfg.maxReadSize ?? config.maxReadSize,
         customContentTypes:
           volumeCfg.customContentTypes ?? config.customContentTypes,
         policy: volumeCfg.policy ?? policy.publicRead(),
@@ -491,6 +498,34 @@ export class FilesPlugin extends Plugin {
   }
 
   /**
+   * Extract `req.query.path` as a single string when present.
+   *
+   * Express coerces repeated query parameters (`?path=a&path=b`) to a string
+   * array and dotted/nested params (`?path[k]=v`) to an object. Reject those
+   * with `400` instead of letting non-string values reach `_isValidPath` /
+   * `connector.resolvePath`, which would misbehave on arrays or objects.
+   *
+   * Returns `{ path }` (with `path` either a string or `undefined` when the
+   * query parameter was absent) on success. Returns `undefined` and writes a
+   * `400` response when the value is not a single string — callers must
+   * check the return for `undefined` before continuing.
+   */
+  private _readPathQuery(
+    req: express.Request,
+    res: express.Response,
+  ): { path: string | undefined } | undefined {
+    const value = req.query.path;
+    if (value === undefined || typeof value === "string") {
+      return { path: value };
+    }
+    res.status(400).json({
+      error: "path query parameter must be a single string",
+      plugin: this.name,
+    });
+    return undefined;
+  }
+
+  /**
    * Validate a file/directory path from user input.
    * Returns `true` if valid, or an error message string if invalid.
    */
@@ -654,17 +689,19 @@ export class FilesPlugin extends Plugin {
       return;
     }
     if (error instanceof AuthenticationError) {
-      res.status(401).json({
-        error: error.message,
-        plugin: this.name,
-      });
+      logger.warn("Authentication failed in %s: %O", this.name, error);
+      res.status(401).json({ error: "Unauthorized", plugin: this.name });
       return;
     }
     if (error instanceof ApiError) {
       const status = error.statusCode ?? 500;
       if (status >= 400 && status < 500) {
+        // Don't reflect raw SDK error.message — it can leak internal volume
+        // paths, hostnames, or principal names. Use the standard HTTP status
+        // text for the public body and log the full error server-side.
+        logger.warn("Upstream %d in %s: %O", status, this.name, error);
         res.status(status).json({
-          error: error.message,
+          error: STATUS_CODES[status] ?? "Client Error",
           statusCode: status,
           plugin: this.name,
         });
@@ -691,7 +728,9 @@ export class FilesPlugin extends Plugin {
     connector: FilesConnector,
     volumeKey: string,
   ): Promise<void> {
-    const path = req.query.path as string | undefined;
+    const query = this._readPathQuery(req, res);
+    if (!query) return;
+    const path = query.path;
 
     if (!(await this._enforcePolicy(req, res, volumeKey, "list", path ?? "/")))
       return;
@@ -727,32 +766,85 @@ export class FilesPlugin extends Plugin {
     connector: FilesConnector,
     volumeKey: string,
   ): Promise<void> {
-    const path = req.query.path as string;
+    const query = this._readPathQuery(req, res);
+    if (!query) return;
+    const rawPath = query.path;
 
-    const valid = this._isValidPath(path);
+    const valid = this._isValidPath(rawPath);
     if (valid !== true) {
       res.status(400).json({ error: valid, plugin: this.name });
       return;
     }
+    const path = rawPath as string;
 
     if (!(await this._enforcePolicy(req, res, volumeKey, "read", path))) return;
 
+    const volumeCfg = this.volumeConfigs[volumeKey];
+    const maxReadSize = volumeCfg.maxReadSize ?? FILES_MAX_READ_SIZE;
     const { mode, userCtx } = this._resolveAuthForRequest(req, volumeKey);
+
     await this._runWithAuth(userCtx, async () => {
       try {
-        const result = await this.execute(
-          async () => connector.read(getWorkspaceClient(), path),
-          this._readSettings(
-            [`files:${volumeKey}:read`, connector.resolvePath(path)],
-            mode,
-          ),
+        // Stream the file body, capping at `maxReadSize` to avoid buffering
+        // arbitrary-size files. Uses download-tier settings (no cache) —
+        // `/read` no longer participates in the read-tier cache. Programmatic
+        // callers wanting a cached small-file read should use the SDK
+        // `volume.read(path, { maxSize })` method directly.
+        const response = await this.execute(
+          async () => connector.download(getWorkspaceClient(), path),
+          this._downloadSettings(mode),
         );
-
-        if (!result.ok) {
-          this._sendStatusError(res, result.status);
+        if (!response.ok) {
+          this._sendStatusError(res, response.status);
           return;
         }
-        res.type("text/plain").send(result.data);
+        if (!response.data.contents) {
+          res.type("text/plain").send("");
+          return;
+        }
+
+        let bytesSent = 0;
+        const limited = response.data.contents.pipeThrough(
+          new TransformStream<Uint8Array, Uint8Array>({
+            transform(chunk, controller) {
+              bytesSent += chunk.byteLength;
+              if (bytesSent > maxReadSize) {
+                controller.error(
+                  new Error(
+                    `File exceeds maxReadSize (${maxReadSize} bytes). Use /download for large files.`,
+                  ),
+                );
+                return;
+              }
+              controller.enqueue(chunk);
+            },
+          }),
+        );
+
+        res.type("text/plain");
+        const nodeStream = Readable.fromWeb(
+          limited as import("node:stream/web").ReadableStream,
+        );
+        nodeStream.on("error", (err) => {
+          if (
+            err instanceof Error &&
+            err.message.includes("exceeds maxReadSize")
+          ) {
+            if (!res.headersSent) {
+              res.status(413).json({ error: err.message, plugin: this.name });
+              return;
+            }
+            res.destroy(err);
+            return;
+          }
+          logger.error("Stream error during read: %O", err);
+          if (!res.headersSent) {
+            this._sendStatusError(res, 500);
+          } else {
+            res.destroy();
+          }
+        });
+        nodeStream.pipe(res);
       } catch (error) {
         this._handleApiError(res, error, "Read failed");
       }
@@ -793,13 +885,16 @@ export class FilesPlugin extends Plugin {
     volumeKey: string,
     opts: { mode: "download" | "raw" },
   ): Promise<void> {
-    const path = req.query.path as string;
+    const query = this._readPathQuery(req, res);
+    if (!query) return;
+    const rawPath = query.path;
 
-    const valid = this._isValidPath(path);
+    const valid = this._isValidPath(rawPath);
     if (valid !== true) {
       res.status(400).json({ error: valid, plugin: this.name });
       return;
     }
+    const path = rawPath as string;
 
     if (!(await this._enforcePolicy(req, res, volumeKey, opts.mode, path)))
       return;
@@ -874,13 +969,16 @@ export class FilesPlugin extends Plugin {
     connector: FilesConnector,
     volumeKey: string,
   ): Promise<void> {
-    const path = req.query.path as string;
+    const query = this._readPathQuery(req, res);
+    if (!query) return;
+    const rawPath = query.path;
 
-    const valid = this._isValidPath(path);
+    const valid = this._isValidPath(rawPath);
     if (valid !== true) {
       res.status(400).json({ error: valid, plugin: this.name });
       return;
     }
+    const path = rawPath as string;
 
     if (!(await this._enforcePolicy(req, res, volumeKey, "exists", path)))
       return;
@@ -913,13 +1011,16 @@ export class FilesPlugin extends Plugin {
     connector: FilesConnector,
     volumeKey: string,
   ): Promise<void> {
-    const path = req.query.path as string;
+    const query = this._readPathQuery(req, res);
+    if (!query) return;
+    const rawPath = query.path;
 
-    const valid = this._isValidPath(path);
+    const valid = this._isValidPath(rawPath);
     if (valid !== true) {
       res.status(400).json({ error: valid, plugin: this.name });
       return;
     }
+    const path = rawPath as string;
 
     if (!(await this._enforcePolicy(req, res, volumeKey, "metadata", path)))
       return;
@@ -952,13 +1053,16 @@ export class FilesPlugin extends Plugin {
     connector: FilesConnector,
     volumeKey: string,
   ): Promise<void> {
-    const path = req.query.path as string;
+    const query = this._readPathQuery(req, res);
+    if (!query) return;
+    const rawPath = query.path;
 
-    const valid = this._isValidPath(path);
+    const valid = this._isValidPath(rawPath);
     if (valid !== true) {
       res.status(400).json({ error: valid, plugin: this.name });
       return;
     }
+    const path = rawPath as string;
 
     if (!(await this._enforcePolicy(req, res, volumeKey, "preview", path)))
       return;
@@ -991,12 +1095,15 @@ export class FilesPlugin extends Plugin {
     connector: FilesConnector,
     volumeKey: string,
   ): Promise<void> {
-    const path = req.query.path as string;
-    const valid = this._isValidPath(path);
+    const query = this._readPathQuery(req, res);
+    if (!query) return;
+    const rawPath = query.path;
+    const valid = this._isValidPath(rawPath);
     if (valid !== true) {
       res.status(400).json({ error: valid, plugin: this.name });
       return;
     }
+    const path = rawPath as string;
 
     const volumeCfg = this.volumeConfigs[volumeKey];
     const maxSize = volumeCfg.maxUploadSize ?? FILES_MAX_UPLOAD_SIZE;
@@ -1045,6 +1152,22 @@ export class FilesPlugin extends Plugin {
                 controller.error(
                   new Error(
                     `Upload stream exceeds maximum allowed size (${maxSize} bytes)`,
+                  ),
+                );
+                return;
+              }
+              // When the client declared a Content-Length, the policy was
+              // gated on that value (lines above pass `size: contentLength`
+              // to `_enforcePolicy`). Refuse bytes beyond the declared size
+              // so an attacker cannot bypass a per-user policy by sending a
+              // small Content-Length and then streaming up to maxSize.
+              if (
+                contentLength !== undefined &&
+                bytesReceived > contentLength
+              ) {
+                controller.error(
+                  new Error(
+                    `Upload stream exceeds declared Content-Length (${contentLength} bytes)`,
                   ),
                 );
                 return;
@@ -1101,7 +1224,8 @@ export class FilesPlugin extends Plugin {
       } catch (error) {
         if (
           error instanceof Error &&
-          error.message.includes("exceeds maximum allowed size")
+          (error.message.includes("exceeds maximum allowed size") ||
+            error.message.includes("exceeds declared Content-Length"))
         ) {
           res.status(413).json({ error: error.message, plugin: this.name });
           return;
@@ -1163,7 +1287,9 @@ export class FilesPlugin extends Plugin {
     connector: FilesConnector,
     volumeKey: string,
   ): Promise<void> {
-    const rawPath = req.query.path as string | undefined;
+    const query = this._readPathQuery(req, res);
+    if (!query) return;
+    const rawPath = query.path;
 
     const valid = this._isValidPath(rawPath);
     if (valid !== true) {
