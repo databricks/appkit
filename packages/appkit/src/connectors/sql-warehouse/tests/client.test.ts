@@ -1,4 +1,5 @@
 import type { sql } from "@databricks/sdk-experimental";
+import { tableFromIPC } from "apache-arrow";
 import { describe, expect, test, vi } from "vitest";
 
 vi.mock("../../../telemetry", () => {
@@ -211,6 +212,83 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
       expect(result.manifest.format).toBe("ARROW_STREAM");
       expect(result.statement_id).toBe("00000001-test-stmt");
       expect(result.result.attachment).toBe(REAL_ARROW_ATTACHMENT);
+    });
+
+    test("synthesizes an empty Arrow IPC attachment for empty results so the client always gets a Table", () => {
+      const connector = createConnector();
+      // Empty result: no attachment, no data_array, no external_links — but
+      // the manifest still describes the schema. The connector should fill in
+      // `attachment` with a zero-row Arrow IPC matching the schema.
+      const response = {
+        statement_id: "stmt-empty",
+        status: { state: "SUCCEEDED" },
+        manifest: {
+          format: "ARROW_STREAM",
+          schema: {
+            columns: [
+              { name: "user_id", type_text: "BIGINT", type_name: "BIGINT" },
+              { name: "name", type_text: "STRING", type_name: "STRING" },
+              {
+                name: "balance",
+                type_text: "DECIMAL(10,2)",
+                type_name: "DECIMAL",
+              },
+            ],
+          },
+          total_row_count: 0,
+        },
+        result: {},
+      } as unknown as sql.StatementResponse;
+
+      const transformed = (connector as any)._transformDataArray(response);
+      const attachment: string = transformed.result.attachment;
+      expect(typeof attachment).toBe("string");
+      expect(attachment.length).toBeGreaterThan(0);
+
+      // Verify the synthesized attachment decodes into the right empty schema.
+      const table = tableFromIPC(Buffer.from(attachment, "base64"));
+      expect(table.numRows).toBe(0);
+      expect(table.schema.fields.map((f) => f.name)).toEqual([
+        "user_id",
+        "name",
+        "balance",
+      ]);
+    });
+
+    test("does NOT synthesize an attachment when external_links are present", () => {
+      const connector = createConnector();
+      const response = {
+        statement_id: "stmt-ext",
+        status: { state: "SUCCEEDED" },
+        manifest: {
+          format: "ARROW_STREAM",
+          schema: { columns: [{ name: "x", type_text: "INT" }] },
+        },
+        result: {
+          external_links: [
+            { external_link: "https://example.com/x", expiration: "9999" },
+          ],
+        },
+      } as unknown as sql.StatementResponse;
+
+      const transformed = (connector as any)._transformDataArray(response);
+      // External-links path returns the statement_id projection — no attachment.
+      expect(transformed.result.attachment).toBeUndefined();
+      expect(transformed.result.statement_id).toBe("stmt-ext");
+    });
+
+    test("does NOT synthesize an attachment when schema is missing", () => {
+      const connector = createConnector();
+      const response = {
+        statement_id: "stmt-no-schema",
+        status: { state: "SUCCEEDED" },
+        manifest: { format: "ARROW_STREAM" },
+        result: {},
+      } as unknown as sql.StatementResponse;
+
+      const transformed = (connector as any)._transformDataArray(response);
+      // Without a schema we cannot build a Table — pass through unchanged.
+      expect(transformed.result?.attachment).toBeUndefined();
     });
 
     test("rejects oversized attachments to bound memory", () => {

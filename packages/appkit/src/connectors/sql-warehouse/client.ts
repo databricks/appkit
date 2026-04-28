@@ -21,6 +21,7 @@ import {
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
+import { buildEmptyArrowIPCBase64 } from "./arrow-schema";
 import { executeStatementDefaults } from "./defaults";
 
 const logger = createLogger("connectors:sql-warehouse");
@@ -413,9 +414,23 @@ export class SQLWarehouseConnector {
         return this.updateWithArrowStatus(response);
       }
 
-      // Inline data_array: fall through to the row transform below.
-      // (Anything else — empty result with no attachment, data_array, or
-      // external_links — also falls through and produces { data: [] }.)
+      // Empty result with a known schema: synthesize a zero-row Arrow IPC
+      // attachment so the client always receives an Arrow Table for
+      // ARROW_STREAM, regardless of whether the warehouse returned data.
+      if (!result?.data_array && response.manifest?.schema?.columns) {
+        const synthesized = buildEmptyArrowIPCBase64(
+          response.manifest.schema.columns,
+        );
+        return {
+          ...response,
+          result: { ...(result ?? {}), attachment: synthesized },
+        };
+      }
+
+      // Inline data_array under ARROW_STREAM (rare): fall through to the
+      // row transform below. The hook will receive `type: "result"` rows;
+      // callers asking for ARROW_STREAM should not hit this path with
+      // current Databricks warehouses.
     }
 
     if (!response.result?.data_array || !response.manifest?.schema?.columns) {
