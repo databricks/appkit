@@ -38,7 +38,7 @@ export class GeniePlugin extends Plugin {
     });
   }
 
-  private defaultSpaces(): Record<string, string> {
+  private defaultSpaces(): Record<string, string | undefined> {
     const spaceId = process.env.DATABRICKS_GENIE_SPACE_ID;
     return spaceId ? { default: spaceId } : {};
   }

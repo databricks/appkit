@@ -1108,6 +1108,39 @@ describe("Genie Plugin", () => {
         error: "Unknown space alias: default",
       });
     });
+
+    test("should 404 when an alias maps to undefined (e.g. unset process.env.X)", async () => {
+      // The IGenieConfig.spaces type accepts `string | undefined` so callers
+      // can pass process.env values directly. Resolution still falls through
+      // to "Unknown space alias", same as a missing key.
+      delete process.env.DATABRICKS_GENIE_SPACE_ID;
+
+      const plugin = new GeniePlugin({
+        timeout: 5000,
+        spaces: { wanderbricks: process.env.DATABRICKS_GENIE_SPACE_ID },
+      });
+      const { router, getHandler } = createMockRouter();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/:alias/messages");
+      const mockReq = createMockRequest({
+        params: { alias: "wanderbricks" },
+        body: { content: "test question" },
+        headers: {
+          "x-forwarded-access-token": "user-token",
+          "x-forwarded-user": "user-1",
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(404);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: "Unknown space alias: wanderbricks",
+      });
+    });
   });
 
   describe("getConversation with pageToken", () => {
