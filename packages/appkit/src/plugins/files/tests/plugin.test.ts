@@ -1,4 +1,4 @@
-import { Readable } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
 import { mockServiceContext, setupDatabricksEnv } from "@tools/test-helpers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ServiceContext } from "../../../context/service-context";
@@ -2120,15 +2120,12 @@ describe("FilesPlugin", () => {
 
       expect(res.status).toHaveBeenCalledWith(401);
       const errBody = res.json.mock.calls[0][0];
-      expect(errBody).toEqual(
-        expect.objectContaining({
-          error: expect.stringContaining("Missing"),
-          plugin: "files",
-        }),
-      );
-      // The error shape comes from AuthenticationError.missingToken (mentions
-      // x-forwarded-access-token in our message).
-      expect(errBody.error).toMatch(/x-forwarded-access-token/);
+      // Public body is generic — internal "missing x-forwarded-access-token"
+      // detail is server-side log only (CWE-209 hardening).
+      expect(errBody).toEqual({
+        error: "Unauthorized",
+        plugin: "files",
+      });
 
       // Policy must not have been evaluated and the SDK must not have been
       // called.
@@ -2254,13 +2251,18 @@ describe("FilesPlugin", () => {
     }
 
     function mockRes() {
-      const res: any = { headersSent: false };
+      // PassThrough gives us a real Writable so the streaming `/read` handler
+      // can `pipe(res)` without crashing. Express-style helpers (status, json,
+      // type, send, setHeader) are layered on top as spies.
+      const stream = new PassThrough();
+      const res: any = stream;
+      res.headersSent = false;
       res.status = vi.fn().mockReturnValue(res);
       res.json = vi.fn().mockReturnValue(res);
       res.type = vi.fn().mockReturnValue(res);
       res.send = vi.fn().mockReturnValue(res);
       res.setHeader = vi.fn().mockReturnValue(res);
-      res.end = vi.fn();
+      res.destroy = vi.fn();
       return res;
     }
 
@@ -2399,14 +2401,18 @@ describe("FilesPlugin", () => {
         isServicePrincipal: false,
       });
 
-      // 2xx path: handler called res.type/send rather than res.status(non-2xx).
+      // 2xx path: handler set Content-Type to text/plain and entered the
+      // streaming branch (no error status code was set). The body is piped
+      // through the PassThrough — exact byte-level assertion is covered by
+      // integration tests; here we just verify the handler took the success
+      // branch.
       const statusCodes = (res.status.mock.calls as number[][]).map(
         (c) => c[0],
       );
       expect(statusCodes).not.toContain(401);
       expect(statusCodes).not.toContain(403);
       expect(statusCodes).not.toContain(500);
-      expect(res.send).toHaveBeenCalled();
+      expect(res.type).toHaveBeenCalledWith("text/plain");
     });
 
     test("OBO read cache is DISABLED: cross-user reads do not share cache state", async () => {
@@ -2828,13 +2834,12 @@ describe("FilesPlugin", () => {
 
       expect(res.status).toHaveBeenCalledWith(401);
       const errBody = res.json.mock.calls[0][0];
-      expect(errBody).toEqual(
-        expect.objectContaining({
-          error: expect.stringContaining("Missing"),
-          plugin: "files",
-        }),
-      );
-      expect(errBody.error).toMatch(/x-forwarded-access-token/);
+      // Public body is generic — internal "missing x-forwarded-access-token"
+      // detail is server-side log only (CWE-209 hardening).
+      expect(errBody).toEqual({
+        error: "Unauthorized",
+        plugin: "files",
+      });
 
       // Neither the SDK upload nor the hand-rolled fetch ran.
       expect(mockClient.files.upload).not.toHaveBeenCalled();

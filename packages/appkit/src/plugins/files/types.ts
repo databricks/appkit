@@ -8,6 +8,12 @@ import type { FilePolicy } from "./policy";
 export interface VolumeConfig {
   /** Maximum upload size in bytes for this volume. Inherits from plugin-level `maxUploadSize` if not set. */
   maxUploadSize?: number;
+  /**
+   * Maximum byte length the `/read` endpoint will stream before aborting with
+   * `413 Payload Too Large`. Inherits from plugin-level `maxReadSize` if not
+   * set; defaults to 10 MB. `/download` and `/raw` are unaffected.
+   */
+  maxReadSize?: number;
   /** Map of file extensions to MIME types for this volume. Inherits from plugin-level `customContentTypes` if not set. */
   customContentTypes?: Record<string, string>;
   /**
@@ -109,6 +115,11 @@ export interface IFilesConfig extends BasePluginConfig {
   customContentTypes?: Record<string, string>;
   /** Maximum upload size in bytes. Defaults to 5 GB (Databricks Files API v2 limit). */
   maxUploadSize?: number;
+  /**
+   * Plugin-level default for the `/read` endpoint's response size cap.
+   * Inherited by volumes without their own `maxReadSize`. Defaults to 10 MB.
+   */
+  maxReadSize?: number;
   /**
    * Plugin-level default auth mode for all volumes. Volumes without an
    * explicit `auth` field inherit this default; volumes that set their own
