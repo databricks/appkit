@@ -383,15 +383,25 @@ async function runPromote(
 
     console.log(`\n${prefix}Running plugin sync...`);
     const { execSync } = await import("node:child_process");
+    // Monorepo flavor: the AppKit monorepo's `pnpm sync:template` script
+    // points sync at `template/appkit.plugins.json` (the file shipped to
+    // consumers and read by the Go init template), not the project-root
+    // default. Detect the monorepo via the same generator-path probe used
+    // above and prefer the script when available so the manifest, the
+    // synced template, and the runtime barrels stay aligned.
+    const syncCommand = fs.existsSync(generatorPath)
+      ? "pnpm run sync:template"
+      : "npx appkit plugin sync --write";
     try {
-      execSync("npx appkit plugin sync --write", {
+      execSync(syncCommand, {
         cwd,
         stdio: "inherit",
       });
     } catch {
       console.error(
-        `Error: post-promote 'plugin sync' failed. Manifest and imports were updated, ` +
-          `but appkit.plugins.json may be out of sync. Run 'npx appkit plugin sync --write' manually.`,
+        `Error: post-promote sync ('${syncCommand}') failed. ` +
+          `Manifest and imports were updated, but the synced plugin manifest ` +
+          `may be stale. Run '${syncCommand}' manually.`,
       );
       process.exit(1);
     }

@@ -68,6 +68,21 @@ jobs:
             echo ""
             exit 1
           fi
+      - name: Check synced template manifest is up to date
+        run: |
+          pnpm run sync:template
+          if ! git diff --exit-code template/appkit.plugins.json; then
+            echo "❌ Error: template/appkit.plugins.json is out of sync with packages/appkit/src/plugins/<name>/manifest.json."
+            echo ""
+            echo "This usually happens when a plugin manifest's stability, resources, or display fields"
+            echo "are edited without running the sync step that regenerates the template manifest."
+            echo ""
+            echo "To fix this:"
+            echo "  1. Run: pnpm run sync:template"
+            echo "  2. Review and commit the changes"
+            echo ""
+            exit 1
+          fi
       - name: Run Biome Check
         run: pnpm run check
       - name: Run Types Check

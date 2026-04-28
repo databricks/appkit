@@ -36,6 +36,44 @@ interface PluginInfo {
   stability: "beta" | "stable";
 }
 
+/**
+ * Mirrors `^[a-z][a-z0-9-]*$` from `plugin-manifest.schema.json`. Catches
+ * malformed manifests that bypassed `appkit plugin validate`.
+ */
+const SCHEMA_NAME_PATTERN = /^[a-z][a-z0-9-]*$/;
+
+/**
+ * Generator-only: the `name` field is interpolated unescaped into a TS
+ * `export { <name> } from "./<folder>";` template, so it MUST be a valid
+ * JavaScript identifier. The schema accepts hyphens (e.g. "my-plugin"),
+ * which would produce `export { my-plugin }` — a TypeScript syntax error.
+ *
+ * This is also a defense-in-depth gate against code-injection (CWE-94)
+ * via a malicious `name` containing `}`, `;`, quotes, newlines, etc.
+ *
+ * Restricted to camelCase / underscore identifiers starting with a lowercase
+ * letter to match the existing built-in plugins (`analytics`, `lakebase`,
+ * `vectorSearch`, …) and the schema's lowercase-first rule.
+ */
+const JS_IDENTIFIER_PATTERN = /^[a-z][a-zA-Z0-9_]*$/;
+
+function validateIdentifier(
+  value: string,
+  kind: "manifest name" | "folder name",
+  manifestPath: string,
+): void {
+  if (!SCHEMA_NAME_PATTERN.test(value)) {
+    throw new Error(
+      `${kind} "${value}" in ${manifestPath} doesn't match the plugin manifest schema pattern ^[a-z][a-z0-9-]*$. Run \`appkit plugin validate\` to catch this earlier.`,
+    );
+  }
+  if (!JS_IDENTIFIER_PATTERN.test(value)) {
+    throw new Error(
+      `${kind} "${value}" in ${manifestPath} is not a valid JavaScript identifier (must match ^[a-z][a-zA-Z0-9_]*$). The generator interpolates this name into \`export { ${value} } from "./<folder>";\` and would emit invalid TypeScript. Rename the plugin folder + manifest \`name\` to camelCase, or set \`hidden: true\` to exclude it from the auto-generated barrels.`,
+    );
+  }
+}
+
 function readPluginInfos(): PluginInfo[] {
   const entries = fs.readdirSync(PLUGINS_DIR, { withFileTypes: true });
   const infos: PluginInfo[] = [];
@@ -63,6 +101,13 @@ function readPluginInfos(): PluginInfo[] {
     if (typeof manifest.name !== "string" || manifest.name.length === 0) {
       throw new Error(`Manifest missing "name": ${manifestPath}`);
     }
+
+    // Both the manifest `name` (used as the exported binding) and the
+    // folder name (used as the `from` path) flow into a TS source file
+    // unescaped. Validate both against the schema and the JS-identifier
+    // rule before we emit anything.
+    validateIdentifier(manifest.name, "manifest name", manifestPath);
+    validateIdentifier(entry.name, "folder name", manifestPath);
 
     const tier = manifest.stability ?? "stable";
     if (tier !== "stable" && tier !== "beta") {
