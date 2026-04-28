@@ -476,8 +476,18 @@ export class SQLWarehouseConnector {
   ) {
     // Cap the size to protect against unbounded inline payloads from
     // misbehaving warehouses. 64 MiB is well above the typical inline limit
-    // (~16 MiB) but bounds memory if a server returns a runaway response.
-    const decodedSize = Math.ceil((attachment.length * 3) / 4);
+    // (~25 MiB hard cap on the API) but bounds memory if a server returns
+    // a runaway response.
+    //
+    // Strip whitespace (rare but legal in base64) and account for trailing
+    // `=` padding so the byte count is exact rather than an upper bound.
+    const stripped = attachment.replace(/\s+/g, "");
+    const padding = stripped.endsWith("==")
+      ? 2
+      : stripped.endsWith("=")
+        ? 1
+        : 0;
+    const decodedSize = Math.floor((stripped.length * 3) / 4) - padding;
     if (decodedSize > MAX_INLINE_ATTACHMENT_BYTES) {
       throw ExecutionError.statementFailed(
         `Inline Arrow attachment exceeds maximum size (${decodedSize} > ${MAX_INLINE_ATTACHMENT_BYTES} bytes)`,

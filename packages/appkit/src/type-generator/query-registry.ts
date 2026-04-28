@@ -439,9 +439,11 @@ export async function generateQueriesFromDescribe(
       cleanedSql,
     }: (typeof uncachedQueries)[number]): Promise<DescribeResult> => {
       // Prefer JSON_ARRAY + INLINE so `data_array` parsing works directly.
-      // Some serverless warehouses reject this combination — fall back to the
-      // warehouse default (typically ARROW_STREAM + INLINE), and let
-      // `convertToQueryType` decode the inline attachment.
+      // Some serverless warehouses reject this combination — fall back to
+      // ARROW_STREAM + INLINE (still inline, just a different format) and
+      // let `convertToQueryType` decode the inline attachment. Forcing
+      // INLINE on the retry avoids EXTERNAL_LINKS, which would silently
+      // produce empty `data_array` and degrade types to `unknown`.
       let result: DatabricksStatementExecutionResponse;
       try {
         result = (await client.statementExecution.executeStatement({
@@ -452,14 +454,21 @@ export async function generateQueriesFromDescribe(
         })) as DatabricksStatementExecutionResponse;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes("ARROW_STREAM") || msg.includes("JSON_ARRAY")) {
+        const looksLikeFormatRejection =
+          msg.includes("JSON_ARRAY") &&
+          (msg.includes("not supported") ||
+            msg.includes("INVALID_PARAMETER_VALUE") ||
+            msg.includes("NOT_IMPLEMENTED"));
+        if (looksLikeFormatRejection) {
           logger.debug(
-            "Warehouse rejected JSON_ARRAY for %s, retrying with default format",
+            "Warehouse rejected JSON_ARRAY+INLINE for %s, retrying with ARROW_STREAM+INLINE",
             queryName,
           );
           result = (await client.statementExecution.executeStatement({
             statement: `DESCRIBE QUERY ${cleanedSql}`,
             warehouse_id: warehouseId,
+            format: "ARROW_STREAM",
+            disposition: "INLINE",
           })) as DatabricksStatementExecutionResponse;
         } else {
           throw err;

@@ -163,6 +163,17 @@ export function useAnalyticsQuery<
 
           // success - Arrow format (inline: decode base64 IPC payload locally)
           if (parsed.type === "arrow_inline") {
+            if (
+              typeof parsed.attachment !== "string" ||
+              parsed.attachment.length === 0
+            ) {
+              console.error(
+                "[useAnalyticsQuery] arrow_inline message missing attachment",
+              );
+              setLoading(false);
+              setError("Unable to load data, please try again");
+              return;
+            }
             try {
               const buffer = decodeBase64(parsed.attachment);
               const table = await ArrowClient.processArrowBuffer(buffer);

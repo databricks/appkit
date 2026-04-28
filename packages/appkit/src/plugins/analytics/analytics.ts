@@ -162,22 +162,26 @@ export class AnalyticsPlugin extends Plugin {
     const hashedQuery = this.queryProcessor.hashQuery(query);
 
     // ARROW_STREAM may resolve to EXTERNAL_LINKS, which returns pre-signed URLs
-    // that typically expire well before queryDefaults.cache.ttl. Disable cache
-    // for ARROW_STREAM to avoid handing out dead URLs from cache.
-    const cacheConfig =
+    // that typically expire ~15 minutes after issue. Cap the cache TTL well
+    // under that for ARROW_STREAM so we never hand out dead URLs from cache,
+    // while still benefiting from caching INLINE attachment responses (and
+    // EXTERNAL_LINKS responses inside their valid window).
+    const cacheTtl =
       format === "ARROW_STREAM"
-        ? { ...queryDefaults.cache, enabled: false }
-        : {
-            ...queryDefaults.cache,
-            cacheKey: [
-              "analytics:query",
-              query_key,
-              JSON.stringify(parameters),
-              format,
-              hashedQuery,
-              executorKey,
-            ],
-          };
+        ? Math.min(queryDefaults.cache?.ttl ?? 600, 600)
+        : queryDefaults.cache?.ttl;
+    const cacheConfig = {
+      ...queryDefaults.cache,
+      ttl: cacheTtl,
+      cacheKey: [
+        "analytics:query",
+        query_key,
+        JSON.stringify(parameters),
+        format,
+        hashedQuery,
+        executorKey,
+      ],
+    };
 
     const defaultConfig: PluginExecuteConfig = {
       ...queryDefaults,
@@ -358,18 +362,23 @@ export class AnalyticsPlugin extends Plugin {
 function _isInlineArrowUnsupported(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
 
+  // Both branches require both INLINE and ARROW_STREAM to appear in the
+  // message — without that pairing we cannot distinguish a format-rejection
+  // from an unrelated SQL/permission error that happens to mention one
+  // keyword (e.g. a column named "INLINE_USERS").
+  if (!msg.includes("INLINE") || !msg.includes("ARROW_STREAM")) {
+    return false;
+  }
+
   const errorCodeMatch = msg.match(/"error_code"\s*:\s*"([^"]+)"/);
   const errorCode = errorCodeMatch?.[1];
   if (
     errorCode === "INVALID_PARAMETER_VALUE" ||
     errorCode === "NOT_IMPLEMENTED"
   ) {
-    return msg.includes("INLINE") || msg.includes("ARROW_STREAM");
+    return true;
   }
 
-  if (!msg.includes("INLINE") || !msg.includes("ARROW_STREAM")) {
-    return false;
-  }
   return (
     msg.includes("not supported") ||
     msg.includes("INVALID_PARAMETER_VALUE") ||

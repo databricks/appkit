@@ -731,6 +731,89 @@ describe("Analytics Plugin", () => {
       });
     });
 
+    test("/query/:query_key falls back when error message carries a structured INVALID_PARAMETER_VALUE error_code", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+
+      // Wrapped JSON error like the SDK surfaces from a `Bad Request` HTTP
+      // response. Both INLINE and ARROW_STREAM appear, plus the structured code.
+      const wrappedJsonError = new Error(
+        'Response from server (Bad Request) {"error_code":"INVALID_PARAMETER_VALUE","message":"ARROW_STREAM is not supported with INLINE disposition on this warehouse"}',
+      );
+      const executeMock = vi
+        .fn()
+        .mockRejectedValueOnce(wrappedJsonError)
+        .mockResolvedValueOnce({
+          result: { statement_id: "stmt-1", status: { state: "SUCCEEDED" } },
+        });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {}, format: "ARROW_STREAM" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      // Both attempts ran: INLINE (rejected) then EXTERNAL_LINKS (succeeded).
+      expect(executeMock).toHaveBeenCalledTimes(2);
+      expect(executeMock.mock.calls[1][1]).toMatchObject({
+        disposition: "EXTERNAL_LINKS",
+        format: "ARROW_STREAM",
+      });
+    });
+
+    test("/query/:query_key does NOT fall back when only one of INLINE/ARROW_STREAM appears in the error", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+
+      // Realistic non-format error that mentions just one of the keywords —
+      // e.g. an unrelated INVALID_PARAMETER_VALUE about a different param.
+      const executeMock = vi
+        .fn()
+        .mockRejectedValue(
+          new Error(
+            'Response from server (Bad Request) {"error_code":"INVALID_PARAMETER_VALUE","message":"INLINE is not a valid value for parameter `mode`"}',
+          ),
+        );
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {}, format: "ARROW_STREAM" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      // The retry interceptor may attempt the query multiple times, but the
+      // analytics plugin must never escalate to EXTERNAL_LINKS for an error
+      // that doesn't actually indicate a format/disposition rejection.
+      for (const call of executeMock.mock.calls) {
+        expect(call[1]).toMatchObject({
+          disposition: "INLINE",
+          format: "ARROW_STREAM",
+        });
+      }
+    });
+
     test("/query/:query_key should not fall back for non-format errors", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();

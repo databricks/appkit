@@ -77,6 +77,31 @@ describe("useAnalyticsQuery", () => {
     expect(result.current.loading).toBe(false);
   });
 
+  test("rejects arrow_inline with missing/empty/non-string attachment without crashing atob", async () => {
+    const cases: Array<unknown> = [undefined, null, "", 123, { foo: "bar" }];
+
+    for (const attachment of cases) {
+      mockProcessArrowBuffer.mockClear();
+      const { result, unmount } = renderHook(() =>
+        useAnalyticsQuery("q", null, { format: "ARROW_STREAM" }),
+      );
+
+      await lastConnectArgs.onMessage({
+        data: JSON.stringify({ type: "arrow_inline", attachment }),
+      });
+
+      await waitFor(() => {
+        expect(result.current.error).toBe(
+          "Unable to load data, please try again",
+        );
+      });
+      // Critically: must NOT call processArrowBuffer (or atob) on the bad input.
+      expect(mockProcessArrowBuffer).not.toHaveBeenCalled();
+
+      unmount();
+    }
+  });
+
   test("still handles type:result rows for JSON_ARRAY", async () => {
     const { result } = renderHook(() =>
       useAnalyticsQuery("q", null, { format: "JSON_ARRAY" }),
