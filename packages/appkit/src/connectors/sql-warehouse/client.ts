@@ -26,8 +26,14 @@ import { executeStatementDefaults } from "./defaults";
 
 const logger = createLogger("connectors:sql-warehouse");
 
-/** Maximum size for inline Arrow IPC attachments (64 MiB decoded). */
-const MAX_INLINE_ATTACHMENT_BYTES = 64 * 1024 * 1024;
+/**
+ * Maximum size for inline Arrow IPC attachments (8 MiB decoded).
+ * Aligned with `streamDefaults.maxEventSize` so anything that would exceed
+ * the SSE event cap fails here with a clear error rather than a confusing
+ * "Buffer size exceeded" downstream. Larger results should use
+ * `disposition: "EXTERNAL_LINKS"`, which the analytics fallback handles.
+ */
+const MAX_INLINE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 
 interface SQLWarehouseConfig {
   timeout?: number;
