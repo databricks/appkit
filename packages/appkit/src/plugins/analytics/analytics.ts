@@ -1,10 +1,14 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type express from "express";
-import type {
-  IAppRouter,
-  PluginExecuteConfig,
-  SQLTypeMarker,
-  StreamExecutionSettings,
+import {
+  type AnalyticsSseMessage,
+  type IAppRouter,
+  makeArrowInlineMessage,
+  makeArrowMessage,
+  makeResultMessage,
+  type PluginExecuteConfig,
+  type SQLTypeMarker,
+  type StreamExecutionSettings,
 } from "shared";
 import { SQLWarehouseConnector } from "../../connectors";
 import { getWarehouseId, getWorkspaceClient } from "../../context";
@@ -229,7 +233,7 @@ export class AnalyticsPlugin extends Plugin {
       | undefined,
     requestedFormat: AnalyticsFormat,
     signal?: AbortSignal,
-  ): Promise<{ type: string; [key: string]: any }> {
+  ): Promise<AnalyticsSseMessage> {
     if (requestedFormat === "JSON_ARRAY") {
       const result = await executor.query(
         query,
@@ -237,7 +241,10 @@ export class AnalyticsPlugin extends Plugin {
         { disposition: "INLINE", format: "JSON_ARRAY" },
         signal,
       );
-      return { type: "result", ...result };
+      return makeResultMessage(result?.data, {
+        status: result?.status,
+        statement_id: result?.statement_id,
+      });
     }
 
     // ARROW_STREAM: try INLINE first, fall back to EXTERNAL_LINKS.
@@ -253,9 +260,12 @@ export class AnalyticsPlugin extends Plugin {
       // data_array under ARROW_STREAM, or an empty result) falls back to the
       // generic "result" payload.
       if (result?.attachment) {
-        return { type: "arrow_inline", attachment: result.attachment };
+        return makeArrowInlineMessage(result.attachment);
       }
-      return { type: "result", ...result };
+      return makeResultMessage(result?.data, {
+        status: result?.status,
+        statement_id: result?.statement_id,
+      });
     } catch (err: unknown) {
       // If the request was aborted, do not retry — the signal is dead and
       // a second statement would be billed but never read.
@@ -280,7 +290,7 @@ export class AnalyticsPlugin extends Plugin {
       { disposition: "EXTERNAL_LINKS", format: "ARROW_STREAM" },
       signal,
     );
-    return { type: "arrow", ...result };
+    return makeArrowMessage(result.statement_id, { status: result.status });
   }
 
   /**

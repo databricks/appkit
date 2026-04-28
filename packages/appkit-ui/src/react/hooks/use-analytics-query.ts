@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnalyticsSseMessage } from "shared";
 import { ArrowClient, connectSSE } from "@/js";
 import type {
   AnalyticsFormat,
@@ -143,20 +144,28 @@ export function useAnalyticsQuery<
       signal: abortController.signal,
       onMessage: async (message) => {
         try {
-          const parsed = JSON.parse(message.data);
+          const rawParsed = JSON.parse(message.data);
+
+          // The error/code branch below predates the SSE wire schema and
+          // can fire for messages that don't match any AnalyticsSseMessage
+          // variant (e.g. server-side error events from executeStream).
+          // Try schema validation first; if it fails, fall through to the
+          // generic error/code handling below.
+          const validated = AnalyticsSseMessage.safeParse(rawParsed);
+          const msg = validated.success ? validated.data : null;
 
           // success - JSON format
-          if (parsed.type === "result") {
+          if (msg?.type === "result") {
             setLoading(false);
-            setData(parsed.data as ResultType);
+            setData(msg.data as ResultType);
             return;
           }
 
           // success - Arrow format (external links: fetch from server)
-          if (parsed.type === "arrow") {
+          if (msg?.type === "arrow") {
             try {
               const arrowData = await ArrowClient.fetchArrow(
-                getArrowStreamUrl(parsed.statement_id),
+                getArrowStreamUrl(msg.statement_id),
               );
               const table = await ArrowClient.processArrowBuffer(arrowData);
               setLoading(false);
@@ -175,21 +184,11 @@ export function useAnalyticsQuery<
           }
 
           // success - Arrow format (inline: decode base64 IPC payload locally)
-          if (parsed.type === "arrow_inline") {
-            if (
-              typeof parsed.attachment !== "string" ||
-              parsed.attachment.length === 0
-            ) {
-              console.error(
-                "[useAnalyticsQuery] arrow_inline message missing attachment",
-              );
-              setLoading(false);
-              setError("Unable to load data, please try again");
-              return;
-            }
+          if (msg?.type === "arrow_inline") {
+            // Schema already enforced non-empty string; just check size.
             // base64 length L decodes to ~L*3/4 bytes; reject before
             // allocating a multi-MiB Uint8Array.
-            const decodedSize = Math.ceil((parsed.attachment.length * 3) / 4);
+            const decodedSize = Math.ceil((msg.attachment.length * 3) / 4);
             if (decodedSize > MAX_INLINE_ATTACHMENT_BYTES) {
               console.error(
                 "[useAnalyticsQuery] arrow_inline attachment exceeds %d bytes (got %d)",
@@ -201,7 +200,7 @@ export function useAnalyticsQuery<
               return;
             }
             try {
-              const buffer = decodeBase64(parsed.attachment);
+              const buffer = decodeBase64(msg.attachment);
               const table = await ArrowClient.processArrowBuffer(buffer);
               setLoading(false);
               setData(table as ResultType);
@@ -217,6 +216,11 @@ export function useAnalyticsQuery<
             }
           }
 
+          // The schema didn't match — fall through to error/code handling
+          // below for legacy error events or surface a malformed-payload
+          // error if no error fields are present.
+          const parsed = rawParsed;
+
           // error
           if (parsed.type === "error" || parsed.error || parsed.code) {
             const errorMsg =
@@ -230,6 +234,18 @@ export function useAnalyticsQuery<
                 `[useAnalyticsQuery] Code: ${parsed.code}, Message: ${errorMsg}`,
               );
             }
+            return;
+          }
+
+          // The payload matched neither AnalyticsSseMessage nor an error
+          // event — surface a generic error rather than silently dropping it.
+          if (!validated.success) {
+            console.error(
+              "[useAnalyticsQuery] Malformed SSE payload",
+              validated.error.flatten(),
+            );
+            setLoading(false);
+            setError("Unable to load data, please try again");
             return;
           }
         } catch (error) {
