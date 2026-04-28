@@ -8,6 +8,7 @@
 export { analytics } from "./analytics";
 export { files } from "./files";
 export { genie } from "./genie";
+export { jobs } from "./jobs";
 export { lakebase } from "./lakebase";
 export { server } from "./server";
 export { serving } from "./serving";

@@ -54,7 +54,6 @@ export {
   type ToPlugin,
   toPlugin,
 } from "./plugin";
-export * from "./plugins/stable-exports.generated";
 // Files plugin types (for custom policy authoring)
 export type {
   FileAction,
