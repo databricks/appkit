@@ -68,6 +68,12 @@ jobs:
             echo ""
             exit 1
           fi
+      - name: Build shared package
+        # `pnpm run sync:template` runs through `packages/shared/bin/appkit.js`
+        # which imports the built `packages/shared/dist/cli/index.js`. The
+        # lint job doesn't otherwise build, so build just the shared package
+        # before invoking sync. Builds in ~2s.
+        run: pnpm --filter shared build:package
       - name: Check synced template manifest is up to date
         run: |
           pnpm run sync:template
