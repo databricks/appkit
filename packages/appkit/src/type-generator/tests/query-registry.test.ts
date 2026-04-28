@@ -1,5 +1,24 @@
 import { Table, tableToIPC, vectorFromArray } from "apache-arrow";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+
+const { mockLoggerWarn, mockLoggerDebug } = vi.hoisted(() => ({
+  mockLoggerWarn: vi.fn(),
+  mockLoggerDebug: vi.fn(),
+}));
+vi.mock("../../logging/logger", () => ({
+  createLogger: vi.fn(() => ({
+    debug: mockLoggerDebug,
+    info: vi.fn(),
+    warn: mockLoggerWarn,
+    error: vi.fn(),
+    event: vi.fn(() => ({
+      set: vi.fn().mockReturnThis(),
+      setComponent: vi.fn().mockReturnThis(),
+      setContext: vi.fn().mockReturnThis(),
+    })),
+  })),
+}));
+
 import {
   convertToQueryType,
   defaultForType,
@@ -431,15 +450,35 @@ SELECT * FROM users WHERE date = :startDate AND count = :count AND name = :name`
       expect(type).not.toContain("from_arrow");
     });
 
-    test("logs a warning and yields no columns on malformed attachment", () => {
+    test("logs a warning and yields the unknown-result fallback on malformed attachment", () => {
+      mockLoggerWarn.mockClear();
       const response: DatabricksStatementExecutionResponse = {
         statement_id: "test-bad",
         status: { state: "SUCCEEDED" },
         result: { attachment: "not-valid-arrow-ipc" },
       };
 
-      const { hasResults } = convertToQueryType(response, "SELECT 1", "test");
+      const { hasResults, type } = convertToQueryType(
+        response,
+        "SELECT 1",
+        "test",
+      );
+
+      // No columns extracted → unknown-result type, hasResults false.
       expect(hasResults).toBe(false);
+      expect(type).toContain("unknown");
+      // None of DESCRIBE QUERY's metadata column names should leak in as
+      // user-facing type fields — that would mean the parser swallowed
+      // the failure and produced bogus columns instead.
+      expect(type).not.toContain("col_name");
+      expect(type).not.toContain("data_type");
+
+      // The warning must fire so a regression that silently produces empty
+      // types (no telemetry signal) fails this test.
+      expect(mockLoggerWarn).toHaveBeenCalledWith(
+        expect.stringContaining("Failed to decode Arrow IPC attachment"),
+        expect.any(String),
+      );
     });
   });
 });
