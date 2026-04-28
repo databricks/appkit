@@ -27,9 +27,25 @@
       "development": "./src/js/index.ts",
       "default": "./dist/js/index.js"
     },
+    "./js/experimental": {
+      "development": "./src/js/experimental.ts",
+      "default": "./dist/js/experimental.js"
+    },
+    "./js/preview": {
+      "development": "./src/js/preview.ts",
+      "default": "./dist/js/preview.js"
+    },
     "./react": {
       "development": "./src/react/index.ts",
       "default": "./dist/react/index.js"
+    },
+    "./react/experimental": {
+      "development": "./src/react/experimental.ts",
+      "default": "./dist/react/experimental.js"
+    },
+    "./react/preview": {
+      "development": "./src/react/preview.ts",
+      "default": "./dist/react/preview.js"
     },
     "./package.json": "./package.json",
     "./styles.css": {
@@ -111,7 +127,11 @@
   "publishConfig": {
     "exports": {
       "./js": "./dist/js/index.js",
+      "./js/experimental": "./dist/js/experimental.js",
+      "./js/preview": "./dist/js/preview.js",
       "./react": "./dist/react/index.js",
+      "./react/experimental": "./dist/react/experimental.js",
+      "./react/preview": "./dist/react/preview.js",
       "./package.json": "./package.json",
       "./styles.css": "./dist/styles.css"
     }

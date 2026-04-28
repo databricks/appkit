@@ -222,6 +222,55 @@ describe("scaffold", () => {
     });
   });
 
+  describe("stability field", () => {
+    it("omits stability from manifest when undefined (defaults to stable)", () => {
+      const tmp = makeTempDir();
+      tempDirs.push(tmp);
+      const targetDir = path.join(tmp, "test");
+
+      scaffoldPlugin(targetDir, BASE_ANSWERS, { isolated: false });
+
+      const manifest = JSON.parse(
+        fs.readFileSync(path.join(targetDir, "manifest.json"), "utf-8"),
+      );
+      expect(manifest.stability).toBeUndefined();
+    });
+
+    it('includes stability: "preview" when set', () => {
+      const tmp = makeTempDir();
+      tempDirs.push(tmp);
+      const targetDir = path.join(tmp, "test");
+
+      scaffoldPlugin(
+        targetDir,
+        { ...BASE_ANSWERS, stability: "preview" },
+        { isolated: false },
+      );
+
+      const manifest = JSON.parse(
+        fs.readFileSync(path.join(targetDir, "manifest.json"), "utf-8"),
+      );
+      expect(manifest.stability).toBe("preview");
+    });
+
+    it('includes stability: "experimental" when set', () => {
+      const tmp = makeTempDir();
+      tempDirs.push(tmp);
+      const targetDir = path.join(tmp, "test");
+
+      scaffoldPlugin(
+        targetDir,
+        { ...BASE_ANSWERS, stability: "experimental" },
+        { isolated: false },
+      );
+
+      const manifest = JSON.parse(
+        fs.readFileSync(path.join(targetDir, "manifest.json"), "utf-8"),
+      );
+      expect(manifest.stability).toBe("experimental");
+    });
+  });
+
   describe("rollback on failure", () => {
     it("cleans up written files when a write fails partway through", () => {
       const tmp = makeTempDir();

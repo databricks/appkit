@@ -119,6 +119,58 @@ describe("list", () => {
         /Failed to parse manifest file/,
       );
     });
+
+    it("defaults stability to stable when absent", () => {
+      const tmp = makeTempDir("list-stability-default");
+      tempDirs.push(tmp);
+      const manifestPath = path.join(tmp, "appkit.plugins.json");
+      fs.writeFileSync(
+        manifestPath,
+        JSON.stringify(TEMPLATE_MANIFEST_JSON, null, 2),
+      );
+
+      const rows = listFromManifestFile(manifestPath);
+      for (const row of rows) {
+        expect(row.stability).toBe("stable");
+      }
+    });
+
+    it("reads stability field from template manifest", () => {
+      const tmp = makeTempDir("list-stability-read");
+      tempDirs.push(tmp);
+      const manifest = {
+        ...TEMPLATE_MANIFEST_JSON,
+        version: "1.1",
+        plugins: {
+          ...TEMPLATE_MANIFEST_JSON.plugins,
+          preview: {
+            name: "preview-plugin",
+            displayName: "Preview Plugin",
+            package: "@databricks/appkit",
+            stability: "preview",
+            resources: { required: [], optional: [] },
+          },
+          experimental: {
+            name: "exp-plugin",
+            displayName: "Experimental Plugin",
+            package: "@databricks/appkit",
+            stability: "experimental",
+            resources: { required: [], optional: [] },
+          },
+        },
+      };
+      const manifestPath = path.join(tmp, "appkit.plugins.json");
+      fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+
+      const rows = listFromManifestFile(manifestPath);
+      const previewRow = rows.find((r) => r.name === "preview-plugin");
+      const expRow = rows.find((r) => r.name === "exp-plugin");
+      const stableRow = rows.find((r) => r.name === "server");
+
+      expect(previewRow?.stability).toBe("preview");
+      expect(expRow?.stability).toBe("experimental");
+      expect(stableRow?.stability).toBe("stable");
+    });
   });
 
   describe("listFromDirectory", () => {
@@ -170,6 +222,42 @@ describe("list", () => {
       const rows = await listFromDirectory(tmp, path.dirname(tmp));
       expect(rows).toHaveLength(1);
       expect(rows[0].name).toBe("my-feature");
+    });
+
+    it("reads stability from manifest in directory scan", async () => {
+      const tmp = makeTempDir("list-dir-stability");
+      tempDirs.push(tmp);
+      const pluginDir = path.join(tmp, "preview-plugin");
+      fs.mkdirSync(pluginDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(pluginDir, "manifest.json"),
+        JSON.stringify({
+          ...PLUGIN_MANIFEST_JSON,
+          name: "preview-feature",
+          stability: "preview",
+        }),
+      );
+
+      const rows = await listFromDirectory(tmp, path.dirname(tmp));
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0].stability).toBe("preview");
+    });
+
+    it("defaults stability to stable in directory scan when absent", async () => {
+      const tmp = makeTempDir("list-dir-stability-default");
+      tempDirs.push(tmp);
+      const pluginDir = path.join(tmp, "stable-plugin");
+      fs.mkdirSync(pluginDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(pluginDir, "manifest.json"),
+        JSON.stringify(PLUGIN_MANIFEST_JSON),
+      );
+
+      const rows = await listFromDirectory(tmp, path.dirname(tmp));
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0].stability).toBe("stable");
     });
 
     it("does not load JS-only manifests by default", async () => {

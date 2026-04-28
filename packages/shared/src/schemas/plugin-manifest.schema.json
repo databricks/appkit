@@ -95,6 +95,12 @@
       "type": "boolean",
       "default": false,
       "description": "When true, this plugin is excluded from the template plugins manifest (appkit.plugins.json) during sync."
+    },
+    "stability": {
+      "type": "string",
+      "enum": ["experimental", "preview", "stable"],
+      "default": "stable",
+      "description": "Plugin stability level. Experimental plugins are very unstable and may be dropped. Preview plugins may have breaking API changes between minor releases but are on a path to stable. Stable plugins follow semver strictly."
     }
   },
   "additionalProperties": false,

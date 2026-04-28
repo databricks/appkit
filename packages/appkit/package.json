@@ -29,6 +29,14 @@
       "development": "./src/index.ts",
       "default": "./dist/index.js"
     },
+    "./experimental": {
+      "development": "./src/experimental.ts",
+      "default": "./dist/experimental.js"
+    },
+    "./preview": {
+      "development": "./src/preview.ts",
+      "default": "./dist/preview.js"
+    },
     "./type-generator": {
       "types": "./dist/type-generator/index.d.ts",
       "development": "./src/type-generator/index.ts",
@@ -95,6 +103,8 @@
   "publishConfig": {
     "exports": {
       ".": "./dist/index.js",
+      "./experimental": "./dist/experimental.js",
+      "./preview": "./dist/preview.js",
       "./dist/shared/src/plugin": "./dist/shared/src/plugin.d.ts",
       "./type-generator": "./dist/type-generator/index.js",
       "./package.json": "./package.json"
