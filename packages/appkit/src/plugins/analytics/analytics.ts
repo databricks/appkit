@@ -8,6 +8,7 @@ import type {
 } from "shared";
 import { SQLWarehouseConnector } from "../../connectors";
 import { getWarehouseId, getWorkspaceClient } from "../../context";
+import { ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
@@ -354,31 +355,39 @@ export class AnalyticsPlugin extends Plugin {
 
 /**
  * Determine whether a warehouse error indicates that ARROW_STREAM + INLINE
- * is unsupported, vs an unrelated SQL/permission error that happens to mention
- * one of the keywords. Requires both "INLINE" and "ARROW_STREAM" in the message
- * plus a marker phrase, or a structured `error_code` (e.g. from a wrapped JSON
- * response of the form `Response from server (Bad Request) {"error_code":...}`).
+ * is unsupported, vs an unrelated SQL/permission error.
+ *
+ * Preferred path: read the structured `errorCode` we now propagate from the
+ * SDK's `ApiError.errorCode` and the warehouse's `status.error.error_code`
+ * through `ExecutionError`. This is stable across error-message wording
+ * changes.
+ *
+ * Substring backstop: if the upstream error didn't surface a code (legacy
+ * SDK builds, or errors thrown outside the connector's wrap path), fall
+ * back to requiring both INLINE and ARROW_STREAM keywords in the message
+ * plus a marker phrase. The pair-requirement avoids matching unrelated SQL
+ * errors that happen to mention one of the words (e.g. a column named
+ * `INLINE_USERS`).
  */
 function _isInlineArrowUnsupported(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
+  const structuredCode =
+    err instanceof ExecutionError ? err.errorCode : undefined;
+  if (
+    structuredCode === "INVALID_PARAMETER_VALUE" ||
+    structuredCode === "NOT_IMPLEMENTED"
+  ) {
+    // Structured code already tells us the warehouse rejected the request.
+    // Require keyword pairing to confirm it's the disposition/format combo
+    // (vs an INVALID_PARAMETER_VALUE for something else entirely).
+    const msg = err instanceof Error ? err.message : String(err);
+    return msg.includes("INLINE") && msg.includes("ARROW_STREAM");
+  }
 
-  // Both branches require both INLINE and ARROW_STREAM to appear in the
-  // message — without that pairing we cannot distinguish a format-rejection
-  // from an unrelated SQL/permission error that happens to mention one
-  // keyword (e.g. a column named "INLINE_USERS").
+  // Backstop for errors without a structured code.
+  const msg = err instanceof Error ? err.message : String(err);
   if (!msg.includes("INLINE") || !msg.includes("ARROW_STREAM")) {
     return false;
   }
-
-  const errorCodeMatch = msg.match(/"error_code"\s*:\s*"([^"]+)"/);
-  const errorCode = errorCodeMatch?.[1];
-  if (
-    errorCode === "INVALID_PARAMETER_VALUE" ||
-    errorCode === "NOT_IMPLEMENTED"
-  ) {
-    return true;
-  }
-
   return (
     msg.includes("not supported") ||
     msg.includes("INVALID_PARAMETER_VALUE") ||

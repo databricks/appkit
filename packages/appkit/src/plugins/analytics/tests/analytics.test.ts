@@ -731,6 +731,50 @@ describe("Analytics Plugin", () => {
       });
     });
 
+    test("/query/:query_key falls back on a structured ExecutionError.errorCode without scanning the message", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+
+      // Properly-structured ExecutionError, as the connector now produces
+      // when the SDK's ApiError surfaces with errorCode set.
+      const { ExecutionError } = await import("../../../errors/execution");
+      const structuredError = ExecutionError.statementFailed(
+        "ARROW_STREAM is not supported with INLINE disposition",
+        "INVALID_PARAMETER_VALUE",
+      );
+
+      const executeMock = vi
+        .fn()
+        .mockRejectedValueOnce(structuredError)
+        .mockResolvedValueOnce({
+          result: { statement_id: "stmt-1", status: { state: "SUCCEEDED" } },
+        });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {}, format: "ARROW_STREAM" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      // Both attempts: INLINE (rejected via structured code) → EXTERNAL_LINKS.
+      expect(executeMock).toHaveBeenCalledTimes(2);
+      expect(executeMock.mock.calls[1][1]).toMatchObject({
+        disposition: "EXTERNAL_LINKS",
+        format: "ARROW_STREAM",
+      });
+    });
+
     test("/query/:query_key falls back when error message carries a structured INVALID_PARAMETER_VALUE error_code", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();

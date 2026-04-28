@@ -16,13 +16,39 @@ export class ExecutionError extends AppKitError {
   readonly isRetryable = false;
 
   /**
-   * Create an execution error for statement failure
+   * Structured error code from the upstream source (typically the warehouse's
+   * `error_code` for statement-level failures, or the SDK's `ApiError.errorCode`
+   * for HTTP failures). Preserved through wrapping so callers can branch on a
+   * stable identifier without substring-matching the message.
    */
-  static statementFailed(errorMessage?: string): ExecutionError {
+  readonly errorCode?: string;
+
+  constructor(
+    message: string,
+    options?: {
+      cause?: Error;
+      context?: Record<string, unknown>;
+      errorCode?: string;
+    },
+  ) {
+    super(message, options);
+    this.errorCode = options?.errorCode;
+  }
+
+  /**
+   * Create an execution error for statement failure.
+   * @param errorMessage Human-readable error from the warehouse / SDK.
+   * @param errorCode Structured code (e.g. "INVALID_PARAMETER_VALUE") to
+   *   preserve through wrapping. Optional.
+   */
+  static statementFailed(
+    errorMessage?: string,
+    errorCode?: string,
+  ): ExecutionError {
     const message = errorMessage
       ? `Statement failed: ${errorMessage}`
       : "Statement failed: Unknown error";
-    return new ExecutionError(message);
+    return new ExecutionError(message, { errorCode });
   }
 
   /**

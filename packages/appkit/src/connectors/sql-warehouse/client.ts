@@ -210,7 +210,10 @@ export class SQLWarehouseConnector {
               result = this._transformDataArray(response);
               break;
             case "FAILED":
-              throw ExecutionError.statementFailed(status.error?.message);
+              throw ExecutionError.statementFailed(
+                status.error?.message,
+                status.error?.error_code,
+              );
             case "CANCELED":
               throw ExecutionError.canceled();
             case "CLOSED":
@@ -255,8 +258,17 @@ export class SQLWarehouseConnector {
           if (error instanceof AppKitError) {
             throw error;
           }
+          // Preserve the SDK's structured ApiError.errorCode (e.g.
+          // "INVALID_PARAMETER_VALUE", "BAD_REQUEST") through the wrap so
+          // callers can branch on a stable identifier rather than
+          // substring-matching the message.
+          const sdkErrorCode =
+            error && typeof error === "object" && "errorCode" in error
+              ? (error as { errorCode?: unknown }).errorCode
+              : undefined;
           throw ExecutionError.statementFailed(
             error instanceof Error ? error.message : String(error),
+            typeof sdkErrorCode === "string" ? sdkErrorCode : undefined,
           );
         } finally {
           // remove abort handler
@@ -369,7 +381,10 @@ export class SQLWarehouseConnector {
                 span.setStatus({ code: SpanStatusCode.OK });
                 return this._transformDataArray(response);
               case "FAILED":
-                throw ExecutionError.statementFailed(status.error?.message);
+                throw ExecutionError.statementFailed(
+                  status.error?.message,
+                  status.error?.error_code,
+                );
               case "CANCELED":
                 throw ExecutionError.canceled();
               case "CLOSED":
@@ -394,8 +409,13 @@ export class SQLWarehouseConnector {
           if (error instanceof AppKitError) {
             throw error;
           }
+          const sdkErrorCode =
+            error && typeof error === "object" && "errorCode" in error
+              ? (error as { errorCode?: unknown }).errorCode
+              : undefined;
           throw ExecutionError.statementFailed(
             error instanceof Error ? error.message : String(error),
+            typeof sdkErrorCode === "string" ? sdkErrorCode : undefined,
           );
         } finally {
           span.end();
