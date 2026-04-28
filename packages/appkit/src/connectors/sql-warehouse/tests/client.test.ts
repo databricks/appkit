@@ -293,8 +293,8 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
 
     test("rejects oversized attachments to bound memory", () => {
       const connector = createConnector();
-      // 8 MiB decoded cap → ~12 MiB of base64 chars decodes to >8 MiB.
-      const oversized = "A".repeat(12 * 1024 * 1024);
+      // 25 MiB decoded cap → ~36 MiB of base64 chars decodes to >25 MiB.
+      const oversized = "A".repeat(36 * 1024 * 1024);
       const response = {
         statement_id: "stmt-oversized",
         status: { state: "SUCCEEDED" },

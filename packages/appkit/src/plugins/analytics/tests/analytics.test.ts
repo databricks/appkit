@@ -848,7 +848,7 @@ describe("Analytics Plugin", () => {
       }
     });
 
-    test("/query/:query_key emits arrow_inline SSE event when ARROW_STREAM INLINE returns an attachment", async () => {
+    test("/query/:query_key stashes ARROW_STREAM INLINE attachment and emits arrow with synthetic statement_id", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -857,7 +857,8 @@ describe("Analytics Plugin", () => {
         isAsUser: false,
       });
 
-      const fakeAttachment = "BASE64_ARROW_IPC_BYTES";
+      // Real-ish base64 — must be valid for `Buffer.from(..., "base64")`.
+      const fakeAttachment = Buffer.from("ipc-bytes-here").toString("base64");
       const executeMock = vi.fn().mockResolvedValue({
         result: { attachment: fakeAttachment, row_count: 1 },
       });
@@ -880,14 +881,18 @@ describe("Analytics Plugin", () => {
         disposition: "INLINE",
         format: "ARROW_STREAM",
       });
-      // SSE payload should use the new arrow_inline message type.
+      // SSE payload uses the unified `arrow` message with an `inline-` id.
       const writeCalls = (mockRes.write as any).mock.calls.map(
         (c: any[]) => c[0] as string,
       );
       const payload = writeCalls.find((s: string) => s.startsWith("data: "));
       expect(payload).toBeDefined();
-      expect(payload).toContain('"type":"arrow_inline"');
-      expect(payload).toContain(`"attachment":"${fakeAttachment}"`);
+      expect(payload).toContain('"type":"arrow"');
+      expect(payload).toMatch(/"statement_id":"inline-/);
+      // Attachment bytes should NOT be inlined in the SSE message.
+      expect(payload).not.toContain(fakeAttachment);
+      // The stash should now hold one entry, ready for /arrow-result fetch.
+      expect((plugin as any).inlineStash.size()).toBe(1);
     });
 
     test("/query/:query_key rejects unknown format values with 400", async () => {

@@ -12,6 +12,7 @@ import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import { queryDefaults } from "./defaults";
+import { InlineArrowStash } from "./inline-arrow-stash";
 import manifest from "./manifest.json";
 import { QueryProcessor } from "./query";
 import type {
@@ -33,11 +34,13 @@ export class AnalyticsPlugin extends Plugin {
   // analytics services
   private SQLClient: SQLWarehouseConnector;
   private queryProcessor: QueryProcessor;
+  private inlineStash: InlineArrowStash;
 
   constructor(config: IAnalyticsConfig) {
     super(config);
     this.config = config;
     this.queryProcessor = new QueryProcessor();
+    this.inlineStash = new InlineArrowStash();
 
     this.SQLClient = new SQLWarehouseConnector({
       timeout: config.timeout,
@@ -76,6 +79,24 @@ export class AnalyticsPlugin extends Plugin {
   ): Promise<void> {
     try {
       const { jobId } = req.params;
+
+      // Inline path: ARROW_STREAM + INLINE responses are stashed by the query
+      // route and served from memory rather than fetched from the warehouse.
+      const stashed = this.inlineStash.take(jobId);
+      if (stashed) {
+        res.setHeader("Content-Type", "application/octet-stream");
+        res.setHeader("Content-Length", stashed.length.toString());
+        // Don't cache — stash entries are one-shot.
+        res.setHeader("Cache-Control", "no-store");
+        logger.debug(
+          "Serving inline Arrow buffer from stash: %d bytes for jobId=%s",
+          stashed.length,
+          jobId,
+        );
+        res.send(stashed);
+        return;
+      }
+
       const workspaceClient = getWorkspaceClient();
 
       logger.debug("Processing Arrow job request for jobId=%s", jobId);
@@ -247,12 +268,15 @@ export class AnalyticsPlugin extends Plugin {
         { disposition: "INLINE", format: "ARROW_STREAM" },
         signal,
       );
-      // INLINE responses with an Arrow IPC attachment are forwarded as base64
-      // for the client to decode into an Arrow Table. Anything else (rare:
-      // data_array under ARROW_STREAM, or an empty result) falls back to the
-      // generic "result" payload.
+      // INLINE responses carry the Arrow IPC bytes as a base64 `attachment`.
+      // Stash them server-side and emit the same `{type:"arrow", statement_id}`
+      // shape that EXTERNAL_LINKS uses, so the client fetches the bytes via
+      // the existing /arrow-result/:jobId path. This keeps SSE messages
+      // small and unifies the wire protocol.
       if (result?.attachment) {
-        return { type: "arrow_inline", attachment: result.attachment };
+        const buffer = Buffer.from(result.attachment, "base64");
+        const statement_id = this.inlineStash.put(buffer);
+        return { type: "arrow", statement_id };
       }
       return { type: "result", ...result };
     } catch (err: unknown) {

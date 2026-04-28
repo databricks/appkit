@@ -22,16 +22,6 @@ function getArrowStreamUrl(id: string) {
   return `/api/analytics/arrow-result/${id}`;
 }
 
-/** Decode a base64 string into a Uint8Array suitable for Arrow IPC parsing. */
-function decodeBase64(b64: string): Uint8Array {
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
 /**
  * Subscribe to an analytics query over SSE and returns its latest result.
  * Integration hook between client and analytics plugin.
@@ -139,7 +129,9 @@ export function useAnalyticsQuery<
             return;
           }
 
-          // success - Arrow format (external links: fetch from server)
+          // success - Arrow format. The server delivers Arrow IPC bytes via
+          // /arrow-result/:jobId for both INLINE (stashed server-side) and
+          // EXTERNAL_LINKS (forwarded from the warehouse) responses.
           if (parsed.type === "arrow") {
             try {
               const arrowData = await ArrowClient.fetchArrow(
@@ -153,36 +145,6 @@ export function useAnalyticsQuery<
             } catch (error) {
               console.error(
                 "[useAnalyticsQuery] Failed to fetch Arrow data",
-                error,
-              );
-              setLoading(false);
-              setError("Unable to load data, please try again");
-              return;
-            }
-          }
-
-          // success - Arrow format (inline: decode base64 IPC payload locally)
-          if (parsed.type === "arrow_inline") {
-            if (
-              typeof parsed.attachment !== "string" ||
-              parsed.attachment.length === 0
-            ) {
-              console.error(
-                "[useAnalyticsQuery] arrow_inline message missing attachment",
-              );
-              setLoading(false);
-              setError("Unable to load data, please try again");
-              return;
-            }
-            try {
-              const buffer = decodeBase64(parsed.attachment);
-              const table = await ArrowClient.processArrowBuffer(buffer);
-              setLoading(false);
-              setData(table as ResultType);
-              return;
-            } catch (error) {
-              console.error(
-                "[useAnalyticsQuery] Failed to decode inline Arrow data",
                 error,
               );
               setLoading(false);

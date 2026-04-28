@@ -30,76 +30,29 @@ describe("useAnalyticsQuery", () => {
     lastConnectArgs = null;
   });
 
-  test("decodes arrow_inline base64 attachment via ArrowClient.processArrowBuffer", async () => {
-    const fakeTable = { numRows: 1, schema: { fields: [] } };
+  test("fetches Arrow IPC via /arrow-result for type:arrow (covers both inline-stash and external-link paths)", async () => {
+    const fakeTable = { numRows: 0, schema: { fields: [] } };
+    mockFetchArrow.mockResolvedValueOnce(new Uint8Array([1, 2, 3]));
     mockProcessArrowBuffer.mockResolvedValueOnce(fakeTable);
-
-    // 'AQID' decodes to bytes [1, 2, 3].
-    const base64 = "AQID";
 
     const { result } = renderHook(() =>
       useAnalyticsQuery("q", null, { format: "ARROW_STREAM" }),
     );
 
-    // Drive the SSE onMessage handler with an arrow_inline payload.
+    // Server emits the same {type:"arrow", statement_id} shape regardless of
+    // whether the bytes came from the warehouse (EXTERNAL_LINKS) or were
+    // stashed locally (INLINE).
     await lastConnectArgs.onMessage({
-      data: JSON.stringify({ type: "arrow_inline", attachment: base64 }),
+      data: JSON.stringify({ type: "arrow", statement_id: "inline-abc" }),
     });
 
     await waitFor(() => {
       expect(result.current.data).toBe(fakeTable);
     });
-
-    expect(mockProcessArrowBuffer).toHaveBeenCalledTimes(1);
-    const passedBuffer = mockProcessArrowBuffer.mock.calls[0][0] as Uint8Array;
-    expect(passedBuffer).toBeInstanceOf(Uint8Array);
-    expect(Array.from(passedBuffer)).toEqual([1, 2, 3]);
-    // Inline path must NOT trigger a network fetch.
-    expect(mockFetchArrow).not.toHaveBeenCalled();
-  });
-
-  test("surfaces an error when arrow_inline decode fails", async () => {
-    mockProcessArrowBuffer.mockRejectedValueOnce(new Error("bad ipc"));
-
-    const { result } = renderHook(() =>
-      useAnalyticsQuery("q", null, { format: "ARROW_STREAM" }),
+    expect(mockFetchArrow).toHaveBeenCalledTimes(1);
+    expect(mockFetchArrow.mock.calls[0][0]).toBe(
+      "/api/analytics/arrow-result/inline-abc",
     );
-
-    await lastConnectArgs.onMessage({
-      data: JSON.stringify({ type: "arrow_inline", attachment: "AQID" }),
-    });
-
-    await waitFor(() => {
-      expect(result.current.error).toBe(
-        "Unable to load data, please try again",
-      );
-    });
-    expect(result.current.loading).toBe(false);
-  });
-
-  test("rejects arrow_inline with missing/empty/non-string attachment without crashing atob", async () => {
-    const cases: Array<unknown> = [undefined, null, "", 123, { foo: "bar" }];
-
-    for (const attachment of cases) {
-      mockProcessArrowBuffer.mockClear();
-      const { result, unmount } = renderHook(() =>
-        useAnalyticsQuery("q", null, { format: "ARROW_STREAM" }),
-      );
-
-      await lastConnectArgs.onMessage({
-        data: JSON.stringify({ type: "arrow_inline", attachment }),
-      });
-
-      await waitFor(() => {
-        expect(result.current.error).toBe(
-          "Unable to load data, please try again",
-        );
-      });
-      // Critically: must NOT call processArrowBuffer (or atob) on the bad input.
-      expect(mockProcessArrowBuffer).not.toHaveBeenCalled();
-
-      unmount();
-    }
   });
 
   test("still handles type:result rows for JSON_ARRAY", async () => {
@@ -118,5 +71,24 @@ describe("useAnalyticsQuery", () => {
       expect(result.current.data).toEqual([{ id: 1 }, { id: 2 }]);
     });
     expect(mockProcessArrowBuffer).not.toHaveBeenCalled();
+  });
+
+  test("surfaces an error when /arrow-result fetch fails", async () => {
+    mockFetchArrow.mockRejectedValueOnce(new Error("HTTP 404"));
+
+    const { result } = renderHook(() =>
+      useAnalyticsQuery("q", null, { format: "ARROW_STREAM" }),
+    );
+
+    await lastConnectArgs.onMessage({
+      data: JSON.stringify({ type: "arrow", statement_id: "inline-stale" }),
+    });
+
+    await waitFor(() => {
+      expect(result.current.error).toBe(
+        "Unable to load data, please try again",
+      );
+    });
+    expect(result.current.loading).toBe(false);
   });
 });
