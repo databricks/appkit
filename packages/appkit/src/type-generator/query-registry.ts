@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
+import { tableFromIPC } from "apache-arrow";
 import pc from "picocolors";
 import { createLogger } from "../logging/logger";
 import { CACHE_VERSION, hashSQL, loadCache, saveCache } from "./cache";
@@ -129,17 +130,68 @@ function formatParametersType(sql: string): string {
     : "Record<string, never>";
 }
 
+/**
+ * Decode a base64 Arrow IPC attachment from a DESCRIBE QUERY response and
+ * extract column metadata. Returns the same shape as rows parsed from the
+ * legacy data_array path.
+ *
+ * IMPORTANT: a DESCRIBE QUERY response is itself a result *table* with rows
+ * shaped like `(col_name, data_type, comment)` describing the user query's
+ * output schema. We must read those rows — NOT `table.schema.fields`, which
+ * would describe DESCRIBE QUERY's own output (`col_name`, `data_type`,
+ * `comment`) and yield bogus types for every query.
+ */
+function columnsFromArrowAttachment(
+  attachment: string,
+): Array<{ name: string; type_name: string; comment: string | undefined }> {
+  const buf = Buffer.from(attachment, "base64");
+  const table = tableFromIPC(buf);
+  return table.toArray().map((row) => {
+    const obj = row.toJSON() as {
+      col_name?: unknown;
+      data_type?: unknown;
+      comment?: unknown;
+    };
+    return {
+      name: typeof obj.col_name === "string" ? obj.col_name : "",
+      type_name:
+        typeof obj.data_type === "string"
+          ? obj.data_type.toUpperCase()
+          : "STRING",
+      comment:
+        typeof obj.comment === "string" && obj.comment !== ""
+          ? obj.comment
+          : undefined,
+    };
+  });
+}
+
 export function convertToQueryType(
   result: DatabricksStatementExecutionResponse,
   sql: string,
   queryName: string,
 ): { type: string; hasResults: boolean } {
   const dataRows = result.result?.data_array || [];
-  const columns = dataRows.map((row) => ({
+  let columns = dataRows.map((row) => ({
     name: row[0] || "",
     type_name: row[1]?.toUpperCase() || "STRING",
     comment: row[2] || undefined,
   }));
+
+  // Fallback: serverless warehouses return ARROW_STREAM format with an inline
+  // base64 attachment instead of data_array. Decode the Arrow IPC rows (the
+  // DESCRIBE QUERY result table) to extract column names and types.
+  if (columns.length === 0 && result.result?.attachment) {
+    logger.debug("data_array empty, decoding Arrow IPC attachment for schema");
+    try {
+      columns = columnsFromArrowAttachment(result.result.attachment);
+    } catch (err) {
+      logger.warn(
+        "Failed to decode Arrow IPC attachment: %s",
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
 
   const paramsType = formatParametersType(sql);
 
@@ -386,16 +438,33 @@ export async function generateQueriesFromDescribe(
       sqlHash,
       cleanedSql,
     }: (typeof uncachedQueries)[number]): Promise<DescribeResult> => {
-      // Always request JSON_ARRAY + INLINE so the downstream caller can parse
-      // `data_array` predictably. If the warehouse rejects this combination,
-      // let the error propagate — the surrounding `Promise.allSettled` will
-      // generate `unknown` types via `generateUnknownResultQuery`.
-      const result = (await client.statementExecution.executeStatement({
-        statement: `DESCRIBE QUERY ${cleanedSql}`,
-        warehouse_id: warehouseId,
-        format: "JSON_ARRAY",
-        disposition: "INLINE",
-      })) as DatabricksStatementExecutionResponse;
+      // Prefer JSON_ARRAY + INLINE so `data_array` parsing works directly.
+      // Some serverless warehouses reject this combination — fall back to the
+      // warehouse default (typically ARROW_STREAM + INLINE), and let
+      // `convertToQueryType` decode the inline attachment.
+      let result: DatabricksStatementExecutionResponse;
+      try {
+        result = (await client.statementExecution.executeStatement({
+          statement: `DESCRIBE QUERY ${cleanedSql}`,
+          warehouse_id: warehouseId,
+          format: "JSON_ARRAY",
+          disposition: "INLINE",
+        })) as DatabricksStatementExecutionResponse;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("ARROW_STREAM") || msg.includes("JSON_ARRAY")) {
+          logger.debug(
+            "Warehouse rejected JSON_ARRAY for %s, retrying with default format",
+            queryName,
+          );
+          result = (await client.statementExecution.executeStatement({
+            statement: `DESCRIBE QUERY ${cleanedSql}`,
+            warehouse_id: warehouseId,
+          })) as DatabricksStatementExecutionResponse;
+        } else {
+          throw err;
+        }
+      }
 
       completed++;
       spinner.update(
@@ -403,10 +472,11 @@ export async function generateQueriesFromDescribe(
       );
 
       logger.debug(
-        "DESCRIBE result for %s: state=%s, rows=%d",
+        "DESCRIBE result for %s: state=%s, rows=%d, hasAttachment=%s",
         queryName,
         result.status.state,
         result.result?.data_array?.length ?? 0,
+        !!result.result?.attachment,
       );
 
       if (result.status.state === "FAILED") {

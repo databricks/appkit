@@ -12,6 +12,8 @@ export interface DatabricksStatementExecutionResponse {
   };
   result?: {
     data_array?: (string | null)[][];
+    /** Base64-encoded Arrow IPC bytes (returned by serverless warehouses using ARROW_STREAM format) */
+    attachment?: string;
   };
 }
 
