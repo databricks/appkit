@@ -32,7 +32,7 @@ describe("QueryProcessor", () => {
       expect(result.statement).toBe(query);
       expect(result.parameters).toHaveLength(2);
       expect(result.parameters).toEqual([
-        { name: "user_id", value: "123", type: "NUMERIC" },
+        { name: "user_id", value: "123", type: "BIGINT" },
         { name: "name", value: "Alice", type: "STRING" },
       ]);
     });
@@ -229,7 +229,7 @@ describe("QueryProcessor", () => {
       expect(result.parameters[0]).toEqual({
         name: "age",
         value: "25",
-        type: "NUMERIC",
+        type: "BIGINT",
       });
     });
 

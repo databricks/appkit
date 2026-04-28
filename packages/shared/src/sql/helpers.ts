@@ -8,6 +8,45 @@ import type {
   SQLTypeMarker,
 } from "./types";
 
+function coerceNumericLike(value: number | string, fnName: string): string {
+  if (typeof value === "number") {
+    return value.toString();
+  }
+  if (typeof value === "string") {
+    if (value === "" || Number.isNaN(Number(value))) {
+      throw new Error(
+        `${fnName}() expects number or numeric string, got: ${value === "" ? "empty string" : value}`,
+      );
+    }
+    return value;
+  }
+  throw new Error(
+    `${fnName}() expects number or numeric string, got: ${typeof value}`,
+  );
+}
+
+function coerceIntegerLike(value: number | string, fnName: string): string {
+  if (typeof value === "number") {
+    if (!Number.isInteger(value)) {
+      throw new Error(
+        `${fnName}() expects an integer, got non-integer number: ${value}`,
+      );
+    }
+    return value.toString();
+  }
+  if (typeof value === "string") {
+    if (value === "" || !/^-?\d+$/.test(value)) {
+      throw new Error(
+        `${fnName}() expects integer number or integer-shaped string, got: ${value === "" ? "empty string" : value}`,
+      );
+    }
+    return value;
+  }
+  throw new Error(
+    `${fnName}() expects integer number or integer-shaped string, got: ${typeof value}`,
+  );
+}
+
 /**
  * SQL helper namespace
  */
@@ -109,47 +148,122 @@ export const sql = {
   },
 
   /**
-   * Creates a NUMERIC type parameter
-   * Accepts numbers or numeric strings
+   * Creates a numeric type parameter. The wire SQL type is inferred from the
+   * value so the parameter binds correctly in any context, including `LIMIT`
+   * and `OFFSET` (which require integer types):
+   *
+   * - JS integer (`10`) → `BIGINT`
+   * - JS non-integer (`3.14`) → `DOUBLE`
+   * - numeric string (`"123.45"`) → `NUMERIC` (preserves caller's precision intent)
+   *
+   * Reach for `sql.int()`, `sql.bigint()`, `sql.float()`, `sql.double()`, or
+   * `sql.decimal()` if you need to override the inferred type.
+   *
    * @param value - Number or numeric string
-   * @returns Marker object for NUMERIC type parameter
+   * @returns Marker for a numeric SQL parameter
    * @example
    * ```typescript
-   * const params = { userId: sql.number(123) };
-   * params = { userId: "123" }
-   * ```
-   * @example
-   * ```typescript
-   * const params = { userId: sql.number("123") };
-   * params = { userId: "123" }
+   * const params = { userId: sql.number(123) };       // BIGINT, value "123"
+   * const params = { ratio: sql.number(0.5) };        // DOUBLE, value "0.5"
+   * const params = { amount: sql.number("123.45") };  // NUMERIC, value "123.45"
    * ```
    */
   number(value: number | string): SQLNumberMarker {
     let numValue: string = "";
+    let inferredType: SQLNumberMarker["__sql_type"] = "NUMERIC";
 
-    // check if value is a number
     if (typeof value === "number") {
       numValue = value.toString();
-    }
-    // check if value is a string
-    else if (typeof value === "string") {
+      inferredType = Number.isInteger(value) ? "BIGINT" : "DOUBLE";
+    } else if (typeof value === "string") {
       if (value === "" || Number.isNaN(Number(value))) {
         throw new Error(
           `sql.number() expects number or numeric string, got: ${value === "" ? "empty string" : value}`,
         );
       }
       numValue = value;
-    }
-    // if value is not a number or string, throw an error
-    else {
+      // Strings stay NUMERIC: the caller chose to pass a string, so honour
+      // their precision intent rather than coercing through JS number.
+      inferredType = "NUMERIC";
+    } else {
       throw new Error(
         `sql.number() expects number or numeric string, got: ${typeof value}`,
       );
     }
 
     return {
-      __sql_type: "NUMERIC",
+      __sql_type: inferredType,
       value: numValue,
+    };
+  },
+
+  /**
+   * Creates an `INT` (32-bit signed integer) parameter. Use when the column
+   * or context requires `INT` specifically (e.g. legacy schemas, or to make
+   * the wire type explicit).
+   *
+   * @param value - Integer number or integer-shaped string
+   */
+  int(value: number | string): SQLNumberMarker {
+    return {
+      __sql_type: "INT",
+      value: coerceIntegerLike(value, "sql.int"),
+    };
+  },
+
+  /**
+   * Creates a `BIGINT` (64-bit signed integer) parameter. Accepts JS
+   * `bigint` so callers can round-trip values outside `Number.MAX_SAFE_INTEGER`
+   * without precision loss.
+   *
+   * @param value - Integer number, bigint, or integer-shaped string
+   */
+  bigint(value: number | bigint | string): SQLNumberMarker {
+    if (typeof value === "bigint") {
+      return { __sql_type: "BIGINT", value: value.toString() };
+    }
+    return {
+      __sql_type: "BIGINT",
+      value: coerceIntegerLike(value, "sql.bigint"),
+    };
+  },
+
+  /**
+   * Creates a `FLOAT` (single-precision) parameter.
+   *
+   * @param value - Number or numeric string
+   */
+  float(value: number | string): SQLNumberMarker {
+    return {
+      __sql_type: "FLOAT",
+      value: coerceNumericLike(value, "sql.float"),
+    };
+  },
+
+  /**
+   * Creates a `DOUBLE` (double-precision) parameter. Same precision as a JS
+   * `number`, so `sql.double(value)` is exact for any JS number.
+   *
+   * @param value - Number or numeric string
+   */
+  double(value: number | string): SQLNumberMarker {
+    return {
+      __sql_type: "DOUBLE",
+      value: coerceNumericLike(value, "sql.double"),
+    };
+  },
+
+  /**
+   * Creates a `NUMERIC` (fixed-point DECIMAL) parameter. Use when you need
+   * exact decimal arithmetic (currency, percentages) — pass values as
+   * strings to avoid JS-number precision loss.
+   *
+   * @param value - Number or numeric string (strings preferred for precision)
+   */
+  decimal(value: number | string): SQLNumberMarker {
+    return {
+      __sql_type: "NUMERIC",
+      value: coerceNumericLike(value, "sql.decimal"),
     };
   },
 

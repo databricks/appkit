@@ -37,27 +37,40 @@ describe("SQL Helpers", () => {
   });
 
   describe("number()", () => {
-    it("should create a NUMERIC type parameter from a number", () => {
-      const number = 1234567890;
-      const result = sql.number(number);
+    it("should bind a JS integer as BIGINT (works in LIMIT/OFFSET)", () => {
+      const result = sql.number(1234567890);
+      expect(result).toEqual({
+        __sql_type: "BIGINT",
+        value: "1234567890",
+      });
+    });
+
+    it("should bind a JS non-integer as DOUBLE", () => {
+      const result = sql.number(3.14);
+      expect(result).toEqual({
+        __sql_type: "DOUBLE",
+        value: "3.14",
+      });
+    });
+
+    it("should keep numeric strings as NUMERIC (preserve precision)", () => {
+      const result = sql.number("1234567890");
       expect(result).toEqual({
         __sql_type: "NUMERIC",
         value: "1234567890",
       });
     });
 
-    it("should create a NUMERIC type parameter from a numeric string", () => {
-      const number = "1234567890";
-      const result = sql.number(number);
+    it("should keep decimal strings as NUMERIC (no JS-number coercion)", () => {
+      const result = sql.number("123.4500000000001");
       expect(result).toEqual({
         __sql_type: "NUMERIC",
-        value: "1234567890",
+        value: "123.4500000000001",
       });
     });
 
     it("should reject non-numeric string", () => {
-      const number = "hello";
-      expect(() => sql.number(number as any)).toThrow(
+      expect(() => sql.number("hello" as any)).toThrow(
         "sql.number() expects number or numeric string, got: hello",
       );
     });
@@ -69,10 +82,55 @@ describe("SQL Helpers", () => {
     });
 
     it("should reject boolean value", () => {
-      const number = true;
-      expect(() => sql.number(number as any)).toThrow(
+      expect(() => sql.number(true as any)).toThrow(
         "sql.number() expects number or numeric string, got: boolean",
       );
+    });
+  });
+
+  describe("int() / bigint() / float() / double() / decimal()", () => {
+    it("sql.int() should produce INT", () => {
+      expect(sql.int(42)).toEqual({ __sql_type: "INT", value: "42" });
+      expect(sql.int("42")).toEqual({ __sql_type: "INT", value: "42" });
+    });
+
+    it("sql.int() should reject non-integers", () => {
+      expect(() => sql.int(3.14)).toThrow(
+        "sql.int() expects an integer, got non-integer number: 3.14",
+      );
+      expect(() => sql.int("3.14")).toThrow(
+        "sql.int() expects integer number or integer-shaped string, got: 3.14",
+      );
+    });
+
+    it("sql.bigint() should produce BIGINT and accept JS bigint", () => {
+      expect(sql.bigint(42)).toEqual({ __sql_type: "BIGINT", value: "42" });
+      expect(sql.bigint("9007199254740993")).toEqual({
+        __sql_type: "BIGINT",
+        value: "9007199254740993",
+      });
+      expect(sql.bigint(9007199254740993n)).toEqual({
+        __sql_type: "BIGINT",
+        value: "9007199254740993",
+      });
+    });
+
+    it("sql.float() should produce FLOAT", () => {
+      expect(sql.float(3.14)).toEqual({ __sql_type: "FLOAT", value: "3.14" });
+    });
+
+    it("sql.double() should produce DOUBLE", () => {
+      expect(sql.double(3.14)).toEqual({
+        __sql_type: "DOUBLE",
+        value: "3.14",
+      });
+    });
+
+    it("sql.decimal() should produce NUMERIC", () => {
+      expect(sql.decimal("12345.6789")).toEqual({
+        __sql_type: "NUMERIC",
+        value: "12345.6789",
+      });
     });
   });
 

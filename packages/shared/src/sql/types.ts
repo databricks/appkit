@@ -3,8 +3,20 @@ export interface SQLStringMarker {
   value: string;
 }
 
+/**
+ * SQL numeric parameter marker. The wire type controls how Databricks SQL
+ * binds the value — notably, only integer types satisfy the `LIMIT` and
+ * `OFFSET` clauses.
+ *
+ * - `BIGINT` / `INT` — integer columns, LIMIT/OFFSET, IDs
+ * - `FLOAT` / `DOUBLE` — floating-point columns
+ * - `NUMERIC` — fixed-point DECIMAL columns (preserves precision)
+ *
+ * Created by `sql.number()` (auto-inferred), or by typed variants
+ * `sql.int()`, `sql.bigint()`, `sql.float()`, `sql.double()`, `sql.decimal()`.
+ */
 export interface SQLNumberMarker {
-  __sql_type: "NUMERIC";
+  __sql_type: "INT" | "BIGINT" | "FLOAT" | "DOUBLE" | "NUMERIC";
   value: string;
 }
 
