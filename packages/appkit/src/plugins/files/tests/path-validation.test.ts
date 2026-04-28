@@ -77,6 +77,17 @@ describe("FilesPlugin path validation", () => {
     teardownTestEnv(serviceContextMock);
   });
 
+  // Defends against regressions where the handler calls the SDK and *also*
+  // returns 400 — the status assertion alone wouldn't catch that.
+  function expectNoSdkCall() {
+    expect(mockClient.files.download).not.toHaveBeenCalled();
+    expect(mockClient.files.upload).not.toHaveBeenCalled();
+    expect(mockClient.files.delete).not.toHaveBeenCalled();
+    expect(mockClient.files.createDirectory).not.toHaveBeenCalled();
+    expect(mockClient.files.getMetadata).not.toHaveBeenCalled();
+    expect(mockClient.files.listDirectoryContents).not.toHaveBeenCalled();
+  }
+
   test("path with null bytes returns 400", async () => {
     const plugin = new FilesPlugin(VOLUMES_CONFIG);
     const handler = getRouteHandler(plugin, "get", "/read");
@@ -93,6 +104,7 @@ describe("FilesPlugin path validation", () => {
         error: "path must not contain null bytes",
       }),
     );
+    expectNoSdkCall();
   });
 
   test("path exceeding 4096 characters returns 400", async () => {
@@ -110,6 +122,7 @@ describe("FilesPlugin path validation", () => {
         error: expect.stringContaining("exceeds maximum length"),
       }),
     );
+    expectNoSdkCall();
   });
 
   test("exists without path returns 400", async () => {
@@ -126,6 +139,7 @@ describe("FilesPlugin path validation", () => {
         plugin: "files",
       }),
     );
+    expectNoSdkCall();
   });
 
   test("metadata without path returns 400", async () => {
@@ -142,6 +156,7 @@ describe("FilesPlugin path validation", () => {
         plugin: "files",
       }),
     );
+    expectNoSdkCall();
   });
 
   test("preview without path returns 400", async () => {
@@ -158,6 +173,7 @@ describe("FilesPlugin path validation", () => {
         plugin: "files",
       }),
     );
+    expectNoSdkCall();
   });
 
   test("upload without path returns 400", async () => {
@@ -178,6 +194,7 @@ describe("FilesPlugin path validation", () => {
         plugin: "files",
       }),
     );
+    expectNoSdkCall();
   });
 
   test("delete with null bytes in path returns 400", async () => {
@@ -196,5 +213,6 @@ describe("FilesPlugin path validation", () => {
         error: "path must not contain null bytes",
       }),
     );
+    expectNoSdkCall();
   });
 });

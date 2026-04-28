@@ -64,10 +64,16 @@ export function mockReq(
   volumeKey: string,
   overrides: Record<string, any> = {},
 ): any {
+  // Lowercase override header keys so `req.header(name)` (case-insensitive
+  // via toLowerCase) matches them regardless of how callers cased the keys.
+  const lowercased: Record<string, string> = {};
+  for (const [k, v] of Object.entries(overrides.headers ?? {})) {
+    lowercased[k.toLowerCase()] = v as string;
+  }
   const headers: Record<string, string> = {
     "x-forwarded-access-token": "test-token",
     "x-forwarded-user": "test-user",
-    ...(overrides.headers ?? {}),
+    ...lowercased,
   };
 
   const req: any = {

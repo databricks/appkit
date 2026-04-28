@@ -76,10 +76,15 @@ describe("FilesPlugin shutdown and trackWrite", () => {
 
     (plugin as any).inflightWrites = 1;
 
-    const shutdownPromise = plugin.shutdown();
+    let settled = false;
+    const shutdownPromise = plugin.shutdown().finally(() => {
+      settled = true;
+    });
 
-    // After 500ms the shutdown loop should still be waiting
+    // After 500ms with inflightWrites > 0, shutdown must still be pending —
+    // an immediate-return regression would settle here.
     await vi.advanceTimersByTimeAsync(500);
+    expect(settled).toBe(false);
 
     // Simulate the write completing
     (plugin as any).inflightWrites = 0;
@@ -87,6 +92,7 @@ describe("FilesPlugin shutdown and trackWrite", () => {
     await vi.advanceTimersByTimeAsync(500);
     await shutdownPromise;
 
+    expect(settled).toBe(true);
     expect((plugin as any).inflightWrites).toBe(0);
   });
 
