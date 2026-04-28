@@ -10,6 +10,55 @@ import type {
 } from "./types";
 import { useQueryHMR } from "./use-query-hmr";
 
+/**
+ * Shallow structural equality for analytics query parameter objects.
+ *
+ * Analytics query parameters are produced by the `sql.*` builders and are
+ * always plain objects keyed to primitive values (string | number | boolean
+ * | null | undefined), so shallow equality is sufficient and substantially
+ * cheaper than a full deep-equal.
+ */
+function shallowEqualParams(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (
+    a === null ||
+    b === null ||
+    typeof a !== "object" ||
+    typeof b !== "object"
+  ) {
+    return false;
+  }
+  const aKeys = Object.keys(a as Record<string, unknown>);
+  const bKeys = Object.keys(b as Record<string, unknown>);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (!Object.hasOwn(b, key)) return false;
+    if (
+      !Object.is(
+        (a as Record<string, unknown>)[key],
+        (b as Record<string, unknown>)[key],
+      )
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Stabilize a value's identity across renders when it is structurally equal
+ * to the previous value. Used to make object-literal parameters safe to pass
+ * directly to `useAnalyticsQuery` without forcing every consumer to wrap
+ * params in `useMemo`.
+ */
+function useStableParams<T>(value: T): T {
+  const ref = useRef<T>(value);
+  if (!shallowEqualParams(ref.current, value)) {
+    ref.current = value;
+  }
+  return ref.current;
+}
+
 function getDevMode() {
   const url = new URL(window.location.href);
   const searchParams = url.searchParams;
@@ -79,9 +128,18 @@ export function useAnalyticsQuery<
     );
   }
 
+  // Stabilize the parameters reference across renders. Without this, a fresh
+  // object literal at the call site (e.g. `useAnalyticsQuery("k", { limit: 10 })`)
+  // would change identity every render, invalidating the `payload` memo and
+  // re-running `start` -> infinite refetch loop.
+  const stableParameters = useStableParams(parameters);
+
   const payload = useMemo(() => {
     try {
-      const serialized = JSON.stringify({ parameters, format });
+      const serialized = JSON.stringify({
+        parameters: stableParameters,
+        format,
+      });
       const sizeInBytes = new Blob([serialized]).size;
       if (sizeInBytes > maxParametersSize) {
         throw new Error(
@@ -94,7 +152,7 @@ export function useAnalyticsQuery<
       console.error("useAnalyticsQuery: Failed to serialize parameters", error);
       return null;
     }
-  }, [parameters, format, maxParametersSize]);
+  }, [stableParameters, format, maxParametersSize]);
 
   const start = useCallback(() => {
     if (payload === null) {
