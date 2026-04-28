@@ -358,6 +358,29 @@ async function runPromote(
   }
 
   if (!options.skipSync && !options.dryRun) {
+    // Monorepo-only: regenerate the auto-generated stable/beta plugin
+    // barrels so the runtime exports match the new manifest stability.
+    // No-op outside the AppKit monorepo (third-party plugin projects don't
+    // ship the generator).
+    const generatorPath = path.join(cwd, "tools", "generate-plugin-entries.ts");
+    if (fs.existsSync(generatorPath)) {
+      console.log(`\n${prefix}Regenerating plugin entry barrels...`);
+      const { execSync } = await import("node:child_process");
+      try {
+        execSync("pnpm exec tsx tools/generate-plugin-entries.ts", {
+          cwd,
+          stdio: "inherit",
+        });
+      } catch {
+        console.error(
+          `Error: post-promote 'generate-plugin-entries' failed. ` +
+            `Manifest was updated, but stable/beta export barrels may be stale. ` +
+            `Run 'pnpm run generate:plugin-entries' manually.`,
+        );
+        process.exit(1);
+      }
+    }
+
     console.log(`\n${prefix}Running plugin sync...`);
     const { execSync } = await import("node:child_process");
     try {

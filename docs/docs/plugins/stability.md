@@ -122,6 +122,26 @@ Only stable plugins can be marked `requiredByTemplate`. Non-stable plugins alway
 
 The import path (`/beta`) only applies to first-party plugins shipped inside `@databricks/appkit`. Third-party plugins declare stability via the `stability` field in their `manifest.json`. CLI tooling (`plugin list`, `plugin sync`) surfaces this information to users.
 
+## For First-Party Plugin Authors (AppKit Monorepo)
+
+Inside the AppKit monorepo, each plugin's `manifest.json` `stability` field is the **single source of truth** for which subpath ships the plugin. A build-time generator (`tools/generate-plugin-entries.ts`) reads every `packages/appkit/src/plugins/<name>/manifest.json` and writes:
+
+- `packages/appkit/src/plugins/stable-exports.generated.ts` — re-exports of stable plugins, included by `src/index.ts` (the `@databricks/appkit` entry).
+- `packages/appkit/src/plugins/beta-exports.generated.ts` — re-exports of beta plugins, included by `src/beta.ts` (the `@databricks/appkit/beta` entry).
+
+These generated barrels are committed and verified by CI; an out-of-date barrel fails the `Check generated types are up to date` step.
+
+The `appkit plugin promote` command detects monorepo context (presence of `tools/generate-plugin-entries.ts`) and re-runs the generator after updating the manifest, so the runtime exports, the synced `appkit.plugins.json`, and the manifest can never drift apart.
+
+To move a built-in plugin between tiers manually:
+
+```bash
+# Edit packages/appkit/src/plugins/<name>/manifest.json
+# Set "stability": "beta" (or remove the field for stable)
+pnpm run generate:plugin-entries  # regenerate the barrels
+pnpm sync:template                # regenerate appkit.plugins.json
+```
+
 ## Current Plugins by Tier
 
 All built-in plugins are currently **stable**:

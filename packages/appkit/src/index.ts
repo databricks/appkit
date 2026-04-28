@@ -54,15 +54,7 @@ export {
   type ToPlugin,
   toPlugin,
 } from "./plugin";
-export {
-  analytics,
-  files,
-  genie,
-  jobs,
-  lakebase,
-  server,
-  serving,
-} from "./plugins";
+export * from "./plugins/stable-exports.generated";
 // Files plugin types (for custom policy authoring)
 export type {
   FileAction,
@@ -88,6 +80,7 @@ export type {
   ServingEndpointRegistry,
   ServingFactory,
 } from "./plugins/serving/types";
+export * from "./plugins/stable-exports.generated";
 // Registry types and utilities for plugin manifests
 export type {
   ConfigSchema,

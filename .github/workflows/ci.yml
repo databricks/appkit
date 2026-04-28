@@ -55,8 +55,12 @@ jobs:
       - name: Check generated types are up to date
         run: |
           pnpm run generate:types
-          if ! git diff --exit-code packages/shared/src/schemas/plugin-manifest.generated.ts packages/appkit/src/registry/types.generated.ts; then
-            echo "❌ Error: Generated types are out of sync with plugin-manifest.schema.json."
+          if ! git diff --exit-code \
+              packages/shared/src/schemas/plugin-manifest.generated.ts \
+              packages/appkit/src/registry/types.generated.ts \
+              packages/appkit/src/plugins/stable-exports.generated.ts \
+              packages/appkit/src/plugins/beta-exports.generated.ts; then
+            echo "❌ Error: Generated files are out of sync with their source manifests/schemas."
             echo ""
             echo "To fix this:"
             echo "  1. Run: pnpm run generate:types"
