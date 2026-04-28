@@ -22,6 +22,19 @@ function getArrowStreamUrl(id: string) {
   return `/api/analytics/arrow-result/${id}`;
 }
 
+/**
+ * Client-side defensive cap on inline Arrow IPC attachments (8 MiB decoded).
+ * Mirrors the server's MAX_INLINE_ATTACHMENT_BYTES so a misconfigured proxy
+ * (or a future server bug) can't push us into allocating an unbounded
+ * Uint8Array and hanging the browser.
+ *
+ * REMOVE THIS GUARD if PR #320 (stash + serve via /arrow-result) lands —
+ * that proposal eliminates the arrow_inline SSE path entirely, so bulk
+ * bytes flow over HTTP where the browser handles backpressure natively
+ * and Content-Length is exposed up-front.
+ */
+const MAX_INLINE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+
 /** Decode a base64 string into a Uint8Array suitable for Arrow IPC parsing. */
 function decodeBase64(b64: string): Uint8Array {
   const binary = atob(b64);
@@ -169,6 +182,19 @@ export function useAnalyticsQuery<
             ) {
               console.error(
                 "[useAnalyticsQuery] arrow_inline message missing attachment",
+              );
+              setLoading(false);
+              setError("Unable to load data, please try again");
+              return;
+            }
+            // base64 length L decodes to ~L*3/4 bytes; reject before
+            // allocating a multi-MiB Uint8Array.
+            const decodedSize = Math.ceil((parsed.attachment.length * 3) / 4);
+            if (decodedSize > MAX_INLINE_ATTACHMENT_BYTES) {
+              console.error(
+                "[useAnalyticsQuery] arrow_inline attachment exceeds %d bytes (got %d)",
+                MAX_INLINE_ATTACHMENT_BYTES,
+                decodedSize,
               );
               setLoading(false);
               setError("Unable to load data, please try again");

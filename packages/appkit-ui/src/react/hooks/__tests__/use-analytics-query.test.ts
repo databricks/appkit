@@ -102,6 +102,27 @@ describe("useAnalyticsQuery", () => {
     }
   });
 
+  test("rejects oversized arrow_inline attachment without allocating a huge buffer", async () => {
+    // Base64 string that would decode to ~9 MiB (>8 MiB cap). The hook
+    // should reject before calling decodeBase64 / processArrowBuffer.
+    const oversized = "A".repeat(13 * 1024 * 1024);
+
+    const { result } = renderHook(() =>
+      useAnalyticsQuery("q", null, { format: "ARROW_STREAM" }),
+    );
+
+    await lastConnectArgs.onMessage({
+      data: JSON.stringify({ type: "arrow_inline", attachment: oversized }),
+    });
+
+    await waitFor(() => {
+      expect(result.current.error).toBe(
+        "Unable to load data, please try again",
+      );
+    });
+    expect(mockProcessArrowBuffer).not.toHaveBeenCalled();
+  });
+
   test("still handles type:result rows for JSON_ARRAY", async () => {
     const { result } = renderHook(() =>
       useAnalyticsQuery("q", null, { format: "JSON_ARRAY" }),

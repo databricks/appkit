@@ -923,9 +923,12 @@ describe("Analytics Plugin", () => {
 
       const executeMock = vi.fn().mockImplementation((_wc, _opts, signal) => {
         // Simulate a signal that becomes aborted before the failure surfaces —
-        // e.g. the client cancelled the SSE stream mid-query.
-        signal?.dispatchEvent?.(new Event("abort"));
-        Object.defineProperty(signal, "aborted", { value: true });
+        // e.g. the client cancelled the SSE stream mid-query. Use vitest's
+        // getter spy rather than Object.defineProperty so we don't try to
+        // override the native non-configurable AbortSignal.aborted getter.
+        if (signal) {
+          vi.spyOn(signal, "aborted", "get").mockReturnValue(true);
+        }
         return Promise.reject(
           new Error(
             "INVALID_PARAMETER_VALUE: ARROW_STREAM not supported with INLINE disposition",

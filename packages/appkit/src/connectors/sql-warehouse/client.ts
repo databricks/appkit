@@ -32,6 +32,10 @@ const logger = createLogger("connectors:sql-warehouse");
  * the SSE event cap fails here with a clear error rather than a confusing
  * "Buffer size exceeded" downstream. Larger results should use
  * `disposition: "EXTERNAL_LINKS"`, which the analytics fallback handles.
+ *
+ * RAISE TO 25 MiB (Databricks API hard cap on INLINE) if PR #320 (stash +
+ * serve via /arrow-result) lands — that proposal moves bulk bytes off SSE
+ * onto HTTP, so the SSE event-size constraint no longer applies here.
  */
 const MAX_INLINE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 
