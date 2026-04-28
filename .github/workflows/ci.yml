@@ -68,12 +68,16 @@ jobs:
             echo ""
             exit 1
           fi
-      - name: Build shared package
+      - name: Build shared package dist (for sync:template CLI)
         # `pnpm run sync:template` runs through `packages/shared/bin/appkit.js`
         # which imports the built `packages/shared/dist/cli/index.js`. The
-        # lint job doesn't otherwise build, so build just the shared package
-        # before invoking sync. Builds in ~2s.
-        run: pnpm --filter shared build:package
+        # lint job doesn't otherwise build, so build just shared's dist
+        # before invoking sync. We invoke tsdown directly rather than
+        # `pnpm --filter shared build:package` because the latter also
+        # re-runs `generate-schema-types.ts`, which writes the raw (unformatted)
+        # version of `plugin-manifest.generated.ts` and trips the biome
+        # check that runs immediately after. ~1s.
+        run: pnpm --filter shared exec tsdown --config tsdown.config.ts
       - name: Check synced template manifest is up to date
         run: |
           pnpm run sync:template
