@@ -187,6 +187,30 @@ describe("Genie Plugin", () => {
     });
   });
 
+  describe("getAgentTools / executeAgentTool", () => {
+    test("produces independent tool entries per configured space", () => {
+      const plugin = new GeniePlugin(config);
+      const names = plugin.getAgentTools().map((t) => t.name);
+
+      expect(names).toContain("myspace.sendMessage");
+      expect(names).toContain("myspace.getConversation");
+      expect(names).toContain("salesbot.sendMessage");
+      expect(names).toContain("salesbot.getConversation");
+      expect(names).toHaveLength(4);
+    });
+
+    test("returns LLM-friendly error string for invalid tool args", async () => {
+      const plugin = new GeniePlugin(config);
+      const result = await plugin.executeAgentTool(
+        "myspace.getConversation",
+        {},
+      );
+      expect(typeof result).toBe("string");
+      expect(result).toContain("Invalid arguments for myspace.getConversation");
+      expect(result).toContain("conversationId");
+    });
+  });
+
   describe("space alias resolution", () => {
     test("should return 404 for unknown alias", async () => {
       const plugin = new GeniePlugin(config);

@@ -1,16 +1,26 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type express from "express";
 import type {
+  AgentToolDefinition,
   IAppRouter,
   PluginExecuteConfig,
   SQLTypeMarker,
   StreamExecutionSettings,
+  ToolProvider,
 } from "shared";
+import { z } from "zod";
 import { SQLWarehouseConnector } from "../../connectors";
 import { getWarehouseId, getWorkspaceClient } from "../../context";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
+import { buildToolkitEntries } from "../../core/agent/build-toolkit";
+import {
+  defineTool,
+  executeFromRegistry,
+  toolsFromRegistry,
+} from "../../core/agent/tools/define-tool";
+import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
 import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import { QueryProcessor } from "./query";
@@ -22,7 +32,7 @@ import type {
 
 const logger = createLogger("analytics");
 
-export class AnalyticsPlugin extends Plugin {
+export class AnalyticsPlugin extends Plugin implements ToolProvider {
   /** Plugin manifest declaring metadata and resource requirements */
   static manifest = manifest as PluginManifest<"analytics">;
 
@@ -263,6 +273,52 @@ export class AnalyticsPlugin extends Plugin {
 
   async shutdown(): Promise<void> {
     this.streamManager.abortAll();
+  }
+
+  private tools = {
+    query: defineTool({
+      description:
+        "Execute a read-only SQL query against the Databricks SQL warehouse. Only SELECT, WITH, SHOW, EXPLAIN, and DESCRIBE statements are accepted; writes are rejected. Returns the query results as JSON.",
+      schema: z.object({
+        query: z
+          .string()
+          .describe(
+            "The SQL query to execute. Must be a SELECT, WITH, SHOW, EXPLAIN, or DESCRIBE statement.",
+          ),
+      }),
+      annotations: {
+        readOnly: true,
+        requiresUserContext: true,
+      },
+      autoInheritable: true,
+      handler: (args, signal) => {
+        assertReadOnlySql(args.query);
+        return this.query(args.query, undefined, undefined, signal);
+      },
+    }),
+  };
+
+  getAgentTools(): AgentToolDefinition[] {
+    return toolsFromRegistry(this.tools);
+  }
+
+  async executeAgentTool(
+    name: string,
+    args: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    return executeFromRegistry(this.tools, name, args, signal);
+  }
+
+  /**
+   * Returns the plugin's tools as a keyed record of `ToolkitEntry` markers.
+   * Called by the agents plugin (via `resolveToolkitFromProvider`) to spread
+   * a filtered, renamed view of the plugin's tools into an agent's tool
+   * index. Most callers should go through `fromPlugin(analytics, opts)` at
+   * module scope instead of reaching for this directly.
+   */
+  toolkit(opts?: import("../../core/agent/types").ToolkitOptions) {
+    return buildToolkitEntries(this.name, this.tools, opts);
   }
 
   /**
