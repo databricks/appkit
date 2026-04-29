@@ -89,7 +89,7 @@ describe("useChartData", () => {
       expect(mockUseAnalyticsQuery).toHaveBeenCalledWith(
         "test",
         undefined,
-        expect.objectContaining({ format: "JSON" }),
+        expect.objectContaining({ format: "JSON_ARRAY" }),
       );
     });
 
@@ -110,7 +110,7 @@ describe("useChartData", () => {
       expect(mockUseAnalyticsQuery).toHaveBeenCalledWith(
         "test",
         undefined,
-        expect.objectContaining({ format: "ARROW" }),
+        expect.objectContaining({ format: "ARROW_STREAM" }),
       );
     });
 
@@ -132,7 +132,7 @@ describe("useChartData", () => {
       expect(mockUseAnalyticsQuery).toHaveBeenCalledWith(
         "test",
         { limit: 1000 },
-        expect.objectContaining({ format: "ARROW" }),
+        expect.objectContaining({ format: "ARROW_STREAM" }),
       );
     });
 
@@ -157,7 +157,7 @@ describe("useChartData", () => {
       expect(mockUseAnalyticsQuery).toHaveBeenCalledWith(
         "test",
         expect.objectContaining({ startDate: "2025-01-01" }),
-        expect.objectContaining({ format: "ARROW" }),
+        expect.objectContaining({ format: "ARROW_STREAM" }),
       );
     });
 
@@ -179,7 +179,7 @@ describe("useChartData", () => {
       expect(mockUseAnalyticsQuery).toHaveBeenCalledWith(
         "test",
         expect.anything(),
-        expect.objectContaining({ format: "JSON" }),
+        expect.objectContaining({ format: "JSON_ARRAY" }),
       );
     });
 
@@ -201,7 +201,7 @@ describe("useChartData", () => {
       expect(mockUseAnalyticsQuery).toHaveBeenCalledWith(
         "test",
         expect.anything(),
-        expect.objectContaining({ format: "ARROW" }),
+        expect.objectContaining({ format: "ARROW_STREAM" }),
       );
     });
 
@@ -223,7 +223,7 @@ describe("useChartData", () => {
       expect(mockUseAnalyticsQuery).toHaveBeenCalledWith(
         "test",
         { limit: 100 },
-        expect.objectContaining({ format: "JSON" }),
+        expect.objectContaining({ format: "JSON_ARRAY" }),
       );
     });
 
@@ -243,7 +243,7 @@ describe("useChartData", () => {
       expect(mockUseAnalyticsQuery).toHaveBeenCalledWith(
         "test",
         undefined,
-        expect.objectContaining({ format: "JSON" }),
+        expect.objectContaining({ format: "JSON_ARRAY" }),
       );
     });
   });
