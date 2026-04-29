@@ -111,6 +111,8 @@ jobs:
         run: pnpm run check:licenses
       - name: Check template deps are pinned
         run: pnpm exec tsx tools/check-template-deps.ts
+      - name: Check CLI compat manifest
+        run: pnpm exec tsx tools/check-cli-compat.ts
 
   test:
     name: Unit Tests
