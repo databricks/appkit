@@ -5,6 +5,9 @@ import {
   CardHeader,
   CardTitle,
 } from '@databricks/appkit-ui/react';
+{{- if .plugins.agents}}
+import { AgentChat } from './pages/agents/AgentChat';
+{{- end}}
 {{- if .plugins.analytics}}
 import { AnalyticsPage } from './pages/analytics/AnalyticsPage';
 {{- end}}
@@ -43,6 +46,11 @@ function Layout() {
           <NavLink to="/" end className={navLinkClass}>
             Home
           </NavLink>
+{{- if .plugins.agents}}
+          <NavLink to="/agents" className={navLinkClass}>
+            Agents
+          </NavLink>
+{{- end}}
 {{- if .plugins.analytics}}
           <NavLink to="/analytics" className={navLinkClass}>
             Analytics
@@ -93,6 +101,9 @@ const router = createBrowserRouter([
     element: <Layout />,
     children: [
       { path: '/', element: <HomePage /> },
+{{- if .plugins.agents}}
+      { path: '/agents', element: <AgentChat /> },
+{{- end}}
 {{- if .plugins.analytics}}
       { path: '/analytics', element: <AnalyticsPage /> },
 {{- end}}
