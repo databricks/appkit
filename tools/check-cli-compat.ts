@@ -5,12 +5,22 @@
  *  - "next" key is required
  *  - All keys are "next" or valid semver (X.Y.Z)
  *  - All values have "appkit" and "skills" fields with valid semver strings
+ *  - "next" appkit/skills versions are >= all versioned entries
  */
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const SEMVER = /^\d+\.\d+\.\d+(-[\w.]+)?$/;
+
+function compareSemver(a: string, b: string): number {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] !== pb[i]) return pa[i] - pb[i];
+  }
+  return 0;
+}
 
 const raw = readFileSync(
   join(import.meta.dirname, "../cli-compat.json"),
@@ -62,6 +72,22 @@ for (const [key, value] of Object.entries(manifest)) {
     errors.push(
       `"${key}.skills" must be a valid semver string, got: ${JSON.stringify(entry.skills)}`,
     );
+  }
+}
+
+// Validate that "next" versions are >= all versioned entries
+const nextEntry = manifest.next as Record<string, string>;
+for (const [key, value] of Object.entries(manifest)) {
+  if (key === "next") continue;
+  const entry = value as Record<string, string>;
+  if (!entry.appkit || !nextEntry.appkit) continue;
+
+  for (const field of ["appkit", "skills"] as const) {
+    if (entry[field] && nextEntry[field] && compareSemver(nextEntry[field], entry[field]) < 0) {
+      errors.push(
+        `"next.${field}" (${nextEntry[field]}) must be >= "${key}.${field}" (${entry[field]})`,
+      );
+    }
   }
 }
 
