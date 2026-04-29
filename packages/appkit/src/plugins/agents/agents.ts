@@ -20,10 +20,6 @@ import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
 import { isFromPluginMarker } from "../../core/agent/from-plugin";
 import { loadAgentsFromDir } from "../../core/agent/load-agents";
 import { AgentRunner } from "../../core/agent/runner";
-import {
-  buildBaseSystemPrompt,
-  composeSystemPrompt,
-} from "../../core/agent/system-prompt";
 import { dispatchToolCall } from "../../core/agent/tool-dispatch";
 import { resolveToolkitFromProvider } from "../../core/agent/toolkit-resolver";
 import {
@@ -35,8 +31,6 @@ import {
 import type {
   AgentDefinition,
   AgentsPluginConfig,
-  BaseSystemPromptOption,
-  PromptContext,
   RegisteredAgent,
   ResolvedToolEntry,
 } from "../../core/agent/types";
@@ -53,6 +47,8 @@ import {
   type ToolBudget,
 } from "./http-tool-executor";
 import manifest from "./manifest.json";
+import { composePromptForAgent, normalizeAutoInherit } from "./prompt";
+import { printRegistry } from "./registry-printer";
 import {
   approvalRequestSchema,
   chatRequestSchema,
@@ -80,15 +76,21 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
   protected declare config: AgentsPluginConfig;
 
-  private agents = new Map<string, RegisteredAgent>();
-  private defaultAgentName: string | null = null;
-  private activeStreams = new Map<
+  /** @internal - Mutated by route handlers and tool-execution helpers. */
+  agents = new Map<string, RegisteredAgent>();
+  /** @internal */
+  defaultAgentName: string | null = null;
+  /** @internal */
+  activeStreams = new Map<
     string,
     { controller: AbortController; userId: string }
   >();
-  private mcpClient: AppKitMcpClient | null = null;
-  private threadStore;
-  private approvalGate = new ToolApprovalGate();
+  /** @internal */
+  mcpClient: AppKitMcpClient | null = null;
+  /** @internal */
+  threadStore;
+  /** @internal */
+  approvalGate = new ToolApprovalGate();
 
   constructor(config: AgentsPluginConfig) {
     super(config);
@@ -111,8 +113,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     }
   }
 
-  /** Effective approval policy with defaults applied. */
-  private get resolvedApprovalPolicy(): {
+  /** Effective approval policy with defaults applied. @internal */
+  get resolvedApprovalPolicy(): {
     requireForDestructive: boolean;
     timeoutMs: number;
   } {
@@ -123,8 +125,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     };
   }
 
-  /** Effective DoS limits with defaults applied. */
-  private get resolvedLimits(): {
+  /** Effective DoS limits with defaults applied. @internal */
+  get resolvedLimits(): {
     maxConcurrentStreamsPerUser: number;
     maxToolCalls: number;
     maxSubAgentDepth: number;
@@ -137,8 +139,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     };
   }
 
-  /** Count active streams owned by a given user. */
-  private countUserStreams(userId: string): number {
+  /** Count active streams owned by a given user. @internal */
+  countUserStreams(userId: string): number {
     let n = 0;
     for (const entry of this.activeStreams.values()) {
       if (entry.userId === userId) n++;
@@ -149,7 +151,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   async setup() {
     await this.loadAgents();
     this.mountInvocationsRoute();
-    this.printRegistry();
+    printRegistry(this.agents, this.defaultAgentName);
   }
 
   /**
@@ -1161,22 +1163,6 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     return first.done ? null : first.value;
   }
 
-  private printRegistry(): void {
-    if (this.agents.size === 0) return;
-    console.log("");
-    console.log(`  ${pc.bold("Agents")} ${pc.dim(`(${this.agents.size})`)}`);
-    console.log(`  ${pc.dim("─".repeat(60))}`);
-    for (const [name, reg] of this.agents) {
-      const tools = reg.toolIndex.size;
-      const marker = name === this.defaultAgentName ? pc.green("●") : " ";
-      console.log(
-        `  ${marker} ${pc.bold(name.padEnd(24))} ${pc.dim(`${tools} tools`)}`,
-      );
-    }
-    console.log(`  ${pc.dim("─".repeat(60))}`);
-    console.log("");
-  }
-
   async shutdown(): Promise<void> {
     this.approvalGate.abortAll();
     if (this.mcpClient) {
@@ -1207,42 +1193,6 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     this.agents.set(name, registered);
     if (!this.defaultAgentName) this.defaultAgentName = name;
   }
-}
-
-function normalizeAutoInherit(value: AgentsPluginConfig["autoInheritTools"]): {
-  file: boolean;
-  code: boolean;
-} {
-  // Default is opt-out for both origins. A markdown agent or code-defined
-  // agent with no declared `tools:` gets an empty tool index unless the
-  // developer explicitly flips `autoInheritTools` on. Even then, only tools
-  // whose plugin author marked `autoInheritable: true` are spread — see
-  // `applyAutoInherit` for the filter.
-  if (value === undefined) return { file: false, code: false };
-  if (typeof value === "boolean") return { file: value, code: value };
-  return { file: value.file ?? false, code: value.code ?? false };
-}
-
-function composePromptForAgent(
-  registered: RegisteredAgent,
-  pluginLevel: BaseSystemPromptOption | undefined,
-  ctx: PromptContext,
-): string {
-  const perAgent = registered.baseSystemPrompt;
-  const resolved = perAgent !== undefined ? perAgent : pluginLevel;
-
-  let base = "";
-  if (resolved === false) {
-    base = "";
-  } else if (typeof resolved === "string") {
-    base = resolved;
-  } else if (typeof resolved === "function") {
-    base = resolved(ctx);
-  } else {
-    base = buildBaseSystemPrompt(ctx);
-  }
-
-  return composeSystemPrompt(base, registered.instructions);
 }
 
 /**
