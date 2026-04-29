@@ -205,18 +205,25 @@ export class CacheManager {
           // check if the value is in the cache
           const cached = await this.storage.get<T>(cacheKey);
           if (cached !== null) {
-            span.setAttribute("cache.hit", true);
-            span.setStatus({ code: SpanStatusCode.OK });
-            this.telemetryMetrics.cacheHitCount.add(1, {
-              "cache.key": cacheKey,
-            });
+            // Storage returns entries unconditionally; expiry check is the
+            // CacheManager's responsibility. If the entry has expired,
+            // delete it and treat as a miss so fn() re-executes.
+            if (Date.now() > cached.expiry) {
+              await this.storage.delete(cacheKey);
+            } else {
+              span.setAttribute("cache.hit", true);
+              span.setStatus({ code: SpanStatusCode.OK });
+              this.telemetryMetrics.cacheHitCount.add(1, {
+                "cache.key": cacheKey,
+              });
 
-            logger.event()?.setExecution({
-              cache_hit: true,
-              cache_key: cacheKey,
-            });
+              logger.event()?.setExecution({
+                cache_hit: true,
+                cache_key: cacheKey,
+              });
 
-            return cached.value as T;
+              return cached.value as T;
+            }
           }
 
           // check if the value is being processed by another request
