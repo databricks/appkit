@@ -16,6 +16,7 @@ import { Route as SqlHelpersRouteRouteImport } from './routes/sql-helpers.route'
 import { Route as ServingRouteRouteImport } from './routes/serving.route'
 import { Route as ReconnectRouteRouteImport } from './routes/reconnect.route'
 import { Route as PolicyMatrixRouteRouteImport } from './routes/policy-matrix.route'
+import { Route as MetricsRouteRouteImport } from './routes/metrics.route'
 import { Route as LakebaseRouteRouteImport } from './routes/lakebase.route'
 import { Route as JobsRouteRouteImport } from './routes/jobs.route'
 import { Route as GenieRouteRouteImport } from './routes/genie.route'
@@ -59,6 +60,11 @@ const ReconnectRouteRoute = ReconnectRouteRouteImport.update({
 const PolicyMatrixRouteRoute = PolicyMatrixRouteRouteImport.update({
   id: '/policy-matrix',
   path: '/policy-matrix',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MetricsRouteRoute = MetricsRouteRouteImport.update({
+  id: '/metrics',
+  path: '/metrics',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LakebaseRouteRoute = LakebaseRouteRouteImport.update({
@@ -117,6 +123,7 @@ export interface FileRoutesByFullPath {
   '/genie': typeof GenieRouteRoute
   '/jobs': typeof JobsRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
+  '/metrics': typeof MetricsRouteRoute
   '/policy-matrix': typeof PolicyMatrixRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
   '/serving': typeof ServingRouteRoute
@@ -135,6 +142,7 @@ export interface FileRoutesByTo {
   '/genie': typeof GenieRouteRoute
   '/jobs': typeof JobsRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
+  '/metrics': typeof MetricsRouteRoute
   '/policy-matrix': typeof PolicyMatrixRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
   '/serving': typeof ServingRouteRoute
@@ -154,6 +162,7 @@ export interface FileRoutesById {
   '/genie': typeof GenieRouteRoute
   '/jobs': typeof JobsRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
+  '/metrics': typeof MetricsRouteRoute
   '/policy-matrix': typeof PolicyMatrixRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
   '/serving': typeof ServingRouteRoute
@@ -174,6 +183,7 @@ export interface FileRouteTypes {
     | '/genie'
     | '/jobs'
     | '/lakebase'
+    | '/metrics'
     | '/policy-matrix'
     | '/reconnect'
     | '/serving'
@@ -192,6 +202,7 @@ export interface FileRouteTypes {
     | '/genie'
     | '/jobs'
     | '/lakebase'
+    | '/metrics'
     | '/policy-matrix'
     | '/reconnect'
     | '/serving'
@@ -210,6 +221,7 @@ export interface FileRouteTypes {
     | '/genie'
     | '/jobs'
     | '/lakebase'
+    | '/metrics'
     | '/policy-matrix'
     | '/reconnect'
     | '/serving'
@@ -229,6 +241,7 @@ export interface RootRouteChildren {
   GenieRouteRoute: typeof GenieRouteRoute
   JobsRouteRoute: typeof JobsRouteRoute
   LakebaseRouteRoute: typeof LakebaseRouteRoute
+  MetricsRouteRoute: typeof MetricsRouteRoute
   PolicyMatrixRouteRoute: typeof PolicyMatrixRouteRoute
   ReconnectRouteRoute: typeof ReconnectRouteRoute
   ServingRouteRoute: typeof ServingRouteRoute
@@ -287,6 +300,13 @@ declare module '@tanstack/react-router' {
       path: '/policy-matrix'
       fullPath: '/policy-matrix'
       preLoaderRoute: typeof PolicyMatrixRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/metrics': {
+      id: '/metrics'
+      path: '/metrics'
+      fullPath: '/metrics'
+      preLoaderRoute: typeof MetricsRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/lakebase': {
@@ -365,6 +385,7 @@ const rootRouteChildren: RootRouteChildren = {
   GenieRouteRoute: GenieRouteRoute,
   JobsRouteRoute: JobsRouteRoute,
   LakebaseRouteRoute: LakebaseRouteRoute,
+  MetricsRouteRoute: MetricsRouteRoute,
   PolicyMatrixRouteRoute: PolicyMatrixRouteRoute,
   ReconnectRouteRoute: ReconnectRouteRoute,
   ServingRouteRoute: ServingRouteRoute,

@@ -111,6 +111,24 @@ function IndexRoute() {
           <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
             <div className="flex flex-col h-full">
               <h3 className="text-2xl font-semibold text-foreground mb-3">
+                Metric Views
+              </h3>
+              <p className="text-muted-foreground mb-6 flex-grow">
+                Consume UC Metric Views with type-safe measures, dimensions,
+                filter spec, and metadata-driven Plotly formatting.
+              </p>
+              <Button
+                onClick={() => navigate({ to: "/metrics" })}
+                className="w-full"
+              >
+                Explore Metric Views
+              </Button>
+            </div>
+          </Card>
+
+          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
+            <div className="flex flex-col h-full">
+              <h3 className="text-2xl font-semibold text-foreground mb-3">
                 Telemetry
               </h3>
               <p className="text-muted-foreground mb-6 flex-grow">

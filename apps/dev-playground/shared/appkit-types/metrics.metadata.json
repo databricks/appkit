@@ -1,0 +1,79 @@
+{
+  "revenue": {
+    "source": "appkit_demo.public.revenue_metrics",
+    "lane": "sp",
+    "measures": {
+      "arr": {
+        "type": "DECIMAL(38,2)",
+        "display_name": "Annual Recurring Revenue",
+        "format": "$#,##0.00",
+        "description": "Annualized contract value across all active subscriptions"
+      },
+      "mrr": {
+        "type": "DECIMAL(38,2)",
+        "display_name": "Monthly Recurring Revenue",
+        "format": "$#,##0.00"
+      },
+      "new_arr": {
+        "type": "DECIMAL(38,2)",
+        "display_name": "New ARR",
+        "format": "$#,##0.00"
+      },
+      "churned_arr": {
+        "type": "DECIMAL(38,2)",
+        "display_name": "Churned ARR",
+        "format": "$#,##0.00"
+      }
+    },
+    "dimensions": {
+      "region": {
+        "type": "STRING",
+        "display_name": "Region"
+      },
+      "segment": {
+        "type": "STRING",
+        "display_name": "Customer Segment"
+      },
+      "created_at": {
+        "type": "TIMESTAMP",
+        "display_name": "Subscription Start",
+        "time_grain": ["day", "week", "month", "quarter", "year"]
+      }
+    }
+  },
+  "customer_metrics": {
+    "source": "appkit_demo.public.customer_metrics",
+    "lane": "obo",
+    "measures": {
+      "active_accounts": {
+        "type": "BIGINT",
+        "display_name": "Active Accounts",
+        "format": "#,##0"
+      },
+      "churn_rate": {
+        "type": "DECIMAL(10,4)",
+        "display_name": "Churn Rate",
+        "format": "0.0%"
+      },
+      "avg_ltv": {
+        "type": "DECIMAL(38,2)",
+        "display_name": "Average LTV",
+        "format": "$#,##0.00"
+      }
+    },
+    "dimensions": {
+      "segment": {
+        "type": "STRING",
+        "display_name": "Customer Segment"
+      },
+      "region": {
+        "type": "STRING",
+        "display_name": "Region"
+      },
+      "csm_email": {
+        "type": "STRING",
+        "display_name": "CSM Email"
+      }
+    }
+  }
+}
