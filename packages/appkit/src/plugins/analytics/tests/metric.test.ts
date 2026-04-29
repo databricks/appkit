@@ -11,6 +11,7 @@ import { AnalyticsPlugin } from "../analytics";
 import {
   buildMetricSql,
   composeMetricCacheKey,
+  deriveMetricExecutorKey,
   loadMetricRegistry,
   makeMetricRequestSchema,
   validateMetricRequest,
@@ -1774,5 +1775,438 @@ describe("metric — filter translator", () => {
       expect(errorPayload.code).toBe("VALIDATION_ERROR");
       expect(errorPayload.error).toMatch(/not a declared dimension/);
     });
+  });
+});
+
+// ============================================================================
+// Phase 4 — OBO lane + cache key composition (final form)
+//
+// Activates the OBO execution lane and finalizes cache-key composition. The
+// cache executor key for OBO entries is a sha256 hash of the user identity —
+// the raw header value never reaches the cache layer (privacy). Cross-user
+// isolation, cross-lane isolation, and sort-before-hash on measures and
+// dimensions are exercised here.
+// ============================================================================
+
+const CUSTOMER_OBO_REGISTRATION: MetricRegistration = {
+  key: "customer_metrics",
+  source: "appkit_demo.public.customer_metrics",
+  lane: "obo",
+  knownMeasures: ["churn_rate", "arpu"],
+  knownDimensions: ["csm_email", "region"],
+  knownTimeGrainsByDim: {},
+};
+
+describe("metric — Phase 4 cache executor key", () => {
+  describe("deriveMetricExecutorKey", () => {
+    test("returns the literal 'sp' for SP-lane entries", () => {
+      const key = deriveMetricExecutorKey({ lane: "sp" });
+      expect(key).toBe("sp");
+    });
+
+    test("ignores userIdentity for SP-lane entries (caller cannot escalate)", () => {
+      // Even if a caller passes a userIdentity for an SP-lane entry, the
+      // function must return "sp" — SP-lane caches are inherently shared.
+      const key = deriveMetricExecutorKey({
+        lane: "sp",
+        userIdentity: "alice@example.com",
+      });
+      expect(key).toBe("sp");
+    });
+
+    test("returns a sha256 hex digest for OBO-lane entries", () => {
+      const key = deriveMetricExecutorKey({
+        lane: "obo",
+        userIdentity: "alice@example.com",
+      });
+      // sha256 hex digest is 64 chars long.
+      expect(key).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    test("OBO digest is stable across calls for the same identity", () => {
+      const a = deriveMetricExecutorKey({
+        lane: "obo",
+        userIdentity: "alice@example.com",
+      });
+      const b = deriveMetricExecutorKey({
+        lane: "obo",
+        userIdentity: "alice@example.com",
+      });
+      expect(a).toBe(b);
+    });
+
+    test("OBO digests differ for different identities", () => {
+      const alice = deriveMetricExecutorKey({
+        lane: "obo",
+        userIdentity: "alice@example.com",
+      });
+      const bob = deriveMetricExecutorKey({
+        lane: "obo",
+        userIdentity: "bob@example.com",
+      });
+      expect(alice).not.toBe(bob);
+    });
+
+    test("does not contain the raw user identity (privacy)", () => {
+      // The hash output must not include the raw email — the whole point of
+      // hashing is that the cache layer (which logs keys) never sees PII.
+      const identity = "alice@example.com";
+      const key = deriveMetricExecutorKey({
+        lane: "obo",
+        userIdentity: identity,
+      });
+      expect(key).not.toContain(identity);
+      expect(key).not.toContain("alice");
+      expect(key).not.toContain("@");
+    });
+
+    test("OBO-lane null identity falls back to anonymous sentinel", () => {
+      const a = deriveMetricExecutorKey({ lane: "obo", userIdentity: null });
+      const b = deriveMetricExecutorKey({
+        lane: "obo",
+        userIdentity: undefined,
+      });
+      const c = deriveMetricExecutorKey({ lane: "obo", userIdentity: "" });
+      const d = deriveMetricExecutorKey({ lane: "obo", userIdentity: "   " });
+      // All map to the same sentinel hash.
+      expect(a).toBe(b);
+      expect(b).toBe(c);
+      expect(c).toBe(d);
+      expect(a).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    test("OBO sentinel hash differs from any real identity hash", () => {
+      const sentinel = deriveMetricExecutorKey({
+        lane: "obo",
+        userIdentity: undefined,
+      });
+      const realUser = deriveMetricExecutorKey({
+        lane: "obo",
+        userIdentity: "alice@example.com",
+      });
+      expect(sentinel).not.toBe(realUser);
+    });
+
+    test("SP key differs from any OBO key (cross-lane isolation)", () => {
+      const sp = deriveMetricExecutorKey({ lane: "sp" });
+      const obo = deriveMetricExecutorKey({
+        lane: "obo",
+        userIdentity: "alice@example.com",
+      });
+      expect(sp).not.toBe(obo);
+    });
+  });
+
+  describe("composeMetricCacheKey — Phase 4 invariants", () => {
+    test("same args, different measure order → same key", () => {
+      const a = composeMetricCacheKey({
+        metricKey: "revenue",
+        measures: ["arr", "mrr"],
+        format: "JSON",
+        executorKey: "sp",
+      });
+      const b = composeMetricCacheKey({
+        metricKey: "revenue",
+        measures: ["mrr", "arr"],
+        format: "JSON",
+        executorKey: "sp",
+      });
+      expect(a).toEqual(b);
+    });
+
+    test("same args, different dimension order → same key", () => {
+      const a = composeMetricCacheKey({
+        metricKey: "revenue",
+        measures: ["arr"],
+        dimensions: ["region", "segment"],
+        format: "JSON",
+        executorKey: "sp",
+      });
+      const b = composeMetricCacheKey({
+        metricKey: "revenue",
+        measures: ["arr"],
+        dimensions: ["segment", "region"],
+        format: "JSON",
+        executorKey: "sp",
+      });
+      expect(a).toEqual(b);
+    });
+
+    test("same args, different filter predicate order → same key", () => {
+      const a = composeMetricCacheKey({
+        metricKey: "revenue",
+        measures: ["arr"],
+        format: "JSON",
+        executorKey: "sp",
+        filter: {
+          and: [
+            { member: "region", operator: "equals", values: ["EMEA"] },
+            { member: "segment", operator: "equals", values: ["Ent"] },
+          ],
+        },
+      });
+      const b = composeMetricCacheKey({
+        metricKey: "revenue",
+        measures: ["arr"],
+        format: "JSON",
+        executorKey: "sp",
+        filter: {
+          and: [
+            { member: "segment", operator: "equals", values: ["Ent"] },
+            { member: "region", operator: "equals", values: ["EMEA"] },
+          ],
+        },
+      });
+      expect(a).toEqual(b);
+    });
+
+    test("different args → different key", () => {
+      const a = composeMetricCacheKey({
+        metricKey: "revenue",
+        measures: ["arr"],
+        format: "JSON",
+        executorKey: "sp",
+      });
+      const b = composeMetricCacheKey({
+        metricKey: "revenue",
+        measures: ["mrr"],
+        format: "JSON",
+        executorKey: "sp",
+      });
+      expect(a).not.toEqual(b);
+    });
+
+    test("SP vs OBO same args → different keys (cross-lane isolation)", () => {
+      const sp = composeMetricCacheKey({
+        metricKey: "revenue",
+        measures: ["arr"],
+        format: "JSON",
+        executorKey: deriveMetricExecutorKey({ lane: "sp" }),
+      });
+      const obo = composeMetricCacheKey({
+        metricKey: "revenue",
+        measures: ["arr"],
+        format: "JSON",
+        executorKey: deriveMetricExecutorKey({
+          lane: "obo",
+          userIdentity: "alice@example.com",
+        }),
+      });
+      expect(sp).not.toEqual(obo);
+    });
+
+    test("OBO different users → different keys (cross-user isolation)", () => {
+      const alice = composeMetricCacheKey({
+        metricKey: "customer_metrics",
+        measures: ["churn_rate"],
+        format: "JSON",
+        executorKey: deriveMetricExecutorKey({
+          lane: "obo",
+          userIdentity: "alice@example.com",
+        }),
+      });
+      const bob = composeMetricCacheKey({
+        metricKey: "customer_metrics",
+        measures: ["churn_rate"],
+        format: "JSON",
+        executorKey: deriveMetricExecutorKey({
+          lane: "obo",
+          userIdentity: "bob@example.com",
+        }),
+      });
+      expect(alice).not.toEqual(bob);
+    });
+
+    test("OBO same user, same args → same key (cache hit)", () => {
+      const a = composeMetricCacheKey({
+        metricKey: "customer_metrics",
+        measures: ["churn_rate"],
+        format: "JSON",
+        executorKey: deriveMetricExecutorKey({
+          lane: "obo",
+          userIdentity: "alice@example.com",
+        }),
+      });
+      const b = composeMetricCacheKey({
+        metricKey: "customer_metrics",
+        measures: ["churn_rate"],
+        format: "JSON",
+        executorKey: deriveMetricExecutorKey({
+          lane: "obo",
+          userIdentity: "alice@example.com",
+        }),
+      });
+      expect(a).toEqual(b);
+    });
+
+    test("the raw user identity is not present in the cache key (privacy)", () => {
+      const identity = "alice@example.com";
+      const key = composeMetricCacheKey({
+        metricKey: "customer_metrics",
+        measures: ["churn_rate"],
+        format: "JSON",
+        executorKey: deriveMetricExecutorKey({
+          lane: "obo",
+          userIdentity: identity,
+        }),
+      });
+      // Inspect every part — none should contain the raw identity.
+      for (const part of key) {
+        expect(part).not.toContain(identity);
+        expect(part).not.toContain("alice");
+        expect(part).not.toContain("@example.com");
+      }
+    });
+  });
+});
+
+describe("AnalyticsPlugin — Phase 4 OBO + cache executor key", () => {
+  let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
+
+  beforeEach(async () => {
+    setupDatabricksEnv();
+    mockCacheStore.clear();
+    ServiceContext.reset();
+    serviceContextMock = await mockServiceContext();
+  });
+
+  afterEach(() => {
+    serviceContextMock?.restore();
+  });
+
+  test("OBO lane: same args, different mock users → both queries execute (no cache leak)", async () => {
+    const plugin = new AnalyticsPlugin({ timeout: 5000 });
+    plugin._setMetricRegistryForTesting({
+      customer_metrics: CUSTOMER_OBO_REGISTRATION,
+    });
+    const { router, getHandler } = createMockRouter();
+
+    const executeMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        result: { data: [{ csm_email: "alice@x.com", churn_rate: 0.1 }] },
+      })
+      .mockResolvedValueOnce({
+        result: { data: [{ csm_email: "bob@x.com", churn_rate: 0.2 }] },
+      });
+    (plugin as any).SQLClient.executeStatement = executeMock;
+
+    plugin.injectRoutes(router);
+
+    const handler = getHandler("POST", "/metric/:key");
+
+    const aliceReq = createMockRequest({
+      params: { key: "customer_metrics" },
+      body: { measures: ["churn_rate"] },
+      headers: {
+        "x-forwarded-access-token": "alice-token",
+        "x-forwarded-user": "alice@example.com",
+      },
+    });
+    const aliceRes = createMockResponse();
+    await handler(aliceReq, aliceRes);
+
+    const bobReq = createMockRequest({
+      params: { key: "customer_metrics" },
+      body: { measures: ["churn_rate"] },
+      headers: {
+        "x-forwarded-access-token": "bob-token",
+        "x-forwarded-user": "bob@example.com",
+      },
+    });
+    const bobRes = createMockResponse();
+    await handler(bobReq, bobRes);
+
+    // Different users, same query — the OBO cache must be partitioned per
+    // user, so both calls hit the warehouse.
+    expect(executeMock).toHaveBeenCalledTimes(2);
+
+    // Each user sees their own row (no cache cross-contamination).
+    expect(aliceRes.write).toHaveBeenCalledWith(
+      expect.stringContaining("alice@x.com"),
+    );
+    expect(bobRes.write).toHaveBeenCalledWith(
+      expect.stringContaining("bob@x.com"),
+    );
+  });
+
+  test("OBO lane: same user, same args twice → second request hits cache", async () => {
+    const plugin = new AnalyticsPlugin({ timeout: 5000 });
+    plugin._setMetricRegistryForTesting({
+      customer_metrics: CUSTOMER_OBO_REGISTRATION,
+    });
+    const { router, getHandler } = createMockRouter();
+
+    const executeMock = vi.fn().mockResolvedValue({
+      result: { data: [{ csm_email: "alice@x.com", churn_rate: 0.1 }] },
+    });
+    (plugin as any).SQLClient.executeStatement = executeMock;
+
+    plugin.injectRoutes(router);
+
+    const handler = getHandler("POST", "/metric/:key");
+
+    const makeReq = () =>
+      createMockRequest({
+        params: { key: "customer_metrics" },
+        body: { measures: ["churn_rate"] },
+        headers: {
+          "x-forwarded-access-token": "alice-token",
+          "x-forwarded-user": "alice@example.com",
+        },
+      });
+
+    await handler(makeReq(), createMockResponse());
+    await handler(makeReq(), createMockResponse());
+
+    // Second request is served from cache.
+    expect(executeMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("cross-lane isolation: SP user 'sp' literal does not collide with an OBO user named 'sp'", async () => {
+    // Defense-in-depth — the executor-key derivation must not let a user
+    // identity collide with the literal "sp" cache scope. Hashing the
+    // identity ensures this collision is structurally impossible.
+    const sp = deriveMetricExecutorKey({ lane: "sp" });
+    const obo = deriveMetricExecutorKey({
+      lane: "obo",
+      userIdentity: "sp",
+    });
+    expect(sp).not.toBe(obo);
+  });
+
+  test("cache TTL defaults to 1 hour (3600 seconds) — matches existing analytics", async () => {
+    // The route handler builds its `defaultConfig` from `queryDefaults` —
+    // assert the TTL is unchanged so a future refactor that swaps defaults
+    // is caught by this test.
+    const { queryDefaults } = await import("../defaults");
+    expect(queryDefaults.cache?.ttl).toBe(3600);
+  });
+
+  test("metric.json registry rejects same key in both sp and obo lanes (cross-lane key uniqueness)", async () => {
+    // Acceptance criterion 7: a metric key registered in both `sp` and
+    // `obo` is rejected at config-load time. Re-exercise the existing
+    // loader test here under the Phase 4 banner so the requirement is
+    // discoverable when reading Phase 4 tests.
+    const fs = await import("node:fs/promises");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const tmpDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), "appkit-metric-phase4-"),
+    );
+    try {
+      await fs.writeFile(
+        path.join(tmpDir, "metric.json"),
+        JSON.stringify({
+          sp: { revenue: { source: "demo.public.revenue" } },
+          obo: { revenue: { source: "demo.public.revenue" } },
+        }),
+      );
+      await expect(loadMetricRegistry(undefined, tmpDir)).rejects.toThrowError(
+        /Duplicate metric key/,
+      );
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
   });
 });

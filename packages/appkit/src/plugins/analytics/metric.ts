@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { type SQLTypeMarker, sql as sqlHelpers } from "shared";
@@ -1107,20 +1108,31 @@ function renderDimensionClause(
 }
 
 /**
- * Compose the cache key.
+ * Compose the cache key — final Phase 4 form.
  *
  * Reserved namespace `metric:` separates metric-view caches from query
- * caches. Phase 4 finalizes sort-before-hash composition with the full
- * argsHash / executorKey discipline; Phase 3's incremental need is for the
- * key to vary on the structured filter so semantically distinct calls get
- * distinct cache entries.
+ * caches. The key shape is `metric:{metric_key}:{argsHash}:{executorKey}`,
+ * where:
+ *  - `metric_key` is the registry's stable map key (readable in debug logs).
+ *  - `argsHash` is a deterministic serialization of the request body's
+ *    canonical form. Order-insensitive components are sorted before they
+ *    contribute to the hash so semantically equivalent calls collapse to the
+ *    same cache entry.
+ *  - `executorKey` is `"sp"` for SP-lane entries and a sha256 hash of the
+ *    end-user's identity for OBO-lane entries. The raw identity is never
+ *    placed in the cache key (privacy concern: cache stores log keys).
  *
- * Order-insensitive components are sorted before hashing into the key
- * string, matching the PRD's sort-before-hash invariant:
- *  - measures: lexicographic sort
- *  - dimensions: lexicographic sort
- *  - filter: predicates inside each AND/OR group are stable-sorted by
- *    `(member, operator)`; group kind (`and` vs `or`) is preserved
+ * Sort-before-hash applies to:
+ *  - `measures`: lexicographic sort
+ *  - `dimensions`: lexicographic sort
+ *  - `filter`: predicates inside each AND/OR group are stable-sorted by
+ *    `(member, operator)`; group kind (`and` vs `or`) is preserved by
+ *    {@link canonicalizeFilter}
+ *
+ * The returned array is consumed by `CacheManager.generateKey` which
+ * concatenates and sha256-hashes the parts. The structure (one element per
+ * concern) makes the cache key inspectable in tests and debug logs without
+ * giving up determinism.
  */
 export function composeMetricCacheKey(input: {
   metricKey: string;
@@ -1147,6 +1159,41 @@ export function composeMetricCacheKey(input: {
     typeof input.limit === "number" ? String(input.limit) : "_",
     input.executorKey,
   ];
+}
+
+/**
+ * Derive the cache executor key from a metric registration's lane and the
+ * caller's user identity.
+ *
+ * Returns `"sp"` for SP-lane entries (every caller shares the cache) and a
+ * sha256 hex digest of the user identity for OBO-lane entries (each user
+ * gets an isolated cache scope).
+ *
+ * The user identity is hashed — never stored verbatim — so the cache layer
+ * (which logs keys at debug level and persists them in any cache backend)
+ * never sees raw user emails or principal names. A stable, opaque token is
+ * what we need: same user → same key (so cache hits work), different users
+ * → different keys (so isolation holds), and reverse lookup is infeasible.
+ *
+ * For a missing or empty identity, falls back to a literal `"anonymous"`
+ * sentinel rather than an empty string. Empty-string hashes would collide
+ * across all callers without an identity — which is the bug a privacy-aware
+ * design must prevent.
+ */
+export function deriveMetricExecutorKey(input: {
+  lane: MetricLane;
+  userIdentity?: string | null;
+}): string {
+  if (input.lane === "sp") {
+    return "sp";
+  }
+  // OBO lane — hash the user identity so the raw email/principal never
+  // reaches the cache layer. `anonymous` is a sentinel for when the request
+  // has no resolvable identity (in practice this should not happen because
+  // OBO requires `x-forwarded-user`, but we belt-and-suspender it here).
+  const identity = input.userIdentity?.trim();
+  const subject = identity && identity.length > 0 ? identity : "anonymous";
+  return createHash("sha256").update(subject).digest("hex");
 }
 
 /**

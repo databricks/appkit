@@ -17,6 +17,7 @@ import manifest from "./manifest.json";
 import {
   buildMetricSql,
   composeMetricCacheKey,
+  deriveMetricExecutorKey,
   loadMetricRegistry,
   validateMetricRequest,
 } from "./metric";
@@ -253,16 +254,21 @@ export class AnalyticsPlugin extends Plugin {
   /**
    * Handle a metric-view query against `POST /api/analytics/metric/:key`.
    *
-   * Phase 1 surface:
-   *  - body validated by zod (rejects unknown measures when the registry
-   *    has build-time metadata)
-   *  - SQL constructed as `SELECT MEASURE(<m>) FROM <fqn> [LIMIT n]`
+   * Phase 4 surface:
+   *  - body validated by zod (rejects unknown measures, dimensions,
+   *    operators, and timeGrain values per the registry's build-time
+   *    metadata)
+   *  - SQL constructed via {@link buildMetricSql} with sorted SELECT list,
+   *    parameterized filter, and `GROUP BY ALL` when dimensions are present
    *  - response uses the same SSE envelope as the existing query route
    *  - reuses the interceptor chain via `executeStream()` (telemetry,
-   *    timeout, retry, cache)
-   *
-   * OBO dispatch is implemented but only the SP lane has callers in Phase 1.
-   * Phase 4 finalizes OBO + cache key composition.
+   *    timeout, retry, cache) — default 1-hour TTL via `queryDefaults`
+   *  - OBO dispatch: `lane === "obo"` entries route through `this.asUser(req)`,
+   *    same Proxy pattern that `.obo.sql` files use today; SP entries route
+   *    through the plugin's default executor.
+   *  - Cache executor key: `"sp"` for SP-lane entries; sha256 hash of the
+   *    user identity for OBO entries (raw `x-forwarded-user` value never
+   *    reaches the cache layer — see {@link deriveMetricExecutorKey}).
    */
   async _handleMetricRoute(
     req: express.Request,
@@ -309,8 +315,18 @@ export class AnalyticsPlugin extends Plugin {
 
     const format = request.format ?? "JSON";
     const isAsUser = registration.lane === "obo";
+    // OBO lane: dispatch via the existing asUser(req) Proxy — same pattern
+    // used by .obo.sql files in `_handleQueryRoute`. The Proxy threads the
+    // user's `x-forwarded-access-token` through every Databricks call so
+    // the warehouse executes the query under the end user's identity.
     const executor = isAsUser ? this.asUser(req) : this;
-    const executorKey = isAsUser ? this.resolveUserId(req) : "sp";
+    // OBO cache key: hash the user identity so the raw email/principal name
+    // never reaches the cache layer. SP cache key: literal "sp" — the cache
+    // is shared across every caller of the SP-lane metric.
+    const executorKey = deriveMetricExecutorKey({
+      lane: registration.lane,
+      userIdentity: isAsUser ? this.resolveUserId(req) : null,
+    });
 
     const queryParameters =
       format === "ARROW"

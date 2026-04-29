@@ -5,5 +5,9 @@
       "source": "appkit_demo.public.revenue_metrics"
     }
   },
-  "obo": {}
+  "obo": {
+    "customer_metrics": {
+      "source": "appkit_demo.public.customer_metrics"
+    }
+  }
 }
