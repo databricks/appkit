@@ -30,5 +30,9 @@ export default defineConfig({
       from: "src/schemas/template-plugins.schema.json",
       to: "dist/schemas",
     },
+    {
+      from: "src/schemas/metric-source.schema.json",
+      to: "dist/schemas",
+    },
   ],
 });

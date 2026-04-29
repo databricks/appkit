@@ -1,0 +1,9 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`runMetricSync — success > produces a stable success-stdout snapshot 1`] = `
+"Syncing N metric(s) from config/queries/metric.json via warehouse stub-warehouse...
+✓ Wrote shared/appkit-types/metric.d.ts
+✓ Wrote shared/appkit-types/metrics.metadata.json"
+`;
+
+exports[`runMetricSync — success > treats an empty metric.json as a no-op (no fetch call) 1`] = `"No metric entries found. Nothing to sync."`;
