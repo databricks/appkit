@@ -149,8 +149,10 @@ export interface ServingClientConfig {
  * AppKit type-generator (parallel to {@link QueryRegistry}).
  *
  * Each registered metric key contributes an entry whose shape carries the
- * FQN, lane, and the structured measure / dimension lists harvested from the
- * build-time DESCRIBE TABLE EXTENDED ... AS JSON call.
+ * FQN, lane, the structured measure / dimension lists harvested from the
+ * build-time DESCRIBE TABLE EXTENDED ... AS JSON call, and (Phase 5) the
+ * per-column semantic metadata bundle (display name, format spec,
+ * description, time-grain options).
  *
  * @example
  * ```ts
@@ -165,6 +167,16 @@ export interface ServingClientConfig {
  *       measureKeys: "arr" | "mrr";
  *       dimensionKeys: "region" | "created_at";
  *       timeGrains: "day" | "week" | "month";
+ *       metadata: {
+ *         measures: {
+ *           arr: { type: "DECIMAL(38,2)"; display_name: "Annual Recurring Revenue"; format: "$#,##0.00" };
+ *           mrr: { type: "DECIMAL(38,2)" };
+ *         };
+ *         dimensions: {
+ *           region: { type: "STRING" };
+ *           created_at: { type: "TIMESTAMP"; time_grain: readonly ["day", "week", "month"] };
+ *         };
+ *       };
  *     };
  *   }
  * }
@@ -230,6 +242,73 @@ type MetricDimensionMap<K> = K extends AugmentedRegistry<MetricRegistry>
 
 /** Full result row type for a registered metric (measures + dimensions). */
 export type MetricRow<K> = MetricMeasureMap<K> & MetricDimensionMap<K>;
+
+// ============================================================================
+// Metric View Semantic Metadata (Phase 5 — display names, format specs, ...)
+// ============================================================================
+
+/**
+ * The per-column semantic-metadata shape exposed via `useMetricView`'s
+ * `metadata` return field and `formatLabel` / `formatValue`'s second argument.
+ *
+ * Mirrors the `metrics.metadata.json` build-time artifact one-for-one. Every
+ * field except `type` is optional — the YAML 1.1 metric view spec marks them
+ * as opt-in, so the consumer's chart code defends against absence (e.g.
+ * `formatLabel` falls back to camelCase humanization when `display_name` is
+ * absent).
+ */
+export interface MetricColumnMetadata {
+  /** Databricks SQL type ("STRING", "DECIMAL(38,2)", "TIMESTAMP", ...). */
+  type: string;
+  /** YAML 1.1 `display_name` — used by `formatLabel` as the canonical title. */
+  display_name?: string;
+  /**
+   * YAML 1.1 `format` — printf-style spec (`"$#,##0.00"`, `"0.0%"`, etc).
+   * Consumed by `formatValue` (returns formatted string) and `toD3Format`
+   * (returns d3-format-compatible string for Plotly's `tickformat` /
+   * ECharts' `valueFormatter`).
+   */
+  format?: string;
+  /** Column-level documentation, surfaced in tooltips by chart components. */
+  description?: string;
+  /**
+   * Allowed time-grains (only present on time-typed dimensions). Phase 2
+   * widening: lets the call-site narrow `timeGrain` to the dim's allowed list.
+   */
+  time_grain?: readonly string[];
+}
+
+/**
+ * One metric's complete semantic-metadata bundle.
+ *
+ * Mirrors the entry shape inside `metrics.metadata.json`. Returned verbatim
+ * by `useMetricView<K>` in its `metadata` field — TypeScript narrows
+ * `metadata.measures.<measureKey>` and `metadata.dimensions.<dimKey>` from the
+ * registry's per-metric `metadata` augmentation when `K` is a registered key.
+ */
+export interface MetricSemanticMetadata {
+  source: string;
+  lane: "sp" | "obo";
+  measures: Record<string, MetricColumnMetadata>;
+  dimensions: Record<string, MetricColumnMetadata>;
+}
+
+/**
+ * Type-narrowed metadata for a registered metric `K`.
+ *
+ * When `K` is a registered key, resolves to the registry's `metadata` shape
+ * (per-column literal-typed `display_name` / `format` / `time_grain`). When
+ * `K` is `string` (no augmentation), resolves to the structural
+ * {@link MetricSemanticMetadata}.
+ *
+ * Consumers usually destructure: `metadata.measures.arr.format`,
+ * `metadata.dimensions.created_at.time_grain`, etc.
+ */
+export type MetricMetadata<K> = K extends AugmentedRegistry<MetricRegistry>
+  ? MetricRegistry[K] extends { metadata: infer Meta }
+    ? Meta
+    : MetricSemanticMetadata
+  : MetricSemanticMetadata;
 
 // ============================================================================
 // Filter Specification (Phase 3 — recursive AND/OR with 12 v1 operators)
@@ -386,9 +465,24 @@ export interface UseMetricViewOptions<F extends AnalyticsFormat = "JSON"> {
   maxParametersSize?: number;
 }
 
-/** Phase 2 result shape: { data, loading, error }. */
-export interface UseMetricViewResult<TRow> {
+/**
+ * Phase 5 result shape: `{ data, metadata, loading, error }`.
+ *
+ * `metadata` is the build-time-bundled semantic metadata for the queried
+ * metric (measures + dimensions only — not other metrics in the registry).
+ * It is available **before** the data loads (it comes from the build-time
+ * artifact, not the network) and is stable across re-renders for the same
+ * metric key (the runtime registry returns the same object reference).
+ *
+ * When the consuming app has not registered the metadata bundle (via
+ * `registerMetricsMetadata` in `@databricks/appkit-ui/format`), `metadata`
+ * resolves to `null`. The PRD's contract is "available even when data is
+ * null" — but the bundle itself is opt-in, so a `null` here is the
+ * unregistered-app signal.
+ */
+export interface UseMetricViewResult<TRow, TMetadata = MetricSemanticMetadata> {
   data: TRow[] | null;
+  metadata: TMetadata | null;
   loading: boolean;
   error: string | null;
 }

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getMetricMetadata } from "@/format";
 import { connectSSE } from "@/js";
 import type {
   AnalyticsFormat,
   DimensionKey,
   MeasureKey,
   MetricKey,
+  MetricMetadata,
   UseMetricViewArgs,
   UseMetricViewOptions,
   UseMetricViewResult,
@@ -14,10 +16,15 @@ import type {
 /**
  * Subscribe to a metric-view query over SSE.
  *
- * Phase 2 surface — accepts `{ measures, dimensions?, timeGrain?, limit? }`.
+ * Phase 5 surface — accepts `{ measures, dimensions?, timeGrain?, filter?, limit? }`.
  * The result row type narrows at the call site to
  * `Pick<MetricRow<K>, M[number] | D[number]>` based on the chosen measures
  * and dimensions, so chart code receives the exact shape it asked for.
+ *
+ * Returns `{ data, metadata, loading, error }`. The `metadata` field carries
+ * the build-time-bundled semantic metadata for the queried metric (display
+ * names, format specs, descriptions). `metadata` is available **before** the
+ * data loads and is stable across re-renders for the same metric key.
  *
  * Use `as const` on the `measures` and `dimensions` arrays at the call site
  * to preserve literal types (the same pattern used elsewhere in AppKit for
@@ -25,12 +32,14 @@ import type {
  *
  * @example
  * ```tsx
- * const { data, loading, error } = useMetricView("revenue", {
+ * const { data, metadata, loading, error } = useMetricView("revenue", {
  *   measures: ["arr"] as const,
  *   dimensions: ["region", "created_at"] as const,
  *   timeGrain: "month",
  * });
  * // data: Array<{ arr: number; region: string; created_at: string }> | null
+ * // metadata.measures.arr.format → "$#,##0.00"
+ * // metadata.measures.arr.display_name → "Annual Recurring Revenue"
  * ```
  */
 export function useMetricView<
@@ -44,7 +53,7 @@ export function useMetricView<
   metricKey: K,
   args: UseMetricViewArgs<K, M, D>,
   options: UseMetricViewOptions<F> = {} as UseMetricViewOptions<F>,
-): UseMetricViewResult<UseMetricViewRow<K, M, D>> {
+): UseMetricViewResult<UseMetricViewRow<K, M, D>, MetricMetadata<K>> {
   if (!metricKey || metricKey.trim().length === 0) {
     throw new Error("useMetricView: 'metricKey' must be a non-empty string.");
   }
@@ -60,6 +69,18 @@ export function useMetricView<
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Read the build-time semantic-metadata bundle from the format registry.
+  // The lookup is keyed only by `metricKey`, so the returned reference is
+  // stable across re-renders for the same metric (the PRD's contract:
+  // "metadata is stable, not reactive"). Memoizing here is also defense-
+  // in-depth — even if a customer hot-reloads the metadata bundle, this hook
+  // still returns the same object reference for the lifetime of the render
+  // cycle.
+  const metadata = useMemo(
+    () => getMetricMetadata(metricKey) as MetricMetadata<K> | null,
+    [metricKey],
+  );
 
   const payload = useMemo(() => {
     try {
@@ -195,5 +216,5 @@ export function useMetricView<
     };
   }, [start, autoStart]);
 
-  return { data, loading, error };
+  return { data, metadata, loading, error };
 }

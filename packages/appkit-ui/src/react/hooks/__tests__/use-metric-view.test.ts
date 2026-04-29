@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { clearMetricsMetadata } from "@/format";
 
 // Mock connectSSE — capture callbacks so we can simulate SSE events.
 let capturedCallbacks: {
@@ -29,6 +30,7 @@ describe("useMetricView", () => {
   afterEach(() => {
     capturedCallbacks = {};
     vi.clearAllMocks();
+    clearMetricsMetadata();
   });
 
   test("initial state is loading=true with autoStart (default)", () => {
@@ -41,6 +43,8 @@ describe("useMetricView", () => {
     // loading flips to true before the test inspects state.
     expect(result.current.loading).toBe(true);
     expect(result.current.error).toBeNull();
+    // Phase 5: metadata is null when no bundle has been registered.
+    expect(result.current.metadata).toBeNull();
   });
 
   test("connects to /api/analytics/metric/<key> with the request payload", () => {

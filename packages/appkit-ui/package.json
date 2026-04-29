@@ -23,6 +23,10 @@
     "sbom.cdx.json"
   ],
   "exports": {
+    "./format": {
+      "development": "./src/format/index.ts",
+      "default": "./dist/format/index.js"
+    },
     "./js": {
       "development": "./src/js/index.ts",
       "default": "./dist/js/index.js"
@@ -118,6 +122,7 @@
   },
   "publishConfig": {
     "exports": {
+      "./format": "./dist/format/index.js",
       "./js": "./dist/js/index.js",
       "./js/beta": "./dist/js/beta.js",
       "./react": "./dist/react/index.js",

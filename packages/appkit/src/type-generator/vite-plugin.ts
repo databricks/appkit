@@ -5,6 +5,7 @@ import { createLogger } from "../logging/logger";
 import {
   ANALYTICS_TYPES_FILE,
   generateFromEntryPoint,
+  METRIC_METADATA_FILE,
   METRIC_TYPES_FILE,
   TYPES_DIR,
 } from "./index";
@@ -19,6 +20,12 @@ interface AppKitTypesPluginOptions {
   outFile?: string;
   /** Path to the metric registry d.ts file (relative to client folder). */
   metricOutFile?: string;
+  /**
+   * Path to the metric semantic-metadata JSON file (relative to client folder).
+   * Phase 5 build-time artifact — sibling of {@link metricOutFile}. Skipped
+   * automatically when `metric.json` is absent.
+   */
+  metricMetadataOutFile?: string;
   /** Folders to watch for changes. */
   watchFolders?: string[];
 }
@@ -32,6 +39,7 @@ interface AppKitTypesPluginOptions {
 export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
   let outFile: string;
   let metricOutFile: string;
+  let metricMetadataOutFile: string;
   let watchFolders: string[];
 
   async function generate() {
@@ -49,6 +57,7 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         warehouseId,
         noCache: false,
         metricOutFile,
+        metricMetadataOutFile,
       });
     } catch (error) {
       // throw in production to fail the build
@@ -86,6 +95,11 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
       metricOutFile = path.resolve(
         projectRoot,
         options?.metricOutFile ?? `shared/${TYPES_DIR}/${METRIC_TYPES_FILE}`,
+      );
+      metricMetadataOutFile = path.resolve(
+        projectRoot,
+        options?.metricMetadataOutFile ??
+          `shared/${TYPES_DIR}/${METRIC_METADATA_FILE}`,
       );
       watchFolders = options?.watchFolders ?? [
         path.join(process.cwd(), "config", "queries"),

@@ -58,6 +58,13 @@ interface ResolvedMetricEntry {
  * Phase 1 captured measure flags + types. Phase 2 widens to time-typed
  * dimensions: a column is "time-typed" iff its DESCRIBE entry carries a
  * non-empty `time_grain` attribute listing the allowed grains for that column.
+ *
+ * Phase 5 captures the YAML 1.1 semantic-metadata fields so the build-time
+ * artifact is a complete record of what the metric view declares: display name
+ * (used by `formatLabel` to render axis titles / legend entries / tooltips),
+ * format spec (printf-like string consumed by `formatValue` and `toD3Format`),
+ * and description (column-level documentation). All three are optional in the
+ * YAML; the extractor leaves the field undefined when absent.
  */
 export interface MetricColumnMetadata {
   name: string;
@@ -66,6 +73,20 @@ export interface MetricColumnMetadata {
   isMeasure: boolean;
   /** Optional column comment / display description (best-effort). */
   description?: string;
+  /**
+   * Human-readable display name from the YAML 1.1 `display_name` attribute.
+   * Used by `formatLabel` as the canonical axis / legend / tooltip text;
+   * absent → callers fall back to camelCase / snake_case humanization of `name`.
+   */
+  displayName?: string;
+  /**
+   * Printf-style format spec from the YAML 1.1 `format` attribute (e.g.
+   * `"$#,##0.00"`, `"0.0%"`, `"#,##0"`). `formatValue` and `toD3Format`
+   * consume this passthrough — the framework deliberately does not invent a
+   * format DSL; we forward the YAML's verbatim string and fall back to
+   * sensible defaults when the spec is absent or unrecognized.
+   */
+  format?: string;
   /**
    * Allowed time-grains for this column when present in the YAML's `time_grain`
    * attribute. Undefined means the column is not time-typed. An empty array is
@@ -332,6 +353,12 @@ export function extractMetricColumns(parsed: unknown): MetricColumnMetadata[] {
           ? obj.description
           : undefined;
 
+    const displayName = extractStringFromAny(obj, [
+      "display_name",
+      "displayName",
+    ]);
+    const format = extractStringFromAny(obj, ["format", "format_spec"]);
+
     const timeGrains = extractTimeGrains(obj);
 
     columns.push({
@@ -339,11 +366,41 @@ export function extractMetricColumns(parsed: unknown): MetricColumnMetadata[] {
       type,
       isMeasure,
       description,
+      ...(displayName ? { displayName } : {}),
+      ...(format ? { format } : {}),
       ...(timeGrains ? { timeGrains } : {}),
     });
   }
 
   return columns;
+}
+
+/**
+ * Read a non-empty string attribute from a DESCRIBE column entry, tolerating
+ * the multiple shapes UC has shipped for this metadata over time.
+ *
+ * For each candidate name, we check the column object directly, then under
+ * `metadata.<name>`. The first non-empty trimmed string wins. Empty / missing
+ * → undefined (the caller leaves the field off the emitted artifact).
+ */
+function extractStringFromAny(
+  obj: Record<string, unknown>,
+  candidates: readonly string[],
+): string | undefined {
+  for (const key of candidates) {
+    const direct = obj[key];
+    if (typeof direct === "string" && direct.trim().length > 0) {
+      return direct;
+    }
+    const meta = obj.metadata;
+    if (meta && typeof meta === "object" && !Array.isArray(meta)) {
+      const nested = (meta as Record<string, unknown>)[key];
+      if (typeof nested === "string" && nested.trim().length > 0) {
+        return nested;
+      }
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -484,6 +541,9 @@ ${dimensions};
           .join(" | ")
       : "never";
 
+  const measureMetadata = renderMetadataMap(schema.measures, indent);
+  const dimensionMetadata = renderMetadataMap(schema.dimensions, indent, true);
+
   return `    ${JSON.stringify(schema.key)}: {
       key: ${JSON.stringify(schema.key)};
       source: ${JSON.stringify(schema.source)};
@@ -493,6 +553,61 @@ ${dimensions};
       measureKeys: ${measureUnion};
       dimensionKeys: ${dimensionUnion};
       timeGrains: ${timeGrainUnion};
+      metadata: {
+        measures: ${measureMetadata};
+        dimensions: ${dimensionMetadata};
+      };
+    }`;
+}
+
+/**
+ * Render the type-level shape of a column's semantic-metadata map for the
+ * `metadata` field of a MetricRegistry entry.
+ *
+ * The shape mirrors {@link MetricColumnSemanticMetadata}: each column emits an
+ * object literal with `type` (string literal) plus optional `display_name`,
+ * `format`, `description` (string literals when known, dropped when absent),
+ * and — for dimensions only — `time_grain` (the column's allowed-grain tuple
+ * literal).
+ *
+ * When the column list is empty, the type collapses to `Record<string, never>`
+ * so consumers can still index into `metadata.measures` / `metadata.dimensions`
+ * without TypeScript errors.
+ */
+function renderMetadataMap(
+  cols: MetricColumnMetadata[],
+  indent: string,
+  includeTimeGrain = false,
+): string {
+  if (cols.length === 0) return "Record<string, never>";
+
+  const inner = cols
+    .map((col) => {
+      const fields: string[] = [`type: ${JSON.stringify(col.type)}`];
+      if (col.displayName) {
+        fields.push(`display_name: ${JSON.stringify(col.displayName)}`);
+      }
+      if (col.format) {
+        fields.push(`format: ${JSON.stringify(col.format)}`);
+      }
+      if (col.description) {
+        fields.push(`description: ${JSON.stringify(col.description)}`);
+      }
+      if (includeTimeGrain && col.timeGrains && col.timeGrains.length > 0) {
+        const grainTuple = col.timeGrains
+          .map((g) => JSON.stringify(g))
+          .join(", ");
+        fields.push(`time_grain: readonly [${grainTuple}]`);
+      }
+      const fieldsBlock = fields.map((f) => `${indent}  ${f}`).join(";\n");
+      return `${indent}${JSON.stringify(col.name)}: {
+${fieldsBlock};
+${indent}}`;
+    })
+    .join(";\n");
+
+  return `{
+${inner};
     }`;
 }
 
@@ -537,6 +652,131 @@ export function generateMetricTypeDeclarations(
   schemas: MetricSchema[],
 ): string {
   return metricFileHeader() + renderMetricRegistry(schemas);
+}
+
+/**
+ * Per-column metadata as emitted into the build-time JSON artifact.
+ *
+ * The shape is deliberately narrow — we forward what the YAML 1.1 declared
+ * (type, display name, format spec, description) plus the time-grain list for
+ * dimensions. Consumers (the React hook, the format utilities) destructure
+ * only the fields they need; absent fields stay absent rather than carrying
+ * empty-string sentinels so JSON.stringify output is minimal.
+ *
+ * Internal — exposed via the {@link buildMetricsMetadataBundle} return shape.
+ * Library consumers see this shape mirrored verbatim in
+ * `@databricks/appkit-ui/format`'s `ColumnMetadata` (they import there, not
+ * here).
+ */
+interface MetricColumnSemanticMetadata {
+  type: string;
+  display_name?: string;
+  format?: string;
+  description?: string;
+  /** Only emitted on dimension entries where the YAML declared a non-empty `time_grain`. */
+  time_grain?: readonly string[];
+}
+
+/**
+ * One metric's complete semantic-metadata bundle.
+ *
+ * Splits cleanly into measures + dimensions so the consuming hook can return
+ * the exact subset for the queried metric without scanning the rest of the
+ * registry.
+ */
+interface MetricSemanticMetadataEntry {
+  source: string;
+  lane: MetricLane;
+  measures: Record<string, MetricColumnSemanticMetadata>;
+  dimensions: Record<string, MetricColumnSemanticMetadata>;
+}
+
+/**
+ * Top-level shape of `metrics.metadata.json` — keyed by metric key.
+ *
+ * Loaded by:
+ *  - the server-side `loadMetricRegistry` (for body-validator awareness of
+ *    display names + types in error messages, when wired up in a follow-on)
+ *  - the client-side `useMetricView` hook (returned in the `metadata` field)
+ *  - any chart-library glue code that wants direct access to format specs /
+ *    display names (Plotly tickformat, ECharts valueFormatter, table cells, ...)
+ */
+type MetricsMetadataBundle = Record<string, MetricSemanticMetadataEntry>;
+
+/**
+ * Pure function: turn a list of metric schemas into the JSON metadata bundle.
+ *
+ * Deterministic key order: outer object keys are sorted alphabetically;
+ * measures and dimensions are emitted in the order they appeared in DESCRIBE
+ * (Phase 1's preserved-from-YAML order), but each per-column object's fields
+ * follow a fixed declaration order so snapshot diffs are stable.
+ *
+ * The output is `JSON.stringify`'d with two-space indentation by the file
+ * emitter — keeping the data structure pure here lets unit tests assert on the
+ * structure without parsing.
+ */
+export function buildMetricsMetadataBundle(
+  schemas: MetricSchema[],
+): MetricsMetadataBundle {
+  const bundle: MetricsMetadataBundle = {};
+  const sortedSchemas = [...schemas].sort((a, b) => a.key.localeCompare(b.key));
+
+  for (const schema of sortedSchemas) {
+    const measures: Record<string, MetricColumnSemanticMetadata> = {};
+    for (const m of schema.measures) {
+      measures[m.name] = buildColumnMetadata(m);
+    }
+
+    const dimensions: Record<string, MetricColumnSemanticMetadata> = {};
+    for (const d of schema.dimensions) {
+      dimensions[d.name] = buildColumnMetadata(d);
+    }
+
+    bundle[schema.key] = {
+      source: schema.source,
+      lane: schema.lane,
+      measures,
+      dimensions,
+    };
+  }
+
+  return bundle;
+}
+
+/**
+ * Render one column's emitted semantic-metadata object.
+ *
+ * Field order is fixed (`type`, `display_name`, `format`, `description`,
+ * `time_grain`) and absent fields are simply not included, so the snapshot
+ * diff is always minimal — consumers receive only what the YAML declared.
+ *
+ * `time_grain` is only emitted on dimensions (the YAML 1.1 spec restricts it
+ * to dimension columns). Defends against DESCRIBE leaking a stray attribute
+ * onto a measure.
+ */
+function buildColumnMetadata(
+  col: MetricColumnMetadata,
+): MetricColumnSemanticMetadata {
+  const entry: MetricColumnSemanticMetadata = { type: col.type };
+  if (col.displayName) entry.display_name = col.displayName;
+  if (col.format) entry.format = col.format;
+  if (col.description) entry.description = col.description;
+  if (!col.isMeasure && col.timeGrains && col.timeGrains.length > 0) {
+    entry.time_grain = [...col.timeGrains];
+  }
+  return entry;
+}
+
+/**
+ * Serialize the metadata bundle to a stable, human-readable JSON string.
+ *
+ * Uses two-space indentation and a trailing newline so file diffs are clean
+ * across regenerations; the bundle's own key order is already sorted by
+ * {@link buildMetricsMetadataBundle}.
+ */
+export function generateMetricsMetadataJson(schemas: MetricSchema[]): string {
+  const bundle = buildMetricsMetadataBundle(schemas);
+  return `${JSON.stringify(bundle, null, 2)}\n`;
 }
 
 /**

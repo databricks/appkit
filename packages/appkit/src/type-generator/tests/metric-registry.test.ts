@@ -3,7 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
+  buildMetricsMetadataBundle,
   extractMetricColumns,
+  generateMetricsMetadataJson,
   generateMetricTypeDeclarations,
   parseDescribeTableExtendedJson,
   readMetricConfig,
@@ -395,6 +397,346 @@ describe("generateMetricTypeDeclarations — snapshot", () => {
     expect(output).toContain("@timeGrain day|month|week");
     expect(output).toContain('"created_at": string');
     expect(output).toContain('"region": string');
+  });
+});
+
+// ── Phase 5: semantic-metadata extraction (display_name + format) ─────────
+describe("extractMetricColumns — Phase 5 semantic metadata", () => {
+  test("captures display_name from a measure column", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        {
+          name: "arr",
+          type: "DECIMAL(38,2)",
+          is_measure: true,
+          display_name: "Annual Recurring Revenue",
+          comment: "ARR for the period",
+        },
+      ],
+    });
+    expect(cols[0]).toMatchObject({
+      name: "arr",
+      type: "DECIMAL(38,2)",
+      isMeasure: true,
+      displayName: "Annual Recurring Revenue",
+      description: "ARR for the period",
+    });
+  });
+
+  test("captures format spec from a measure column", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        {
+          name: "arr",
+          type: "DECIMAL(38,2)",
+          is_measure: true,
+          format: "$#,##0.00",
+        },
+      ],
+    });
+    expect(cols[0].format).toBe("$#,##0.00");
+  });
+
+  test("captures display_name + format on a dimension column", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        {
+          name: "region",
+          type: "STRING",
+          is_measure: false,
+          display_name: "Region",
+          format: undefined,
+        },
+      ],
+    });
+    expect(cols[0]).toMatchObject({
+      name: "region",
+      isMeasure: false,
+      displayName: "Region",
+    });
+    expect(cols[0].format).toBeUndefined();
+  });
+
+  test("falls back to displayName camelCase variant", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        {
+          name: "mrr",
+          type: "DECIMAL",
+          is_measure: true,
+          displayName: "Monthly Recurring Revenue",
+        },
+      ],
+    });
+    expect(cols[0].displayName).toBe("Monthly Recurring Revenue");
+  });
+
+  test("reads display_name + format from metadata.<name> (DESCRIBE wrap)", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        {
+          name: "arr",
+          type: "DECIMAL(38,2)",
+          metadata: {
+            is_measure: true,
+            display_name: "ARR",
+            format: "$#,##0.00",
+          },
+        },
+      ],
+    });
+    expect(cols[0]).toMatchObject({
+      isMeasure: true,
+      displayName: "ARR",
+      format: "$#,##0.00",
+    });
+  });
+
+  test("treats empty / whitespace display_name as absent", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        {
+          name: "arr",
+          type: "DECIMAL",
+          is_measure: true,
+          display_name: "   ",
+          format: "",
+        },
+      ],
+    });
+    expect(cols[0].displayName).toBeUndefined();
+    expect(cols[0].format).toBeUndefined();
+  });
+
+  test("captures format from format_spec alias", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        {
+          name: "arr",
+          type: "DECIMAL",
+          is_measure: true,
+          format_spec: "$#,##0.00",
+        },
+      ],
+    });
+    expect(cols[0].format).toBe("$#,##0.00");
+  });
+});
+
+// ── Phase 5: metadata bundle generation ───────────────────────────────────
+describe("buildMetricsMetadataBundle", () => {
+  test("emits per-metric measures + dimensions records keyed by name", async () => {
+    const resolution = resolveMetricConfig({
+      sp: { revenue: { source: "appkit_demo.public.revenue_metrics" } },
+    });
+
+    const fetcher = async () =>
+      mockDescribeResponse({
+        columns: [
+          {
+            name: "arr",
+            type: "DECIMAL(38,2)",
+            is_measure: true,
+            display_name: "Annual Recurring Revenue",
+            format: "$#,##0.00",
+            comment: "ARR for the period",
+          },
+          { name: "region", type: "STRING", is_measure: false },
+          {
+            name: "created_at",
+            type: "TIMESTAMP",
+            is_measure: false,
+            time_grain: ["day", "month"],
+          },
+        ],
+      });
+
+    const schemas = await syncMetrics(resolution, fetcher);
+    const bundle = buildMetricsMetadataBundle(schemas);
+
+    expect(bundle.revenue).toMatchObject({
+      source: "appkit_demo.public.revenue_metrics",
+      lane: "sp",
+      measures: {
+        arr: {
+          type: "DECIMAL(38,2)",
+          display_name: "Annual Recurring Revenue",
+          format: "$#,##0.00",
+          description: "ARR for the period",
+        },
+      },
+      dimensions: {
+        region: {
+          type: "STRING",
+        },
+        created_at: {
+          type: "TIMESTAMP",
+          time_grain: ["day", "month"],
+        },
+      },
+    });
+  });
+
+  test("preserves stable alphabetical key order across metrics", async () => {
+    const resolution = resolveMetricConfig({
+      sp: {
+        z_metric: { source: "demo.public.z_metric" },
+        a_metric: { source: "demo.public.a_metric" },
+      },
+    });
+
+    const fetcher = async () =>
+      mockDescribeResponse({
+        columns: [{ name: "v", type: "DECIMAL", is_measure: true }],
+      });
+
+    const schemas = await syncMetrics(resolution, fetcher);
+    const bundle = buildMetricsMetadataBundle(schemas);
+    expect(Object.keys(bundle)).toEqual(["a_metric", "z_metric"]);
+  });
+
+  test("omits absent fields rather than emitting null/empty placeholders", async () => {
+    const resolution = resolveMetricConfig({
+      sp: { revenue: { source: "demo.public.revenue" } },
+    });
+
+    const fetcher = async () =>
+      mockDescribeResponse({
+        columns: [{ name: "arr", type: "DECIMAL", is_measure: true }],
+      });
+
+    const schemas = await syncMetrics(resolution, fetcher);
+    const bundle = buildMetricsMetadataBundle(schemas);
+    const arr = bundle.revenue.measures.arr;
+    expect(arr.type).toBe("DECIMAL");
+    expect(arr.display_name).toBeUndefined();
+    expect(arr.format).toBeUndefined();
+    expect(arr.description).toBeUndefined();
+    expect(arr.time_grain).toBeUndefined();
+  });
+
+  test("only emits time_grain on time-typed dimensions, never on measures", async () => {
+    const resolution = resolveMetricConfig({
+      sp: { revenue: { source: "demo.public.revenue" } },
+    });
+
+    const fetcher = async () =>
+      mockDescribeResponse({
+        columns: [
+          // Time-grain on a measure should not be picked up — measures never
+          // carry time_grain in the YAML 1.1 spec; defending here is belt-
+          // and-suspenders, in case DESCRIBE leaks a stray attribute.
+          {
+            name: "arr",
+            type: "DECIMAL",
+            is_measure: true,
+            time_grain: ["day"],
+          },
+          {
+            name: "ts",
+            type: "TIMESTAMP",
+            is_measure: false,
+            time_grain: ["day", "month"],
+          },
+        ],
+      });
+
+    const schemas = await syncMetrics(resolution, fetcher);
+    const bundle = buildMetricsMetadataBundle(schemas);
+    expect(bundle.revenue.measures.arr.time_grain).toBeUndefined();
+    expect(bundle.revenue.dimensions.ts.time_grain).toEqual(["day", "month"]);
+  });
+});
+
+// ── Phase 5: metadata JSON serialization ──────────────────────────────────
+describe("generateMetricsMetadataJson — snapshot", () => {
+  test("serializes a representative metric view with display_name + format + time_grain", async () => {
+    const resolution = resolveMetricConfig({
+      sp: {
+        revenue: { source: "appkit_demo.public.revenue_metrics" },
+      },
+      obo: {
+        customer_metrics: {
+          source: "appkit_demo.public.customer_metrics",
+        },
+      },
+    });
+
+    const fetcher = async (fqn: string) =>
+      fqn.endsWith("revenue_metrics")
+        ? mockDescribeResponse({
+            columns: [
+              {
+                name: "arr",
+                type: "DECIMAL(38,2)",
+                is_measure: true,
+                display_name: "Annual Recurring Revenue",
+                format: "$#,##0.00",
+                comment: "ARR per quarter",
+              },
+              {
+                name: "growth_rate",
+                type: "DOUBLE",
+                is_measure: true,
+                display_name: "Growth Rate",
+                format: "0.0%",
+              },
+              {
+                name: "region",
+                type: "STRING",
+                is_measure: false,
+                display_name: "Region",
+              },
+              {
+                name: "created_at",
+                type: "TIMESTAMP",
+                is_measure: false,
+                display_name: "Period",
+                time_grain: ["day", "week", "month", "quarter"],
+              },
+            ],
+          })
+        : mockDescribeResponse({
+            columns: [
+              {
+                name: "churn_rate",
+                type: "DOUBLE",
+                is_measure: true,
+                display_name: "Churn Rate",
+                format: "0.0%",
+              },
+              {
+                name: "csm_email",
+                type: "STRING",
+                is_measure: false,
+                display_name: "CSM Email",
+              },
+            ],
+          });
+
+    const schemas = await syncMetrics(resolution, fetcher);
+    const json = generateMetricsMetadataJson(schemas);
+    expect(json).toMatchSnapshot();
+
+    // Guard against snapshot blind-update: structural assertions on the parsed JSON.
+    const parsed = JSON.parse(json);
+    expect(Object.keys(parsed)).toEqual(["customer_metrics", "revenue"]);
+    expect(parsed.revenue.measures.arr.format).toBe("$#,##0.00");
+    expect(parsed.revenue.measures.arr.display_name).toBe(
+      "Annual Recurring Revenue",
+    );
+    // Time grains are sorted lexicographically by extractMetricColumns (Phase 2).
+    expect(parsed.revenue.dimensions.created_at.time_grain).toEqual([
+      "day",
+      "month",
+      "quarter",
+      "week",
+    ]);
+    expect(parsed.customer_metrics.lane).toBe("obo");
+  });
+
+  test("emits `{}` when no metrics are registered", () => {
+    expect(generateMetricsMetadataJson([])).toBe("{}\n");
   });
 });
 

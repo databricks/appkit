@@ -4,9 +4,12 @@ import type {
   Filter,
   MeasureKey,
   MetricFilterOperator,
+  MetricMetadata,
+  MetricSemanticMetadata,
   Predicate,
   TimeGrain,
   UseMetricViewArgs,
+  UseMetricViewResult,
   UseMetricViewRow,
 } from "../types";
 
@@ -34,6 +37,24 @@ declare module "../types" {
       measureKeys: "arr" | "mrr";
       dimensionKeys: "region" | "segment" | "created_at";
       timeGrains: "day" | "month" | "week";
+      metadata: {
+        measures: {
+          arr: {
+            type: "DECIMAL(38,2)";
+            display_name: "Annual Recurring Revenue";
+            format: "$#,##0.00";
+          };
+          mrr: { type: "DECIMAL(38,2)" };
+        };
+        dimensions: {
+          region: { type: "STRING" };
+          segment: { type: "STRING" };
+          created_at: {
+            type: "TIMESTAMP";
+            time_grain: readonly ["day", "month", "week"];
+          };
+        };
+      };
     };
     flat_metric: {
       key: "flat_metric";
@@ -44,6 +65,10 @@ declare module "../types" {
       measureKeys: "count";
       dimensionKeys: never;
       timeGrains: never;
+      metadata: {
+        measures: { count: { type: "BIGINT" } };
+        dimensions: Record<string, never>;
+      };
     };
   }
 }
@@ -219,5 +244,50 @@ describe("Filter<K> / Predicate<K> — recursive shape and registry narrowing", 
   test("Predicate.member is `never` when the registry declares no dimensions", () => {
     type Member = Predicate<"flat_metric">["member"];
     expectTypeOf<Member>().toEqualTypeOf<never>();
+  });
+});
+
+// ── Phase 5: MetricMetadata<K> narrows per-metric, hook return shape carries metadata ──
+describe("MetricMetadata<K> — Phase 5 metadata narrowing", () => {
+  test("MetricMetadata narrows to the registry's metadata shape for registered keys", () => {
+    type Meta = MetricMetadata<"revenue">;
+    expectTypeOf<
+      Meta["measures"]["arr"]["format"]
+    >().toEqualTypeOf<"$#,##0.00">();
+    expectTypeOf<
+      Meta["measures"]["arr"]["display_name"]
+    >().toEqualTypeOf<"Annual Recurring Revenue">();
+  });
+
+  test("MetricMetadata exposes time_grain literal tuple on time-typed dims", () => {
+    type Meta = MetricMetadata<"revenue">;
+    expectTypeOf<
+      Meta["dimensions"]["created_at"]["time_grain"]
+    >().toEqualTypeOf<readonly ["day", "month", "week"]>();
+  });
+
+  test("MetricMetadata's measures only contain the metric's own keys (not other metrics')", () => {
+    type Meta = MetricMetadata<"revenue">;
+    type MeasureKeys = keyof Meta["measures"];
+    expectTypeOf<MeasureKeys>().toEqualTypeOf<"arr" | "mrr">();
+
+    type FlatMeta = MetricMetadata<"flat_metric">;
+    type FlatKeys = keyof FlatMeta["measures"];
+    expectTypeOf<FlatKeys>().toEqualTypeOf<"count">();
+  });
+
+  test("MetricMetadata falls back to the structural shape for unregistered keys", () => {
+    type Meta = MetricMetadata<string>;
+    expectTypeOf<Meta>().toEqualTypeOf<MetricSemanticMetadata>();
+  });
+
+  test("UseMetricViewResult carries metadata typed per K", () => {
+    type Result = UseMetricViewResult<
+      { arr: number },
+      MetricMetadata<"revenue">
+    >;
+    type MetaField = Result["metadata"];
+    // metadata is the metric's literal-typed metadata or null.
+    expectTypeOf<MetaField>().toEqualTypeOf<MetricMetadata<"revenue"> | null>();
   });
 });

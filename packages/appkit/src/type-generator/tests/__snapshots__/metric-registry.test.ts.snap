@@ -25,6 +25,26 @@ declare module "@databricks/appkit-ui/react" {
       measureKeys: "arr";
       dimensionKeys: "created_at" | "region" | "segment";
       timeGrains: "day" | "month" | "week";
+      metadata: {
+        measures: {
+      "arr": {
+        type: "DECIMAL(38,2)";
+        description: "Annual recurring revenue";
+      };
+    };
+        dimensions: {
+      "created_at": {
+        type: "TIMESTAMP";
+        time_grain: readonly ["day", "month", "week"];
+      };
+      "region": {
+        type: "STRING";
+      };
+      "segment": {
+        type: "STRING";
+      };
+    };
+      };
     };
   }
 }
@@ -56,6 +76,26 @@ declare module "@databricks/appkit-ui/react" {
       measureKeys: "arr" | "mrr";
       dimensionKeys: "region" | "segment";
       timeGrains: never;
+      metadata: {
+        measures: {
+      "arr": {
+        type: "DECIMAL(38,2)";
+        description: "Annual recurring revenue";
+      };
+      "mrr": {
+        type: "DECIMAL(38,2)";
+        description: "Monthly recurring revenue";
+      };
+    };
+        dimensions: {
+      "region": {
+        type: "STRING";
+      };
+      "segment": {
+        type: "STRING";
+      };
+    };
+      };
     };
   }
 }
@@ -68,6 +108,62 @@ exports[`generateMetricTypeDeclarations — snapshot > emits an empty MetricRegi
 import "@databricks/appkit-ui/react";
 declare module "@databricks/appkit-ui/react" {
   interface MetricRegistry {}
+}
+"
+`;
+
+exports[`generateMetricsMetadataJson — snapshot > serializes a representative metric view with display_name + format + time_grain 1`] = `
+"{
+  "customer_metrics": {
+    "source": "appkit_demo.public.customer_metrics",
+    "lane": "obo",
+    "measures": {
+      "churn_rate": {
+        "type": "DOUBLE",
+        "display_name": "Churn Rate",
+        "format": "0.0%"
+      }
+    },
+    "dimensions": {
+      "csm_email": {
+        "type": "STRING",
+        "display_name": "CSM Email"
+      }
+    }
+  },
+  "revenue": {
+    "source": "appkit_demo.public.revenue_metrics",
+    "lane": "sp",
+    "measures": {
+      "arr": {
+        "type": "DECIMAL(38,2)",
+        "display_name": "Annual Recurring Revenue",
+        "format": "$#,##0.00",
+        "description": "ARR per quarter"
+      },
+      "growth_rate": {
+        "type": "DOUBLE",
+        "display_name": "Growth Rate",
+        "format": "0.0%"
+      }
+    },
+    "dimensions": {
+      "region": {
+        "type": "STRING",
+        "display_name": "Region"
+      },
+      "created_at": {
+        "type": "TIMESTAMP",
+        "display_name": "Period",
+        "time_grain": [
+          "day",
+          "month",
+          "quarter",
+          "week"
+        ]
+      }
+    }
+  }
 }
 "
 `;

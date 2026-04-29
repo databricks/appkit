@@ -5,6 +5,7 @@ import { createLogger } from "../logging/logger";
 import {
   createWorkspaceDescribeFetcher,
   type DescribeFetcher,
+  generateMetricsMetadataJson,
   generateMetricTypeDeclarations,
   type MetricSchema,
   readMetricConfig,
@@ -62,6 +63,10 @@ declare module "@databricks/appkit-ui/react" {
  * @param options.metricOutFile - optional output file for the MetricRegistry
  *   augmentation. Defaults to a sibling `metric.d.ts` file under the same
  *   directory as `outFile`. Skipped entirely if `metric.json` is absent.
+ * @param options.metricMetadataOutFile - optional output file for the
+ *   build-time semantic metadata JSON bundle (`metrics.metadata.json`).
+ *   Defaults to a sibling of `metricOutFile`. Skipped entirely if
+ *   `metric.json` is absent.
  * @param options.metricFetcher - optional DescribeFetcher used by
  *   {@link syncMetrics}. Tests inject a mock; production builds let the
  *   default WorkspaceClient-backed fetcher be created lazily.
@@ -72,6 +77,7 @@ export async function generateFromEntryPoint(options: {
   warehouseId: string;
   noCache?: boolean;
   metricOutFile?: string;
+  metricMetadataOutFile?: string;
   metricFetcher?: DescribeFetcher;
 }) {
   const {
@@ -80,6 +86,7 @@ export async function generateFromEntryPoint(options: {
     warehouseId,
     noCache,
     metricOutFile,
+    metricMetadataOutFile,
     metricFetcher,
   } = options;
   const projectRoot = resolveProjectRoot(outFile);
@@ -134,8 +141,19 @@ export async function generateFromEntryPoint(options: {
       const metricDeclarations = generateMetricTypeDeclarations(metricSchemas);
       await fs.mkdir(path.dirname(metricFile), { recursive: true });
       await fs.writeFile(metricFile, metricDeclarations, "utf-8");
+
+      // Phase 5: emit the semantic-metadata JSON bundle alongside the .d.ts.
+      // The hook imports this artifact (via a registration call from the
+      // consuming app) and exposes the per-metric subset on its return value.
+      const metadataFile =
+        metricMetadataOutFile ??
+        path.join(path.dirname(metricFile), METRIC_METADATA_FILE);
+      const metadataJson = generateMetricsMetadataJson(metricSchemas);
+      await fs.mkdir(path.dirname(metadataFile), { recursive: true });
+      await fs.writeFile(metadataFile, metadataJson, "utf-8");
+
       logger.debug(
-        "Wrote MetricRegistry augmentation for %d metric(s)",
+        "Wrote MetricRegistry augmentation + metadata bundle for %d metric(s)",
         metricSchemas.length,
       );
     }
@@ -161,3 +179,15 @@ export const ANALYTICS_TYPES_FILE = "analytics.d.ts";
 export const SERVING_TYPES_FILE = "serving.d.ts";
 /** Default filename for metric-view registry type declarations. */
 export const METRIC_TYPES_FILE = "metric.d.ts";
+/**
+ * Default filename for the build-time semantic-metadata JSON bundle.
+ *
+ * Sibling of {@link METRIC_TYPES_FILE}. The JSON shape is
+ * `Record<metricKey, { source, lane, measures, dimensions }>` — see
+ * `MetricsMetadataBundle` in `metric-registry.ts`. The consuming app imports
+ * this file at build time (via Vite's JSON loader / Webpack's `import` etc.)
+ * and registers it through `@databricks/appkit-ui/format`'s
+ * `registerMetricsMetadata()` so the React hook can return per-metric
+ * `metadata` without a second network round-trip.
+ */
+export const METRIC_METADATA_FILE = "metrics.metadata.json";
