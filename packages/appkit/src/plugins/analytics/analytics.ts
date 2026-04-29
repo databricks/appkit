@@ -326,6 +326,8 @@ export class AnalyticsPlugin extends Plugin {
     const cacheKey = composeMetricCacheKey({
       metricKey: key,
       measures: request.measures,
+      dimensions: request.dimensions,
+      timeGrain: request.timeGrain,
       format,
       executorKey,
       limit: request.limit,

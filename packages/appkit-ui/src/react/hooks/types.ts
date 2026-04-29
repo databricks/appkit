@@ -141,7 +141,7 @@ export interface ServingClientConfig {
 }
 
 // ============================================================================
-// Metric View Registry (Phase 1 — measures only)
+// Metric View Registry (Phase 2 — measures + dimensions + time grain)
 // ============================================================================
 
 /**
@@ -161,9 +161,10 @@ export interface ServingClientConfig {
  *       source: "appkit_demo.public.revenue_metrics";
  *       lane: "sp";
  *       measures: { arr: number; mrr: number };
- *       dimensions: Record<string, never>;
+ *       dimensions: { region: string; created_at: string };
  *       measureKeys: "arr" | "mrr";
- *       dimensionKeys: never;
+ *       dimensionKeys: "region" | "created_at";
+ *       timeGrains: "day" | "week" | "month";
  *     };
  *   }
  * }
@@ -195,6 +196,20 @@ export type DimensionKey<K> = K extends AugmentedRegistry<MetricRegistry>
     : never
   : never;
 
+/**
+ * The union of allowed time-grains for a registered metric key — derived from
+ * the YAML 1.1 `time_grain` attributes on time-typed dimensions. Resolves to
+ * `string` for unregistered keys (so dynamic callers don't compile-error) and
+ * to `never` for registered metrics that have zero time-typed dimensions.
+ */
+export type TimeGrain<K> = K extends AugmentedRegistry<MetricRegistry>
+  ? MetricRegistry[K] extends { timeGrains: infer G }
+    ? G extends string
+      ? G
+      : never
+    : never
+  : string;
+
 /** The "measures" entry on a registered metric — a record of name → row type. */
 type MetricMeasureMap<K> = K extends AugmentedRegistry<MetricRegistry>
   ? MetricRegistry[K] extends { measures: infer M }
@@ -216,14 +231,66 @@ type MetricDimensionMap<K> = K extends AugmentedRegistry<MetricRegistry>
 /** Full result row type for a registered metric (measures + dimensions). */
 export type MetricRow<K> = MetricMeasureMap<K> & MetricDimensionMap<K>;
 
-/** Phase 1 args: only measures are accepted. */
-export interface UseMetricViewArgs<K extends MetricKey> {
-  measures: ReadonlyArray<MeasureKey<K>>;
+/**
+ * Phase 2 args: measures + dimensions + optional time grain.
+ *
+ * Generics:
+ *  - `K` — the metric key (narrows to the registry literal at the call site).
+ *  - `M` — the chosen measure tuple (narrows to the literal subset).
+ *  - `D` — the chosen dimension tuple (narrows to the literal subset).
+ *
+ * Use `const` modifiers on `M` and `D` at the call site for literal-preserving
+ * inference (matches the Phase 1 measures-only pattern):
+ *
+ * ```tsx
+ * useMetricView("revenue", {
+ *   measures: ["arr"] as const,
+ *   dimensions: ["region", "created_at"] as const,
+ *   timeGrain: "month",
+ * });
+ * ```
+ */
+export interface UseMetricViewArgs<
+  K extends MetricKey,
+  M extends ReadonlyArray<MeasureKey<K>> = ReadonlyArray<MeasureKey<K>>,
+  D extends ReadonlyArray<DimensionKey<K>> = ReadonlyArray<DimensionKey<K>>,
+> {
+  measures: M;
+  /**
+   * Dimensions to GROUP BY. Empty (or omitted) → ungrouped query. Only
+   * dimensions declared on the metric view are accepted.
+   */
+  dimensions?: D;
+  /**
+   * Time-grain truncation applied to every time-typed dimension in
+   * `dimensions`. Narrows to the union of grains the metric view declares.
+   *
+   * If the metric view has no time-typed dimensions, this field cannot be set
+   * (the type resolves to `never`).
+   *
+   * Setting `timeGrain` without including any time-typed dimension in
+   * `dimensions` is a server-side 400.
+   */
+  timeGrain?: TimeGrain<K>;
   /** Optional row cap. */
   limit?: number;
 }
 
-/** Phase 1 options: format passthrough + autoStart toggle. */
+/**
+ * Row narrowing helper: produce the row type containing only the chosen
+ * measures and dimensions, matching what the server projects.
+ *
+ * If callers omit dimensions, the row contains only measures; if callers omit
+ * measures (not allowed at v1, but the type stays sound), the row contains
+ * only dimensions.
+ */
+export type UseMetricViewRow<
+  K extends MetricKey,
+  M extends ReadonlyArray<MeasureKey<K>>,
+  D extends ReadonlyArray<DimensionKey<K>>,
+> = Pick<MetricRow<K>, (M[number] | D[number]) & keyof MetricRow<K>>;
+
+/** Phase 2 options: format passthrough + autoStart toggle. */
 export interface UseMetricViewOptions<F extends AnalyticsFormat = "JSON"> {
   format?: F;
   /** Whether to fire the request automatically on mount. Default: true. */
@@ -232,7 +299,7 @@ export interface UseMetricViewOptions<F extends AnalyticsFormat = "JSON"> {
   maxParametersSize?: number;
 }
 
-/** Phase 1 result shape: { data, loading, error }. */
+/** Phase 2 result shape: { data, loading, error }. */
 export interface UseMetricViewResult<TRow> {
   data: TRow[] | null;
   loading: boolean;

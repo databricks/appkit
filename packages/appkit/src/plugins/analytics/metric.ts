@@ -55,6 +55,25 @@ const metricConfigSchema = z
   .strict();
 
 /**
+ * Per-metric metadata threaded from the type-generator into the runtime
+ * registry. Phase 1 supplied measures + dimensions; Phase 2 adds the
+ * per-dim time-grain map for time-typed dimensions.
+ *
+ * Internal to this module — the type-generator wires the JSON metadata blob
+ * (Phase 5) into `loadMetricRegistry` via the inferred function parameter
+ * shape, so external consumers never name this interface directly.
+ */
+interface MetricBuildTimeMetadata {
+  measures?: string[];
+  dimensions?: string[];
+  /**
+   * Dimension name → allowed time-grains. Only populated for time-typed
+   * dimensions; regular dimensions are absent from this map.
+   */
+  timeGrainsByDim?: Record<string, string[]>;
+}
+
+/**
  * Read and validate `config/queries/metric.json`.
  *
  * Returns an empty registry when the file is absent — the metric-view path is
@@ -66,7 +85,7 @@ const metricConfigSchema = z
  * structural checks.
  */
 export async function loadMetricRegistry(
-  metadata?: Record<string, { measures?: string[]; dimensions?: string[] }>,
+  metadata?: Record<string, MetricBuildTimeMetadata>,
   queriesDir: string = QUERIES_DIR,
 ): Promise<Record<string, MetricRegistration>> {
   const metricPath = path.join(queriesDir, METRIC_CONFIG_FILE);
@@ -118,6 +137,7 @@ export async function loadMetricRegistry(
         lane,
         knownMeasures: meta?.measures ?? [],
         knownDimensions: meta?.dimensions ?? [],
+        knownTimeGrainsByDim: meta?.timeGrainsByDim ?? {},
       };
     }
   }
@@ -137,7 +157,15 @@ export async function loadMetricRegistry(
  * metadata available) any non-empty string is accepted and validation defers
  * to the warehouse.
  *
- * Phase 1 body shape: `{ measures, format?, limit? }`. Phase 2/3 widen this.
+ * Phase 2 body shape: `{ measures, dimensions?, timeGrain?, format?, limit? }`.
+ *
+ * Validation matrix:
+ *  - `measures` — must be a non-empty array; constrained to `knownMeasures`
+ *    when build-time metadata is available.
+ *  - `dimensions` — optional array; constrained to `knownDimensions`.
+ *  - `timeGrain` — optional string; constrained to the union of grains
+ *    declared across all time-typed dimensions; rejected unless the
+ *    `dimensions` array contains at least one time-typed dimension.
  */
 export function makeMetricRequestSchema(
   registration: MetricRegistration,
@@ -160,11 +188,41 @@ export function makeMetricRequestSchema(
         )
       : baseMeasureSchema;
 
-  return z
+  const knownDimensions = registration.knownDimensions;
+  const baseDimensionSchema = z
+    .string()
+    .min(1, { message: "dimension name cannot be empty" });
+  const dimensionItemSchema =
+    knownDimensions.length > 0
+      ? baseDimensionSchema.refine(
+          (name: string) => knownDimensions.includes(name),
+          {
+            message: `dimension must be one of: ${knownDimensions.join(", ")}`,
+          },
+        )
+      : baseDimensionSchema;
+
+  // Aggregate the union of grains the metric view supports. Empty union means
+  // no time-typed dimensions are declared — `timeGrain` cannot be set.
+  const grainsByDim = registration.knownTimeGrainsByDim;
+  const allowedGrains = collectAllowedGrains(grainsByDim);
+  const baseTimeGrainSchema = z
+    .string()
+    .min(1, { message: "timeGrain cannot be empty" });
+  const timeGrainSchema =
+    allowedGrains.length > 0
+      ? baseTimeGrainSchema.refine((g: string) => allowedGrains.includes(g), {
+          message: `timeGrain must be one of: ${allowedGrains.join(", ")}`,
+        })
+      : baseTimeGrainSchema;
+
+  const baseObject = z
     .object({
       measures: z
         .array(measureItemSchema)
         .min(1, { message: "measures must contain at least one entry" }),
+      dimensions: z.array(dimensionItemSchema).optional(),
+      timeGrain: timeGrainSchema.optional(),
       format: z.enum(["JSON", "ARROW"]).optional(),
       limit: z
         .number()
@@ -172,7 +230,42 @@ export function makeMetricRequestSchema(
         .positive({ message: "limit must be positive" })
         .optional(),
     })
-    .strict() as z.ZodType<IAnalyticsMetricRequest>;
+    .strict();
+
+  // Cross-field rule: timeGrain is meaningless without a time-typed dimension
+  // in the dimensions list. Failing fast here keeps the SQL constructor
+  // honest (no `date_trunc(<grain>, <col>)` without a real column to truncate).
+  return baseObject.superRefine((value, ctx) => {
+    if (value.timeGrain == null) return;
+    const dims = value.dimensions ?? [];
+    const hasTimeDim = dims.some(
+      (d) => Array.isArray(grainsByDim[d]) && grainsByDim[d].length > 0,
+    );
+    if (!hasTimeDim) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["timeGrain"],
+        message:
+          "timeGrain specified but no time-typed dimension is included in 'dimensions'",
+      });
+    }
+  }) as z.ZodType<IAnalyticsMetricRequest>;
+}
+
+/**
+ * Aggregate the set of allowed time-grains across every time-typed dimension.
+ *
+ * Sorted + deduplicated so the validator's error messages and the cache-key
+ * construction are deterministic.
+ */
+function collectAllowedGrains(grainsByDim: Record<string, string[]>): string[] {
+  const set = new Set<string>();
+  for (const grains of Object.values(grainsByDim)) {
+    for (const g of grains) {
+      set.add(g);
+    }
+  }
+  return [...set].sort();
 }
 
 /**
@@ -227,13 +320,43 @@ function assertSafeFqn(fqn: string): void {
 const MEASURE_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
 /**
- * Construct the Phase 1 metric SQL.
+ * Dimension name pattern. Matches the identifier shape we accept for measures
+ * — column references cannot be parameterized in SQL, so they must be
+ * conservatively safe identifiers (no spaces, no quotes, no SQL operators).
+ */
+const DIMENSION_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+/**
+ * Time-grain enum values that are safe to interpolate into `date_trunc()`.
+ * The build-time metadata supplies these as YAML 1.1 lowercase tokens — we
+ * only accept that shape; anything else (mixed case, quoted strings,
+ * SQL operators) is rejected before reaching the SQL string.
+ */
+const TIME_GRAIN_PATTERN = /^[a-z][a-z_]*$/;
+
+/**
+ * Construct the Phase 2 metric SQL.
  *
- * Shape: `SELECT MEASURE(m1), MEASURE(m2) FROM <fqn> [LIMIT n]`.
+ * Shape:
  *
- * Phase 1 has no dimensions, no filter, no GROUP BY, no time-grain. Each of
- * those is a follow-on phase with its own dedicated test surface. The intent
- * here is the integration spine, not a feature-rich generator.
+ *   SELECT MEASURE(m), date_trunc('<grain>', <time_dim>) AS <time_dim>, <dim>
+ *     FROM <fqn>
+ *    [GROUP BY ALL]
+ *    [LIMIT n]
+ *
+ * Notes:
+ *  - All column references (measures, dimensions) are validated against the
+ *    registry's `knownMeasures` / `knownDimensions` and against the conservative
+ *    identifier pattern. No user-supplied string flows into the SQL string
+ *    without passing both gates.
+ *  - `date_trunc('<grain>', col) AS col` is emitted for every time-typed
+ *    dimension when `timeGrain` is set. The grain literal is single-quoted in
+ *    the SQL — we cannot use a bind variable for `date_trunc`'s first
+ *    argument, so we restrict to the registry's allowed grain enum.
+ *  - `GROUP BY ALL` is added when at least one dimension is requested. UC
+ *    requires GROUP BY when MEASURE() is mixed with non-aggregated columns;
+ *    `GROUP BY ALL` is the documented form that works without re-listing each
+ *    dimension.
  */
 export function buildMetricSql(
   registration: MetricRegistration,
@@ -261,44 +384,129 @@ export function buildMetricSql(
     }
   }
 
+  const dimensions = request.dimensions ?? [];
+  for (const d of dimensions) {
+    if (!DIMENSION_NAME_PATTERN.test(d)) {
+      throw new Error(
+        `Refusing to build SQL: dimension "${d}" is not a valid identifier.`,
+      );
+    }
+    if (
+      registration.knownDimensions.length > 0 &&
+      !registration.knownDimensions.includes(d)
+    ) {
+      throw new Error(
+        `Refusing to build SQL: unknown dimension "${d}" for metric "${registration.key}".`,
+      );
+    }
+  }
+
+  if (request.timeGrain !== undefined) {
+    if (!TIME_GRAIN_PATTERN.test(request.timeGrain)) {
+      throw new Error(
+        `Refusing to build SQL: timeGrain "${request.timeGrain}" is not a valid grain token.`,
+      );
+    }
+    const allowed = collectAllowedGrains(registration.knownTimeGrainsByDim);
+    if (allowed.length > 0 && !allowed.includes(request.timeGrain)) {
+      throw new Error(
+        `Refusing to build SQL: unknown timeGrain "${request.timeGrain}" for metric "${registration.key}".`,
+      );
+    }
+    const hasTimeDim = dimensions.some((d) => isTimeTypedDim(registration, d));
+    if (!hasTimeDim) {
+      throw new Error(
+        `Refusing to build SQL: timeGrain "${request.timeGrain}" set but no time-typed dimension is in 'dimensions'.`,
+      );
+    }
+  }
+
   // Deterministic order so cache keys collapse semantically equivalent calls.
   // Sort-before-hash composition is finalized in Phase 4; sorting the SELECT
   // list here is the same idea applied to the SQL itself.
   const measureClauses = [...request.measures]
     .sort()
-    .map((m) => `MEASURE(${m})`)
-    .join(", ");
+    .map((m) => `MEASURE(${m})`);
+
+  const dimensionClauses = [...dimensions]
+    .sort()
+    .map((d) => renderDimensionClause(registration, d, request.timeGrain));
+
+  const selectList = [...measureClauses, ...dimensionClauses].join(", ");
+  const groupByClause = dimensions.length > 0 ? " GROUP BY ALL" : "";
 
   const limitClause =
     typeof request.limit === "number" && request.limit > 0
       ? ` LIMIT ${Math.floor(request.limit)}`
       : "";
 
-  const statement = `SELECT ${measureClauses} FROM ${registration.source}${limitClause}`;
+  const statement = `SELECT ${selectList} FROM ${registration.source}${groupByClause}${limitClause}`;
   return { statement, parameters: [] };
 }
 
 /**
- * Compose the Phase 1 cache key.
+ * Whether a dimension name is registered as time-typed (carries a non-empty
+ * `time_grain` attribute in the YAML).
+ */
+function isTimeTypedDim(
+  registration: MetricRegistration,
+  dim: string,
+): boolean {
+  const grains = registration.knownTimeGrainsByDim[dim];
+  return Array.isArray(grains) && grains.length > 0;
+}
+
+/**
+ * Render a single SELECT-list clause for a dimension.
+ *
+ * Time-typed dimensions are wrapped in `date_trunc('<grain>', <col>) AS <col>`
+ * when `timeGrain` is set; non-time dimensions render as the bare column name.
+ *
+ * The grain literal is whitelisted by `collectAllowedGrains(registration)` and
+ * the column name has already passed the identifier-pattern guard above, so
+ * neither flows through user-controlled bytes.
+ */
+function renderDimensionClause(
+  registration: MetricRegistration,
+  dim: string,
+  timeGrain: string | undefined,
+): string {
+  if (timeGrain && isTimeTypedDim(registration, dim)) {
+    return `date_trunc('${timeGrain}', ${dim}) AS ${dim}`;
+  }
+  return dim;
+}
+
+/**
+ * Compose the cache key.
  *
  * Reserved namespace `metric:` separates metric-view caches from query
- * caches. Phase 4 finalizes sort-before-hash composition; Phase 1 only needs
- * the namespace to be reserved + a stable per-key/per-args/per-executor key
- * so the cache test surface works.
+ * caches. Phase 4 finalizes sort-before-hash composition with the full
+ * argsHash / executorKey discipline; Phase 2's incremental need is for the
+ * key to vary on dimensions + timeGrain so semantically distinct calls get
+ * distinct cache entries.
+ *
+ * Order-insensitive components (measures, dimensions) are sorted before
+ * hashing into the key string, matching the PRD's sort-before-hash invariant.
  */
 export function composeMetricCacheKey(input: {
   metricKey: string;
   measures: string[];
+  dimensions?: string[];
+  timeGrain?: string;
   format: string;
   executorKey: string;
   limit?: number;
 }): string[] {
   const sortedMeasures = [...input.measures].sort();
+  const sortedDimensions = [...(input.dimensions ?? [])].sort();
   return [
     "metric",
     input.metricKey,
     input.format,
     sortedMeasures.join(","),
+    sortedDimensions.join(","),
+    input.timeGrain ?? "_",
     typeof input.limit === "number" ? String(input.limit) : "_",
     input.executorKey,
   ];

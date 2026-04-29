@@ -207,6 +207,80 @@ describe("extractMetricColumns", () => {
   test("returns empty array on unrecognized shape", () => {
     expect(extractMetricColumns({ unrelated: true })).toEqual([]);
   });
+
+  // ── Phase 2: time-typed dimensions ────────────────────────────────────
+  test("captures time_grain attribute on a time-typed dimension", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        {
+          name: "created_at",
+          type: "DATE",
+          is_measure: false,
+          time_grain: ["day", "week", "month"],
+        },
+        { name: "region", type: "STRING", is_measure: false },
+      ],
+    });
+    expect(cols).toHaveLength(2);
+    expect(cols[0]).toMatchObject({
+      name: "created_at",
+      type: "DATE",
+      isMeasure: false,
+      timeGrains: ["day", "month", "week"], // sorted, deduped
+    });
+    // Non-time dim has no timeGrains key.
+    expect(cols[1].timeGrains).toBeUndefined();
+  });
+
+  test("normalizes time_grain values to lowercase + sorted + deduped", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        {
+          name: "ts",
+          type: "TIMESTAMP",
+          is_measure: false,
+          time_grain: ["MONTH", "day", "Day", "week"],
+        },
+      ],
+    });
+    expect(cols[0].timeGrains).toEqual(["day", "month", "week"]);
+  });
+
+  test("falls back to metadata.time_grain (DESCRIBE wraps it under metadata)", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        {
+          name: "ts",
+          type: "TIMESTAMP",
+          metadata: { is_measure: false, time_grain: ["day"] },
+        },
+      ],
+    });
+    expect(cols[0].timeGrains).toEqual(["day"]);
+  });
+
+  test("treats empty time_grain attribute as not time-typed", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        { name: "ts", type: "TIMESTAMP", is_measure: false, time_grain: [] },
+      ],
+    });
+    expect(cols[0].timeGrains).toBeUndefined();
+  });
+
+  test("ignores non-string time_grain entries", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        {
+          name: "ts",
+          type: "TIMESTAMP",
+          is_measure: false,
+          time_grain: ["day", null, 42, "week"],
+        },
+      ],
+    });
+    expect(cols[0].timeGrains).toEqual(["day", "week"]);
+  });
 });
 
 describe("syncMetrics", () => {
@@ -281,5 +355,75 @@ describe("generateMetricTypeDeclarations — snapshot", () => {
   test("emits an empty MetricRegistry interface when no metrics are registered", () => {
     const output = generateMetricTypeDeclarations([]);
     expect(output).toMatchSnapshot();
+  });
+
+  // ── Phase 2: time-typed dim + multiple non-time dims fixture ─────────
+  test("emits TimeGrain<K> union for a metric view with time-typed + regular dimensions", async () => {
+    const resolution = resolveMetricConfig({
+      sp: {
+        revenue: { source: "appkit_demo.public.revenue_metrics_v2" },
+      },
+    });
+
+    const fetcher = async () =>
+      mockDescribeResponse({
+        columns: [
+          {
+            name: "arr",
+            type: "DECIMAL(38,2)",
+            is_measure: true,
+            comment: "Annual recurring revenue",
+          },
+          {
+            name: "created_at",
+            type: "TIMESTAMP",
+            is_measure: false,
+            time_grain: ["day", "week", "month"],
+          },
+          { name: "region", type: "STRING", is_measure: false },
+          { name: "segment", type: "STRING", is_measure: false },
+        ],
+      });
+
+    const schemas = await syncMetrics(resolution, fetcher);
+    const output = generateMetricTypeDeclarations(schemas);
+    expect(output).toMatchSnapshot();
+
+    // Sanity assertions in addition to the snapshot, so future drift surfaces
+    // even when snapshots are blindly updated.
+    expect(output).toContain('timeGrains: "day" | "month" | "week"');
+    expect(output).toContain("@timeGrain day|month|week");
+    expect(output).toContain('"created_at": string');
+    expect(output).toContain('"region": string');
+  });
+});
+
+// ── Phase 2: syncMetrics propagates timeGrains end-to-end ────────────────
+describe("syncMetrics — time-typed dimension propagation", () => {
+  test("propagates the time_grain attribute onto the resulting MetricSchema", async () => {
+    const resolution = resolveMetricConfig({
+      sp: { revenue: { source: "demo.public.revenue" } },
+    });
+
+    const fetcher = async () =>
+      mockDescribeResponse({
+        columns: [
+          { name: "arr", type: "DECIMAL", is_measure: true },
+          {
+            name: "ts",
+            type: "TIMESTAMP",
+            is_measure: false,
+            time_grain: ["day", "month"],
+          },
+          { name: "region", type: "STRING", is_measure: false },
+        ],
+      });
+
+    const schemas = await syncMetrics(resolution, fetcher);
+    expect(schemas[0].dimensions).toHaveLength(2);
+    const tsDim = schemas[0].dimensions.find((d) => d.name === "ts");
+    expect(tsDim?.timeGrains).toEqual(["day", "month"]);
+    const regionDim = schemas[0].dimensions.find((d) => d.name === "region");
+    expect(regionDim?.timeGrains).toBeUndefined();
   });
 });

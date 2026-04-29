@@ -72,6 +72,82 @@ describe("useMetricView", () => {
     });
   });
 
+  // ── Phase 2: dimensions + timeGrain payload assembly ────────────────────
+  test("includes dimensions in the payload when non-empty", () => {
+    renderHook(() =>
+      useMetricView("revenue", {
+        measures: ["arr"],
+        dimensions: ["region", "segment"],
+      }),
+    );
+
+    const payload = JSON.parse(
+      (mockConnectSSE.mock.calls[0][0] as any).payload,
+    );
+    expect(payload).toEqual({
+      measures: ["arr"],
+      dimensions: ["region", "segment"],
+      format: "JSON",
+    });
+  });
+
+  test("omits dimensions from the payload when empty (ungrouped query)", () => {
+    renderHook(() =>
+      useMetricView("revenue", { measures: ["arr"], dimensions: [] }),
+    );
+
+    const payload = JSON.parse(
+      (mockConnectSSE.mock.calls[0][0] as any).payload,
+    );
+    expect(payload).toEqual({
+      measures: ["arr"],
+      format: "JSON",
+    });
+    expect(payload.dimensions).toBeUndefined();
+  });
+
+  test("includes timeGrain in the payload when provided", () => {
+    renderHook(() =>
+      useMetricView("revenue", {
+        measures: ["arr"],
+        dimensions: ["created_at"],
+        timeGrain: "month",
+      }),
+    );
+
+    const payload = JSON.parse(
+      (mockConnectSSE.mock.calls[0][0] as any).payload,
+    );
+    expect(payload).toEqual({
+      measures: ["arr"],
+      dimensions: ["created_at"],
+      timeGrain: "month",
+      format: "JSON",
+    });
+  });
+
+  test("combines dimensions, timeGrain, and limit in the payload", () => {
+    renderHook(() =>
+      useMetricView("revenue", {
+        measures: ["arr", "mrr"],
+        dimensions: ["created_at"],
+        timeGrain: "week",
+        limit: 50,
+      }),
+    );
+
+    const payload = JSON.parse(
+      (mockConnectSSE.mock.calls[0][0] as any).payload,
+    );
+    expect(payload).toEqual({
+      measures: ["arr", "mrr"],
+      dimensions: ["created_at"],
+      timeGrain: "week",
+      limit: 50,
+      format: "JSON",
+    });
+  });
+
   test("populates data on a result event", async () => {
     const { result } = renderHook(() =>
       useMetricView("revenue", { measures: ["arr"] }),
@@ -149,7 +225,10 @@ describe("useMetricView", () => {
 
   test("rejects an empty metric key", () => {
     expect(() =>
-      renderHook(() => useMetricView("", { measures: ["arr"] } as any)),
+      // Cast to any so the runtime guard ("non-empty string") is what fails,
+      // not the compile-time MetricKey union (which is augmented in the
+      // sibling type-tests file).
+      renderHook(() => useMetricView("" as any, { measures: ["arr"] } as any)),
     ).toThrowError(/non-empty string/);
   });
 

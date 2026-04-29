@@ -55,8 +55,9 @@ interface ResolvedMetricEntry {
 /**
  * Per-column metadata extracted from DESCRIBE TABLE EXTENDED ... AS JSON.
  *
- * We only need a small subset at Phase 1 (measure names + types). Dimensions
- * and YAML metadata land in later phases.
+ * Phase 1 captured measure flags + types. Phase 2 widens to time-typed
+ * dimensions: a column is "time-typed" iff its DESCRIBE entry carries a
+ * non-empty `time_grain` attribute listing the allowed grains for that column.
  */
 export interface MetricColumnMetadata {
   name: string;
@@ -65,6 +66,13 @@ export interface MetricColumnMetadata {
   isMeasure: boolean;
   /** Optional column comment / display description (best-effort). */
   description?: string;
+  /**
+   * Allowed time-grains for this column when present in the YAML's `time_grain`
+   * attribute. Undefined means the column is not time-typed. An empty array is
+   * never produced — if the attribute is present but empty we treat the
+   * column as a regular dimension (matches "explicit only" semantics from the PRD).
+   */
+  timeGrains?: string[];
 }
 
 /**
@@ -324,10 +332,60 @@ export function extractMetricColumns(parsed: unknown): MetricColumnMetadata[] {
           ? obj.description
           : undefined;
 
-    columns.push({ name, type, isMeasure, description });
+    const timeGrains = extractTimeGrains(obj);
+
+    columns.push({
+      name,
+      type,
+      isMeasure,
+      description,
+      ...(timeGrains ? { timeGrains } : {}),
+    });
   }
 
   return columns;
+}
+
+/**
+ * Pull the allowed time-grain list for a column from the DESCRIBE entry.
+ *
+ * Time-grain may live at:
+ *   1. `time_grain: ["day", "week", "month"]` — the YAML 1.1 canonical form.
+ *   2. `metadata.time_grain: [...]` — when DESCRIBE wraps it under `metadata`.
+ *   3. `time_grain: { grains: [...] }` — defensive against future shape drift.
+ *
+ * Returns `undefined` for "not a time-typed column" (no attribute present, or
+ * attribute present but empty/malformed). The caller treats undefined-grains
+ * dimensions as regular dimensions.
+ */
+function extractTimeGrains(obj: Record<string, unknown>): string[] | undefined {
+  let raw: unknown = obj.time_grain;
+  if (raw == null && obj.metadata && typeof obj.metadata === "object") {
+    raw = (obj.metadata as Record<string, unknown>).time_grain;
+  }
+  if (raw == null) return undefined;
+
+  if (
+    raw &&
+    typeof raw === "object" &&
+    !Array.isArray(raw) &&
+    Array.isArray((raw as Record<string, unknown>).grains)
+  ) {
+    raw = (raw as Record<string, unknown>).grains;
+  }
+
+  if (!Array.isArray(raw)) return undefined;
+  const grains: string[] = [];
+  for (const g of raw) {
+    if (typeof g === "string" && g.trim().length > 0) {
+      grains.push(g.toLowerCase().trim());
+    }
+  }
+  // Empty list → treat as not time-typed (defensive). Phase 2's contract is
+  // "time_grain populated" → time dimension.
+  if (grains.length === 0) return undefined;
+  // Stable order so the generated d.ts and metadata are deterministic.
+  return [...new Set(grains)].sort();
 }
 
 /**
@@ -377,10 +435,13 @@ ${indent}${JSON.stringify(m.name)}: ${tsTypeFor(m.type)}`,
   const dimensions =
     schema.dimensions.length > 0
       ? schema.dimensions
-          .map(
-            (d) => `${indent}/** @sqlType ${d.type} */
-${indent}${JSON.stringify(d.name)}: ${tsTypeFor(d.type)}`,
-          )
+          .map((d) => {
+            const grainComment = d.timeGrains?.length
+              ? ` @timeGrain ${d.timeGrains.join("|")}`
+              : "";
+            return `${indent}/** @sqlType ${d.type}${grainComment} */
+${indent}${JSON.stringify(d.name)}: ${tsTypeFor(d.type)}`;
+          })
           .join(";\n")
       : "";
 
@@ -404,6 +465,25 @@ ${dimensions};
   const dimensionUnion =
     dimensionKeys.length > 0 ? dimensionKeys.join(" | ") : "never";
 
+  // Union of allowed time-grains across every time-typed dimension. The PRD
+  // documents the v1 contract: a single top-level `timeGrain` applies to all
+  // time-typed dims. Therefore the type-level constraint is the union (any of
+  // the dim-allowed grains is acceptable; per-dim narrowing is a future
+  // widening to `TimeGrain<K> | Record<DimensionKey<K>, TimeGrain<K>>`).
+  const timeGrainSet = new Set<string>();
+  for (const d of schema.dimensions) {
+    for (const g of d.timeGrains ?? []) {
+      timeGrainSet.add(g);
+    }
+  }
+  const timeGrainUnion =
+    timeGrainSet.size > 0
+      ? [...timeGrainSet]
+          .sort()
+          .map((g) => JSON.stringify(g))
+          .join(" | ")
+      : "never";
+
   return `    ${JSON.stringify(schema.key)}: {
       key: ${JSON.stringify(schema.key)};
       source: ${JSON.stringify(schema.source)};
@@ -412,6 +492,7 @@ ${dimensions};
       dimensions: ${dimensionsBlock};
       measureKeys: ${measureUnion};
       dimensionKeys: ${dimensionUnion};
+      timeGrains: ${timeGrainUnion};
     }`;
 }
 

@@ -14,12 +14,14 @@ export type {
   QueryRegistry,
   ServingAlias,
   ServingEndpointRegistry,
+  TimeGrain,
   TypedArrowTable,
   UseAnalyticsQueryOptions,
   UseAnalyticsQueryResult,
   UseMetricViewArgs,
   UseMetricViewOptions,
   UseMetricViewResult,
+  UseMetricViewRow,
 } from "./types";
 export { useAnalyticsQuery } from "./use-analytics-query";
 export {

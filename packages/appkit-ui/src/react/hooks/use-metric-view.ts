@@ -2,36 +2,49 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { connectSSE } from "@/js";
 import type {
   AnalyticsFormat,
+  DimensionKey,
+  MeasureKey,
   MetricKey,
-  MetricRow,
   UseMetricViewArgs,
   UseMetricViewOptions,
   UseMetricViewResult,
+  UseMetricViewRow,
 } from "./types";
 
 /**
  * Subscribe to a metric-view query over SSE.
  *
- * Phase 1 surface — accepts `{ measures }` only. Phase 2/3 widen to
- * `dimensions`, `filter`, `timeGrain`. The hook signature mirrors
- * `useAnalyticsQuery`'s shape so that adopters muscle-memorize the call
- * pattern across the two hooks.
+ * Phase 2 surface — accepts `{ measures, dimensions?, timeGrain?, limit? }`.
+ * The result row type narrows at the call site to
+ * `Pick<MetricRow<K>, M[number] | D[number]>` based on the chosen measures
+ * and dimensions, so chart code receives the exact shape it asked for.
+ *
+ * Use `as const` on the `measures` and `dimensions` arrays at the call site
+ * to preserve literal types (the same pattern used elsewhere in AppKit for
+ * registry-narrowed APIs).
  *
  * @example
  * ```tsx
  * const { data, loading, error } = useMetricView("revenue", {
- *   measures: ["arr"],
+ *   measures: ["arr"] as const,
+ *   dimensions: ["region", "created_at"] as const,
+ *   timeGrain: "month",
  * });
+ * // data: Array<{ arr: number; region: string; created_at: string }> | null
  * ```
  */
 export function useMetricView<
   K extends MetricKey = MetricKey,
+  const M extends ReadonlyArray<MeasureKey<K>> = ReadonlyArray<MeasureKey<K>>,
+  const D extends ReadonlyArray<DimensionKey<K>> = ReadonlyArray<
+    DimensionKey<K>
+  >,
   F extends AnalyticsFormat = "JSON",
 >(
   metricKey: K,
-  args: UseMetricViewArgs<K>,
+  args: UseMetricViewArgs<K, M, D>,
   options: UseMetricViewOptions<F> = {} as UseMetricViewOptions<F>,
-): UseMetricViewResult<MetricRow<K>> {
+): UseMetricViewResult<UseMetricViewRow<K, M, D>> {
   if (!metricKey || metricKey.trim().length === 0) {
     throw new Error("useMetricView: 'metricKey' must be a non-empty string.");
   }
@@ -42,7 +55,7 @@ export function useMetricView<
 
   const url = `/api/analytics/metric/${encodeURIComponent(metricKey)}`;
 
-  type ResultType = MetricRow<K>;
+  type ResultType = UseMetricViewRow<K, M, D>;
   const [data, setData] = useState<ResultType[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,11 +63,20 @@ export function useMetricView<
 
   const payload = useMemo(() => {
     try {
-      const body = {
+      const dimensions = args.dimensions ? [...args.dimensions] : undefined;
+      const body: Record<string, unknown> = {
         measures: [...args.measures],
-        ...(typeof args.limit === "number" ? { limit: args.limit } : {}),
         format,
       };
+      if (dimensions && dimensions.length > 0) {
+        body.dimensions = dimensions;
+      }
+      if (typeof args.timeGrain === "string" && args.timeGrain.length > 0) {
+        body.timeGrain = args.timeGrain;
+      }
+      if (typeof args.limit === "number") {
+        body.limit = args.limit;
+      }
       const serialized = JSON.stringify(body);
       const sizeInBytes = new Blob([serialized]).size;
       if (sizeInBytes > maxParametersSize) {
@@ -67,7 +89,14 @@ export function useMetricView<
       console.error("useMetricView: Failed to serialize request body", err);
       return null;
     }
-  }, [args.measures, args.limit, format, maxParametersSize]);
+  }, [
+    args.measures,
+    args.dimensions,
+    args.timeGrain,
+    args.limit,
+    format,
+    maxParametersSize,
+  ]);
 
   const start = useCallback(() => {
     if (payload === null) {
