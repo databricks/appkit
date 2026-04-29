@@ -5,11 +5,11 @@
  *
  * Run from repo root: pnpm exec tsx tools/generate-schema-types.ts
  */
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { compileFromFile } from "json-schema-to-typescript";
+import { formatWithBiome } from "./format-with-biome.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, "..");
@@ -51,22 +51,6 @@ async function main(): Promise<void> {
   fs.writeFileSync(OUT_PATH, result, "utf-8");
   formatWithBiome(OUT_PATH);
   console.log("Wrote", OUT_PATH);
-}
-
-/**
- * Run Biome on the generated file so its formatting matches the rest of the
- * repo. Without this, every `pnpm build`/`pnpm dev` would leave the file dirty
- * until `pnpm format` is run.
- */
-function formatWithBiome(filePath: string): void {
-  const result = spawnSync(
-    "pnpm",
-    ["exec", "biome", "check", "--write", "--no-errors-on-unmatched", filePath],
-    { cwd: REPO_ROOT, stdio: "inherit" },
-  );
-  if (result.status !== 0) {
-    throw new Error(`biome check --write failed for ${filePath}`);
-  }
 }
 
 main();
