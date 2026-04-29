@@ -21,7 +21,10 @@ import { z } from "zod";
 /** Successful row-shaped result (JSON_ARRAY format, or empty results). */
 export const AnalyticsResultMessage = z.object({
   type: z.literal("result"),
-  data: z.array(z.record(z.unknown())).optional(),
+  // zod 4 requires both key and value type for z.record(); zod 3 took
+  // value only. Using the explicit two-arg form keeps the schema valid
+  // under whichever zod major resolves at install time.
+  data: z.array(z.record(z.string(), z.unknown())).optional(),
   // Status is opaque metadata forwarded from the warehouse — keep it as
   // `unknown` so we don't bake the SDK's detailed shape into the contract.
   status: z.unknown().optional(),
