@@ -1,10 +1,15 @@
 export type {
   AnalyticsFormat,
+  DimensionKey,
   InferResultByFormat,
   InferRowType,
   InferServingChunk,
   InferServingRequest,
   InferServingResponse,
+  MeasureKey,
+  MetricKey,
+  MetricRegistry,
+  MetricRow,
   PluginRegistry,
   QueryRegistry,
   ServingAlias,
@@ -12,6 +17,9 @@ export type {
   TypedArrowTable,
   UseAnalyticsQueryOptions,
   UseAnalyticsQueryResult,
+  UseMetricViewArgs,
+  UseMetricViewOptions,
+  UseMetricViewResult,
 } from "./types";
 export { useAnalyticsQuery } from "./use-analytics-query";
 export {
@@ -19,6 +27,7 @@ export {
   type UseChartDataResult,
   useChartData,
 } from "./use-chart-data";
+export { useMetricView } from "./use-metric-view";
 export { usePluginClientConfig } from "./use-plugin-config";
 export {
   type UseServingInvokeOptions,

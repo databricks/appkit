@@ -3,6 +3,15 @@ import path from "node:path";
 import dotenv from "dotenv";
 import { createLogger } from "../logging/logger";
 import {
+  createWorkspaceDescribeFetcher,
+  type DescribeFetcher,
+  generateMetricTypeDeclarations,
+  type MetricSchema,
+  readMetricConfig,
+  resolveMetricConfig,
+  syncMetrics,
+} from "./metric-registry";
+import {
   migrateProjectConfig,
   removeOldGeneratedTypes,
   resolveProjectRoot,
@@ -50,15 +59,29 @@ declare module "@databricks/appkit-ui/react" {
  * @param options - the options for the generation
  * @param options.entryPoint - the entry point file
  * @param options.outFile - the output file
- * @param options.querySchemaFile - optional path to query schema file (e.g. config/queries/schema.ts)
+ * @param options.metricOutFile - optional output file for the MetricRegistry
+ *   augmentation. Defaults to a sibling `metric.d.ts` file under the same
+ *   directory as `outFile`. Skipped entirely if `metric.json` is absent.
+ * @param options.metricFetcher - optional DescribeFetcher used by
+ *   {@link syncMetrics}. Tests inject a mock; production builds let the
+ *   default WorkspaceClient-backed fetcher be created lazily.
  */
 export async function generateFromEntryPoint(options: {
   outFile: string;
   queryFolder?: string;
   warehouseId: string;
   noCache?: boolean;
+  metricOutFile?: string;
+  metricFetcher?: DescribeFetcher;
 }) {
-  const { outFile, queryFolder, warehouseId, noCache } = options;
+  const {
+    outFile,
+    queryFolder,
+    warehouseId,
+    noCache,
+    metricOutFile,
+    metricFetcher,
+  } = options;
   const projectRoot = resolveProjectRoot(outFile);
 
   logger.debug("Starting type generation...");
@@ -93,6 +116,31 @@ export async function generateFromEntryPoint(options: {
   await fs.mkdir(path.dirname(outFile), { recursive: true });
   await fs.writeFile(outFile, typeDeclarations, "utf-8");
 
+  // Metric-view types: only emit when metric.json exists. The path is purely
+  // additive — apps that never adopt metric views must not produce empty noise.
+  if (queryFolder) {
+    const metricConfig = await readMetricConfig(queryFolder);
+    if (metricConfig) {
+      const resolution = resolveMetricConfig(metricConfig);
+      const fetcher =
+        metricFetcher ?? createWorkspaceDescribeFetcher(warehouseId);
+      const metricSchemas: MetricSchema[] = await syncMetrics(
+        resolution,
+        fetcher,
+      );
+
+      const metricFile =
+        metricOutFile ?? path.join(path.dirname(outFile), METRIC_TYPES_FILE);
+      const metricDeclarations = generateMetricTypeDeclarations(metricSchemas);
+      await fs.mkdir(path.dirname(metricFile), { recursive: true });
+      await fs.writeFile(metricFile, metricDeclarations, "utf-8");
+      logger.debug(
+        "Wrote MetricRegistry augmentation for %d metric(s)",
+        metricSchemas.length,
+      );
+    }
+  }
+
   // One-time migration: remove old generated file and patch project configs
   await removeOldGeneratedTypes(projectRoot, "appKitTypes.d.ts");
   await migrateProjectConfig(projectRoot);
@@ -111,3 +159,5 @@ export const TYPES_DIR = "appkit-types";
 export const ANALYTICS_TYPES_FILE = "analytics.d.ts";
 /** Default filename for serving endpoint type declarations. */
 export const SERVING_TYPES_FILE = "serving.d.ts";
+/** Default filename for metric-view registry type declarations. */
+export const METRIC_TYPES_FILE = "metric.d.ts";

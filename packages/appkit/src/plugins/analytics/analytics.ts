@@ -8,16 +8,24 @@ import type {
 } from "shared";
 import { SQLWarehouseConnector } from "../../connectors";
 import { getWarehouseId, getWorkspaceClient } from "../../context";
+import { AppKitError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
+import {
+  buildMetricSql,
+  composeMetricCacheKey,
+  loadMetricRegistry,
+  validateMetricRequest,
+} from "./metric";
 import { QueryProcessor } from "./query";
 import type {
   AnalyticsQueryResponse,
   IAnalyticsConfig,
   IAnalyticsQueryRequest,
+  MetricRegistration,
 } from "./types";
 
 const logger = createLogger("analytics");
@@ -33,6 +41,13 @@ export class AnalyticsPlugin extends Plugin {
   private SQLClient: SQLWarehouseConnector;
   private queryProcessor: QueryProcessor;
 
+  /**
+   * Metric-view registry loaded from `config/queries/metric.json` at server
+   * startup. Keys are stable; values carry the FQN, lane, and known
+   * measure/dimension names. Empty when no `metric.json` is present.
+   */
+  private metricRegistry: Record<string, MetricRegistration> = {};
+
   constructor(config: IAnalyticsConfig) {
     super(config);
     this.config = config;
@@ -42,6 +57,23 @@ export class AnalyticsPlugin extends Plugin {
       timeout: config.timeout,
       telemetry: config.telemetry,
     });
+  }
+
+  /**
+   * Eagerly load the metric registry. Failures are logged at warn level (not
+   * thrown) so a malformed `metric.json` does not take down the whole app —
+   * the route handler returns a clean 404 for unregistered keys regardless.
+   */
+  async setup(): Promise<void> {
+    try {
+      this.metricRegistry = await loadMetricRegistry();
+    } catch (err) {
+      logger.warn(
+        "Failed to load metric registry: %s",
+        err instanceof Error ? err.message : String(err),
+      );
+      this.metricRegistry = {};
+    }
   }
 
   injectRoutes(router: IAppRouter) {
@@ -64,6 +96,15 @@ export class AnalyticsPlugin extends Plugin {
       path: "/query/:query_key",
       handler: async (req: express.Request, res: express.Response) => {
         await this._handleQueryRoute(req, res);
+      },
+    });
+
+    this.route(router, {
+      name: "metric",
+      method: "post",
+      path: "/metric/:key",
+      handler: async (req: express.Request, res: express.Response) => {
+        await this._handleMetricRoute(req, res);
       },
     });
   }
@@ -207,6 +248,129 @@ export class AnalyticsPlugin extends Plugin {
       streamExecutionSettings,
       executorKey,
     );
+  }
+
+  /**
+   * Handle a metric-view query against `POST /api/analytics/metric/:key`.
+   *
+   * Phase 1 surface:
+   *  - body validated by zod (rejects unknown measures when the registry
+   *    has build-time metadata)
+   *  - SQL constructed as `SELECT MEASURE(<m>) FROM <fqn> [LIMIT n]`
+   *  - response uses the same SSE envelope as the existing query route
+   *  - reuses the interceptor chain via `executeStream()` (telemetry,
+   *    timeout, retry, cache)
+   *
+   * OBO dispatch is implemented but only the SP lane has callers in Phase 1.
+   * Phase 4 finalizes OBO + cache key composition.
+   */
+  async _handleMetricRoute(
+    req: express.Request,
+    res: express.Response,
+  ): Promise<void> {
+    const { key } = req.params;
+
+    logger.debug(req, "Executing metric: %s", key);
+
+    const event = logger.event(req);
+    event?.setComponent("analytics", "executeMetric").setContext("analytics", {
+      metric_key: key,
+      plugin: this.name,
+    });
+
+    if (!key) {
+      res.status(400).json({ error: "metric key is required" });
+      return;
+    }
+
+    const registration = this.metricRegistry[key];
+    if (!registration) {
+      res.status(404).json({ error: `Metric "${key}" not registered` });
+      return;
+    }
+
+    let request: ReturnType<typeof validateMetricRequest>;
+    try {
+      request = validateMetricRequest(registration, req.body ?? {});
+    } catch (err) {
+      if (err instanceof AppKitError) {
+        res.status(err.statusCode).json({
+          error: err.message,
+          code: err.code,
+        });
+        return;
+      }
+      // Validator only throws ValidationError, but be defensive.
+      res.status(400).json({
+        error: err instanceof Error ? err.message : "Invalid request body",
+      });
+      return;
+    }
+
+    const format = request.format ?? "JSON";
+    const isAsUser = registration.lane === "obo";
+    const executor = isAsUser ? this.asUser(req) : this;
+    const executorKey = isAsUser ? this.resolveUserId(req) : "sp";
+
+    const queryParameters =
+      format === "ARROW"
+        ? {
+            formatParameters: {
+              disposition: "EXTERNAL_LINKS",
+              format: "ARROW_STREAM",
+            },
+            type: "arrow",
+          }
+        : { type: "result" };
+
+    const cacheKey = composeMetricCacheKey({
+      metricKey: key,
+      measures: request.measures,
+      format,
+      executorKey,
+      limit: request.limit,
+    });
+
+    const defaultConfig: PluginExecuteConfig = {
+      ...queryDefaults,
+      cache: {
+        ...queryDefaults.cache,
+        cacheKey,
+      },
+    };
+
+    const streamExecutionSettings: StreamExecutionSettings = {
+      default: defaultConfig,
+    };
+
+    await executor.executeStream(
+      res,
+      async (signal) => {
+        const { statement } = buildMetricSql(registration, request);
+        const result = await executor.query(
+          statement,
+          undefined,
+          queryParameters.formatParameters,
+          signal,
+        );
+        return { type: queryParameters.type, ...result };
+      },
+      streamExecutionSettings,
+      executorKey,
+    );
+  }
+
+  /**
+   * Test-only seam: populate the metric registry without going through
+   * `setup()` (which reads `config/queries/metric.json` from disk). Tests
+   * exercise the route handler directly with synthetic registrations.
+   *
+   * @internal
+   */
+  _setMetricRegistryForTesting(
+    registry: Record<string, MetricRegistration>,
+  ): void {
+    this.metricRegistry = registry;
   }
 
   /**

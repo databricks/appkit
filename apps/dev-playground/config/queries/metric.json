@@ -1,0 +1,9 @@
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/metric-source.schema.json",
+  "sp": {
+    "revenue": {
+      "source": "appkit_demo.public.revenue_metrics"
+    }
+  },
+  "obo": {}
+}

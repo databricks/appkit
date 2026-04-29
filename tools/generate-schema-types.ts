@@ -1,7 +1,11 @@
 /**
- * Generates TypeScript interfaces from plugin-manifest.schema.json using
+ * Generates TypeScript interfaces from JSON Schemas using
  * json-schema-to-typescript. Single source of truth for structural types
- * (ResourceFieldEntry, ResourceRequirement, PluginManifest).
+ * shared between packages.
+ *
+ * Currently generates:
+ *  - plugin-manifest.generated.ts (PluginManifest, ResourceRequirement, ...)
+ *  - metric-source.generated.ts (MetricSourceConfiguration)
  *
  * Run from repo root: pnpm exec tsx tools/generate-schema-types.ts
  */
@@ -13,31 +17,63 @@ import { formatWithBiome } from "./format-with-biome.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, "..");
-const SCHEMA_PATH = path.join(
-  REPO_ROOT,
-  "packages/shared/src/schemas/plugin-manifest.schema.json",
-);
-const OUT_PATH = path.join(
-  REPO_ROOT,
-  "packages/shared/src/schemas/plugin-manifest.generated.ts",
-);
 
-const BANNER = `// AUTO-GENERATED from plugin-manifest.schema.json — do not edit.
+interface SchemaJob {
+  schemaPath: string;
+  outPath: string;
+  bannerSource: string;
+  rootRename?: { fromTitle: string; toName: string };
+}
+
+const JOBS: SchemaJob[] = [
+  {
+    schemaPath: path.join(
+      REPO_ROOT,
+      "packages/shared/src/schemas/plugin-manifest.schema.json",
+    ),
+    outPath: path.join(
+      REPO_ROOT,
+      "packages/shared/src/schemas/plugin-manifest.generated.ts",
+    ),
+    bannerSource: "plugin-manifest.schema.json",
+    rootRename: {
+      fromTitle: "AppKit Plugin Manifest",
+      toName: "PluginManifest",
+    },
+  },
+  {
+    schemaPath: path.join(
+      REPO_ROOT,
+      "packages/shared/src/schemas/metric-source.schema.json",
+    ),
+    outPath: path.join(
+      REPO_ROOT,
+      "packages/shared/src/schemas/metric-source.generated.ts",
+    ),
+    bannerSource: "metric-source.schema.json",
+    rootRename: {
+      fromTitle: "AppKit Metric Source Configuration",
+      toName: "MetricSourceConfiguration",
+    },
+  },
+];
+
+async function compileOne(job: SchemaJob): Promise<void> {
+  const banner = `// AUTO-GENERATED from ${job.bannerSource} — do not edit.
 // Run: pnpm exec tsx tools/generate-schema-types.ts
 `;
 
-async function main(): Promise<void> {
-  const raw = await compileFromFile(SCHEMA_PATH, {
+  const raw = await compileFromFile(job.schemaPath, {
     bannerComment: "",
     additionalProperties: false,
     strictIndexSignatures: false,
     unreachableDefinitions: true,
     format: false,
     style: { semi: true, singleQuote: false },
-    // Rename the root type (derived from schema title "AppKit Plugin Manifest")
-    // to "PluginManifest" for ergonomic imports.
     customName: (schema) =>
-      schema.title === "AppKit Plugin Manifest" ? "PluginManifest" : undefined,
+      job.rootRename && schema.title === job.rootRename.fromTitle
+        ? job.rootRename.toName
+        : undefined,
   });
 
   // Post-processing: work around json-schema-to-typescript limitations that
@@ -45,12 +81,18 @@ async function main(): Promise<void> {
   // allOf/if-then produces `{ [k: string]: unknown } & { … }` — strip the index-signature part.
   const output = raw.replace(/\{\s*\[k: string\]: unknown;?\s*\}\s*&\s*/g, "");
 
-  const result = BANNER + output;
+  const result = banner + output;
 
-  fs.mkdirSync(path.dirname(OUT_PATH), { recursive: true });
-  fs.writeFileSync(OUT_PATH, result, "utf-8");
-  formatWithBiome(OUT_PATH);
-  console.log("Wrote", OUT_PATH);
+  fs.mkdirSync(path.dirname(job.outPath), { recursive: true });
+  fs.writeFileSync(job.outPath, result, "utf-8");
+  formatWithBiome(job.outPath);
+  console.log("Wrote", job.outPath);
+}
+
+async function main(): Promise<void> {
+  for (const job of JOBS) {
+    await compileOne(job);
+  }
 }
 
 main();

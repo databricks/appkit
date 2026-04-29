@@ -5,6 +5,7 @@ import { createLogger } from "../logging/logger";
 import {
   ANALYTICS_TYPES_FILE,
   generateFromEntryPoint,
+  METRIC_TYPES_FILE,
   TYPES_DIR,
 } from "./index";
 
@@ -16,6 +17,8 @@ const logger = createLogger("type-generator:vite-plugin");
 interface AppKitTypesPluginOptions {
   /* Path to the output d.ts file (relative to client folder). */
   outFile?: string;
+  /** Path to the metric registry d.ts file (relative to client folder). */
+  metricOutFile?: string;
   /** Folders to watch for changes. */
   watchFolders?: string[];
 }
@@ -28,6 +31,7 @@ interface AppKitTypesPluginOptions {
  */
 export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
   let outFile: string;
+  let metricOutFile: string;
   let watchFolders: string[];
 
   async function generate() {
@@ -44,6 +48,7 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         queryFolder: watchFolders[0],
         warehouseId,
         noCache: false,
+        metricOutFile,
       });
     } catch (error) {
       // throw in production to fail the build
@@ -78,6 +83,10 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         projectRoot,
         options?.outFile ?? `shared/${TYPES_DIR}/${ANALYTICS_TYPES_FILE}`,
       );
+      metricOutFile = path.resolve(
+        projectRoot,
+        options?.metricOutFile ?? `shared/${TYPES_DIR}/${METRIC_TYPES_FILE}`,
+      );
       watchFolders = options?.watchFolders ?? [
         path.join(process.cwd(), "config", "queries"),
       ];
@@ -95,7 +104,10 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
           changedFile.startsWith(folder),
         );
 
-        if (isWatchedFile && changedFile.endsWith(".sql")) {
+        if (
+          isWatchedFile &&
+          (changedFile.endsWith(".sql") || changedFile.endsWith("metric.json"))
+        ) {
           generate();
         }
       });
