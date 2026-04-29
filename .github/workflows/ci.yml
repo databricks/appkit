@@ -59,7 +59,15 @@ jobs:
               packages/shared/src/schemas/plugin-manifest.generated.ts \
               packages/appkit/src/registry/types.generated.ts \
               packages/appkit/src/plugins/stable-exports.generated.ts \
-              packages/appkit/src/plugins/beta-exports.generated.ts; then
+              packages/appkit/src/plugins/beta-exports.generated.ts \
+              docs/docs/plugins/analytics.md \
+              docs/docs/plugins/files.md \
+              docs/docs/plugins/genie.md \
+              docs/docs/plugins/jobs.md \
+              docs/docs/plugins/lakebase.md \
+              docs/docs/plugins/model-serving.md \
+              docs/docs/plugins/server.md \
+              docs/docs/plugins/vector-search.md; then
             echo "❌ Error: Generated files are out of sync with their source manifests/schemas."
             echo ""
             echo "To fix this:"

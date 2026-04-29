@@ -358,24 +358,22 @@ async function runPromote(
   }
 
   if (!options.skipSync && !options.dryRun) {
-    // Monorepo-only: regenerate the auto-generated stable/beta plugin
-    // barrels so the runtime exports match the new manifest stability.
+    // Monorepo-only: regenerate every artifact derived from plugin
+    // manifests (stable/beta export barrels AND the per-plugin docs-page
+    // stability banner) so all manifest-derived layers move together.
     // No-op outside the AppKit monorepo (third-party plugin projects don't
-    // ship the generator).
+    // ship the generators).
     const generatorPath = path.join(cwd, "tools", "generate-plugin-entries.ts");
     if (fs.existsSync(generatorPath)) {
-      console.log(`\n${prefix}Regenerating plugin entry barrels...`);
+      console.log(`\n${prefix}Regenerating manifest-derived artifacts...`);
       const { execSync } = await import("node:child_process");
       try {
-        execSync("pnpm exec tsx tools/generate-plugin-entries.ts", {
-          cwd,
-          stdio: "inherit",
-        });
+        execSync("pnpm run generate:types", { cwd, stdio: "inherit" });
       } catch {
         console.error(
-          `Error: post-promote 'generate-plugin-entries' failed. ` +
-            `Manifest was updated, but stable/beta export barrels may be stale. ` +
-            `Run 'pnpm run generate:plugin-entries' manually.`,
+          `Error: post-promote 'generate:types' failed. ` +
+            `Manifest was updated, but generated barrels and docs banners may be stale. ` +
+            `Run 'pnpm run generate:types' manually.`,
         );
         process.exit(1);
       }

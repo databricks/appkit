@@ -12,6 +12,7 @@
     "check": "biome check .",
     "generate:types": "tsx tools/generate-schema-types.ts && tsx tools/generate-registry-types.ts && tsx tools/generate-plugin-entries.ts && tsx tools/generate-plugin-doc-banners.ts",
     "generate:plugin-entries": "tsx tools/generate-plugin-entries.ts",
+    "generate:plugin-doc-banners": "tsx tools/generate-plugin-doc-banners.ts",
     "generate:app-templates": "tsx tools/generate-app-templates.ts",
     "check:licenses": "tsx tools/check-licenses.ts",
     "build:notice": "tsx tools/build-notice.ts > NOTICE.md",

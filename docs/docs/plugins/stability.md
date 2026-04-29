@@ -124,12 +124,14 @@ The import path (`/beta`) only applies to first-party plugins shipped inside `@d
 
 ## For First-Party Plugin Authors (AppKit Monorepo)
 
-Inside the AppKit monorepo, each plugin's `manifest.json` `stability` field is the **single source of truth** for which subpath ships the plugin. A build-time generator (`tools/generate-plugin-entries.ts`) reads every `packages/appkit/src/plugins/<name>/manifest.json` and writes:
+Inside the AppKit monorepo, each plugin's `manifest.json` `stability` field is the **single source of truth** for which subpath ships the plugin. Two build-time generators read every `packages/appkit/src/plugins/<name>/manifest.json`:
 
-- `packages/appkit/src/plugins/stable-exports.generated.ts` — re-exports of stable plugins, included by `src/index.ts` (the `@databricks/appkit` entry).
-- `packages/appkit/src/plugins/beta-exports.generated.ts` — re-exports of beta plugins, included by `src/beta.ts` (the `@databricks/appkit/beta` entry).
+- `tools/generate-plugin-entries.ts` writes the runtime export barrels:
+  - `packages/appkit/src/plugins/stable-exports.generated.ts` — re-exports of stable plugins, included by `src/index.ts` (the `@databricks/appkit` entry).
+  - `packages/appkit/src/plugins/beta-exports.generated.ts` — re-exports of beta plugins, included by `src/beta.ts` (the `@databricks/appkit/beta` entry).
+- `tools/generate-plugin-doc-banners.ts` injects (or removes) a `:::warning Beta plugin` admonition at the top of each plugin's docs page (`docs/docs/plugins/<name>.md`) so a plugin's documented stability follows its manifest.
 
-These generated barrels are committed and verified by CI; an out-of-date barrel fails the `Check generated types are up to date` step.
+All generated artifacts are committed and verified by CI; an out-of-date file fails the `Check generated types are up to date` step.
 
 The `appkit plugin promote` command detects monorepo context (presence of `tools/generate-plugin-entries.ts`) and re-runs the generator after updating the manifest, so the runtime exports, the synced `appkit.plugins.json`, and the manifest can never drift apart.
 
