@@ -17,8 +17,8 @@ export interface UseChartDataOptions {
   parameters?: Record<string, unknown>;
   /**
    * Data format preference
-   * - "json": Force JSON format
-   * - "arrow": Force Arrow format
+   * - "json_array": Force JSON format
+   * - "arrow_stream": Force Arrow format
    * - "auto": Auto-select based on heuristics
    * @default "auto"
    */
@@ -52,8 +52,8 @@ function resolveFormat(
   parameters?: Record<string, unknown>,
 ): "JSON_ARRAY" | "ARROW_STREAM" {
   // Explicit format selection
-  if (format === "json") return "JSON_ARRAY";
-  if (format === "arrow") return "ARROW_STREAM";
+  if (format === "json_array") return "JSON_ARRAY";
+  if (format === "arrow_stream") return "ARROW_STREAM";
 
   // Auto-selection heuristics
   if (format === "auto") {
@@ -97,7 +97,7 @@ function resolveFormat(
  * // Force Arrow format
  * const { data } = useChartData({
  *   queryKey: "big_query",
- *   format: "arrow"
+ *   format: "arrow_stream"
  * });
  * ```
  */

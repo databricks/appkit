@@ -22,6 +22,7 @@ throw new ExecutionError("Statement was canceled");
 new ExecutionError(message: string, options?: {
   cause?: Error;
   context?: Record<string, unknown>;
+  errorCode?: string;
 }): ExecutionError;
 ```
 
@@ -30,15 +31,16 @@ new ExecutionError(message: string, options?: {
 | Parameter | Type |
 | ------ | ------ |
 | `message` | `string` |
-| `options?` | \{ `cause?`: `Error`; `context?`: `Record`\<`string`, `unknown`\>; \} |
+| `options?` | \{ `cause?`: `Error`; `context?`: `Record`\<`string`, `unknown`\>; `errorCode?`: `string`; \} |
 | `options.cause?` | `Error` |
 | `options.context?` | `Record`\<`string`, `unknown`\> |
+| `options.errorCode?` | `string` |
 
 #### Returns
 
 `ExecutionError`
 
-#### Inherited from
+#### Overrides
 
 [`AppKitError`](Class.AppKitError.md).[`constructor`](Class.AppKitError.md#constructor)
 
@@ -83,6 +85,19 @@ Additional context for the error
 #### Inherited from
 
 [`AppKitError`](Class.AppKitError.md).[`context`](Class.AppKitError.md#context)
+
+***
+
+### errorCode?
+
+```ts
+readonly optional errorCode: string;
+```
+
+Structured error code from the upstream source (typically the warehouse's
+`error_code` for statement-level failures, or the SDK's `ApiError.errorCode`
+for HTTP failures). Preserved through wrapping so callers can branch on a
+stable identifier without substring-matching the message.
 
 ***
 
@@ -202,16 +217,17 @@ Create an execution error for closed/expired results
 ### statementFailed()
 
 ```ts
-static statementFailed(errorMessage?: string): ExecutionError;
+static statementFailed(errorMessage?: string, errorCode?: string): ExecutionError;
 ```
 
-Create an execution error for statement failure
+Create an execution error for statement failure.
 
 #### Parameters
 
-| Parameter | Type |
-| ------ | ------ |
-| `errorMessage?` | `string` |
+| Parameter | Type | Description |
+| ------ | ------ | ------ |
+| `errorMessage?` | `string` | Human-readable error from the warehouse / SDK. |
+| `errorCode?` | `string` | Structured code (e.g. "INVALID_PARAMETER_VALUE") to preserve through wrapping. Optional. |
 
 #### Returns
 

@@ -5,7 +5,7 @@ import type { Table } from "apache-arrow";
 // ============================================================================
 
 /** Supported data formats for analytics queries */
-export type DataFormat = "json" | "arrow" | "auto";
+export type DataFormat = "json_array" | "arrow_stream" | "auto";
 
 /** Chart orientation */
 export type Orientation = "vertical" | "horizontal";
@@ -77,8 +77,8 @@ export interface QueryProps extends ChartBaseProps {
   parameters?: Record<string, unknown>;
   /**
    * Data format to use
-   * - "json": Use JSON format (smaller payloads, simpler)
-   * - "arrow": Use Arrow format (faster for large datasets)
+   * - "json_array": Use JSON format (smaller payloads, simpler)
+   * - "arrow_stream": Use Arrow format (faster for large datasets)
    * - "auto": Automatically select based on expected data size
    * @default "auto"
    */

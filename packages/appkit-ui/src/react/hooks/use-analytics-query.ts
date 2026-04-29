@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnalyticsSseMessage } from "shared";
 import { ArrowClient, connectSSE } from "@/js";
 import type {
   AnalyticsFormat,
@@ -23,6 +24,29 @@ function getArrowStreamUrl(id: string) {
 }
 
 /**
+ * Client-side defensive cap on inline Arrow IPC attachments (8 MiB decoded).
+ * Mirrors the server's MAX_INLINE_ATTACHMENT_BYTES so a misconfigured proxy
+ * (or a future server bug) can't push us into allocating an unbounded
+ * Uint8Array and hanging the browser.
+ *
+ * REMOVE THIS GUARD if PR #320 (stash + serve via /arrow-result) lands —
+ * that proposal eliminates the arrow_inline SSE path entirely, so bulk
+ * bytes flow over HTTP where the browser handles backpressure natively
+ * and Content-Length is exposed up-front.
+ */
+const MAX_INLINE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+
+/** Decode a base64 string into a Uint8Array suitable for Arrow IPC parsing. */
+function decodeBase64(b64: string): Uint8Array {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+/**
  * Subscribe to an analytics query over SSE and returns its latest result.
  * Integration hook between client and analytics plugin.
  *
@@ -39,13 +63,13 @@ function getArrowStreamUrl(id: string) {
  * @param options - Analytics query settings including format
  * @returns Query result state with format-appropriate data type
  *
- * @example JSON format (default)
+ * @example JSON_ARRAY format (default)
  * ```typescript
  * const { data } = useAnalyticsQuery("spend_data", params);
  * // data: Array<{ group_key: string; cost_usd: number; ... }> | null
  * ```
  *
- * @example Arrow format
+ * @example ARROW_STREAM format
  * ```typescript
  * const { data } = useAnalyticsQuery("spend_data", params, { format: "ARROW_STREAM" });
  * // data: TypedArrowTable<{ group_key: string; cost_usd: number; ... }> | null
@@ -120,20 +144,28 @@ export function useAnalyticsQuery<
       signal: abortController.signal,
       onMessage: async (message) => {
         try {
-          const parsed = JSON.parse(message.data);
+          const rawParsed = JSON.parse(message.data);
+
+          // The error/code branch below predates the SSE wire schema and
+          // can fire for messages that don't match any AnalyticsSseMessage
+          // variant (e.g. server-side error events from executeStream).
+          // Try schema validation first; if it fails, fall through to the
+          // generic error/code handling below.
+          const validated = AnalyticsSseMessage.safeParse(rawParsed);
+          const msg = validated.success ? validated.data : null;
 
           // success - JSON format
-          if (parsed.type === "result") {
+          if (msg?.type === "result") {
             setLoading(false);
-            setData(parsed.data as ResultType);
+            setData(msg.data as ResultType);
             return;
           }
 
-          // success - Arrow format
-          if (parsed.type === "arrow") {
+          // success - Arrow format (external links: fetch from server)
+          if (msg?.type === "arrow") {
             try {
               const arrowData = await ArrowClient.fetchArrow(
-                getArrowStreamUrl(parsed.statement_id),
+                getArrowStreamUrl(msg.statement_id),
               );
               const table = await ArrowClient.processArrowBuffer(arrowData);
               setLoading(false);
@@ -151,6 +183,44 @@ export function useAnalyticsQuery<
             }
           }
 
+          // success - Arrow format (inline: decode base64 IPC payload locally)
+          if (msg?.type === "arrow_inline") {
+            // Schema already enforced non-empty string; just check size.
+            // base64 length L decodes to ~L*3/4 bytes; reject before
+            // allocating a multi-MiB Uint8Array.
+            const decodedSize = Math.ceil((msg.attachment.length * 3) / 4);
+            if (decodedSize > MAX_INLINE_ATTACHMENT_BYTES) {
+              console.error(
+                "[useAnalyticsQuery] arrow_inline attachment exceeds %d bytes (got %d)",
+                MAX_INLINE_ATTACHMENT_BYTES,
+                decodedSize,
+              );
+              setLoading(false);
+              setError("Unable to load data, please try again");
+              return;
+            }
+            try {
+              const buffer = decodeBase64(msg.attachment);
+              const table = await ArrowClient.processArrowBuffer(buffer);
+              setLoading(false);
+              setData(table as ResultType);
+              return;
+            } catch (error) {
+              console.error(
+                "[useAnalyticsQuery] Failed to decode inline Arrow data",
+                error,
+              );
+              setLoading(false);
+              setError("Unable to load data, please try again");
+              return;
+            }
+          }
+
+          // The schema didn't match — fall through to error/code handling
+          // below for legacy error events or surface a malformed-payload
+          // error if no error fields are present.
+          const parsed = rawParsed;
+
           // error
           if (parsed.type === "error" || parsed.error || parsed.code) {
             const errorMsg =
@@ -164,6 +234,18 @@ export function useAnalyticsQuery<
                 `[useAnalyticsQuery] Code: ${parsed.code}, Message: ${errorMsg}`,
               );
             }
+            return;
+          }
+
+          // The payload matched neither AnalyticsSseMessage nor an error
+          // event — surface a generic error rather than silently dropping it.
+          if (!validated.success) {
+            console.error(
+              "[useAnalyticsQuery] Malformed SSE payload",
+              validated.error.flatten(),
+            );
+            setLoading(false);
+            setError("Unable to load data, please try again");
             return;
           }
         } catch (error) {

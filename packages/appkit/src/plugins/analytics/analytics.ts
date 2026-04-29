@@ -1,12 +1,16 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type express from "express";
-import type {
-  AgentToolDefinition,
-  IAppRouter,
-  PluginExecuteConfig,
-  SQLTypeMarker,
-  StreamExecutionSettings,
-  ToolProvider,
+import {
+  type AgentToolDefinition,
+  type AnalyticsSseMessage,
+  type IAppRouter,
+  makeArrowInlineMessage,
+  makeArrowMessage,
+  makeResultMessage,
+  type PluginExecuteConfig,
+  type SQLTypeMarker,
+  type StreamExecutionSettings,
+  type ToolProvider,
 } from "shared";
 import { z } from "zod";
 import { SQLWarehouseConnector } from "../../connectors";
@@ -18,6 +22,7 @@ import {
   toolsFromRegistry,
 } from "../../core/agent/tools/define-tool";
 import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
+import { ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
@@ -26,6 +31,7 @@ import manifest from "./manifest.json";
 import { QueryProcessor } from "./query";
 import { normalizeAnalyticsFormat } from "./types";
 import type {
+  AnalyticsFormat,
   AnalyticsQueryResponse,
   IAnalyticsConfig,
   IAnalyticsQueryRequest,
@@ -131,6 +137,19 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     const { query_key } = req.params;
     const { parameters, format: rawFormat = "JSON_ARRAY" } =
       req.body as IAnalyticsQueryRequest;
+
+    if (
+      rawFormat !== "JSON_ARRAY" &&
+      rawFormat !== "ARROW_STREAM" &&
+      rawFormat !== "JSON" &&
+      rawFormat !== "ARROW"
+    ) {
+      res.status(400).json({
+        error: `Invalid format: ${String(rawFormat)}. Expected "JSON_ARRAY" or "ARROW_STREAM".`,
+      });
+      return;
+    }
+
     const format = normalizeAnalyticsFormat(rawFormat);
 
     // Request-scoped logging with WideEvent tracking
@@ -166,34 +185,33 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     const executor = isAsUser ? this.asUser(req) : this;
     const executorKey = isAsUser ? this.resolveUserId(req) : "global";
 
-    const queryParameters =
-      format === "ARROW_STREAM"
-        ? {
-            formatParameters: {
-              disposition: "EXTERNAL_LINKS",
-              format: "ARROW_STREAM",
-            },
-            type: "arrow",
-          }
-        : {
-            type: "result",
-          };
-
     const hashedQuery = this.queryProcessor.hashQuery(query);
+
+    // ARROW_STREAM may resolve to EXTERNAL_LINKS, which returns pre-signed URLs
+    // that typically expire ~15 minutes after issue. Cap the cache TTL well
+    // under that for ARROW_STREAM so we never hand out dead URLs from cache,
+    // while still benefiting from caching INLINE attachment responses (and
+    // EXTERNAL_LINKS responses inside their valid window).
+    const cacheTtl =
+      format === "ARROW_STREAM"
+        ? Math.min(queryDefaults.cache?.ttl ?? 600, 600)
+        : queryDefaults.cache?.ttl;
+    const cacheConfig = {
+      ...queryDefaults.cache,
+      ttl: cacheTtl,
+      cacheKey: [
+        "analytics:query",
+        query_key,
+        JSON.stringify(parameters),
+        format,
+        hashedQuery,
+        executorKey,
+      ],
+    };
 
     const defaultConfig: PluginExecuteConfig = {
       ...queryDefaults,
-      cache: {
-        ...queryDefaults.cache,
-        cacheKey: [
-          "analytics:query",
-          query_key,
-          JSON.stringify(parameters),
-          JSON.stringify(format),
-          hashedQuery,
-          executorKey,
-        ],
-      },
+      cache: cacheConfig,
     };
 
     const streamExecutionSettings: StreamExecutionSettings = {
@@ -208,18 +226,92 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
           parameters,
         );
 
-        const result = await executor.query(
+        return this._executeWithFormatFallback(
+          executor,
           query,
           processedParams,
-          queryParameters.formatParameters,
+          format,
           signal,
         );
-
-        return { type: queryParameters.type, ...result };
       },
       streamExecutionSettings,
       executorKey,
     );
+  }
+
+  /**
+   * Execute a query with automatic disposition fallback for ARROW_STREAM.
+   *
+   * - JSON_ARRAY: always uses INLINE disposition, no fallback.
+   * - ARROW_STREAM: tries INLINE first, falls back to EXTERNAL_LINKS.
+   *   This handles warehouses that only support one disposition.
+   */
+  private async _executeWithFormatFallback(
+    executor: AnalyticsPlugin,
+    query: string,
+    processedParams:
+      | Record<string, SQLTypeMarker | null | undefined>
+      | undefined,
+    requestedFormat: AnalyticsFormat,
+    signal?: AbortSignal,
+  ): Promise<AnalyticsSseMessage> {
+    if (requestedFormat === "JSON_ARRAY") {
+      const result = await executor.query(
+        query,
+        processedParams,
+        { disposition: "INLINE", format: "JSON_ARRAY" },
+        signal,
+      );
+      return makeResultMessage(result?.data, {
+        status: result?.status,
+        statement_id: result?.statement_id,
+      });
+    }
+
+    // ARROW_STREAM: try INLINE first, fall back to EXTERNAL_LINKS.
+    try {
+      const result = await executor.query(
+        query,
+        processedParams,
+        { disposition: "INLINE", format: "ARROW_STREAM" },
+        signal,
+      );
+      // INLINE responses with an Arrow IPC attachment are forwarded as base64
+      // for the client to decode into an Arrow Table. Anything else (rare:
+      // data_array under ARROW_STREAM, or an empty result) falls back to the
+      // generic "result" payload.
+      if (result?.attachment) {
+        return makeArrowInlineMessage(result.attachment);
+      }
+      return makeResultMessage(result?.data, {
+        status: result?.status,
+        statement_id: result?.statement_id,
+      });
+    } catch (err: unknown) {
+      // If the request was aborted, do not retry — the signal is dead and
+      // a second statement would be billed but never read.
+      if (signal?.aborted) {
+        throw err;
+      }
+
+      if (!_isInlineArrowUnsupported(err)) {
+        throw err;
+      }
+
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(
+        "ARROW_STREAM INLINE rejected by warehouse, falling back to EXTERNAL_LINKS: %s",
+        msg,
+      );
+    }
+
+    const result = await executor.query(
+      query,
+      processedParams,
+      { disposition: "EXTERNAL_LINKS", format: "ARROW_STREAM" },
+      signal,
+    );
+    return makeArrowMessage(result.statement_id, { status: result.status });
   }
 
   /**
@@ -336,6 +428,48 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       query: this.query,
     };
   }
+}
+
+/**
+ * Determine whether a warehouse error indicates that ARROW_STREAM + INLINE
+ * is unsupported, vs an unrelated SQL/permission error.
+ *
+ * Preferred path: read the structured `errorCode` we now propagate from the
+ * SDK's `ApiError.errorCode` and the warehouse's `status.error.error_code`
+ * through `ExecutionError`. This is stable across error-message wording
+ * changes.
+ *
+ * Substring backstop: if the upstream error didn't surface a code (legacy
+ * SDK builds, or errors thrown outside the connector's wrap path), fall
+ * back to requiring both INLINE and ARROW_STREAM keywords in the message
+ * plus a marker phrase. The pair-requirement avoids matching unrelated SQL
+ * errors that happen to mention one of the words (e.g. a column named
+ * `INLINE_USERS`).
+ */
+function _isInlineArrowUnsupported(err: unknown): boolean {
+  const structuredCode =
+    err instanceof ExecutionError ? err.errorCode : undefined;
+  if (
+    structuredCode === "INVALID_PARAMETER_VALUE" ||
+    structuredCode === "NOT_IMPLEMENTED"
+  ) {
+    // Structured code already tells us the warehouse rejected the request.
+    // Require keyword pairing to confirm it's the disposition/format combo
+    // (vs an INVALID_PARAMETER_VALUE for something else entirely).
+    const msg = err instanceof Error ? err.message : String(err);
+    return msg.includes("INLINE") && msg.includes("ARROW_STREAM");
+  }
+
+  // Backstop for errors without a structured code.
+  const msg = err instanceof Error ? err.message : String(err);
+  if (!msg.includes("INLINE") || !msg.includes("ARROW_STREAM")) {
+    return false;
+  }
+  return (
+    msg.includes("not supported") ||
+    msg.includes("INVALID_PARAMETER_VALUE") ||
+    msg.includes("NOT_IMPLEMENTED")
+  );
 }
 
 /**

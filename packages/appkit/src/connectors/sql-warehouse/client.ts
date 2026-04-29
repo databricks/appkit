@@ -21,9 +21,23 @@ import {
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
+import { buildEmptyArrowIPCBase64 } from "./arrow-schema";
 import { executeStatementDefaults } from "./defaults";
 
 const logger = createLogger("connectors:sql-warehouse");
+
+/**
+ * Maximum size for inline Arrow IPC attachments (8 MiB decoded).
+ * Aligned with `streamDefaults.maxEventSize` so anything that would exceed
+ * the SSE event cap fails here with a clear error rather than a confusing
+ * "Buffer size exceeded" downstream. Larger results should use
+ * `disposition: "EXTERNAL_LINKS"`, which the analytics fallback handles.
+ *
+ * RAISE TO 25 MiB (Databricks API hard cap on INLINE) if PR #320 (stash +
+ * serve via /arrow-result) lands — that proposal moves bulk bytes off SSE
+ * onto HTTP, so the SSE event-size constraint no longer applies here.
+ */
+const MAX_INLINE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 
 interface SQLWarehouseConfig {
   timeout?: number;
@@ -196,7 +210,10 @@ export class SQLWarehouseConnector {
               result = this._transformDataArray(response);
               break;
             case "FAILED":
-              throw ExecutionError.statementFailed(status.error?.message);
+              throw ExecutionError.statementFailed(
+                status.error?.message,
+                status.error?.error_code,
+              );
             case "CANCELED":
               throw ExecutionError.canceled();
             case "CLOSED":
@@ -236,18 +253,22 @@ export class SQLWarehouseConnector {
               code: SpanStatusCode.ERROR,
               message: error instanceof Error ? error.message : String(error),
             });
-
-            logger.error(
-              "Statement execution failed: %s",
-              error instanceof Error ? error.message : String(error),
-            );
           }
 
           if (error instanceof AppKitError) {
             throw error;
           }
+          // Preserve the SDK's structured ApiError.errorCode (e.g.
+          // "INVALID_PARAMETER_VALUE", "BAD_REQUEST") through the wrap so
+          // callers can branch on a stable identifier rather than
+          // substring-matching the message.
+          const sdkErrorCode =
+            error && typeof error === "object" && "errorCode" in error
+              ? (error as { errorCode?: unknown }).errorCode
+              : undefined;
           throw ExecutionError.statementFailed(
             error instanceof Error ? error.message : String(error),
+            typeof sdkErrorCode === "string" ? sdkErrorCode : undefined,
           );
         } finally {
           // remove abort handler
@@ -360,7 +381,10 @@ export class SQLWarehouseConnector {
                 span.setStatus({ code: SpanStatusCode.OK });
                 return this._transformDataArray(response);
               case "FAILED":
-                throw ExecutionError.statementFailed(status.error?.message);
+                throw ExecutionError.statementFailed(
+                  status.error?.message,
+                  status.error?.error_code,
+                );
               case "CANCELED":
                 throw ExecutionError.canceled();
               case "CLOSED":
@@ -382,12 +406,16 @@ export class SQLWarehouseConnector {
             message: error instanceof Error ? error.message : String(error),
           });
 
-          // error logging is handled by executeStatement's catch block (gated on isAborted)
           if (error instanceof AppKitError) {
             throw error;
           }
+          const sdkErrorCode =
+            error && typeof error === "object" && "errorCode" in error
+              ? (error as { errorCode?: unknown }).errorCode
+              : undefined;
           throw ExecutionError.statementFailed(
             error instanceof Error ? error.message : String(error),
+            typeof sdkErrorCode === "string" ? sdkErrorCode : undefined,
           );
         } finally {
           span.end();
@@ -399,7 +427,40 @@ export class SQLWarehouseConnector {
 
   private _transformDataArray(response: sql.StatementResponse) {
     if (response.manifest?.format === "ARROW_STREAM") {
-      return this.updateWithArrowStatus(response);
+      const result = response.result as
+        | (sql.ResultData & { attachment?: string })
+        | undefined;
+
+      // Inline Arrow: pass the base64 IPC attachment through unmodified so
+      // the analytics route can stream it to the client, where the existing
+      // ArrowClient infrastructure decodes it into a Table. Validate size
+      // here to fail fast on runaway payloads.
+      if (result?.attachment) {
+        return this._validateArrowAttachment(response, result.attachment);
+      }
+
+      // External links: data fetched separately via statement_id.
+      if (result?.external_links) {
+        return this.updateWithArrowStatus(response);
+      }
+
+      // Empty result with a known schema: synthesize a zero-row Arrow IPC
+      // attachment so the client always receives an Arrow Table for
+      // ARROW_STREAM, regardless of whether the warehouse returned data.
+      if (!result?.data_array && response.manifest?.schema?.columns) {
+        const synthesized = buildEmptyArrowIPCBase64(
+          response.manifest.schema.columns,
+        );
+        return {
+          ...response,
+          result: { ...(result ?? {}), attachment: synthesized },
+        };
+      }
+
+      // Inline data_array under ARROW_STREAM (rare): fall through to the
+      // row transform below. The hook will receive `type: "result"` rows;
+      // callers asking for ARROW_STREAM should not hit this path with
+      // current Databricks warehouses.
     }
 
     if (!response.result?.data_array || !response.manifest?.schema?.columns) {
@@ -443,6 +504,41 @@ export class SQLWarehouseConnector {
         data: transformedData,
       },
     };
+  }
+
+  /**
+   * Validate (but do not decode) a base64 Arrow IPC attachment.
+   * Some serverless warehouses return inline results as Arrow IPC in
+   * `result.attachment`. We pass the base64 string through to the client,
+   * which decodes it into an Arrow Table via the existing ArrowClient
+   * infrastructure. This keeps the wire contract for ARROW_STREAM
+   * consistent (client always receives an Arrow Table) and avoids
+   * decode/re-encode work on the server.
+   */
+  private _validateArrowAttachment(
+    response: sql.StatementResponse,
+    attachment: string,
+  ) {
+    // Cap the size to protect against unbounded inline payloads from
+    // misbehaving warehouses. 64 MiB is well above the typical inline limit
+    // (~25 MiB hard cap on the API) but bounds memory if a server returns
+    // a runaway response.
+    //
+    // Strip whitespace (rare but legal in base64) and account for trailing
+    // `=` padding so the byte count is exact rather than an upper bound.
+    const stripped = attachment.replace(/\s+/g, "");
+    const padding = stripped.endsWith("==")
+      ? 2
+      : stripped.endsWith("=")
+        ? 1
+        : 0;
+    const decodedSize = Math.floor((stripped.length * 3) / 4) - padding;
+    if (decodedSize > MAX_INLINE_ATTACHMENT_BYTES) {
+      throw ExecutionError.statementFailed(
+        `Inline Arrow attachment exceeds maximum size (${decodedSize} > ${MAX_INLINE_ATTACHMENT_BYTES} bytes)`,
+      );
+    }
+    return response;
   }
 
   private updateWithArrowStatus(response: sql.StatementResponse): {
