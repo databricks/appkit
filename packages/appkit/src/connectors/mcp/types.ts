@@ -1,7 +1,7 @@
 /**
  * Input shape consumed by {@link AppKitMcpClient.connect}. Produced by the
  * agents plugin from user-facing `HostedTool` declarations (see
- * `plugins/agents/tools/hosted-tools.ts`) and accepted directly by the
+ * `core/agent/tools/hosted-tools.ts`) and accepted directly by the
  * connector to keep its surface free of agent-layer concepts.
  */
 export interface McpEndpointConfig {

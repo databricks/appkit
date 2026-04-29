@@ -17,33 +17,22 @@ import type {
 } from "shared";
 import { AppKitMcpClient, buildMcpHostPolicy } from "../../connectors/mcp";
 import { getWorkspaceClient } from "../../context";
-import { createLogger } from "../../logging/logger";
-import { Plugin, toPlugin } from "../../plugin";
-import type { PluginManifest } from "../../registry";
-import { consumeAdapterStream } from "./consume-adapter-stream";
-import { agentStreamDefaults } from "./defaults";
-import { EventChannel } from "./event-channel";
-import { AgentEventTranslator } from "./event-translator";
-import { isFromPluginMarker } from "./from-plugin";
-import { loadAgentsFromDir } from "./load-agents";
-import manifest from "./manifest.json";
-import { normalizeToolResult } from "./normalize-result";
+import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
+import { isFromPluginMarker } from "../../core/agent/from-plugin";
+import { loadAgentsFromDir } from "../../core/agent/load-agents";
+import { normalizeToolResult } from "../../core/agent/normalize-result";
 import {
-  approvalRequestSchema,
-  chatRequestSchema,
-  invocationsRequestSchema,
-} from "./schemas";
-import { buildBaseSystemPrompt, composeSystemPrompt } from "./system-prompt";
-import { InMemoryThreadStore } from "./thread-store";
-import { ToolApprovalGate } from "./tool-approval-gate";
-import { dispatchToolCall } from "./tool-dispatch";
-import { resolveToolkitFromProvider } from "./toolkit-resolver";
+  buildBaseSystemPrompt,
+  composeSystemPrompt,
+} from "../../core/agent/system-prompt";
+import { dispatchToolCall } from "../../core/agent/tool-dispatch";
+import { resolveToolkitFromProvider } from "../../core/agent/toolkit-resolver";
 import {
   functionToolToDefinition,
   isFunctionTool,
   isHostedTool,
   resolveHostedTools,
-} from "./tools";
+} from "../../core/agent/tools";
 import type {
   AgentDefinition,
   AgentsPluginConfig,
@@ -51,8 +40,22 @@ import type {
   PromptContext,
   RegisteredAgent,
   ResolvedToolEntry,
-} from "./types";
-import { isToolkitEntry } from "./types";
+} from "../../core/agent/types";
+import { isToolkitEntry } from "../../core/agent/types";
+import { createLogger } from "../../logging/logger";
+import { Plugin, toPlugin } from "../../plugin";
+import type { PluginManifest } from "../../registry";
+import { agentStreamDefaults } from "./defaults";
+import { EventChannel } from "./event-channel";
+import { AgentEventTranslator } from "./event-translator";
+import manifest from "./manifest.json";
+import {
+  approvalRequestSchema,
+  chatRequestSchema,
+  invocationsRequestSchema,
+} from "./schemas";
+import { InMemoryThreadStore } from "./thread-store";
+import { ToolApprovalGate } from "./tool-approval-gate";
 
 const logger = createLogger("agents");
 
@@ -379,7 +382,8 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     this.resolveFromPluginMarkers(agentName, toolsRecord, index);
 
     // 3. Explicit tools (toolkit entries, function tools, hosted tools)
-    const hostedToCollect: import("./tools/hosted-tools").HostedTool[] = [];
+    const hostedToCollect: import("../../core/agent/tools/hosted-tools").HostedTool[] =
+      [];
     for (const [key, tool] of Object.entries(toolsRecord)) {
       if (isToolkitEntry(tool)) {
         index.set(key, {
@@ -518,7 +522,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   }
 
   private async connectHostedTools(
-    hostedTools: import("./tools/hosted-tools").HostedTool[],
+    hostedTools: import("../../core/agent/tools/hosted-tools").HostedTool[],
     index: Map<string, ResolvedToolEntry>,
   ): Promise<void> {
     const wsClient = await this.resolveWorkspaceClient();

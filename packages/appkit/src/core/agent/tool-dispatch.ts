@@ -1,6 +1,6 @@
 import type express from "express";
 import type { AppKitMcpClient } from "../../connectors/mcp";
-import type { PluginContext } from "../../core/plugin-context";
+import type { PluginContext } from "../plugin-context";
 import type { ResolvedToolEntry } from "./types";
 
 interface ToolDispatchContext {
