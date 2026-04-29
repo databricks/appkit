@@ -168,8 +168,59 @@ function loadManifestFromFileSync(filePath: string): unknown {
   return JSON.parse(raw);
 }
 
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Convert a kebab-case manifest name to its camelCase JS identifier form
+ * (e.g. `vector-search` -> `vectorSearch`). Mirrors the convention used by
+ * first-party plugin index files: a manifest's `name` field may be
+ * kebab-case (the schema permits `^[a-z][a-z0-9-]*$`), but the actual
+ * exported binding is always a JS identifier. We try both forms when
+ * matching specifiers in user code.
+ */
+function manifestNameToBinding(pluginName: string): string {
+  return pluginName.replace(/-+([a-z0-9])/g, (_, c: string) => c.toUpperCase());
+}
+
+/**
+ * Returns true when the named import specifier `spec` resolves to either
+ * `pluginName` itself or its kebab-to-camelCase JS-identifier form.
+ * Handles the `name`, `name as alias`, and inline-type (`type name`,
+ * `type name as alias`) forms. Matches on the imported binding before any
+ * `as` rename so a promotion finds the right specifier regardless of how
+ * the user aliased it.
+ */
+function specifierMatchesPlugin(spec: string, pluginName: string): boolean {
+  const stripped = spec.replace(/^type\s+/, "").trim();
+  const head = stripped.split(/\s+as\s+/)[0]?.trim();
+  if (!head) return false;
+  return head === pluginName || head === manifestNameToBinding(pluginName);
+}
+
+/**
+ * Rewrite imports of `pluginName` from `<pkg><oldSuffix>` to `<pkg><newSuffix>`
+ * across one file, leaving every OTHER specifier on the same import line at
+ * its original source. The naïve `split/join` approach this replaced was
+ * promoting *every* beta specifier in the file along with the targeted
+ * plugin — a bug because beta specifiers don't exist at the stable subpath.
+ *
+ * Behaviour:
+ * - If the targeted plugin is the only specifier on an import line, the
+ *   line's source is rewritten to the new path.
+ * - If the import has multiple specifiers, the targeted one is moved to a
+ *   newly-emitted import line at the new source, and the original import
+ *   keeps the remaining specifiers at the old source.
+ * - Imports that don't reference `pluginName` are left untouched.
+ *
+ * Multi-line specifier lists, type-only imports (`import type { ... }`),
+ * inline-type specifiers (`import { type Foo }`), and `as`-aliased
+ * specifiers are all preserved through the rewrite.
+ */
 function rewriteImportsInFile(
   filePath: string,
+  pluginName: string,
   oldSuffix: string,
   newSuffix: string,
   dryRun: boolean,
@@ -187,10 +238,50 @@ function rewriteImportsInFile(
   for (const pkg of packages) {
     const oldPath = `${pkg}${oldSuffix}`;
     const newPath = `${pkg}${newSuffix}`;
-    if (updated.includes(oldPath)) {
-      updated = updated.split(oldPath).join(newPath);
-      changed = true;
-    }
+
+    // Match: `import [type] { ...specifiers... } from "<oldPath>";`
+    // - `[^}]*` lets the specifier list span newlines (safe — TS imports
+    //   don't have nested braces inside the specifier list).
+    // - Captures the `type ` keyword (if any), the specifier body, and
+    //   the surrounding quote style so we can preserve them on output.
+    const importRe = new RegExp(
+      `import\\s+(type\\s+)?\\{([^}]*)\\}\\s*from\\s*(["'])${escapeRegex(oldPath)}\\3\\s*;?`,
+      "g",
+    );
+
+    updated = updated.replace(
+      importRe,
+      (full, typeKeyword, specifiers, quote) => {
+        const specList: string[] = specifiers
+          .split(",")
+          .map((s: string) => s.trim())
+          .filter((s: string) => s.length > 0);
+
+        const promotedSpec = specList.find((s) =>
+          specifierMatchesPlugin(s, pluginName),
+        );
+        if (!promotedSpec) {
+          // Plugin not in this import — leave it alone.
+          return full;
+        }
+
+        const remaining = specList.filter(
+          (s) => !specifierMatchesPlugin(s, pluginName),
+        );
+        changed = true;
+
+        const tk = typeKeyword ?? "";
+        const promotedImport = `import ${tk}{ ${promotedSpec} } from ${quote}${newPath}${quote};`;
+
+        if (remaining.length === 0) {
+          // Only specifier — just rewrite the source.
+          return promotedImport;
+        }
+
+        const remainingImport = `import ${tk}{ ${remaining.join(", ")} } from ${quote}${oldPath}${quote};`;
+        return `${remainingImport}\n${promotedImport}`;
+      },
+    );
   }
 
   if (!changed) return null;
@@ -340,6 +431,7 @@ async function runPromote(
     for (const file of tsFiles) {
       const result = rewriteImportsInFile(
         file,
+        pluginName,
         oldSuffix,
         newSuffix,
         Boolean(options.dryRun),

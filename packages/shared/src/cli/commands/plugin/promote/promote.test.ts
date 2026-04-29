@@ -162,20 +162,21 @@ describe("rewriteImportsInFile", () => {
     cleanDir(tmp);
   });
 
-  it("rewrites a matching import", () => {
+  it("rewrites a single-specifier matching import", () => {
     const file = path.join(tmp, "server.ts");
     fs.writeFileSync(file, `import { x } from "@databricks/appkit/beta";\n`);
-    const result = rewriteImportsInFile(file, "/beta", "", false);
+    const result = rewriteImportsInFile(file, "x", "/beta", "", false);
     expect(result).not.toBeNull();
-    expect(fs.readFileSync(file, "utf-8")).toContain(`"@databricks/appkit"`);
-    expect(fs.readFileSync(file, "utf-8")).not.toContain("/beta");
+    const after = fs.readFileSync(file, "utf-8");
+    expect(after).toContain(`from "@databricks/appkit"`);
+    expect(after).not.toContain("/beta");
   });
 
   it("dry-run does not write the file", () => {
     const file = path.join(tmp, "server.ts");
     const original = `import { x } from "@databricks/appkit/beta";\n`;
     fs.writeFileSync(file, original);
-    const result = rewriteImportsInFile(file, "/beta", "", true);
+    const result = rewriteImportsInFile(file, "x", "/beta", "", true);
     expect(result).not.toBeNull();
     expect(fs.readFileSync(file, "utf-8")).toBe(original);
   });
@@ -183,8 +184,97 @@ describe("rewriteImportsInFile", () => {
   it("returns null when no rewrite is needed", () => {
     const file = path.join(tmp, "server.ts");
     fs.writeFileSync(file, `import { x } from "express";\n`);
-    const result = rewriteImportsInFile(file, "/beta", "", false);
+    const result = rewriteImportsInFile(file, "x", "/beta", "", false);
     expect(result).toBeNull();
+  });
+
+  it("only rewrites the targeted specifier in a multi-specifier import", () => {
+    // Reviewer-flagged scenario: the old split/join would have rewritten
+    // the entire `from "@databricks/appkit/beta"` source for the whole
+    // line, breaking `betaB` (which doesn't exist at the stable subpath).
+    const file = path.join(tmp, "server.ts");
+    fs.writeFileSync(
+      file,
+      `import { betaA, betaB } from "@databricks/appkit/beta";\n`,
+    );
+    const result = rewriteImportsInFile(file, "betaA", "/beta", "", false);
+    expect(result).not.toBeNull();
+    const after = fs.readFileSync(file, "utf-8");
+    expect(after).toContain(`{ betaB } from "@databricks/appkit/beta"`);
+    expect(after).toContain(`{ betaA } from "@databricks/appkit"`);
+  });
+
+  it("returns null when the specifier list does not contain the plugin", () => {
+    const file = path.join(tmp, "server.ts");
+    const original = `import { betaA, betaB } from "@databricks/appkit/beta";\n`;
+    fs.writeFileSync(file, original);
+    // Promoting a different plugin — this file shouldn't change at all.
+    const result = rewriteImportsInFile(file, "ghost", "/beta", "", false);
+    expect(result).toBeNull();
+    expect(fs.readFileSync(file, "utf-8")).toBe(original);
+  });
+
+  it("preserves the `import type` keyword across the split", () => {
+    const file = path.join(tmp, "types.ts");
+    fs.writeFileSync(
+      file,
+      `import type { betaA, betaB } from "@databricks/appkit/beta";\n`,
+    );
+    const result = rewriteImportsInFile(file, "betaA", "/beta", "", false);
+    expect(result).not.toBeNull();
+    const after = fs.readFileSync(file, "utf-8");
+    expect(after).toContain(
+      `import type { betaB } from "@databricks/appkit/beta"`,
+    );
+    expect(after).toContain(`import type { betaA } from "@databricks/appkit"`);
+  });
+
+  it("matches an aliased specifier on the imported binding, not the alias", () => {
+    const file = path.join(tmp, "server.ts");
+    fs.writeFileSync(
+      file,
+      `import { betaA as a, betaB } from "@databricks/appkit/beta";\n`,
+    );
+    const result = rewriteImportsInFile(file, "betaA", "/beta", "", false);
+    expect(result).not.toBeNull();
+    const after = fs.readFileSync(file, "utf-8");
+    expect(after).toContain(`{ betaB } from "@databricks/appkit/beta"`);
+    expect(after).toContain(`{ betaA as a } from "@databricks/appkit"`);
+  });
+
+  it("handles multi-line specifier lists", () => {
+    const file = path.join(tmp, "server.ts");
+    fs.writeFileSync(
+      file,
+      `import {\n  betaA,\n  betaB,\n} from "@databricks/appkit/beta";\n`,
+    );
+    const result = rewriteImportsInFile(file, "betaA", "/beta", "", false);
+    expect(result).not.toBeNull();
+    const after = fs.readFileSync(file, "utf-8");
+    expect(after).toContain(`{ betaB } from "@databricks/appkit/beta"`);
+    expect(after).toContain(`{ betaA } from "@databricks/appkit"`);
+  });
+
+  it("rewrites both appkit and appkit-ui packages independently", () => {
+    const file = path.join(tmp, "App.tsx");
+    fs.writeFileSync(
+      file,
+      [
+        `import { betaA, betaB } from "@databricks/appkit/beta";`,
+        `import { Comp } from "@databricks/appkit-ui/react/beta";`,
+        ``,
+      ].join("\n"),
+    );
+    const result = rewriteImportsInFile(file, "betaA", "/beta", "", false);
+    expect(result).not.toBeNull();
+    const after = fs.readFileSync(file, "utf-8");
+    // appkit: split — betaB stays beta, betaA goes stable.
+    expect(after).toContain(`{ betaB } from "@databricks/appkit/beta"`);
+    expect(after).toContain(`{ betaA } from "@databricks/appkit"`);
+    // appkit-ui: not touched (Comp isn't the promoted plugin).
+    expect(after).toContain(
+      `import { Comp } from "@databricks/appkit-ui/react/beta"`,
+    );
   });
 });
 
@@ -286,29 +376,33 @@ describe("runPromote", () => {
     expect(fs.readFileSync(manifestPath, "utf-8")).toBe(before);
   });
 
-  it("rewrites imports across .ts and .tsx files in the project", async () => {
+  it("rewrites only the targeted plugin's imports across .ts and .tsx files", async () => {
+    // `my-plugin` is the kebab-case manifest name; the import binding is
+    // `myPlugin` (kebab-to-camelCase). The rewriter accepts both forms.
     writeManifest(h.cwd, "my-plugin", "beta");
+
     const tsFile = path.join(h.cwd, "server", "server.ts");
     fs.mkdirSync(path.dirname(tsFile), { recursive: true });
     fs.writeFileSync(
       tsFile,
       `import { myPlugin } from "@databricks/appkit/beta";\n`,
     );
+
+    // Unrelated beta import — promoting `my-plugin` must NOT touch this.
+    // Pre-fix, the blind `split/join` rewrite would have moved `Comp`
+    // onto the stable subpath where it doesn't exist, breaking the app.
     const tsxFile = path.join(h.cwd, "client", "App.tsx");
     fs.mkdirSync(path.dirname(tsxFile), { recursive: true });
-    fs.writeFileSync(
-      tsxFile,
-      `import { Comp } from "@databricks/appkit-ui/react/beta";\n`,
-    );
+    const tsxOriginal = `import { Comp } from "@databricks/appkit-ui/react/beta";\n`;
+    fs.writeFileSync(tsxFile, tsxOriginal);
 
     await runPromote("my-plugin", { to: "stable", skipSync: true });
 
-    expect(fs.readFileSync(tsFile, "utf-8")).toContain(`"@databricks/appkit"`);
-    expect(fs.readFileSync(tsFile, "utf-8")).not.toContain("/beta");
-    expect(fs.readFileSync(tsxFile, "utf-8")).toContain(
-      `"@databricks/appkit-ui/react"`,
-    );
-    expect(fs.readFileSync(tsxFile, "utf-8")).not.toContain("/beta");
+    const tsAfter = fs.readFileSync(tsFile, "utf-8");
+    expect(tsAfter).toContain(`{ myPlugin } from "@databricks/appkit"`);
+    expect(tsAfter).not.toContain("/beta");
+
+    expect(fs.readFileSync(tsxFile, "utf-8")).toBe(tsxOriginal);
   });
 
   it("skips symlinked directories during the project walk", async () => {

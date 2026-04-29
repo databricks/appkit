@@ -84,9 +84,14 @@ async function loadPluginEntry(
       ...(manifest.onSetupMessage && {
         onSetupMessage: manifest.onSetupMessage,
       }),
+      // Narrowing on `!== "stable"` removes "stable"; the truthy check
+      // removes `undefined`. What's left is the non-stable tier set,
+      // which TypeScript already knows is assignable to TemplatePlugin's
+      // `stability` field — so no cast is needed and adding a future
+      // tier (e.g. "alpha") flows through type-correctly.
       ...(manifest.stability &&
         manifest.stability !== "stable" && {
-          stability: manifest.stability as "beta",
+          stability: manifest.stability,
         }),
     },
   ];
