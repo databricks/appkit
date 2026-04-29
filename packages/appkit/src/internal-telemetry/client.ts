@@ -41,7 +41,7 @@ async function fetchWithRedirect(
   const res = await fetch(url, init);
   const location = res.headers.get("location");
   if (res.status >= 300 && res.status < 400 && location) {
-    return fetch(location, init);
+    return fetch(new URL(location, url), init);
   }
   return res;
 }
@@ -62,7 +62,7 @@ export async function postTelemetry(params: {
   if (!host) throw new Error("Telemetry: workspaceHost is empty");
   if (!params.workspaceId) throw new Error("Telemetry: workspaceId is empty");
 
-  const url = `${host}/telemetry?o=${params.workspaceId}`;
+  const url = `${host}/telemetry-ext?o=${params.workspaceId}`;
   const body = JSON.stringify(params.payload);
 
   const headers = new Headers({

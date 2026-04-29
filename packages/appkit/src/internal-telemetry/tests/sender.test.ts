@@ -41,7 +41,7 @@ describe("sendStartupTelemetry", () => {
     expect(fetchSpy).toHaveBeenCalledOnce();
     const [url] = fetchSpy.mock.calls[0];
     expect(url).toBe(
-      "https://my-workspace.cloud.databricks.com/telemetry?o=1234567890",
+      "https://my-workspace.cloud.databricks.com/telemetry-ext?o=1234567890",
     );
   });
 
@@ -132,11 +132,31 @@ describe("sendStartupTelemetry", () => {
 
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     const [redirectUrl, redirectOptions] = fetchSpy.mock.calls[1];
-    expect(redirectUrl).toBe("https://redirected.example.com/telemetry");
+    expect(String(redirectUrl)).toBe(
+      "https://redirected.example.com/telemetry",
+    );
     const redirectHeaders = redirectOptions.headers as Headers;
     expect(redirectHeaders.get("Authorization")).toBe("Bearer mock-sp-token");
     expect(redirectHeaders.get("X-Databricks-Org-Id")).toBe("1234567890");
     expect(redirectOptions.method).toBe("POST");
+  });
+
+  test("resolves relative redirect URLs against the original host", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response("", {
+        status: 302,
+        headers: { location: "/login.html?next_url=%2Ftelemetry-ext" },
+      }),
+    );
+    fetchSpy.mockResolvedValueOnce(new Response("", { status: 200 }));
+
+    await sendStartupTelemetry(defaultParams());
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const [redirectUrl] = fetchSpy.mock.calls[1];
+    expect(String(redirectUrl)).toBe(
+      "https://my-workspace.cloud.databricks.com/login.html?next_url=%2Ftelemetry-ext",
+    );
   });
 
   test("propagates fetch errors to the caller", async () => {
@@ -185,7 +205,7 @@ describe("sendStartupTelemetry", () => {
     const result = await sendStartupTelemetry(defaultParams());
     expect(result.request.method).toBe("POST");
     expect(result.request.url).toBe(
-      "https://my-workspace.cloud.databricks.com/telemetry?o=1234567890",
+      "https://my-workspace.cloud.databricks.com/telemetry-ext?o=1234567890",
     );
     expect(result.request.headers["content-type"]).toBe("application/json");
     expect(result.request.headers.authorization).toBe("Bearer mock-sp-token");
@@ -202,7 +222,7 @@ describe("sendStartupTelemetry", () => {
 
     const [url] = fetchSpy.mock.calls[0];
     expect(url).toBe(
-      "https://my-workspace.cloud.databricks.com/telemetry?o=1234567890",
+      "https://my-workspace.cloud.databricks.com/telemetry-ext?o=1234567890",
     );
   });
 
@@ -214,7 +234,7 @@ describe("sendStartupTelemetry", () => {
 
     const [url] = fetchSpy.mock.calls[0];
     expect(url).toBe(
-      "https://my-workspace.cloud.databricks.com/telemetry?o=1234567890",
+      "https://my-workspace.cloud.databricks.com/telemetry-ext?o=1234567890",
     );
   });
 
