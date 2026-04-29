@@ -328,6 +328,7 @@ export class AnalyticsPlugin extends Plugin {
       measures: request.measures,
       dimensions: request.dimensions,
       timeGrain: request.timeGrain,
+      filter: request.filter,
       format,
       executorKey,
       limit: request.limit,
@@ -348,10 +349,10 @@ export class AnalyticsPlugin extends Plugin {
     await executor.executeStream(
       res,
       async (signal) => {
-        const { statement } = buildMetricSql(registration, request);
+        const { statement, parameters } = buildMetricSql(registration, request);
         const result = await executor.query(
           statement,
-          undefined,
+          Object.keys(parameters).length > 0 ? parameters : undefined,
           queryParameters.formatParameters,
           signal,
         );

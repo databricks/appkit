@@ -1,15 +1,87 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { type SQLTypeMarker, sql as sqlHelpers } from "shared";
 import { z } from "zod";
 import { ValidationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import type {
   IAnalyticsMetricRequest,
+  MetricDimensionTypeClass,
+  MetricFilter,
+  MetricFilterOperatorName,
   MetricLane,
+  MetricPredicate,
   MetricRegistration,
 } from "./types";
 
 const logger = createLogger("analytics:metric");
+
+/**
+ * The exact twelve filter operators allowed at v1. The runtime tuple is the
+ * server-side source of truth; the client-side type union
+ * `MetricFilterOperator` mirrors these names statically.
+ */
+const METRIC_FILTER_OPERATORS = [
+  "equals",
+  "notEquals",
+  "in",
+  "notIn",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "contains",
+  "notContains",
+  "set",
+  "notSet",
+] as const satisfies readonly MetricFilterOperatorName[];
+
+/**
+ * Maximum AND/OR nesting depth. The PRD documents 8 as a sensible cap —
+ * enough for any real BI filter UI, low enough that a hostile or malformed
+ * payload cannot stack-overflow the recursive validator or translator.
+ *
+ * The depth count is the number of nested `{ and }` / `{ or }` wrappers
+ * encountered while descending — leaf predicates do not count toward depth.
+ */
+const METRIC_FILTER_MAX_DEPTH = 8;
+
+/**
+ * Range ops — require numeric or date-typed dimensions. The remaining ops
+ * split into:
+ *   - any-type: equals, notEquals, in, notIn, set, notSet
+ *   - string-only: contains, notContains
+ */
+const RANGE_OPERATORS = new Set<MetricFilterOperatorName>([
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+]);
+
+/** String ops — require string-typed dimensions. */
+const STRING_OPERATORS = new Set<MetricFilterOperatorName>([
+  "contains",
+  "notContains",
+]);
+
+/** Operators that require exactly one value. */
+const SINGLE_VALUE_OPERATORS = new Set<MetricFilterOperatorName>([
+  "equals",
+  "notEquals",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "contains",
+  "notContains",
+]);
+
+/** Operators that require at least one value. */
+const LIST_VALUE_OPERATORS = new Set<MetricFilterOperatorName>(["in", "notIn"]);
+
+/** Operators that reject `values` entirely. */
+const NULL_OPERATORS = new Set<MetricFilterOperatorName>(["set", "notSet"]);
 
 /**
  * Default queries directory. Mirrors `AppManager.queriesDir` so dev mode and
@@ -157,7 +229,7 @@ export async function loadMetricRegistry(
  * metadata available) any non-empty string is accepted and validation defers
  * to the warehouse.
  *
- * Phase 2 body shape: `{ measures, dimensions?, timeGrain?, format?, limit? }`.
+ * Phase 3 body shape: `{ measures, dimensions?, timeGrain?, filter?, format?, limit? }`.
  *
  * Validation matrix:
  *  - `measures` — must be a non-empty array; constrained to `knownMeasures`
@@ -166,6 +238,11 @@ export async function loadMetricRegistry(
  *  - `timeGrain` — optional string; constrained to the union of grains
  *    declared across all time-typed dimensions; rejected unless the
  *    `dimensions` array contains at least one time-typed dimension.
+ *  - `filter` — optional recursive AND/OR tree of predicates; `member`
+ *    constrained to `knownDimensions`; `operator` constrained to the v1
+ *    twelve; op⇄type compatibility enforced when dimension types are
+ *    available; values cardinality enforced per operator; AND/OR depth
+ *    capped at {@link METRIC_FILTER_MAX_DEPTH}.
  */
 export function makeMetricRequestSchema(
   registration: MetricRegistration,
@@ -216,6 +293,42 @@ export function makeMetricRequestSchema(
         })
       : baseTimeGrainSchema;
 
+  // ── Filter sub-schema (Phase 3) ──────────────────────────────────────────
+  //
+  // The filter shape is recursive (`Predicate | { and: [...] } | { or: [...] }`).
+  // Zod's recursive support uses `z.lazy(() => ...)` — the depth cap and the
+  // op⇄type compatibility check live in a `superRefine` on the parent (so we
+  // can walk the tree once with full context).
+  const filterPredicateSchema: z.ZodType<MetricPredicate> = z
+    .object({
+      member: z
+        .string()
+        .min(1, { message: "filter predicate 'member' cannot be empty" }),
+      operator: z.string().min(1, {
+        message: "filter predicate 'operator' cannot be empty",
+      }) as z.ZodType<MetricFilterOperatorName>,
+      values: z.array(z.union([z.string(), z.number()])).optional(),
+    })
+    .strict();
+
+  const filterSchema: z.ZodType<MetricFilter> = z.lazy(() =>
+    z.union([
+      filterPredicateSchema,
+      z
+        .object({
+          and: z.array(filterSchema),
+        })
+        .strict(),
+      z
+        .object({
+          or: z.array(filterSchema),
+        })
+        .strict(),
+    ]),
+  );
+
+  const knownDimensionTypes = registration.knownDimensionTypes ?? {};
+
   const baseObject = z
     .object({
       measures: z
@@ -223,6 +336,7 @@ export function makeMetricRequestSchema(
         .min(1, { message: "measures must contain at least one entry" }),
       dimensions: z.array(dimensionItemSchema).optional(),
       timeGrain: timeGrainSchema.optional(),
+      filter: filterSchema.optional(),
       format: z.enum(["JSON", "ARROW"]).optional(),
       limit: z
         .number()
@@ -232,24 +346,236 @@ export function makeMetricRequestSchema(
     })
     .strict();
 
-  // Cross-field rule: timeGrain is meaningless without a time-typed dimension
-  // in the dimensions list. Failing fast here keeps the SQL constructor
-  // honest (no `date_trunc(<grain>, <col>)` without a real column to truncate).
+  // Cross-field rules:
+  //  1. timeGrain is meaningless without a time-typed dimension in the
+  //     dimensions list. Failing fast here keeps the SQL constructor honest
+  //     (no `date_trunc(<grain>, <col>)` without a real column to truncate).
+  //  2. The recursive `filter` tree is depth-walked once: every predicate's
+  //     member must be a registered dimension; every operator must be one of
+  //     the twelve; op⇄type compatibility is enforced when dimension types
+  //     are available; values cardinality is enforced per operator; AND/OR
+  //     nesting is capped at METRIC_FILTER_MAX_DEPTH.
   return baseObject.superRefine((value, ctx) => {
-    if (value.timeGrain == null) return;
-    const dims = value.dimensions ?? [];
-    const hasTimeDim = dims.some(
-      (d) => Array.isArray(grainsByDim[d]) && grainsByDim[d].length > 0,
-    );
-    if (!hasTimeDim) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["timeGrain"],
-        message:
-          "timeGrain specified but no time-typed dimension is included in 'dimensions'",
+    if (value.timeGrain != null) {
+      const dims = value.dimensions ?? [];
+      const hasTimeDim = dims.some(
+        (d) => Array.isArray(grainsByDim[d]) && grainsByDim[d].length > 0,
+      );
+      if (!hasTimeDim) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["timeGrain"],
+          message:
+            "timeGrain specified but no time-typed dimension is included in 'dimensions'",
+        });
+      }
+    }
+
+    if (value.filter != null) {
+      validateFilterTree(value.filter, ctx, ["filter"], 0, {
+        knownDimensions,
+        knownDimensionTypes,
       });
     }
   }) as z.ZodType<IAnalyticsMetricRequest>;
+}
+
+/**
+ * Recursive zod-time validator for the filter tree.
+ *
+ * Pushes structured issues into the zod refinement context with stable paths
+ * (`filter.and.0.or.2.member`, etc.) so the canonical 400 error shape carries
+ * actionable diagnostics. Keeps three concerns in one descent:
+ *
+ *  1. Member is a registered dimension (when registry has metadata).
+ *  2. Operator is one of the twelve; values cardinality matches.
+ *  3. Op⇄type compatibility (string ops on string-typed dims, range ops on
+ *     numeric/date-typed dims, equality/set/null ops on any type).
+ *  4. Depth cap (AND/OR nesting limit).
+ *
+ * Returns void; issues are accumulated on `ctx`. The caller's
+ * `safeParse(...).success` flips false when any issue is added.
+ */
+function validateFilterTree(
+  node: MetricFilter,
+  ctx: z.RefinementCtx,
+  path: Array<string | number>,
+  depth: number,
+  registry: {
+    knownDimensions: string[];
+    knownDimensionTypes: Record<string, string>;
+  },
+): void {
+  if (node === null || typeof node !== "object") {
+    // The base schema rejects this case earlier via the union, but be
+    // defensive in case a future refactor leaves the door ajar.
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path,
+      message: "filter node must be a Predicate or { and } / { or } group",
+    });
+    return;
+  }
+
+  if ("and" in node || "or" in node) {
+    if (depth + 1 > METRIC_FILTER_MAX_DEPTH) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path,
+        message: `filter AND/OR nesting exceeds the maximum depth of ${METRIC_FILTER_MAX_DEPTH}`,
+      });
+      return;
+    }
+
+    const groupKey = "and" in node ? "and" : "or";
+    const children = (
+      node as { and?: ReadonlyArray<MetricFilter> } & {
+        or?: ReadonlyArray<MetricFilter>;
+      }
+    )[groupKey];
+
+    if (!Array.isArray(children)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...path, groupKey],
+        message: `filter ${groupKey} group must be an array of predicates or nested groups`,
+      });
+      return;
+    }
+
+    children.forEach((child, idx) => {
+      validateFilterTree(
+        child,
+        ctx,
+        [...path, groupKey, idx],
+        depth + 1,
+        registry,
+      );
+    });
+    return;
+  }
+
+  // Leaf predicate. The base schema already enforced shape; here we layer in
+  // the registry-aware constraints.
+  const predicate = node as MetricPredicate;
+
+  if (
+    registry.knownDimensions.length > 0 &&
+    !registry.knownDimensions.includes(predicate.member)
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [...path, "member"],
+      message: `filter member "${predicate.member}" is not a declared dimension (allowed: ${registry.knownDimensions.join(", ")})`,
+    });
+  }
+
+  if (
+    !METRIC_FILTER_OPERATORS.includes(
+      predicate.operator as MetricFilterOperatorName,
+    )
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [...path, "operator"],
+      message: `filter operator "${predicate.operator}" is not one of: ${METRIC_FILTER_OPERATORS.join(", ")}`,
+    });
+    // No further checks meaningful when the operator is unknown.
+    return;
+  }
+
+  const op = predicate.operator;
+  const values = predicate.values;
+  const valuesLen = values?.length ?? 0;
+
+  if (NULL_OPERATORS.has(op)) {
+    if (values != null && valuesLen > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...path, "values"],
+        message: `filter operator "${op}" must not carry values`,
+      });
+    }
+  } else if (SINGLE_VALUE_OPERATORS.has(op)) {
+    if (valuesLen !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...path, "values"],
+        message: `filter operator "${op}" requires exactly one value (got ${valuesLen})`,
+      });
+    }
+  } else if (LIST_VALUE_OPERATORS.has(op)) {
+    if (valuesLen < 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...path, "values"],
+        message: `filter operator "${op}" requires at least one value`,
+      });
+    }
+  }
+
+  // Op⇄type compatibility — only enforced when we have a registered type.
+  // Falls open (no error) when the registry didn't supply a type for the dim.
+  const declaredType = registry.knownDimensionTypes[predicate.member];
+  if (declaredType) {
+    const cls = classifyDimensionType(declaredType);
+    if (RANGE_OPERATORS.has(op) && cls === "string") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...path, "operator"],
+        message: `filter operator "${op}" is incompatible with string-typed dimension "${predicate.member}"`,
+      });
+    }
+    if (STRING_OPERATORS.has(op) && cls !== "string" && cls !== "unknown") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...path, "operator"],
+        message: `filter operator "${op}" is incompatible with non-string dimension "${predicate.member}" (type ${declaredType})`,
+      });
+    }
+  }
+}
+
+/**
+ * Classify a Databricks SQL type string into a coarse compatibility class.
+ *
+ * The classification is conservative: `STRING` and adjacent text types map to
+ * `string`; numeric, integral, and float types map to `numeric`; `DATE` and
+ * `TIMESTAMP` map to `date`; everything else maps to `unknown`. Accepting the
+ * fallback as `unknown` lets the validator stay deterministic when the
+ * registry has no type metadata for the dim.
+ */
+function classifyDimensionType(sqlType: string): MetricDimensionTypeClass {
+  const normalized = sqlType
+    .toUpperCase()
+    .replace(/\(.*\)$/, "")
+    .replace(/<.*>$/, "")
+    .split(" ")[0];
+
+  switch (normalized) {
+    case "STRING":
+    case "VARCHAR":
+    case "CHAR":
+    case "TEXT":
+      return "string";
+    case "TINYINT":
+    case "SMALLINT":
+    case "INT":
+    case "INTEGER":
+    case "BIGINT":
+    case "FLOAT":
+    case "DOUBLE":
+    case "DECIMAL":
+    case "NUMERIC":
+      return "numeric";
+    case "DATE":
+    case "TIMESTAMP":
+    case "TIMESTAMP_NTZ":
+    case "TIMESTAMP_LTZ":
+      return "date";
+    default:
+      return "unknown";
+  }
 }
 
 /**
@@ -335,20 +661,21 @@ const DIMENSION_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 const TIME_GRAIN_PATTERN = /^[a-z][a-z_]*$/;
 
 /**
- * Construct the Phase 2 metric SQL.
+ * Construct the Phase 3 metric SQL.
  *
  * Shape:
  *
  *   SELECT MEASURE(m), date_trunc('<grain>', <time_dim>) AS <time_dim>, <dim>
  *     FROM <fqn>
+ *    [WHERE <filter expression>]
  *    [GROUP BY ALL]
  *    [LIMIT n]
  *
  * Notes:
- *  - All column references (measures, dimensions) are validated against the
- *    registry's `knownMeasures` / `knownDimensions` and against the conservative
- *    identifier pattern. No user-supplied string flows into the SQL string
- *    without passing both gates.
+ *  - All column references (measures, dimensions, filter members) are
+ *    validated against the registry and against the conservative identifier
+ *    pattern. No user-supplied string flows into the SQL string without
+ *    passing both gates.
  *  - `date_trunc('<grain>', col) AS col` is emitted for every time-typed
  *    dimension when `timeGrain` is set. The grain literal is single-quoted in
  *    the SQL — we cannot use a bind variable for `date_trunc`'s first
@@ -357,11 +684,21 @@ const TIME_GRAIN_PATTERN = /^[a-z][a-z_]*$/;
  *    requires GROUP BY when MEASURE() is mixed with non-aggregated columns;
  *    `GROUP BY ALL` is the documented form that works without re-listing each
  *    dimension.
+ *  - `WHERE` clause is rendered from the recursive filter tree. Every value
+ *    flows through Statement Execution's named bind-var path (`:f_<idx>`);
+ *    no value is ever interpolated as a literal. Member identifiers come
+ *    from the validated registry, not the request body.
+ *
+ * Returns `{ statement, parameters }` where `parameters` is the named
+ * bind-var dictionary the analytics plugin's `query()` method consumes.
  */
 export function buildMetricSql(
   registration: MetricRegistration,
   request: IAnalyticsMetricRequest,
-): { statement: string; parameters: never[] } {
+): {
+  statement: string;
+  parameters: Record<string, SQLTypeMarker>;
+} {
   assertSafeFqn(registration.source);
 
   if (request.measures.length === 0) {
@@ -440,8 +777,300 @@ export function buildMetricSql(
       ? ` LIMIT ${Math.floor(request.limit)}`
       : "";
 
-  const statement = `SELECT ${selectList} FROM ${registration.source}${groupByClause}${limitClause}`;
-  return { statement, parameters: [] };
+  // Filter translation. Every value is bound through `:f_<idx>` named params;
+  // every column identifier is gated by the registry-membership check above
+  // (recursively, via `renderFilter`). Empty filter or no filter → no WHERE.
+  const parameters: Record<string, SQLTypeMarker> = {};
+  let whereClause = "";
+  if (request.filter !== undefined) {
+    const fragment = renderFilter(request.filter, registration, parameters, {
+      counter: 0,
+      depth: 0,
+    });
+    if (fragment !== null && fragment.length > 0) {
+      whereClause = ` WHERE ${fragment}`;
+    }
+  }
+
+  const statement = `SELECT ${selectList} FROM ${registration.source}${whereClause}${groupByClause}${limitClause}`;
+  return { statement, parameters };
+}
+
+/**
+ * Mutable counter / depth threaded through {@link renderFilter}. Fresh per
+ * `buildMetricSql` call, so two requests never share bind-var indexes.
+ */
+interface FilterRenderState {
+  counter: number;
+  depth: number;
+}
+
+/**
+ * Recursively render a filter tree into a SQL fragment, pushing bind values
+ * into `params` keyed by `:f_<idx>` names.
+ *
+ * Returns `null` for an empty group (no WHERE clause needed). The caller's
+ * `buildMetricSql` only emits `WHERE` when this returns a non-null,
+ * non-empty fragment. Empty `and: []` and `or: []` groups collapse to null —
+ * matching SQL's vacuous-truth semantics for AND, and the validator-permitted
+ * "no predicates" shape.
+ *
+ * Defense-in-depth: even though the request body's filter has already been
+ * validated by the zod schema, every member name is re-checked against the
+ * registry here. If validation is ever bypassed, the SQL constructor still
+ * refuses to interpolate an unknown identifier.
+ */
+function renderFilter(
+  node: MetricFilter,
+  registration: MetricRegistration,
+  params: Record<string, SQLTypeMarker>,
+  state: FilterRenderState,
+): string | null {
+  if (node === null || typeof node !== "object") {
+    throw new Error(
+      "Refusing to build SQL: filter node must be an object Predicate or { and } / { or } group.",
+    );
+  }
+
+  if ("and" in node || "or" in node) {
+    const groupKey = "and" in node ? "and" : "or";
+    if (state.depth + 1 > METRIC_FILTER_MAX_DEPTH) {
+      throw new Error(
+        `Refusing to build SQL: filter AND/OR nesting exceeds the maximum depth of ${METRIC_FILTER_MAX_DEPTH}.`,
+      );
+    }
+
+    const children = (
+      node as { and?: ReadonlyArray<MetricFilter> } & {
+        or?: ReadonlyArray<MetricFilter>;
+      }
+    )[groupKey];
+
+    if (!Array.isArray(children) || children.length === 0) {
+      // Empty group → no constraint; an empty AND is vacuously true and an
+      // empty OR is the validator's "do not contribute" shape.
+      return null;
+    }
+
+    // Sort-before-hash discipline (Phase 3 incremental). Within a group,
+    // predicate leaves are stable-sorted by (member, operator) before
+    // contributing to the rendered fragment, so semantically equivalent calls
+    // produce the same SQL string and (downstream) the same cache key.
+    const sortedChildren = sortFilterChildren(children);
+
+    const fragments: string[] = [];
+    const childState: FilterRenderState = {
+      counter: state.counter,
+      depth: state.depth + 1,
+    };
+    for (const child of sortedChildren) {
+      const rendered = renderFilter(child, registration, params, childState);
+      if (rendered != null && rendered.length > 0) {
+        fragments.push(rendered);
+      }
+    }
+    state.counter = childState.counter;
+
+    if (fragments.length === 0) return null;
+    if (fragments.length === 1) return fragments[0];
+    const joiner = groupKey === "and" ? " AND " : " OR ";
+    return `(${fragments.join(joiner)})`;
+  }
+
+  // Leaf predicate — validate against the registry one more time, then render.
+  const predicate = node as MetricPredicate;
+
+  if (!DIMENSION_NAME_PATTERN.test(predicate.member)) {
+    throw new Error(
+      `Refusing to build SQL: filter member "${predicate.member}" is not a valid identifier.`,
+    );
+  }
+  if (
+    registration.knownDimensions.length > 0 &&
+    !registration.knownDimensions.includes(predicate.member)
+  ) {
+    throw new Error(
+      `Refusing to build SQL: unknown filter member "${predicate.member}" for metric "${registration.key}".`,
+    );
+  }
+  if (
+    !METRIC_FILTER_OPERATORS.includes(
+      predicate.operator as MetricFilterOperatorName,
+    )
+  ) {
+    throw new Error(
+      `Refusing to build SQL: unknown filter operator "${predicate.operator}".`,
+    );
+  }
+
+  return renderPredicate(predicate, params, state);
+}
+
+/**
+ * Stable-sort filter children inside an AND/OR group by `(member, operator)`.
+ *
+ * Predicates carry both fields and sort by their pair; nested groups sort
+ * after predicates and stay in their original relative order (a nested group
+ * is opaque from the outside — we cannot collapse it to a single key). This
+ * is the sort-before-hash invariant applied at the SQL-fragment level so
+ * downstream cache keys collapse semantically equivalent calls.
+ */
+function sortFilterChildren(
+  children: ReadonlyArray<MetricFilter>,
+): MetricFilter[] {
+  const indexed = children.map((child, idx) => {
+    let key: string;
+    let isPredicate: boolean;
+    if (
+      child !== null &&
+      typeof child === "object" &&
+      !("and" in child) &&
+      !("or" in child)
+    ) {
+      const p = child as MetricPredicate;
+      key = `${p.member} ${p.operator}`;
+      isPredicate = true;
+    } else {
+      // Nested groups don't have a single (member, operator) — keep their
+      // original index so multiple nested groups within the same parent
+      // remain stable relative to each other.
+      key = "";
+      isPredicate = false;
+    }
+    return { child, idx, key, isPredicate };
+  });
+
+  indexed.sort((a, b) => {
+    if (a.isPredicate && !b.isPredicate) return -1;
+    if (!a.isPredicate && b.isPredicate) return 1;
+    if (a.isPredicate && b.isPredicate) {
+      if (a.key < b.key) return -1;
+      if (a.key > b.key) return 1;
+    }
+    return a.idx - b.idx;
+  });
+
+  return indexed.map((entry) => entry.child);
+}
+
+/**
+ * Translate a single predicate into a SQL fragment.
+ *
+ * Every value flows through a freshly-allocated `:f_<idx>` named bind var.
+ * Nothing from the request body is ever interpolated as a literal — the
+ * fragment carries identifiers (registry-validated) and operators
+ * (whitelisted), then references the bind name for each value.
+ *
+ * `set` and `notSet` emit `IS NULL` / `IS NOT NULL` with no bind value.
+ * `in` and `notIn` emit `IN (:f_0, :f_1, ...)`. `contains` and `notContains`
+ * emit `LIKE :f_0` and pre-bind the value with `%` wrapping.
+ */
+function renderPredicate(
+  predicate: MetricPredicate,
+  params: Record<string, SQLTypeMarker>,
+  state: FilterRenderState,
+): string {
+  const col = predicate.member;
+  const op = predicate.operator;
+  const values = predicate.values ?? [];
+
+  switch (op) {
+    case "equals":
+      return `${col} = ${bindValue(values[0], params, state)}`;
+    case "notEquals":
+      return `${col} <> ${bindValue(values[0], params, state)}`;
+    case "gt":
+      return `${col} > ${bindValue(values[0], params, state)}`;
+    case "gte":
+      return `${col} >= ${bindValue(values[0], params, state)}`;
+    case "lt":
+      return `${col} < ${bindValue(values[0], params, state)}`;
+    case "lte":
+      return `${col} <= ${bindValue(values[0], params, state)}`;
+    case "in": {
+      const placeholders = values.map((v) => bindValue(v, params, state));
+      return `${col} IN (${placeholders.join(", ")})`;
+    }
+    case "notIn": {
+      const placeholders = values.map((v) => bindValue(v, params, state));
+      return `${col} NOT IN (${placeholders.join(", ")})`;
+    }
+    case "contains": {
+      const raw = values[0];
+      if (typeof raw !== "string") {
+        throw new Error(
+          `Refusing to build SQL: filter operator "contains" requires a string value (got ${typeof raw}).`,
+        );
+      }
+      return `${col} LIKE ${bindLikeValue(raw, params, state)}`;
+    }
+    case "notContains": {
+      const raw = values[0];
+      if (typeof raw !== "string") {
+        throw new Error(
+          `Refusing to build SQL: filter operator "notContains" requires a string value (got ${typeof raw}).`,
+        );
+      }
+      return `${col} NOT LIKE ${bindLikeValue(raw, params, state)}`;
+    }
+    case "set":
+      return `${col} IS NOT NULL`;
+    case "notSet":
+      return `${col} IS NULL`;
+    default: {
+      // Exhaustiveness — the operator union is closed; if this is reached
+      // the operator vocabulary widened without updating the switch.
+      const _exhaustive: never = op;
+      throw new Error(
+        `Refusing to build SQL: unhandled filter operator "${_exhaustive as string}".`,
+      );
+    }
+  }
+}
+
+/**
+ * Allocate a fresh `:f_<idx>` bind name for `value`, push the typed marker
+ * into `params`, and return the placeholder string. Bumps the counter.
+ */
+function bindValue(
+  value: string | number | undefined,
+  params: Record<string, SQLTypeMarker>,
+  state: FilterRenderState,
+): string {
+  if (value === undefined) {
+    throw new Error(
+      "Refusing to build SQL: filter predicate is missing a required value.",
+    );
+  }
+  const name = `f_${state.counter}`;
+  state.counter += 1;
+  if (typeof value === "number") {
+    params[name] = sqlHelpers.number(value);
+  } else if (typeof value === "string") {
+    params[name] = sqlHelpers.string(value);
+  } else {
+    throw new Error(
+      `Refusing to build SQL: filter value must be a string or number (got ${typeof value}).`,
+    );
+  }
+  return `:${name}`;
+}
+
+/**
+ * Like {@link bindValue}, but wraps the value in `%...%` for `LIKE` /
+ * `NOT LIKE`. SQL wildcards in the user-supplied string remain in the value
+ * (matching the documented "contains" semantics) — escape-on-receive could
+ * be added later as an opt-in if customers request strict-substring matching.
+ */
+function bindLikeValue(
+  value: string,
+  params: Record<string, SQLTypeMarker>,
+  state: FilterRenderState,
+): string {
+  const name = `f_${state.counter}`;
+  state.counter += 1;
+  params[name] = sqlHelpers.string(`%${value}%`);
+  return `:${name}`;
 }
 
 /**
@@ -482,24 +1111,31 @@ function renderDimensionClause(
  *
  * Reserved namespace `metric:` separates metric-view caches from query
  * caches. Phase 4 finalizes sort-before-hash composition with the full
- * argsHash / executorKey discipline; Phase 2's incremental need is for the
- * key to vary on dimensions + timeGrain so semantically distinct calls get
+ * argsHash / executorKey discipline; Phase 3's incremental need is for the
+ * key to vary on the structured filter so semantically distinct calls get
  * distinct cache entries.
  *
- * Order-insensitive components (measures, dimensions) are sorted before
- * hashing into the key string, matching the PRD's sort-before-hash invariant.
+ * Order-insensitive components are sorted before hashing into the key
+ * string, matching the PRD's sort-before-hash invariant:
+ *  - measures: lexicographic sort
+ *  - dimensions: lexicographic sort
+ *  - filter: predicates inside each AND/OR group are stable-sorted by
+ *    `(member, operator)`; group kind (`and` vs `or`) is preserved
  */
 export function composeMetricCacheKey(input: {
   metricKey: string;
   measures: string[];
   dimensions?: string[];
   timeGrain?: string;
+  filter?: MetricFilter;
   format: string;
   executorKey: string;
   limit?: number;
 }): string[] {
   const sortedMeasures = [...input.measures].sort();
   const sortedDimensions = [...(input.dimensions ?? [])].sort();
+  const filterFingerprint =
+    input.filter !== undefined ? canonicalizeFilter(input.filter) : "_";
   return [
     "metric",
     input.metricKey,
@@ -507,7 +1143,48 @@ export function composeMetricCacheKey(input: {
     sortedMeasures.join(","),
     sortedDimensions.join(","),
     input.timeGrain ?? "_",
+    filterFingerprint,
     typeof input.limit === "number" ? String(input.limit) : "_",
     input.executorKey,
   ];
+}
+
+/**
+ * Produce a deterministic string fingerprint of the filter tree.
+ *
+ * The fingerprint sorts predicates within each AND/OR group by
+ * `(member, operator)` and recursively canonicalizes nested groups. Values
+ * are included verbatim so cache entries differ when the filter targets
+ * different values (`region in [EMEA]` vs `region in [APAC]` — different
+ * keys; `equals A` vs `equals B` — different keys), while order-insensitive
+ * predicate lists collapse to the same key.
+ */
+function canonicalizeFilter(node: MetricFilter): string {
+  if (node === null || typeof node !== "object") {
+    return "_";
+  }
+
+  if ("and" in node || "or" in node) {
+    const groupKey = "and" in node ? "and" : "or";
+    const children = (
+      node as { and?: ReadonlyArray<MetricFilter> } & {
+        or?: ReadonlyArray<MetricFilter>;
+      }
+    )[groupKey];
+
+    if (!Array.isArray(children) || children.length === 0) {
+      return `${groupKey}()`;
+    }
+
+    const sorted = sortFilterChildren(children);
+    const childFingerprints = sorted.map(canonicalizeFilter);
+    return `${groupKey}(${childFingerprints.join(",")})`;
+  }
+
+  // Leaf predicate.
+  const p = node as MetricPredicate;
+  const valuesPart = p.values
+    ? p.values.map((v) => `${typeof v}:${String(v)}`).join("|")
+    : "";
+  return `p(${p.member}/${p.operator}/${valuesPart})`;
 }

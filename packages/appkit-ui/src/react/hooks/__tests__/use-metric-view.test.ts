@@ -148,6 +148,83 @@ describe("useMetricView", () => {
     });
   });
 
+  // ── Phase 3: filter payload assembly ─────────────────────────────────────
+  test("includes a leaf Predicate filter in the payload", () => {
+    renderHook(() =>
+      useMetricView("revenue", {
+        measures: ["arr"],
+        dimensions: ["region"],
+        filter: {
+          member: "region",
+          operator: "equals",
+          values: ["EMEA"],
+        },
+      } as any),
+    );
+
+    const payload = JSON.parse(
+      (mockConnectSSE.mock.calls[0][0] as any).payload,
+    );
+    expect(payload.filter).toEqual({
+      member: "region",
+      operator: "equals",
+      values: ["EMEA"],
+    });
+  });
+
+  test("preserves recursive { and: [...] } filter structure verbatim", () => {
+    const filter = {
+      and: [
+        { member: "region", operator: "in", values: ["EMEA", "APAC"] },
+        { member: "segment", operator: "equals", values: ["Enterprise"] },
+      ],
+    };
+    renderHook(() =>
+      useMetricView("revenue", {
+        measures: ["arr"],
+        filter,
+      } as any),
+    );
+
+    const payload = JSON.parse(
+      (mockConnectSSE.mock.calls[0][0] as any).payload,
+    );
+    expect(payload.filter).toEqual(filter);
+  });
+
+  test("preserves deeply-nested OR-of-AND structure", () => {
+    const filter = {
+      or: [
+        {
+          and: [
+            { member: "region", operator: "equals", values: ["EMEA"] },
+            { member: "segment", operator: "equals", values: ["Enterprise"] },
+          ],
+        },
+        { member: "region", operator: "equals", values: ["APAC"] },
+      ],
+    };
+    renderHook(() =>
+      useMetricView("revenue", {
+        measures: ["arr"],
+        filter,
+      } as any),
+    );
+
+    const payload = JSON.parse(
+      (mockConnectSSE.mock.calls[0][0] as any).payload,
+    );
+    expect(payload.filter).toEqual(filter);
+  });
+
+  test("omits filter from the payload when not provided", () => {
+    renderHook(() => useMetricView("revenue", { measures: ["arr"] }));
+    const payload = JSON.parse(
+      (mockConnectSSE.mock.calls[0][0] as any).payload,
+    );
+    expect(payload.filter).toBeUndefined();
+  });
+
   test("populates data on a result event", async () => {
     const { result } = renderHook(() =>
       useMetricView("revenue", { measures: ["arr"] }),

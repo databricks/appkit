@@ -69,6 +69,22 @@ const REVENUE_REGISTRATION: MetricRegistration = {
   },
 };
 
+/**
+ * Phase 3 fixture — adds a numeric dim (`deal_size`) and registered
+ * `knownDimensionTypes` so op⇄type compatibility tests can exercise both
+ * branches (range ops on numeric dim, string ops on string dim).
+ */
+const REVENUE_PHASE3_REGISTRATION: MetricRegistration = {
+  ...REVENUE_REGISTRATION,
+  knownDimensions: ["region", "segment", "created_at", "deal_size"],
+  knownDimensionTypes: {
+    region: "STRING",
+    segment: "STRING",
+    created_at: "TIMESTAMP",
+    deal_size: "DOUBLE",
+  },
+};
+
 describe("metric — pure helpers", () => {
   describe("makeMetricRequestSchema / validateMetricRequest", () => {
     test("accepts a request with a known measure", () => {
@@ -116,7 +132,17 @@ describe("metric — pure helpers", () => {
       expect(() =>
         validateMetricRequest(REVENUE_REGISTRATION, {
           measures: ["arr"],
-          // 'filter' is reserved for Phase 3; the strict() schema must reject it.
+          // 'someUnknownField' is not in the v1 contract and the strict()
+          // schema must reject it. (filter is now a Phase 3 field.)
+          someUnknownField: 123,
+        } as any),
+      ).toThrowError();
+    });
+
+    test("rejects filter passed as a bare array (not a Predicate or { and }/{or} group)", () => {
+      expect(() =>
+        validateMetricRequest(REVENUE_REGISTRATION, {
+          measures: ["arr"],
           filter: [{ member: "region", operator: "in", values: ["EMEA"] }],
         } as any),
       ).toThrowError();
@@ -242,7 +268,8 @@ describe("metric — pure helpers", () => {
       expect(statement).toBe(
         "SELECT MEASURE(arr) FROM appkit_demo.public.revenue_metrics",
       );
-      expect(parameters).toEqual([]);
+      // No filter present → no bind params.
+      expect(parameters).toEqual({});
     });
 
     test("sorts measures lexicographically for deterministic SQL", () => {
@@ -1029,5 +1056,723 @@ describe("AnalyticsPlugin — metric route handler", () => {
     expect(mockRes.status).toHaveBeenCalledWith(400);
     const errorPayload = (mockRes.json as any).mock.calls[0][0];
     expect(errorPayload.code).toBe("VALIDATION_ERROR");
+  });
+});
+
+// ============================================================================
+// Phase 3 — Filter spec (recursive AND/OR with 12 v1 operators)
+// ============================================================================
+
+describe("metric — filter translator", () => {
+  // Helper: render filter via buildMetricSql and return WHERE fragment + params.
+  function render(
+    filter: any,
+    registration: MetricRegistration = REVENUE_PHASE3_REGISTRATION,
+  ) {
+    const { statement, parameters } = buildMetricSql(registration, {
+      measures: ["arr"],
+      filter,
+    });
+    // Pull just the WHERE portion (between ` WHERE ` and ` GROUP BY` / ` LIMIT` / end).
+    const match = statement.match(/ WHERE (.+?)( GROUP BY| LIMIT|$)/);
+    const where = match ? match[1] : null;
+    return { statement, where, parameters };
+  }
+
+  describe("operators (12 unit tests)", () => {
+    test("equals → `<col> = :f_0`", () => {
+      const { where, parameters } = render({
+        member: "region",
+        operator: "equals",
+        values: ["EMEA"],
+      });
+      expect(where).toBe("region = :f_0");
+      expect(parameters).toEqual({
+        f_0: { __sql_type: "STRING", value: "EMEA" },
+      });
+    });
+
+    test("notEquals → `<col> <> :f_0`", () => {
+      const { where, parameters } = render({
+        member: "region",
+        operator: "notEquals",
+        values: ["EMEA"],
+      });
+      expect(where).toBe("region <> :f_0");
+      expect(parameters.f_0).toEqual({ __sql_type: "STRING", value: "EMEA" });
+    });
+
+    test("in → `<col> IN (:f_0, :f_1, ...)`", () => {
+      const { where, parameters } = render({
+        member: "region",
+        operator: "in",
+        values: ["EMEA", "APAC", "AMER"],
+      });
+      expect(where).toBe("region IN (:f_0, :f_1, :f_2)");
+      expect(parameters.f_0).toEqual({ __sql_type: "STRING", value: "EMEA" });
+      expect(parameters.f_1).toEqual({ __sql_type: "STRING", value: "APAC" });
+      expect(parameters.f_2).toEqual({ __sql_type: "STRING", value: "AMER" });
+    });
+
+    test("notIn → `<col> NOT IN (:f_0, :f_1, ...)`", () => {
+      const { where, parameters } = render({
+        member: "region",
+        operator: "notIn",
+        values: ["EMEA", "APAC"],
+      });
+      expect(where).toBe("region NOT IN (:f_0, :f_1)");
+      expect(Object.keys(parameters)).toHaveLength(2);
+    });
+
+    test("gt → `<col> > :f_0`", () => {
+      const { where, parameters } = render({
+        member: "deal_size",
+        operator: "gt",
+        values: [10000],
+      });
+      expect(where).toBe("deal_size > :f_0");
+      expect(parameters.f_0).toEqual({ __sql_type: "NUMERIC", value: "10000" });
+    });
+
+    test("gte → `<col> >= :f_0`", () => {
+      const { where } = render({
+        member: "deal_size",
+        operator: "gte",
+        values: [5000],
+      });
+      expect(where).toBe("deal_size >= :f_0");
+    });
+
+    test("lt → `<col> < :f_0`", () => {
+      const { where } = render({
+        member: "deal_size",
+        operator: "lt",
+        values: [100],
+      });
+      expect(where).toBe("deal_size < :f_0");
+    });
+
+    test("lte → `<col> <= :f_0`", () => {
+      const { where } = render({
+        member: "deal_size",
+        operator: "lte",
+        values: [50000],
+      });
+      expect(where).toBe("deal_size <= :f_0");
+    });
+
+    test("contains → `<col> LIKE :f_0` (value wrapped in %...%)", () => {
+      const { where, parameters } = render({
+        member: "region",
+        operator: "contains",
+        values: ["MEA"],
+      });
+      expect(where).toBe("region LIKE :f_0");
+      expect(parameters.f_0).toEqual({ __sql_type: "STRING", value: "%MEA%" });
+    });
+
+    test("notContains → `<col> NOT LIKE :f_0`", () => {
+      const { where, parameters } = render({
+        member: "region",
+        operator: "notContains",
+        values: ["test"],
+      });
+      expect(where).toBe("region NOT LIKE :f_0");
+      expect(parameters.f_0).toEqual({
+        __sql_type: "STRING",
+        value: "%test%",
+      });
+    });
+
+    test("set → `<col> IS NOT NULL` (no bind)", () => {
+      const { where, parameters } = render({
+        member: "region",
+        operator: "set",
+      });
+      expect(where).toBe("region IS NOT NULL");
+      expect(parameters).toEqual({});
+    });
+
+    test("notSet → `<col> IS NULL` (no bind)", () => {
+      const { where, parameters } = render({
+        member: "region",
+        operator: "notSet",
+      });
+      expect(where).toBe("region IS NULL");
+      expect(parameters).toEqual({});
+    });
+  });
+
+  describe("AND/OR composition", () => {
+    test("flat AND group renders predicates joined by AND", () => {
+      const { where, parameters } = render({
+        and: [
+          { member: "region", operator: "equals", values: ["EMEA"] },
+          { member: "segment", operator: "equals", values: ["Enterprise"] },
+        ],
+      });
+      expect(where).toBe("(region = :f_0 AND segment = :f_1)");
+      expect(parameters.f_0.value).toBe("EMEA");
+      expect(parameters.f_1.value).toBe("Enterprise");
+    });
+
+    test("flat OR group renders predicates joined by OR", () => {
+      const { where } = render({
+        or: [
+          { member: "region", operator: "equals", values: ["EMEA"] },
+          { member: "region", operator: "equals", values: ["APAC"] },
+        ],
+      });
+      // Sort-before-hash: same member+operator pair sorts stably; both are
+      // (region, equals). The OR fragment renders both predicates.
+      expect(where).toBe("(region = :f_0 OR region = :f_1)");
+    });
+
+    test("AND-of-OR composes nested groups", () => {
+      const { where } = render({
+        and: [
+          { member: "region", operator: "in", values: ["EMEA", "APAC"] },
+          {
+            or: [
+              { member: "segment", operator: "equals", values: ["Enterprise"] },
+              { member: "deal_size", operator: "gt", values: [50000] },
+            ],
+          },
+        ],
+      });
+      expect(where).toContain("(region IN (");
+      expect(where).toContain(" AND ");
+      expect(where).toContain("OR");
+    });
+
+    test("OR-of-AND composes nested groups", () => {
+      const { where } = render({
+        or: [
+          {
+            and: [
+              { member: "region", operator: "equals", values: ["EMEA"] },
+              { member: "segment", operator: "equals", values: ["Enterprise"] },
+            ],
+          },
+          { member: "region", operator: "equals", values: ["APAC"] },
+        ],
+      });
+      // Outer is OR of (AND group, leaf predicate).
+      expect(where).toMatch(/^\(.+ OR .+\)$/);
+      expect(where).toContain(" AND ");
+    });
+
+    test("deeply nested mix of AND/OR (4 levels)", () => {
+      const { where, parameters } = render({
+        and: [
+          {
+            or: [
+              {
+                and: [
+                  { member: "region", operator: "equals", values: ["EMEA"] },
+                  {
+                    or: [
+                      {
+                        member: "segment",
+                        operator: "equals",
+                        values: ["Enterprise"],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+      // Single-leaf groups collapse; multi-leaf groups parenthesize.
+      expect(where).toBeTruthy();
+      // All values are bound.
+      expect(parameters.f_0.value).toBe("EMEA");
+      expect(parameters.f_1.value).toBe("Enterprise");
+    });
+
+    test("empty AND/OR group emits no WHERE clause", () => {
+      const { statement, parameters } = buildMetricSql(
+        REVENUE_PHASE3_REGISTRATION,
+        {
+          measures: ["arr"],
+          filter: { and: [] },
+        },
+      );
+      expect(statement).not.toContain("WHERE");
+      expect(parameters).toEqual({});
+    });
+  });
+
+  describe("depth cap", () => {
+    test("rejects 9 levels of AND nesting (validator)", () => {
+      // Build 9-deep AND nesting: { and: [ { and: [ ... { equals } ] } ] }
+      let node: any = {
+        member: "region",
+        operator: "equals",
+        values: ["EMEA"],
+      };
+      for (let i = 0; i < 9; i += 1) {
+        node = { and: [node] };
+      }
+      expect(() =>
+        validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
+          measures: ["arr"],
+          filter: node,
+        }),
+      ).toThrowError(/maximum depth/);
+    });
+
+    test("accepts exactly 8 levels of AND nesting (validator)", () => {
+      let node: any = {
+        member: "region",
+        operator: "equals",
+        values: ["EMEA"],
+      };
+      for (let i = 0; i < 8; i += 1) {
+        node = { and: [node] };
+      }
+      expect(() =>
+        validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
+          measures: ["arr"],
+          filter: node,
+        }),
+      ).not.toThrow();
+    });
+  });
+
+  describe("parameterization safety (no values in rendered SQL)", () => {
+    test("string values do not appear verbatim in the SQL string", () => {
+      const sneaky = "EMEA' OR '1'='1";
+      const { statement } = render({
+        member: "region",
+        operator: "equals",
+        values: [sneaky],
+      });
+      expect(statement).not.toContain(sneaky);
+      expect(statement).toContain(":f_0");
+    });
+
+    test("numeric values do not appear verbatim in the SQL string", () => {
+      const { statement } = render({
+        member: "deal_size",
+        operator: "gt",
+        values: [987654321],
+      });
+      expect(statement).not.toContain("987654321");
+      expect(statement).toContain(":f_0");
+    });
+
+    test("LIKE wildcard is the only value transformation; the original string is not in SQL", () => {
+      const { statement } = render({
+        member: "region",
+        operator: "contains",
+        values: ["dangerous%"],
+      });
+      expect(statement).not.toContain("dangerous");
+      expect(statement).toContain(":f_0");
+    });
+
+    test("IN values are individually bound (not concatenated)", () => {
+      const { statement, parameters } = render({
+        member: "region",
+        operator: "in",
+        values: ["A", "B", "C"],
+      });
+      // No raw value appears in the SQL string.
+      expect(statement).not.toMatch(/region IN \([^:]/);
+      expect(Object.keys(parameters)).toHaveLength(3);
+    });
+
+    test("identifier names in SQL come from the registry, not the request", () => {
+      // Even if a hostile member somehow bypasses validation, the SQL
+      // constructor's identifier guard rejects it before SQL emission.
+      expect(() =>
+        render({
+          member: "region; DROP TABLE foo --",
+          operator: "equals",
+          values: ["x"],
+        }),
+      ).toThrowError(/not a valid identifier|unknown filter member/);
+    });
+  });
+
+  describe("validator rejection cases", () => {
+    test("rejects an unknown member", () => {
+      expect(() =>
+        validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
+          measures: ["arr"],
+          filter: {
+            member: "ghost",
+            operator: "equals",
+            values: ["x"],
+          },
+        }),
+      ).toThrowError(/not a declared dimension/);
+    });
+
+    test("rejects an unknown operator", () => {
+      expect(() =>
+        validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
+          measures: ["arr"],
+          filter: {
+            member: "region",
+            operator: "startsWith" as any,
+            values: ["E"],
+          },
+        }),
+      ).toThrowError(/not one of/);
+    });
+
+    test("rejects gt on a string-typed dimension (op⇄type)", () => {
+      expect(() =>
+        validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
+          measures: ["arr"],
+          filter: {
+            member: "region",
+            operator: "gt",
+            values: ["EMEA"],
+          },
+        }),
+      ).toThrowError(/incompatible/);
+    });
+
+    test("rejects contains on a numeric-typed dimension (op⇄type)", () => {
+      expect(() =>
+        validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
+          measures: ["arr"],
+          filter: {
+            member: "deal_size",
+            operator: "contains",
+            values: ["1000"],
+          },
+        }),
+      ).toThrowError(/incompatible/);
+    });
+
+    test("rejects contains on a date-typed dimension (op⇄type)", () => {
+      expect(() =>
+        validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
+          measures: ["arr"],
+          filter: {
+            member: "created_at",
+            operator: "contains",
+            values: ["2026"],
+          },
+        }),
+      ).toThrowError(/incompatible/);
+    });
+
+    test("accepts gt on a date-typed dimension", () => {
+      expect(() =>
+        validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
+          measures: ["arr"],
+          filter: {
+            member: "created_at",
+            operator: "gt",
+            values: ["2026-01-01"],
+          },
+        }),
+      ).not.toThrow();
+    });
+
+    test("rejects equals with zero values (cardinality)", () => {
+      expect(() =>
+        validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
+          measures: ["arr"],
+          filter: {
+            member: "region",
+            operator: "equals",
+            values: [],
+          },
+        }),
+      ).toThrowError(/exactly one value/);
+    });
+
+    test("rejects equals with multiple values (cardinality)", () => {
+      expect(() =>
+        validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
+          measures: ["arr"],
+          filter: {
+            member: "region",
+            operator: "equals",
+            values: ["A", "B"],
+          },
+        }),
+      ).toThrowError(/exactly one value/);
+    });
+
+    test("rejects in with empty values (cardinality)", () => {
+      expect(() =>
+        validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
+          measures: ["arr"],
+          filter: {
+            member: "region",
+            operator: "in",
+            values: [],
+          },
+        }),
+      ).toThrowError(/at least one value/);
+    });
+
+    test("rejects set with values (cardinality — must be absent)", () => {
+      expect(() =>
+        validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
+          measures: ["arr"],
+          filter: {
+            member: "region",
+            operator: "set",
+            values: ["EMEA"],
+          },
+        }),
+      ).toThrowError(/must not carry values/);
+    });
+
+    test("accepts set with no values", () => {
+      expect(() =>
+        validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
+          measures: ["arr"],
+          filter: {
+            member: "region",
+            operator: "set",
+          },
+        }),
+      ).not.toThrow();
+    });
+
+    test("accepts notSet with empty values array", () => {
+      expect(() =>
+        validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
+          measures: ["arr"],
+          filter: {
+            member: "region",
+            operator: "notSet",
+            values: [],
+          },
+        }),
+      ).not.toThrow();
+    });
+
+    test("falls open on op⇄type when registry has no type metadata", () => {
+      // Without knownDimensionTypes, the validator cannot enforce op⇄type
+      // and accepts any op on any registered dim (defense-in-depth — the
+      // SQL constructor still enforces identifier shape and registry
+      // membership).
+      expect(() =>
+        validateMetricRequest(REVENUE_REGISTRATION, {
+          measures: ["arr"],
+          filter: {
+            member: "region",
+            operator: "gt",
+            values: ["EMEA"],
+          },
+        }),
+      ).not.toThrow();
+    });
+
+    test("rejects member at depth — nested filter with unknown member", () => {
+      expect(() =>
+        validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
+          measures: ["arr"],
+          filter: {
+            and: [
+              { member: "region", operator: "equals", values: ["EMEA"] },
+              { member: "ghost", operator: "equals", values: ["X"] },
+            ],
+          },
+        }),
+      ).toThrowError(/not a declared dimension/);
+    });
+  });
+
+  describe("sort-before-hash (predicate ordering inside groups)", () => {
+    test("predicate order does not affect the rendered SQL within an AND group", () => {
+      const a = render({
+        and: [
+          { member: "region", operator: "equals", values: ["EMEA"] },
+          { member: "segment", operator: "equals", values: ["Ent"] },
+        ],
+      });
+      const b = render({
+        and: [
+          { member: "segment", operator: "equals", values: ["Ent"] },
+          { member: "region", operator: "equals", values: ["EMEA"] },
+        ],
+      });
+      // The bind-var indices may differ but the textual fragment shape
+      // sorts predicates by (member, operator), so both calls render the
+      // same WHERE clause.
+      expect(a.where).toBe(b.where);
+    });
+
+    test("predicate order does not affect cache key", () => {
+      const a = composeMetricCacheKey({
+        metricKey: "revenue",
+        measures: ["arr"],
+        format: "JSON",
+        executorKey: "sp",
+        filter: {
+          and: [
+            { member: "region", operator: "equals", values: ["EMEA"] },
+            { member: "segment", operator: "equals", values: ["Ent"] },
+          ],
+        },
+      });
+      const b = composeMetricCacheKey({
+        metricKey: "revenue",
+        measures: ["arr"],
+        format: "JSON",
+        executorKey: "sp",
+        filter: {
+          and: [
+            { member: "segment", operator: "equals", values: ["Ent"] },
+            { member: "region", operator: "equals", values: ["EMEA"] },
+          ],
+        },
+      });
+      expect(a).toEqual(b);
+    });
+
+    test("differentiates filtered vs unfiltered cache keys", () => {
+      const filtered = composeMetricCacheKey({
+        metricKey: "revenue",
+        measures: ["arr"],
+        format: "JSON",
+        executorKey: "sp",
+        filter: {
+          member: "region",
+          operator: "equals",
+          values: ["EMEA"],
+        },
+      });
+      const unfiltered = composeMetricCacheKey({
+        metricKey: "revenue",
+        measures: ["arr"],
+        format: "JSON",
+        executorKey: "sp",
+      });
+      expect(filtered).not.toEqual(unfiltered);
+    });
+
+    test("differentiates filters with different values", () => {
+      const a = composeMetricCacheKey({
+        metricKey: "revenue",
+        measures: ["arr"],
+        format: "JSON",
+        executorKey: "sp",
+        filter: {
+          member: "region",
+          operator: "equals",
+          values: ["EMEA"],
+        },
+      });
+      const b = composeMetricCacheKey({
+        metricKey: "revenue",
+        measures: ["arr"],
+        format: "JSON",
+        executorKey: "sp",
+        filter: {
+          member: "region",
+          operator: "equals",
+          values: ["APAC"],
+        },
+      });
+      expect(a).not.toEqual(b);
+    });
+  });
+
+  describe("route handler — filter integration", () => {
+    let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
+    beforeEach(async () => {
+      setupDatabricksEnv();
+      mockCacheStore.clear();
+      ServiceContext.reset();
+      serviceContextMock = await mockServiceContext();
+    });
+    afterEach(() => {
+      serviceContextMock?.restore();
+    });
+
+    test("constructs WHERE clause from a structured filter", async () => {
+      const plugin = new AnalyticsPlugin({ timeout: 5000 });
+      plugin._setMetricRegistryForTesting({
+        revenue: REVENUE_PHASE3_REGISTRATION,
+      });
+      const { router, getHandler } = createMockRouter();
+
+      const executeMock = vi.fn().mockResolvedValue({
+        result: { data: [{ arr: 1234567 }] },
+      });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/metric/:key");
+      const mockReq = createMockRequest({
+        params: { key: "revenue" },
+        body: {
+          measures: ["arr"],
+          filter: {
+            member: "region",
+            operator: "in",
+            values: ["EMEA", "APAC"],
+          },
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(executeMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          statement: expect.stringContaining("WHERE region IN (:f_0, :f_1)"),
+          parameters: expect.arrayContaining([
+            expect.objectContaining({
+              name: "f_0",
+              value: "EMEA",
+              type: "STRING",
+            }),
+            expect.objectContaining({
+              name: "f_1",
+              value: "APAC",
+              type: "STRING",
+            }),
+          ]),
+        }),
+        expect.any(AbortSignal),
+      );
+    });
+
+    test("returns 400 with the canonical error shape on filter rejection", async () => {
+      const plugin = new AnalyticsPlugin({ timeout: 5000 });
+      plugin._setMetricRegistryForTesting({
+        revenue: REVENUE_PHASE3_REGISTRATION,
+      });
+      const { router, getHandler } = createMockRouter();
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/metric/:key");
+      const mockReq = createMockRequest({
+        params: { key: "revenue" },
+        body: {
+          measures: ["arr"],
+          filter: {
+            member: "ghost",
+            operator: "equals",
+            values: ["X"],
+          },
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      const errorPayload = (mockRes.json as any).mock.calls[0][0];
+      expect(errorPayload.code).toBe("VALIDATION_ERROR");
+      expect(errorPayload.error).toMatch(/not a declared dimension/);
+    });
   });
 });

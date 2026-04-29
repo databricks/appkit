@@ -231,6 +231,80 @@ type MetricDimensionMap<K> = K extends AugmentedRegistry<MetricRegistry>
 /** Full result row type for a registered metric (measures + dimensions). */
 export type MetricRow<K> = MetricMeasureMap<K> & MetricDimensionMap<K>;
 
+// ============================================================================
+// Filter Specification (Phase 3 — recursive AND/OR with 12 v1 operators)
+// ============================================================================
+
+/**
+ * The v1 filter operator vocabulary. Twelve operators, exactly:
+ *
+ *  - Equality:        `equals`, `notEquals`
+ *  - Set membership:  `in`, `notIn`
+ *  - Range:           `gt`, `gte`, `lt`, `lte`
+ *  - String search:   `contains`, `notContains`
+ *  - NULL checks:     `set`, `notSet`
+ *
+ * Operator-vs-type rules (enforced server-side):
+ *  - Range ops (`gt`, `gte`, `lt`, `lte`) require a numeric / date-typed dim.
+ *  - String ops (`contains`, `notContains`) require a string-typed dim.
+ *  - The remaining six accept any dimension type.
+ *
+ * Cardinality rules (enforced server-side):
+ *  - Single-value ops (`equals`, `notEquals`, `gt`, `gte`, `lt`, `lte`,
+ *    `contains`, `notContains`) require exactly one value.
+ *  - List ops (`in`, `notIn`) require at least one value.
+ *  - NULL ops (`set`, `notSet`) reject `values` entirely.
+ */
+export type MetricFilterOperator =
+  | "equals"
+  | "notEquals"
+  | "in"
+  | "notIn"
+  | "gt"
+  | "gte"
+  | "lt"
+  | "lte"
+  | "contains"
+  | "notContains"
+  | "set"
+  | "notSet";
+
+/**
+ * A single filter predicate — leaf node of the recursive {@link Filter} tree.
+ *
+ * `member` narrows to the union of dimension names declared on the metric
+ * view (HAVING — filtering on measures — is reserved for v1.5).
+ *
+ * `values` is optional; the validator rejects requests where `values` is
+ * present for `set`/`notSet` and absent for every other operator.
+ */
+export interface Predicate<K> {
+  member: DimensionKey<K>;
+  operator: MetricFilterOperator;
+  values?: ReadonlyArray<string | number>;
+}
+
+/**
+ * The recursive filter type for metric views.
+ *
+ * A `Filter<K>` is one of:
+ *  - a leaf {@link Predicate}
+ *  - an `{ and: Filter<K>[] }` group — every child predicate must match
+ *  - an `{ or: Filter<K>[] }` group — at least one child predicate must match
+ *
+ * The shape supports nesting from v1; flat consumers can pass an array of
+ * predicates either via `{ and: [...] }` (explicit AND) or — since the wire
+ * shape carries the full union — by composing a single-level `{ and }`
+ * wrapper on the client.
+ *
+ * Server-side, recursion is depth-capped so a malformed or hostile payload
+ * cannot stack-overflow the validator.
+ */
+export type Filter<K> =
+  | Predicate<K>
+  | { and: ReadonlyArray<Filter<K>> }
+  | { or: ReadonlyArray<Filter<K>> };
+
 /**
  * Phase 2 args: measures + dimensions + optional time grain.
  *
@@ -272,6 +346,19 @@ export interface UseMetricViewArgs<
    * `dimensions` is a server-side 400.
    */
   timeGrain?: TimeGrain<K>;
+  /**
+   * Optional structured filter — recursive AND/OR composition of predicates.
+   *
+   * `member` narrows to the metric's declared dimension names (the IDE
+   * catches typos at the call site). `operator` narrows to the 12 v1
+   * operators. All `values` are bound as parameters server-side; nothing
+   * from the request body flows into the rendered SQL string.
+   *
+   * The filter shape is recursive from day one — flat callers can wrap a
+   * predicate list in `{ and: [...] }`; nested callers can mix `and`/`or`
+   * groups freely. The server enforces a depth cap to prevent stack abuse.
+   */
+  filter?: Filter<K>;
   /** Optional row cap. */
   limit?: number;
 }

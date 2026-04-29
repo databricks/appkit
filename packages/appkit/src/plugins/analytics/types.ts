@@ -57,13 +57,82 @@ export interface MetricRegistration {
    * on requests for this metric.
    */
   knownTimeGrainsByDim: Record<string, string[]>;
+  /**
+   * Map of dimension name → registered SQL type (Phase 3). Drives op-vs-type
+   * compatibility checks in the filter validator (string ops on string-typed
+   * dims, range ops on numeric/date-typed dims). Empty map means
+   * "compatibility checks fall open"; the dimension still passes the
+   * identifier guard and the registry-membership check.
+   */
+  knownDimensionTypes?: Record<string, string>;
 }
 
 /**
- * Body of POST /api/analytics/metric/:key at Phase 2.
+ * Coarse classification of a dimension's column type, used by the filter
+ * validator to enforce op-vs-type compatibility.
  *
- * Phase 1 shape: `{ measures, format?, limit? }`. Phase 2 widens with
- * `dimensions: string[]` and optional `timeGrain`. Phase 3 will add `filter`.
+ *  - `string`  — STRING / VARCHAR / CHAR / TEXT (accepts string ops)
+ *  - `numeric` — INT / BIGINT / DOUBLE / DECIMAL / etc (accepts range ops)
+ *  - `date`    — DATE / TIMESTAMP (accepts range ops)
+ *  - `unknown` — fall-open: validator only enforces structural rules
+ */
+export type MetricDimensionTypeClass =
+  | "string"
+  | "numeric"
+  | "date"
+  | "unknown";
+
+/**
+ * A single filter predicate — leaf node of the recursive {@link MetricFilter}.
+ *
+ * Server-side `IAnalyticsMetricRequest` uses the structural shape (no
+ * registry generic); the per-metric narrowing lives client-side via
+ * `Predicate<K>` in `@databricks/appkit-ui/react`.
+ */
+export interface MetricPredicate {
+  member: string;
+  operator: MetricFilterOperatorName;
+  values?: ReadonlyArray<string | number>;
+}
+
+/**
+ * The recursive filter type for the metric-view request body.
+ *
+ * Server-side use of this shape is intentionally non-generic — the registry
+ * generic only affects compile-time autocomplete and lives in
+ * `@databricks/appkit-ui/react`.
+ */
+export type MetricFilter =
+  | MetricPredicate
+  | { and: ReadonlyArray<MetricFilter> }
+  | { or: ReadonlyArray<MetricFilter> };
+
+/**
+ * v1 filter operator vocabulary — exactly twelve names. Mirrored on the
+ * client as `MetricFilterOperator` in `@databricks/appkit-ui/react`. The
+ * runtime tuple `METRIC_FILTER_OPERATORS` lives next to the validator in
+ * `metric.ts`.
+ */
+export type MetricFilterOperatorName =
+  | "equals"
+  | "notEquals"
+  | "in"
+  | "notIn"
+  | "gt"
+  | "gte"
+  | "lt"
+  | "lte"
+  | "contains"
+  | "notContains"
+  | "set"
+  | "notSet";
+
+/**
+ * Body of POST /api/analytics/metric/:key at Phase 3.
+ *
+ * Phase 1 shape: `{ measures, format?, limit? }`. Phase 2 added
+ * `dimensions: string[]` and optional `timeGrain`. Phase 3 adds optional
+ * structured `filter`.
  */
 export interface IAnalyticsMetricRequest {
   measures: string[];
@@ -79,6 +148,12 @@ export interface IAnalyticsMetricRequest {
    * metric view's allowed grain enum (400).
    */
   timeGrain?: string;
+  /**
+   * Structured filter expression — recursive AND/OR composition of predicates.
+   * All values are bound as parameters via the existing Statement Execution
+   * bind-var path; no value flows into the rendered SQL string.
+   */
+  filter?: MetricFilter;
   format?: AnalyticsFormat;
   /** Optional row cap. */
   limit?: number;

@@ -1,7 +1,10 @@
 import { describe, expectTypeOf, test } from "vitest";
 import type {
   DimensionKey,
+  Filter,
   MeasureKey,
+  MetricFilterOperator,
+  Predicate,
   TimeGrain,
   UseMetricViewArgs,
   UseMetricViewRow,
@@ -133,5 +136,88 @@ describe("UseMetricViewRow<K, M, D> — row narrowing via Pick", () => {
   test("dimensions-only call narrows the row to just the dimensions", () => {
     type Row = UseMetricViewRow<"revenue", readonly [], readonly ["segment"]>;
     expectTypeOf<Row>().toEqualTypeOf<{ segment: string }>();
+  });
+});
+
+describe("Filter<K> / Predicate<K> — recursive shape and registry narrowing", () => {
+  test("Predicate.member narrows to DimensionKey<K>", () => {
+    type RevenueMember = Predicate<"revenue">["member"];
+    expectTypeOf<RevenueMember>().toEqualTypeOf<
+      "region" | "segment" | "created_at"
+    >();
+  });
+
+  test("Predicate.operator narrows to MetricFilterOperator (12 v1 ops)", () => {
+    type Op = Predicate<"revenue">["operator"];
+    expectTypeOf<Op>().toEqualTypeOf<MetricFilterOperator>();
+  });
+
+  test("MetricFilterOperator union has exactly 12 members", () => {
+    type Op = MetricFilterOperator;
+    // exactness guard: assignability both ways
+    expectTypeOf<Op>().toEqualTypeOf<
+      | "equals"
+      | "notEquals"
+      | "in"
+      | "notIn"
+      | "gt"
+      | "gte"
+      | "lt"
+      | "lte"
+      | "contains"
+      | "notContains"
+      | "set"
+      | "notSet"
+    >();
+  });
+
+  test("Filter<K> accepts a leaf Predicate", () => {
+    const leaf: Filter<"revenue"> = {
+      member: "region",
+      operator: "equals",
+      values: ["EMEA"],
+    };
+    expectTypeOf(leaf).toMatchTypeOf<Filter<"revenue">>();
+  });
+
+  test("Filter<K> accepts an { and: Filter<K>[] } group (recursive)", () => {
+    const grouped: Filter<"revenue"> = {
+      and: [
+        { member: "region", operator: "equals", values: ["EMEA"] },
+        { member: "segment", operator: "equals", values: ["Enterprise"] },
+      ],
+    };
+    expectTypeOf(grouped).toMatchTypeOf<Filter<"revenue">>();
+  });
+
+  test("Filter<K> accepts an { or: Filter<K>[] } group with nested AND (recursive)", () => {
+    const nested: Filter<"revenue"> = {
+      or: [
+        {
+          and: [
+            { member: "region", operator: "equals", values: ["EMEA"] },
+            { member: "segment", operator: "equals", values: ["Enterprise"] },
+          ],
+        },
+        { member: "region", operator: "equals", values: ["APAC"] },
+      ],
+    };
+    expectTypeOf(nested).toMatchTypeOf<Filter<"revenue">>();
+  });
+
+  test("UseMetricViewArgs accepts an optional filter narrowing to DimensionKey<K>", () => {
+    type Args = UseMetricViewArgs<
+      "revenue",
+      readonly ["arr"],
+      readonly ["region"]
+    >;
+    expectTypeOf<Args["filter"]>().toEqualTypeOf<
+      Filter<"revenue"> | undefined
+    >();
+  });
+
+  test("Predicate.member is `never` when the registry declares no dimensions", () => {
+    type Member = Predicate<"flat_metric">["member"];
+    expectTypeOf<Member>().toEqualTypeOf<never>();
   });
 });

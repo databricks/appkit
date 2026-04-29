@@ -74,6 +74,11 @@ export function useMetricView<
       if (typeof args.timeGrain === "string" && args.timeGrain.length > 0) {
         body.timeGrain = args.timeGrain;
       }
+      if (args.filter !== undefined) {
+        // Filter is a recursive AND/OR/Predicate tree; preserve structure
+        // verbatim — the server validates and translates it into SQL.
+        body.filter = args.filter;
+      }
       if (typeof args.limit === "number") {
         body.limit = args.limit;
       }
@@ -93,6 +98,7 @@ export function useMetricView<
     args.measures,
     args.dimensions,
     args.timeGrain,
+    args.filter,
     args.limit,
     format,
     maxParametersSize,
