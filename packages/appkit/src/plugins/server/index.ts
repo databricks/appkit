@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import express from "express";
 import type { PluginClientConfigs, PluginPhase } from "shared";
 import { ServerError } from "../../errors";
+import { TelemetryReporter } from "../../internal-telemetry";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
@@ -96,6 +97,7 @@ export class ServerPlugin extends Plugin {
    * @returns The express application.
    */
   async start(): Promise<express.Application> {
+    this.serverApplication.use(requestMetricsMiddleware);
     this.serverApplication.use(
       express.json({
         type: (req) => {
@@ -413,6 +415,29 @@ export class ServerPlugin extends Plugin {
 }
 
 const EXCLUDED_PLUGINS: string[] = [ServerPlugin.manifest.name];
+
+function requestMetricsMiddleware(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction,
+) {
+  const startMs = Date.now();
+  res.on("finish", () => {
+    const reporter = TelemetryReporter.getInstance();
+    if (!reporter) return;
+    const routePath = (req.route as { path?: string } | undefined)?.path;
+    if (!routePath) return;
+    const baseUrl = req.baseUrl ?? "";
+    const template = `${baseUrl}${routePath}`;
+    reporter.recordRequest(
+      req.method,
+      template,
+      res.statusCode,
+      Date.now() - startMs,
+    );
+  });
+  next();
+}
 
 /**
  * @internal

@@ -8,8 +8,14 @@ import type {
   PluginData,
   PluginMap,
 } from "shared";
+import { version as productVersion } from "../../package.json";
 import { CacheManager } from "../cache";
 import { ServiceContext } from "../context";
+import {
+  isInternalTelemetryEnabled,
+  sendStartupTelemetry,
+  TelemetryReporter,
+} from "../internal-telemetry";
 import { createLogger } from "../logging/logger";
 import { ResourceRegistry, ResourceType } from "../registry";
 import type { TelemetryConfig } from "../telemetry";
@@ -171,6 +177,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
       cache?: CacheConfig;
       client?: WorkspaceClient;
       onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
+      disableInternalTelemetry?: boolean;
     } = {},
   ): Promise<PluginMap<T>> {
     // Initialize core services
@@ -212,12 +219,53 @@ export class AppKit<TPlugins extends InputPluginMap> {
       logger.debug("onPluginsReady hook completed");
     }
 
+    if (isInternalTelemetryEnabled(config)) {
+      AppKit.bootstrapInternalTelemetry(rawPlugins);
+    }
+
     const serverPlugin = instance.#pluginInstances.server;
     if (serverPlugin && typeof (serverPlugin as any).start === "function") {
       await (serverPlugin as any).start();
     }
 
     return handle;
+  }
+
+  private static bootstrapInternalTelemetry(
+    rawPlugins: PluginData<PluginConstructor, unknown, string>[] | undefined,
+  ): void {
+    const serviceCtx = ServiceContext.get();
+    const workspaceHost = process.env.DATABRICKS_HOST || "";
+    const appName = process.env.DATABRICKS_APP_NAME || "unknown";
+    const appId = process.env.DATABRICKS_APP_ID || "";
+    const environment = process.env.NODE_ENV || "production";
+    const pluginNames = (rawPlugins ?? []).map((p) => p.name);
+
+    const reporter = TelemetryReporter.initialize({
+      workspaceHost,
+      workspaceId: serviceCtx.workspaceId,
+      client: serviceCtx.client,
+      appId,
+      appkitVersion: productVersion,
+    });
+    reporter.start();
+    reporter.sendStartup().catch(() => {});
+
+    // TODO: remove the legacy observability_log fallback once the AppkitLog
+    // schema is deployed end-to-end on the telemetry backend.
+    serviceCtx.workspaceId
+      .then((workspaceId) => {
+        sendStartupTelemetry({
+          workspaceHost,
+          workspaceId,
+          client: serviceCtx.client,
+          appkitVersion: productVersion,
+          appName,
+          plugins: pluginNames,
+          environment,
+        }).catch(() => {});
+      })
+      .catch(() => {});
   }
 
   private static preparePlugins(
@@ -279,6 +327,7 @@ export async function createApp<
     cache?: CacheConfig;
     client?: WorkspaceClient;
     onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
+    disableInternalTelemetry?: boolean;
   } = {},
 ): Promise<PluginMap<T>> {
   return AppKit._createApp(config);

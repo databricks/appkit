@@ -24,6 +24,7 @@ plugin architecture, and React integration.
 | [PolicyDeniedError](Class.PolicyDeniedError.md) | Thrown when a policy denies an action. |
 | [ResourceRegistry](Class.ResourceRegistry.md) | Central registry for tracking plugin resource requirements. Deduplication uses type + resourceKey (machine-stable); alias is for display only. |
 | [ServerError](Class.ServerError.md) | Error thrown when server lifecycle operations fail. Use for server start/stop issues, configuration conflicts, etc. |
+| [TelemetryReporter](Class.TelemetryReporter.md) | - |
 | [TunnelError](Class.TunnelError.md) | Error thrown when remote tunnel operations fail. Use for tunnel connection issues, message parsing failures, etc. |
 | [ValidationError](Class.ValidationError.md) | Error thrown when input validation fails. Use for invalid parameters, missing required fields, or type mismatches. |
 

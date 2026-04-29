@@ -129,6 +129,25 @@ function IndexRoute() {
           <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
             <div className="flex flex-col h-full">
               <h3 className="text-2xl font-semibold text-foreground mb-3">
+                Internal Telemetry
+              </h3>
+              <p className="text-muted-foreground mb-6 flex-grow">
+                Manually trigger AppKit's internal telemetry events
+                (APP_STARTUP, HEARTBEAT, REQUEST_METRICS) and inspect what gets
+                POSTed to the workspace's <code>/telemetry</code> endpoint.
+              </p>
+              <Button
+                onClick={() => navigate({ to: "/internal-telemetry" })}
+                className="w-full"
+              >
+                Open Internal Telemetry
+              </Button>
+            </div>
+          </Card>
+
+          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
+            <div className="flex flex-col h-full">
+              <h3 className="text-2xl font-semibold text-foreground mb-3">
                 File Browser
               </h3>
               <p className="text-muted-foreground mb-6 flex-grow">

@@ -73,6 +73,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Class.TelemetryReporter",
+          label: "TelemetryReporter"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Class.TunnelError",
           label: "TunnelError"
         },

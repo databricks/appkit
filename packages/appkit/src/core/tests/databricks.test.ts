@@ -6,6 +6,25 @@ import type { PluginManifest } from "../../registry/types";
 import { ResourceType } from "../../registry/types";
 import { AppKit, createApp } from "../appkit";
 
+const mockReporter = {
+  start: vi.fn(),
+  stop: vi.fn(),
+  sendStartup: vi.fn().mockResolvedValue(undefined),
+  sendHeartbeat: vi.fn().mockResolvedValue(undefined),
+  flushRequestMetrics: vi.fn().mockResolvedValue(undefined),
+  recordRequest: vi.fn(),
+};
+
+vi.mock("../../internal-telemetry", () => ({
+  isInternalTelemetryEnabled: vi.fn().mockReturnValue(true),
+  sendStartupTelemetry: vi.fn().mockResolvedValue(undefined),
+  TelemetryReporter: {
+    initialize: vi.fn(() => mockReporter),
+    getInstance: vi.fn(() => mockReporter),
+    _reset: vi.fn(),
+  },
+}));
+
 // Generic test manifest for test plugins
 const createTestManifest = (name: string): PluginManifest => ({
   name,
@@ -627,6 +646,57 @@ describe("AppKit", () => {
         if (prevWh !== undefined) process.env.DATABRICKS_WAREHOUSE_ID = prevWh;
         else delete process.env.DATABRICKS_WAREHOUSE_ID;
       }
+    });
+  });
+
+  describe("internal telemetry", () => {
+    test("should call sendStartupTelemetry after successful createApp", async () => {
+      const { sendStartupTelemetry } = await import("../../internal-telemetry");
+
+      const pluginData = [
+        { plugin: CoreTestPlugin, config: {}, name: "coreTest" },
+      ];
+      await createApp({ plugins: pluginData });
+
+      // Allow the fire-and-forget promise chain to resolve
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(sendStartupTelemetry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          plugins: ["coreTest"],
+          environment: expect.any(String),
+          appkitVersion: expect.any(String),
+          client: expect.anything(),
+        }),
+      );
+    });
+
+    test("should not call sendStartupTelemetry when isInternalTelemetryEnabled returns false", async () => {
+      const { isInternalTelemetryEnabled, sendStartupTelemetry } = await import(
+        "../../internal-telemetry"
+      );
+      vi.mocked(sendStartupTelemetry).mockClear();
+      vi.mocked(isInternalTelemetryEnabled).mockReturnValue(false);
+
+      await createApp({ plugins: [] });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(sendStartupTelemetry).not.toHaveBeenCalled();
+      vi.mocked(isInternalTelemetryEnabled).mockReturnValue(true);
+    });
+
+    test("should not crash startup if sendStartupTelemetry rejects", async () => {
+      const { sendStartupTelemetry } = await import("../../internal-telemetry");
+      vi.mocked(sendStartupTelemetry).mockRejectedValue(
+        new Error("telemetry failure"),
+      );
+
+      const instance = await createApp({
+        plugins: [{ plugin: CoreTestPlugin, config: {}, name: "coreTest" }],
+      });
+
+      expect(instance).toBeDefined();
     });
   });
 
