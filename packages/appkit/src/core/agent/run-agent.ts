@@ -8,11 +8,14 @@ import type {
   PluginData,
   ToolProvider,
 } from "shared";
-import { consumeAdapterStream } from "./consume-adapter-stream";
 import { isFromPluginMarker } from "./from-plugin";
+import { AgentRunner } from "./runner";
+import {
+  type StandaloneEntry,
+  StandaloneToolExecutor,
+} from "./standalone-tool-executor";
 import { resolveToolkitFromProvider } from "./toolkit-resolver";
 import {
-  type FunctionTool,
   functionToolToDefinition,
   isFunctionTool,
 } from "./tools/function-tool";
@@ -65,58 +68,33 @@ export async function runAgent(
   const toolIndex = buildStandaloneToolIndex(def, input.plugins ?? []);
   const tools = Array.from(toolIndex.values()).map((e) => e.def);
 
-  const signal = input.signal;
-
-  const executeTool = async (name: string, args: unknown): Promise<unknown> => {
-    const entry = toolIndex.get(name);
-    if (!entry) throw new Error(`Unknown tool: ${name}`);
-    if (entry.kind === "function") {
-      return entry.tool.execute(args as Record<string, unknown>);
-    }
-    if (entry.kind === "toolkit") {
-      return entry.provider.executeAgentTool(
-        entry.localName,
-        args as Record<string, unknown>,
-        signal,
-      );
-    }
-    if (entry.kind === "subagent") {
-      const subInput: RunAgentInput = {
-        messages:
-          typeof args === "object" &&
-          args !== null &&
-          typeof (args as { input?: unknown }).input === "string"
-            ? (args as { input: string }).input
-            : JSON.stringify(args),
-        signal,
-        plugins: input.plugins,
-      };
-      const res = await runAgent(entry.agentDef, subInput);
-      return res.text;
-    }
-    throw new Error(
-      `runAgent: tool "${name}" is a ${entry.kind} tool. ` +
-        "Hosted/MCP tools are only usable via createApp({ plugins: [..., agents(...)] }).",
-    );
-  };
+  // `runAgent` historically allowed callers to omit a signal. Synthesize one
+  // so AgentRunner / ToolExecutor can rely on always having a real signal.
+  const signal = input.signal ?? new AbortController().signal;
 
   const events: AgentEvent[] = [];
-  const text = await consumeAdapterStream(
-    adapter.run(
-      {
-        messages,
-        tools,
-        threadId: randomUUID(),
-        signal,
-      },
-      { executeTool, signal },
-    ),
-    {
-      signal,
-      onEvent: (event) => events.push(event),
+
+  const executor = new StandaloneToolExecutor(
+    toolIndex,
+    async (subDef, subInput, subSignal) => {
+      const res = await runAgent(subDef, {
+        messages: subInput,
+        signal: subSignal,
+        plugins: input.plugins,
+      });
+      return res.text;
     },
   );
 
+  const runner = new AgentRunner({
+    adapter,
+    tools,
+    executeTool: executor,
+    signal,
+    onEvent: (event) => events.push(event),
+  });
+
+  const text = await runner.run({ messages, threadId: randomUUID() });
   return { text, events };
 }
 
@@ -156,29 +134,6 @@ function normalizeMessages(
   }
   return [systemMessage, ...input];
 }
-
-type StandaloneEntry =
-  | {
-      kind: "function";
-      def: AgentToolDefinition;
-      tool: FunctionTool;
-    }
-  | {
-      kind: "subagent";
-      def: AgentToolDefinition;
-      agentDef: AgentDefinition;
-    }
-  | {
-      kind: "toolkit";
-      def: AgentToolDefinition;
-      provider: ToolProvider;
-      pluginName: string;
-      localName: string;
-    }
-  | {
-      kind: "hosted";
-      def: AgentToolDefinition;
-    };
 
 /**
  * Resolves `def.tools` (string-keyed entries + symbol-keyed `fromPlugin`

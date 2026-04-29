@@ -12,7 +12,6 @@ import type {
   PluginPhase,
   ResponseStreamEvent,
   Thread,
-  ToolAnnotations,
   ToolProvider,
 } from "shared";
 import { AppKitMcpClient, buildMcpHostPolicy } from "../../connectors/mcp";
@@ -20,7 +19,7 @@ import { getWorkspaceClient } from "../../context";
 import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
 import { isFromPluginMarker } from "../../core/agent/from-plugin";
 import { loadAgentsFromDir } from "../../core/agent/load-agents";
-import { normalizeToolResult } from "../../core/agent/normalize-result";
+import { AgentRunner } from "../../core/agent/runner";
 import {
   buildBaseSystemPrompt,
   composeSystemPrompt,
@@ -48,6 +47,11 @@ import type { PluginManifest } from "../../registry";
 import { agentStreamDefaults } from "./defaults";
 import { EventChannel } from "./event-channel";
 import { AgentEventTranslator } from "./event-translator";
+import {
+  type ApprovalCheck,
+  HttpToolExecutor,
+  type ToolBudget,
+} from "./http-tool-executor";
 import manifest from "./manifest.json";
 import {
   approvalRequestSchema,
@@ -773,110 +777,53 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     this.activeStreams.set(requestId, { controller: abortController, userId });
 
     const tools = Array.from(registered.toolIndex.values()).map((e) => e.def);
-    const approvalPolicy = this.resolvedApprovalPolicy;
     const limits = this.resolvedLimits;
     const outboundEvents = new EventChannel<ResponseStreamEvent>();
     const translator = new AgentEventTranslator();
-    // Per-run tool-call budget (shared across the top-level adapter and any
-    // sub-agents it delegates to). Counted pre-dispatch so a prompt-injected
+    // Per-run tool-call budget shared across the top-level adapter and any
+    // sub-agents it delegates to. Counted pre-dispatch so a prompt-injected
     // agent cannot drain the budget silently via denied calls.
-    let toolCallsUsed = 0;
+    const budget: ToolBudget = { used: 0, limit: limits.maxToolCalls };
 
-    const executeTool = async (
-      name: string,
-      args: unknown,
-    ): Promise<unknown> => {
-      if (toolCallsUsed >= limits.maxToolCalls) {
-        abortController.abort(
-          new Error(
-            `Tool-call budget exhausted (limit ${limits.maxToolCalls}).`,
-          ),
+    const executor = new HttpToolExecutor({
+      toolIndex: registered.toolIndex,
+      approvalPolicy: this.resolvedApprovalPolicy,
+      approvalGate: this.approvalGate,
+      translator,
+      outboundEvents,
+      abortController,
+      budget,
+      req,
+      streamId: requestId,
+      userId,
+      pluginContext: this.context,
+      mcpClient: this.mcpClient,
+      runSubAgent: (agentName, subArgs, subSignal, forwardEvent, check) => {
+        const childAgent = this.agents.get(agentName);
+        if (!childAgent) throw new Error(`Sub-agent not found: ${agentName}`);
+        return this.runSubAgent(
+          req,
+          childAgent,
+          subArgs,
+          subSignal,
+          1,
+          forwardEvent,
+          check,
         );
-        throw new Error(
-          `Tool-call budget exhausted (limit ${limits.maxToolCalls}). Raise agents({ limits: { maxToolCalls } }) or review the agent's tool-selection logic.`,
-        );
-      }
-      toolCallsUsed++;
+      },
+    });
 
-      const entry = registered.toolIndex.get(name);
-      if (!entry) throw new Error(`Unknown tool: ${name}`);
-
-      // Approval flow used by BOTH the parent stream and any sub-agents
-      // delegated to from it. Sub-agents were previously running destructive
-      // tools without ever surfacing the gate; this closure lifts the check
-      // so `runSubAgent.childExecute` can reuse the exact same semantics
-      // (event emission + gate.wait + deny string).
-      const checkApproval = async (
-        toolEntry: ResolvedToolEntry,
-        toolArgs: unknown,
-      ): Promise<"approve" | "deny" | null> => {
-        if (!approvalPolicy.requireForDestructive) return null;
-        if (!isDestructiveToolEntry(toolEntry)) return null;
-        const approvalId = randomUUID();
-        for (const ev of translator.translate({
-          type: "approval_pending",
-          approvalId,
-          streamId: requestId,
-          toolName: toolEntry.def.name,
-          args: toolArgs,
-          annotations: combinedToolAnnotations(toolEntry),
-        })) {
-          outboundEvents.push(ev);
-        }
-        return this.approvalGate.wait({
-          approvalId,
-          streamId: requestId,
-          userId,
-          timeoutMs: approvalPolicy.timeoutMs,
-        });
-      };
-
-      const decision = await checkApproval(entry, args);
-      if (decision === "deny") {
-        return `Tool execution denied by user approval gate (tool: ${name}).`;
-      }
-
-      // Forward events from nested sub-agents into the parent's outbound
-      // SSE stream so the client sees inner tool calls AND the sub-agent's
-      // streaming text as it's generated. Without this the user stares at
-      // "thinking…" for the full duration of the sub-agent run.
-      //
-      // The one exception is `metadata`: sub-agents have their own
-      // threadId, and forwarding it would overwrite the parent's thread
-      // state on the client and break multi-turn continuity.
-      //
-      // `approval_pending` is not emitted by adapters directly — it comes
-      // through `checkApproval()` which already pushes to the parent's
-      // outboundEvents — so sub-agent destructive approvals surface
-      // independently of this forwarder.
-      const forwardSubAgentEvent = (ev: AgentEvent): void => {
-        if (ev.type === "metadata") return;
-        for (const translated of translator.translate(ev)) {
+    const runner = new AgentRunner({
+      adapter: registered.adapter,
+      tools,
+      executeTool: executor,
+      signal,
+      onEvent: (event) => {
+        for (const translated of translator.translate(event)) {
           outboundEvents.push(translated);
         }
-      };
-
-      const raw = await dispatchToolCall(entry, args, {
-        req,
-        signal,
-        pluginContext: this.context,
-        mcpClient: this.mcpClient,
-        runSubAgent: (agentName, subArgs) => {
-          const childAgent = this.agents.get(agentName);
-          if (!childAgent) throw new Error(`Sub-agent not found: ${agentName}`);
-          return this.runSubAgent(
-            req,
-            childAgent,
-            subArgs,
-            signal,
-            1,
-            forwardSubAgentEvent,
-            checkApproval,
-          );
-        },
-      });
-      return normalizeToolResult(raw);
-    };
+      },
+    });
 
     // Drive the adapter and the approval-event side-channel concurrently.
     // Outbound events from both sources flow through `outboundEvents`; the
@@ -916,23 +863,9 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
           ...thread.messages,
         ];
 
-        const stream = registered.adapter.run(
-          {
-            messages: messagesWithSystem,
-            tools,
-            threadId: thread.id,
-            signal,
-          },
-          { executeTool, signal },
-        );
-
-        const fullContent = await consumeAdapterStream(stream, {
-          signal,
-          onEvent: (event) => {
-            for (const translated of translator.translate(event)) {
-              outboundEvents.push(translated);
-            }
-          },
+        const fullContent = await runner.run({
+          messages: messagesWithSystem,
+          threadId: thread.id,
         });
 
         if (fullContent) {
@@ -1027,10 +960,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
      * Absent (or returning `null`) means no gate — non-destructive tools
      * or approval disabled policy-wide.
      */
-    checkApproval?: (
-      entry: ResolvedToolEntry,
-      toolArgs: unknown,
-    ) => Promise<"approve" | "deny" | null>,
+    checkApproval?: ApprovalCheck,
   ): Promise<string> {
     const limits = this.resolvedLimits;
     if (depth > limits.maxSubAgentDepth) {
@@ -1048,6 +978,10 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         : JSON.stringify(args);
     const childTools = Array.from(child.toolIndex.values()).map((e) => e.def);
 
+    // Sub-agent dispatch reuses the parent's approval check so a destructive
+    // tool fires `approval_pending` on the parent's SSE stream. Sub-agents
+    // do not enforce their own budget — the parent already counted the
+    // `agent-<key>` invocation.
     const childExecute = async (
       name: string,
       childArgs: unknown,
@@ -1273,44 +1207,6 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     this.agents.set(name, registered);
     if (!this.defaultAgentName) this.defaultAgentName = name;
   }
-}
-
-/**
- * True when the tool should go through the approval gate. Historically
- * scoped to `destructive: true` — hence the name — but now also fires for
- * the semantic `effect` enum on {@link ToolAnnotations}. Any effect that
- * mutates the world (`write` | `update` | `destructive`) gates; `read` and
- * unannotated tools do not. `def.annotations` is the normal path; for
- * `function` tools we also read `functionTool.annotations` so a mismatch
- * between the spread def and the original {@link FunctionTool} cannot drop
- * the hint.
- */
-function isDestructiveToolEntry(entry: ResolvedToolEntry): boolean {
-  const defAnn = entry.def.annotations;
-  const fnAnn =
-    entry.source === "function" ? entry.functionTool.annotations : undefined;
-
-  const effect = defAnn?.effect ?? fnAnn?.effect;
-  if (effect === "write" || effect === "update" || effect === "destructive") {
-    return true;
-  }
-  if (defAnn?.destructive === true) return true;
-  if (fnAnn?.destructive === true) return true;
-  return false;
-}
-
-/** Merged annotations for the approval SSE payload (client UI + debugging). */
-function combinedToolAnnotations(
-  entry: ResolvedToolEntry,
-): ToolAnnotations | undefined {
-  if (entry.source === "function") {
-    const merged: ToolAnnotations = {
-      ...entry.functionTool.annotations,
-      ...entry.def.annotations,
-    };
-    return Object.keys(merged).length > 0 ? merged : undefined;
-  }
-  return entry.def.annotations;
 }
 
 function normalizeAutoInherit(value: AgentsPluginConfig["autoInheritTools"]): {
