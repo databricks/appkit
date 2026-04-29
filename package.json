@@ -10,7 +10,7 @@
     "build:watch": "pnpm -r --filter=!dev-playground --filter=!docs build:watch",
     "check:fix": "biome check --write .",
     "check": "biome check .",
-    "generate:types": "tsx tools/generate-schema-types.ts && tsx tools/generate-registry-types.ts && biome check --write packages/shared/src/schemas/plugin-manifest.generated.ts packages/appkit/src/registry/types.generated.ts",
+    "generate:types": "tsx tools/generate-schema-types.ts && tsx tools/generate-registry-types.ts",
     "generate:app-templates": "tsx tools/generate-app-templates.ts",
     "check:licenses": "tsx tools/check-licenses.ts",
     "build:notice": "tsx tools/build-notice.ts > NOTICE.md",
