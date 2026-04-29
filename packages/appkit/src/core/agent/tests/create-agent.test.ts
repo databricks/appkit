@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { tool } from "../../../core/agent/tools/tool";
-import type { AgentDefinition } from "../../../core/agent/types";
 import { createAgent } from "../create-agent";
+import { tool } from "../tools/tool";
+import type { AgentDefinition } from "../types";
 
 describe("createAgent", () => {
   test("returns the definition unchanged for a simple agent", () => {

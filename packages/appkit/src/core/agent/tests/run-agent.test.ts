@@ -10,11 +10,11 @@ import type {
 } from "shared";
 import { describe, expect, test, vi } from "vitest";
 import { z } from "zod";
-import type { ToolkitEntry } from "../../../core/agent/types";
 import { createAgent } from "../create-agent";
 import { fromPlugin } from "../from-plugin";
 import { runAgent } from "../run-agent";
 import { tool } from "../tools/tool";
+import type { ToolkitEntry } from "../types";
 
 function scriptedAdapter(events: AgentEvent[]): AgentAdapter {
   return {

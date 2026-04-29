@@ -1,3 +1,6 @@
+// Re-exports of agent primitives that now live in core/agent/. Kept here so
+// the public package barrel (`@databricks/appkit`) and any callers that
+// already imported via `./plugins/agents` continue to resolve unchanged.
 export { buildToolkitEntries } from "../../core/agent/build-toolkit";
 export {
   FROM_PLUGIN_MARKER,
