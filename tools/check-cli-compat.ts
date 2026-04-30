@@ -11,7 +11,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const SEMVER = /^\d+\.\d+\.\d+(-[\w.]+)?$/;
+const SEMVER = /^\d+\.\d+\.\d+$/;
 
 function compareSemver(a: string, b: string): number {
   const pa = a.split(".").map(Number);
@@ -35,7 +35,11 @@ try {
   process.exit(1);
 }
 
-if (typeof manifest !== "object" || manifest === null || Array.isArray(manifest)) {
+if (
+  typeof manifest !== "object" ||
+  manifest === null ||
+  Array.isArray(manifest)
+) {
   console.error("cli-compat.json must be a JSON object");
   process.exit(1);
 }
@@ -45,12 +49,22 @@ if (!("next" in manifest)) {
   process.exit(1);
 }
 
+const versionedKeys = Object.keys(manifest).filter((k) => k !== "next");
+if (versionedKeys.length === 0) {
+  console.error(
+    'cli-compat.json must contain at least one versioned CLI entry besides "next"',
+  );
+  process.exit(1);
+}
+
 const errors: string[] = [];
 
 for (const [key, value] of Object.entries(manifest)) {
   // Validate key
   if (key !== "next" && !SEMVER.test(key)) {
-    errors.push(`Invalid key "${key}": must be "next" or a semver string (X.Y.Z)`);
+    errors.push(
+      `Invalid key "${key}": must be "next" or a semver string (X.Y.Z)`,
+    );
     continue;
   }
 
@@ -80,10 +94,13 @@ const nextEntry = manifest.next as Record<string, string>;
 for (const [key, value] of Object.entries(manifest)) {
   if (key === "next") continue;
   const entry = value as Record<string, string>;
-  if (!entry.appkit || !nextEntry.appkit) continue;
 
   for (const field of ["appkit", "skills"] as const) {
-    if (entry[field] && nextEntry[field] && compareSemver(nextEntry[field], entry[field]) < 0) {
+    if (
+      entry[field] &&
+      nextEntry[field] &&
+      compareSemver(nextEntry[field], entry[field]) < 0
+    ) {
       errors.push(
         `"next.${field}" (${nextEntry[field]}) must be >= "${key}.${field}" (${entry[field]})`,
       );
