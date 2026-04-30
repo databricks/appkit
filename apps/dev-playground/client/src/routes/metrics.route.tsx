@@ -167,8 +167,12 @@ function RevenueChart() {
   // Wire metadata into Plotly layout. `formatLabel` returns the YAML-defined
   // display name; `toD3Format` converts the YAML's printf-style format spec
   // into the d3-format syntax that Plotly's `tickformat` understands.
+  // Defensive: `metric sync` may have emitted an empty measures/dimensions
+  // record (e.g., DESCRIBE response shape mismatch for joined metric views).
+  // formatLabel + toD3Format both fall back gracefully when given undefined,
+  // so this stays safe even when the metadata bundle is incomplete.
   const arrLabel = formatLabel("arr", metadata?.measures.arr);
-  const arrTickFormat = toD3Format(metadata?.measures.arr.format);
+  const arrTickFormat = toD3Format(metadata?.measures.arr?.format);
 
   return (
     <Plot
@@ -279,13 +283,13 @@ function CustomerMetricsPanel({ user }: { user: string | null }) {
                 <td className="py-2.5 pr-4 text-right font-mono tabular-nums text-foreground">
                   {formatValue(
                     row.active_accounts,
-                    metadata?.measures.active_accounts.format,
+                    metadata?.measures.active_accounts?.format,
                   )}
                 </td>
                 <td className="py-2.5 text-right font-mono tabular-nums text-foreground">
                   {formatValue(
                     row.churn_rate,
-                    metadata?.measures.churn_rate.format,
+                    metadata?.measures.churn_rate?.format,
                   )}
                 </td>
               </tr>

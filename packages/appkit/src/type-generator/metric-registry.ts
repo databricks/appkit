@@ -852,6 +852,19 @@ export async function syncMetrics(
     const measures = columns.filter((c) => c.isMeasure);
     const dimensions = columns.filter((c) => !c.isMeasure);
 
+    // Warn when extraction succeeded but yielded no columns. The most common
+    // cause is a DESCRIBE response shape that `extractMetricColumns` doesn't
+    // recognize (e.g., joined metric views may put columns under a wrapper
+    // that the v0.1 reader doesn't traverse). Without this signal, the bundle
+    // ships with empty measures/dimensions and downstream consumers blow up
+    // on `metadata.measures.<name>.format` accesses.
+    if (columns.length === 0) {
+      logger.warn(
+        "DESCRIBE response for %s yielded zero columns — the bundle entry will have empty measures/dimensions. Check that the response shape has a top-level `columns` array (or `schema.fields`).",
+        entry.source,
+      );
+    }
+
     schemas.push({
       key: entry.key,
       source: entry.source,

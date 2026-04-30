@@ -34,47 +34,7 @@
   "revenue": {
     "source": "appkit_demo.public.revenue_metrics",
     "lane": "sp",
-    "measures": {
-      "mrr": {
-        "type": "double",
-        "display_name": "Monthly Recurring Revenue"
-      },
-      "arr": {
-        "type": "double",
-        "display_name": "Annual Recurring Revenue",
-        "description": "Annualized contract value across all active subscriptions"
-      },
-      "new_arr": {
-        "type": "double",
-        "display_name": "New ARR"
-      },
-      "churned_arr": {
-        "type": "double",
-        "display_name": "Churned ARR"
-      }
-    },
-    "dimensions": {
-      "region": {
-        "type": "string",
-        "display_name": "Region"
-      },
-      "segment": {
-        "type": "string",
-        "display_name": "Customer Segment"
-      },
-      "created_at": {
-        "type": "timestamp_ltz",
-        "display_name": "Subscription Start",
-        "time_grain": [
-          "day",
-          "hour",
-          "minute",
-          "month",
-          "quarter",
-          "week",
-          "year"
-        ]
-      }
-    }
+    "measures": {},
+    "dimensions": {}
   }
 }

@@ -7,62 +7,14 @@ declare module "@databricks/appkit-ui/react" {
       key: "revenue";
       source: "appkit_demo.public.revenue_metrics";
       lane: "sp";
-      measures: {
-      /** @sqlType double */
-      "mrr": number;
-      /** @sqlType double */
-      "arr": number;
-      /** @sqlType double */
-      "new_arr": number;
-      /** @sqlType double */
-      "churned_arr": number;
-    };
-      dimensions: {
-      /** @sqlType string */
-      "region": string;
-      /** @sqlType string */
-      "segment": string;
-      /** @sqlType timestamp_ltz @timeGrain day|hour|minute|month|quarter|week|year */
-      "created_at": string;
-    };
-      measureKeys: "mrr" | "arr" | "new_arr" | "churned_arr";
-      dimensionKeys: "region" | "segment" | "created_at";
-      timeGrains: "day" | "hour" | "minute" | "month" | "quarter" | "week" | "year";
+      measures: Record<string, never>;
+      dimensions: Record<string, never>;
+      measureKeys: never;
+      dimensionKeys: never;
+      timeGrains: never;
       metadata: {
-        measures: {
-      "mrr": {
-        type: "double";
-        display_name: "Monthly Recurring Revenue";
-      };
-      "arr": {
-        type: "double";
-        display_name: "Annual Recurring Revenue";
-        description: "Annualized contract value across all active subscriptions";
-      };
-      "new_arr": {
-        type: "double";
-        display_name: "New ARR";
-      };
-      "churned_arr": {
-        type: "double";
-        display_name: "Churned ARR";
-      };
-    };
-        dimensions: {
-      "region": {
-        type: "string";
-        display_name: "Region";
-      };
-      "segment": {
-        type: "string";
-        display_name: "Customer Segment";
-      };
-      "created_at": {
-        type: "timestamp_ltz";
-        display_name: "Subscription Start";
-        time_grain: readonly ["day", "hour", "minute", "month", "quarter", "week", "year"];
-      };
-    };
+        measures: Record<string, never>;
+        dimensions: Record<string, never>;
       };
     };
     "customer_metrics": {
