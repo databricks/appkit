@@ -14,9 +14,13 @@ const pkg = JSON.parse(fs.readFileSync("package.json", "utf-8"));
 
 // Packages that are workspace-local but published separately — replace workspace:* with real version.
 // "shared" is intentionally excluded: it is bundled directly into appkit/appkit-ui via noExternal.
+// When APPKIT_VENDOR_LAKEBASE=1 (PR template artifact only), embed the lakebase .tgz from
+// packages/lakebase/tmp/ into tmp/ and depend on file:./… so installs stay off the registry.
 const WORKSPACE_PACKAGE_REPLACEMENTS = ["@databricks/lakebase"];
 
 delete pkg.dependencies.shared;
+
+const vendorLakebase = process.env.APPKIT_VENDOR_LAKEBASE === "1";
 
 for (const depName of WORKSPACE_PACKAGE_REPLACEMENTS) {
   if (pkg.dependencies?.[depName] === "workspace:*") {
@@ -26,7 +30,32 @@ for (const depName of WORKSPACE_PACKAGE_REPLACEMENTS) {
       `../packages/${pkgDirName}/package.json`,
     );
     const depPkg = JSON.parse(fs.readFileSync(depPkgPath, "utf-8"));
-    pkg.dependencies[depName] = `${depPkg.version}`;
+    const depVersion = depPkg.version as string;
+
+    if (vendorLakebase) {
+      const packedName = `databricks-${pkgDirName}-${depVersion}.tgz`;
+      const tarballSrc = path.join(
+        __dirname,
+        "../packages",
+        pkgDirName,
+        "tmp",
+        packedName,
+      );
+      if (!fs.existsSync(tarballSrc)) {
+        console.error(
+          `APPKIT_VENDOR_LAKEBASE is set but missing ${tarballSrc}. Run: pnpm --filter=@databricks/lakebase tarball`,
+        );
+        process.exit(1);
+      }
+      fs.copyFileSync(tarballSrc, path.join("tmp", packedName));
+      pkg.dependencies[depName] = `file:./${packedName}`;
+      pkg.files = pkg.files ?? [];
+      if (!pkg.files.includes(packedName)) {
+        pkg.files.push(packedName);
+      }
+    } else {
+      pkg.dependencies[depName] = `${depVersion}`;
+    }
   }
 }
 

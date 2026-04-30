@@ -158,8 +158,8 @@ jobs:
           echo "version=$PR_VERSION" >> "$GITHUB_OUTPUT"
           pnpm exec tsx tools/sync-versions.ts "$PR_VERSION"
 
-      - name: Build SDK tarballs
-        run: pnpm pack:sdk
+      - name: Build SDK tarballs for PR template
+        run: pnpm pack:pr-template
 
       - name: Prepare template artifact
         run: pnpm exec tsx tools/prepare-template-artifact.ts --version "${{ steps.version.outputs.version }}"

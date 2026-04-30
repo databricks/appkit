@@ -4,7 +4,9 @@
  *
  * Copies the template/ directory into a staging folder, bundles the SDK tarballs,
  * and rewrites package.json to use `file:` references so the template can be
- * tested against a specific version of appkit/appkit-ui.
+ * tested against a specific version of appkit/appkit-ui. For a local PR-template-style
+ * pack, run `pnpm pack:pr-template` (bundles lakebase into the appkit tarball via
+ * APPKIT_VENDOR_LAKEBASE); release flows keep using `pnpm pack:sdk`.
  *
  * Usage:
  *   tsx tools/prepare-template-artifact.ts --version <ver> [--tarball-dir <path>] [--output-dir <path>]
