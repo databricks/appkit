@@ -130,7 +130,7 @@ See [docs/README.md](./docs/README.md) for more details.
 
 ## Updating the CLI compatibility manifest
 
-`cli-compat.json` maps Databricks CLI versions to compatible AppKit and Agent Skills versions. The CLI fetches this file at runtime to determine which template version to use for `apps init` and `aitools install`. See the [design doc](https://docs.google.com/document/d/1qOchR4vnYAo_5a_oHyFdIdySBayzRc5bBmVZ0u-Mvus/edit) for full context.
+`cli-compat.json` maps Databricks CLI versions to compatible AppKit and Agent Skills versions. The CLI fetches this file at runtime to determine which template version to use for `apps init` and `aitools install`.
 
 ### Manifest format
 
@@ -153,11 +153,15 @@ See [docs/README.md](./docs/README.md) for more details.
 
 ### When to update
 
-Update `cli-compat.json` via a pull request after each AppKit release:
+After each AppKit release:
 
-- **No template changes** (just an AppKit version bump): update all entries to the new version.
-- **Template changes that don't require new CLI features**: test the last few CLI versions and update matching entries.
-- **Template changes that require new CLI features**: add a new entry for the minimum CLI version that supports them; older entries keep pointing to the previous template version.
+1. **Run evals** on the new AppKit version. If there is no regression, proceed.
+2. **Open a PR** to update `cli-compat.json`. The change depends on the type of release:
+   - **No template changes** (just an AppKit/skills version bump): search & replace all version occurrences in the manifest and update `next`.
+   - **Template changes that don't require new CLI features**: test the last 3 CLI versions with the new template and update matching entries.
+   - **Template changes that require new CLI features**: add a new entry for the minimum CLI version that supports them; older entries keep pointing to the previous template version.
+
+This process is manual for now but can be automated as part of the release workflow in the future. Use the `/bump-cli-compat` Claude Code skill to automate the update and PR creation.
 
 CI validates the manifest structure and invariants via `tools/check-cli-compat.ts`.
 
