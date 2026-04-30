@@ -47,7 +47,6 @@ describe("postTelemetry", () => {
       "https://my-workspace.cloud.databricks.com/telemetry-ext?o=1234567890",
     );
     expect(options.method).toBe("POST");
-    expect(options.redirect).toBe("manual");
   });
 
   test("authenticates via WorkspaceClient and sets headers", async () => {
@@ -68,20 +67,6 @@ describe("postTelemetry", () => {
     const [, options] = fetchSpy.mock.calls[0];
     const body = JSON.parse(options.body);
     expect(body).toEqual(samplePayload);
-  });
-
-  test("returns 3xx responses as-is (no automatic redirect follow)", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      new Response("redirected", {
-        status: 302,
-        headers: { location: "/login.html?next_url=%2Ftelemetry-ext" },
-      }),
-    );
-
-    const result = await postTelemetry(defaultOpts());
-    expect(fetchSpy).toHaveBeenCalledOnce();
-    expect(result.response.status).toBe(302);
-    expect(result.response.body).toBe("redirected");
   });
 
   test("propagates fetch errors to the caller", async () => {

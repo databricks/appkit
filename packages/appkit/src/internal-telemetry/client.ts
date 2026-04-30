@@ -68,7 +68,6 @@ export async function postTelemetry(params: {
       headers,
       body,
       signal: controller.signal,
-      redirect: "manual",
     });
     const responseBody = await response.text();
     return {
