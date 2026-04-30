@@ -84,6 +84,57 @@ type RevenueRow = {
   created_at: string;
 };
 
+/**
+ * Watch the dark-mode class on `<html>` so Plotly's layout can swap palettes
+ * when the ThemeSelector flips. Plotly does not auto-detect themes — the
+ * defaults assume a light background, which clash with the playground's dark
+ * mode (white text-on-card becomes invisible on a near-black plot bg).
+ */
+function useIsDarkMode(): boolean {
+  const [isDark, setIsDark] = useState<boolean>(() =>
+    typeof document !== "undefined"
+      ? document.documentElement.classList.contains("dark")
+      : false,
+  );
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement;
+    const update = () => setIsDark(root.classList.contains("dark"));
+    const observer = new MutationObserver(update);
+    observer.observe(root, { attributes: true, attributeFilter: ["class"] });
+    update();
+    return () => observer.disconnect();
+  }, []);
+
+  return isDark;
+}
+
+/**
+ * Theme-aware color palette for Plotly. Backgrounds are transparent so the
+ * Card behind the plot shows through (the card's bg is already theme-aware).
+ * Foreground / grid / axis colors are hardcoded to neutral hex matching the
+ * AppKit tailwind palette — close enough to the design tokens to feel native
+ * without plumbing CSS-var reads at render time.
+ */
+function plotlyThemeColors(isDark: boolean) {
+  return isDark
+    ? {
+        paper: "transparent",
+        plot: "transparent",
+        font: "#e5e7eb", // zinc-200
+        grid: "#27272a", // zinc-800
+        axis: "#71717a", // zinc-500
+      }
+    : {
+        paper: "transparent",
+        plot: "transparent",
+        font: "#18181b", // zinc-900
+        grid: "#e4e4e7", // zinc-200
+        axis: "#71717a", // zinc-500
+      };
+}
+
 function RevenueChart() {
   // Wrap args in `useMemo` so reference stability prevents infinite refetches.
   const args = useMemo(
@@ -102,6 +153,8 @@ function RevenueChart() {
   );
 
   const { data, metadata, loading, error } = useMetricView("revenue", args);
+  const isDark = useIsDarkMode();
+  const colors = plotlyThemeColors(isDark);
 
   if (loading) {
     return (
@@ -178,16 +231,29 @@ function RevenueChart() {
     <Plot
       data={traces}
       layout={{
-        title: { text: arrLabel },
+        paper_bgcolor: colors.paper,
+        plot_bgcolor: colors.plot,
+        font: { color: colors.font },
+        title: { text: arrLabel, font: { color: colors.font } },
         xaxis: {
           title: {
             text: formatLabel("created_at", metadata?.dimensions.created_at),
+            font: { color: colors.font },
           },
+          gridcolor: colors.grid,
+          zerolinecolor: colors.grid,
+          linecolor: colors.axis,
+          tickfont: { color: colors.font },
         },
         yaxis: {
-          title: { text: arrLabel },
+          title: { text: arrLabel, font: { color: colors.font } },
           tickformat: arrTickFormat,
+          gridcolor: colors.grid,
+          zerolinecolor: colors.grid,
+          linecolor: colors.axis,
+          tickfont: { color: colors.font },
         },
+        legend: { font: { color: colors.font } },
         margin: { t: 40, r: 20, b: 60, l: 80 },
         height: 380,
         autosize: true,
