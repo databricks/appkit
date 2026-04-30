@@ -39,7 +39,7 @@ interface AppkitLogEnvelope {
   entry: { appkit_log: AppkitLog };
 }
 
-export interface TelemetryPayload {
+interface TelemetryPayload {
   uploadTime: number;
   items: never[];
   protoLogs: string[];

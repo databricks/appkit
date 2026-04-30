@@ -209,6 +209,21 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.TelemetrySendRequest",
+          label: "TelemetrySendRequest"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.TelemetrySendResponse",
+          label: "TelemetrySendResponse"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.TelemetrySendResult",
+          label: "TelemetrySendResult"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.ValidationResult",
           label: "ValidationResult"
         }

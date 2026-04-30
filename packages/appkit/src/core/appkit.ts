@@ -13,7 +13,6 @@ import { CacheManager } from "../cache";
 import { ServiceContext } from "../context";
 import {
   isInternalTelemetryEnabled,
-  sendStartupTelemetry,
   TelemetryReporter,
 } from "../internal-telemetry";
 import { createLogger } from "../logging/logger";
@@ -220,7 +219,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
     }
 
     if (isInternalTelemetryEnabled(config)) {
-      AppKit.bootstrapInternalTelemetry(rawPlugins);
+      AppKit.bootstrapInternalTelemetry();
     }
 
     const serverPlugin = instance.#pluginInstances.server;
@@ -231,41 +230,17 @@ export class AppKit<TPlugins extends InputPluginMap> {
     return handle;
   }
 
-  private static bootstrapInternalTelemetry(
-    rawPlugins: PluginData<PluginConstructor, unknown, string>[] | undefined,
-  ): void {
+  private static bootstrapInternalTelemetry(): void {
     const serviceCtx = ServiceContext.get();
-    const workspaceHost = process.env.DATABRICKS_HOST || "";
-    const appName = process.env.DATABRICKS_APP_NAME || "unknown";
-    const appId = process.env.DATABRICKS_APP_ID || "";
-    const environment = process.env.NODE_ENV || "production";
-    const pluginNames = (rawPlugins ?? []).map((p) => p.name);
-
     const reporter = TelemetryReporter.initialize({
-      workspaceHost,
+      workspaceHost: process.env.DATABRICKS_HOST || "",
       workspaceId: serviceCtx.workspaceId,
       client: serviceCtx.client,
-      appId,
+      appId: process.env.DATABRICKS_APP_ID || "",
       appkitVersion: productVersion,
     });
     reporter.start();
     reporter.sendStartup().catch(() => {});
-
-    // TODO: remove the legacy observability_log fallback once the AppkitLog
-    // schema is deployed end-to-end on the telemetry backend.
-    serviceCtx.workspaceId
-      .then((workspaceId) => {
-        sendStartupTelemetry({
-          workspaceHost,
-          workspaceId,
-          client: serviceCtx.client,
-          appkitVersion: productVersion,
-          appName,
-          plugins: pluginNames,
-          environment,
-        }).catch(() => {});
-      })
-      .catch(() => {});
   }
 
   private static preparePlugins(

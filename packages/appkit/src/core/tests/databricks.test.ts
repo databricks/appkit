@@ -17,7 +17,6 @@ const mockReporter = {
 
 vi.mock("../../internal-telemetry", () => ({
   isInternalTelemetryEnabled: vi.fn().mockReturnValue(true),
-  sendStartupTelemetry: vi.fn().mockResolvedValue(undefined),
   TelemetryReporter: {
     initialize: vi.fn(() => mockReporter),
     getInstance: vi.fn(() => mockReporter),
@@ -650,45 +649,48 @@ describe("AppKit", () => {
   });
 
   describe("internal telemetry", () => {
-    test("should call sendStartupTelemetry after successful createApp", async () => {
-      const { sendStartupTelemetry } = await import("../../internal-telemetry");
+    test("initializes the reporter and fires sendStartup after createApp", async () => {
+      const { TelemetryReporter } = await import("../../internal-telemetry");
+      mockReporter.sendStartup.mockClear();
+      mockReporter.start.mockClear();
+      vi.mocked(TelemetryReporter.initialize).mockClear();
 
-      const pluginData = [
-        { plugin: CoreTestPlugin, config: {}, name: "coreTest" },
-      ];
-      await createApp({ plugins: pluginData });
+      await createApp({
+        plugins: [{ plugin: CoreTestPlugin, config: {}, name: "coreTest" }],
+      });
 
       // Allow the fire-and-forget promise chain to resolve
       await new Promise((r) => setTimeout(r, 10));
 
-      expect(sendStartupTelemetry).toHaveBeenCalledWith(
+      expect(TelemetryReporter.initialize).toHaveBeenCalledWith(
         expect.objectContaining({
-          plugins: ["coreTest"],
-          environment: expect.any(String),
           appkitVersion: expect.any(String),
           client: expect.anything(),
         }),
       );
+      expect(mockReporter.start).toHaveBeenCalledOnce();
+      expect(mockReporter.sendStartup).toHaveBeenCalledOnce();
     });
 
-    test("should not call sendStartupTelemetry when isInternalTelemetryEnabled returns false", async () => {
-      const { isInternalTelemetryEnabled, sendStartupTelemetry } = await import(
+    test("skips bootstrap when isInternalTelemetryEnabled returns false", async () => {
+      const { isInternalTelemetryEnabled, TelemetryReporter } = await import(
         "../../internal-telemetry"
       );
-      vi.mocked(sendStartupTelemetry).mockClear();
+      vi.mocked(TelemetryReporter.initialize).mockClear();
+      mockReporter.sendStartup.mockClear();
       vi.mocked(isInternalTelemetryEnabled).mockReturnValue(false);
 
       await createApp({ plugins: [] });
 
       await new Promise((r) => setTimeout(r, 10));
 
-      expect(sendStartupTelemetry).not.toHaveBeenCalled();
+      expect(TelemetryReporter.initialize).not.toHaveBeenCalled();
+      expect(mockReporter.sendStartup).not.toHaveBeenCalled();
       vi.mocked(isInternalTelemetryEnabled).mockReturnValue(true);
     });
 
-    test("should not crash startup if sendStartupTelemetry rejects", async () => {
-      const { sendStartupTelemetry } = await import("../../internal-telemetry");
-      vi.mocked(sendStartupTelemetry).mockRejectedValue(
+    test("does not crash startup if sendStartup rejects", async () => {
+      mockReporter.sendStartup.mockRejectedValueOnce(
         new Error("telemetry failure"),
       );
 

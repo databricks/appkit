@@ -1,6 +1,7 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { sendStartupTelemetry } from "../sender";
+import type { AppkitLog } from "../appkit-log";
+import { sendAppkitLogs } from "../sender";
 
 function createMockClient(): WorkspaceClient {
   return {
@@ -12,15 +13,18 @@ function createMockClient(): WorkspaceClient {
   } as unknown as WorkspaceClient;
 }
 
-const defaultParams = () => ({
+const defaultOpts = () => ({
   workspaceHost: "https://my-workspace.cloud.databricks.com",
   workspaceId: "1234567890",
   client: createMockClient(),
-  appkitVersion: "0.22.0",
-  appName: "test-app",
-  plugins: ["server", "analytics"],
-  environment: "production",
 });
+
+const sampleLog: AppkitLog = {
+  event_name: "APP_STARTUP",
+  app_id: "app-id",
+  appkit_version: "0.27.0",
+  app_startup_event: { placeholder: true },
+};
 
 let fetchSpy: ReturnType<typeof vi.fn>;
 
@@ -34,27 +38,30 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("sendStartupTelemetry", () => {
-  test("sends POST to authenticated endpoint URL", async () => {
-    await sendStartupTelemetry(defaultParams());
+describe("sendAppkitLogs", () => {
+  test("returns null when there are no logs", async () => {
+    const result = await sendAppkitLogs([], defaultOpts());
+    expect(result).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test("POSTs to the SP-friendly /telemetry-ext endpoint", async () => {
+    await sendAppkitLogs([sampleLog], defaultOpts());
 
     expect(fetchSpy).toHaveBeenCalledOnce();
-    const [url] = fetchSpy.mock.calls[0];
+    const [url, options] = fetchSpy.mock.calls[0];
     expect(url).toBe(
       "https://my-workspace.cloud.databricks.com/telemetry-ext?o=1234567890",
     );
+    expect(options.method).toBe("POST");
+    expect(options.redirect).toBe("manual");
   });
 
-  test("authenticates using the WorkspaceClient", async () => {
-    const params = defaultParams();
-    await sendStartupTelemetry(params);
+  test("authenticates via WorkspaceClient and sets headers", async () => {
+    const opts = defaultOpts();
+    await sendAppkitLogs([sampleLog], opts);
 
-    expect(params.client.config.authenticate).toHaveBeenCalledOnce();
-  });
-
-  test("sends correct headers including auth", async () => {
-    await sendStartupTelemetry(defaultParams());
-
+    expect(opts.client.config.authenticate).toHaveBeenCalledOnce();
     const [, options] = fetchSpy.mock.calls[0];
     const headers = options.headers as Headers;
     expect(headers.get("Content-Type")).toBe("application/json");
@@ -62,82 +69,39 @@ describe("sendStartupTelemetry", () => {
     expect(headers.get("Authorization")).toBe("Bearer mock-sp-token");
   });
 
-  test("sends correct payload structure", async () => {
-    await sendStartupTelemetry(defaultParams());
+  test("encodes one protoLog entry per AppkitLog", async () => {
+    await sendAppkitLogs([sampleLog, sampleLog, sampleLog], defaultOpts());
 
     const [, options] = fetchSpy.mock.calls[0];
     const body = JSON.parse(options.body);
-
-    expect(body).toHaveProperty("uploadTime");
-    expect(typeof body.uploadTime).toBe("number");
+    expect(body.protoLogs).toHaveLength(3);
     expect(body.items).toEqual([]);
-    expect(body.protoLogs).toHaveLength(1);
-    expect(typeof body.protoLogs[0]).toBe("string");
-  });
-
-  test("sends correct observability log format", async () => {
-    await sendStartupTelemetry(defaultParams());
-
-    const [, options] = fetchSpy.mock.calls[0];
-    const body = JSON.parse(options.body);
-    const protoLog = JSON.parse(body.protoLogs[0]);
-
-    expect(protoLog.frontend_log_event_id).toMatch(/^appkit-startup-/);
-    expect(typeof protoLog.inferred_timestamp_millis).toBe("number");
-    expect(protoLog.entry.observability_log).toEqual({
-      type: "INTERACTION_PHASE",
-      entity: {
-        type: "INTERACTION",
-        sub_type: "INITIAL_LOAD",
-        entity_id: "appkit:0.22.0:production:server,analytics",
-      },
-      client_source: "APPKIT",
+    expect(typeof body.uploadTime).toBe("number");
+    const proto = JSON.parse(body.protoLogs[0]);
+    expect(proto.entry.appkit_log).toMatchObject({
+      event_name: "APP_STARTUP",
+      app_id: "app-id",
     });
-  });
-
-  test("packs metadata into entity_id", async () => {
-    await sendStartupTelemetry({
-      ...defaultParams(),
-      appkitVersion: "1.0.0",
-      environment: "development",
-      plugins: ["server", "genie", "files"],
-    });
-
-    const [, options] = fetchSpy.mock.calls[0];
-    const protoLog = JSON.parse(JSON.parse(options.body).protoLogs[0]);
-
-    expect(protoLog.entry.observability_log.entity.entity_id).toBe(
-      "appkit:1.0.0:development:server,genie,files",
-    );
-  });
-
-  test("uses POST method with manual redirect", async () => {
-    await sendStartupTelemetry(defaultParams());
-
-    const [, options] = fetchSpy.mock.calls[0];
-    expect(options.method).toBe("POST");
-    expect(options.redirect).toBe("manual");
   });
 
   test("follows one redirect preserving auth headers", async () => {
     fetchSpy.mockResolvedValueOnce(
       new Response("", {
         status: 307,
-        headers: { location: "https://redirected.example.com/telemetry" },
+        headers: { location: "https://redirected.example.com/telemetry-ext" },
       }),
     );
     fetchSpy.mockResolvedValueOnce(new Response("", { status: 200 }));
 
-    await sendStartupTelemetry(defaultParams());
+    await sendAppkitLogs([sampleLog], defaultOpts());
 
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     const [redirectUrl, redirectOptions] = fetchSpy.mock.calls[1];
     expect(String(redirectUrl)).toBe(
-      "https://redirected.example.com/telemetry",
+      "https://redirected.example.com/telemetry-ext",
     );
     const redirectHeaders = redirectOptions.headers as Headers;
     expect(redirectHeaders.get("Authorization")).toBe("Bearer mock-sp-token");
-    expect(redirectHeaders.get("X-Databricks-Org-Id")).toBe("1234567890");
     expect(redirectOptions.method).toBe("POST");
   });
 
@@ -150,7 +114,7 @@ describe("sendStartupTelemetry", () => {
     );
     fetchSpy.mockResolvedValueOnce(new Response("", { status: 200 }));
 
-    await sendStartupTelemetry(defaultParams());
+    await sendAppkitLogs([sampleLog], defaultOpts());
 
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     const [redirectUrl] = fetchSpy.mock.calls[1];
@@ -162,7 +126,7 @@ describe("sendStartupTelemetry", () => {
   test("propagates fetch errors to the caller", async () => {
     fetchSpy.mockRejectedValue(new Error("network failure"));
 
-    await expect(sendStartupTelemetry(defaultParams())).rejects.toThrow(
+    await expect(sendAppkitLogs([sampleLog], defaultOpts())).rejects.toThrow(
       "network failure",
     );
   });
@@ -170,31 +134,33 @@ describe("sendStartupTelemetry", () => {
   test("returns 4xx/5xx responses without throwing", async () => {
     fetchSpy.mockResolvedValue(new Response("boom", { status: 500 }));
 
-    const result = await sendStartupTelemetry(defaultParams());
-    expect(result.response.status).toBe(500);
-    expect(result.response.body).toBe("boom");
+    const result = await sendAppkitLogs([sampleLog], defaultOpts());
+    expect(result?.response.status).toBe(500);
+    expect(result?.response.body).toBe("boom");
   });
 
   test("propagates authentication failures", async () => {
-    const params = defaultParams();
+    const opts = defaultOpts();
     (
-      params.client.config.authenticate as ReturnType<typeof vi.fn>
+      opts.client.config.authenticate as ReturnType<typeof vi.fn>
     ).mockRejectedValue(new Error("auth failed"));
 
-    await expect(sendStartupTelemetry(params)).rejects.toThrow("auth failed");
+    await expect(sendAppkitLogs([sampleLog], opts)).rejects.toThrow(
+      "auth failed",
+    );
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   test("throws when workspaceHost is empty", async () => {
     await expect(
-      sendStartupTelemetry({ ...defaultParams(), workspaceHost: "" }),
+      sendAppkitLogs([sampleLog], { ...defaultOpts(), workspaceHost: "" }),
     ).rejects.toThrow(/workspaceHost/);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   test("throws when workspaceId is empty", async () => {
     await expect(
-      sendStartupTelemetry({ ...defaultParams(), workspaceId: "" }),
+      sendAppkitLogs([sampleLog], { ...defaultOpts(), workspaceId: "" }),
     ).rejects.toThrow(/workspaceId/);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -202,49 +168,34 @@ describe("sendStartupTelemetry", () => {
   test("returns the dispatched request and response", async () => {
     fetchSpy.mockResolvedValue(new Response("ok", { status: 200 }));
 
-    const result = await sendStartupTelemetry(defaultParams());
-    expect(result.request.method).toBe("POST");
-    expect(result.request.url).toBe(
+    const result = await sendAppkitLogs([sampleLog], defaultOpts());
+    expect(result?.request.method).toBe("POST");
+    expect(result?.request.url).toBe(
       "https://my-workspace.cloud.databricks.com/telemetry-ext?o=1234567890",
     );
-    expect(result.request.headers["content-type"]).toBe("application/json");
-    expect(result.request.headers.authorization).toBe("Bearer mock-sp-token");
-    expect(JSON.parse(result.request.body).protoLogs).toHaveLength(1);
-    expect(result.response.status).toBe(200);
-    expect(result.response.body).toBe("ok");
+    expect(result?.response.status).toBe(200);
+    expect(result?.response.body).toBe("ok");
   });
 
-  test("normalizes host without protocol", async () => {
-    await sendStartupTelemetry({
-      ...defaultParams(),
+  test("normalizes a host without protocol", async () => {
+    await sendAppkitLogs([sampleLog], {
+      ...defaultOpts(),
       workspaceHost: "my-workspace.cloud.databricks.com",
     });
-
     const [url] = fetchSpy.mock.calls[0];
     expect(url).toBe(
       "https://my-workspace.cloud.databricks.com/telemetry-ext?o=1234567890",
     );
   });
 
-  test("strips trailing slashes from host", async () => {
-    await sendStartupTelemetry({
-      ...defaultParams(),
+  test("strips trailing slashes from the host", async () => {
+    await sendAppkitLogs([sampleLog], {
+      ...defaultOpts(),
       workspaceHost: "https://my-workspace.cloud.databricks.com///",
     });
-
     const [url] = fetchSpy.mock.calls[0];
     expect(url).toBe(
       "https://my-workspace.cloud.databricks.com/telemetry-ext?o=1234567890",
-    );
-  });
-
-  test("handles empty plugins list", async () => {
-    await sendStartupTelemetry({ ...defaultParams(), plugins: [] });
-
-    const [, options] = fetchSpy.mock.calls[0];
-    const protoLog = JSON.parse(JSON.parse(options.body).protoLogs[0]);
-    expect(protoLog.entry.observability_log.entity.entity_id).toBe(
-      "appkit:0.22.0:production:",
     );
   });
 });

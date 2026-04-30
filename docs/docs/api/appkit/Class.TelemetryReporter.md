@@ -10,7 +10,7 @@ flushRequestMetrics(): Promise<TelemetrySendResult | null>;
 
 #### Returns
 
-`Promise`\<`TelemetrySendResult` \| `null`\>
+`Promise`\<[`TelemetrySendResult`](Interface.TelemetrySendResult.md) \| `null`\>
 
 ***
 
@@ -47,7 +47,7 @@ sendHeartbeat(): Promise<TelemetrySendResult | null>;
 
 #### Returns
 
-`Promise`\<`TelemetrySendResult` \| `null`\>
+`Promise`\<[`TelemetrySendResult`](Interface.TelemetrySendResult.md) \| `null`\>
 
 ***
 
@@ -59,7 +59,7 @@ sendStartup(): Promise<TelemetrySendResult | null>;
 
 #### Returns
 
-`Promise`\<`TelemetrySendResult` \| `null`\>
+`Promise`\<[`TelemetrySendResult`](Interface.TelemetrySendResult.md) \| `null`\>
 
 ***
 
