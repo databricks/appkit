@@ -90,6 +90,15 @@ const NULL_OPERATORS = new Set<MetricFilterOperatorName>(["set", "notSet"]);
  */
 const QUERIES_DIR = path.resolve(process.cwd(), "config/queries");
 const METRIC_CONFIG_FILE = "metric.json";
+/**
+ * Default location of the build-time metadata bundle emitted by
+ * `metric sync` and the Vite type-generator plugin. The path mirrors the
+ * default `metricMetadataOutFile` in `packages/appkit/src/type-generator/`.
+ */
+const METRIC_METADATA_PATH = path.resolve(
+  process.cwd(),
+  "shared/appkit-types/metrics.metadata.json",
+);
 
 const METRIC_KEY_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 const FQN_PATTERN =
@@ -144,6 +153,103 @@ interface MetricBuildTimeMetadata {
    * dimensions; regular dimensions are absent from this map.
    */
   timeGrainsByDim?: Record<string, string[]>;
+  /**
+   * Dimension name → SQL type. Drives op-vs-type compatibility checks in the
+   * filter validator. Empty/missing → validator falls open on type checks.
+   */
+  dimensionTypes?: Record<string, string>;
+}
+
+/**
+ * Read the build-time metadata bundle (`metrics.metadata.json`) emitted by
+ * `metric sync` / the Vite type-generator plugin, and transform it into the
+ * shape `loadMetricRegistry` expects.
+ *
+ * Returns `null` when the file is absent — apps that haven't run `metric sync`
+ * fall back to the validator's open mode. Logs and returns null on parse
+ * failures so a stale bundle never takes the server down.
+ */
+async function readMetricsMetadataBundle(
+  metadataPath: string = METRIC_METADATA_PATH,
+): Promise<Record<string, MetricBuildTimeMetadata> | null> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(metadataPath, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    logger.warn(
+      "Failed to read metrics.metadata.json at %s: %s",
+      metadataPath,
+      err instanceof Error ? err.message : String(err),
+    );
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    logger.warn(
+      "metrics.metadata.json at %s is not valid JSON: %s",
+      metadataPath,
+      err instanceof Error ? err.message : String(err),
+    );
+    return null;
+  }
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return null;
+  }
+
+  const result: Record<string, MetricBuildTimeMetadata> = {};
+  for (const [metricKey, value] of Object.entries(
+    parsed as Record<string, unknown>,
+  )) {
+    if (!value || typeof value !== "object") continue;
+    const v = value as Record<string, unknown>;
+    const measuresObj =
+      v.measures && typeof v.measures === "object" && !Array.isArray(v.measures)
+        ? (v.measures as Record<string, unknown>)
+        : {};
+    const dimensionsObj =
+      v.dimensions &&
+      typeof v.dimensions === "object" &&
+      !Array.isArray(v.dimensions)
+        ? (v.dimensions as Record<string, unknown>)
+        : {};
+
+    const measures = Object.keys(measuresObj).sort();
+    const dimensions = Object.keys(dimensionsObj).sort();
+
+    const timeGrainsByDim: Record<string, string[]> = {};
+    const dimensionTypes: Record<string, string> = {};
+    for (const [dimName, dimMeta] of Object.entries(dimensionsObj)) {
+      if (!dimMeta || typeof dimMeta !== "object") continue;
+      const m = dimMeta as Record<string, unknown>;
+      if (typeof m.type === "string") {
+        dimensionTypes[dimName] = m.type;
+      }
+      if (Array.isArray(m.time_grain)) {
+        const grains = m.time_grain.filter(
+          (g): g is string => typeof g === "string",
+        );
+        if (grains.length > 0) {
+          timeGrainsByDim[dimName] = grains;
+        }
+      }
+    }
+
+    result[metricKey] = {
+      measures,
+      dimensions,
+      timeGrainsByDim,
+      dimensionTypes,
+    };
+  }
+
+  return result;
 }
 
 /**
@@ -162,6 +268,13 @@ export async function loadMetricRegistry(
   queriesDir: string = QUERIES_DIR,
 ): Promise<Record<string, MetricRegistration>> {
   const metricPath = path.join(queriesDir, METRIC_CONFIG_FILE);
+
+  // Auto-discover the build-time metadata bundle if the caller didn't
+  // pass one explicitly. This wires up Phase 5's metrics.metadata.json
+  // to the server-side validator so it knows which dimensions are time-
+  // typed (and therefore which `timeGrain` values to accept).
+  const resolvedMetadata =
+    metadata ?? (await readMetricsMetadataBundle()) ?? undefined;
 
   let raw: string;
   try {
@@ -203,7 +316,7 @@ export async function loadMetricRegistry(
           `Duplicate metric key "${key}": cannot appear in both sp and obo lanes.`,
         );
       }
-      const meta = metadata?.[key];
+      const meta = resolvedMetadata?.[key];
       registry[key] = {
         key,
         source: entry.source,
@@ -211,6 +324,7 @@ export async function loadMetricRegistry(
         knownMeasures: meta?.measures ?? [],
         knownDimensions: meta?.dimensions ?? [],
         knownTimeGrainsByDim: meta?.timeGrainsByDim ?? {},
+        knownDimensionTypes: meta?.dimensionTypes,
       };
     }
   }
@@ -357,7 +471,11 @@ export function makeMetricRequestSchema(
   //     are available; values cardinality is enforced per operator; AND/OR
   //     nesting is capped at METRIC_FILTER_MAX_DEPTH.
   return baseObject.superRefine((value, ctx) => {
-    if (value.timeGrain != null) {
+    // Cross-field rule for timeGrain. We can only enforce "no time-typed
+    // dimension is grouped" when metadata is available — without it the
+    // validator falls open (mirrors the dimensions-fall-open behavior at
+    // line 274-281). The warehouse will reject incompatible grains itself.
+    if (value.timeGrain != null && Object.keys(grainsByDim).length > 0) {
       const dims = value.dimensions ?? [];
       const hasTimeDim = dims.some(
         (d) => Array.isArray(grainsByDim[d]) && grainsByDim[d].length > 0,
@@ -751,11 +869,18 @@ export function buildMetricSql(
         `Refusing to build SQL: unknown timeGrain "${request.timeGrain}" for metric "${registration.key}".`,
       );
     }
-    const hasTimeDim = dimensions.some((d) => isTimeTypedDim(registration, d));
-    if (!hasTimeDim) {
-      throw new Error(
-        `Refusing to build SQL: timeGrain "${request.timeGrain}" set but no time-typed dimension is in 'dimensions'.`,
+    // Same fall-open rule as the validator: only enforce when metadata is
+    // available. Without registry knowledge we trust the warehouse to reject
+    // an incompatible grain at SQL execution time.
+    if (Object.keys(registration.knownTimeGrainsByDim).length > 0) {
+      const hasTimeDim = dimensions.some((d) =>
+        isTimeTypedDim(registration, d),
       );
+      if (!hasTimeDim) {
+        throw new Error(
+          `Refusing to build SQL: timeGrain "${request.timeGrain}" set but no time-typed dimension is in 'dimensions'.`,
+        );
+      }
     }
   }
 

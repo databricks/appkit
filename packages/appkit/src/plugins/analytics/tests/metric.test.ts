@@ -245,19 +245,39 @@ describe("metric — pure helpers", () => {
       ).toThrowError(/no time-typed dimension/);
     });
 
-    test("rejects timeGrain when the metric view has no time-typed dims", () => {
-      const noTimeRegistration: MetricRegistration = {
+    test("rejects timeGrain when none of the requested dims are time-typed (metadata available)", () => {
+      // Some dims are time-typed in the registry, but the request only
+      // includes a non-time dim. The validator must catch the mismatch.
+      const partialRegistration: MetricRegistration = {
         ...REVENUE_REGISTRATION,
-        knownDimensions: ["region", "segment"],
-        knownTimeGrainsByDim: {},
+        knownDimensions: ["region", "segment", "created_at"],
+        knownTimeGrainsByDim: { created_at: ["day", "week", "month"] },
       };
       expect(() =>
-        validateMetricRequest(noTimeRegistration, {
+        validateMetricRequest(partialRegistration, {
           measures: ["arr"],
           dimensions: ["region"],
           timeGrain: "month",
         }),
       ).toThrowError();
+    });
+
+    test("falls open on timeGrain when metadata is empty (no metrics.metadata.json)", () => {
+      // Without build-time metadata the validator can't tell which dims are
+      // time-typed. Mirror the dimensions-fall-open behavior: accept the
+      // request and let the warehouse reject incompatible grains.
+      const noMetadataRegistration: MetricRegistration = {
+        ...REVENUE_REGISTRATION,
+        knownDimensions: [],
+        knownTimeGrainsByDim: {},
+      };
+      expect(() =>
+        validateMetricRequest(noMetadataRegistration, {
+          measures: ["arr"],
+          dimensions: ["created_at"],
+          timeGrain: "month",
+        }),
+      ).not.toThrowError();
     });
   });
 
