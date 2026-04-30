@@ -9,6 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { compileFromFile } from "json-schema-to-typescript";
+import { formatWithBiome } from "./format-with-biome.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, "..");
@@ -48,6 +49,7 @@ async function main(): Promise<void> {
 
   fs.mkdirSync(path.dirname(OUT_PATH), { recursive: true });
   fs.writeFileSync(OUT_PATH, result, "utf-8");
+  formatWithBiome(OUT_PATH);
   console.log("Wrote", OUT_PATH);
 }
 

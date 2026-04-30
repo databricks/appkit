@@ -7,6 +7,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { formatWithBiome } from "./format-with-biome.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, "..");
@@ -149,6 +150,7 @@ function main(): void {
   const out = generate(schema);
   fs.mkdirSync(path.dirname(OUT_PATH), { recursive: true });
   fs.writeFileSync(OUT_PATH, out, "utf-8");
+  formatWithBiome(OUT_PATH);
   console.log("Wrote", OUT_PATH);
 }
 
