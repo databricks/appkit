@@ -128,6 +128,39 @@ pnpm docs:serve  # Serve built docs
 
 See [docs/README.md](./docs/README.md) for more details.
 
+## Updating the CLI compatibility manifest
+
+`cli-compat.json` maps Databricks CLI versions to compatible AppKit and Agent Skills versions. The CLI fetches this file at runtime to determine which template version to use for `apps init` and `aitools install`. See the [design doc](https://docs.google.com/document/d/1qOchR4vnYAo_5a_oHyFdIdySBayzRc5bBmVZ0u-Mvus/edit) for full context.
+
+### Manifest format
+
+```json
+{
+  "next": { "appkit": "0.24.0", "skills": "0.1.4" },
+  "0.299.0": { "appkit": "0.24.0", "skills": "0.1.4" }
+}
+```
+
+- Each key is a CLI version (`X.Y.Z`) or `"next"`.
+- Each value specifies the compatible `appkit` and `skills` versions.
+- `"next"` is used for CLI versions newer than any listed entry.
+
+### How the CLI resolves versions
+
+1. **Exact match** on CLI version → use that entry.
+2. **No exact match**, between two entries → use the nearest lower version's entry.
+3. **Newer than all entries** → use `"next"`.
+
+### When to update
+
+Update `cli-compat.json` via a pull request after each AppKit release:
+
+- **No template changes** (just an AppKit version bump): update all entries to the new version.
+- **Template changes that don't require new CLI features**: test the last few CLI versions and update matching entries.
+- **Template changes that require new CLI features**: add a new entry for the minimum CLI version that supports them; older entries keep pointing to the previous template version.
+
+CI validates the manifest structure and invariants via `tools/check-cli-compat.ts`.
+
 ## Adding or changing a resource type
 
 Resource types and their permissions are defined once in the plugin-manifest schema; the CLI (create, add-resource, validate) and the appkit registry types are derived from it.
