@@ -22,18 +22,18 @@ describe("isInternalTelemetryEnabled", () => {
     ).toBe(true);
   });
 
-  test("returns false when APPKIT_TELEMETRY_DISABLED env var is true", () => {
-    vi.stubEnv("APPKIT_TELEMETRY_DISABLED", "true");
+  test("returns false when DISABLE_APPKIT_INTERNAL_TELEMETRY env var is true", () => {
+    vi.stubEnv("DISABLE_APPKIT_INTERNAL_TELEMETRY", "true");
     expect(isInternalTelemetryEnabled()).toBe(false);
   });
 
-  test("returns true when APPKIT_TELEMETRY_DISABLED env var is not true", () => {
-    vi.stubEnv("APPKIT_TELEMETRY_DISABLED", "false");
+  test("returns true when DISABLE_APPKIT_INTERNAL_TELEMETRY env var is not true", () => {
+    vi.stubEnv("DISABLE_APPKIT_INTERNAL_TELEMETRY", "false");
     expect(isInternalTelemetryEnabled()).toBe(true);
   });
 
   test("config option takes precedence over env var", () => {
-    vi.stubEnv("APPKIT_TELEMETRY_DISABLED", "false");
+    vi.stubEnv("DISABLE_APPKIT_INTERNAL_TELEMETRY", "false");
     expect(isInternalTelemetryEnabled({ disableInternalTelemetry: true })).toBe(
       false,
     );
