@@ -150,6 +150,7 @@ See [docs/README.md](./docs/README.md) for more details.
 1. **Exact match** on CLI version → use that entry.
 2. **No exact match**, between two entries → use the nearest lower version's entry.
 3. **Newer than all entries** → use `"next"`.
+4. **Older than all entries** → use the oldest versioned entry.
 
 ### When to update
 
