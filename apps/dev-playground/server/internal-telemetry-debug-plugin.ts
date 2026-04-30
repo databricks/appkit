@@ -68,6 +68,20 @@ class InternalTelemetryDebug extends Plugin {
   }
 }
 
+const SENSITIVE_HEADERS = new Set(["authorization", "cookie", "set-cookie"]);
+
+function redactHeaders(
+  headers: Record<string, string>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    out[name] = SENSITIVE_HEADERS.has(name.toLowerCase())
+      ? "[REDACTED]"
+      : value;
+  }
+  return out;
+}
+
 function formatSuccess(
   action: ReporterAction,
   result: TelemetrySendResult | null,
@@ -80,12 +94,16 @@ function formatSuccess(
         "Nothing to send (request metrics buffer empty — record some first).",
     };
   }
+  const safeRequest: TelemetrySendRequest = {
+    ...result.request,
+    headers: redactHeaders(result.request.headers),
+  };
   return {
     ok: result.response.status >= 200 && result.response.status < 300,
     action,
-    request: result.request,
+    request: safeRequest,
     response: result.response,
-    curl: toCurl(result.request),
+    curl: toCurl(safeRequest),
   };
 }
 

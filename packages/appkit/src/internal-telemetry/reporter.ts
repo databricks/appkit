@@ -73,6 +73,7 @@ export class TelemetryReporter {
   }
 
   static initialize(opts: ReporterOptions): TelemetryReporter {
+    TelemetryReporter.#instance?.stop();
     TelemetryReporter.#instance = new TelemetryReporter(opts);
     return TelemetryReporter.#instance;
   }

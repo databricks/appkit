@@ -70,11 +70,14 @@ describe("postTelemetry", () => {
     expect(body).toEqual(samplePayload);
   });
 
-  test("follows one redirect preserving auth headers", async () => {
+  test("follows same-origin redirect preserving auth headers", async () => {
     fetchSpy.mockResolvedValueOnce(
       new Response("", {
         status: 307,
-        headers: { location: "https://redirected.example.com/telemetry-ext" },
+        headers: {
+          location:
+            "https://my-workspace.cloud.databricks.com/telemetry-ext-v2",
+        },
       }),
     );
     fetchSpy.mockResolvedValueOnce(new Response("", { status: 200 }));
@@ -84,11 +87,26 @@ describe("postTelemetry", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     const [redirectUrl, redirectOptions] = fetchSpy.mock.calls[1];
     expect(String(redirectUrl)).toBe(
-      "https://redirected.example.com/telemetry-ext",
+      "https://my-workspace.cloud.databricks.com/telemetry-ext-v2",
     );
     const redirectHeaders = redirectOptions.headers as Headers;
     expect(redirectHeaders.get("Authorization")).toBe("Bearer mock-sp-token");
     expect(redirectOptions.method).toBe("POST");
+  });
+
+  test("refuses cross-origin redirects so SP token is not leaked", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response("", {
+        status: 307,
+        headers: { location: "https://attacker.example.com/steal" },
+      }),
+    );
+
+    await expect(postTelemetry(defaultOpts())).rejects.toThrow(
+      /cross-origin redirect/,
+    );
+    // Only the original request was sent; the redirect target was never fetched.
+    expect(fetchSpy).toHaveBeenCalledOnce();
   });
 
   test("resolves relative redirect URLs against the original host", async () => {

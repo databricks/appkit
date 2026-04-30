@@ -21,6 +21,6 @@
     "tools/**",
     "docs/**"
   ],
-  "ignoreDependencies": ["json-schema-to-typescript", "@cyclonedx/cdxgen"],
-  "ignoreBinaries": ["tarball", "cdxgen"]
+  "ignoreDependencies": ["json-schema-to-typescript"],
+  "ignoreBinaries": ["tarball"]
 }

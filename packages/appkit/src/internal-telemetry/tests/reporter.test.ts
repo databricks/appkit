@@ -183,6 +183,30 @@ describe("TelemetryReporter", () => {
     vi.useRealTimers();
   });
 
+  test("re-initialize stops the previous instance's timers", () => {
+    vi.useFakeTimers();
+    const first = TelemetryReporter.initialize({
+      ...baseOpts(),
+      heartbeatIntervalMs: 100,
+      metricsFlushIntervalMs: 100,
+    });
+    const firstHeartbeat = vi
+      .spyOn(first, "sendHeartbeat")
+      .mockResolvedValue(null);
+    first.start();
+
+    TelemetryReporter.initialize({
+      ...baseOpts(),
+      heartbeatIntervalMs: 1_000_000,
+      metricsFlushIntervalMs: 1_000_000,
+    });
+
+    vi.advanceTimersByTime(500);
+    // The first reporter's timers must have been cleared by the re-init.
+    expect(firstHeartbeat).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
   test("returns dispatched request and response from sendStartup", async () => {
     fetchSpy.mockResolvedValue(new Response("ok", { status: 200 }));
     const reporter = TelemetryReporter.initialize(baseOpts());
