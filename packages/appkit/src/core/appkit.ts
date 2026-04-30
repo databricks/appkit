@@ -236,7 +236,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
       workspaceHost: process.env.DATABRICKS_HOST || "",
       workspaceId: serviceCtx.workspaceId,
       client: serviceCtx.client,
-      appId: process.env.DATABRICKS_APP_ID || "",
+      appId: process.env.DATABRICKS_CLIENT_ID || "",
       appkitVersion: productVersion,
     });
     reporter.start();
