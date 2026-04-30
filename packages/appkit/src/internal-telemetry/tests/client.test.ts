@@ -70,61 +70,18 @@ describe("postTelemetry", () => {
     expect(body).toEqual(samplePayload);
   });
 
-  test("follows same-origin redirect preserving auth headers", async () => {
+  test("returns 3xx responses as-is (no automatic redirect follow)", async () => {
     fetchSpy.mockResolvedValueOnce(
-      new Response("", {
-        status: 307,
-        headers: {
-          location:
-            "https://my-workspace.cloud.databricks.com/telemetry-ext-v2",
-        },
-      }),
-    );
-    fetchSpy.mockResolvedValueOnce(new Response("", { status: 200 }));
-
-    await postTelemetry(defaultOpts());
-
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-    const [redirectUrl, redirectOptions] = fetchSpy.mock.calls[1];
-    expect(String(redirectUrl)).toBe(
-      "https://my-workspace.cloud.databricks.com/telemetry-ext-v2",
-    );
-    const redirectHeaders = redirectOptions.headers as Headers;
-    expect(redirectHeaders.get("Authorization")).toBe("Bearer mock-sp-token");
-    expect(redirectOptions.method).toBe("POST");
-  });
-
-  test("refuses cross-origin redirects so SP token is not leaked", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      new Response("", {
-        status: 307,
-        headers: { location: "https://attacker.example.com/steal" },
-      }),
-    );
-
-    await expect(postTelemetry(defaultOpts())).rejects.toThrow(
-      /cross-origin redirect/,
-    );
-    // Only the original request was sent; the redirect target was never fetched.
-    expect(fetchSpy).toHaveBeenCalledOnce();
-  });
-
-  test("resolves relative redirect URLs against the original host", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      new Response("", {
+      new Response("redirected", {
         status: 302,
         headers: { location: "/login.html?next_url=%2Ftelemetry-ext" },
       }),
     );
-    fetchSpy.mockResolvedValueOnce(new Response("", { status: 200 }));
 
-    await postTelemetry(defaultOpts());
-
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-    const [redirectUrl] = fetchSpy.mock.calls[1];
-    expect(String(redirectUrl)).toBe(
-      "https://my-workspace.cloud.databricks.com/login.html?next_url=%2Ftelemetry-ext",
-    );
+    const result = await postTelemetry(defaultOpts());
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(result.response.status).toBe(302);
+    expect(result.response.body).toBe("redirected");
   });
 
   test("propagates fetch errors to the caller", async () => {

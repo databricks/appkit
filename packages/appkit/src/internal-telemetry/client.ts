@@ -34,27 +34,6 @@ function headersToObject(h: Headers): Record<string, string> {
   return out;
 }
 
-async function fetchWithRedirect(
-  url: string,
-  init: RequestInit,
-): Promise<Response> {
-  const res = await fetch(url, init);
-  const location = res.headers.get("location");
-  if (res.status >= 300 && res.status < 400 && location) {
-    const target = new URL(location, url);
-    await res.body?.cancel().catch(() => {});
-    // Refuse cross-origin redirects so the Authorization header (a live
-    // service-principal token) cannot be replayed against a third party.
-    if (target.origin !== new URL(url).origin) {
-      throw new Error(
-        `Telemetry: refusing cross-origin redirect to ${target.origin}`,
-      );
-    }
-    return fetch(target, init);
-  }
-  return res;
-}
-
 /**
  * Authenticated POST to the Databricks Client Telemetry endpoint.
  * Returns the dispatched request and the received response so callers can
@@ -84,14 +63,13 @@ export async function postTelemetry(params: {
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   try {
-    const init: RequestInit = {
+    const response = await fetch(url, {
       method: "POST",
       headers,
       body,
       signal: controller.signal,
       redirect: "manual",
-    };
-    const response = await fetchWithRedirect(url, init);
+    });
     const responseBody = await response.text();
     return {
       request: { url, method: "POST", headers: headersToObject(headers), body },
