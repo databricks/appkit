@@ -267,7 +267,7 @@ describe("metric — pure helpers", () => {
         measures: ["arr"],
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) FROM appkit_demo.public.revenue_metrics",
+        "SELECT MEASURE(arr) AS arr FROM appkit_demo.public.revenue_metrics",
       );
       // No filter present → no bind params.
       expect(parameters).toEqual({});
@@ -278,7 +278,7 @@ describe("metric — pure helpers", () => {
         measures: ["mrr", "arr"],
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr), MEASURE(mrr) FROM appkit_demo.public.revenue_metrics",
+        "SELECT MEASURE(arr) AS arr, MEASURE(mrr) AS mrr FROM appkit_demo.public.revenue_metrics",
       );
     });
 
@@ -288,7 +288,7 @@ describe("metric — pure helpers", () => {
         limit: 10,
       });
       expect(statement).toBe(
-        "SELECT MEASURE(arr) FROM appkit_demo.public.revenue_metrics LIMIT 10",
+        "SELECT MEASURE(arr) AS arr FROM appkit_demo.public.revenue_metrics LIMIT 10",
       );
     });
 
@@ -335,7 +335,7 @@ describe("metric — pure helpers", () => {
         measures: ["arr"],
       });
       expect(statement).toMatchInlineSnapshot(
-        `"SELECT MEASURE(arr) FROM appkit_demo.public.revenue_metrics"`,
+        `"SELECT MEASURE(arr) AS arr FROM appkit_demo.public.revenue_metrics"`,
       );
     });
 
@@ -345,7 +345,7 @@ describe("metric — pure helpers", () => {
         dimensions: ["region"],
       });
       expect(statement).toMatchInlineSnapshot(
-        `"SELECT MEASURE(arr), region FROM appkit_demo.public.revenue_metrics GROUP BY ALL"`,
+        `"SELECT MEASURE(arr) AS arr, region FROM appkit_demo.public.revenue_metrics GROUP BY ALL"`,
       );
     });
 
@@ -356,7 +356,7 @@ describe("metric — pure helpers", () => {
         timeGrain: "month",
       });
       expect(statement).toMatchInlineSnapshot(
-        `"SELECT MEASURE(arr), date_trunc('month', created_at) AS created_at, region FROM appkit_demo.public.revenue_metrics GROUP BY ALL"`,
+        `"SELECT MEASURE(arr) AS arr, date_trunc('month', created_at) AS created_at, region FROM appkit_demo.public.revenue_metrics GROUP BY ALL"`,
       );
     });
 
@@ -368,7 +368,7 @@ describe("metric — pure helpers", () => {
         limit: 50,
       });
       expect(statement).toMatchInlineSnapshot(
-        `"SELECT MEASURE(arr), MEASURE(mrr), date_trunc('week', created_at) AS created_at FROM appkit_demo.public.revenue_metrics GROUP BY ALL LIMIT 50"`,
+        `"SELECT MEASURE(arr) AS arr, MEASURE(mrr) AS mrr, date_trunc('week', created_at) AS created_at FROM appkit_demo.public.revenue_metrics GROUP BY ALL LIMIT 50"`,
       );
     });
 
@@ -444,7 +444,7 @@ describe("metric — pure helpers", () => {
       });
       // region comes before segment alphabetically.
       expect(statement).toBe(
-        "SELECT MEASURE(arr), region, segment FROM appkit_demo.public.revenue_metrics GROUP BY ALL",
+        "SELECT MEASURE(arr) AS arr, region, segment FROM appkit_demo.public.revenue_metrics GROUP BY ALL",
       );
     });
   });
@@ -862,7 +862,7 @@ describe("AnalyticsPlugin — metric route handler", () => {
       expect.anything(),
       expect.objectContaining({
         statement:
-          "SELECT MEASURE(arr) FROM appkit_demo.public.revenue_metrics",
+          "SELECT MEASURE(arr) AS arr FROM appkit_demo.public.revenue_metrics",
         warehouse_id: "test-warehouse-id",
       }),
       expect.any(AbortSignal),
@@ -938,7 +938,7 @@ describe("AnalyticsPlugin — metric route handler", () => {
       expect.anything(),
       expect.objectContaining({
         statement:
-          "SELECT MEASURE(arr), region FROM appkit_demo.public.revenue_metrics GROUP BY ALL",
+          "SELECT MEASURE(arr) AS arr, region FROM appkit_demo.public.revenue_metrics GROUP BY ALL",
       }),
       expect.any(AbortSignal),
     );
@@ -975,7 +975,7 @@ describe("AnalyticsPlugin — metric route handler", () => {
       expect.anything(),
       expect.objectContaining({
         statement:
-          "SELECT MEASURE(arr), date_trunc('month', created_at) AS created_at FROM appkit_demo.public.revenue_metrics GROUP BY ALL",
+          "SELECT MEASURE(arr) AS arr, date_trunc('month', created_at) AS created_at FROM appkit_demo.public.revenue_metrics GROUP BY ALL",
       }),
       expect.any(AbortSignal),
     );

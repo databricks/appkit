@@ -762,9 +762,14 @@ export function buildMetricSql(
   // Deterministic order so cache keys collapse semantically equivalent calls.
   // Sort-before-hash composition is finalized in Phase 4; sorting the SELECT
   // list here is the same idea applied to the SQL itself.
+  // Alias each measure to its plain name so result rows have keys matching
+  // the registered measure (`{ arr: 1234 }`) rather than the SQL-function
+  // serialization Databricks returns by default (`{ "measure(arr)": 1234 }`).
+  // The measure name has already been validated against MEASURE_NAME_PATTERN
+  // and the registry's known measure list, so it's safe to interpolate.
   const measureClauses = [...request.measures]
     .sort()
-    .map((m) => `MEASURE(${m})`);
+    .map((m) => `MEASURE(${m}) AS ${m}`);
 
   const dimensionClauses = [...dimensions]
     .sort()
