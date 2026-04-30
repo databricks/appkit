@@ -223,7 +223,7 @@ describe("scaffold", () => {
   });
 
   describe("stability field", () => {
-    it("omits stability from manifest when undefined (defaults to stable)", () => {
+    it("omits stability from manifest when undefined (defaults to ga)", () => {
       const tmp = makeTempDir();
       tempDirs.push(tmp);
       const targetDir = path.join(tmp, "test");

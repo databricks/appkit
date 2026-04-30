@@ -6,16 +6,16 @@ import { resolveManifestInDir } from "../manifest-resolve";
 import { isWithinDirectory } from "../sync/sync";
 import { shouldAllowJsManifestForDir } from "../trusted-js-manifest";
 
-type Stability = "beta" | "stable";
+type Stability = "beta" | "ga";
 
 const TIER_ORDER: Record<Stability, number> = {
   beta: 0,
-  stable: 1,
+  ga: 1,
 };
 
 const IMPORT_PATH_MAP: Record<Stability, string> = {
   beta: "/beta",
-  stable: "",
+  ga: "",
 };
 
 /** Aligned with sync.ts and list.ts; keep all plugin-tree walks at the same cap. */
@@ -76,7 +76,7 @@ function validatePluginName(pluginName: string): void {
 }
 
 function isStability(value: unknown): value is Stability {
-  return value === "beta" || value === "stable";
+  return value === "beta" || value === "ga";
 }
 
 function findPluginManifest(
@@ -204,7 +204,7 @@ function specifierMatchesPlugin(spec: string, pluginName: string): boolean {
  * across one file, leaving every OTHER specifier on the same import line at
  * its original source. The naïve `split/join` approach this replaced was
  * promoting *every* beta specifier in the file along with the targeted
- * plugin — a bug because beta specifiers don't exist at the stable subpath.
+ * plugin — a bug because beta specifiers don't exist at the GA subpath.
  *
  * Behaviour:
  * - If the targeted plugin is the only specifier on an import line, the
@@ -341,7 +341,7 @@ async function runPromote(
 
   if (!isStability(options.to)) {
     console.error(
-      `Invalid target tier "${options.to}". Must be one of: beta, stable.`,
+      `Invalid target tier "${options.to}". Must be one of: beta, ga.`,
     );
     process.exit(1);
   }
@@ -383,11 +383,11 @@ async function runPromote(
     process.exit(1);
   }
 
-  const rawStability = raw.stability ?? "stable";
+  const rawStability = raw.stability ?? "ga";
   if (!isStability(rawStability)) {
     console.error(
       `Manifest at ${path.relative(cwd, manifestPath)} has an invalid stability value "${String(rawStability)}". ` +
-        `Must be one of: beta, stable (or omitted for stable).`,
+        `Must be one of: beta, ga (or omitted for ga).`,
     );
     process.exit(1);
   }
@@ -409,7 +409,7 @@ async function runPromote(
 
   const prefix = options.dryRun ? "[dry-run] " : "";
 
-  if (target === "stable") {
+  if (target === "ga") {
     delete raw.stability;
   } else {
     raw.stability = target;
@@ -451,7 +451,7 @@ async function runPromote(
 
   if (!options.skipSync && !options.dryRun) {
     // Monorepo-only: regenerate every artifact derived from plugin
-    // manifests (stable/beta export barrels AND the per-plugin docs-page
+    // manifests (ga/beta export barrels AND the per-plugin docs-page
     // stability banner) so all manifest-derived layers move together.
     // No-op outside the AppKit monorepo (third-party plugin projects don't
     // ship the generators).
@@ -520,7 +520,7 @@ export {
 export const pluginPromoteCommand = new Command("promote")
   .description("Promote a plugin to a higher stability tier")
   .argument("<plugin-name>", "Plugin name to promote")
-  .requiredOption("--to <tier>", "Target stability tier (beta, stable)")
+  .requiredOption("--to <tier>", "Target stability tier (beta, ga)")
   .option("--dry-run", "Show what would change without modifying files")
   .option("--skip-imports", "Only update manifest, skip import path rewriting")
   .option("--skip-sync", "Don't auto-run plugin sync after promotion")

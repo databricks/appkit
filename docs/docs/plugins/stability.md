@@ -10,8 +10,8 @@ AppKit plugins have a two-tier stability system that communicates API maturity a
 
 | Tier | Import Path | Contract |
 |------|------------|---------|
-| **Beta** | `@databricks/appkit/beta` | API may change between minor releases. On a path to stable. |
-| **Stable** | `@databricks/appkit` | Production ready. Follows semver strictly. |
+| **Beta** | `@databricks/appkit/beta` | API may change between minor releases. On a path to GA. |
+| **GA** | `@databricks/appkit` | Generally available. Production ready. Follows semver strictly. |
 
 The import path is the primary stability signal. Importing from `/beta` is explicit consent to potential breaking changes.
 
@@ -20,7 +20,7 @@ The import path is the primary stability signal. Importing from `/beta` is expli
 Promotion is one-way. Plugins can enter at any tier.
 
 ```
-beta ──→ stable
+beta ──→ ga
 ```
 
 ## Usage
@@ -28,7 +28,7 @@ beta ──→ stable
 ### Importing Plugins by Tier
 
 ```typescript
-// Stable plugins
+// GA plugins
 import { server, analytics } from "@databricks/appkit";
 
 // Beta plugins
@@ -60,16 +60,16 @@ The output includes a STABILITY column showing each plugin's tier.
 npx appkit plugin create
 ```
 
-The interactive flow prompts for a stability level (defaults to stable).
+The interactive flow prompts for a stability level (defaults to GA).
 
 ### Promoting a Plugin
 
 ```bash
-# Promote from beta to stable
-npx appkit plugin promote my-plugin --to stable
+# Promote from beta to GA
+npx appkit plugin promote my-plugin --to ga
 
 # Preview changes without modifying files
-npx appkit plugin promote my-plugin --to stable --dry-run
+npx appkit plugin promote my-plugin --to ga --dry-run
 ```
 
 The promote command:
@@ -85,7 +85,7 @@ The promote command:
 
 ## Manifest Field
 
-The `stability` field in `manifest.json` is optional. When absent, the plugin is considered stable.
+The `stability` field in `manifest.json` is optional. When absent, the plugin is considered GA.
 
 ```json
 {
@@ -97,11 +97,11 @@ The `stability` field in `manifest.json` is optional. When absent, the plugin is
 }
 ```
 
-Valid values: `"beta"`, `"stable"`.
+Valid values: `"beta"`, `"ga"`.
 
 ## Template Manifest (appkit.plugins.json)
 
-When `plugin sync` discovers non-stable plugins, it includes their stability in the output:
+When `plugin sync` discovers non-GA plugins, it includes their stability in the output:
 
 ```json
 {
@@ -116,7 +116,7 @@ When `plugin sync` discovers non-stable plugins, it includes their stability in 
 }
 ```
 
-Only stable plugins can be marked `requiredByTemplate`. Non-stable plugins always remain optional during init.
+Only GA plugins can be marked `requiredByTemplate`. Non-GA plugins always remain optional during init.
 
 ## For Third-Party Plugin Authors
 
@@ -127,7 +127,7 @@ The import path (`/beta`) only applies to first-party plugins shipped inside `@d
 Inside the AppKit monorepo, each plugin's `manifest.json` `stability` field is the **single source of truth** for which subpath ships the plugin. Two build-time generators read every `packages/appkit/src/plugins/<name>/manifest.json`:
 
 - `tools/generate-plugin-entries.ts` writes the runtime export barrels:
-  - `packages/appkit/src/plugins/stable-exports.generated.ts` — re-exports of stable plugins, included by `src/index.ts` (the `@databricks/appkit` entry).
+  - `packages/appkit/src/plugins/ga-exports.generated.ts` — re-exports of GA plugins, included by `src/index.ts` (the `@databricks/appkit` entry).
   - `packages/appkit/src/plugins/beta-exports.generated.ts` — re-exports of beta plugins, included by `src/beta.ts` (the `@databricks/appkit/beta` entry).
 - `tools/generate-plugin-doc-banners.ts` injects (or removes) a `:::warning Beta plugin` admonition at the top of each plugin's docs page (`docs/docs/plugins/<name>.md`) so a plugin's documented stability follows its manifest.
 
@@ -139,14 +139,14 @@ To move a built-in plugin between tiers manually:
 
 ```bash
 # Edit packages/appkit/src/plugins/<name>/manifest.json
-# Set "stability": "beta" (or remove the field for stable)
+# Set "stability": "beta" (or remove the field for GA)
 pnpm run generate:plugin-entries  # regenerate the barrels
 pnpm sync:template                # regenerate appkit.plugins.json
 ```
 
 ## Current Plugins by Tier
 
-All built-in plugins are currently **stable**:
+All built-in plugins are currently **GA**:
 
 - `server` -- Express HTTP server
 - `analytics` -- SQL query execution

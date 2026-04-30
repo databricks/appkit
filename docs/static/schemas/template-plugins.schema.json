@@ -71,9 +71,9 @@
         },
         "stability": {
           "type": "string",
-          "enum": ["beta", "stable"],
-          "default": "stable",
-          "description": "Plugin stability level. Beta is heading to stable; APIs may change between minor releases. Stable follows semver."
+          "enum": ["beta", "ga"],
+          "default": "ga",
+          "description": "Plugin stability level. Beta is heading to GA; APIs may change between minor releases. GA (general availability) follows semver."
         },
         "resources": {
           "type": "object",

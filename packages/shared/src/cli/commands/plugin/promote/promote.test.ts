@@ -125,14 +125,18 @@ describe("validatePluginName", () => {
 describe("isStability", () => {
   it("accepts the two tiers", () => {
     expect(isStability("beta")).toBe(true);
-    expect(isStability("stable")).toBe(true);
+    expect(isStability("ga")).toBe(true);
   });
 
   it("rejects everything else (including legacy tiers)", () => {
     expect(isStability("experimental")).toBe(false);
     expect(isStability("preview")).toBe(false);
-    expect(isStability("Stable")).toBe(false);
-    expect(isStability("STABLE")).toBe(false);
+    // "stable" was the previous name for the GA tier. After the rename it
+    // is no longer a valid stability value; manifests using it must
+    // migrate to "ga" (or omit the field, which defaults to GA).
+    expect(isStability("stable")).toBe(false);
+    expect(isStability("GA")).toBe(false);
+    expect(isStability("Ga")).toBe(false);
     expect(isStability("alpha")).toBe(false);
     expect(isStability(undefined)).toBe(false);
     expect(isStability(null)).toBe(false);
@@ -141,12 +145,12 @@ describe("isStability", () => {
 });
 
 describe("TIER_ORDER", () => {
-  it("orders beta < stable", () => {
-    expect(TIER_ORDER.beta).toBeLessThan(TIER_ORDER.stable);
+  it("orders beta < ga", () => {
+    expect(TIER_ORDER.beta).toBeLessThan(TIER_ORDER.ga);
   });
 
-  it("IMPORT_PATH_MAP returns empty string for stable (root entrypoint)", () => {
-    expect(IMPORT_PATH_MAP.stable).toBe("");
+  it("IMPORT_PATH_MAP returns empty string for ga (root entrypoint)", () => {
+    expect(IMPORT_PATH_MAP.ga).toBe("");
     expect(IMPORT_PATH_MAP.beta).toBe("/beta");
   });
 });
@@ -291,7 +295,7 @@ describe("runPromote", () => {
 
   it("rejects an invalid plugin name (path traversal attempt)", async () => {
     await expect(
-      runPromote("../etc/passwd", { to: "stable", skipSync: true }),
+      runPromote("../etc/passwd", { to: "ga", skipSync: true }),
     ).rejects.toThrow(/Invalid plugin name/);
   });
 
@@ -305,7 +309,11 @@ describe("runPromote", () => {
 
   it("rejects legacy tier names as targets", async () => {
     writeManifest(h.cwd, "my-plugin", "beta");
-    for (const legacy of ["experimental", "preview"]) {
+    // "experimental" and "preview" predate the beta/GA collapse; "stable"
+    // is the previous name for the GA tier. All three must be rejected
+    // up front so a stale --to flag in someone's shell history can't
+    // silently no-op or land a manifest with an invalid value.
+    for (const legacy of ["experimental", "preview", "stable"]) {
       h.errors.length = 0;
       await expect(
         runPromote("my-plugin", { to: legacy, skipSync: true }),
@@ -316,28 +324,36 @@ describe("runPromote", () => {
 
   it("rejects when plugin is not found", async () => {
     await expect(
-      runPromote("ghost", { to: "stable", skipSync: true }),
+      runPromote("ghost", { to: "ga", skipSync: true }),
     ).rejects.toThrow(/__exit:1/);
     expect(h.errors.some((e) => /not found/.test(e))).toBe(true);
   });
 
-  it("rejects an invalid stability value in the manifest (cased 'Stable')", async () => {
-    writeManifest(h.cwd, "my-plugin", "Stable");
+  it("rejects an invalid stability value in the manifest (cased 'GA')", async () => {
+    writeManifest(h.cwd, "my-plugin", "GA");
     await expect(
-      runPromote("my-plugin", { to: "stable", skipSync: true }),
+      runPromote("my-plugin", { to: "ga", skipSync: true }),
     ).rejects.toThrow(/__exit:1/);
     expect(h.errors.some((e) => /invalid stability value/i.test(e))).toBe(true);
   });
 
   it("rejects a legacy stability value in the manifest", async () => {
-    writeManifest(h.cwd, "my-plugin", "preview");
-    await expect(
-      runPromote("my-plugin", { to: "stable", skipSync: true }),
-    ).rejects.toThrow(/__exit:1/);
-    expect(h.errors.some((e) => /invalid stability value/i.test(e))).toBe(true);
+    // "preview" predates the beta/GA collapse; "stable" predates the
+    // GA rename. Both must be rejected so a stale manifest can't reach
+    // the rest of the flow with an unknown value.
+    for (const legacy of ["preview", "stable"]) {
+      h.errors.length = 0;
+      writeManifest(h.cwd, `my-${legacy}-plugin`, legacy);
+      await expect(
+        runPromote(`my-${legacy}-plugin`, { to: "ga", skipSync: true }),
+      ).rejects.toThrow(/__exit:1/);
+      expect(h.errors.some((e) => /invalid stability value/i.test(e))).toBe(
+        true,
+      );
+    }
   });
 
-  it("rejects demotion from stable (absent stability) to beta", async () => {
+  it("rejects demotion from GA (absent stability) to beta", async () => {
     writeManifest(h.cwd, "my-plugin");
     await expect(
       runPromote("my-plugin", { to: "beta", skipSync: true }),
@@ -353,10 +369,10 @@ describe("runPromote", () => {
     expect(h.errors.some((e) => /already at "beta"/.test(e))).toBe(true);
   });
 
-  it("promotes beta to stable by removing the stability field", async () => {
+  it("promotes beta to ga by removing the stability field", async () => {
     const manifestPath = writeManifest(h.cwd, "my-plugin", "beta");
     await runPromote("my-plugin", {
-      to: "stable",
+      to: "ga",
       skipSync: true,
       skipImports: true,
     });
@@ -368,7 +384,7 @@ describe("runPromote", () => {
     const manifestPath = writeManifest(h.cwd, "my-plugin", "beta");
     const before = fs.readFileSync(manifestPath, "utf-8");
     await runPromote("my-plugin", {
-      to: "stable",
+      to: "ga",
       dryRun: true,
       skipSync: true,
       skipImports: true,
@@ -396,7 +412,7 @@ describe("runPromote", () => {
     const tsxOriginal = `import { Comp } from "@databricks/appkit-ui/react/beta";\n`;
     fs.writeFileSync(tsxFile, tsxOriginal);
 
-    await runPromote("my-plugin", { to: "stable", skipSync: true });
+    await runPromote("my-plugin", { to: "ga", skipSync: true });
 
     const tsAfter = fs.readFileSync(tsFile, "utf-8");
     expect(tsAfter).toContain(`{ myPlugin } from "@databricks/appkit"`);
@@ -421,7 +437,7 @@ describe("runPromote", () => {
         return;
       }
 
-      await runPromote("my-plugin", { to: "stable", skipSync: true });
+      await runPromote("my-plugin", { to: "ga", skipSync: true });
 
       expect(fs.readFileSync(outsideTs, "utf-8")).toContain(
         "@databricks/appkit/beta",
@@ -440,7 +456,7 @@ describe("runPromote", () => {
     );
     await expect(
       runPromote("installed-plugin", {
-        to: "stable",
+        to: "ga",
         skipSync: true,
         skipImports: true,
       }),
@@ -463,7 +479,7 @@ describe("runPromote", () => {
       JSON.stringify({ name: "ghost", stability: "beta" }),
     );
     await expect(
-      runPromote("../../../elsewhere", { to: "stable", skipSync: true }),
+      runPromote("../../../elsewhere", { to: "ga", skipSync: true }),
     ).rejects.toThrow(/Invalid plugin name/);
   });
 });

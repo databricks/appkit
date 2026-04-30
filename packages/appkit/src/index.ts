@@ -66,6 +66,7 @@ export {
   READ_ACTIONS,
   WRITE_ACTIONS,
 } from "./plugins/files/policy";
+export * from "./plugins/ga-exports.generated";
 export type {
   IJobsConfig,
   JobAPI,
@@ -79,7 +80,6 @@ export type {
   ServingEndpointRegistry,
   ServingFactory,
 } from "./plugins/serving/types";
-export * from "./plugins/stable-exports.generated";
 // Registry types and utilities for plugin manifests
 export type {
   ConfigSchema,

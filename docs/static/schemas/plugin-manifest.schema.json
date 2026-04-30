@@ -98,9 +98,9 @@
     },
     "stability": {
       "type": "string",
-      "enum": ["beta", "stable"],
-      "default": "stable",
-      "description": "Plugin stability level. Beta plugins may have breaking API changes between minor releases but are on a path to stable. Stable plugins follow semver strictly."
+      "enum": ["beta", "ga"],
+      "default": "ga",
+      "description": "Plugin stability level. Beta plugins may have breaking API changes between minor releases but are on a path to GA. GA (general availability) plugins follow semver strictly."
     }
   },
   "additionalProperties": false,

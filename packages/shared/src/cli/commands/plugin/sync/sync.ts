@@ -84,13 +84,13 @@ async function loadPluginEntry(
       ...(manifest.onSetupMessage && {
         onSetupMessage: manifest.onSetupMessage,
       }),
-      // Narrowing on `!== "stable"` removes "stable"; the truthy check
-      // removes `undefined`. What's left is the non-stable tier set,
+      // Narrowing on `!== "ga"` removes "ga"; the truthy check
+      // removes `undefined`. What's left is the non-GA tier set,
       // which TypeScript already knows is assignable to TemplatePlugin's
       // `stability` field — so no cast is needed and adding a future
       // tier (e.g. "alpha") flows through type-correctly.
       ...(manifest.stability &&
-        manifest.stability !== "stable" && {
+        manifest.stability !== "ga" && {
           stability: manifest.stability,
         }),
     },
@@ -761,12 +761,12 @@ async function runPluginsSync(options: {
     }
   }
 
-  // Step 6b: Strip requiredByTemplate for non-stable plugins
+  // Step 6b: Strip requiredByTemplate for non-GA plugins
   for (const plugin of Object.values(plugins)) {
     if (
       plugin.requiredByTemplate &&
       plugin.stability &&
-      plugin.stability !== "stable"
+      plugin.stability !== "ga"
     ) {
       plugin.requiredByTemplate = undefined;
     }

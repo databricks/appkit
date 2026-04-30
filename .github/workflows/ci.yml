@@ -58,7 +58,7 @@ jobs:
           if ! git diff --exit-code \
               packages/shared/src/schemas/plugin-manifest.generated.ts \
               packages/appkit/src/registry/types.generated.ts \
-              packages/appkit/src/plugins/stable-exports.generated.ts \
+              packages/appkit/src/plugins/ga-exports.generated.ts \
               packages/appkit/src/plugins/beta-exports.generated.ts \
               docs/docs/plugins/analytics.md \
               docs/docs/plugins/files.md \

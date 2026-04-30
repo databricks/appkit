@@ -8,8 +8,8 @@
  * Outputs: docs/docs/plugins/<doc-file>.md (banner block injected after the H1)
  *
  * Idempotent: each run strips any existing auto-generated banner via the
- * marker comments and re-injects when the manifest's stability is non-stable.
- * Stable / absent stability => banner removed.
+ * marker comments and re-injects when the manifest's stability is non-GA.
+ * GA / absent stability => banner removed.
  *
  * Run from repo root: pnpm exec tsx tools/generate-plugin-doc-banners.ts
  */
@@ -70,7 +70,7 @@ function injectBanner(content: string, body: string): string {
 
 interface PluginInfo {
   name: string;
-  stability: "beta" | "stable";
+  stability: "beta" | "ga";
   docFile: string;
 }
 
@@ -96,10 +96,10 @@ function readPluginInfos(): PluginInfo[] {
       continue; // not a valid plugin manifest, skip silently
     }
 
-    const tier = manifest.stability ?? "stable";
-    if (tier !== "beta" && tier !== "stable") {
+    const tier = manifest.stability ?? "ga";
+    if (tier !== "beta" && tier !== "ga") {
       throw new Error(
-        `Manifest at ${manifestPath} has invalid stability "${tier}". Must be "beta" or "stable".`,
+        `Manifest at ${manifestPath} has invalid stability "${tier}". Must be "beta" or "ga".`,
       );
     }
 
@@ -131,7 +131,7 @@ function main(): void {
     const original = fs.readFileSync(info.docFile, "utf-8");
     const stripped = stripBanner(original);
     const next =
-      info.stability === "stable"
+      info.stability === "ga"
         ? stripped
         : injectBanner(stripped, BANNER_BODY[info.stability]);
 
@@ -142,7 +142,7 @@ function main(): void {
     fs.writeFileSync(info.docFile, next, "utf-8");
     summary.push({
       name: info.name,
-      action: info.stability === "stable" ? "strip" : "inject",
+      action: info.stability === "ga" ? "strip" : "inject",
     });
   }
 

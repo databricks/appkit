@@ -16,7 +16,7 @@ export interface PluginRow {
   name: string;
   displayName: string;
   package: string;
-  stability: "beta" | "stable";
+  stability: "beta" | "ga";
   required: number;
   optional: number;
 }
@@ -37,7 +37,7 @@ export function listFromManifestFile(manifestPath: string): PluginRow[] {
         name: string;
         displayName: string;
         package: string;
-        stability?: "beta" | "stable";
+        stability?: "beta" | "ga";
         resources: { required: unknown[]; optional: unknown[] };
       }
     >;
@@ -54,7 +54,7 @@ export function listFromManifestFile(manifestPath: string): PluginRow[] {
     name: p.name,
     displayName: p.displayName ?? p.name,
     package: p.package ?? "",
-    stability: p.stability ?? "stable",
+    stability: p.stability ?? "ga",
     required: Array.isArray(p.resources?.required)
       ? p.resources.required.length
       : 0,
@@ -107,13 +107,13 @@ async function collectPluginsRecursive(
             ? relPath
             : `./${relPath}`;
           const rawManifest = manifest as typeof manifest & {
-            stability?: "beta" | "stable";
+            stability?: "beta" | "ga";
           };
           rows.push({
             name: manifest.name,
             displayName: manifest.displayName ?? manifest.name,
             package: packagePath,
-            stability: rawManifest.stability ?? "stable",
+            stability: rawManifest.stability ?? "ga",
             required: Array.isArray(manifest.resources?.required)
               ? manifest.resources.required.length
               : 0,

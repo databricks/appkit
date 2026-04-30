@@ -6,7 +6,7 @@
  * exports cannot drift apart.
  *
  * Inputs:  packages/appkit/src/plugins/<name>/manifest.json
- * Outputs: packages/appkit/src/plugins/stable-exports.generated.ts
+ * Outputs: packages/appkit/src/plugins/ga-exports.generated.ts
  *          packages/appkit/src/plugins/beta-exports.generated.ts
  *
  * Run from repo root: pnpm exec tsx tools/generate-plugin-entries.ts
@@ -19,7 +19,7 @@ import { formatWithBiome } from "./format-with-biome.ts";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, "..");
 const PLUGINS_DIR = path.join(REPO_ROOT, "packages/appkit/src/plugins");
-const STABLE_OUT = path.join(PLUGINS_DIR, "stable-exports.generated.ts");
+const GA_OUT = path.join(PLUGINS_DIR, "ga-exports.generated.ts");
 const BETA_OUT = path.join(PLUGINS_DIR, "beta-exports.generated.ts");
 
 const HEADER = `// AUTO-GENERATED from packages/appkit/src/plugins/<name>/manifest.json — do not edit.
@@ -33,7 +33,7 @@ const HEADER = `// AUTO-GENERATED from packages/appkit/src/plugins/<name>/manife
 interface PluginInfo {
   name: string;
   folder: string;
-  stability: "beta" | "stable";
+  stability: "beta" | "ga";
 }
 
 /**
@@ -109,10 +109,10 @@ function readPluginInfos(): PluginInfo[] {
     validateIdentifier(manifest.name, "manifest name", manifestPath);
     validateIdentifier(entry.name, "folder name", manifestPath);
 
-    const tier = manifest.stability ?? "stable";
-    if (tier !== "stable" && tier !== "beta") {
+    const tier = manifest.stability ?? "ga";
+    if (tier !== "ga" && tier !== "beta") {
       throw new Error(
-        `Manifest at ${manifestPath} has invalid stability "${tier}". Must be "beta" or "stable".`,
+        `Manifest at ${manifestPath} has invalid stability "${tier}". Must be "beta" or "ga".`,
       );
     }
 
@@ -123,7 +123,7 @@ function readPluginInfos(): PluginInfo[] {
     });
   }
 
-  // Deterministic order so re-runs produce stable diffs.
+  // Deterministic order so re-runs produce reproducible diffs.
   infos.sort((a, b) => a.name.localeCompare(b.name));
   return infos;
 }
@@ -138,20 +138,20 @@ function renderBarrel(infos: PluginInfo[]): string {
 
 function main(): void {
   const infos = readPluginInfos();
-  const stable = infos.filter((p) => p.stability === "stable");
+  const ga = infos.filter((p) => p.stability === "ga");
   const beta = infos.filter((p) => p.stability === "beta");
 
-  fs.writeFileSync(STABLE_OUT, renderBarrel(stable), "utf-8");
+  fs.writeFileSync(GA_OUT, renderBarrel(ga), "utf-8");
   fs.writeFileSync(BETA_OUT, renderBarrel(beta), "utf-8");
   // Self-format so a fresh `pnpm build` doesn't leave the generated
   // barrels dirty against biome's canonical formatting (matches the
   // pattern set by tools/generate-schema-types.ts and
   // tools/generate-registry-types.ts after PR #324).
-  formatWithBiome(STABLE_OUT);
+  formatWithBiome(GA_OUT);
   formatWithBiome(BETA_OUT);
 
   console.log(
-    `Wrote ${path.relative(REPO_ROOT, STABLE_OUT)} (${stable.length} stable plugin${stable.length === 1 ? "" : "s"})`,
+    `Wrote ${path.relative(REPO_ROOT, GA_OUT)} (${ga.length} GA plugin${ga.length === 1 ? "" : "s"})`,
   );
   console.log(
     `Wrote ${path.relative(REPO_ROOT, BETA_OUT)} (${beta.length} beta plugin${beta.length === 1 ? "" : "s"})`,

@@ -333,17 +333,17 @@ async function runInteractive(): Promise<void> {
       process.exit(0);
     }
 
-    const stability = await select<"stable" | "beta">({
+    const stability = await select<"ga" | "beta">({
       message: "Plugin stability level",
       options: [
-        { value: "stable", label: "Stable", hint: "API follows semver" },
+        { value: "ga", label: "GA", hint: "API follows semver" },
         {
           value: "beta",
           label: "Beta",
-          hint: "Heading to stable, API may change",
+          hint: "Heading to GA, API may change",
         },
       ],
-      initialValue: "stable" as "stable" | "beta",
+      initialValue: "ga" as "ga" | "beta",
     });
     if (isCancel(stability)) {
       cancel("Cancelled.");
@@ -386,7 +386,7 @@ async function runInteractive(): Promise<void> {
       name: (name as string).trim(),
       displayName: (displayName as string).trim(),
       description: (description as string).trim(),
-      stability: stability === "stable" ? undefined : stability,
+      stability: stability === "ga" ? undefined : stability,
       resources,
       version: DEFAULT_VERSION,
     };

@@ -17,8 +17,8 @@ export interface TemplatePlugin extends Omit<PluginManifest, "config"> {
   package: string;
   /** When true, this plugin is required by the template and cannot be deselected during CLI init. */
   requiredByTemplate?: boolean;
-  /** Plugin stability level. Absent or undefined means "stable". */
-  stability?: "beta" | "stable";
+  /** Plugin stability level. Absent or undefined means "ga" (general availability). */
+  stability?: "beta" | "ga";
 }
 
 export interface TemplatePluginsManifest {

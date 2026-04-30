@@ -120,7 +120,7 @@ describe("list", () => {
       );
     });
 
-    it("defaults stability to stable when absent", () => {
+    it("defaults stability to ga when absent", () => {
       const tmp = makeTempDir("list-stability-default");
       tempDirs.push(tmp);
       const manifestPath = path.join(tmp, "appkit.plugins.json");
@@ -131,7 +131,7 @@ describe("list", () => {
 
       const rows = listFromManifestFile(manifestPath);
       for (const row of rows) {
-        expect(row.stability).toBe("stable");
+        expect(row.stability).toBe("ga");
       }
     });
 
@@ -157,10 +157,10 @@ describe("list", () => {
 
       const rows = listFromManifestFile(manifestPath);
       const betaRow = rows.find((r) => r.name === "beta-plugin");
-      const stableRow = rows.find((r) => r.name === "server");
+      const gaRow = rows.find((r) => r.name === "server");
 
       expect(betaRow?.stability).toBe("beta");
-      expect(stableRow?.stability).toBe("stable");
+      expect(gaRow?.stability).toBe("ga");
     });
   });
 
@@ -235,10 +235,10 @@ describe("list", () => {
       expect(rows[0].stability).toBe("beta");
     });
 
-    it("defaults stability to stable in directory scan when absent", async () => {
+    it("defaults stability to ga in directory scan when absent", async () => {
       const tmp = makeTempDir("list-dir-stability-default");
       tempDirs.push(tmp);
-      const pluginDir = path.join(tmp, "stable-plugin");
+      const pluginDir = path.join(tmp, "ga-plugin");
       fs.mkdirSync(pluginDir, { recursive: true });
       fs.writeFileSync(
         path.join(pluginDir, "manifest.json"),
@@ -248,7 +248,7 @@ describe("list", () => {
       const rows = await listFromDirectory(tmp, path.dirname(tmp));
 
       expect(rows).toHaveLength(1);
-      expect(rows[0].stability).toBe("stable");
+      expect(rows[0].stability).toBe("ga");
     });
 
     it("does not load JS-only manifests by default", async () => {
