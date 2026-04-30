@@ -261,9 +261,9 @@ export class ServingPlugin extends Plugin {
       return;
     }
 
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Content-Encoding", "none");
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders();
 
     const nodeStream = Readable.fromWeb(

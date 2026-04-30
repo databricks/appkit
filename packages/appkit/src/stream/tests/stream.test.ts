@@ -44,7 +44,7 @@ describe("StreamManager", () => {
 
       expect(mockRes.setHeader).toHaveBeenCalledWith(
         "Content-Type",
-        "text/event-stream",
+        "text/event-stream; charset=utf-8",
       );
       expect(events).toContain(
         'data: {"type":"start","message":"Starting"}\n\n',

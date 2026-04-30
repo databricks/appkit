@@ -299,11 +299,11 @@ describe("Genie Plugin", () => {
       // Verify SSE headers
       expect(mockRes.setHeader).toHaveBeenCalledWith(
         "Content-Type",
-        "text/event-stream",
+        "text/event-stream; charset=utf-8",
       );
       expect(mockRes.setHeader).toHaveBeenCalledWith(
         "Cache-Control",
-        "no-cache",
+        "no-cache, no-transform",
       );
 
       // Verify SSE events are written
