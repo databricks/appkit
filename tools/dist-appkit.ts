@@ -14,18 +14,9 @@ const pkg = JSON.parse(fs.readFileSync("package.json", "utf-8"));
 
 // Packages that are workspace-local but published separately — replace workspace:* with real version.
 // "shared" is intentionally excluded: it is bundled directly into appkit/appkit-ui via noExternal.
-// When APPKIT_VENDOR_LAKEBASE=1 (PR template artifact only), embed the lakebase .tgz from
-// packages/lakebase/tmp/ under tmp/dist/vendor/ and depend on file:./dist/vendor/… .
-// Root-level .tgz under tmp/ can be omitted by npm pack because packages/appkit/.gitignore
-// lists "tmp", so packlist skips them; "dist" is already in "files".
 const WORKSPACE_PACKAGE_REPLACEMENTS = ["@databricks/lakebase"];
 
 delete pkg.dependencies.shared;
-
-const vendorLakebase = process.env.APPKIT_VENDOR_LAKEBASE === "1";
-
-/** Set when vendoring: copy lakebase tgz into tmp/dist/vendor/ after dist/ is staged. */
-let vendorLakebaseCopy: { src: string; destName: string } | null = null;
 
 for (const depName of WORKSPACE_PACKAGE_REPLACEMENTS) {
   if (pkg.dependencies?.[depName] === "workspace:*") {
@@ -35,28 +26,7 @@ for (const depName of WORKSPACE_PACKAGE_REPLACEMENTS) {
       `../packages/${pkgDirName}/package.json`,
     );
     const depPkg = JSON.parse(fs.readFileSync(depPkgPath, "utf-8"));
-    const depVersion = depPkg.version as string;
-
-    if (vendorLakebase) {
-      const packedName = `databricks-${pkgDirName}-${depVersion}.tgz`;
-      const tarballSrc = path.join(
-        __dirname,
-        "../packages",
-        pkgDirName,
-        "tmp",
-        packedName,
-      );
-      if (!fs.existsSync(tarballSrc)) {
-        console.error(
-          `APPKIT_VENDOR_LAKEBASE is set but missing ${tarballSrc}. Run: pnpm --filter=@databricks/lakebase tarball`,
-        );
-        process.exit(1);
-      }
-      vendorLakebaseCopy = { src: tarballSrc, destName: packedName };
-      pkg.dependencies[depName] = `file:./dist/vendor/${packedName}`;
-    } else {
-      pkg.dependencies[depName] = `${depVersion}`;
-    }
+    pkg.dependencies[depName] = `${depPkg.version}`;
   }
 }
 
@@ -86,15 +56,6 @@ Object.assign(pkg.dependencies, CLI_DEPENDENCIES);
 fs.writeFileSync("tmp/package.json", JSON.stringify(pkg, null, 2));
 
 fs.cpSync("dist", "tmp/dist", { recursive: true });
-
-if (vendorLakebaseCopy) {
-  const vendorDir = "tmp/dist/vendor";
-  fs.mkdirSync(vendorDir, { recursive: true });
-  fs.copyFileSync(
-    vendorLakebaseCopy.src,
-    path.join(vendorDir, vendorLakebaseCopy.destName),
-  );
-}
 
 if (fs.existsSync("bin")) {
   fs.cpSync("bin", "tmp/bin", { recursive: true });

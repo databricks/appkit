@@ -3,10 +3,13 @@
  * Prepares a template artifact for testing or release.
  *
  * Copies the template/ directory into a staging folder, bundles the SDK tarballs,
- * and rewrites package.json to use `file:` references so the template can be
- * tested against a specific version of appkit/appkit-ui. For a local PR-template-style
- * pack, run `pnpm pack:pr-template` (bundles lakebase into the appkit tarball via
- * APPKIT_VENDOR_LAKEBASE); release flows keep using `pnpm pack:sdk`.
+ * and rewrites package.json to use `file:` references for appkit and appkit-ui.
+ *
+ * When `packages/lakebase/tmp/databricks-lakebase-<version>.tgz` exists (e.g. after
+ * `pnpm pack:sdk` on a dev checkout), that tarball is copied into the staging folder and
+ * `overrides["@databricks/lakebase"]` is set so the template install uses the local pack
+ * instead of the registry. Release jobs that only download appkit tarballs skip this
+ * branch and keep the default semver resolution from the appkit tarball.
  *
  * Usage:
  *   tsx tools/prepare-template-artifact.ts --version <ver> [--tarball-dir <path>] [--output-dir <path>]
@@ -21,6 +24,7 @@
 import {
   copyFileSync,
   cpSync,
+  existsSync,
   mkdirSync,
   readFileSync,
   writeFileSync,
@@ -55,6 +59,12 @@ const STAGING_DIR = join(ROOT, outputDir);
 const APPKIT_TARBALL = `databricks-appkit-${version}.tgz`;
 const APPKIT_UI_TARBALL = `databricks-appkit-ui-${version}.tgz`;
 
+const lakebasePkg = JSON.parse(
+  readFileSync(join(ROOT, "packages/lakebase/package.json"), "utf-8"),
+) as { version: string };
+const lakebaseVersion = lakebasePkg.version;
+const LAKEBASE_TARBALL = `databricks-lakebase-${lakebaseVersion}.tgz`;
+
 // 1. Copy template into staging directory
 mkdirSync(STAGING_DIR, { recursive: true });
 cpSync(join(ROOT, "template"), STAGING_DIR, { recursive: true });
@@ -72,10 +82,24 @@ copyFileSync(appkitSrc, join(STAGING_DIR, APPKIT_TARBALL));
 copyFileSync(appkitUiSrc, join(STAGING_DIR, APPKIT_UI_TARBALL));
 console.log(`✓ Copied ${APPKIT_TARBALL} and ${APPKIT_UI_TARBALL}`);
 
+const lakebaseSrc = join(ROOT, "packages/lakebase/tmp", LAKEBASE_TARBALL);
+if (existsSync(lakebaseSrc)) {
+  copyFileSync(lakebaseSrc, join(STAGING_DIR, LAKEBASE_TARBALL));
+  console.log(`✓ Copied ${LAKEBASE_TARBALL}`);
+}
+
 // 3. Rewrite package.json dependencies to point at the local tarballs
 const pkgPath = join(STAGING_DIR, "package.json");
 const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
 pkg.dependencies["@databricks/appkit"] = `file:./${APPKIT_TARBALL}`;
 pkg.dependencies["@databricks/appkit-ui"] = `file:./${APPKIT_UI_TARBALL}`;
+if (existsSync(lakebaseSrc)) {
+  pkg.overrides = pkg.overrides ?? {};
+  pkg.overrides["@databricks/lakebase"] = `file:./${LAKEBASE_TARBALL}`;
+}
 writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
-console.log("✓ Rewrote package.json dependencies to file: references");
+console.log(
+  existsSync(lakebaseSrc)
+    ? "✓ Rewrote package.json (appkit/appkit-ui file: deps; @databricks/lakebase override)"
+    : "✓ Rewrote package.json dependencies to file: references (no local lakebase pack)",
+);
