@@ -346,6 +346,96 @@ describe("StreamManager", () => {
     });
   });
 
+  describe("error categorization", () => {
+    // Helper: capture the SSE error code emitted by streaming a generator
+    // that throws the supplied error.
+    async function captureCategorizedCode(
+      manager: StreamManager,
+      thrown: unknown,
+    ): Promise<string | undefined> {
+      const { mockRes, events } = createMockResponse();
+      async function* generator() {
+        yield { type: "start" };
+        throw thrown;
+      }
+      await manager.stream(mockRes as any, generator);
+      const errorEvent = events.find((e) => e.startsWith("event: error"));
+      if (!errorEvent) return undefined;
+      const dataLine = events
+        .find((e) => e.startsWith("data:") && e.includes('"code"'))
+        ?.replace(/^data: /, "")
+        .replace(/\n\n$/, "");
+      if (!dataLine) return undefined;
+      const parsed = JSON.parse(dataLine);
+      return parsed.code as string;
+    }
+
+    test("classifies native AbortError as STREAM_ABORTED", async () => {
+      const err = new Error("operation aborted");
+      err.name = "AbortError";
+      const code = await captureCategorizedCode(streamManager, err);
+      expect(code).toBe("STREAM_ABORTED");
+    });
+
+    test("classifies wrapped AbortError (whose name was overwritten) as STREAM_ABORTED", async () => {
+      // Simulates the SQL warehouse client's wrap behavior: an AbortError
+      // gets re-wrapped as ExecutionError, losing `name === "AbortError"` —
+      // but the message survives. The classifier MUST detect this via the
+      // message substring fallback.
+      class FakeExecutionError extends Error {
+        statusCode = 500;
+        constructor() {
+          super("Statement failed: The operation was aborted.");
+          this.name = "ExecutionError";
+        }
+      }
+      const code = await captureCategorizedCode(
+        streamManager,
+        new FakeExecutionError(),
+      );
+      expect(code).toBe("STREAM_ABORTED");
+    });
+
+    test("classifies real upstream API errors (statusCode + non-abort message) as UPSTREAM_ERROR", async () => {
+      class FakeApiError extends Error {
+        statusCode = 503;
+        constructor() {
+          super("Statement failed: Internal warehouse error");
+          this.name = "ExecutionError";
+        }
+      }
+      const code = await captureCategorizedCode(
+        streamManager,
+        new FakeApiError(),
+      );
+      expect(code).toBe("UPSTREAM_ERROR");
+    });
+
+    test("classifies timeouts as TIMEOUT", async () => {
+      const code = await captureCategorizedCode(
+        streamManager,
+        new Error("Request timed out"),
+      );
+      expect(code).toBe("TIMEOUT");
+    });
+
+    test("classifies ECONNREFUSED / unavailable as TEMPORARY_UNAVAILABLE", async () => {
+      const code = await captureCategorizedCode(
+        streamManager,
+        new Error("connect ECONNREFUSED 127.0.0.1:443"),
+      );
+      expect(code).toBe("TEMPORARY_UNAVAILABLE");
+    });
+
+    test("falls through to INTERNAL_ERROR for opaque errors", async () => {
+      const code = await captureCategorizedCode(
+        streamManager,
+        new Error("something unexpected"),
+      );
+      expect(code).toBe("INTERNAL_ERROR");
+    });
+  });
+
   describe("heartbeat", () => {
     test("should send heartbeat messages periodically", async () => {
       vi.useFakeTimers();

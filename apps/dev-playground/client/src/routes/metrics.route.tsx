@@ -113,17 +113,23 @@ function RevenueChart() {
 
   if (error) {
     return (
-      <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
-        <p className="font-medium">Could not load the revenue metric.</p>
-        <p className="mt-1 text-sm">
-          The dev workspace does not host the demo metric view at{" "}
-          <code className="text-xs">appkit_demo.public.revenue_metrics</code>.
-          The typed surface and metadata flow still compile — this panel would
-          render a Plotly line chart with{" "}
-          <code className="text-xs">$#,##0.00</code> tick formatting once the
-          metric view exists in your warehouse.
+      <div className="rounded-md border border-border bg-muted/40 p-4">
+        <p className="font-medium text-foreground">
+          Could not load the revenue metric.
         </p>
-        <p className="mt-2 text-xs">Server error: {error}</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          The dev workspace does not host the demo metric view at{" "}
+          <code className="rounded bg-muted px-1 py-0.5 text-xs">
+            appkit_demo.public.revenue_metrics
+          </code>
+          . The typed surface and metadata flow still compile — this panel would
+          render a Plotly line chart with{" "}
+          <code className="rounded bg-muted px-1 py-0.5 text-xs">
+            $#,##0.00
+          </code>{" "}
+          tick formatting once the metric view exists in your warehouse.
+        </p>
+        <p className="mt-3 text-xs font-mono text-destructive">{error}</p>
       </div>
     );
   }
@@ -220,32 +226,39 @@ function CustomerMetricsPanel({ user }: { user: string | null }) {
         </div>
       )}
       {error && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
-          <p className="font-medium">Could not load customer metrics.</p>
-          <p className="mt-1 text-sm">
+        <div className="rounded-md border border-border bg-muted/40 p-4">
+          <p className="font-medium text-foreground">
+            Could not load customer metrics.
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
             The dev workspace does not host the demo metric view at{" "}
-            <code className="text-xs">appkit_demo.public.customer_metrics</code>
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">
+              appkit_demo.public.customer_metrics
+            </code>
             . When wired to a real OBO-lane metric view, this panel would show
             row-level scoping driven by{" "}
-            <code className="text-xs">x-forwarded-access-token</code>.
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">
+              x-forwarded-access-token
+            </code>
+            .
           </p>
-          <p className="mt-2 text-xs">Server error: {error}</p>
+          <p className="mt-3 text-xs font-mono text-destructive">{error}</p>
         </div>
       )}
       {data && data.length > 0 && (
         <table className="w-full text-sm">
-          <thead className="text-left">
-            <tr className="border-b border-border">
-              <th className="py-2 pr-4">
+          <thead>
+            <tr className="border-b border-border/60 text-left">
+              <th className="py-2 pr-4 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 {formatLabel("segment", metadata?.dimensions.segment)}
               </th>
-              <th className="py-2 pr-4">
+              <th className="py-2 pr-4 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 {formatLabel(
                   "active_accounts",
                   metadata?.measures.active_accounts,
                 )}
               </th>
-              <th className="py-2">
+              <th className="py-2 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 {formatLabel("churn_rate", metadata?.measures.churn_rate)}
               </th>
             </tr>
@@ -258,15 +271,18 @@ function CustomerMetricsPanel({ user }: { user: string | null }) {
                 churn_rate: number;
               }>
             ).map((row) => (
-              <tr key={row.segment} className="border-b border-border">
-                <td className="py-2 pr-4">{row.segment}</td>
-                <td className="py-2 pr-4 font-mono">
+              <tr
+                key={row.segment}
+                className="border-b border-border/60 transition-colors hover:bg-muted/40"
+              >
+                <td className="py-2.5 pr-4 text-foreground">{row.segment}</td>
+                <td className="py-2.5 pr-4 text-right font-mono tabular-nums text-foreground">
                   {formatValue(
                     row.active_accounts,
                     metadata?.measures.active_accounts.format,
                   )}
                 </td>
-                <td className="py-2 font-mono">
+                <td className="py-2.5 text-right font-mono tabular-nums text-foreground">
                   {formatValue(
                     row.churn_rate,
                     metadata?.measures.churn_rate.format,

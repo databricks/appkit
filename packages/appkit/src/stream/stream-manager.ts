@@ -400,6 +400,19 @@ export class StreamManager {
         return SSEErrorCode.STREAM_ABORTED;
       }
 
+      // Defense-in-depth: when an upstream layer (e.g., SQL warehouse client)
+      // wraps an AbortError into a domain error, the original `name` is lost
+      // but the message survives. Detect aborts via message substring before
+      // falling through to the statusCode-based UPSTREAM_ERROR classification —
+      // otherwise legitimate client cancellations get logged at error level
+      // and surfaced to consumers as if the warehouse failed.
+      if (
+        message.includes("operation was aborted") ||
+        message.includes("the request was aborted")
+      ) {
+        return SSEErrorCode.STREAM_ABORTED;
+      }
+
       // Detect upstream API errors (e.g., from Databricks SDK ApiError)
       if (
         "statusCode" in error &&
