@@ -310,7 +310,7 @@ describe("useMetricView", () => {
   });
 
   test("in prod, falls back to the generic message via onError", async () => {
-    vi.stubEnv("DEV", "");
+    vi.stubEnv("DEV", false);
     try {
       const { result } = renderHook(() =>
         useMetricView("revenue", { measures: ["arr"] }),

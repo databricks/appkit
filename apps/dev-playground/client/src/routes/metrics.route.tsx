@@ -336,7 +336,7 @@ function MetricsRoute() {
                 </li>
                 <li>
                   <code>npx appkit metric sync</code> regenerates a typed{" "}
-                  <code>metrics.d.ts</code> (augmenting{" "}
+                  <code>metric.d.ts</code> (augmenting{" "}
                   <code>MetricRegistry</code>) and a{" "}
                   <code>metrics.metadata.json</code> bundle.
                 </li>
