@@ -101,7 +101,7 @@ Valid values: `"beta"`, `"ga"`.
 
 ## Template Manifest (appkit.plugins.json)
 
-When `plugin sync` discovers non-GA plugins, it includes their stability in the output:
+When `plugin sync` discovers non-GA plugins, it includes their stability in the output. That is true for **every** discovery path: plugins resolved from your server file, from `--plugins-dir` / local plugin trees, and from known packages under `node_modules` (for example `@databricks/appkit`). The tier in each plugin’s `manifest.json` is always reflected in the synced template manifest when it is not GA.
 
 ```json
 {
@@ -129,7 +129,7 @@ Inside the AppKit monorepo, each plugin's `manifest.json` `stability` field is t
 - `tools/generate-plugin-entries.ts` writes the runtime export barrels:
   - `packages/appkit/src/plugins/ga-exports.generated.ts` — re-exports of GA plugins, included by `src/index.ts` (the `@databricks/appkit` entry).
   - `packages/appkit/src/plugins/beta-exports.generated.ts` — re-exports of beta plugins, included by `src/beta.ts` (the `@databricks/appkit/beta` entry).
-- `tools/generate-plugin-doc-banners.ts` injects (or removes) a `:::warning Beta plugin` admonition at the top of each plugin's docs page (`docs/docs/plugins/<name>.md`) so a plugin's documented stability follows its manifest.
+- `tools/generate-plugin-doc-banners.ts` injects (or removes) a `:::warning Beta plugin` admonition at the top of each plugin's docs page (`docs/docs/plugins/<name>.md`) so a plugin's documented stability follows its manifest. The script only writes under `docs/docs/plugins/`: each manifest `name` must match the plugin schema pattern (`^[a-z][a-z0-9-]*$`), and resolved doc paths are checked so a malformed `name` cannot escape that directory.
 
 All generated artifacts are committed and verified by CI; an out-of-date file fails the `Check generated types are up to date` step.
 
@@ -140,16 +140,6 @@ To move a built-in plugin between tiers manually:
 ```bash
 # Edit packages/appkit/src/plugins/<name>/manifest.json
 # Set "stability": "beta" (or remove the field for GA)
-pnpm run generate:plugin-entries  # regenerate the barrels
-pnpm sync:template                # regenerate appkit.plugins.json
+pnpm run generate:types   # regenerates schema/registry types, export barrels, and doc banners
+pnpm sync:template        # regenerates template/appkit.plugins.json
 ```
-
-## Current Plugins by Tier
-
-All built-in plugins are currently **GA**:
-
-- `server` -- Express HTTP server
-- `analytics` -- SQL query execution
-- `files` -- Multi-volume file browser
-- `genie` -- Genie Space integration
-- `lakebase` -- Postgres Autoscaling
