@@ -56,8 +56,9 @@ interface ResolvedMetricEntry {
  * Per-column metadata extracted from DESCRIBE TABLE EXTENDED ... AS JSON.
  *
  * Phase 1 captured measure flags + types. Phase 2 widens to time-typed
- * dimensions: a column is "time-typed" iff its DESCRIBE entry carries a
- * non-empty `time_grain` attribute listing the allowed grains for that column.
+ * dimensions: grain qualification is inferred from the column's SQL type
+ * (TIMESTAMP* / DATE) — the UC metric-view YAML schema has no per-column
+ * `time_grain` attribute, so the type is the only signal available.
  *
  * Phase 5 captures the YAML 1.1 semantic-metadata fields so the build-time
  * artifact is a complete record of what the metric view declares: display name
@@ -88,10 +89,9 @@ export interface MetricColumnMetadata {
    */
   format?: string;
   /**
-   * Allowed time-grains for this column when present in the YAML's `time_grain`
-   * attribute. Undefined means the column is not time-typed. An empty array is
-   * never produced — if the attribute is present but empty we treat the
-   * column as a regular dimension (matches "explicit only" semantics from the PRD).
+   * Standard time-grain set for this column, inferred from the SQL data type:
+   *   TIMESTAMP* → 7 grains (minute..year); DATE → 5 grains (day..year).
+   * Undefined means the column is not time-typed. Measures never get grains.
    */
   timeGrains?: string[];
 }
@@ -359,7 +359,14 @@ export function extractMetricColumns(parsed: unknown): MetricColumnMetadata[] {
     ]);
     const format = extractStringFromAny(obj, ["format", "format_spec"]);
 
-    const timeGrains = extractTimeGrains(obj);
+    // Time-grain inference is type-driven, not YAML-attribute-driven.
+    // Earlier versions of this code looked for a `time_grain` field on each
+    // column, but that field does not exist in UC's metric-view schema —
+    // the Rust serde at universe/reyden/metric-view-serde/src/v11/column.rs
+    // enumerates the 7 known column properties (window, expr, format,
+    // display_name, name, comment, synonyms). CREATE rejects `time_grain`
+    // with "Unrecognized field". Measures don't get grouped, so skip them.
+    const timeGrains = isMeasure ? undefined : inferTimeGrains(type);
 
     columns.push({
       name,
@@ -404,45 +411,37 @@ function extractStringFromAny(
 }
 
 /**
- * Pull the allowed time-grain list for a column from the DESCRIBE entry.
+ * Infer the standard set of valid time grains for a dimension based on its
+ * SQL data type.
  *
- * Time-grain may live at:
- *   1. `time_grain: ["day", "week", "month"]` — the YAML 1.1 canonical form.
- *   2. `metadata.time_grain: [...]` — when DESCRIBE wraps it under `metadata`.
- *   3. `time_grain: { grains: [...] }` — defensive against future shape drift.
+ *   TIMESTAMP / TIMESTAMP_LTZ / TIMESTAMP_NTZ → all 7 standard grains
+ *   DATE → [day, week, month, quarter, year] (no sub-day grains)
+ *   anything else → undefined (not time-typed)
  *
- * Returns `undefined` for "not a time-typed column" (no attribute present, or
- * attribute present but empty/malformed). The caller treats undefined-grains
- * dimensions as regular dimensions.
+ * Earlier code looked for a `time_grain` attribute on the YAML column. That
+ * field does not exist in the UC metric-view schema (see the v11 Rust serde
+ * — Column has 7 known properties: window, expr, format, display_name,
+ * name, comment, synonyms; CREATE fails with "Unrecognized field
+ * 'time_grain'"). So grain qualification has to come from the column's
+ * resolved SQL type instead.
  */
-function extractTimeGrains(obj: Record<string, unknown>): string[] | undefined {
-  let raw: unknown = obj.time_grain;
-  if (raw == null && obj.metadata && typeof obj.metadata === "object") {
-    raw = (obj.metadata as Record<string, unknown>).time_grain;
-  }
-  if (raw == null) return undefined;
-
+function inferTimeGrains(type: string): string[] | undefined {
+  // Strip parameterized suffixes ("TIMESTAMP(6)" → "TIMESTAMP") and trim.
+  const normalized = type
+    .toLowerCase()
+    .replace(/\(.*\)$/, "")
+    .trim();
   if (
-    raw &&
-    typeof raw === "object" &&
-    !Array.isArray(raw) &&
-    Array.isArray((raw as Record<string, unknown>).grains)
+    normalized === "timestamp" ||
+    normalized === "timestamp_ltz" ||
+    normalized === "timestamp_ntz"
   ) {
-    raw = (raw as Record<string, unknown>).grains;
+    return ["day", "hour", "minute", "month", "quarter", "week", "year"];
   }
-
-  if (!Array.isArray(raw)) return undefined;
-  const grains: string[] = [];
-  for (const g of raw) {
-    if (typeof g === "string" && g.trim().length > 0) {
-      grains.push(g.toLowerCase().trim());
-    }
+  if (normalized === "date") {
+    return ["day", "month", "quarter", "week", "year"];
   }
-  // Empty list → treat as not time-typed (defensive). Phase 2's contract is
-  // "time_grain populated" → time dimension.
-  if (grains.length === 0) return undefined;
-  // Stable order so the generated d.ts and metadata are deterministic.
-  return [...new Set(grains)].sort();
+  return undefined;
 }
 
 /**
@@ -673,7 +672,7 @@ interface MetricColumnSemanticMetadata {
   display_name?: string;
   format?: string;
   description?: string;
-  /** Only emitted on dimension entries where the YAML declared a non-empty `time_grain`. */
+  /** Only emitted on dimension entries that resolved to a TIMESTAMP* or DATE SQL type (grain set inferred from type). */
   time_grain?: readonly string[];
 }
 
@@ -750,9 +749,9 @@ export function buildMetricsMetadataBundle(
  * `time_grain`) and absent fields are simply not included, so the snapshot
  * diff is always minimal — consumers receive only what the YAML declared.
  *
- * `time_grain` is only emitted on dimensions (the YAML 1.1 spec restricts it
- * to dimension columns). Defends against DESCRIBE leaking a stray attribute
- * onto a measure.
+ * `time_grain` is only emitted on dimensions whose SQL type is TIMESTAMP* or
+ * DATE — measures never receive a grain since they aren't grouped on. The
+ * caller (extractMetricColumns) skips inference for `isMeasure: true` columns.
  */
 function buildColumnMetadata(
   col: MetricColumnMetadata,

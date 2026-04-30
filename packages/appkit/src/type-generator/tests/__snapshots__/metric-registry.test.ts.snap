@@ -15,7 +15,7 @@ declare module "@databricks/appkit-ui/react" {
       "arr": number;
     };
       dimensions: {
-      /** @sqlType TIMESTAMP @timeGrain day|month|week */
+      /** @sqlType TIMESTAMP @timeGrain day|hour|minute|month|quarter|week|year */
       "created_at": string;
       /** @sqlType STRING */
       "region": string;
@@ -24,7 +24,7 @@ declare module "@databricks/appkit-ui/react" {
     };
       measureKeys: "arr";
       dimensionKeys: "created_at" | "region" | "segment";
-      timeGrains: "day" | "month" | "week";
+      timeGrains: "day" | "hour" | "minute" | "month" | "quarter" | "week" | "year";
       metadata: {
         measures: {
       "arr": {
@@ -35,7 +35,7 @@ declare module "@databricks/appkit-ui/react" {
         dimensions: {
       "created_at": {
         type: "TIMESTAMP";
-        time_grain: readonly ["day", "month", "week"];
+        time_grain: readonly ["day", "hour", "minute", "month", "quarter", "week", "year"];
       };
       "region": {
         type: "STRING";
@@ -157,9 +157,12 @@ exports[`generateMetricsMetadataJson — snapshot > serializes a representative 
         "display_name": "Period",
         "time_grain": [
           "day",
+          "hour",
+          "minute",
           "month",
           "quarter",
-          "week"
+          "week",
+          "year"
         ]
       }
     }

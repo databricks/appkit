@@ -211,77 +211,106 @@ describe("extractMetricColumns", () => {
   });
 
   // ── Phase 2: time-typed dimensions ────────────────────────────────────
-  test("captures time_grain attribute on a time-typed dimension", () => {
+  test("infers all 7 standard grains for a TIMESTAMP dimension", () => {
     const cols = extractMetricColumns({
       columns: [
-        {
-          name: "created_at",
-          type: "DATE",
-          is_measure: false,
-          time_grain: ["day", "week", "month"],
-        },
+        { name: "created_at", type: "TIMESTAMP", is_measure: false },
         { name: "region", type: "STRING", is_measure: false },
       ],
     });
     expect(cols).toHaveLength(2);
     expect(cols[0]).toMatchObject({
       name: "created_at",
-      type: "DATE",
       isMeasure: false,
-      timeGrains: ["day", "month", "week"], // sorted, deduped
+      timeGrains: ["day", "hour", "minute", "month", "quarter", "week", "year"],
     });
     // Non-time dim has no timeGrains key.
     expect(cols[1].timeGrains).toBeUndefined();
   });
 
-  test("normalizes time_grain values to lowercase + sorted + deduped", () => {
+  test("infers 5 standard grains (no sub-day) for a DATE dimension", () => {
     const cols = extractMetricColumns({
-      columns: [
-        {
-          name: "ts",
-          type: "TIMESTAMP",
-          is_measure: false,
-          time_grain: ["MONTH", "day", "Day", "week"],
-        },
-      ],
+      columns: [{ name: "billing_date", type: "DATE", is_measure: false }],
     });
-    expect(cols[0].timeGrains).toEqual(["day", "month", "week"]);
+    expect(cols[0].timeGrains).toEqual([
+      "day",
+      "month",
+      "quarter",
+      "week",
+      "year",
+    ]);
   });
 
-  test("falls back to metadata.time_grain (DESCRIBE wraps it under metadata)", () => {
+  test("recognizes TIMESTAMP_LTZ and TIMESTAMP_NTZ aliases", () => {
     const cols = extractMetricColumns({
       columns: [
-        {
-          name: "ts",
-          type: "TIMESTAMP",
-          metadata: { is_measure: false, time_grain: ["day"] },
-        },
+        { name: "ts_ltz", type: "TIMESTAMP_LTZ", is_measure: false },
+        { name: "ts_ntz", type: "TIMESTAMP_NTZ", is_measure: false },
       ],
     });
-    expect(cols[0].timeGrains).toEqual(["day"]);
+    expect(cols[0].timeGrains).toEqual([
+      "day",
+      "hour",
+      "minute",
+      "month",
+      "quarter",
+      "week",
+      "year",
+    ]);
+    expect(cols[1].timeGrains).toEqual([
+      "day",
+      "hour",
+      "minute",
+      "month",
+      "quarter",
+      "week",
+      "year",
+    ]);
   });
 
-  test("treats empty time_grain attribute as not time-typed", () => {
+  test("type matching is case-insensitive", () => {
     const cols = extractMetricColumns({
       columns: [
-        { name: "ts", type: "TIMESTAMP", is_measure: false, time_grain: [] },
+        { name: "a", type: "timestamp", is_measure: false },
+        { name: "b", type: "Timestamp", is_measure: false },
+        { name: "c", type: "DATE", is_measure: false },
+        { name: "d", type: "date", is_measure: false },
       ],
+    });
+    expect(cols[0].timeGrains?.length).toBe(7);
+    expect(cols[1].timeGrains?.length).toBe(7);
+    expect(cols[2].timeGrains?.length).toBe(5);
+    expect(cols[3].timeGrains?.length).toBe(5);
+  });
+
+  test("strips parameterized type suffixes like TIMESTAMP(6)", () => {
+    const cols = extractMetricColumns({
+      columns: [{ name: "ts", type: "TIMESTAMP(6)", is_measure: false }],
+    });
+    expect(cols[0].timeGrains?.length).toBe(7);
+  });
+
+  test("does not infer grains for non-temporal types", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        { name: "id", type: "BIGINT", is_measure: false },
+        { name: "name", type: "STRING", is_measure: false },
+        { name: "amount", type: "DECIMAL(38,2)", is_measure: false },
+      ],
+    });
+    for (const col of cols) {
+      expect(col.timeGrains).toBeUndefined();
+    }
+  });
+
+  test("does not infer grains on measures even if their type is TIMESTAMP", () => {
+    // Measures are aggregated, never grouped on — grain inference is
+    // dimension-only. Defends against an unusual MEASURE() expression
+    // resolving to a temporal type.
+    const cols = extractMetricColumns({
+      columns: [{ name: "last_event_at", type: "TIMESTAMP", is_measure: true }],
     });
     expect(cols[0].timeGrains).toBeUndefined();
-  });
-
-  test("ignores non-string time_grain entries", () => {
-    const cols = extractMetricColumns({
-      columns: [
-        {
-          name: "ts",
-          type: "TIMESTAMP",
-          is_measure: false,
-          time_grain: ["day", null, 42, "week"],
-        },
-      ],
-    });
-    expect(cols[0].timeGrains).toEqual(["day", "week"]);
   });
 });
 
@@ -376,12 +405,7 @@ describe("generateMetricTypeDeclarations — snapshot", () => {
             is_measure: true,
             comment: "Annual recurring revenue",
           },
-          {
-            name: "created_at",
-            type: "TIMESTAMP",
-            is_measure: false,
-            time_grain: ["day", "week", "month"],
-          },
+          { name: "created_at", type: "TIMESTAMP", is_measure: false },
           { name: "region", type: "STRING", is_measure: false },
           { name: "segment", type: "STRING", is_measure: false },
         ],
@@ -392,9 +416,13 @@ describe("generateMetricTypeDeclarations — snapshot", () => {
     expect(output).toMatchSnapshot();
 
     // Sanity assertions in addition to the snapshot, so future drift surfaces
-    // even when snapshots are blindly updated.
-    expect(output).toContain('timeGrains: "day" | "month" | "week"');
-    expect(output).toContain("@timeGrain day|month|week");
+    // even when snapshots are blindly updated. TIMESTAMP → all 7 standard grains.
+    expect(output).toContain(
+      'timeGrains: "day" | "hour" | "minute" | "month" | "quarter" | "week" | "year"',
+    );
+    expect(output).toContain(
+      "@timeGrain day|hour|minute|month|quarter|week|year",
+    );
     expect(output).toContain('"created_at": string');
     expect(output).toContain('"region": string');
   });
@@ -542,12 +570,7 @@ describe("buildMetricsMetadataBundle", () => {
             comment: "ARR for the period",
           },
           { name: "region", type: "STRING", is_measure: false },
-          {
-            name: "created_at",
-            type: "TIMESTAMP",
-            is_measure: false,
-            time_grain: ["day", "month"],
-          },
+          { name: "created_at", type: "TIMESTAMP", is_measure: false },
         ],
       });
 
@@ -571,7 +594,15 @@ describe("buildMetricsMetadataBundle", () => {
         },
         created_at: {
           type: "TIMESTAMP",
-          time_grain: ["day", "month"],
+          time_grain: [
+            "day",
+            "hour",
+            "minute",
+            "month",
+            "quarter",
+            "week",
+            "year",
+          ],
         },
       },
     });
@@ -623,28 +654,27 @@ describe("buildMetricsMetadataBundle", () => {
     const fetcher = async () =>
       mockDescribeResponse({
         columns: [
-          // Time-grain on a measure should not be picked up — measures never
-          // carry time_grain in the YAML 1.1 spec; defending here is belt-
-          // and-suspenders, in case DESCRIBE leaks a stray attribute.
-          {
-            name: "arr",
-            type: "DECIMAL",
-            is_measure: true,
-            time_grain: ["day"],
-          },
-          {
-            name: "ts",
-            type: "TIMESTAMP",
-            is_measure: false,
-            time_grain: ["day", "month"],
-          },
+          // Even when a measure resolves to a temporal type (rare but possible
+          // for MEASURE() expressions like MAX(event_at)), no grains should be
+          // emitted — measures aren't grouped on. Grain inference is gated on
+          // is_measure: false in extractMetricColumns.
+          { name: "last_event_at", type: "TIMESTAMP", is_measure: true },
+          { name: "ts", type: "TIMESTAMP", is_measure: false },
         ],
       });
 
     const schemas = await syncMetrics(resolution, fetcher);
     const bundle = buildMetricsMetadataBundle(schemas);
-    expect(bundle.revenue.measures.arr.time_grain).toBeUndefined();
-    expect(bundle.revenue.dimensions.ts.time_grain).toEqual(["day", "month"]);
+    expect(bundle.revenue.measures.last_event_at.time_grain).toBeUndefined();
+    expect(bundle.revenue.dimensions.ts.time_grain).toEqual([
+      "day",
+      "hour",
+      "minute",
+      "month",
+      "quarter",
+      "week",
+      "year",
+    ]);
   });
 });
 
@@ -692,7 +722,6 @@ describe("generateMetricsMetadataJson — snapshot", () => {
                 type: "TIMESTAMP",
                 is_measure: false,
                 display_name: "Period",
-                time_grain: ["day", "week", "month", "quarter"],
               },
             ],
           })
@@ -725,12 +754,16 @@ describe("generateMetricsMetadataJson — snapshot", () => {
     expect(parsed.revenue.measures.arr.display_name).toBe(
       "Annual Recurring Revenue",
     );
-    // Time grains are sorted lexicographically by extractMetricColumns (Phase 2).
+    // Time grains are inferred from the SQL type and ordered lexicographically.
+    // TIMESTAMP → all 7 standard grains.
     expect(parsed.revenue.dimensions.created_at.time_grain).toEqual([
       "day",
+      "hour",
+      "minute",
       "month",
       "quarter",
       "week",
+      "year",
     ]);
     expect(parsed.customer_metrics.lane).toBe("obo");
   });
@@ -742,7 +775,7 @@ describe("generateMetricsMetadataJson — snapshot", () => {
 
 // ── Phase 2: syncMetrics propagates timeGrains end-to-end ────────────────
 describe("syncMetrics — time-typed dimension propagation", () => {
-  test("propagates the time_grain attribute onto the resulting MetricSchema", async () => {
+  test("propagates inferred grains onto the resulting MetricSchema", async () => {
     const resolution = resolveMetricConfig({
       sp: { revenue: { source: "demo.public.revenue" } },
     });
@@ -751,12 +784,7 @@ describe("syncMetrics — time-typed dimension propagation", () => {
       mockDescribeResponse({
         columns: [
           { name: "arr", type: "DECIMAL", is_measure: true },
-          {
-            name: "ts",
-            type: "TIMESTAMP",
-            is_measure: false,
-            time_grain: ["day", "month"],
-          },
+          { name: "ts", type: "TIMESTAMP", is_measure: false },
           { name: "region", type: "STRING", is_measure: false },
         ],
       });
@@ -764,7 +792,15 @@ describe("syncMetrics — time-typed dimension propagation", () => {
     const schemas = await syncMetrics(resolution, fetcher);
     expect(schemas[0].dimensions).toHaveLength(2);
     const tsDim = schemas[0].dimensions.find((d) => d.name === "ts");
-    expect(tsDim?.timeGrains).toEqual(["day", "month"]);
+    expect(tsDim?.timeGrains).toEqual([
+      "day",
+      "hour",
+      "minute",
+      "month",
+      "quarter",
+      "week",
+      "year",
+    ]);
     const regionDim = schemas[0].dimensions.find((d) => d.name === "region");
     expect(regionDim?.timeGrains).toBeUndefined();
   });

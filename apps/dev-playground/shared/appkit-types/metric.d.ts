@@ -22,12 +22,12 @@ declare module "@databricks/appkit-ui/react" {
       "region": string;
       /** @sqlType string */
       "segment": string;
-      /** @sqlType timestamp_ltz */
+      /** @sqlType timestamp_ltz @timeGrain day|hour|minute|month|quarter|week|year */
       "created_at": string;
     };
       measureKeys: "mrr" | "arr" | "new_arr" | "churned_arr";
       dimensionKeys: "region" | "segment" | "created_at";
-      timeGrains: never;
+      timeGrains: "day" | "hour" | "minute" | "month" | "quarter" | "week" | "year";
       metadata: {
         measures: {
       "mrr": {
@@ -60,6 +60,7 @@ declare module "@databricks/appkit-ui/react" {
       "created_at": {
         type: "timestamp_ltz";
         display_name: "Subscription Start";
+        time_grain: readonly ["day", "hour", "minute", "month", "quarter", "week", "year"];
       };
     };
       };
