@@ -60,6 +60,11 @@ jobs:
         working-directory: packages/lakebase
         run: |
           pnpm exec release-it ${{ steps.version.outputs.version }} --ci
+
+      - name: Sync version
+        if: steps.version.outputs.version != ''
+        run: pnpm exec tsx tools/sync-lakebase-version.ts "${{ steps.version.outputs.version }}"
+
       - name: Build
         if: steps.version.outputs.version != ''
         run: pnpm --filter=@databricks/lakebase build:package
