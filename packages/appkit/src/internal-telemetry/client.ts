@@ -42,15 +42,14 @@ async function fetchWithRedirect(
   const location = res.headers.get("location");
   if (res.status >= 300 && res.status < 400 && location) {
     const target = new URL(location, url);
+    await res.body?.cancel().catch(() => {});
     // Refuse cross-origin redirects so the Authorization header (a live
     // service-principal token) cannot be replayed against a third party.
     if (target.origin !== new URL(url).origin) {
-      await res.body?.cancel().catch(() => {});
       throw new Error(
         `Telemetry: refusing cross-origin redirect to ${target.origin}`,
       );
     }
-    await res.body?.cancel().catch(() => {});
     return fetch(target, init);
   }
   return res;
