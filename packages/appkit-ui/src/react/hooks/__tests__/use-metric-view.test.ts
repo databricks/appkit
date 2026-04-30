@@ -287,6 +287,52 @@ describe("useMetricView", () => {
     expect(result.current.error).toMatch(/Network error/);
   });
 
+  test("in dev, surfaces the actual error message via onError", async () => {
+    // Vitest sets import.meta.env.DEV = true by default, mirroring Vite dev.
+    const { result } = renderHook(() =>
+      useMetricView("revenue", { measures: ["arr"] }),
+    );
+
+    act(() => {
+      capturedCallbacks.onError?.(
+        new Error(
+          "[TABLE_OR_VIEW_NOT_FOUND] appkit_demo.public.revenue_metrics",
+        ),
+      );
+    });
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+    expect(result.current.error).toBe(
+      "[TABLE_OR_VIEW_NOT_FOUND] appkit_demo.public.revenue_metrics",
+    );
+  });
+
+  test("in prod, falls back to the generic message via onError", async () => {
+    vi.stubEnv("DEV", "");
+    try {
+      const { result } = renderHook(() =>
+        useMetricView("revenue", { measures: ["arr"] }),
+      );
+
+      act(() => {
+        capturedCallbacks.onError?.(
+          new Error("[TABLE_OR_VIEW_NOT_FOUND] schema.foo.bar"),
+        );
+      });
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+      expect(result.current.error).toBe(
+        "Unable to load data, please try again",
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   test("does NOT auto-start when autoStart=false", () => {
     renderHook(() =>
       useMetricView("revenue", { measures: ["arr"] }, { autoStart: false }),

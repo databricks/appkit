@@ -195,6 +195,13 @@ export function useMetricView<
             userMessage = "Request timed out, please try again";
           } else if (err.message.includes("Failed to fetch")) {
             userMessage = "Network error. Please check your connection.";
+          } else if (import.meta.env.DEV && err.message) {
+            // In dev, surface the actual error so developers can diagnose
+            // schema-not-found, auth-failed, and other server-thrown
+            // failures that didn't make it into an SSE error event.
+            // Production keeps the generic message — the full error is
+            // still in the console.error below for ops.
+            userMessage = err.message;
           }
           console.error("[useMetricView] Error", {
             metricKey,
