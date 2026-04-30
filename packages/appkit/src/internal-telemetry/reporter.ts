@@ -1,7 +1,10 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
-import type { AppkitLog, RequestMetricsEvent } from "./appkit-log.js";
-import type { TelemetrySendResult } from "./client.js";
-import { sendAppkitLogs } from "./sender.js";
+import {
+  type AppkitLog,
+  buildAppkitPayload,
+  type RequestMetricsEvent,
+} from "./appkit-log.js";
+import { postTelemetry, type TelemetrySendResult } from "./client.js";
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
 const DEFAULT_METRICS_FLUSH_INTERVAL_MS = 60 * 1000;
@@ -178,11 +181,13 @@ export class TelemetryReporter {
   }
 
   async #send(logs: AppkitLog[]): Promise<TelemetrySendResult | null> {
+    if (logs.length === 0) return null;
     const workspaceId = await this.#workspaceIdPromise;
-    return sendAppkitLogs(logs, {
+    return postTelemetry({
       workspaceHost: this.#host,
       workspaceId,
       client: this.#client,
+      payload: buildAppkitPayload(logs),
     });
   }
 }
