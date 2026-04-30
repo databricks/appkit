@@ -422,6 +422,10 @@ async function scanForPlugins(
         ...(manifest.onSetupMessage && {
           onSetupMessage: manifest.onSetupMessage,
         }),
+        ...(manifest.stability &&
+          manifest.stability !== "ga" && {
+            stability: manifest.stability,
+          }),
       } satisfies TemplatePlugin;
     }
   }

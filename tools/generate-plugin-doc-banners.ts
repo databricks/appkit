@@ -23,6 +23,24 @@ const PLUGINS_DIR = path.join(REPO_ROOT, "packages/appkit/src/plugins");
 const DOCS_DIR = path.join(REPO_ROOT, "docs/docs/plugins");
 
 /**
+ * Same as `plugin-manifest.schema.json` `name` pattern; keeps `path.join` targets
+ * under `docs/docs/plugins` (defense in depth vs path traversal in `name`).
+ */
+const SCHEMA_NAME_PATTERN = /^[a-z][a-z0-9-]*$/;
+
+/**
+ * Checks whether a resolved file path is within a given directory boundary.
+ */
+function isWithinDirectory(filePath: string, boundary: string): boolean {
+  const resolvedPath = path.resolve(filePath);
+  const resolvedBoundary = path.resolve(boundary);
+  return (
+    resolvedPath === resolvedBoundary ||
+    resolvedPath.startsWith(`${resolvedBoundary}${path.sep}`)
+  );
+}
+
+/**
  * Maps a plugin's manifest `name` to the basename of its docs page when
  * the page is named differently from the manifest. Default lookup is
  * `<name>.md`. Add an entry here when you create a doc page that doesn't
@@ -96,6 +114,12 @@ function readPluginInfos(): PluginInfo[] {
       continue; // not a valid plugin manifest, skip silently
     }
 
+    if (!SCHEMA_NAME_PATTERN.test(manifest.name)) {
+      throw new Error(
+        `Manifest name "${manifest.name}" in ${manifestPath} doesn't match the plugin manifest schema pattern ^[a-z][a-z0-9-]*$.`,
+      );
+    }
+
     const tier = manifest.stability ?? "ga";
     if (tier !== "beta" && tier !== "ga") {
       throw new Error(
@@ -105,10 +129,29 @@ function readPluginInfos(): PluginInfo[] {
 
     const docBasename =
       DOC_FILE_OVERRIDES[manifest.name] ?? `${manifest.name}.md`;
+    if (
+      docBasename.includes("..") ||
+      docBasename !== path.basename(docBasename) ||
+      docBasename.includes(path.sep)
+    ) {
+      throw new Error(
+        `Invalid docs basename "${docBasename}" derived for manifest at ${manifestPath}.`,
+      );
+    }
+
+    const docFile = path.join(DOCS_DIR, docBasename);
+    const resolvedDoc = path.resolve(docFile);
+    const resolvedDocsDir = path.resolve(DOCS_DIR);
+    if (!isWithinDirectory(resolvedDoc, resolvedDocsDir)) {
+      throw new Error(
+        `Resolved docs path escapes ${resolvedDocsDir}: ${resolvedDoc}`,
+      );
+    }
+
     infos.push({
       name: manifest.name,
       stability: tier,
-      docFile: path.join(DOCS_DIR, docBasename),
+      docFile,
     });
   }
 
