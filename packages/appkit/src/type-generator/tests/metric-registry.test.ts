@@ -549,6 +549,168 @@ describe("extractMetricColumns — Phase 5 semantic metadata", () => {
     });
     expect(cols[0].format).toBe("$#,##0.00");
   });
+
+  // ── Structured-format translation (UC YAML 1.1 → printf string) ────────
+  // DESCRIBE TABLE EXTENDED ... AS JSON wraps the format type as the outer
+  // key: { currency: { ... } } / { percent: { ... } } / { number: { ... } }.
+  // The extractor translates these into printf strings consumable by
+  // formatValue / toD3Format.
+  test("translates structured currency format with USD", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        {
+          name: "arr",
+          type: "DOUBLE",
+          is_measure: true,
+          metadata: {
+            format: {
+              currency: {
+                decimal_places: { type: "EXACT", places: 2 },
+                currency_code: "USD",
+              },
+            },
+          },
+        },
+      ],
+    });
+    expect(cols[0].format).toBe("$#,##0.00");
+  });
+
+  test("translates structured currency format with EUR + 0 decimal places", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        {
+          name: "ticket_price",
+          type: "DOUBLE",
+          is_measure: true,
+          metadata: {
+            format: {
+              currency: {
+                decimal_places: { places: 0 },
+                currency_code: "EUR",
+              },
+            },
+          },
+        },
+      ],
+    });
+    expect(cols[0].format).toBe("€#,##0");
+  });
+
+  test("falls back to ISO code as literal prefix for unknown currencies", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        {
+          name: "amount",
+          type: "DOUBLE",
+          is_measure: true,
+          metadata: {
+            format: {
+              currency: {
+                decimal_places: { places: 2 },
+                currency_code: "AUD",
+              },
+            },
+          },
+        },
+      ],
+    });
+    expect(cols[0].format).toBe("AUD #,##0.00");
+  });
+
+  test("translates structured percent format with 1 decimal place", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        {
+          name: "churn_rate",
+          type: "DECIMAL",
+          is_measure: true,
+          metadata: {
+            format: {
+              percent: { decimal_places: { places: 1 } },
+            },
+          },
+        },
+      ],
+    });
+    expect(cols[0].format).toBe("0.0%");
+  });
+
+  test("translates structured percent with 0 decimal places", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        {
+          name: "rate",
+          type: "DECIMAL",
+          is_measure: true,
+          metadata: { format: { percent: { decimal_places: { places: 0 } } } },
+        },
+      ],
+    });
+    expect(cols[0].format).toBe("0%");
+  });
+
+  test("translates structured number format with comma grouping", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        {
+          name: "active_accounts",
+          type: "BIGINT",
+          is_measure: true,
+          metadata: {
+            format: { number: { decimal_places: { places: 0 } } },
+          },
+        },
+      ],
+    });
+    expect(cols[0].format).toBe("#,##0");
+  });
+
+  test("returns undefined for unrecognized structured format shapes", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        {
+          name: "weirdo",
+          type: "DOUBLE",
+          is_measure: true,
+          metadata: {
+            format: { custom_thing: { whatever: 1 } },
+          },
+        },
+      ],
+    });
+    expect(cols[0].format).toBeUndefined();
+  });
+
+  test("currency format defaults to USD + 2 places when fields are missing", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        {
+          name: "amount",
+          type: "DOUBLE",
+          is_measure: true,
+          metadata: { format: { currency: {} } },
+        },
+      ],
+    });
+    expect(cols[0].format).toBe("$#,##0.00");
+  });
+
+  test("accepts decimal_places as a bare number (legacy shape)", () => {
+    const cols = extractMetricColumns({
+      columns: [
+        {
+          name: "amount",
+          type: "DOUBLE",
+          is_measure: true,
+          metadata: {
+            format: { currency: { decimal_places: 4, currency_code: "USD" } },
+          },
+        },
+      ],
+    });
+    expect(cols[0].format).toBe("$#,##0.0000");
+  });
 });
 
 // ── Phase 5: metadata bundle generation ───────────────────────────────────

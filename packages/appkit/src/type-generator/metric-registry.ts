@@ -357,7 +357,7 @@ export function extractMetricColumns(parsed: unknown): MetricColumnMetadata[] {
       "display_name",
       "displayName",
     ]);
-    const format = extractStringFromAny(obj, ["format", "format_spec"]);
+    const format = extractFormatString(obj);
 
     // Time-grain inference is type-driven, not YAML-attribute-driven.
     // Earlier versions of this code looked for a `time_grain` field on each
@@ -408,6 +408,139 @@ function extractStringFromAny(
     }
   }
   return undefined;
+}
+
+/**
+ * Read the column's `format` attribute from a DESCRIBE entry and return a
+ * printf-like format string suitable for `formatValue` and `toD3Format`.
+ *
+ * Tolerates two source shapes:
+ *
+ *   1. **Legacy / hand-authored** — `format: "$#,##0.00"` (already a printf
+ *      string). Returned as-is.
+ *
+ *   2. **YAML 1.1 structured** — DESCRIBE TABLE EXTENDED ... AS JSON for a
+ *      UC Metric View wraps the column's format type as the outer key:
+ *
+ *      ```
+ *      { "currency": { "decimal_places": { "places": 2 }, "currency_code": "USD" } }
+ *      { "percent":  { "decimal_places": { "places": 1 } } }
+ *      { "number":   { "decimal_places": { "places": 0 } } }
+ *      ```
+ *
+ * Both shapes are checked at top-level (`obj.format` / `obj.format_spec`)
+ * and under `metadata.<name>` for parity with extractStringFromAny.
+ *
+ * Unrecognized objects return undefined; downstream consumers fall back to
+ * default locale formatting.
+ */
+function extractFormatString(obj: Record<string, unknown>): string | undefined {
+  for (const key of ["format", "format_spec"]) {
+    const direct = obj[key];
+    const fromDirect = formatStringFromValue(direct);
+    if (fromDirect) return fromDirect;
+
+    const meta = obj.metadata;
+    if (meta && typeof meta === "object" && !Array.isArray(meta)) {
+      const nested = (meta as Record<string, unknown>)[key];
+      const fromMeta = formatStringFromValue(nested);
+      if (fromMeta) return fromMeta;
+    }
+  }
+  return undefined;
+}
+
+function formatStringFromValue(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim().length > 0) return value.trim();
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return translateStructuredFormat(value as Record<string, unknown>);
+  }
+  return undefined;
+}
+
+/**
+ * Translate the structured `format` object emitted by DESCRIBE TABLE EXTENDED
+ * AS JSON into a printf-like format string. Recognizes the three YAML 1.1
+ * shapes; returns undefined for anything else.
+ */
+function translateStructuredFormat(
+  spec: Record<string, unknown>,
+): string | undefined {
+  if (spec.currency && typeof spec.currency === "object") {
+    return currencyFormatString(spec.currency as Record<string, unknown>);
+  }
+  if (spec.percent && typeof spec.percent === "object") {
+    return percentFormatString(spec.percent as Record<string, unknown>);
+  }
+  if (spec.number && typeof spec.number === "object") {
+    return numberFormatString(spec.number as Record<string, unknown>);
+  }
+  return undefined;
+}
+
+function currencyFormatString(c: Record<string, unknown>): string {
+  const places = readDecimalPlaces(c) ?? 2;
+  const codeRaw = c.currency_code;
+  const code =
+    typeof codeRaw === "string" && codeRaw.trim().length > 0
+      ? codeRaw.toUpperCase()
+      : "USD";
+  const symbol = currencySymbol(code);
+  return `${symbol}#,##0${fractionalSuffix(places)}`;
+}
+
+function percentFormatString(p: Record<string, unknown>): string {
+  const places = readDecimalPlaces(p) ?? 0;
+  return `0${fractionalSuffix(places)}%`;
+}
+
+function numberFormatString(n: Record<string, unknown>): string {
+  const places = readDecimalPlaces(n) ?? 0;
+  return `#,##0${fractionalSuffix(places)}`;
+}
+
+function fractionalSuffix(places: number): string {
+  return places > 0 ? `.${"0".repeat(places)}` : "";
+}
+
+function readDecimalPlaces(obj: Record<string, unknown>): number | undefined {
+  const dp = obj.decimal_places;
+  if (typeof dp === "number" && Number.isFinite(dp) && dp >= 0) {
+    return Math.floor(dp);
+  }
+  if (dp && typeof dp === "object" && !Array.isArray(dp)) {
+    const places = (dp as Record<string, unknown>).places;
+    if (typeof places === "number" && Number.isFinite(places) && places >= 0) {
+      return Math.floor(places);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Map ISO currency codes to their conventional prefix symbol. Unknown codes
+ * fall back to the literal code + space (e.g., "AUD #,##0.00") so the value
+ * is never lost — `formatValue` and `toD3Format` will still render correctly,
+ * just without a single-character glyph.
+ */
+function currencySymbol(code: string): string {
+  switch (code) {
+    case "USD":
+      return "$";
+    case "EUR":
+      return "€";
+    case "GBP":
+      return "£";
+    case "JPY":
+    case "CNY":
+      return "¥";
+    case "INR":
+      return "₹";
+    case "BRL":
+      return "R$";
+    default:
+      return `${code} `;
+  }
 }
 
 /**
