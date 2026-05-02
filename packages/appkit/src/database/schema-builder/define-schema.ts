@@ -1,4 +1,4 @@
-import { pgSchema } from "drizzle-orm/pg-core";
+import { pgSchema, pgTable } from "drizzle-orm/pg-core";
 import { ValidationError } from "../../errors";
 import { enumColumn } from "./columns";
 import { buildTable, rebuildRelationsFromColumns } from "./table";
@@ -27,7 +27,9 @@ export function defineSchema<T extends Record<string, AppKitTable>>(
   build: (ctx: SchemaBuilderContext) => T,
   options: DefineSchemaOptions = {},
 ): Schema<T> {
-  const schemaInstance = pgSchema(options.schemaName ?? "app");
+  const schemaName = options.schemaName ?? "app";
+  const schemaInstance =
+    schemaName === "public" ? { table: pgTable } : pgSchema(schemaName);
 
   const context: SchemaBuilderContext = {
     table: (name, columns) => buildTable(schemaInstance, name, columns),

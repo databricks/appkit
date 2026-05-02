@@ -39,10 +39,11 @@ export interface ColumnMeta {
   tableName?: string;
   /** @internal */
   columnName?: string;
+  /** @internal Drizzle column ref attached at table-build time, used by introspector. */
+  drizzleColumn?: unknown;
   /**
-   * @internal
-   * Foreign-key reference in one of two states: **deferred** (`target` set)
-   * or **resolved** (`toTable`/`toColumn` populated).
+   * @internal Foreign-key reference. Two states: **deferred** (`target` set
+   * before table assembly) or **resolved** (`toTable`/`toColumn` populated).
    */
   references?: {
     target?: AppKitColumn;

@@ -250,4 +250,18 @@ describe("defineSchema", () => {
       );
     }
   });
+
+  test("supports declaring tables in the public schema", () => {
+    const schema = defineSchema(
+      ({ table }) => ({
+        user: table("user", {
+          id: id(),
+          email: text().notNull(),
+        }),
+      }),
+      { schemaName: "public" },
+    );
+
+    expect(schema.user[APPKIT_TABLE]).toBe(true);
+  });
 });

@@ -33,6 +33,11 @@
       "development": "./src/beta.ts",
       "default": "./dist/beta.js"
     },
+    "./database/introspector": {
+      "types": "./dist/database/introspector/index.d.ts",
+      "development": "./src/database/introspector/index.ts",
+      "default": "./dist/database/introspector/index.js"
+    },
     "./type-generator": {
       "types": "./dist/type-generator/index.d.ts",
       "development": "./src/type-generator/index.ts",
@@ -105,6 +110,7 @@
     "exports": {
       ".": "./dist/index.js",
       "./beta": "./dist/beta.js",
+      "./database/introspector": "./dist/database/introspector/index.js",
       "./dist/shared/src/plugin": "./dist/shared/src/plugin.d.ts",
       "./type-generator": "./dist/type-generator/index.js",
       "./package.json": "./package.json"
