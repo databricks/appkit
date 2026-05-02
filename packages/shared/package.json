@@ -37,9 +37,11 @@
   },
   "dependencies": {
     "@ast-grep/napi": "0.37.0",
+    "@clack/prompts": "1.0.1",
     "ajv": "8.17.1",
     "ajv-formats": "3.0.1",
-    "@clack/prompts": "1.0.1",
-    "commander": "12.1.0"
+    "commander": "12.1.0",
+    "execa": "^9.6.1",
+    "picocolors": "1.1.1"
   }
 }
