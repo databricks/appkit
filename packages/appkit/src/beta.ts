@@ -73,3 +73,11 @@ export {
 } from "./plugins/agents";
 
 export * from "./plugins/beta-exports.generated";
+export type {
+  EntityHooks,
+  HookContext,
+  HttpAccess,
+  HttpEntityOverride,
+  IDatabaseConfig,
+} from "./plugins/database";
+export { readDefaults, writeDefaults } from "./plugins/database/defaults";

@@ -1,0 +1,87 @@
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "name": "database",
+  "displayName": "Database",
+  "description": "Application database with schema-driven CRUD, type generation, OBO, RLS, and LLM tools",
+  "hidden": false,
+  "stability": "beta",
+  "resources": {
+    "required": [
+      {
+        "type": "postgres",
+        "alias": "Application Database",
+        "resourceKey": "database",
+        "description": "Lakebase Postgres instance for application data. Schema lives at config/database/schema.ts.",
+        "permission": "CAN_CONNECT_AND_CREATE",
+        "fields": {
+          "branch": {
+            "description": "Full Lakebase Postgres branch resource name.",
+            "examples": ["projects/{project-id}/branches/{branch-id}"]
+          },
+          "database": {
+            "description": "Full Lakebase Postgres database resource name."
+          },
+          "host": {
+            "env": "PGHOST",
+            "localOnly": true,
+            "resolve": "postgres:host",
+            "description": "Postgres host for local development."
+          },
+          "databaseName": {
+            "env": "PGDATABASE",
+            "localOnly": true,
+            "resolve": "postgres:databaseName",
+            "description": "Postgres database name for local development."
+          },
+          "endpointPath": {
+            "env": "LAKEBASE_ENDPOINT",
+            "bundleIgnore": true,
+            "resolve": "postgres:endpointPath",
+            "description": "Lakebase endpoint resource name."
+          },
+          "port": {
+            "env": "PGPORT",
+            "localOnly": true,
+            "value": "5432",
+            "description": "Postgres port."
+          },
+          "sslmode": {
+            "env": "PGSSLMODE",
+            "localOnly": true,
+            "value": "require",
+            "description": "Postgres SSL mode."
+          }
+        }
+      }
+    ],
+    "optional": []
+  },
+  "config": {
+    "schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "http": { "type": "object", "additionalProperties": true },
+        "hooks": { "type": "object", "additionalProperties": true },
+        "cache": {
+          "type": "object",
+          "properties": {
+            "list": {
+              "type": "object",
+              "properties": { "ttl": { "type": "number" } }
+            },
+            "find": {
+              "type": "object",
+              "properties": { "ttl": { "type": "number" } }
+            },
+            "count": {
+              "type": "object",
+              "properties": { "ttl": { "type": "number" } }
+            }
+          }
+        }
+      }
+    }
+  },
+  "onSetupMessage": "Database plugin installed. Next steps:\n  Greenfield: npx appkit db generate user name:string email:string\n  Brownfield: npx appkit db introspect\n  Then:      npx appkit db migrate up && pnpm dev"
+}

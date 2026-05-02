@@ -1,0 +1,109 @@
+import type { BasePluginConfig } from "shared";
+import type { LakebasePoolConfig } from "@/connectors";
+
+/**
+ * HTTP access control for entity operations.
+ * @public
+ */
+export type HttpAccess = "public" | "obo" | "service" | false;
+
+/**
+ * HTTP access control overrides for entity operations.
+ * @public
+ */
+export interface HttpEntityOverride {
+  /** The HTTP access control for the list operation. */
+  list?: HttpAccess;
+  /** The HTTP access control for the find operation. */
+  find?: HttpAccess;
+  /** The HTTP access control for the count operation. */
+  count?: HttpAccess;
+  /** The HTTP access control for the create operation. */
+  create?: HttpAccess;
+  /** The HTTP access control for the update operation. */
+  update?: HttpAccess;
+  /** The HTTP access control for the delete operation. */
+  delete?: HttpAccess;
+}
+
+/**
+ * Context for entity hooks.
+ * @public
+ */
+export interface HookContext {
+  /** The request object. */
+  req?: import("express").Request;
+  /** The entity name. */
+  entity?: string;
+  /** The user ID. */
+  userId?: string;
+}
+
+/**
+ * Entity hooks.
+ * @public
+ */
+export interface EntityHooks {
+  /** A hook to run before a create operation. */
+  beforeCreate?: (
+    data: Record<string, unknown>,
+    ctx: HookContext,
+  ) => Promise<Record<string, unknown> | void>;
+  /** A hook to run after a create operation. */
+  afterCreate?: (
+    row: Record<string, unknown>,
+    ctx: HookContext,
+  ) => Promise<void>;
+  /** A hook to run before an update operation. */
+  beforeUpdate?: (
+    id: unknown,
+    patch: Record<string, unknown>,
+    ctx: HookContext,
+  ) => Promise<Record<string, unknown> | void>;
+  /** A hook to run after an update operation. */
+  afterUpdate?: (
+    row: Record<string, unknown>,
+    ctx: HookContext,
+  ) => Promise<void>;
+  /** A hook to run before a delete operation. */
+  beforeDelete?: (id: unknown, ctx: HookContext) => Promise<void>;
+  /** A hook to run after a delete operation. */
+  afterDelete?: (id: unknown, ctx: HookContext) => Promise<void>;
+}
+
+/**
+ * Cache action settings.
+ * @public
+ */
+export interface CacheActionSettings {
+  /** The time to live for the cache in seconds. */
+  ttl?: number;
+}
+
+/**
+ * Cache settings.
+ * @public
+ */
+export interface CacheSettings {
+  /** The cache settings for the list operation. */
+  list?: CacheActionSettings;
+  /** The cache settings for the find operation. */
+  find?: CacheActionSettings;
+  /** The cache settings for the count operation. */
+  count?: CacheActionSettings;
+}
+
+/**
+ * Database configuration.
+ * @public
+ */
+export interface IDatabaseConfig extends BasePluginConfig {
+  /** The connection settings for the database. */
+  connection?: Partial<LakebasePoolConfig>;
+  /** The HTTP entity overrides for the database. */
+  http?: Record<string, HttpEntityOverride>;
+  /** The entity hooks for the database. */
+  hooks?: Record<string, EntityHooks>;
+  /** The cache settings for the database. */
+  cache?: CacheSettings;
+}
