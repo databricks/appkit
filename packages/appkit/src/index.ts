@@ -22,6 +22,9 @@ export type {
   LakebasePool,
   LakebasePoolConfig,
   LakebasePoolManager,
+  LakebasePostgrestClient,
+  LakebasePostgrestClientConfig,
+  LakebaseTokenResolver,
   RequestedClaims,
   RequestedResource,
 } from "./connectors/lakebase";
@@ -29,6 +32,7 @@ export type {
 export {
   createLakebasePool,
   createLakebasePoolManager,
+  createLakebasePostgrestClient,
   generateDatabaseCredential,
   getLakebaseOrmConfig,
   getLakebasePgConfig,
