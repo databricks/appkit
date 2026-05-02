@@ -12,6 +12,7 @@ import {
   POOL_DEFAULTS,
   STATEMENT_TIMEOUT_DEFAULT_MS,
 } from "./defaults";
+import { checkDrift } from "./drift";
 import type { EntityClient, ExecutorFn } from "./entity-proxy";
 import { type UserPoolRegistry, wireEntities } from "./entity-wiring";
 import manifest from "./manifest.json";
@@ -111,6 +112,14 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
         "Database entity API wired for: %s",
         Object.keys(this.entities).join(", "),
       );
+
+      // Compare the live database against the declared schema; warns in dev,
+      // throws in prod when the two have diverged. See drift.ts for the matrix.
+      await checkDrift({
+        pool: this.requirePool(),
+        schema: this.schema,
+        enabled: this.config.checkDrift !== false,
+      });
     } catch (err) {
       // A throwing schema-load otherwise cascades through Promise.all in core
       // and crashes every plugin's boot. Decorate the error with the
@@ -118,7 +127,7 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
       // caller opted into tolerant boot.
       const message = err instanceof Error ? err.message : String(err);
       logger.error(
-        "Database schema load failed (config/database/schema.ts): %s",
+        "Database setup failed (config/database/schema.ts): %s",
         message,
       );
       if (!this.config.tolerateSetupFailure) throw err;

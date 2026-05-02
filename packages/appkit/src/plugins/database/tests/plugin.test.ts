@@ -4,6 +4,7 @@ import { createLakebasePool } from "../../../connectors/lakebase";
 import { defineSchema, id, text } from "../../../database";
 import { loadSchemaByConvention } from "../convention";
 import { database } from "../database";
+import { checkDrift } from "../drift";
 
 vi.mock("../../../connectors/lakebase", () => ({
   createLakebasePool: vi.fn(),
@@ -66,6 +67,10 @@ vi.mock("../../../cache", () => ({
 
 vi.mock("../convention", () => ({
   loadSchemaByConvention: vi.fn(),
+}));
+
+vi.mock("../drift", () => ({
+  checkDrift: vi.fn(async () => ({ hasDrift: false, entries: [] })),
 }));
 
 const pool = {
@@ -137,6 +142,30 @@ describe("DatabasePlugin", () => {
       (plugin as unknown as { schema: typeof schema; schemaPath: string })
         .schemaPath,
     ).toBe("/app/config/database/schema.ts");
+    expect(checkDrift).toHaveBeenCalledWith({
+      pool,
+      schema,
+      enabled: true,
+    });
+  });
+
+  test("passes checkDrift=false through to startup drift detection", async () => {
+    const schema = defineSchema(({ table }) => ({
+      user: table("user", { id: id() }),
+    }));
+    vi.mocked(loadSchemaByConvention).mockResolvedValue({
+      schema,
+      schemaPath: "/app/config/database/schema.ts",
+    });
+
+    const plugin = createPlugin({ checkDrift: false });
+    await plugin.setup();
+
+    expect(checkDrift).toHaveBeenCalledWith({
+      pool,
+      schema,
+      enabled: false,
+    });
   });
 
   test("wires one entity client per schema table on the SP pool", async () => {
