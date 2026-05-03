@@ -16,6 +16,7 @@ describe("dbCommand", () => {
       "introspect",
       "migration",
       "migrate",
+      "rls",
       "seed",
       "setup:dev",
       "types",

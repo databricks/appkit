@@ -3,6 +3,7 @@ import { initCommand } from "./init";
 import { introspectCommand } from "./introspect";
 import { migrateCommand } from "./migrate";
 import { migrationCommand } from "./migration";
+import { rlsCommand } from "./rls";
 import { seedCommand } from "./seed";
 import { setupDevCommand } from "./setup-dev";
 import { typesCommand } from "./types";
@@ -17,6 +18,7 @@ export const dbCommand = new Command("db")
   .addCommand(introspectCommand)
   .addCommand(migrationCommand)
   .addCommand(migrateCommand)
+  .addCommand(rlsCommand)
   .addCommand(seedCommand)
   .addCommand(setupDevCommand)
   .addCommand(typesCommand)
@@ -32,5 +34,6 @@ Examples:
   $ appkit db seed
   $ appkit db setup:dev --seed --name init
   $ appkit db types generate
+  $ appkit db rls user owner:userId
   $ appkit db verify`,
   );
