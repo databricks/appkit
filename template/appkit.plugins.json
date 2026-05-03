@@ -54,7 +54,7 @@
     "database": {
       "name": "database",
       "displayName": "Database",
-      "description": "Lakebase Postgres pool + schema declaration via defineSchema. CRUD/OBO/RLS surface ships incrementally in subsequent stack layers; this layer provides the pool, schema convention loader, and column metadata.",
+      "description": "Application database with schema-driven CRUD, type generation, OBO, and RLS",
       "package": "@databricks/appkit",
       "resources": {
         "required": [
@@ -109,7 +109,7 @@
         ],
         "optional": []
       },
-      "onSetupMessage": "Database plugin installed. Configure your schema in config/database/schema.ts via defineSchema(). The plugin currently exposes pool access (appkit.database.getPool()); CRUD, OBO, and RLS surfaces ship in subsequent stack layers.",
+      "onSetupMessage": "Database plugin installed. Next: npx appkit db init\n  - For a new database: define entities in config/database/schema.ts (and optional demo rows in config/database/seed.sql) before running init.\n  - For an existing Lakebase: just run init; it will introspect the schema for you.\nThe init command picks the Databricks profile and Lakebase project, creates a per-user dev branch, writes .env, and runs the right setup or introspection.",
       "stability": "beta"
     },
     "files": {
