@@ -111,3 +111,5 @@ export const TYPES_DIR = "appkit-types";
 export const ANALYTICS_TYPES_FILE = "analytics.d.ts";
 /** Default filename for serving endpoint type declarations. */
 export const SERVING_TYPES_FILE = "serving.d.ts";
+
+export * from "./database";

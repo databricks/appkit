@@ -111,6 +111,8 @@ export {
   SpanStatusCode,
   type TelemetryConfig,
 } from "./telemetry";
+export { generateDatabaseTypes } from "./type-generator/database/generator";
+export { appKitDatabaseTypesPlugin } from "./type-generator/database/vite-plugin";
 export {
   extractServingEndpoints,
   findServerFile,
