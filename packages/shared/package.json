@@ -41,6 +41,8 @@
     "ajv": "8.17.1",
     "ajv-formats": "3.0.1",
     "commander": "12.1.0",
+    "drizzle-kit": "^0.31.10",
+    "drizzle-orm": "0.45.1",
     "execa": "^9.6.1",
     "picocolors": "1.1.1"
   }

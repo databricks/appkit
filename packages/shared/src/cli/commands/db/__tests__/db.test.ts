@@ -1,15 +1,33 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { dbCommand } from "../index";
+import { assertSeedSqlAllowed } from "../seed";
+import { assertDevSetupAllowed, setupDev } from "../setup-dev";
 import { databasePaths, resolveProjectRoot, splitCsv } from "../shared";
 
 describe("dbCommand", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   test("registers database subcommands", () => {
     expect(dbCommand.name()).toBe("db");
     expect(dbCommand.commands.map((command) => command.name())).toEqual([
       "introspect",
-      "generate",
+      "migration",
       "migrate",
+      "seed",
+      "setup:dev",
       "verify",
+    ]);
+  });
+
+  test("registers migration subcommands", () => {
+    const migration = dbCommand.commands.find(
+      (command) => command.name() === "migration",
+    );
+
+    expect(migration?.commands.map((command) => command.name())).toEqual([
+      "generate",
     ]);
   });
 
@@ -48,5 +66,64 @@ describe("dbCommand", () => {
 
   test("falls back to the start directory when no package root is found", () => {
     expect(resolveProjectRoot("/")).toBe("/");
+  });
+
+  test("setup:dev refuses production", () => {
+    vi.stubEnv("NODE_ENV", "production");
+
+    expect(() => assertDevSetupAllowed()).toThrow(/production/);
+  });
+
+  test("setup:dev refuses CI unless forced", () => {
+    vi.stubEnv("CI", "true");
+
+    expect(() => assertDevSetupAllowed()).toThrow(/CI/);
+    expect(() => assertDevSetupAllowed({ force: true })).not.toThrow();
+  });
+
+  test("seed rejects DDL by default", () => {
+    expect(() => assertSeedSqlAllowed("CREATE TABLE users (id int);")).toThrow(
+      /data-only/,
+    );
+  });
+
+  test("seed allows DDL with explicit flag", () => {
+    expect(() =>
+      assertSeedSqlAllowed("CREATE TABLE users (id int);", { allowDdl: true }),
+    ).not.toThrow();
+  });
+
+  test("seed allows idempotent insert data", () => {
+    expect(() =>
+      assertSeedSqlAllowed(`
+        INSERT INTO users (email)
+        VALUES ('demo@databricks.com')
+        ON CONFLICT DO NOTHING;
+      `),
+    ).not.toThrow();
+  });
+
+  test("setup:dev runs generate, migrate, seed, verify in order", async () => {
+    const calls: string[] = [];
+
+    await setupDev(
+      { name: "init", seed: true, force: true },
+      {
+        generateMigration: async () => {
+          calls.push("generate");
+        },
+        migrateUp: async () => {
+          calls.push("migrate");
+        },
+        runSeed: async () => {
+          calls.push("seed");
+        },
+        verifyDatabase: async () => {
+          calls.push("verify");
+        },
+      },
+    );
+
+    expect(calls).toEqual(["generate", "migrate", "seed", "verify"]);
   });
 });

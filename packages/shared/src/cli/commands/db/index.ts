@@ -1,7 +1,9 @@
 import { Command } from "commander";
-import { generateCommand } from "./generate";
 import { introspectCommand } from "./introspect";
 import { migrateCommand } from "./migrate";
+import { migrationCommand } from "./migration";
+import { seedCommand } from "./seed";
+import { setupDevCommand } from "./setup-dev";
 import { verifyCommand } from "./verify";
 
 /**
@@ -10,15 +12,19 @@ import { verifyCommand } from "./verify";
 export const dbCommand = new Command("db")
   .description("Database (Lakebase) management commands")
   .addCommand(introspectCommand)
-  .addCommand(generateCommand)
+  .addCommand(migrationCommand)
   .addCommand(migrateCommand)
+  .addCommand(seedCommand)
+  .addCommand(setupDevCommand)
   .addCommand(verifyCommand)
   .addHelpText(
     "after",
     `
 Examples:
   $ appkit db introspect
-  $ appkit db generate --name add_phone
+  $ appkit db migration generate --name init
   $ appkit db migrate up
+  $ appkit db seed
+  $ appkit db setup:dev --seed --name init
   $ appkit db verify`,
   );
