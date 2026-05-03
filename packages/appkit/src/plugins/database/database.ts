@@ -3,7 +3,7 @@ import type { IAppRouter } from "shared";
 import { Plugin, toPlugin } from "@/plugin";
 import { createLakebasePool } from "../../connectors/lakebase";
 import type { DataPath, Schema } from "../../database";
-import { ConfigurationError } from "../../errors";
+import { AuthenticationError, ConfigurationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import type { PluginManifest } from "../../registry";
 import { loadSchemaByConvention } from "./convention";
@@ -140,7 +140,15 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
     // client's own asUser fallback.
     const email = req.header("x-forwarded-email");
     if (!email && process.env.NODE_ENV === "development") {
+      logger.warn(
+        "Database asUser() called without x-forwarded-email in development mode. Falling back to service pool.",
+      );
       return baseProxy;
+    }
+    if (!email) {
+      throw new AuthenticationError(
+        "Missing x-forwarded-email header. Cannot create user-scoped database exports.",
+      );
     }
 
     const userEntities: Record<string, EntityClient> = {};

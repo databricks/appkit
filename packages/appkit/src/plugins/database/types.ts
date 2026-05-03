@@ -1,27 +1,5 @@
 import type { BasePluginConfig } from "shared";
-
-/**
- * Pool tuning exposed via `IDatabaseConfig.connection`.
- * Intentionally excludes auth fields; Lakebase resolves credentials via OAuth + env.
- */
-export interface DatabasePoolTuning {
-  /** Maximum number of clients in the pool. */
-  max?: number;
-  /** Idle timeout (ms) before closing an idle client. */
-  idleTimeoutMillis?: number;
-  /** Connection acquire timeout (ms). */
-  connectionTimeoutMillis?: number;
-  /**
-   * Recycle a client after N uses to reduce stale-token issues.
-   */
-  maxUses?: number;
-  /**
-   * Statement timeout (ms) set per new connection; top-level setting wins.
-   */
-  statement_timeout?: number;
-  /** Random jitter (ms) added to statement timeout when supported. */
-  statement_timeout_jitter_ms?: number;
-}
+import type { LakebasePoolConfig } from "@/connectors";
 
 /**
  * HTTP access control for entity operations.
@@ -34,17 +12,17 @@ export type HttpAccess = "public" | "obo" | "service" | false;
  * @public
  */
 export interface HttpEntityOverride {
-  /** Access mode for list. */
+  /** The HTTP access control for the list operation. */
   list?: HttpAccess;
-  /** Access mode for find. */
+  /** The HTTP access control for the find operation. */
   find?: HttpAccess;
-  /** Access mode for count. */
+  /** The HTTP access control for the count operation. */
   count?: HttpAccess;
-  /** Access mode for create. */
+  /** The HTTP access control for the create operation. */
   create?: HttpAccess;
-  /** Access mode for update. */
+  /** The HTTP access control for the update operation. */
   update?: HttpAccess;
-  /** Access mode for delete. */
+  /** The HTTP access control for the delete operation. */
   delete?: HttpAccess;
 }
 
@@ -53,43 +31,56 @@ export interface HttpEntityOverride {
  * @public
  */
 export interface HookContext {
-  /** Request object. */
+  /** The request object. */
   req?: import("express").Request;
-  /** Entity name. */
+  /** The entity name. */
   entity?: string;
-  /** User ID. */
+  /** The user ID. */
   userId?: string;
 }
+
+// biome-ignore lint/suspicious/noConfusingVoidType: hooks may return nothing to keep the original payload.
+type HookMutationResult = Record<string, unknown> | void;
 
 /**
  * Entity hooks.
  * @public
  */
 export interface EntityHooks {
-  /** Runs before create. */
+  /** A hook to run before a create operation. */
   beforeCreate?: (
     data: Record<string, unknown>,
     ctx: HookContext,
-  ) => Promise<Record<string, unknown> | void>;
-  /** Runs after create. */
+  ) => Promise<HookMutationResult>;
+  /** A hook to run after a create operation. */
   afterCreate?: (
     row: Record<string, unknown>,
     ctx: HookContext,
   ) => Promise<void>;
-  /** Runs before update. */
+  /** A hook to run before an update operation. */
   beforeUpdate?: (
     id: unknown,
     patch: Record<string, unknown>,
     ctx: HookContext,
-  ) => Promise<Record<string, unknown> | void>;
-  /** Runs after update. */
+  ) => Promise<HookMutationResult>;
+  /** A hook to run after an update operation. */
   afterUpdate?: (
     row: Record<string, unknown>,
     ctx: HookContext,
   ) => Promise<void>;
-  /** Runs before delete. */
+  /** A hook to run before an upsert operation. */
+  beforeUpsert?: (
+    data: Record<string, unknown>,
+    ctx: HookContext,
+  ) => Promise<HookMutationResult>;
+  /** A hook to run after an upsert operation. */
+  afterUpsert?: (
+    row: Record<string, unknown>,
+    ctx: HookContext,
+  ) => Promise<void>;
+  /** A hook to run before a delete operation. */
   beforeDelete?: (id: unknown, ctx: HookContext) => Promise<void>;
-  /** Runs after delete. */
+  /** A hook to run after a delete operation. */
   afterDelete?: (id: unknown, ctx: HookContext) => Promise<void>;
 }
 
@@ -98,7 +89,7 @@ export interface EntityHooks {
  * @public
  */
 export interface CacheActionSettings {
-  /** Cache TTL in seconds. */
+  /** The time to live for the cache in seconds. */
   ttl?: number;
 }
 
@@ -107,11 +98,11 @@ export interface CacheActionSettings {
  * @public
  */
 export interface CacheSettings {
-  /** Cache settings for list. */
+  /** The cache settings for the list operation. */
   list?: CacheActionSettings;
-  /** Cache settings for find. */
+  /** The cache settings for the find operation. */
   find?: CacheActionSettings;
-  /** Cache settings for count. */
+  /** The cache settings for the count operation. */
   count?: CacheActionSettings;
 }
 
@@ -120,29 +111,34 @@ export interface CacheSettings {
  * @public
  */
 export interface IDatabaseConfig extends BasePluginConfig {
-  /**
-   * Pool tuning forwarded to `createLakebasePool` (no auth fields).
-   */
-  connection?: DatabasePoolTuning;
-  /** Per-entity HTTP access overrides. */
+  /** The connection settings for the database. */
+  connection?: Partial<LakebasePoolConfig>;
+  /** The HTTP entity overrides for the database. */
   http?: Record<string, HttpEntityOverride>;
-  /** Per-entity lifecycle hooks. */
+  /** The entity hooks for the database. */
   hooks?: Record<string, EntityHooks>;
-  /** Per-operation cache settings. */
+  /** Whether to check live schema drift during startup. */
+  checkDrift?: boolean;
+  /** The cache settings for the database. */
   cache?: CacheSettings;
   /**
-   * Max distinct OBO pools kept alive. Defaults to 25.
-   * Worst-case fan-out is `(1 + oboPoolMax) × poolMax`.
+   * Maximum number of distinct per-user (OBO) pools the registry keeps alive
+   * at once. Each pool defaults to `OBO_POOL_DEFAULTS.max = 4` connections, so
+   * the worst-case fan-out is `(1 + oboPoolMax) × poolMax`. Defaults to 25 —
+   * tune up for hot OBO traffic, down for low-tier Lakebase plans.
    */
   oboPoolMax?: number;
   /**
-   * Postgres `statement_timeout` (ms) for pooled connections. Defaults to 15s.
-   * Set `0` to disable server-side timeout (client timeout still applies).
+   * Postgres `statement_timeout` applied to every pooled connection (ms).
+   * Defaults to 15s. Set to `0` to disable the server-side cap; the AppKit
+   * timeout interceptor still applies on the client side.
    */
   statementTimeoutMs?: number;
   /**
-   * If true, `setup()` schema/drift failures are logged and ignored.
-   * Defaults to false (fail closed).
+   * When true, schema-load and drift-check failures during `setup()` are
+   * logged but do not throw. Defaults to false (fail closed). Useful in
+   * environments where the database is provisioned out of band and the boot
+   * shouldn't crash before the schema is reachable.
    */
   tolerateSetupFailure?: boolean;
 }

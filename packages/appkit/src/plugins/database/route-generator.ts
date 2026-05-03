@@ -1,6 +1,8 @@
 import type express from "express";
 import type { IAppRouter, RouteConfig } from "shared";
+import { ZodError } from "zod";
 import type { AppKitTable, Schema } from "@/database";
+import { AppKitError } from "@/errors";
 import { createLogger } from "@/logging/logger";
 import type { EntityClient, WhereInput } from "./entity-proxy";
 import type { HttpAccess, HttpEntityOverride, IDatabaseConfig } from "./types";
@@ -26,7 +28,14 @@ const MAX_LIMIT = 500;
 
 // These query params control the shape of the read. Everything else is treated
 // as a potential column filter, but only if it matches a declared schema column.
-const RESERVED_QUERY_KEYS = new Set(["select", "order", "limit", "offset"]);
+const RESERVED_QUERY_KEYS = new Set([
+  "select",
+  "order",
+  "limit",
+  "offset",
+  "include",
+  "on_conflict",
+]);
 
 // Keep the HTTP dialect intentionally identical to PostGREST's builder methods:
 // `?age=gte.18`, `?name=ilike.%foo%`, `?id=in.(1,2,3)`.
@@ -64,7 +73,7 @@ interface RouteGeneratorOptions {
  * This class deliberately does not know about PostGREST clients, pg pools, or
  * auth internals. It translates Express requests into the L3 EntityClient API;
  * the entity client then handles validation, hooks, execute wrapping, retries,
- * cache, telemetry, and PostGREST calls.
+ * cache, telemetry, and DataPath calls.
  */
 export class RouteGenerator {
   constructor(private readonly options: RouteGeneratorOptions) {}
@@ -88,11 +97,9 @@ export class RouteGenerator {
     if (access.list !== false) this.bindList(router, name, cols, access.list);
     if (access.count !== false)
       this.bindCount(router, name, cols, access.count);
-    if (access.find !== false) this.bindFind(router, name, access.find);
-    if (access.create !== false)
-      this.bindCreate(router, name, table, access.create);
-    if (access.update !== false)
-      this.bindUpdate(router, name, table, access.update);
+    if (access.find !== false) this.bindFind(router, name, cols, access.find);
+    if (access.create !== false) this.bindCreate(router, name, access.create);
+    if (access.update !== false) this.bindUpdate(router, name, access.update);
     if (access.delete !== false) this.bindDelete(router, name, access.delete);
   }
   private bindList(
@@ -103,17 +110,9 @@ export class RouteGenerator {
   ): void {
     this.bind(router, name, "list", "get", `/${name}`, async (req, res) => {
       let q = this.entity(req, access, name);
-
-      // Filters are applied inline here on purpose. A separate parser would just
-      // duplicate PostGREST's operator vocabulary and create another abstraction
-      // to keep in sync.
       q = applyFilters(q, req.query, cols);
-
-      // Forward `?select=*,posts(*)` and plain column lists to EntityClient's raw
-      // select overload. This is what lets browser `.include()` work end to end.
-      if (typeof req.query.select === "string") {
-        q = q.select(req.query.select);
-      }
+      q = applySelect(q, req.query.select, cols);
+      q = applyInclude(q, req.query.include);
       if (typeof req.query.order === "string") {
         q = applyOrder(q, req.query.order, cols);
       }
@@ -122,8 +121,6 @@ export class RouteGenerator {
           ? clampLimit(Number(req.query.limit))
           : DEFAULT_LIMIT,
       );
-
-      // EntityClient defers offset+limit translation into PostGREST range().
       if (typeof req.query.offset === "string") {
         const offset = Number(req.query.offset);
         if (Number.isFinite(offset) && offset >= 0) {
@@ -153,14 +150,16 @@ export class RouteGenerator {
       },
     );
   }
-  private bindFind(router: IAppRouter, name: string, access: HttpAccess): void {
+  private bindFind(
+    router: IAppRouter,
+    name: string,
+    cols: ReadonlySet<string>,
+    access: HttpAccess,
+  ): void {
     this.bind(router, name, "find", "get", `/${name}/:id`, async (req, res) => {
       let q = this.entity(req, access, name);
-
-      // Useful for embedded reads like /user/1?select=*,posts(*).
-      if (typeof req.query.select === "string") {
-        q = q.select(req.query.select);
-      }
+      q = applySelect(q, req.query.select, cols);
+      q = applyInclude(q, req.query.include);
       const row = await q.find(coerceId(req.params.id));
       if (!row) {
         res.status(404).json({ error: `${name} not found` });
@@ -172,18 +171,9 @@ export class RouteGenerator {
   private bindCreate(
     router: IAppRouter,
     name: string,
-    table: AppKitTable,
     access: HttpAccess,
   ): void {
     this.bind(router, name, "create", "post", `/${name}`, async (req, res) => {
-      // Validate at the route boundary so bad browser requests get a 400 with
-      // structured Zod errors before hooks or database work run.
-      const parsed = table.$insertSchema.safeParse(req.body);
-      if (!parsed.success) {
-        res.status(400).json({ errors: parsed.error.format() });
-        return;
-      }
-
       // PostgREST-compatible upsert: a POST carrying `Prefer:
       // resolution=merge-duplicates` plus `?on_conflict=<column>` is treated as
       // INSERT ... ON CONFLICT DO UPDATE. Lets the browser client share one
@@ -196,7 +186,7 @@ export class RouteGenerator {
         onConflict
       ) {
         const row = await this.entity(req, access, name).upsert(
-          parsed.data as Record<string, unknown>,
+          req.body as Record<string, unknown>,
           { onConflict },
         );
         res.status(200).json(row);
@@ -204,7 +194,7 @@ export class RouteGenerator {
       }
 
       const row = await this.entity(req, access, name).create(
-        parsed.data as Record<string, unknown>,
+        req.body as Record<string, unknown>,
       );
       res.status(201).json(row);
     });
@@ -212,7 +202,6 @@ export class RouteGenerator {
   private bindUpdate(
     router: IAppRouter,
     name: string,
-    table: AppKitTable,
     access: HttpAccess,
   ): void {
     this.bind(
@@ -222,16 +211,9 @@ export class RouteGenerator {
       "patch",
       `/${name}/:id`,
       async (req, res) => {
-        // Same boundary validation as create(), but using the update schema so
-        // partial patches are accepted.
-        const parsed = table.$updateSchema.safeParse(req.body);
-        if (!parsed.success) {
-          res.status(400).json({ errors: parsed.error.format() });
-          return;
-        }
         const row = await this.entity(req, access, name).update(
           coerceId(req.params.id),
-          parsed.data as Partial<Record<string, unknown>>,
+          req.body as Partial<Record<string, unknown>>,
         );
         res.json(row);
       },
@@ -287,7 +269,13 @@ export class RouteGenerator {
           await handler(req, res);
         } catch (error) {
           logger.error("database route %s %s failed: %O", method, path, error);
-          res.status(500).json({
+          if (error instanceof ZodError) {
+            res.status(400).json({ errors: error.format() });
+            return;
+          }
+          const status =
+            error instanceof AppKitError ? error.statusCode : undefined;
+          res.status(status ?? 500).json({
             error: error instanceof Error ? error.message : "Server error",
           });
         }
@@ -332,6 +320,83 @@ function applyFilters(
   }
   return next;
 }
+/**
+ * Validate `?select=col1,col2` against the schema's columns and project.
+ * Unknown columns are dropped silently — same posture as `applyFilters` so
+ * undeclared columns never become HTTP-addressable.
+ */
+function applySelect(
+  q: EntityClient,
+  raw: unknown,
+  cols: ReadonlySet<string>,
+): EntityClient {
+  if (typeof raw !== "string" || raw.length === 0) return q;
+  const picked = raw
+    .split(",")
+    .map((c) => c.trim())
+    .filter((c) => cols.has(c));
+  return picked.length > 0 ? q.select(...picked) : q;
+}
+
+/**
+ * Parse `?include=posts,author` (or `?include=posts(id,title),author(name)`)
+ * and forward to `entity.include({ ... })`. The runtime resolves relation
+ * names against the schema's `$relations` metadata; unknown names throw at
+ * query time, so this parser intentionally trusts the caller.
+ */
+function applyInclude(q: EntityClient, raw: unknown): EntityClient {
+  if (typeof raw !== "string" || raw.length === 0) return q;
+  const include = parseIncludeSpec(raw);
+  return Object.keys(include).length > 0
+    ? (q.include(include) as EntityClient)
+    : q;
+}
+
+/**
+ * Tokenise an `?include=` value into `{ relation: true | { select: [...] } }`.
+ * Splits on top-level commas (paren-aware) and parses each `name(col,col)`
+ * fragment. Whitespace is trimmed everywhere; empty fragments are skipped.
+ */
+function parseIncludeSpec(
+  raw: string,
+): Record<string, true | { select: string[] }> {
+  const out: Record<string, true | { select: string[] }> = {};
+  let depth = 0;
+  let buf = "";
+  const fragments: string[] = [];
+  for (const ch of raw) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
+    if (ch === "," && depth === 0) {
+      fragments.push(buf);
+      buf = "";
+      continue;
+    }
+    buf += ch;
+  }
+  if (buf) fragments.push(buf);
+
+  for (const fragment of fragments) {
+    const trimmed = fragment.trim();
+    if (!trimmed) continue;
+    const open = trimmed.indexOf("(");
+    if (open < 0) {
+      out[trimmed] = true;
+      continue;
+    }
+    const close = trimmed.lastIndexOf(")");
+    const relation = trimmed.slice(0, open).trim();
+    if (!relation) continue;
+    const inner = close > open ? trimmed.slice(open + 1, close) : "";
+    const select = inner
+      .split(",")
+      .map((c) => c.trim())
+      .filter(Boolean);
+    out[relation] = select.length > 0 ? { select } : true;
+  }
+  return out;
+}
+
 function applyOrder(
   q: EntityClient,
   raw: string,
@@ -360,18 +425,50 @@ function coerceFilterValue(op: string, value: string): unknown {
     // URLs while the latter is a little easier to type by hand.
     const body =
       value.startsWith("(") && value.endsWith(")") ? value.slice(1, -1) : value;
-    return body.split(",").map(coerceScalar);
+    return splitList(body).map(coerceScalar);
   }
   return coerceScalar(value);
 }
 function coerceScalar(value: string): unknown {
   // Keep coercion intentionally small and predictable. Anything more complex
   // should be expressed by the client as a string and interpreted by Postgres.
+  if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+    return value.slice(1, -1).replace(/\\"/g, '"');
+  }
   if (value === "true") return true;
   if (value === "false") return false;
   if (value === "null") return null;
   if (value !== "" && !Number.isNaN(Number(value))) return Number(value);
   return value;
+}
+function splitList(value: string): string[] {
+  const out: string[] = [];
+  let buf = "";
+  let inQuotes = false;
+  let escaped = false;
+
+  for (const ch of value) {
+    if (escaped) {
+      buf += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\" && inQuotes) {
+      buf += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') inQuotes = !inQuotes;
+    if (ch === "," && !inQuotes) {
+      out.push(buf);
+      buf = "";
+      continue;
+    }
+    buf += ch;
+  }
+
+  out.push(buf);
+  return out;
 }
 function coerceId(raw: string): string | number {
   // Numeric path ids become numbers so serial primary keys behave naturally;

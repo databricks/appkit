@@ -10,6 +10,7 @@ import { readDefaults, writeDefaults } from "./defaults";
 import type { CacheSettings, EntityHooks, HookContext } from "./types";
 
 type Row = Record<string, unknown>;
+const MAX_LIMIT = 500;
 
 type DatabaseAction =
   | "list"
@@ -151,8 +152,8 @@ interface EntityClientDeps {
   /** Bound `Plugin#execute` wrapper. Every terminator must go through this. */
   execute: ExecutorFn;
   /**
-   * Build (or reuse) a per-user DataPath for this request. Returns `null`
-   * when the request lacks an OBO identity — callers fall back to SP.
+   * Build (or reuse) a per-user DataPath for this request. Returns `null` only
+   * for the local dev fallback when the request lacks forwarded OBO identity.
    */
   makeUserDataPath: (req: import("express").Request) => DataPath | null;
   cache?: CacheSettings;
@@ -225,7 +226,7 @@ class EntityClientImpl<
   }
 
   limit(n: number) {
-    const limit = Math.max(0, Math.floor(n));
+    const limit = Math.min(MAX_LIMIT, Math.max(0, Math.floor(n)));
     return this.chain({ limit }, { limit });
   }
 
@@ -250,8 +251,8 @@ class EntityClientImpl<
 
   asUser(req: import("express").Request) {
     // Dev fallback: when no user identity is forwarded and we're running
-    // locally, return self so routes don't 401 / fail the dev loop. Mirrors
-    // the core Plugin#asUser contract.
+    // locally, return self so routes don't 401 / fail the dev loop. In
+    // production, makeUserDataPath throws instead of silently falling back.
     const userDataPath = this.deps.makeUserDataPath(req);
     if (!userDataPath) return this;
 
@@ -384,13 +385,20 @@ class EntityClientImpl<
 
   upsert(data: TInsert, options: { onConflict: keyof TRow }): Promise<TRow> {
     return this.run("upsert", async (signal) => {
-      const validated = this.deps.table.$insertSchema.parse(data);
+      const ctx = this.deps.hookContext();
+      const before = await this.deps.hooks?.beforeUpsert?.(
+        data as Record<string, unknown>,
+        ctx,
+      );
+      const payload = before ?? data;
+      const validated = this.deps.table.$insertSchema.parse(payload);
       const row = await this.deps.dataPath.upsert(
         this.deps.table,
         validated as Row,
         { onConflict: String(options.onConflict) },
         signal,
       );
+      await this.deps.hooks?.afterUpsert?.(row, ctx);
       return row as TRow;
     });
   }

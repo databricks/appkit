@@ -100,6 +100,15 @@ describe("EntityClient", () => {
     });
   });
 
+  test("clamps read limits at the server-side maximum", async () => {
+    const { client, dataPath } = makeClient();
+
+    await client.limit(10_000).toArray();
+
+    const args = dataPath.calls[0].args[1] as Record<string, unknown>;
+    expect(args.limit).toBe(500);
+  });
+
   test("every terminator runs through the bound executor", async () => {
     const cases: Array<
       (
@@ -163,6 +172,38 @@ describe("EntityClient", () => {
       "id",
       1,
       expect.objectContaining({ role: "owner" }),
+      expect.anything(),
+    );
+  });
+
+  test("upsert hooks can rewrite payloads before validation", async () => {
+    const beforeUpsert = vi.fn(async (data: Record<string, unknown>) => ({
+      ...data,
+      role: "admin",
+    }));
+    const afterUpsert = vi.fn(async () => undefined);
+    const dataPath = fakeDataPath([{ id: 1, email: "a@x", role: "admin" }]);
+    const client = makeEntityClient({
+      table: schema.user,
+      entity: "user",
+      dataPath: dataPath.path,
+      execute: makeExecutor(),
+      makeUserDataPath: () => dataPath.path,
+      hooks: { beforeUpsert, afterUpsert },
+      hookContext: () => ({ entity: "user" }),
+    });
+
+    await client.upsert({ email: "a@x" }, { onConflict: "email" });
+
+    expect(beforeUpsert).toHaveBeenCalled();
+    expect(afterUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "admin" }),
+      { entity: "user" },
+    );
+    expect(dataPath.path.upsert).toHaveBeenCalledWith(
+      schema.user,
+      expect.objectContaining({ role: "admin" }),
+      { onConflict: "email" },
       expect.anything(),
     );
   });

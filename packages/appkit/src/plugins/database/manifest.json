@@ -2,7 +2,7 @@
   "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
   "name": "database",
   "displayName": "Database",
-  "description": "Lakebase Postgres pool + schema declaration via defineSchema. CRUD/OBO/RLS surface ships incrementally in subsequent stack layers; this layer provides the pool, schema convention loader, and column metadata.",
+  "description": "Application database with schema-driven CRUD, type generation, OBO, and RLS",
   "hidden": false,
   "stability": "beta",
   "resources": {
@@ -61,25 +61,14 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "connection": {
-          "type": "object",
-          "additionalProperties": true,
-          "description": "Optional pg.Pool overrides forwarded to createLakebasePool. Avoid setting `password`/`user` here — Lakebase uses OAuth."
-        },
-        "statementTimeoutMs": {
-          "type": "number",
-          "description": "Server-side `statement_timeout` (ms) applied per pool connection. Defaults to 15_000."
-        },
-        "tolerateSetupFailure": {
-          "type": "boolean",
-          "description": "If true, plugin boot continues with an empty schema when config/database/schema.ts fails to load. Off by default."
-        },
-        "oboPoolMax": {
-          "type": "number",
-          "description": "Max number of distinct OBO pools held in the LRU. Worst-case fan-out is oboPoolMax × OBO_POOL_DEFAULTS.max + POOL_DEFAULTS.max connections per app instance."
-        },
         "http": { "type": "object", "additionalProperties": true },
         "hooks": { "type": "object", "additionalProperties": true },
+        "checkDrift": { "type": "boolean", "default": true },
+        "oboPoolMax": {
+          "type": "number",
+          "default": 50,
+          "description": "Maximum number of per-user OBO pools to keep open."
+        },
         "cache": {
           "type": "object",
           "properties": {
@@ -100,5 +89,5 @@
       }
     }
   },
-  "onSetupMessage": "Database plugin installed. Configure your schema in config/database/schema.ts via defineSchema(). The plugin currently exposes pool access (appkit.database.getPool()); CRUD, OBO, and RLS surfaces ship in subsequent stack layers."
+  "onSetupMessage": "Database plugin installed. Next: npx appkit db init\n  - For a new database: define entities in config/database/schema.ts (and optional demo rows in config/database/seed.sql) before running init.\n  - For an existing Lakebase: just run init; it will introspect the schema for you.\nThe init command picks the Databricks profile and Lakebase project, creates a per-user dev branch, writes .env, and runs the right setup or introspection."
 }

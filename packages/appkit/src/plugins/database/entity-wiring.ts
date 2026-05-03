@@ -1,11 +1,14 @@
+import { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { Pool } from "pg";
 import { createLakebasePool } from "@/connectors";
+import { ServiceContext } from "@/context";
 import {
   type AppKitTable,
   createDrizzleDataPath,
   type DataPath,
   type Schema,
 } from "@/database";
+import { AuthenticationError, ConfigurationError } from "@/errors";
 import { createLogger } from "@/logging/logger";
 import {
   type EntityClient,
@@ -36,14 +39,18 @@ interface WireEntitiesResult {
 /**
  * Per-user pool registry.
  *
- * `getOrCreate(email)` returns (or builds) a `pg.Pool` whose Lakebase OAuth
- * resolves to the given user. Pools are kept in a Map; `closeAll()` drains
- * them at shutdown. There is no LRU eviction yet — for MVP, we accept a pool
- * per distinct user identity. A bounded LRU is tracked as a follow-up.
+ * `getOrCreate(identity)` returns (or builds) a `pg.Pool` whose Lakebase OAuth
+ * resolves to the given user. Pools are kept in a bounded LRU keyed by email;
+ * evicted pools are drained with `pool.end()`.
  */
 export interface UserPoolRegistry {
-  getOrCreate(email: string): Pool;
+  getOrCreate(identity: UserPoolIdentity): Pool;
   closeAll(): Promise<void>;
+}
+
+interface UserPoolIdentity {
+  email: string;
+  token: string;
 }
 
 /**
@@ -61,9 +68,9 @@ export function wireEntities(args: WireEntitiesArgs): WireEntitiesResult {
   const makeUserDataPath = (
     req: import("express").Request,
   ): DataPath | null => {
-    const email = req.header("x-forwarded-email");
-    if (!email) return null;
-    const pool = userPools.getOrCreate(email);
+    const identity = resolveUserPoolIdentity(req);
+    if (!identity) return null;
+    const pool = userPools.getOrCreate(identity);
     return createDrizzleDataPath(pool, args.schema);
   };
 
@@ -107,29 +114,35 @@ function derivePkColumn(table: AppKitTable): string {
  * Build the per-user pool registry. Pools are created lazily on first
  * `getOrCreate(email)` and reused across requests for the same identity.
  *
- * Each pool is constructed via `createLakebasePool({ user })`, which is the
- * same path the standalone `lakebase` plugin uses — Lakebase OAuth refresh
- * happens automatically inside the pool. Dev = user OAuth, prod = SP-on-behalf
- * (the platform forwards the user identity in a header, then we use Lakebase's
- * standard token exchange).
+ * Each pool is constructed via `createLakebasePool({ user, workspaceClient })`,
+ * where the workspace client is authenticated with the forwarded user token.
+ * Lakebase OAuth refresh still happens inside the pool; this layer only selects
+ * the identity and bounds the number of open pools.
  */
 function makeUserPoolRegistry(
   config: IDatabaseConfig,
   _schema: Schema,
 ): UserPoolRegistry {
   const pools = new Map<string, Pool>();
+  const maxPools = normalizePoolMax(config.oboPoolMax);
 
   return {
-    getOrCreate(email) {
-      const existing = pools.get(email);
-      if (existing) return existing;
+    getOrCreate(identity) {
+      const existing = pools.get(identity.email);
+      if (existing) {
+        pools.delete(identity.email);
+        pools.set(identity.email, existing);
+        return existing;
+      }
 
       const pool = createLakebasePool({
         ...config.connection,
-        user: email,
+        user: identity.email,
+        workspaceClient: createUserWorkspaceClient(identity.token),
       });
-      pools.set(email, pool);
-      logger.debug("Created per-user pool for %s", email);
+      pools.set(identity.email, pool);
+      evictOldestIfNeeded(pools, maxPools);
+      logger.debug("Created per-user pool for %s", identity.email);
       return pool;
     },
     async closeAll() {
@@ -147,4 +160,59 @@ function makeUserPoolRegistry(
       );
     },
   };
+}
+
+function resolveUserPoolIdentity(
+  req: import("express").Request,
+): UserPoolIdentity | null {
+  const email = req.header("x-forwarded-email");
+  const token = req.header("x-forwarded-access-token");
+  const isDev = process.env.NODE_ENV === "development";
+
+  if (email && token) return { email, token };
+
+  if (isDev) {
+    logger.warn(
+      "Database OBO requested without x-forwarded-email/x-forwarded-access-token; falling back to service pool in development.",
+    );
+    return null;
+  }
+
+  if (!token) throw AuthenticationError.missingToken("user token");
+  throw new AuthenticationError(
+    "Missing x-forwarded-email header. Cannot create a user-scoped database pool.",
+  );
+}
+
+function createUserWorkspaceClient(token: string): WorkspaceClient {
+  const host = process.env.DATABRICKS_HOST;
+  if (!host) throw ConfigurationError.missingEnvVar("DATABRICKS_HOST");
+  return new WorkspaceClient(
+    {
+      host,
+      token,
+      authType: "pat",
+    },
+    ServiceContext.getClientOptions(),
+  );
+}
+
+function normalizePoolMax(value: number | undefined): number {
+  if (!Number.isFinite(value) || value === undefined) return 50;
+  return Math.max(1, Math.floor(value));
+}
+
+function evictOldestIfNeeded(pools: Map<string, Pool>, maxPools: number): void {
+  while (pools.size > maxPools) {
+    const oldest = pools.entries().next().value as
+      | [email: string, pool: Pool]
+      | undefined;
+    if (!oldest) return;
+    const [email, pool] = oldest;
+    pools.delete(email);
+    pool.end().catch((err) => {
+      logger.error("Error evicting per-user pool for %s: %O", email, err);
+    });
+    logger.debug("Evicted per-user pool for %s", email);
+  }
 }

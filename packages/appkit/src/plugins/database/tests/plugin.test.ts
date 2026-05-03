@@ -150,6 +150,69 @@ describe("DatabasePlugin", () => {
     expect(createLakebasePool).toHaveBeenCalled();
   });
 
+  test("entity asUser creates user-scoped pools and evicts by LRU limit", async () => {
+    const originalHost = process.env.DATABRICKS_HOST;
+    process.env.DATABRICKS_HOST = "https://example.cloud.databricks.com";
+    const servicePool = {
+      end: vi.fn(async () => undefined),
+    } as unknown as Pool;
+    const userOnePool = {
+      end: vi.fn(async () => undefined),
+    } as unknown as Pool;
+    const userTwoPool = {
+      end: vi.fn(async () => undefined),
+    } as unknown as Pool;
+    vi.mocked(createLakebasePool)
+      .mockReturnValueOnce(servicePool)
+      .mockReturnValueOnce(userOnePool)
+      .mockReturnValueOnce(userTwoPool);
+    const schema = defineSchema(({ table }) => ({
+      user: table("user", {
+        id: id(),
+        email: text().notNull(),
+      }),
+    }));
+    vi.mocked(loadSchemaByConvention).mockResolvedValue({
+      schema,
+      schemaPath: "/app/config/database/schema.ts",
+    });
+
+    const plugin = createPlugin({ oboPoolMax: 1 });
+    await plugin.setup();
+    const exports = plugin.exports() as unknown as {
+      user: {
+        asUser: (req: import("express").Request) => unknown;
+      };
+    };
+    const reqFor = (email: string, token: string) =>
+      ({
+        header: vi.fn((name: string) => {
+          if (name === "x-forwarded-email") return email;
+          if (name === "x-forwarded-access-token") return token;
+          return undefined;
+        }),
+      }) as unknown as import("express").Request;
+
+    exports.user.asUser(reqFor("one@example.com", "tok-1"));
+    exports.user.asUser(reqFor("two@example.com", "tok-2"));
+
+    expect(createLakebasePool).toHaveBeenCalledTimes(3);
+    expect(createLakebasePool).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        user: "one@example.com",
+        workspaceClient: expect.any(Object),
+      }),
+    );
+    expect(userOnePool.end).toHaveBeenCalled();
+    expect(userTwoPool.end).not.toHaveBeenCalled();
+    if (originalHost === undefined) {
+      delete process.env.DATABRICKS_HOST;
+    } else {
+      process.env.DATABRICKS_HOST = originalHost;
+    }
+  });
+
   test("exports transaction(fn) and sql`` backed by the runtime data path", async () => {
     const schema = defineSchema(({ table }) => ({
       user: table("user", { id: id(), email: text().notNull() }),
