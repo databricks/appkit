@@ -28,7 +28,9 @@ vi.mock("../../../database", async () => {
       update: vi.fn(async () => ({})),
       upsert: vi.fn(async () => ({})),
       delete: vi.fn(async () => undefined),
-      transaction: vi.fn(async (fn: never) => fn as never),
+      transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn({}),
+      ),
       raw: vi.fn(async () => []),
     })),
   };
@@ -93,7 +95,11 @@ describe("DatabasePlugin", () => {
       connectionTimeoutMillis: 3_000,
       maxUses: 1000,
     });
-    expect(plugin.exports()).toEqual({ getPool: expect.any(Function) });
+    expect(plugin.exports()).toMatchObject({
+      getPool: expect.any(Function),
+      transaction: expect.any(Function),
+      sql: expect.any(Function),
+    });
     expect((plugin.exports() as { getPool: () => Pool }).getPool()).toBe(pool);
   });
 
@@ -142,6 +148,34 @@ describe("DatabasePlugin", () => {
     expect(exports.user).toBeDefined();
     // The wiring goes through the SP pool; no Data API URL is required.
     expect(createLakebasePool).toHaveBeenCalled();
+  });
+
+  test("exports transaction(fn) and sql`` backed by the runtime data path", async () => {
+    const schema = defineSchema(({ table }) => ({
+      user: table("user", { id: id(), email: text().notNull() }),
+    }));
+    vi.mocked(loadSchemaByConvention).mockResolvedValue({
+      schema,
+      schemaPath: "/app/config/database/schema.ts",
+    });
+
+    const plugin = createPlugin();
+    await plugin.setup();
+
+    const exports = plugin.exports() as unknown as {
+      transaction: <T>(fn: (tx: unknown) => Promise<T>) => Promise<T>;
+      sql: (
+        strings: TemplateStringsArray,
+        ...values: unknown[]
+      ) => Promise<unknown[]>;
+    };
+    expect(typeof exports.transaction).toBe("function");
+    expect(typeof exports.sql).toBe("function");
+
+    // Round-trip through the stub DataPath wired in createDrizzleDataPath mock
+    // (top of this file). Both should resolve via the stubbed methods.
+    await expect(exports.transaction(async () => 42)).resolves.toBe(42);
+    await expect(exports.sql`select 1`).resolves.toEqual([]);
   });
 
   test("injectRoutes registers entity routes once schema is loaded", async () => {

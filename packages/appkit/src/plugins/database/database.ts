@@ -2,7 +2,7 @@ import type { Pool } from "pg";
 import type { IAppRouter } from "shared";
 import { Plugin, toPlugin } from "@/plugin";
 import { createLakebasePool } from "../../connectors/lakebase";
-import type { Schema } from "../../database";
+import type { DataPath, Schema } from "../../database";
 import { ConfigurationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import type { PluginManifest } from "../../registry";
@@ -13,16 +13,30 @@ import {
   STATEMENT_TIMEOUT_DEFAULT_MS,
 } from "./defaults";
 import type { EntityClient, ExecutorFn } from "./entity-proxy";
-import { wireEntities } from "./entity-wiring";
+import { type UserPoolRegistry, wireEntities } from "./entity-wiring";
 import manifest from "./manifest.json";
 import { RouteGenerator } from "./route-generator";
 import type { HttpAccess, IDatabaseConfig } from "./types";
 
 const logger = createLogger("database");
 
+type TransactionFn<T> = (tx: DataPath) => Promise<T>;
+
 type DatabaseExports = {
-  [entity: string]: EntityClient | (() => Pool);
+  [entity: string]:
+    | EntityClient
+    | (() => Pool)
+    | (<T>(fn: TransactionFn<T>) => Promise<T>)
+    | ((
+        strings: TemplateStringsArray,
+        ...values: unknown[]
+      ) => Promise<unknown[]>);
   getPool: () => Pool;
+  transaction: <T>(fn: TransactionFn<T>) => Promise<T>;
+  sql: (
+    strings: TemplateStringsArray,
+    ...values: unknown[]
+  ) => Promise<unknown[]>;
 };
 
 class DatabasePlugin extends Plugin<IDatabaseConfig> {
@@ -33,6 +47,8 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
   protected schema: Schema | null = null;
   protected schemaPath: string | null = null;
   protected entities: Record<string, EntityClient> = {};
+  protected dataPath: DataPath | null = null;
+  protected userPools: UserPoolRegistry | null = null;
 
   constructor(config: IDatabaseConfig = {}) {
     super(config);
@@ -48,9 +64,8 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
       ...this.config.connection,
     });
     attachSessionDefaults(this.pool, this.config.statementTimeoutMs);
-    if (process.env.APPKIT_DEBUG_POOL || process.env.DEBUG_POOL) {
+    if (process.env.DEBUG_POOL)
       startPoolStatsLog(this.pool, "service-principal");
-    }
     logger.info("Database plugin pool initialized");
 
     try {
@@ -86,29 +101,23 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
       });
 
       this.entities = wired.entities;
+      this.dataPath = wired.dataPath;
+      this.userPools = wired.userPools;
       logger.info(
         "Database entity API wired for: %s",
         Object.keys(this.entities).join(", "),
       );
     } catch (err) {
+      // A throwing schema-load otherwise cascades through Promise.all in core
+      // and crashes every plugin's boot. Decorate the error with the
+      // convention path so the operator can find it, then re-raise unless the
+      // caller opted into tolerant boot.
       const message = err instanceof Error ? err.message : String(err);
       logger.error(
         "Database schema load failed (config/database/schema.ts): %s",
         message,
       );
-      if (!this.config.tolerateSetupFailure) {
-        const stalePool = this.pool;
-        this.pool = null;
-        if (stalePool) {
-          await stalePool.end().catch((endErr) => {
-            logger.error(
-              "Error draining stale pool after schema-load failure: %O",
-              endErr,
-            );
-          });
-        }
-        throw err;
-      }
+      if (!this.config.tolerateSetupFailure) throw err;
     }
   }
 
@@ -142,6 +151,10 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
     const userExports = (): DatabaseExports => ({
       ...userEntities,
       getPool: () => this.requirePool(),
+      transaction: <T>(fn: TransactionFn<T>) =>
+        this.requireDataPath().transaction(fn),
+      sql: (strings, ...values) =>
+        this.requireDataPath().raw(strings, ...values),
     });
 
     return new Proxy(baseProxy, {
@@ -162,11 +175,23 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
     const drains: Array<Promise<void>> = [];
     if (this.pool) {
       logger.info("Closing database pool");
-      const draining = this.pool.end().catch((err) => {
-        logger.error("Error closing database pool: %O", err);
-      });
+      const draining = this.pool
+        .end()
+        .catch((err) => {
+          logger.error("Error closing database pool: %O", err);
+        });
       this.pool = null;
       drains.push(draining);
+    }
+
+    if (this.userPools) {
+      const pools = this.userPools;
+      this.userPools = null;
+      drains.push(
+        pools.closeAll().catch((err) => {
+          logger.error("Error closing per-user database pools: %O", err);
+        }),
+      );
     }
 
     await Promise.all(drains);
@@ -176,7 +201,21 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
     return {
       ...this.entities,
       getPool: () => this.requirePool(),
+      transaction: <T>(fn: TransactionFn<T>) =>
+        this.requireDataPath().transaction(fn),
+      sql: (strings, ...values) =>
+        this.requireDataPath().raw(strings, ...values),
     };
+  }
+
+  protected requireDataPath(): DataPath {
+    if (!this.dataPath) {
+      throw ConfigurationError.resourceNotFound(
+        "Database",
+        "Database runtime not initialized — declare config/database/schema.ts before calling transaction() or sql``.",
+      );
+    }
+    return this.dataPath;
   }
 
   protected requirePool(): Pool {
@@ -203,59 +242,38 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
 export const database = toPlugin(DatabasePlugin);
 
 /**
- * Attach a `connect` listener that sets per-session defaults on
- * every new Postgres session checked out of the pool
- * @param pool
- * @param override
+ * Attach a `connect` listener that sets per-session defaults on every new
+ * Postgres session checked out of the pool: `statement_timeout` (caps runaway
+ * queries even when the client signal is dropped) and `application_name` (so
+ * the connection is attributable in `pg_stat_activity`).
  */
 function attachSessionDefaults(pool: Pool, override?: number): void {
   const ms = override ?? STATEMENT_TIMEOUT_DEFAULT_MS;
-  const applicationName = applicationNameForSession();
   pool.on("connect", (client) => {
-    let destroyed = false;
-    const destroy = (label: string, err: unknown) => {
-      if (destroyed) return;
-      destroyed = true;
-      logger.error(
-        "Failed to set %s on pool connection; destroying client to prevent unguarded use: %O",
-        label,
-        err,
-      );
-      // `release(true)` removes the client from the pool entirely. pg will
-      // build a fresh connection on next acquire and re-fire `connect`.
-      const maybeRelease = (
-        client as unknown as { release?: (destroy?: boolean) => void }
-      ).release;
-      try {
-        maybeRelease?.call(client, true);
-      } catch (releaseErr) {
-        logger.error("Failed to destroy pool client: %O", releaseErr);
-      }
-    };
     client
-      .query(`SET application_name = '${applicationName}'`)
-      .catch((err) => destroy("application_name", err));
+      .query(`SET application_name = '${APPLICATION_NAME}'`)
+      .catch((err) => {
+        logger.error(
+          "Failed to set application_name on pool connection: %O",
+          err,
+        );
+      });
     if (Number.isFinite(ms) && ms > 0) {
-      client
-        .query(`SET statement_timeout = ${Math.floor(ms)}`)
-        .catch((err) => destroy("statement_timeout", err));
+      client.query(`SET statement_timeout = ${Math.floor(ms)}`).catch((err) => {
+        logger.error(
+          "Failed to set statement_timeout on pool connection: %O",
+          err,
+        );
+      });
     }
   });
 }
 
 /**
- * Build a per-session `application_name` string.
+ * When `DEBUG_POOL=1` is set, periodically log the pool's
+ * total/idle/waiting connection counts so operators can observe saturation.
+ * The interval is unrefed so it never blocks shutdown.
  */
-function applicationNameForSession(): string {
-  const appName = process.env.DATABRICKS_APP_NAME;
-  // Sanitize: only allow common identifier characters in the discriminator.
-  const safeAppName = appName?.replace(/[^A-Za-z0-9._-]/g, "_") ?? "";
-  const composed = safeAppName
-    ? `${APPLICATION_NAME}:${safeAppName}`
-    : APPLICATION_NAME;
-  return composed.slice(0, 60);
-}
-
 function startPoolStatsLog(pool: Pool, label: string): void {
   const intervalMs = 30_000;
   const handle = setInterval(() => {
