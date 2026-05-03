@@ -58,6 +58,52 @@ describe("database schema convention loader", () => {
     expect(result?.schema).toBe(schema);
   });
 
+  test("unwraps nested default exports from TS loaders", async () => {
+    const schemaPath = await touch("config/database/schema.ts");
+    const schema = defineSchema(({ table }) => ({
+      user: table("user", { id: id() }),
+    }));
+
+    const result = await loadSchemaByConvention({
+      cwd,
+      importer: vi.fn(async () => ({ default: { default: schema } })),
+    });
+
+    expect(result).toEqual({ schema, schemaPath });
+  });
+
+  test("unwraps three levels of `default` (cjs interop in cjs interop)", async () => {
+    const schemaPath = await touch("config/database/schema.ts");
+    const schema = defineSchema(({ table }) => ({
+      user: table("user", { id: id() }),
+    }));
+
+    const result = await loadSchemaByConvention({
+      cwd,
+      importer: vi.fn(async () => ({
+        default: { default: { default: schema } },
+      })),
+    });
+
+    expect(result).toEqual({ schema, schemaPath });
+  });
+
+  test("rejects schemas wrapped beyond the safety limit (4+ levels)", async () => {
+    await touch("config/database/schema.ts");
+    const schema = defineSchema(({ table }) => ({
+      user: table("user", { id: id() }),
+    }));
+
+    await expect(
+      loadSchemaByConvention({
+        cwd,
+        importer: vi.fn(async () => ({
+          default: { default: { default: { default: schema } } },
+        })),
+      }),
+    ).rejects.toThrow(/defineSchema/);
+  });
+
   test("throws a configuration error for invalid schema modules", async () => {
     await touch("config/database/schema.ts");
 

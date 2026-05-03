@@ -10,6 +10,7 @@ export {
 } from "./diff";
 export { formatDriftResolution } from "./drift-help";
 export { renderSchema } from "./render";
+export { extractSchema, isSchema } from "./schema-loader";
 export { schemaToIntrospection } from "./schema-to-introspection";
 export { mapPostgresType } from "./type-map";
 export type {

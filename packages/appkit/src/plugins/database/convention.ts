@@ -2,13 +2,20 @@ import { access } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Schema } from "../../database";
+import { extractSchema } from "../../database/introspector/schema-loader";
 import { ConfigurationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 
 const logger = createLogger("database:convention");
 
+export { isSchema } from "../../database/introspector/schema-loader";
+
 /**
  * Convention paths for loading the database schema.
+ *
+ * Order matters: dev `.ts` paths win over prod `dist/.../*.js` because in dev
+ * mode both can be present after a recent build, and we always prefer the
+ * source the user is actively editing.
  */
 const CONVENTION_PATHS = [
   "config/database/schema.ts",
@@ -44,16 +51,6 @@ export async function pathExists(filePath: string): Promise<boolean> {
   }
 }
 
-export function isSchema(value: unknown): value is Schema {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "$drizzle" in value &&
-    "$tables" in value &&
-    typeof (value as { $tables?: unknown }).$tables === "object"
-  );
-}
-
 export async function loadSchemaByConvention(
   options: LoadSchemaByConventionOptions = {},
 ): Promise<LoadSchemaResult | null> {
@@ -69,7 +66,7 @@ export async function loadSchemaByConvention(
     const mod = await importer(absolutePath);
     const schema = extractSchema(mod);
 
-    if (!isSchema(schema)) {
+    if (!schema) {
       throw new ConfigurationError(
         `Database schema at ${absolutePath} is not a valid AppKit schema. Export the result of defineSchema(...) as the default export.`,
         { context: { schemaPath: absolutePath } },
@@ -88,12 +85,4 @@ export async function loadSchemaByConvention(
 
 async function defaultImporter(absolutePath: string): Promise<unknown> {
   return import(pathToFileURL(absolutePath).href);
-}
-
-function extractSchema(mod: unknown): unknown {
-  if (isSchema(mod)) return mod;
-  if (typeof mod !== "object" || mod === null) return undefined;
-
-  const exports = mod as { default?: unknown; schema?: unknown };
-  return exports.default ?? exports.schema;
 }
