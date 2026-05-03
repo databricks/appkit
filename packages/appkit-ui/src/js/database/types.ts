@@ -48,7 +48,9 @@ export type DatabaseUpdate<E extends DatabaseEntityKey> =
 
 /** Includes map for entity `E`. Empty object when no relations exist. */
 export type DatabaseIncludes<E extends DatabaseEntityKey> =
-  DatabaseRegistry extends { [K in E]: { includes: infer I } } ? I : {};
+  DatabaseRegistry extends { [K in E]: { includes: infer I } }
+    ? I
+    : Record<string, never>;
 
 /**
  * Operator-style predicate accepted by `.where(...)`. Any bare value is shorthand
@@ -93,8 +95,6 @@ export type IncludeInput<TIncludes> = {
     | true
     | {
         select?: ReadonlyArray<keyof RelatedRow<TIncludes, K>>;
-        limit?: number;
-        order?: OrderInput<RelatedRow<TIncludes, K>>;
       };
 };
 
@@ -114,7 +114,12 @@ export type ApplyIncludes<TIncludes, I> = {
  * HTTP request against `/api/database/<entity>`; the chain methods mutate an
  * internal request descriptor.
  */
-export interface EntityClient<TRow, TInsert, TUpdate, TIncludes = {}> {
+export interface EntityClient<
+  TRow,
+  TInsert,
+  TUpdate,
+  TIncludes = Record<string, never>,
+> {
   where(
     input: WhereInput<TRow>,
   ): EntityClient<TRow, TInsert, TUpdate, TIncludes>;
@@ -128,8 +133,8 @@ export interface EntityClient<TRow, TInsert, TUpdate, TIncludes = {}> {
   ): EntityClient<Pick<TRow, K>, TInsert, TUpdate, TIncludes>;
 
   /**
-   * Eager-load related entities. Serializes `{ posts: true }` into PostgREST
-   * embedding syntax (`select=*,posts(*)`) on the outgoing request.
+   * Eager-load related entities. Serializes `{ posts: true }` into AppKit's
+   * route-owned `?include=posts` query syntax.
    */
   include<I extends IncludeInput<TIncludes>>(
     input: I,

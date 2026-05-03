@@ -61,14 +61,15 @@ describe("createDatabaseClient — list + filters", () => {
     expect(init?.signal).toBeUndefined();
   });
 
-  test(".include({ posts: true }) produces PostgREST embedding", async () => {
+  test(".include({ posts: true }) emits ?include= without touching select", async () => {
     const { db, fetchSpy } = setup([jsonResponse([])]);
     const users = db as unknown as { user: UserClient };
 
     await users.user.include({ posts: true }).toArray();
 
     const [url] = fetchSpy.mock.calls[0] ?? [];
-    expect(url).toContain("select=*%2Cposts%28*%29");
+    expect(url).toContain("include=posts");
+    expect(url).not.toContain("select=");
   });
 
   test("first() returns the first row or null", async () => {

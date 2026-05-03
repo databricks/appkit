@@ -103,6 +103,7 @@ export function createDatabaseClient(
           limit: undefined,
           offset: undefined,
           select: undefined,
+          include: undefined,
         };
         const url = buildUrl(baseUrl, `${entity}/count`, countState);
         const res = await fetchImpl(url, { signal });

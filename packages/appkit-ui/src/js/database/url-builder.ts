@@ -2,7 +2,7 @@ import type { OrderInput, WhereInput } from "./types";
 
 /**
  * Internal request descriptor accumulated by chain methods on `EntityClient`.
- * Each field holds the pre-serialized PostgREST literal — `buildUrl` just
+ * Each field holds the pre-serialized AppKit route literal — `buildUrl` just
  * concatenates them into a `URLSearchParams` string.
  */
 export interface RequestState {
@@ -10,8 +10,10 @@ export interface RequestState {
   order?: string;
   limit?: number;
   offset?: number;
-  /** Either a plain comma list (`"id,email"`) or an include spec (`"*,posts(*)"`). */
+  /** Comma-separated column projection (e.g. `"id,email"`). */
   select?: string;
+  /** Include spec (e.g. `"posts(id,title),author"`) — separate from select. */
+  include?: string;
 }
 
 /** Fresh empty state — used when a new chain is started from `db.<entity>`. */
@@ -74,9 +76,11 @@ export function pushSelect(
 
 /**
  * Serialize an `.include({ posts: true, author: { select: ["id"] } })` input
- * into the PostgREST embedding spec and merge it with any existing select.
- * When `select` already holds a projection, the base `*` is implicit — we keep
- * it so embedded relations can still attach.
+ * into the route layer's `?include=` syntax. Bare `true` keeps the relation
+ * with all default columns; an options bag with `select` projects them.
+ *
+ * Stored separately from `select` so column projection and relation embedding
+ * stay independent and the server can parse each axis cleanly.
  */
 export function pushInclude(
   state: RequestState,
@@ -85,8 +89,6 @@ export function pushInclude(
     | true
     | {
         select?: readonly string[];
-        limit?: number;
-        order?: OrderInput<unknown>;
       }
   >,
 ): RequestState {
@@ -94,15 +96,20 @@ export function pushInclude(
   for (const [rel, spec] of Object.entries(input)) {
     if (spec === undefined) continue;
     if (spec === true) {
-      parts.push(`${rel}(*)`);
+      parts.push(rel);
       continue;
     }
-    const inner = spec.select?.length ? spec.select.join(",") : "*";
-    parts.push(`${rel}(${inner})`);
+    if (spec.select?.length) {
+      parts.push(`${rel}(${spec.select.join(",")})`);
+    } else {
+      parts.push(rel);
+    }
   }
   if (parts.length === 0) return state;
-  const base = state.select && state.select !== "*" ? state.select : "*";
-  return { ...state, select: [base, ...parts].join(",") };
+  const next = state.include
+    ? `${state.include},${parts.join(",")}`
+    : parts.join(",");
+  return { ...state, include: next };
 }
 
 /** Compose the final URL for this entity/state. */
@@ -117,6 +124,7 @@ export function buildUrl(
   if (state.limit !== undefined) params.set("limit", String(state.limit));
   if (state.offset !== undefined) params.set("offset", String(state.offset));
   if (state.select) params.set("select", state.select);
+  if (state.include) params.set("include", state.include);
   const qs = params.toString();
   return `${baseUrl}/${entity}${qs ? `?${qs}` : ""}`;
 }

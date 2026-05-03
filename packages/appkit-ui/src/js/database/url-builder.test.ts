@@ -118,25 +118,27 @@ describe("pushSelect", () => {
 });
 
 describe("pushInclude", () => {
-  test("serializes `{ posts: true }` with star projection", () => {
+  test("serializes `{ posts: true }` as a bare relation name", () => {
     const next = pushInclude(EMPTY_STATE, { posts: true });
 
-    expect(next.select).toBe("*,posts(*)");
+    expect(next.include).toBe("posts");
+    expect(next.select).toBeUndefined();
   });
 
-  test("merges include with existing typed select", () => {
+  test("keeps select and include independent", () => {
     const withSelect = pushSelect(EMPTY_STATE, ["id", "email"]);
     const next = pushInclude(withSelect, { posts: true });
 
-    expect(next.select).toBe("id,email,posts(*)");
+    expect(next.select).toBe("id,email");
+    expect(next.include).toBe("posts");
   });
 
-  test("renders per-relation column list", () => {
+  test("renders per-relation column list with parens", () => {
     const next = pushInclude(EMPTY_STATE, {
       posts: { select: ["id", "title"] },
     });
 
-    expect(next.select).toBe("*,posts(id,title)");
+    expect(next.include).toBe("posts(id,title)");
   });
 
   test("combines multiple relations", () => {
@@ -145,7 +147,7 @@ describe("pushInclude", () => {
       author: { select: ["id"] },
     });
 
-    expect(next.select).toBe("*,posts(*),author(id)");
+    expect(next.include).toBe("posts,author(id)");
   });
 
   test("is a no-op when input is empty", () => {
@@ -176,16 +178,17 @@ describe("buildUrl", () => {
     );
   });
 
-  test("includes order, offset, and select when present", () => {
+  test("includes order, offset, select, and include when present", () => {
     const state: RequestState = {
       filters: [],
       order: "id.desc",
       offset: 20,
-      select: "*,posts(*)",
+      select: "id,email",
+      include: "posts(title),author",
     };
 
     expect(buildUrl("/api/database", "user", state)).toBe(
-      "/api/database/user?order=id.desc&offset=20&select=*%2Cposts%28*%29",
+      "/api/database/user?order=id.desc&offset=20&select=id%2Cemail&include=posts%28title%29%2Cauthor",
     );
   });
 
