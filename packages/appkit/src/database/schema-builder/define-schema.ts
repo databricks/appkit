@@ -76,5 +76,6 @@ export function defineSchema<T extends Record<string, AppKitTable>>(
     $drizzle: schemaInstance,
     $tables: tableMap,
     $migrations: { snapshotHints: undefined },
+    $schemaName: schemaName,
   } as Schema<T>;
 }

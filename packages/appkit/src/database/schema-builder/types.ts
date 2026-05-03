@@ -124,6 +124,13 @@ export type Schema<
   readonly $drizzle: unknown;
   readonly $tables: Record<string, AppKitTable>;
   readonly $migrations: { snapshotHints: unknown };
+  /**
+   * Postgres schema namespace declared via `defineSchema(..., { schemaName })`.
+   * Consumed by the database plugin (route/postgrest layer) and the
+   * introspector so downstream code never has to re-configure what the schema
+   * already knows about itself.
+   */
+  readonly $schemaName: string;
 };
 
 /**
