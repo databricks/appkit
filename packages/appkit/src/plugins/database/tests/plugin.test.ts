@@ -1,13 +1,38 @@
 import type { Pool } from "pg";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { createLakebasePool } from "../../../connectors/lakebase";
-import { defineSchema, id } from "../../../database";
+import { defineSchema, id, text } from "../../../database";
 import { loadSchemaByConvention } from "../convention";
 import { database } from "../database";
 
 vi.mock("../../../connectors/lakebase", () => ({
   createLakebasePool: vi.fn(),
+  createLakebasePostgrestClient: vi.fn(),
 }));
+
+vi.mock("../../../database", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../../database")>(
+      "../../../database",
+    );
+  return {
+    ...actual,
+    // The runtime is exercised by entity-proxy tests with a fake DataPath;
+    // here we only care that the plugin wires *something* per entity, so we
+    // stub the runtime to avoid initialising drizzle + node-postgres.
+    createDrizzleDataPath: vi.fn(() => ({
+      select: vi.fn(async () => []),
+      findOne: vi.fn(async () => null),
+      count: vi.fn(async () => 0),
+      insert: vi.fn(async () => ({})),
+      update: vi.fn(async () => ({})),
+      upsert: vi.fn(async () => ({})),
+      delete: vi.fn(async () => undefined),
+      transaction: vi.fn(async (fn: never) => fn as never),
+      raw: vi.fn(async () => []),
+    })),
+  };
+});
 
 vi.mock("../../../cache", () => ({
   CacheManager: {
@@ -92,6 +117,71 @@ describe("DatabasePlugin", () => {
       (plugin as unknown as { schema: typeof schema; schemaPath: string })
         .schemaPath,
     ).toBe("/app/config/database/schema.ts");
+  });
+
+  test("wires one entity client per schema table on the SP pool", async () => {
+    const schema = defineSchema(({ table }) => ({
+      user: table("user", {
+        id: id(),
+        email: text().notNull(),
+      }),
+    }));
+    vi.mocked(loadSchemaByConvention).mockResolvedValue({
+      schema,
+      schemaPath: "/app/config/database/schema.ts",
+    });
+
+    const plugin = createPlugin();
+    await plugin.setup();
+
+    const exports = plugin.exports() as unknown as {
+      getPool: () => Pool;
+      user: unknown;
+    };
+    expect(exports.getPool()).toBe(pool);
+    expect(exports.user).toBeDefined();
+    // The wiring goes through the SP pool; no Data API URL is required.
+    expect(createLakebasePool).toHaveBeenCalled();
+  });
+
+  test("injectRoutes registers entity routes once schema is loaded", async () => {
+    const schema = defineSchema(({ table }) => ({
+      user: table("user", {
+        id: id(),
+        email: text().notNull(),
+      }),
+    }));
+    vi.mocked(loadSchemaByConvention).mockResolvedValue({
+      schema,
+      schemaPath: "/app/config/database/schema.ts",
+    });
+
+    const plugin = createPlugin();
+    await plugin.setup();
+
+    const router = {
+      get: vi.fn(),
+      post: vi.fn(),
+      patch: vi.fn(),
+      delete: vi.fn(),
+    };
+    plugin.injectRoutes(router as never);
+
+    expect(router.get).toHaveBeenCalledWith("/user", expect.any(Function));
+    expect(router.get).toHaveBeenCalledWith(
+      "/user/count",
+      expect.any(Function),
+    );
+    expect(router.get).toHaveBeenCalledWith("/user/:id", expect.any(Function));
+    expect(router.post).toHaveBeenCalledWith("/user", expect.any(Function));
+    expect(router.patch).toHaveBeenCalledWith(
+      "/user/:id",
+      expect.any(Function),
+    );
+    expect(router.delete).toHaveBeenCalledWith(
+      "/user/:id",
+      expect.any(Function),
+    );
   });
 
   test("closes the pool during shutdown", async () => {

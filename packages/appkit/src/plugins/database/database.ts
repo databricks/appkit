@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import type { IAppRouter } from "shared";
 import { Plugin, toPlugin } from "@/plugin";
 import { createLakebasePool } from "../../connectors/lakebase";
 import type { Schema } from "../../database";
@@ -11,10 +12,18 @@ import {
   POOL_DEFAULTS,
   STATEMENT_TIMEOUT_DEFAULT_MS,
 } from "./defaults";
+import type { EntityClient, ExecutorFn } from "./entity-proxy";
+import { wireEntities } from "./entity-wiring";
 import manifest from "./manifest.json";
-import type { IDatabaseConfig } from "./types";
+import { RouteGenerator } from "./route-generator";
+import type { HttpAccess, IDatabaseConfig } from "./types";
 
 const logger = createLogger("database");
+
+type DatabaseExports = {
+  [entity: string]: EntityClient | (() => Pool);
+  getPool: () => Pool;
+};
 
 class DatabasePlugin extends Plugin<IDatabaseConfig> {
   static manifest = manifest as PluginManifest<"database">;
@@ -23,6 +32,7 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
   protected pool: Pool | null = null;
   protected schema: Schema | null = null;
   protected schemaPath: string | null = null;
+  protected entities: Record<string, EntityClient> = {};
 
   constructor(config: IDatabaseConfig = {}) {
     super(config);
@@ -30,6 +40,9 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
   }
 
   async setup() {
+    // Service-principal pool. Same factory the standalone `lakebase` plugin
+    // uses — Lakebase OAuth refresh is built in. Dev = current user OAuth,
+    // prod = SP OAuth, both transparent.
     this.pool = createLakebasePool({
       ...POOL_DEFAULTS,
       ...this.config.connection,
@@ -44,7 +57,7 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
       const loaded = await loadSchemaByConvention();
       if (!loaded) {
         logger.warn(
-          "Database plugin did not find config/database/schema.ts, using empty schema",
+          "Database plugin did not find config/database/schema.ts; running with no entities",
         );
         return;
       }
@@ -55,6 +68,27 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
         "Database schema loaded from %s with %d entries",
         loaded.schemaPath,
         Object.keys(loaded.schema.$tables).length,
+      );
+
+      // Wiring builds an EntityClient per table on top of the SP pool, plus a
+      // per-user pool registry used by `EntityClient.asUser(req)` for OBO.
+      const executor: ExecutorFn = async (fn, options) => {
+        const result = await this.execute(fn, options);
+        if (!result.ok) throw new Error(result.message);
+        return result.data;
+      };
+
+      const wired = wireEntities({
+        schema: this.schema,
+        config: this.config,
+        servicePool: this.pool,
+        executor,
+      });
+
+      this.entities = wired.entities;
+      logger.info(
+        "Database entity API wired for: %s",
+        Object.keys(this.entities).join(", "),
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -78,22 +112,69 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
     }
   }
 
-  async abortActiveOperations(): Promise<void> {
-    super.abortActiveOperations();
-    if (!this.pool) return;
+  injectRoutes(router: IAppRouter): void {
+    if (!this.schema) return;
 
-    logger.info("Closing database pool");
-    const draining = this.pool.end();
-    this.pool = null;
-    try {
-      await draining;
-    } catch (err) {
-      logger.error("Error closing database pool: %O", err);
-    }
+    new RouteGenerator({
+      schema: this.schema,
+      config: this.config,
+      getSurface: (req, access) => this.getSurface(req, access),
+      route: (target, config) => this.route(target, config),
+    }).injectAll(router);
   }
 
-  exports() {
+  asUser(req: import("express").Request): this {
+    const baseProxy = super.asUser(req);
+
+    // Dev fallback: when no OBO header is present and we're in dev, return
+    // the SP-backed proxy so the dev loop stays unbroken. Mirrors the entity
+    // client's own asUser fallback.
+    const email = req.header("x-forwarded-email");
+    if (!email && process.env.NODE_ENV === "development") {
+      return baseProxy;
+    }
+
+    const userEntities: Record<string, EntityClient> = {};
+    for (const [name, client] of Object.entries(this.entities)) {
+      userEntities[name] = client.asUser(req);
+    }
+
+    const userExports = (): DatabaseExports => ({
+      ...userEntities,
+      getPool: () => this.requirePool(),
+    });
+
+    return new Proxy(baseProxy, {
+      get: (target, prop, receiver) => {
+        if (prop === "exports") return userExports;
+        if (typeof prop === "string" && prop in userEntities) {
+          return userEntities[prop];
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    }) as this;
+  }
+
+  async abortActiveOperations(): Promise<void> {
+    super.abortActiveOperations();
+
+    // Drain the SP pool first, then any per-user pools built by asUser().
+    const drains: Array<Promise<void>> = [];
+    if (this.pool) {
+      logger.info("Closing database pool");
+      const draining = this.pool.end().catch((err) => {
+        logger.error("Error closing database pool: %O", err);
+      });
+      this.pool = null;
+      drains.push(draining);
+    }
+
+    await Promise.all(drains);
+  }
+
+  exports(): DatabaseExports {
     return {
+      ...this.entities,
       getPool: () => this.requirePool(),
     };
   }
@@ -106,6 +187,16 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
       );
     }
     return this.pool;
+  }
+
+  private getSurface(
+    req: import("express").Request,
+    access: HttpAccess,
+  ): Record<string, EntityClient> {
+    if (access === "obo") {
+      return this.asUser(req).exports() as Record<string, EntityClient>;
+    }
+    return this.exports() as Record<string, EntityClient>;
   }
 }
 
