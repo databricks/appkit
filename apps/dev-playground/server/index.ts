@@ -11,7 +11,12 @@ import {
   serving,
   WRITE_ACTIONS,
 } from "@databricks/appkit";
-import { agents, createAgent, tool } from "@databricks/appkit/beta";
+import {
+  agents,
+  createAgent,
+  database,
+  tool,
+} from "@databricks/appkit/beta";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import { z } from "zod";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
@@ -343,6 +348,7 @@ createApp({
     reconnect(),
     telemetryExamples(),
     analytics({}),
+    database(),
     genie({
       spaces: { demo: process.env.DATABRICKS_GENIE_SPACE_ID ?? "placeholder" },
     }),

@@ -71,6 +71,13 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         icon: DatabaseIcon,
       },
       {
+        to: "/database",
+        label: "Database",
+        description:
+          "Typed db client with schema-first introspection, RLS, and CRUD scaffolding.",
+        icon: LayoutDashboardIcon,
+      },
+      {
         to: "/sql-helpers",
         label: "SQL Helpers",
         description:

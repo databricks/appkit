@@ -1,4 +1,5 @@
 import path from "node:path";
+import { appKitDatabaseTypesPlugin } from "@databricks/appkit";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
@@ -11,6 +12,7 @@ export default defineConfig({
       target: "react",
       autoCodeSplitting: process.env.NODE_ENV !== "development",
     }),
+    appKitDatabaseTypesPlugin(),
   ],
   server: {
     hmr: {
