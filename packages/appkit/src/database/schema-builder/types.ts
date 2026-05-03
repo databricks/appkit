@@ -16,6 +16,7 @@ export const APPKIT_TABLE = Symbol.for("appkit.database.table");
  */
 export interface ColumnMeta {
   serverGenerated?: boolean;
+  primaryKey?: boolean;
   /** @internal */
   tableName?: string;
   /** @internal */
