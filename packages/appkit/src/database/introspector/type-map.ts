@@ -1,20 +1,26 @@
 /**
  * Maps a Postgres catalog type to the AppKit column helper used by the renderer.
  *
- * `id()` is only emitted for generated int4 primary keys because it represents a
- * serial int4 PK. Generated non-PK columns and int8 identities must keep their
- * scalar helper or the generated schema changes shape.
+ * `id()` and `bigid()` are shortcuts for auto-incrementing primary keys
+ * (Postgres `serial`/`bigserial` or equivalent identity columns). They are
+ * only emitted when both `serverGenerated` AND `isPrimaryKey` are true so we
+ * don't mis-render a generated-but-not-PK column or a non-generated PK.
+ *
+ * The `isIdShortcut: true` flag tells the renderer to skip the usual
+ * `.notNull().primaryKey().default(...)` chain because the helper already
+ * encodes all of that.
  */
 export function mapPostgresType(
   pgType: string,
   options: { serverGenerated?: boolean; isPrimaryKey?: boolean } = {},
 ): { helper: string; isIdShortcut: boolean } {
-  if (
-    options.serverGenerated &&
-    options.isPrimaryKey &&
-    (pgType === "int4" || pgType === "serial")
-  ) {
-    return { helper: "id()", isIdShortcut: true };
+  if (options.serverGenerated && options.isPrimaryKey) {
+    if (pgType === "int4" || pgType === "serial") {
+      return { helper: "id()", isIdShortcut: true };
+    }
+    if (pgType === "int8" || pgType === "bigserial") {
+      return { helper: "bigid()", isIdShortcut: true };
+    }
   }
 
   switch (pgType) {

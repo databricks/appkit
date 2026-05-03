@@ -49,12 +49,16 @@ function adaptColumn(
     hasDefault: column.hasDefault,
   };
 
-  if (column.default !== undefined)
-    adapted.defaultExpression = String(column.default);
+  if (column.default !== undefined) {
+    adapted.defaultExpression = stringifyDefault(column.default);
+  }
   if (column.primary) adapted.isPrimaryKey = true;
   if (
     meta?.serverGenerated ||
-    (column.hasDefault && column.columnType === "PgSerial")
+    (column.hasDefault &&
+      (column.columnType === "PgSerial" ||
+        column.columnType === "PgBigSerial53" ||
+        column.columnType === "PgBigSerial64"))
   ) {
     adapted.serverGenerated = true;
   }
@@ -75,7 +79,33 @@ function adaptColumn(
   return adapted;
 }
 
-/** Convert a Drizzle column type to a Postgres type. */
+function stringifyDefault(value: unknown): string {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    Array.isArray((value as { queryChunks?: unknown }).queryChunks)
+  ) {
+    const chunks = (value as { queryChunks: Array<{ value?: unknown }> })
+      .queryChunks;
+    return chunks
+      .map((chunk) => {
+        if (Array.isArray(chunk.value)) return chunk.value.join("");
+        return chunk.value === undefined ? String(chunk) : String(chunk.value);
+      })
+      .join("");
+  }
+
+  return String(value);
+}
+
+/**
+ * Convert a Drizzle column type to a Postgres `udt_name` value.
+ *
+ * Postgres returns `int4` for `serial` and `int8` for `bigserial` from
+ * `information_schema.columns.udt_name`, so we collapse the auto-incrementing
+ * and plain-integer Drizzle types to the same wire type. The `serverGenerated`
+ * flag tracks the sequence-vs-no-sequence distinction separately.
+ */
 function drizzleTypeToPgType(column: DrizzleColumn): string {
   switch (column.columnType) {
     case "PgSerial":
@@ -83,6 +113,8 @@ function drizzleTypeToPgType(column: DrizzleColumn): string {
       return "int4";
     case "PgBigInt":
     case "PgBigInt53":
+    case "PgBigSerial53":
+    case "PgBigSerial64":
       return "int8";
     case "PgText":
       return "text";

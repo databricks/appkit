@@ -177,6 +177,40 @@ describe("renderSchema", () => {
     ).toThrow(/multiple database schemas/i);
   });
 
+  test("emits bigid() for server-generated int8 primary keys", () => {
+    const out = renderSchema({
+      schemas: ["public"],
+      tables: [
+        {
+          schema: "public",
+          name: "messages",
+          policies: [],
+          columns: [
+            {
+              name: "id",
+              pgType: "int8",
+              nullable: false,
+              hasDefault: true,
+              isPrimaryKey: true,
+              serverGenerated: true,
+              defaultExpression: "nextval('messages_id_seq'::regclass)",
+            },
+            {
+              name: "content",
+              pgType: "text",
+              nullable: false,
+              hasDefault: false,
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(out).toContain("id: bigid()");
+    // Crucial: the import line must include bigid so the rendered file compiles
+    expect(out).toContain("bigid,");
+  });
+
   test("keeps self-references compileable with a TODO column", () => {
     const out = renderSchema({
       schemas: ["app"],

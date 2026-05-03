@@ -36,7 +36,7 @@ export function diffIntrospections(
       entries.push({
         severity: "warn",
         kind: "live-only",
-        message: `+ table ${key} (exists in db, missing in schema.ts)`,
+        message: `table ${key} (exists in db, missing in schema.ts)`,
       });
       continue;
     }
@@ -48,7 +48,7 @@ export function diffIntrospections(
       entries.push({
         severity: "warn",
         kind: "schema-only",
-        message: `- table ${key} (in schema.ts, missing in db)`,
+        message: `table ${key} (in schema.ts, missing in db)`,
       });
     }
   }
@@ -72,7 +72,7 @@ function diffColumns(
       entries.push({
         severity: "warn",
         kind: "live-only",
-        message: `+ column ${key}.${name} (in db, missing in schema.ts)`,
+        message: `column ${key}.${name} (in db, missing in schema.ts)`,
       });
       continue;
     }
@@ -81,7 +81,7 @@ function diffColumns(
       entries.push({
         severity: "warn",
         kind: "type-mismatch",
-        message: `~ column ${key}.${name} (${declaredCol.pgType} declared, ${liveCol.pgType} in db)`,
+        message: `column ${key}.${name} (${declaredCol.pgType} declared, ${liveCol.pgType} in db)`,
       });
     }
     diffColumnMetadata(key, name, liveCol, declaredCol, entries);
@@ -92,7 +92,7 @@ function diffColumns(
       entries.push({
         severity: "warn",
         kind: "schema-only",
-        message: `- column ${key}.${name} (in schema.ts, missing in db)`,
+        message: `column ${key}.${name} (in schema.ts, missing in db)`,
       });
     }
   }
@@ -109,6 +109,13 @@ function tableKey(table: Pick<IntrospectedTable, "schema" | "name">): string {
  * Runtime writes and migrations depend on nullability, defaults, keys,
  * generated columns, and FK actions, so drift detection must compare the
  * metadata captured by introspection instead of stopping at `pgType`.
+ *
+ * Server-generated columns get special treatment: when both sides agree the
+ * column is server-generated, we skip `hasDefault` and `defaultExpression`
+ * comparisons because the live DB stores the literal `nextval(...)` /
+ * `GENERATED AS IDENTITY` expression while the schema models the same fact
+ * as `serverGenerated: true` metadata. Comparing them would produce noise on
+ * every introspect → verify roundtrip for serial / bigserial / identity PKs.
  */
 function diffColumnMetadata(
   table: string,
@@ -125,22 +132,28 @@ function diffColumnMetadata(
     declared.nullable,
     entries,
   );
-  compareField(
-    table,
-    column,
-    "hasDefault",
-    live.hasDefault,
-    declared.hasDefault,
-    entries,
-  );
-  compareField(
-    table,
-    column,
-    "defaultExpression",
-    live.defaultExpression,
-    declared.defaultExpression,
-    entries,
-  );
+
+  const bothServerGenerated =
+    Boolean(live.serverGenerated) && Boolean(declared.serverGenerated);
+  if (!bothServerGenerated) {
+    compareField(
+      table,
+      column,
+      "hasDefault",
+      live.hasDefault,
+      declared.hasDefault,
+      entries,
+    );
+    compareField(
+      table,
+      column,
+      "defaultExpression",
+      normalizeDefaultExpression(live.defaultExpression),
+      normalizeDefaultExpression(declared.defaultExpression),
+      entries,
+    );
+  }
+
   compareField(
     table,
     column,
@@ -149,14 +162,16 @@ function diffColumnMetadata(
     Boolean(declared.isPrimaryKey),
     entries,
   );
-  compareField(
-    table,
-    column,
-    "serverGenerated",
-    Boolean(live.serverGenerated),
-    Boolean(declared.serverGenerated),
-    entries,
-  );
+  if (live.isPrimaryKey || declared.isPrimaryKey) {
+    compareField(
+      table,
+      column,
+      "serverGenerated",
+      Boolean(live.serverGenerated),
+      Boolean(declared.serverGenerated),
+      entries,
+    );
+  }
 
   const liveRef = normalizeReference(live.references);
   const declaredRef = normalizeReference(declared.references);
@@ -164,7 +179,7 @@ function diffColumnMetadata(
     entries.push({
       severity: "warn",
       kind: "type-mismatch",
-      message: `~ column ${table}.${column} foreign key (${declaredRef} declared, ${liveRef} in db)`,
+      message: `column ${table}.${column} foreign key (${declaredRef} declared, ${liveRef} in db)`,
     });
   }
 }
@@ -182,7 +197,7 @@ function compareField(
   entries.push({
     severity: "warn",
     kind: "type-mismatch",
-    message: `~ column ${table}.${column} ${field} (${formatValue(
+    message: `column ${table}.${column} ${field} (${formatValue(
       declared,
     )} declared, ${formatValue(live)} in db)`,
   });
@@ -206,3 +221,34 @@ function normalizeReference(
 function formatValue(value: unknown): string {
   return value === undefined ? "undefined" : JSON.stringify(value);
 }
+
+/**
+ * Strip the trivial `'literal'::type` cast Postgres emits around quoted
+ * string defaults so that `'member'::text` (live) compares equal to `member`
+ * (declared). Also unescapes `''` -> `'` inside the literal.
+ *
+ * Deliberately conservative:
+ *   - Matches a SINGLE quoted literal followed by a single `::type` cast.
+ *   - Does NOT touch expressions that contain `||`, function calls, or
+ *     additional casts — those are kept verbatim and compared as-is so we
+ *     don't claim equality between two non-trivially-different expressions
+ *     and silently miss real drift. Example: `'foo'::text || 'bar'::text`
+ *     and `'foobar'` stay distinct.
+ */
+function normalizeDefaultExpression(
+  value: string | undefined,
+): string | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  const castedString = SIMPLE_CAST_LITERAL.exec(trimmed);
+  if (castedString) return castedString[1].replaceAll("''", "'");
+  return trimmed;
+}
+
+/**
+ * Matches `'literal'::type` where the literal is a single quoted string with
+ * `''` escaping and the type is a simple identifier (no parens, no `||`,
+ * no further casts).
+ */
+const SIMPLE_CAST_LITERAL =
+  /^'((?:[^']|'')*)'::[a-zA-Z_][\w]*(?:\s*\(\s*\d+\s*\))?$/;

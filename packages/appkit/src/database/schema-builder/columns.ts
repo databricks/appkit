@@ -1,5 +1,6 @@
 import {
   bigint as pgBigint,
+  bigserial as pgBigserial,
   boolean as pgBoolean,
   pgEnum,
   integer as pgInteger,
@@ -80,14 +81,31 @@ function wrap(builder: unknown, meta: ColumnMeta = {}): AppKitColumnChain {
 }
 
 /**
- * Create a primary key column with a serial type.
- * @returns The wrapped column chain.
+ * Create an int4 (serial) primary-key column.
+ *
+ * Maps to Postgres `serial` (4-byte integer with an attached sequence). Use
+ * `bigid()` for tables that need more than ~2 billion rows or that mirror an
+ * existing `bigserial` column from a brownfield database.
  */
 export function id(): AppKitColumnChain {
   return wrap(serial().primaryKey(), {
     serverGenerated: true,
     primaryKey: true,
     pgKind: "serial",
+  });
+}
+
+/**
+ * Create an int8 (bigserial) primary-key column.
+ *
+ * Maps to Postgres `bigserial` (8-byte integer with an attached sequence).
+ * `appkit db introspect` emits this for live `bigserial`/`int8 + nextval()`
+ * primary keys so the round-trip stays drift-free.
+ */
+export function bigid(): AppKitColumnChain {
+  return wrap(pgBigserial({ mode: "number" }).primaryKey(), {
+    serverGenerated: true,
+    primaryKey: true,
   });
 }
 

@@ -1,4 +1,5 @@
 export {
+  bigid,
   bigint,
   boolean,
   enumColumn,

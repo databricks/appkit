@@ -16,7 +16,7 @@ describe("mapPostgresType", () => {
     expect(mapPostgresType(pgType, { serverGenerated }).helper).toBe(expected);
   });
 
-  test("uses id() for server-generated integer primary keys", () => {
+  test("uses id() for server-generated int4 primary keys", () => {
     expect(
       mapPostgresType("int4", { serverGenerated: true, isPrimaryKey: true }),
     ).toEqual({
@@ -25,14 +25,31 @@ describe("mapPostgresType", () => {
     });
   });
 
+  test("uses bigid() for server-generated int8 primary keys", () => {
+    expect(
+      mapPostgresType("int8", { serverGenerated: true, isPrimaryKey: true }),
+    ).toEqual({
+      helper: "bigid()",
+      isIdShortcut: true,
+    });
+    expect(
+      mapPostgresType("bigserial", {
+        serverGenerated: true,
+        isPrimaryKey: true,
+      }),
+    ).toEqual({
+      helper: "bigid()",
+      isIdShortcut: true,
+    });
+  });
+
   test("does not turn non-primary generated integers into id columns", () => {
     expect(mapPostgresType("int4", { serverGenerated: true }).helper).toBe(
       "integer()",
     );
-    expect(
-      mapPostgresType("int8", { serverGenerated: true, isPrimaryKey: true })
-        .helper,
-    ).toBe("bigint()");
+    expect(mapPostgresType("int8", { serverGenerated: true }).helper).toBe(
+      "bigint()",
+    );
   });
 
   test("keeps unknown types visible for manual cleanup", () => {
