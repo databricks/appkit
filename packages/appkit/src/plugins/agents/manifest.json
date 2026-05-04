@@ -12,12 +12,12 @@
         "type": "serving_endpoint",
         "alias": "Model Serving (agents)",
         "resourceKey": "agents-serving-endpoint",
-        "description": "Databricks Model Serving endpoint for agents using workspace-hosted models (`DatabricksAdapter.fromModelServing`). Wire the same endpoint name AppKit reads from `DATABRICKS_AGENT_ENDPOINT` when no per-agent model is configured. Omit when agents use only external adapters.",
+        "description": "Databricks Model Serving endpoint for agents using workspace-hosted models (`DatabricksAdapter.fromModelServing`). Wire the same endpoint name AppKit reads from `DATABRICKS_SERVING_ENDPOINT_NAME` when no per-agent model is configured. The same env var the `serving` plugin reads — one value covers both. Omit when agents use only external adapters.",
         "permission": "CAN_QUERY",
         "fields": {
           "name": {
-            "env": "DATABRICKS_AGENT_ENDPOINT",
-            "description": "Endpoint name passed to Model Serving when agents default to `DatabricksAdapter.fromModelServing()`"
+            "env": "DATABRICKS_SERVING_ENDPOINT_NAME",
+            "description": "Endpoint name passed to Model Serving when agents default to `DatabricksAdapter.fromModelServing()`. Shared with the `serving` plugin."
           }
         }
       }
