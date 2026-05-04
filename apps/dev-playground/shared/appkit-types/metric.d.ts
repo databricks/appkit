@@ -7,14 +7,66 @@ declare module "@databricks/appkit-ui/react" {
       key: "revenue";
       source: "appkit_demo.public.revenue_metrics";
       lane: "sp";
-      measures: Record<string, never>;
-      dimensions: Record<string, never>;
-      measureKeys: never;
-      dimensionKeys: never;
-      timeGrains: never;
+      measures: {
+      /** @sqlType double */
+      "mrr": number;
+      /** @sqlType double */
+      "arr": number;
+      /** @sqlType double */
+      "new_arr": number;
+      /** @sqlType double */
+      "churned_arr": number;
+    };
+      dimensions: {
+      /** @sqlType string */
+      "region": string;
+      /** @sqlType string */
+      "segment": string;
+      /** @sqlType timestamp_ltz @timeGrain day|hour|minute|month|quarter|week|year */
+      "created_at": string;
+    };
+      measureKeys: "mrr" | "arr" | "new_arr" | "churned_arr";
+      dimensionKeys: "region" | "segment" | "created_at";
+      timeGrains: "day" | "hour" | "minute" | "month" | "quarter" | "week" | "year";
       metadata: {
-        measures: Record<string, never>;
-        dimensions: Record<string, never>;
+        measures: {
+      "mrr": {
+        type: "double";
+        display_name: "Monthly Recurring Revenue";
+        format: "$#,##0.00";
+      };
+      "arr": {
+        type: "double";
+        display_name: "Annual Recurring Revenue";
+        format: "$#,##0.00";
+        description: "Annualized contract value across all active subscriptions";
+      };
+      "new_arr": {
+        type: "double";
+        display_name: "New ARR";
+        format: "$#,##0.00";
+      };
+      "churned_arr": {
+        type: "double";
+        display_name: "Churned ARR";
+        format: "$#,##0.00";
+      };
+    };
+        dimensions: {
+      "region": {
+        type: "string";
+        display_name: "Region";
+      };
+      "segment": {
+        type: "string";
+        display_name: "Customer Segment";
+      };
+      "created_at": {
+        type: "timestamp_ltz";
+        display_name: "Subscription Start";
+        time_grain: readonly ["day", "hour", "minute", "month", "quarter", "week", "year"];
+      };
+    };
       };
     };
     "customer_metrics": {
@@ -45,6 +97,7 @@ declare module "@databricks/appkit-ui/react" {
       "active_accounts": {
         type: "bigint";
         display_name: "Active Accounts";
+        format: "#,##0";
       };
       "churn_rate": {
         type: "decimal";
@@ -53,6 +106,7 @@ declare module "@databricks/appkit-ui/react" {
       "avg_ltv": {
         type: "double";
         display_name: "Average LTV";
+        format: "$#,##0.00";
       };
     };
         dimensions: {
