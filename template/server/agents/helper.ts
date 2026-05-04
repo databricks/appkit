@@ -1,5 +1,5 @@
 {{if .plugins.agents -}}
-import { createAgent, tool } from '@databricks/appkit';
+import { createAgent, tool } from '@databricks/appkit/beta';
 import { z } from 'zod';
 
 /**

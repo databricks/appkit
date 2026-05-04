@@ -1,19 +1,16 @@
 import "reflect-metadata";
 import {
-  agents,
   analytics,
-  createAgent,
   createApp,
   type FilePolicy,
   files,
-  fromPlugin,
   genie,
   PolicyDeniedError,
   server,
   serving,
-  tool,
   WRITE_ACTIONS,
 } from "@databricks/appkit";
+import { agents, createAgent, fromPlugin, tool } from "@databricks/appkit/beta";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import { z } from "zod";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
