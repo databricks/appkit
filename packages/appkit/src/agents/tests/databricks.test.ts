@@ -595,8 +595,8 @@ describe("DatabricksAdapter.fromModelServing", () => {
     process.env = originalEnv;
   });
 
-  test("reads endpoint from DATABRICKS_AGENT_ENDPOINT env var", async () => {
-    process.env.DATABRICKS_AGENT_ENDPOINT = "my-model";
+  test("reads endpoint from DATABRICKS_SERVING_ENDPOINT_NAME env var", async () => {
+    process.env.DATABRICKS_SERVING_ENDPOINT_NAME = "my-model";
 
     vi.mock("@databricks/sdk-experimental", () => ({
       WorkspaceClient: vi.fn().mockImplementation(() => ({
@@ -609,7 +609,7 @@ describe("DatabricksAdapter.fromModelServing", () => {
   });
 
   test("throws when no endpoint name and no env var", async () => {
-    delete process.env.DATABRICKS_AGENT_ENDPOINT;
+    delete process.env.DATABRICKS_SERVING_ENDPOINT_NAME;
 
     await expect(DatabricksAdapter.fromModelServing()).rejects.toThrow(
       "No endpoint name provided",
@@ -617,7 +617,7 @@ describe("DatabricksAdapter.fromModelServing", () => {
   });
 
   test("explicit endpoint name takes precedence over env var", async () => {
-    process.env.DATABRICKS_AGENT_ENDPOINT = "env-model";
+    process.env.DATABRICKS_SERVING_ENDPOINT_NAME = "env-model";
 
     const apiClient = {
       request: vi.fn().mockResolvedValue({
