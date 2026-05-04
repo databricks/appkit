@@ -68,18 +68,50 @@ describe("checkDrift", () => {
     expect(report.entries[0]?.message).toContain("audit_log");
   });
 
-  test("throws in production when drift is detected", async () => {
+  test("throws in production on fatal drift (schema-only/type-mismatch)", async () => {
     await expect(
       checkDrift({
         pool: {} as Pool,
         schema: declared,
         nodeEnv: "production",
-        introspectFn: async () =>
-          liveSnapshot([
-            { schema: "app", name: "audit_log", policies: [], columns: [] },
-          ]),
+        introspectFn: async () => ({
+          schemas: ["app"],
+          tables: [
+            {
+              schema: "app",
+              name: "user",
+              policies: [],
+              // Drop the `email` column live so declared has it but db doesn't.
+              columns: [
+                {
+                  name: "id",
+                  pgType: "int4",
+                  nullable: false,
+                  hasDefault: true,
+                  isPrimaryKey: true,
+                  serverGenerated: true,
+                },
+              ],
+            },
+          ],
+        }),
       }),
     ).rejects.toThrow(ConfigurationError);
+  });
+
+  test("does not throw in production when drift is purely additive (live-only)", async () => {
+    const report = await checkDrift({
+      pool: {} as Pool,
+      schema: declared,
+      nodeEnv: "production",
+      introspectFn: async () =>
+        liveSnapshot([
+          { schema: "app", name: "audit_log", policies: [], columns: [] },
+        ]),
+    });
+
+    expect(report.hasDrift).toBe(true);
+    expect(report.entries.every((e) => e.kind === "live-only")).toBe(true);
   });
 
   test("skips the live check when disabled", async () => {
