@@ -407,6 +407,12 @@ export function makeMetricRequestSchema(
   const baseDimensionSchema = z
     .string()
     .min(1, { message: "dimension name cannot be empty" });
+  // When the metric has no registered dimensions (a measure-only KPI),
+  // `dimensions` must be empty/omitted: any non-empty entry is rejected.
+  // This closes the previous fall-open path (where empty `knownDimensions`
+  // skipped the allowlist refinement) without blocking the legitimate
+  // measure-only case — `dimensions: undefined` and `dimensions: []` still
+  // pass the surrounding `.optional()` and `.min(0)` shape.
   const dimensionItemSchema =
     knownDimensions.length > 0
       ? baseDimensionSchema.refine(
@@ -415,7 +421,7 @@ export function makeMetricRequestSchema(
             message: `dimension must be one of: ${knownDimensions.join(", ")}`,
           },
         )
-      : baseDimensionSchema;
+      : (z.never() as unknown as z.ZodType<string>);
 
   // Aggregate the union of grains the metric view supports. Empty union means
   // no time-typed dimensions are declared — `timeGrain` cannot be set.
@@ -646,10 +652,18 @@ function validateFilterTree(
   // the registry-aware constraints.
   const predicate = node as MetricPredicate;
 
-  if (
-    registry.knownDimensions.length > 0 &&
-    !registry.knownDimensions.includes(predicate.member)
-  ) {
+  if (registry.knownDimensions.length === 0) {
+    // The metric has no registered dimensions (measure-only KPI) — any
+    // filter predicate references a member that cannot exist. Reject
+    // rather than fall open. This complements the validator-level
+    // dimensionItemSchema tightening: filter and dimensions are both
+    // gated by the same registry signal.
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [...path, "member"],
+      message: `filter member "${predicate.member}" is not a declared dimension`,
+    });
+  } else if (!registry.knownDimensions.includes(predicate.member)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: [...path, "member"],

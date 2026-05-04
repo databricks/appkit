@@ -222,7 +222,28 @@ describe("metric — pure helpers", () => {
       ).toThrowError(/dimensions\.0/);
     });
 
-    test("falls open on dimensions when knownDimensions is empty", () => {
+    test("rejects non-empty `dimensions` when knownDimensions is empty (measure-only metric)", () => {
+      // Round-4 tightening: a measure-only metric registers
+      // `knownDimensions: []`, and any non-empty `dimensions` request
+      // must be rejected. The old fall-open behavior here was the
+      // round-4 security finding ("knownDimensions=[] fall-open" — empty
+      // registry let arbitrary dimension identifiers through to SQL).
+      const looseRegistration: MetricRegistration = {
+        ...REVENUE_REGISTRATION,
+        knownDimensions: [],
+        knownTimeGrainsByDim: {},
+      };
+      expect(() =>
+        validateMetricRequest(looseRegistration, {
+          measures: ["arr"],
+          dimensions: ["any_column"],
+        }),
+      ).toThrowError(/fields:.*dimensions/);
+    });
+
+    test("accepts measure-only requests when knownDimensions is empty", () => {
+      // Complement of the above — a measure-only metric must still
+      // accept requests that simply omit dimensions and filter.
       const looseRegistration: MetricRegistration = {
         ...REVENUE_REGISTRATION,
         knownDimensions: [],
@@ -230,9 +251,8 @@ describe("metric — pure helpers", () => {
       };
       const parsed = validateMetricRequest(looseRegistration, {
         measures: ["arr"],
-        dimensions: ["any_column"],
       });
-      expect(parsed.dimensions).toEqual(["any_column"]);
+      expect(parsed.dimensions).toBeUndefined();
     });
 
     // ── Phase 2: time grain ─────────────────────────────────────────────
@@ -310,23 +330,14 @@ describe("metric — pure helpers", () => {
       ).toThrowError();
     });
 
-    test("falls open on timeGrain when metadata is empty (no metrics.metadata.json)", () => {
-      // Without build-time metadata the validator can't tell which dims are
-      // time-typed. Mirror the dimensions-fall-open behavior: accept the
-      // request and let the warehouse reject incompatible grains.
-      const noMetadataRegistration: MetricRegistration = {
-        ...REVENUE_REGISTRATION,
-        knownDimensions: [],
-        knownTimeGrainsByDim: {},
-      };
-      expect(() =>
-        validateMetricRequest(noMetadataRegistration, {
-          measures: ["arr"],
-          dimensions: ["created_at"],
-          timeGrain: "month",
-        }),
-      ).not.toThrowError();
-    });
+    // Note: the previous "falls open on timeGrain when metadata is empty"
+    // test was deleted in round 4. Its premise depended on `dimensions`
+    // also falling open, which the round-4 validator tightening removed:
+    // a request with empty `knownDimensions` and a non-empty `dimensions`
+    // array now hits the rejection path before timeGrain is reached.
+    // Empty-metadata registrations are also blocked at the route's 503
+    // fail-closed gate via `knownMeasures.length === 0`, so this code
+    // path is no longer reachable in practice.
   });
 
   describe("buildMetricSql", () => {
@@ -918,12 +929,40 @@ describe("AnalyticsPlugin — metric route handler", () => {
     expect(errorPayload.error).toBe("Metric registry not initialized");
   });
 
-  test("returns 503 when knownDimensions is empty (fail-closed on either side)", async () => {
-    // The fail-closed gate must trip on EITHER empty measures OR empty
-    // dimensions. With non-empty measures but empty knownDimensions, the
-    // validator otherwise falls open on dimension identifiers (filter
-    // members, GROUP BY targets) and the SQL constructor interpolates them
-    // into the WHERE clause directly.
+  test("accepts a measure-only request when knownDimensions is empty (KPI metric)", async () => {
+    // Measure-only metric views are a legitimate shape — the public
+    // contract declares `dimensions?: string[]`. The route must not 503
+    // a request that omits dimensions just because the registry has none.
+    const plugin = new AnalyticsPlugin(config);
+    plugin._setMetricRegistryForTesting({
+      revenue: {
+        ...REVENUE_REGISTRATION,
+        knownMeasures: ["arr"],
+        knownDimensions: [],
+      },
+    });
+    (plugin as any).SQLClient.executeStatement = vi
+      .fn()
+      .mockResolvedValue({ result: { data: [{ arr: 1234 }] } });
+    const { router, getHandler } = createMockRouter();
+    plugin.injectRoutes(router);
+
+    const handler = getHandler("POST", "/metric/:key");
+    const mockReq = createMockRequest({
+      params: { key: "revenue" },
+      body: { measures: ["arr"] },
+    });
+    const mockRes = createMockResponse();
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).not.toHaveBeenCalledWith(503);
+  });
+
+  test("rejects a non-empty `dimensions` request against a measure-only metric", async () => {
+    // Closes the round-3 fall-open path: when knownDimensions is empty,
+    // the validator must reject any non-empty `dimensions` entry — those
+    // identifiers would otherwise flow into the SELECT/GROUP BY clauses
+    // of a metric view that has no dimensions registered.
     const plugin = new AnalyticsPlugin(config);
     plugin._setMetricRegistryForTesting({
       revenue: {
@@ -938,15 +977,51 @@ describe("AnalyticsPlugin — metric route handler", () => {
     const handler = getHandler("POST", "/metric/:key");
     const mockReq = createMockRequest({
       params: { key: "revenue" },
-      body: { measures: ["arr"] },
+      body: { measures: ["arr"], dimensions: ["secret_col"] },
     });
     const mockRes = createMockResponse();
 
     await handler(mockReq, mockRes);
-
-    expect(mockRes.status).toHaveBeenCalledWith(503);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
     const errorPayload = (mockRes.json as any).mock.calls[0][0];
-    expect(errorPayload.code).toBe("METRIC_REGISTRY_NOT_READY");
+    expect(errorPayload.code).toBe("VALIDATION_ERROR");
+    expect(errorPayload.error).toMatch(/fields:.*dimensions/);
+  });
+
+  test("rejects a `filter` request against a measure-only metric", async () => {
+    // Same fall-open closure as the dimensions case: filter members
+    // would otherwise interpolate into the WHERE clause for a metric
+    // that has no dimensions to filter on.
+    const plugin = new AnalyticsPlugin(config);
+    plugin._setMetricRegistryForTesting({
+      revenue: {
+        ...REVENUE_REGISTRATION,
+        knownMeasures: ["arr"],
+        knownDimensions: [],
+      },
+    });
+    const { router, getHandler } = createMockRouter();
+    plugin.injectRoutes(router);
+
+    const handler = getHandler("POST", "/metric/:key");
+    const mockReq = createMockRequest({
+      params: { key: "revenue" },
+      body: {
+        measures: ["arr"],
+        filter: {
+          member: "secret_col",
+          operator: "equals",
+          values: ["x"],
+        },
+      },
+    });
+    const mockRes = createMockResponse();
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+    const errorPayload = (mockRes.json as any).mock.calls[0][0];
+    expect(errorPayload.code).toBe("VALIDATION_ERROR");
+    expect(errorPayload.error).toMatch(/fields:.*filter/);
   });
 
   test("returns 400 with the canonical error shape on validator failure", async () => {
