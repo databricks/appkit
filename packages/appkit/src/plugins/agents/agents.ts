@@ -12,26 +12,38 @@ import type {
   PluginPhase,
   ResponseStreamEvent,
   Thread,
+  ToolAnnotations,
   ToolProvider,
 } from "shared";
 import { AppKitMcpClient, buildMcpHostPolicy } from "../../connectors/mcp";
 import { getWorkspaceClient } from "../../context";
-import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
-import { isFromPluginMarker } from "../../core/agent/from-plugin";
-import { loadAgentsFromDir } from "../../core/agent/load-agents";
-import { normalizeToolResult } from "../../core/agent/normalize-result";
+import { createLogger } from "../../logging/logger";
+import { Plugin, toPlugin } from "../../plugin";
+import type { PluginManifest } from "../../registry";
+import { consumeAdapterStream } from "./consume-adapter-stream";
+import { agentStreamDefaults } from "./defaults";
+import { EventChannel } from "./event-channel";
+import { AgentEventTranslator } from "./event-translator";
+import { isFromPluginMarker } from "./from-plugin";
+import { loadAgentsFromDir } from "./load-agents";
+import manifest from "./manifest.json";
+import { normalizeToolResult } from "./normalize-result";
 import {
-  buildBaseSystemPrompt,
-  composeSystemPrompt,
-} from "../../core/agent/system-prompt";
-import { dispatchToolCall } from "../../core/agent/tool-dispatch";
-import { resolveToolkitFromProvider } from "../../core/agent/toolkit-resolver";
+  approvalRequestSchema,
+  chatRequestSchema,
+  invocationsRequestSchema,
+} from "./schemas";
+import { buildBaseSystemPrompt, composeSystemPrompt } from "./system-prompt";
+import { InMemoryThreadStore } from "./thread-store";
+import { ToolApprovalGate } from "./tool-approval-gate";
+import { dispatchToolCall } from "./tool-dispatch";
+import { resolveToolkitFromProvider } from "./toolkit-resolver";
 import {
   functionToolToDefinition,
   isFunctionTool,
   isHostedTool,
   resolveHostedTools,
-} from "../../core/agent/tools";
+} from "./tools";
 import type {
   AgentDefinition,
   AgentsPluginConfig,
@@ -39,22 +51,8 @@ import type {
   PromptContext,
   RegisteredAgent,
   ResolvedToolEntry,
-} from "../../core/agent/types";
-import { isToolkitEntry } from "../../core/agent/types";
-import { createLogger } from "../../logging/logger";
-import { Plugin, toPlugin } from "../../plugin";
-import type { PluginManifest } from "../../registry";
-import { agentStreamDefaults } from "./defaults";
-import { EventChannel } from "./event-channel";
-import { AgentEventTranslator } from "./event-translator";
-import manifest from "./manifest.json";
-import {
-  approvalRequestSchema,
-  chatRequestSchema,
-  invocationsRequestSchema,
-} from "./schemas";
-import { InMemoryThreadStore } from "./thread-store";
-import { ToolApprovalGate } from "./tool-approval-gate";
+} from "./types";
+import { isToolkitEntry } from "./types";
 
 const logger = createLogger("agents");
 
@@ -381,8 +379,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     this.resolveFromPluginMarkers(agentName, toolsRecord, index);
 
     // 3. Explicit tools (toolkit entries, function tools, hosted tools)
-    const hostedToCollect: import("../../core/agent/tools/hosted-tools").HostedTool[] =
-      [];
+    const hostedToCollect: import("./tools/hosted-tools").HostedTool[] = [];
     for (const [key, tool] of Object.entries(toolsRecord)) {
       if (isToolkitEntry(tool)) {
         index.set(key, {
@@ -521,37 +518,27 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   }
 
   private async connectHostedTools(
-    hostedTools: import("../../core/agent/tools/hosted-tools").HostedTool[],
+    hostedTools: import("./tools/hosted-tools").HostedTool[],
     index: Map<string, ResolvedToolEntry>,
   ): Promise<void> {
-    let host: string | undefined;
-    let authenticate: () => Promise<Record<string, string>>;
-
-    try {
-      const { getWorkspaceClient } = await import("../../context");
-      const wsClient = getWorkspaceClient();
-      await wsClient.config.ensureResolved();
-      host = wsClient.config.host;
-      authenticate = async () => {
-        const headers = new Headers();
-        await wsClient.config.authenticate(headers);
-        return Object.fromEntries(headers.entries());
-      };
-    } catch {
-      host = process.env.DATABRICKS_HOST;
-      authenticate = async (): Promise<Record<string, string>> => {
-        const token = process.env.DATABRICKS_TOKEN;
-        return token ? { Authorization: `Bearer ${token}` } : {};
-      };
-    }
+    const wsClient = await this.resolveWorkspaceClient();
+    await wsClient.config.ensureResolved();
+    const host = wsClient.config.host;
 
     if (!host) {
       logger.warn(
-        "No Databricks host available — skipping %d hosted tool(s)",
+        "No Databricks host available — skipping %d hosted tool(s). " +
+          "Set DATABRICKS_HOST or configure a profile in ~/.databrickscfg.",
         hostedTools.length,
       );
       return;
     }
+
+    const authenticate = async (): Promise<Record<string, string>> => {
+      const headers = new Headers();
+      await wsClient.config.authenticate(headers);
+      return Object.fromEntries(headers.entries());
+    };
 
     if (!this.mcpClient) {
       const policy = buildMcpHostPolicy(this.config.mcp, host);
@@ -567,6 +554,23 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         mcpToolName: def.name,
         def,
       });
+    }
+  }
+
+  /**
+   * Return the ambient workspace client from {@link getWorkspaceClient} when
+   * `ServiceContext` is initialized (the normal `createApp` path). Fall back
+   * to a fresh `WorkspaceClient()` that walks the SDK's credential chain —
+   * `DATABRICKS_HOST` / `DATABRICKS_TOKEN`, `~/.databrickscfg` profiles,
+   * DAB auth, OAuth, metadata service — for test rigs and manual embeds
+   * that never ran through `createApp`.
+   */
+  private async resolveWorkspaceClient() {
+    try {
+      return getWorkspaceClient();
+    } catch {
+      const { WorkspaceClient } = await import("@databricks/sdk-experimental");
+      return new WorkspaceClient({});
     }
   }
 
@@ -793,83 +797,76 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       const entry = registered.toolIndex.get(name);
       if (!entry) throw new Error(`Unknown tool: ${name}`);
 
-      if (
-        approvalPolicy.requireForDestructive &&
-        entry.def.annotations?.destructive === true
-      ) {
+      // Approval flow used by BOTH the parent stream and any sub-agents
+      // delegated to from it. Sub-agents were previously running destructive
+      // tools without ever surfacing the gate; this closure lifts the check
+      // so `runSubAgent.childExecute` can reuse the exact same semantics
+      // (event emission + gate.wait + deny string).
+      const checkApproval = async (
+        toolEntry: ResolvedToolEntry,
+        toolArgs: unknown,
+      ): Promise<"approve" | "deny" | null> => {
+        if (!approvalPolicy.requireForDestructive) return null;
+        if (!isDestructiveToolEntry(toolEntry)) return null;
         const approvalId = randomUUID();
         for (const ev of translator.translate({
           type: "approval_pending",
           approvalId,
           streamId: requestId,
-          toolName: name,
-          args,
-          annotations: entry.def.annotations,
+          toolName: toolEntry.def.name,
+          args: toolArgs,
+          annotations: combinedToolAnnotations(toolEntry),
         })) {
           outboundEvents.push(ev);
         }
-        const decision = await this.approvalGate.wait({
+        return this.approvalGate.wait({
           approvalId,
           streamId: requestId,
           userId,
           timeoutMs: approvalPolicy.timeoutMs,
         });
-        if (decision === "deny") {
-          return `Tool execution denied by user approval gate (tool: ${name}).`;
-        }
+      };
+
+      const decision = await checkApproval(entry, args);
+      if (decision === "deny") {
+        return `Tool execution denied by user approval gate (tool: ${name}).`;
       }
 
-      let result: unknown;
-      if (entry.source === "toolkit") {
-        if (!this.context) {
-          throw new Error(
-            "Plugin tool execution requires PluginContext; this should never happen through createApp",
+      // Forward tool-call / tool-result events from nested sub-agents into
+      // the parent's outbound SSE stream. Without this the client only sees
+      // the outer `agent-<name>` function call and never the inner tool
+      // invocations the sub-agent makes — so UI-action tools (apply_filter,
+      // highlight_period, etc.) that rely on SSE-based dispatch are
+      // invisible to the browser. Message deltas and metadata are
+      // deliberately NOT forwarded: that would bleed the sub-agent's
+      // assistant text into the parent's chat and double-emit threadIds.
+      const forwardSubAgentToolEvent = (ev: AgentEvent): void => {
+        if (ev.type !== "tool_call" && ev.type !== "tool_result") return;
+        for (const translated of translator.translate(ev)) {
+          outboundEvents.push(translated);
+        }
+      };
+
+      const raw = await dispatchToolCall(entry, args, {
+        req,
+        signal,
+        pluginContext: this.context,
+        mcpClient: this.mcpClient,
+        runSubAgent: (agentName, subArgs) => {
+          const childAgent = this.agents.get(agentName);
+          if (!childAgent) throw new Error(`Sub-agent not found: ${agentName}`);
+          return this.runSubAgent(
+            req,
+            childAgent,
+            subArgs,
+            signal,
+            1,
+            forwardSubAgentToolEvent,
+            checkApproval,
           );
-        }
-        result = await this.context.executeTool(
-          req,
-          entry.pluginName,
-          entry.localName,
-          args,
-          signal,
-        );
-      } else if (entry.source === "function") {
-        result = await entry.functionTool.execute(
-          args as Record<string, unknown>,
-        );
-      } else if (entry.source === "mcp") {
-        if (!this.mcpClient) throw new Error("MCP client not connected");
-        const oboToken = req.headers["x-forwarded-access-token"];
-        const mcpAuth =
-          typeof oboToken === "string"
-            ? { Authorization: `Bearer ${oboToken}` }
-            : undefined;
-        result = await this.mcpClient.callTool(
-          entry.mcpToolName,
-          args,
-          mcpAuth,
-        );
-      } else if (entry.source === "subagent") {
-        const childAgent = this.agents.get(entry.agentName);
-        if (!childAgent)
-          throw new Error(`Sub-agent not found: ${entry.agentName}`);
-        result = await this.runSubAgent(req, childAgent, args, signal, 1);
-      }
-
-      // A `void` / `undefined` return is a legitimate tool outcome (e.g., a
-      // "send notification" side-effecting tool). Return an empty string so
-      // the LLM sees a successful-but-empty result rather than a bogus
-      // "execution failed" error.
-      if (result === undefined) {
-        return "";
-      }
-      const MAX = 50_000;
-      const serialized =
-        typeof result === "string" ? result : JSON.stringify(result);
-      if (serialized.length > MAX) {
-        return `${serialized.slice(0, MAX)}\n\n[Result truncated: ${serialized.length} chars exceeds ${MAX} limit]`;
-      }
-      return result;
+        },
+      });
+      return normalizeToolResult(raw);
     };
 
     // Drive the adapter and the approval-event side-channel concurrently.
@@ -920,26 +917,14 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
           { executeTool, signal },
         );
 
-        // Accumulate assistant output from BOTH streaming and non-streaming
-        // adapters. Delta-based adapters (Databricks, Vercel AI) emit
-        // `message_delta` chunks that we concatenate; adapters that yield a
-        // single final assistant message (e.g. LangChain's `on_chain_end`
-        // path) emit a `message` event whose content replaces whatever
-        // deltas already arrived. Without the `message` branch, multi-turn
-        // LangChain conversations silently dropped the assistant turn from
-        // thread history.
-        let fullContent = "";
-        for await (const event of stream) {
-          if (signal.aborted) break;
-          if (event.type === "message_delta") {
-            fullContent += event.content;
-          } else if (event.type === "message") {
-            fullContent = event.content;
-          }
-          for (const translated of translator.translate(event)) {
-            outboundEvents.push(translated);
-          }
-        }
+        const fullContent = await consumeAdapterStream(stream, {
+          signal,
+          onEvent: (event) => {
+            for (const translated of translator.translate(event)) {
+              outboundEvents.push(translated);
+            }
+          },
+        });
 
         if (fullContent) {
           await this.threadStore.addMessage(thread.id, userId, {
@@ -1017,6 +1002,26 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     args: unknown,
     signal: AbortSignal,
     depth: number,
+    /**
+     * Optional per-event sink installed by the parent `_streamAgent`. When
+     * supplied, each adapter event the child yields is passed through —
+     * the parent's closure filters it to `tool_call` / `tool_result` so
+     * inner tool invocations surface to the client's SSE stream without
+     * also bleeding the sub-agent's assistant text.
+     */
+    onEvent?: (event: AgentEvent) => void,
+    /**
+     * Optional approval gate injected by the parent `_streamAgent`. When
+     * present, sub-agent tool calls annotated `destructive: true` fire
+     * `appkit.approval_pending` through the parent's outbound channel and
+     * await the user's decision, exactly like the parent's own executeTool.
+     * Absent (or returning `null`) means no gate — non-destructive tools
+     * or approval disabled policy-wide.
+     */
+    checkApproval?: (
+      entry: ResolvedToolEntry,
+      toolArgs: unknown,
+    ) => Promise<"approve" | "deny" | null>,
   ): Promise<string> {
     const limits = this.resolvedLimits;
     if (depth > limits.maxSubAgentDepth) {
@@ -1040,33 +1045,33 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     ): Promise<unknown> => {
       const entry = child.toolIndex.get(name);
       if (!entry) throw new Error(`Unknown tool in sub-agent: ${name}`);
-      if (entry.source === "toolkit" && this.context) {
-        return this.context.executeTool(
-          req,
-          entry.pluginName,
-          entry.localName,
-          childArgs,
-          signal,
-        );
+
+      if (checkApproval) {
+        const decision = await checkApproval(entry, childArgs);
+        if (decision === "deny") {
+          return `Tool execution denied by user approval gate (tool: ${name}).`;
+        }
       }
-      if (entry.source === "function") {
-        return entry.functionTool.execute(childArgs as Record<string, unknown>);
-      }
-      if (entry.source === "subagent") {
-        const grandchild = this.agents.get(entry.agentName);
-        if (!grandchild)
-          throw new Error(`Sub-agent not found: ${entry.agentName}`);
-        return this.runSubAgent(req, grandchild, childArgs, signal, depth + 1);
-      }
-      if (entry.source === "mcp" && this.mcpClient) {
-        const oboToken = req.headers["x-forwarded-access-token"];
-        const mcpAuth =
-          typeof oboToken === "string"
-            ? { Authorization: `Bearer ${oboToken}` }
-            : undefined;
-        return this.mcpClient.callTool(entry.mcpToolName, childArgs, mcpAuth);
-      }
-      throw new Error(`Unsupported sub-agent tool source: ${entry.source}`);
+
+      return dispatchToolCall(entry, childArgs, {
+        req,
+        signal,
+        pluginContext: this.context,
+        mcpClient: this.mcpClient,
+        runSubAgent: (agentName, args) => {
+          const grandchild = this.agents.get(agentName);
+          if (!grandchild) throw new Error(`Sub-agent not found: ${agentName}`);
+          return this.runSubAgent(
+            req,
+            grandchild,
+            args,
+            signal,
+            depth + 1,
+            onEvent,
+            checkApproval,
+          );
+        },
+      });
     };
 
     const runContext: AgentRunContext = { executeTool: childExecute, signal };
@@ -1101,17 +1106,13 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       },
     ];
 
-    let output = "";
-    const events: AgentEvent[] = [];
-    for await (const event of child.adapter.run(
-      { messages, tools: childTools, threadId: randomUUID(), signal },
-      runContext,
-    )) {
-      events.push(event);
-      if (event.type === "message_delta") output += event.content;
-      else if (event.type === "message") output = event.content;
-    }
-    return output;
+    return consumeAdapterStream(
+      child.adapter.run(
+        { messages, tools: childTools, threadId: randomUUID(), signal },
+        runContext,
+      ),
+      { signal, onEvent },
+    );
   }
 
   private async _handleCancel(req: express.Request, res: express.Response) {
@@ -1265,6 +1266,44 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   }
 }
 
+/**
+ * True when the tool should go through the approval gate. Historically
+ * scoped to `destructive: true` — hence the name — but now also fires for
+ * the semantic `effect` enum on {@link ToolAnnotations}. Any effect that
+ * mutates the world (`write` | `update` | `destructive`) gates; `read` and
+ * unannotated tools do not. `def.annotations` is the normal path; for
+ * `function` tools we also read `functionTool.annotations` so a mismatch
+ * between the spread def and the original {@link FunctionTool} cannot drop
+ * the hint.
+ */
+function isDestructiveToolEntry(entry: ResolvedToolEntry): boolean {
+  const defAnn = entry.def.annotations;
+  const fnAnn =
+    entry.source === "function" ? entry.functionTool.annotations : undefined;
+
+  const effect = defAnn?.effect ?? fnAnn?.effect;
+  if (effect === "write" || effect === "update" || effect === "destructive") {
+    return true;
+  }
+  if (defAnn?.destructive === true) return true;
+  if (fnAnn?.destructive === true) return true;
+  return false;
+}
+
+/** Merged annotations for the approval SSE payload (client UI + debugging). */
+function combinedToolAnnotations(
+  entry: ResolvedToolEntry,
+): ToolAnnotations | undefined {
+  if (entry.source === "function") {
+    const merged: ToolAnnotations = {
+      ...entry.functionTool.annotations,
+      ...entry.def.annotations,
+    };
+    return Object.keys(merged).length > 0 ? merged : undefined;
+  }
+  return entry.def.annotations;
+}
+
 function normalizeAutoInherit(value: AgentsPluginConfig["autoInheritTools"]): {
   file: boolean;
   code: boolean;
@@ -1302,7 +1341,7 @@ function composePromptForAgent(
 }
 
 /**
- * Plugin factory for the agents plugin. Reads `config/agents/*.md` by default,
+ * Plugin factory for the agents plugin. Reads `config/agents/<id>/agent.md` by default,
  * resolves toolkits/tools from registered plugins, exposes `appkit.agents.*`
  * runtime API and mounts `/invocations`.
  *
