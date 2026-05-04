@@ -169,12 +169,15 @@ describe("DatabasePlugin", () => {
     process.env.DATABRICKS_HOST = "https://example.cloud.databricks.com";
     const servicePool = {
       end: vi.fn(async () => undefined),
+      on: vi.fn(),
     } as unknown as Pool;
     const userOnePool = {
       end: vi.fn(async () => undefined),
+      on: vi.fn(),
     } as unknown as Pool;
     const userTwoPool = {
       end: vi.fn(async () => undefined),
+      on: vi.fn(),
     } as unknown as Pool;
     vi.mocked(createLakebasePool)
       .mockReturnValueOnce(servicePool)
@@ -232,9 +235,11 @@ describe("DatabasePlugin", () => {
     process.env.DATABRICKS_HOST = "https://example.cloud.databricks.com";
     const servicePool = {
       end: vi.fn(async () => undefined),
+      on: vi.fn(),
     } as unknown as Pool;
     const userPool = {
       end: vi.fn(async () => undefined),
+      on: vi.fn(),
     } as unknown as Pool;
     vi.mocked(createLakebasePool)
       .mockReturnValueOnce(servicePool)
@@ -409,6 +414,62 @@ describe("DatabasePlugin", () => {
 
     const plugin = createPlugin({ tolerateSetupFailure: true });
     await expect(plugin.setup()).resolves.toBeUndefined();
+  });
+
+  test("per-user pools set app.user_id on every new connection", async () => {
+    const originalHost = process.env.DATABRICKS_HOST;
+    process.env.DATABRICKS_HOST = "https://example.cloud.databricks.com";
+    const servicePool = {
+      end: vi.fn(async () => undefined),
+      on: vi.fn(),
+    } as unknown as Pool;
+    const userPool = {
+      end: vi.fn(async () => undefined),
+      on: vi.fn(),
+    } as unknown as Pool;
+    vi.mocked(createLakebasePool)
+      .mockReturnValueOnce(servicePool)
+      .mockReturnValueOnce(userPool);
+    const schema = defineSchema(({ table }) => ({
+      user: table("user", { id: id(), email: text().notNull() }),
+    }));
+    vi.mocked(loadSchemaByConvention).mockResolvedValue({
+      schema,
+      schemaPath: "/app/config/database/schema.ts",
+    });
+
+    const plugin = createPlugin();
+    await plugin.setup();
+    const exports = plugin.exports() as unknown as {
+      user: { asUser: (req: import("express").Request) => unknown };
+    };
+    const req = {
+      header: vi.fn((name: string) => {
+        if (name === "x-forwarded-email") return "alice@example.com";
+        if (name === "x-forwarded-access-token") return "tok-alice";
+        return undefined;
+      }),
+    } as unknown as import("express").Request;
+    exports.user.asUser(req);
+
+    expect(userPool.on).toHaveBeenCalledWith("connect", expect.any(Function));
+    const handler = vi
+      .mocked(userPool.on)
+      .mock.calls.find(([event]) => event === "connect")?.[1] as unknown as (
+      client: { query: ReturnType<typeof vi.fn> },
+    ) => void;
+    const client = { query: vi.fn(async () => ({})) };
+    handler(client);
+    expect(client.query).toHaveBeenCalledWith(
+      "SELECT set_config('app.user_id', $1, false)",
+      ["alice@example.com"],
+    );
+
+    if (originalHost === undefined) {
+      delete process.env.DATABRICKS_HOST;
+    } else {
+      process.env.DATABRICKS_HOST = originalHost;
+    }
   });
 
   test("closeAll drains evicted per-user pools, not just live ones", async () => {

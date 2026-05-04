@@ -154,6 +154,21 @@ function makeUserPoolRegistry(
       user: identity.email,
       workspaceClient: createUserWorkspaceClient(identity.token),
     });
+    // Set session-local app.user_id on every connection so RLS predicates
+    // referencing current_user_id() (the helpers emitted by `appkit db rls`)
+    // resolve to the OBO user. Per-user pool means the identity is invariant
+    // across connections in this pool, so a session-level setting is safe.
+    pool.on("connect", (client) => {
+      client
+        .query("SELECT set_config('app.user_id', $1, false)", [identity.email])
+        .catch((err) => {
+          logger.error(
+            "Failed to set app.user_id on user pool connection for %s: %O",
+            identity.email,
+            err,
+          );
+        });
+    });
     pools.set(identity.email, pool);
     evictOldestIfNeeded(pools, draining, maxPools);
     logger.debug("Created per-user pool for %s", identity.email);
