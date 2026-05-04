@@ -3,6 +3,20 @@ import path from "node:path";
 import dotenv from "dotenv";
 import { createLogger } from "../logging/logger";
 import {
+  createWorkspaceDescribeFetcher,
+  type DescribeFetcher,
+  generateMetricsMetadataJson,
+  generateMetricTypeDeclarations,
+  type MetricColumnMetadata,
+  type MetricLane,
+  type MetricSchema,
+  type MetricSyncFailure,
+  type MetricSyncResult,
+  readMetricConfig,
+  resolveMetricConfig,
+  syncMetrics,
+} from "./metric-registry";
+import {
   migrateProjectConfig,
   removeOldGeneratedTypes,
   resolveProjectRoot,
@@ -50,15 +64,35 @@ declare module "@databricks/appkit-ui/react" {
  * @param options - the options for the generation
  * @param options.entryPoint - the entry point file
  * @param options.outFile - the output file
- * @param options.querySchemaFile - optional path to query schema file (e.g. config/queries/schema.ts)
+ * @param options.metricOutFile - optional output file for the MetricRegistry
+ *   augmentation. Defaults to a sibling `metric.d.ts` file under the same
+ *   directory as `outFile`. Skipped entirely if `metric.json` is absent.
+ * @param options.metricMetadataOutFile - optional output file for the
+ *   build-time semantic metadata JSON bundle (`metrics.metadata.json`).
+ *   Defaults to a sibling of `metricOutFile`. Skipped entirely if
+ *   `metric.json` is absent.
+ * @param options.metricFetcher - optional DescribeFetcher used by
+ *   {@link syncMetrics}. Tests inject a mock; production builds let the
+ *   default WorkspaceClient-backed fetcher be created lazily.
  */
 export async function generateFromEntryPoint(options: {
   outFile: string;
   queryFolder?: string;
   warehouseId: string;
   noCache?: boolean;
+  metricOutFile?: string;
+  metricMetadataOutFile?: string;
+  metricFetcher?: DescribeFetcher;
 }) {
-  const { outFile, queryFolder, warehouseId, noCache } = options;
+  const {
+    outFile,
+    queryFolder,
+    warehouseId,
+    noCache,
+    metricOutFile,
+    metricMetadataOutFile,
+    metricFetcher,
+  } = options;
   const projectRoot = resolveProjectRoot(outFile);
 
   logger.debug("Starting type generation...");
@@ -93,6 +127,58 @@ export async function generateFromEntryPoint(options: {
   await fs.mkdir(path.dirname(outFile), { recursive: true });
   await fs.writeFile(outFile, typeDeclarations, "utf-8");
 
+  // Metric-view types: only emit when metric.json exists. The path is purely
+  // additive — apps that never adopt metric views must not produce empty noise.
+  if (queryFolder) {
+    const metricConfig = await readMetricConfig(queryFolder);
+    if (metricConfig) {
+      const resolution = resolveMetricConfig(metricConfig);
+      const fetcher =
+        metricFetcher ?? createWorkspaceDescribeFetcher(warehouseId);
+      const { schemas: metricSchemas, failures } = await syncMetrics(
+        resolution,
+        fetcher,
+      );
+
+      // Surface DESCRIBE failures loudly so a misconfigured metric.json or a
+      // workspace-side typo doesn't silently ship an empty bundle entry. The
+      // route's runtime fail-closed gate would 503 these in production —
+      // catching the issue at type-gen time is the cheaper signal.
+      if (failures.length > 0) {
+        for (const f of failures) {
+          logger.warn(
+            "metric sync failed for %s (%s): %s",
+            f.key,
+            f.source,
+            f.reason,
+          );
+        }
+      }
+
+      const metricFile =
+        metricOutFile ?? path.join(path.dirname(outFile), METRIC_TYPES_FILE);
+      const metricDeclarations = generateMetricTypeDeclarations(metricSchemas);
+      await fs.mkdir(path.dirname(metricFile), { recursive: true });
+      await fs.writeFile(metricFile, metricDeclarations, "utf-8");
+
+      // Phase 5: emit the semantic-metadata JSON bundle alongside the .d.ts.
+      // The hook imports this artifact (via a registration call from the
+      // consuming app) and exposes the per-metric subset on its return value.
+      const metadataFile =
+        metricMetadataOutFile ??
+        path.join(path.dirname(metricFile), METRIC_METADATA_FILE);
+      const metadataJson = generateMetricsMetadataJson(metricSchemas);
+      await fs.mkdir(path.dirname(metadataFile), { recursive: true });
+      await fs.writeFile(metadataFile, metadataJson, "utf-8");
+
+      logger.debug(
+        "Wrote MetricRegistry augmentation + metadata bundle for %d metric(s)%s",
+        metricSchemas.length,
+        failures.length > 0 ? ` (${failures.length} failure(s))` : "",
+      );
+    }
+  }
+
   // One-time migration: remove old generated file and patch project configs
   await removeOldGeneratedTypes(projectRoot, "appKitTypes.d.ts");
   await migrateProjectConfig(projectRoot);
@@ -105,9 +191,34 @@ export async function generateFromEntryPoint(options: {
 // mirroring how generateFromEntryPoint (also defined here) is preserved via the analytics vite plugin.
 export const generateServingTypes = generateServingTypesImpl;
 
+// Re-export the metric-registry types so consumers (CLI, the type-generator
+// .d.ts shim in `packages/shared`) can pick them up from this entry point —
+// the .d.ts shim documents these as part of the package's public surface.
+export type {
+  MetricColumnMetadata,
+  MetricLane,
+  MetricSchema,
+  MetricSyncFailure,
+  MetricSyncResult,
+};
+
 /** Directory name for generated AppKit type declaration files. */
 export const TYPES_DIR = "appkit-types";
 /** Default filename for analytics query type declarations. */
 export const ANALYTICS_TYPES_FILE = "analytics.d.ts";
 /** Default filename for serving endpoint type declarations. */
 export const SERVING_TYPES_FILE = "serving.d.ts";
+/** Default filename for metric-view registry type declarations. */
+export const METRIC_TYPES_FILE = "metric.d.ts";
+/**
+ * Default filename for the build-time semantic-metadata JSON bundle.
+ *
+ * Sibling of {@link METRIC_TYPES_FILE}. The JSON shape is
+ * `Record<metricKey, { source, lane, measures, dimensions }>` — see
+ * `MetricsMetadataBundle` in `metric-registry.ts`. The consuming app imports
+ * this file at build time (via Vite's JSON loader / Webpack's `import` etc.)
+ * and registers it through `@databricks/appkit-ui/format`'s
+ * `registerMetricsMetadata()` so the React hook can return per-metric
+ * `metadata` without a second network round-trip.
+ */
+export const METRIC_METADATA_FILE = "metrics.metadata.json";

@@ -323,8 +323,12 @@ export abstract class Plugin<
    * @throws AuthenticationError in production when no user header is present.
    */
   protected resolveUserId(req: express.Request): string {
-    const userId = req.header("x-forwarded-user");
-    if (userId) return userId;
+    // Trim before truthiness — a whitespace-only `x-forwarded-user` would
+    // otherwise pass through as a valid identity, and downstream consumers
+    // (cache key derivation, OBO proxy, telemetry) would treat distinct
+    // misconfigured callers as one. Reject it as a missing identity instead.
+    const userId = req.header("x-forwarded-user")?.trim();
+    if (userId && userId.length > 0) return userId;
     if (process.env.NODE_ENV === "development") return getCurrentUserId();
     throw AuthenticationError.missingToken(
       "Missing x-forwarded-user header. Cannot resolve user ID.",
@@ -342,8 +346,12 @@ export abstract class Plugin<
    *   In development mode (`NODE_ENV=development`), skips user impersonation instead of throwing.
    */
   asUser(req: express.Request): this {
-    const token = req.header("x-forwarded-access-token");
-    const userId = req.header("x-forwarded-user");
+    const token = req.header("x-forwarded-access-token")?.trim();
+    // Trim before truthiness — a whitespace-only header would otherwise
+    // pass downstream as a valid identity / token. The cache-key path
+    // would collapse distinct misconfigured callers into a shared scope,
+    // and the OBO proxy would attempt to authenticate with whitespace.
+    const userId = req.header("x-forwarded-user")?.trim();
     const isDev = process.env.NODE_ENV === "development";
 
     // In local development, skip user impersonation

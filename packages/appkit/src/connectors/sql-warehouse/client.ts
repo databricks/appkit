@@ -243,6 +243,15 @@ export class SQLWarehouseConnector {
             );
           }
 
+          // Preserve native AbortError identity. Without this, the wrap below
+          // overwrites `name` (to "ExecutionError") and the downstream
+          // stream-manager._categorizeError can no longer distinguish a
+          // legitimate client cancellation from a real upstream failure —
+          // the duck-type `statusCode` fallback would route every aborted
+          // SQL through SSEErrorCode.UPSTREAM_ERROR.
+          if (error instanceof Error && error.name === "AbortError") {
+            throw error;
+          }
           if (error instanceof AppKitError) {
             throw error;
           }
@@ -383,6 +392,11 @@ export class SQLWarehouseConnector {
           });
 
           // error logging is handled by executeStatement's catch block (gated on isAborted)
+          if (error instanceof Error && error.name === "AbortError") {
+            // Preserve AbortError identity for stream-manager classification —
+            // see executeStatement's catch for the rationale.
+            throw error;
+          }
           if (error instanceof AppKitError) {
             throw error;
           }

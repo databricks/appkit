@@ -8,16 +8,25 @@ import type {
 } from "shared";
 import { SQLWarehouseConnector } from "../../connectors";
 import { getWarehouseId, getWorkspaceClient } from "../../context";
+import { AppKitError, ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
+import {
+  buildMetricSql,
+  composeMetricCacheKey,
+  deriveMetricExecutorKey,
+  loadMetricRegistry,
+  validateMetricRequest,
+} from "./metric";
 import { QueryProcessor } from "./query";
 import type {
   AnalyticsQueryResponse,
   IAnalyticsConfig,
   IAnalyticsQueryRequest,
+  MetricRegistration,
 } from "./types";
 
 const logger = createLogger("analytics");
@@ -33,6 +42,25 @@ export class AnalyticsPlugin extends Plugin {
   private SQLClient: SQLWarehouseConnector;
   private queryProcessor: QueryProcessor;
 
+  /**
+   * Metric-view registry loaded from `config/queries/metric.json` at server
+   * startup. Keys are stable; values carry the FQN, lane, and known
+   * measure/dimension names. Empty when no `metric.json` is present.
+   */
+  private metricRegistry: Record<string, MetricRegistration> = {};
+
+  /**
+   * Latched error from the most recent `loadMetricRegistry()` attempt.
+   * `null` means the registry loaded cleanly (or `metric.json` was absent
+   * — also fine; metric views are an opt-in feature). When non-null, every
+   * `/metric/:key` request returns 503 with code `METRIC_REGISTRY_LOAD_FAILED`
+   * so deployment errors (malformed JSON, schema violations, missing
+   * required fields) surface as a clear server status rather than
+   * masquerading as 404s for every metric. Surfaces via the route only —
+   * the rest of the analytics plugin stays available.
+   */
+  private metricRegistryLoadError: string | null = null;
+
   constructor(config: IAnalyticsConfig) {
     super(config);
     this.config = config;
@@ -42,6 +70,34 @@ export class AnalyticsPlugin extends Plugin {
       timeout: config.timeout,
       telemetry: config.telemetry,
     });
+  }
+
+  /**
+   * Eagerly load the metric registry.
+   *
+   * `setup()` does not throw — failures here would otherwise prevent the
+   * whole app (including unrelated plugins) from starting, which is too
+   * blunt for what is conceptually a single-route configuration error.
+   * Instead, latch the failure on `metricRegistryLoadError`: the metric
+   * route then returns 503 with a clear code so deployment pipelines + the
+   * /metric/:key surface itself reflect the broken state. Other analytics
+   * routes (`/query/:key`, `/arrow-result/:jobId`) continue to work.
+   *
+   * The previous behavior — empty `metricRegistry` plus a warn log — made
+   * malformed `metric.json` indistinguishable from missing keys (every
+   * metric returned 404 "Metric not found"), which masked deployment
+   * errors and matched a recurring review pattern across multiple rounds.
+   */
+  async setup(): Promise<void> {
+    try {
+      this.metricRegistry = await loadMetricRegistry();
+      this.metricRegistryLoadError = null;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      logger.warn("Failed to load metric registry: %s", reason);
+      this.metricRegistry = {};
+      this.metricRegistryLoadError = reason;
+    }
   }
 
   injectRoutes(router: IAppRouter) {
@@ -64,6 +120,15 @@ export class AnalyticsPlugin extends Plugin {
       path: "/query/:query_key",
       handler: async (req: express.Request, res: express.Response) => {
         await this._handleQueryRoute(req, res);
+      },
+    });
+
+    this.route(router, {
+      name: "metric",
+      method: "post",
+      path: "/metric/:key",
+      handler: async (req: express.Request, res: express.Response) => {
+        await this._handleMetricRoute(req, res);
       },
     });
   }
@@ -207,6 +272,301 @@ export class AnalyticsPlugin extends Plugin {
       streamExecutionSettings,
       executorKey,
     );
+  }
+
+  /**
+   * Handle a metric-view query against `POST /api/analytics/metric/:key`.
+   *
+   * Phase 4 surface:
+   *  - body validated by zod (rejects unknown measures, dimensions,
+   *    operators, and timeGrain values per the registry's build-time
+   *    metadata)
+   *  - SQL constructed via {@link buildMetricSql} with sorted SELECT list,
+   *    parameterized filter, and `GROUP BY ALL` when dimensions are present
+   *  - response uses the same SSE envelope as the existing query route
+   *  - reuses the interceptor chain via `executeStream()` (telemetry,
+   *    timeout, retry, cache) — default 1-hour TTL via `queryDefaults`
+   *  - OBO dispatch: `lane === "obo"` entries route through `this.asUser(req)`,
+   *    same Proxy pattern that `.obo.sql` files use today; SP entries route
+   *    through the plugin's default executor.
+   *  - Cache executor key: `"sp"` for SP-lane entries; sha256 hash of the
+   *    user identity for OBO entries (raw `x-forwarded-user` value never
+   *    reaches the cache layer — see {@link deriveMetricExecutorKey}).
+   */
+  async _handleMetricRoute(
+    req: express.Request,
+    res: express.Response,
+  ): Promise<void> {
+    const { key } = req.params;
+
+    logger.debug(req, "Executing metric: %s", key);
+
+    const event = logger.event(req);
+    event?.setComponent("analytics", "executeMetric").setContext("analytics", {
+      metric_key: key,
+      plugin: this.name,
+    });
+
+    if (!key) {
+      res.status(400).json({ error: "metric key is required" });
+      return;
+    }
+
+    // Surface a startup-time registry-load failure on the route. Without
+    // this, a malformed metric.json would yield 404 for every key — which
+    // looks identical to "key never registered" and hides the deployment
+    // error. The full reason goes to telemetry only.
+    if (this.metricRegistryLoadError !== null) {
+      event?.setContext("analytics", {
+        metric_registry_load_error: this.metricRegistryLoadError,
+      });
+      res.status(503).json({
+        error: "Metric registry not available",
+        code: "METRIC_REGISTRY_LOAD_FAILED",
+      });
+      return;
+    }
+
+    const registration = this.metricRegistry[key];
+    if (!registration) {
+      // Don't echo the user-supplied `key` back in the public response.
+      // Confirming "metric X is not registered" lets an unauthenticated
+      // probe enumerate registered keys by elimination. The 404 status
+      // stays — it's useful for tooling — but the body is generic; full
+      // detail goes to telemetry only.
+      event?.setContext("analytics", { unknown_metric_key: key });
+      res.status(404).json({ error: "Metric not found" });
+      return;
+    }
+
+    // Fail-closed: if the build-time DESCRIBE never produced a measure list
+    // for this metric, the body validator falls open (no allowlist) and the
+    // SQL constructor would let arbitrary measure references through to
+    // the warehouse. Refuse the request so an empty/missing
+    // `metrics.metadata.json` cannot become a schema-enumeration vector.
+    // The clear server-side fix is to (re-)run `pnpm exec appkit metric sync`.
+    //
+    // We deliberately do NOT gate on `knownDimensions.length === 0` here —
+    // a measure-only KPI metric legitimately has zero dimensions and must
+    // continue to work. The validator-side tightening below rejects
+    // `dimensions` / `filter` payloads against an empty `knownDimensions`,
+    // which closes the fall-open path without blocking the legitimate case.
+    if (registration.knownMeasures.length === 0) {
+      logger.warn(
+        req,
+        "Metric %s registered but build-time metadata is empty — refusing the request. Run `appkit metric sync` to populate metrics.metadata.json.",
+        key,
+      );
+      res.status(503).json({
+        error: "Metric registry not initialized",
+        code: "METRIC_REGISTRY_NOT_READY",
+      });
+      return;
+    }
+
+    // Single try/catch covering both body validation and executor setup —
+    // OBO lane's `asUser(req)` and `resolveUserId(req)` can throw on a
+    // missing/invalid `x-forwarded-access-token` (AuthenticationError). If
+    // they bubble up unwrapped, the route returns a malformed response
+    // outside the canonical error envelope. We compute the executor inside
+    // the same `try` so the auth error lands on the canonical 401 path.
+    let request: ReturnType<typeof validateMetricRequest>;
+    let executor: AnalyticsPlugin;
+    let executorKey: string;
+    let isAsUser: boolean;
+    try {
+      request = validateMetricRequest(registration, req.body ?? {});
+      isAsUser = registration.lane === "obo";
+      // OBO lane: dispatch via the existing asUser(req) Proxy — same pattern
+      // used by .obo.sql files in `_handleQueryRoute`. The Proxy threads the
+      // user's `x-forwarded-access-token` through every Databricks call so
+      // the warehouse executes the query under the end user's identity.
+      executor = isAsUser ? this.asUser(req) : this;
+      // OBO cache key: hash the user identity so the raw email/principal name
+      // never reaches the cache layer. SP cache key: literal "sp" — the cache
+      // is shared across every caller of the SP-lane metric.
+      executorKey = deriveMetricExecutorKey({
+        lane: registration.lane,
+        userIdentity: isAsUser ? this.resolveUserId(req) : null,
+      });
+    } catch (err) {
+      if (err instanceof AppKitError) {
+        res.status(err.statusCode).json({
+          error: err.message,
+          code: err.code,
+        });
+        return;
+      }
+      // Validator throws ValidationError; asUser/resolveUserId throw
+      // AuthenticationError — both are AppKitError. This branch only fires
+      // for unexpected errors. Hard-code the public message (do not echo
+      // err.message — it could contain stack-adjacent internals from any
+      // unwrapped throw site). The full detail goes to telemetry only.
+      event?.setContext("analytics", {
+        unexpected_error: err instanceof Error ? err.message : String(err),
+        metric_key: key,
+      });
+      logger.warn(
+        req,
+        "Unexpected throw during metric request setup for %s: %s",
+        key,
+        err instanceof Error ? err.message : String(err),
+      );
+      res.status(400).json({ error: "Invalid request body" });
+      return;
+    }
+
+    const format = request.format ?? "JSON";
+
+    const queryParameters =
+      format === "ARROW"
+        ? {
+            formatParameters: {
+              disposition: "EXTERNAL_LINKS",
+              format: "ARROW_STREAM",
+            },
+            type: "arrow",
+          }
+        : { type: "result" };
+
+    const cacheKey = composeMetricCacheKey({
+      metricKey: key,
+      measures: request.measures,
+      dimensions: request.dimensions,
+      timeGrain: request.timeGrain,
+      filter: request.filter,
+      format,
+      executorKey,
+      limit: request.limit,
+    });
+
+    const defaultConfig: PluginExecuteConfig = {
+      ...queryDefaults,
+      cache: {
+        ...queryDefaults.cache,
+        cacheKey,
+      },
+    };
+
+    const streamExecutionSettings: StreamExecutionSettings = {
+      default: defaultConfig,
+    };
+
+    await executor.executeStream(
+      res,
+      async (signal) => {
+        try {
+          const { statement, parameters } = buildMetricSql(
+            registration,
+            request,
+          );
+          const result = await executor.query(
+            statement,
+            Object.keys(parameters).length > 0 ? parameters : undefined,
+            queryParameters.formatParameters,
+            signal,
+          );
+          return { type: queryParameters.type, ...result };
+        } catch (err) {
+          // Cancellation must pass through to the framework's stream layer
+          // SHAPED AS an AbortError so `StreamManager._categorizeError`
+          // classifies it as STREAM_ABORTED (it checks `name === "AbortError"`
+          // or `message.includes("operation was aborted")`). Re-throwing
+          // unchanged would otherwise let `ExecutionError.canceled()` fall
+          // through to UPSTREAM_ERROR.
+          //
+          // We identify cancellations by error CLASS/MESSAGE rather than
+          // by `signal.aborted`. The signal-state check raced concurrent
+          // warehouse errors: if `TimeoutInterceptor` aborted the signal
+          // exactly when the warehouse returned `TABLE_OR_VIEW_NOT_FOUND`,
+          // the bypass would rethrow the raw warehouse text unscrubbed
+          // (round-6 security finding). Two narrow shapes:
+          //
+          //  1. real `AbortError` (`fetch` / `AbortController.abort()`)
+          //  2. `ExecutionError` with the static message constructed by
+          //     `ExecutionError.canceled()` ("Statement was canceled") —
+          //     the only ExecutionError variant that means cancellation.
+          //     Match the message exactly so warehouse errors that happen
+          //     to mention "canceled" cannot trick the bypass.
+          const isCancellation =
+            (err instanceof Error && err.name === "AbortError") ||
+            (err instanceof ExecutionError &&
+              err.message === "Statement was canceled");
+          if (isCancellation) {
+            if (err instanceof Error && err.name === "AbortError") {
+              throw err;
+            }
+            // Normalize the connector's `ExecutionError.canceled()` to the
+            // AbortError shape `_categorizeError` recognizes.
+            const normalized = new Error("operation was aborted");
+            normalized.name = "AbortError";
+            throw normalized;
+          }
+          // Server-side scrub for the SSE error envelope. Without this, any
+          // 4xx from the warehouse (e.g. TABLE_OR_VIEW_NOT_FOUND with a UC
+          // FQN attached) flows verbatim through the framework's pass-through
+          // for client-status errors — visible to anyone hitting the route,
+          // including non-React consumers that the round-1 client-side scrub
+          // does not protect. Production gets a generic message; dev keeps
+          // the original for diagnostics. Telemetry always carries the raw.
+          //
+          // Fail-closed env check: only an explicit "development" treats as
+          // dev. Containers / serverless runtimes that leave NODE_ENV unset
+          // must not leak warehouse internals.
+          event?.setContext("analytics", {
+            metric_query_error:
+              err instanceof Error ? err.message : String(err),
+            metric_key: key,
+          });
+          const isProd = process.env.NODE_ENV !== "development";
+          if (err instanceof AppKitError) {
+            // 5xx-class AppKitErrors (notably ExecutionError raised by the
+            // SQL connector on warehouse failures) carry raw warehouse text
+            // in their message. Scrub those in prod; let 4xx-class
+            // AppKitErrors (ValidationError, AuthenticationError) through
+            // since their messages are constructed by us with known-clean
+            // content.
+            if (isProd && err.statusCode >= 500) {
+              throw new ExecutionError("Failed to execute metric query");
+            }
+            throw err;
+          }
+          throw new ExecutionError(
+            isProd
+              ? "Failed to execute metric query"
+              : err instanceof Error
+                ? err.message
+                : "Failed to execute metric query",
+          );
+        }
+      },
+      streamExecutionSettings,
+      executorKey,
+    );
+  }
+
+  /**
+   * Test-only seam: populate the metric registry without going through
+   * `setup()` (which reads `config/queries/metric.json` from disk). Tests
+   * exercise the route handler directly with synthetic registrations.
+   *
+   * @internal
+   */
+  _setMetricRegistryForTesting(
+    registry: Record<string, MetricRegistration>,
+  ): void {
+    this.metricRegistry = registry;
+  }
+
+  /**
+   * Test-only seam: simulate a `loadMetricRegistry()` failure latched by
+   * `setup()`. Production code never calls this — `setup()` is the sole
+   * setter of `metricRegistryLoadError`.
+   *
+   * @internal
+   */
+  _setMetricRegistryLoadErrorForTesting(reason: string | null): void {
+    this.metricRegistryLoadError = reason;
   }
 
   /**
