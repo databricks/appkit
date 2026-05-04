@@ -24,7 +24,7 @@ let oboPoolManager: LakebasePoolManager;
  */
 
 interface Product {
-  id: number;
+  id: string;
   name: string;
   category: string;
   price: number;
@@ -40,12 +40,15 @@ export async function setup(user?: string) {
   // Create OBO pool manager for per-user pools
   oboPoolManager = createLakebasePoolManager();
 
-  // Create schema and table (idempotent)
+  // Drop and recreate (SERIAL→UUID migration; safe for POC)
+  await pool.query(`DROP TABLE IF EXISTS raw_example.products CASCADE`);
+
+  // Create schema and table
   await pool.query(`
     CREATE SCHEMA IF NOT EXISTS raw_example;
 
     CREATE TABLE IF NOT EXISTS raw_example.products (
-      id SERIAL PRIMARY KEY,
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       name VARCHAR(255) NOT NULL,
       category VARCHAR(100),
       price DECIMAL(10, 2),
@@ -80,6 +83,12 @@ export async function setup(user?: string) {
     $$;
   `);
 
+  // Grant schema/table access to PUBLIC so OBO users can SELECT/INSERT
+  await pool.query(`
+    GRANT USAGE ON SCHEMA raw_example TO PUBLIC;
+    GRANT ALL ON ALL TABLES IN SCHEMA raw_example TO PUBLIC;
+  `);
+
   // Seed sample data if table is empty
   const { rows } = await pool.query<{ count: string }>(
     "SELECT COUNT(*) as count FROM raw_example.products",
@@ -98,32 +107,32 @@ function getUserPool(
   fallbackPool: Pool,
 ): { pool: Pool; userName: string | null } {
   const userToken = req.header("x-forwarded-access-token");
-  const userName = req.header("x-forwarded-user");
+  const userEmail = req.header("x-forwarded-email");
 
-  if (!userToken || !userName) {
-    console.log("[lakebase-obo] No user token/name — falling back to SP pool");
+  if (!userToken || !userEmail) {
+    console.log("[lakebase-obo] No user token/email — falling back to SP pool");
     return { pool: fallbackPool, userName: null };
   }
 
-  const isNewPool = !oboPoolManager.hasPool(userName);
-  const userPool = oboPoolManager.getPool(userName, {
+  const isNewPool = !oboPoolManager.hasPool(userEmail);
+  const userPool = oboPoolManager.getPool(userEmail, {
     workspaceClient: new WorkspaceClient({
       token: userToken,
       host: process.env.DATABRICKS_HOST,
       authType: "pat",
     }),
-    user: userName,
+    user: userEmail,
   });
 
   if (isNewPool) {
     console.log(
-      `[lakebase-obo] Created new OBO pool for user "${userName}" (total pools: ${oboPoolManager.size})`,
+      `[lakebase-obo] Created new OBO pool for user "${userEmail}" (total pools: ${oboPoolManager.size})`,
     );
   } else {
-    console.log(`[lakebase-obo] Reusing OBO pool for user "${userName}"`);
+    console.log(`[lakebase-obo] Reusing OBO pool for user "${userEmail}"`);
   }
 
-  return { pool: userPool, userName };
+  return { pool: userPool, userName: userEmail };
 }
 
 export function registerRoutes(router: IAppRouter, basePath: string) {
@@ -182,6 +191,14 @@ export function registerRoutes(router: IAppRouter, basePath: string) {
         message: err.message,
       });
     }
+  });
+
+  // GET /raw/debug-token - Show forwarded headers for debugging
+  router.get(`${basePath}/debug-token`, (req, res) => {
+    const allForwarded = Object.fromEntries(
+      Object.entries(req.headers).filter(([k]) => k.startsWith("x-forwarded")),
+    );
+    res.json(allForwarded);
   });
 
   // ── OBO routes (per-user pool, RLS enforced) ─────────────────────

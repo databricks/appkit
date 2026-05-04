@@ -7,6 +7,7 @@ import {
 import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
 import {
   ActivityLogsPanel,
+  OboProductsPanel,
   OrdersPanel,
   ProductsPanel,
   TasksPanel,
@@ -34,13 +35,18 @@ function LakebaseRoute() {
         </div>
 
         {/* Tabs for different examples */}
-        <Tabs defaultValue="raw" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
+        <Tabs defaultValue="raw-obo" className="space-y-6">
+          <TabsList className="grid w-full grid-cols-5">
+            <TabsTrigger value="raw-obo">Raw Driver OBO</TabsTrigger>
             <TabsTrigger value="raw">Raw Driver</TabsTrigger>
             <TabsTrigger value="drizzle">Drizzle ORM</TabsTrigger>
             <TabsTrigger value="typeorm">TypeORM</TabsTrigger>
             <TabsTrigger value="sequelize">Sequelize</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="raw-obo">
+            <OboProductsPanel />
+          </TabsContent>
 
           <TabsContent value="raw">
             <ProductsPanel />
