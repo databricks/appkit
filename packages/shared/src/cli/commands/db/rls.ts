@@ -189,6 +189,15 @@ async function runRls({ entity, spec, options }: RunRlsArgs): Promise<void> {
     actions,
   });
 
+  // Owner/tenant shorthands compile to current_user_id()/current_tenant_id().
+  // Both are app-level helpers Postgres doesn't know about; emit them once,
+  // before any rls policy migration tries to reference them, otherwise
+  // `migrate up` fails closed and RLS denies every read.
+  const helpersFile = ensureRlsHelpersMigration(paths.migrationsDir);
+  if (helpersFile) {
+    console.log(check(`Wrote ${path.relative(paths.root, helpersFile)}`));
+  }
+
   const migrationFile = writeMigration(
     paths.migrationsDir,
     entity,
@@ -254,6 +263,42 @@ function writeMigration(
   const next = nextMigrationNumber(migrationsDir);
   const baseName = `${next}_rls_${entity}_${policyName}.sql`;
   const filePath = path.join(migrationsDir, baseName);
+  writeFileSync(filePath, sql, "utf8");
+  return filePath;
+}
+
+/**
+ * Emit `<NNNN>_appkit_rls_helpers.sql` defining `current_user_id()` and
+ * `current_tenant_id()` if no helpers migration exists yet. Returns the
+ * absolute path of a newly written file, or `null` when one already exists.
+ *
+ * The functions read from session-local config keys `app.user_id` and
+ * `app.tenant_id` set by AppKit's per-user pool on connection check-out
+ * (see `entity-wiring.ts`). Without those settings they return NULL and
+ * RLS predicates referencing them deny every row — fail-closed by design.
+ */
+function ensureRlsHelpersMigration(migrationsDir: string): string | null {
+  if (!existsSync(migrationsDir)) {
+    mkdirSync(migrationsDir, { recursive: true });
+  }
+  const files = readdirSync(migrationsDir);
+  if (files.some((f) => /_appkit_rls_helpers\.sql$/.test(f))) {
+    return null;
+  }
+  const next = nextMigrationNumber(migrationsDir);
+  const filePath = path.join(migrationsDir, `${next}_appkit_rls_helpers.sql`);
+  const sql = [
+    "-- AppKit RLS helpers: current_user_id() / current_tenant_id().",
+    "-- Read from session-local config keys set by the per-user pool.",
+    "CREATE OR REPLACE FUNCTION current_user_id() RETURNS text",
+    "  LANGUAGE sql STABLE AS",
+    "  $$ SELECT current_setting('app.user_id', true) $$;",
+    "",
+    "CREATE OR REPLACE FUNCTION current_tenant_id() RETURNS text",
+    "  LANGUAGE sql STABLE AS",
+    "  $$ SELECT current_setting('app.tenant_id', true) $$;",
+    "",
+  ].join("\n");
   writeFileSync(filePath, sql, "utf8");
   return filePath;
 }
