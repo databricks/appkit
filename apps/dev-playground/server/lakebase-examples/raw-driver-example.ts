@@ -101,9 +101,11 @@ function getUserPool(
   const userName = req.header("x-forwarded-user");
 
   if (!userToken || !userName) {
+    console.log("[lakebase-obo] No user token/name — falling back to SP pool");
     return { pool: fallbackPool, userName: null };
   }
 
+  const isNewPool = !oboPoolManager.hasPool(userName);
   const userPool = oboPoolManager.getPool(userName, {
     workspaceClient: new WorkspaceClient({
       token: userToken,
@@ -112,6 +114,14 @@ function getUserPool(
     }),
     user: userName,
   });
+
+  if (isNewPool) {
+    console.log(
+      `[lakebase-obo] Created new OBO pool for user "${userName}" (total pools: ${oboPoolManager.size})`,
+    );
+  } else {
+    console.log(`[lakebase-obo] Reusing OBO pool for user "${userName}"`);
+  }
 
   return { pool: userPool, userName };
 }

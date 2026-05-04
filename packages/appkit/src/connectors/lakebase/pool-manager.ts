@@ -16,6 +16,9 @@ export interface LakebasePoolManager {
    */
   getPool(key: string, perPoolConfig: Partial<LakebasePoolConfig>): Pool;
 
+  /** Check whether a pool exists for the given key. */
+  hasPool(key: string): boolean;
+
   /** Close and remove a specific pool. */
   closePool(key: string): Promise<void>;
 
@@ -57,6 +60,10 @@ export function createLakebasePoolManager(
       const pool = createLakebasePool({ ...baseConfig, ...perPoolConfig });
       pools.set(key, pool);
       return pool;
+    },
+
+    hasPool(key: string): boolean {
+      return pools.has(key);
     },
 
     async closePool(key: string): Promise<void> {
