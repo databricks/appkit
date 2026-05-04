@@ -5,6 +5,7 @@ import { migrateCommand } from "./migrate";
 import { migrationCommand } from "./migration";
 import { seedCommand } from "./seed";
 import { setupDevCommand } from "./setup-dev";
+import { typesCommand } from "./types";
 import { verifyCommand } from "./verify";
 
 /**
@@ -18,6 +19,7 @@ export const dbCommand = new Command("db")
   .addCommand(migrateCommand)
   .addCommand(seedCommand)
   .addCommand(setupDevCommand)
+  .addCommand(typesCommand)
   .addCommand(verifyCommand)
   .addHelpText(
     "after",
@@ -29,5 +31,6 @@ Examples:
   $ appkit db migrate up
   $ appkit db seed
   $ appkit db setup:dev --seed --name init
+  $ appkit db types generate
   $ appkit db verify`,
   );

@@ -1,6 +1,7 @@
 import { DatabaseHTTPError } from "./errors";
 import type {
   ApplyIncludes,
+  ColumnInfo,
   DatabaseClient,
   DatabaseClientConfig,
   EntityClient,
@@ -107,6 +108,13 @@ export function createDatabaseClient(
         const res = await fetchImpl(url, { signal });
         const json = await readJson<{ count: number }>(res);
         return json.count;
+      },
+      columns: async (signal) => {
+        // Metadata-only endpoint — chain state (where/order/limit/...)
+        // would be meaningless here, so we deliberately ignore it.
+        const url = `${baseUrl}/${entity}/_columns`;
+        const res = await fetchImpl(url, { signal });
+        return readJson<ColumnInfo[]>(res);
       },
 
       create: async (data, signal) => {

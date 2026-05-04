@@ -56,6 +56,7 @@ describe("RouteGenerator", () => {
       "DELETE:/user/:id",
       "GET:/user",
       "GET:/user/:id",
+      "GET:/user/_columns",
       "GET:/user/count",
       "PATCH:/user/:id",
       "POST:/user",
@@ -146,6 +147,49 @@ describe("RouteGenerator", () => {
       expect.objectContaining({ email: "a@x" }),
     );
   });
+
+  test("GET /<entity>/_columns returns the declared column metadata", async () => {
+    const { router, handlers } = createMockRouter();
+    new RouteGenerator({
+      schema,
+      config: {},
+      getSurface: vi.fn(() => ({ user: makeEntity() })),
+      route: (target, config) =>
+        target[config.method](config.path, config.handler),
+    }).injectAll(router);
+
+    const res = createMockResponse();
+    await handlers["GET:/user/_columns"](createMockRequest({}), res);
+
+    const payload = (res.json as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(Array.isArray(payload)).toBe(true);
+    // Should include every declared column: id, email, role.
+    const names = payload.map((c: { name: string }) => c.name).sort();
+    expect(names).toEqual(["email", "id", "role"]);
+    // id() is a server-generated PK; role has a default; email is not null.
+    const byName = Object.fromEntries(
+      payload.map((c: { name: string }) => [c.name, c]),
+    );
+    expect(byName.id.primaryKey).toBe(true);
+    expect(byName.id.generated).toBe(true);
+    expect(byName.email.nullable).toBe(false);
+    expect(byName.role.hasDefault).toBe(true);
+  });
+
+  test("disabling `list` hides /_columns too", async () => {
+    const { router, handlers } = createMockRouter();
+    new RouteGenerator({
+      schema,
+      config: { http: { user: { list: false } } },
+      getSurface: vi.fn(() => ({ user: makeEntity() })),
+      route: (target, config) =>
+        target[config.method](config.path, config.handler),
+    }).injectAll(router);
+
+    expect(handlers["GET:/user"]).toBeUndefined();
+    expect(handlers["GET:/user/_columns"]).toBeUndefined();
+  });
+
 
   test("returns zod-formatted validation errors from the entity layer", async () => {
     const { router, handlers } = createMockRouter();

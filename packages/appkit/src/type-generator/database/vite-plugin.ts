@@ -60,8 +60,23 @@ export function appKitDatabaseTypesPlugin(
         loadModule,
       });
     } catch (error) {
+      // Production: fail the build loudly — a broken type generation there
+      // would ship wrong types to downstream consumers.
       if (process.env.NODE_ENV === "production") throw error;
+      // Dev: don't kill the dev server (HMR must survive a temporarily
+      // broken schema.ts), but make the failure visible in the terminal.
+      // Previously this went through `logger.error`, which routed to pino's
+      // file transport under some configs and swallowed the message; users
+      // saw "db.* isn't typed" with no hint why. Surface on stderr so it
+      // shows up next to Vite's own startup logs.
       logger.error("Database type generation failed: %O", error);
+      const message =
+        error instanceof Error ? `${error.message}` : String(error);
+      console.error(
+        `[appkit-database-types] Type generation failed: ${message}\n` +
+          `  Shared types at "${path.relative(projectRoot, outFile)}" were not updated.\n` +
+          `  Fix config/database/schema.ts or run \`appkit db types generate --force\` after.`,
+      );
     }
   }
 
@@ -90,6 +105,9 @@ export function appKitDatabaseTypesPlugin(
     },
 
     async buildStart() {
+      // `generator.ts` re-writes the `.d.ts` even on cache HIT, so a regen
+      // on every `buildStart` is enough to heal after `git clean -fdX` or
+      // manual deletion of the gitignored output file.
       await regenerate();
     },
 

@@ -4,6 +4,7 @@ import { ZodError } from "zod";
 import type { AppKitTable, Schema } from "@/database";
 import { AppKitError } from "@/errors";
 import { createLogger } from "@/logging/logger";
+import { describeEntityColumns } from "./columns-route";
 import { DatabaseRouteError } from "./database";
 import { DEFAULT_LIMIT, MAX_LIMIT } from "./defaults";
 import type { EntityClient, WhereInput } from "./entity-proxy";
@@ -220,6 +221,37 @@ export class RouteGenerator {
       this.bindUpdate(router, name, pkKind, access.update);
     if (access.delete !== false)
       this.bindDelete(router, name, pkKind, access.delete);
+
+
+    // `_columns` is a pure-metadata read derived from the declared schema.
+    // It doesn't consume a verb slot in the access config — it's keyed on
+    // `list` so disabling list hides _columns too, which matches "this
+    // entity is not browsable over HTTP".
+    if (access.list !== false) this.bindColumns(router, name, table);
+  }
+
+  /**
+   * Expose a compact `ColumnInfo[]` description of the entity so the browser
+   * can auto-render edit/create forms. Handler is synchronous data derived
+   * from `schema.ts` — no pool, no token — so we bypass `this.bind`'s entity
+   * lookup but keep its error-to-JSON wrapping for consistent failure shape.
+   */
+  private bindColumns(
+    router: IAppRouter,
+    name: string,
+    table: AppKitTable,
+  ): void {
+    // Describe once at registration; the result is stable for the plugin's
+    // lifetime because schema.ts does not change at runtime.
+    const columns = describeEntityColumns(table);
+    this.options.route(router, {
+      name: `${name}.columns`,
+      method: "get",
+      path: `/${name}/_columns`,
+      handler: async (_req, res) => {
+        res.json(columns);
+      },
+    });
   }
   private bindList(
     router: IAppRouter,

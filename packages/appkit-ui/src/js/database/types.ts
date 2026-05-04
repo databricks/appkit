@@ -66,6 +66,28 @@ export type WhereInput<TRow> = {
 /** Sort directive for `.order(...)`. */
 export type OrderInput<TRow> = { [K in keyof TRow]?: "asc" | "desc" };
 
+/**
+ * Column metadata from `GET /api/database/<entity>/_columns` for form UIs.
+ * `type` is a control bucket (not SQL): ints → `"number"`, timestamps → `"date"`.
+ */
+export interface ColumnInfo {
+  name: string;
+  type:
+    | "string"
+    | "number"
+    | "boolean"
+    | "date"
+    | "json"
+    | "uuid"
+    | "bigint"
+    | "unknown";
+  nullable: boolean;
+  primaryKey: boolean;
+  hasDefault: boolean;
+  /** Postgres/server-generated; hide from create flows by default. */
+  generated: boolean;
+}
+
 /** Related row shape: single `{ row }` or `{ row }[]` from the registry. */
 export type RelatedRow<
   TIncludes,
@@ -128,6 +150,13 @@ export interface EntityClient<
   first(signal?: AbortSignal): Promise<TRow | null>;
   find(id: string | number, signal?: AbortSignal): Promise<TRow | null>;
   count(signal?: AbortSignal): Promise<number>;
+  /**
+   * Fetch the entity's column metadata. Intended for auto-rendered
+   * edit/create forms that need to know which inputs to draw; reads are
+   * cheap (metadata is static for the plugin's lifetime) so caching is the
+   * caller's concern.
+   */
+  columns(signal?: AbortSignal): Promise<ColumnInfo[]>;
 
   create(data: TInsert, signal?: AbortSignal): Promise<TRow>;
   /**
