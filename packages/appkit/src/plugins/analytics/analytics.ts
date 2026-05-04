@@ -8,7 +8,7 @@ import type {
 } from "shared";
 import { SQLWarehouseConnector } from "../../connectors";
 import { getWarehouseId, getWorkspaceClient } from "../../context";
-import { AppKitError } from "../../errors";
+import { AppKitError, ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
@@ -349,10 +349,20 @@ export class AnalyticsPlugin extends Plugin {
       }
       // Validator throws ValidationError; asUser/resolveUserId throw
       // AuthenticationError — both are AppKitError. This branch only fires
-      // for unexpected errors; keep generic to avoid leaking internals.
-      res.status(400).json({
-        error: err instanceof Error ? err.message : "Invalid request body",
+      // for unexpected errors. Hard-code the public message (do not echo
+      // err.message — it could contain stack-adjacent internals from any
+      // unwrapped throw site). The full detail goes to telemetry only.
+      event?.setContext("analytics", {
+        unexpected_error: err instanceof Error ? err.message : String(err),
+        metric_key: key,
       });
+      logger.warn(
+        req,
+        "Unexpected throw during metric request setup for %s: %s",
+        key,
+        err instanceof Error ? err.message : String(err),
+      );
+      res.status(400).json({ error: "Invalid request body" });
       return;
     }
 
@@ -395,14 +405,41 @@ export class AnalyticsPlugin extends Plugin {
     await executor.executeStream(
       res,
       async (signal) => {
-        const { statement, parameters } = buildMetricSql(registration, request);
-        const result = await executor.query(
-          statement,
-          Object.keys(parameters).length > 0 ? parameters : undefined,
-          queryParameters.formatParameters,
-          signal,
-        );
-        return { type: queryParameters.type, ...result };
+        try {
+          const { statement, parameters } = buildMetricSql(
+            registration,
+            request,
+          );
+          const result = await executor.query(
+            statement,
+            Object.keys(parameters).length > 0 ? parameters : undefined,
+            queryParameters.formatParameters,
+            signal,
+          );
+          return { type: queryParameters.type, ...result };
+        } catch (err) {
+          // Server-side scrub for the SSE error envelope. Without this, any
+          // 4xx from the warehouse (e.g. TABLE_OR_VIEW_NOT_FOUND with a UC
+          // FQN attached) flows verbatim through the framework's pass-through
+          // for client-status errors — visible to anyone hitting the route,
+          // including non-React consumers that the round-1 client-side scrub
+          // does not protect. Production gets a generic message; dev keeps
+          // the original for diagnostics. Telemetry always carries the raw.
+          event?.setContext("analytics", {
+            metric_query_error:
+              err instanceof Error ? err.message : String(err),
+            metric_key: key,
+          });
+          if (err instanceof AppKitError) throw err;
+          const isProd = process.env.NODE_ENV === "production";
+          throw new ExecutionError(
+            isProd
+              ? "Failed to execute metric query"
+              : err instanceof Error
+                ? err.message
+                : "Failed to execute metric query",
+          );
+        }
       },
       streamExecutionSettings,
       executorKey,
