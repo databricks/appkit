@@ -1,12 +1,5 @@
 env:
   - name: DATABRICKS_WAREHOUSE_ID
     valueFrom: sql-warehouse
-  # Lakebase database resource — these env vars are read by @databricks/lakebase
-  - name: PGHOST
-    valueFrom: database.PGHOST
-  - name: PGDATABASE
-    valueFrom: database.PGDATABASE
-  - name: PGUSER
-    valueFrom: database.PGUSER
   - name: LAKEBASE_ENDPOINT
-    valueFrom: database.LAKEBASE_ENDPOINT
+    valueFrom: database
