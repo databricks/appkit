@@ -65,6 +65,10 @@ function wrap(builder: unknown, meta: ColumnMeta = {}): AppKitColumnChain {
       column.$meta.serverGenerated = true;
       return chain;
     },
+    private() {
+      column.$meta.private = true;
+      return chain;
+    },
   });
 
   return chain;

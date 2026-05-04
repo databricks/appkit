@@ -1,5 +1,6 @@
 import type { pgSchema } from "drizzle-orm/pg-core";
 import { createInsertSchema, createUpdateSchema } from "drizzle-zod";
+import type { z } from "zod";
 import {
   APPKIT_TABLE,
   type AppKitColumn,
@@ -58,13 +59,32 @@ export function buildTable<
     })
     .filter((relation): relation is Relation => relation !== null);
 
+  const privateMask = Object.fromEntries(
+    Object.entries(columns)
+      .filter(([, definition]) => definition.$meta.private === true)
+      .map(([columnName]) => [columnName, true as const]),
+  );
+
+  const insertSchema = createInsertSchema(drizzleTable as never);
+  const updateSchema = createUpdateSchema(drizzleTable as never);
+
   return {
     [APPKIT_TABLE]: true,
     name,
     $drizzle: drizzleTable,
     $columns,
     $relations,
-    $insertSchema: createInsertSchema(drizzleTable as never),
-    $updateSchema: createUpdateSchema(drizzleTable as never),
+    $insertSchema:
+      Object.keys(privateMask).length > 0
+        ? (insertSchema as unknown as z.ZodObject<z.ZodRawShape>).omit(
+            privateMask as never,
+          )
+        : insertSchema,
+    $updateSchema:
+      Object.keys(privateMask).length > 0
+        ? (updateSchema as unknown as z.ZodObject<z.ZodRawShape>).omit(
+            privateMask as never,
+          )
+        : updateSchema,
   };
 }

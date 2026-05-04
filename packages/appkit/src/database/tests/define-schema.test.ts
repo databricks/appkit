@@ -46,4 +46,36 @@ describe("defineSchema", () => {
       schema.user.$updateSchema.safeParse({ email: "b@example.com" }).success,
     ).toBe(true);
   });
+
+  test("private columns are omitted from insert and update schemas", () => {
+    const schema = defineSchema(({ table }) => ({
+      user: table("user", {
+        id: id(),
+        email: text().notNull(),
+        passwordHash: text().notNull().private(),
+      }),
+    }));
+
+    expect(schema.user.$columns.passwordHash.private).toBe(true);
+
+    const inserted = schema.user.$insertSchema.safeParse({
+      email: "a@example.com",
+      passwordHash: "ignored",
+    });
+    expect(inserted.success).toBe(true);
+    if (inserted.success) {
+      expect("passwordHash" in (inserted.data as Record<string, unknown>)).toBe(
+        false,
+      );
+    }
+
+    const updated = schema.user.$updateSchema.safeParse({
+      passwordHash: "ignored",
+    });
+    if (updated.success) {
+      expect("passwordHash" in (updated.data as Record<string, unknown>)).toBe(
+        false,
+      );
+    }
+  });
 });

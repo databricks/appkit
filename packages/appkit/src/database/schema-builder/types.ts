@@ -17,6 +17,12 @@ export const APPKIT_TABLE = Symbol.for("appkit.database.table");
 export interface ColumnMeta {
   serverGenerated?: boolean;
   primaryKey?: boolean;
+  /**
+   * Hides the column from default reads, writes, and column metadata. Set via
+   * `.private()` on the column chain. Used to keep secrets like password hashes
+   * out of the public surface without forking the schema.
+   */
+  private?: boolean;
   /** @internal */
   tableName?: string;
   /** @internal */
@@ -57,6 +63,7 @@ export interface AppKitColumnChain extends AppKitColumn {
   default<T>(value: T): AppKitColumnChain;
   defaultNow(): AppKitColumnChain;
   defaultRandom(): AppKitColumnChain;
+  private(): AppKitColumnChain;
 }
 
 /**
