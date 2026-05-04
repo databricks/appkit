@@ -76,7 +76,7 @@ const pool = createLakebasePool({
 ### sslMode?
 
 ```ts
-optional sslMode: "require" | "disable" | "prefer";
+optional sslMode: "disable" | "require" | "prefer";
 ```
 
 SSL mode for the connection (convenience helper)
