@@ -8,7 +8,6 @@ import {
   files,
   fromPlugin,
   genie,
-  jobs,
   PolicyDeniedError,
   server,
   serving,
@@ -178,6 +177,42 @@ const clear_highlights = tool({
   execute: async () => "All highlights cleared.",
 });
 
+// Restores a previously saved view. The tool-call arguments are the
+// authoritative state: the client listens for this function_call on SSE
+// and applies the filters + highlights directly without needing a round
+// trip back for metadata. The agent is expected to have looked up the
+// saved view server-side before emitting this call (it passes the
+// already-resolved state through).
+const load_view = tool({
+  name: "load_view",
+  description:
+    "Restore a previously saved dashboard view by applying its filters and highlights. The caller supplies the already-resolved state so the client can apply it from this tool call without a second round trip.",
+  schema: z.object({
+    name: z.string().describe("The saved view's name (for UI feedback)"),
+    filters: z
+      .object({
+        date_from: z.string().optional(),
+        date_to: z.string().optional(),
+        pickup_zip: z.string().optional(),
+        fare_min: z.string().optional(),
+        fare_max: z.string().optional(),
+      })
+      .passthrough()
+      .describe("Filters to restore. Omit fields that should not be set."),
+    highlights: z
+      .array(
+        z.object({
+          start: z.string(),
+          end: z.string(),
+          color: z.enum(["blue", "red", "yellow"]).optional(),
+          label: z.string().optional(),
+        }),
+      )
+      .describe("Highlight ranges to restore."),
+  }),
+  execute: async ({ name }) => `Restored saved view "${name}".`,
+});
+
 const focus_chart = tool({
   name: "focus_chart",
   description:
@@ -240,6 +275,7 @@ const dashboard_pilot = createAgent({
     "Focus & save:",
     "- `focus_chart({chart_id})` — scroll the viewport to `kpis`, `trips_over_time`, or `fare_distribution` and briefly pulse it.",
     "- `save_view({name, description?})` — persist the current configuration. Destructive; the user will see an approval card.",
+    "- `load_view({name, filters, highlights})` — restore a previously saved view. Always pass the resolved state; never leave fields unset.",
     "Rules:",
     "1. Pick the single tool that matches the user's intent. Do not chain filters unless the user asks for a compound filter.",
     "2. Briefly state what you did after the tool returns. Do not narrate before calling the tool.",
@@ -254,12 +290,13 @@ const dashboard_pilot = createAgent({
     clear_highlights,
     focus_chart,
     save_view,
+    load_view,
   },
 });
 
 createApp({
   plugins: [
-    server(),
+    server({ autoStart: false }),
     reconnect(),
     telemetryExamples(),
     analytics({}),
@@ -269,6 +306,10 @@ createApp({
     lakebaseExamples(),
     files({
       volumes: {
+        // Smart Dashboard saved views land here. Backed by
+        // DATABRICKS_VOLUME_FILES (see app.yaml / .env). Open policy for
+        // the demo — production apps should narrow this.
+        files: { policy: files.policy.allowAll() },
         // baseline: everything allowed
         allow_all: { policy: files.policy.allowAll() },
         // read-only: uploads/mkdir/delete return 403
@@ -290,7 +331,6 @@ createApp({
         implicit: {},
       },
     }),
-    jobs(),
     serving(),
     agents({
       agents: { helper, sql_analyst, dashboard_pilot },
@@ -311,8 +351,9 @@ createApp({
     // }),
   ],
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
-  onPluginsReady(appkit) {
-    appkit.server.extend((app) => {
+}).then((appkit) => {
+  appkit.server
+    .extend((app) => {
       app.get("/sp", (_req, res) => {
         appkit.analytics
           .query("SELECT * FROM samples.nyctaxi.trips;")
@@ -410,9 +451,203 @@ createApp({
           results,
         });
       });
-    });
-  },
-}).catch(console.error);
+
+      /**
+       * Smart-Dashboard saved-view storage.
+       *
+       * Writes a PNG snapshot of the dashboard plus a sidecar JSON of the
+       * filter/highlight state into the `files` volume
+       * (`DATABRICKS_VOLUME_FILES` — `/Volumes/<catalog>/<schema>/...`).
+       * Body is JSON with a base64-encoded PNG so we avoid adding a
+       * multipart library just for this route. The ~33% size overhead is
+       * fine for demo payloads.
+       *
+       * This endpoint is only reachable AFTER the `save_view` approval
+       * gate has resolved client-side — the agent's text confirmation
+       * depends on the client first upload the screenshot, then POSTing
+       * the approval.
+       */
+      app.post("/api/dashboard/save-view", async (req, res) => {
+        const body = req.body as {
+          name?: string;
+          description?: string;
+          filters?: Record<string, unknown>;
+          highlights?: unknown[];
+          pngBase64?: string;
+        } | null;
+
+        if (
+          !body?.name ||
+          typeof body.name !== "string" ||
+          !body.pngBase64 ||
+          typeof body.pngBase64 !== "string"
+        ) {
+          res
+            .status(400)
+            .json({ error: "Missing required fields: name, pngBase64." });
+          return;
+        }
+
+        const slug = toSlug(body.name);
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const baseName = `saved-views/${timestamp}_${slug}`;
+        const pngPath = `${baseName}.png`;
+        const metaPath = `${baseName}.json`;
+
+        const pngBytes = decodeDataUrlOrBase64(body.pngBase64);
+        if (!pngBytes) {
+          res.status(400).json({ error: "pngBase64 is not valid base64." });
+          return;
+        }
+
+        const metadata = {
+          name: body.name,
+          description: body.description ?? null,
+          filters: body.filters ?? {},
+          highlights: body.highlights ?? [],
+          savedAt: new Date().toISOString(),
+          savedBy: req.header("x-forwarded-user") ?? "unknown",
+          pngPath,
+        };
+
+        try {
+          const volume = appkit.files("files").asUser(req);
+          await volume.upload(pngPath, pngBytes, { overwrite: true });
+          await volume.upload(
+            metaPath,
+            Buffer.from(JSON.stringify(metadata, null, 2), "utf8"),
+            { overwrite: true },
+          );
+          res.json({
+            volumePath: pngPath,
+            metaPath,
+            bytes: pngBytes.length,
+            metadata,
+          });
+        } catch (err) {
+          console.error("[save-view] upload failed:", err);
+          const msg = err instanceof Error ? err.message : String(err);
+          res.status(500).json({ error: `Upload failed: ${msg}` });
+        }
+      });
+
+      /**
+       * Lists saved views in the `files` volume.
+       *
+       * Pairs the `.png` and `.json` entries into a single record per
+       * saved view; strips files that don't conform to the
+       * `<timestamp>_<slug>.(png|json)` convention.
+       */
+      app.get("/api/dashboard/saved-views", async (req, res) => {
+        try {
+          const volume = appkit.files("files").asUser(req);
+          const entries = await volume.list("saved-views");
+          const pngs = new Map<string, (typeof entries)[number]>();
+          const metas = new Map<string, (typeof entries)[number]>();
+          for (const e of entries) {
+            if (e.path.endsWith(".png")) {
+              pngs.set(e.path.replace(/\.png$/, ""), e);
+            } else if (e.path.endsWith(".json")) {
+              metas.set(e.path.replace(/\.json$/, ""), e);
+            }
+          }
+          const views = await Promise.all(
+            Array.from(pngs.entries())
+              .filter(([base]) => metas.has(base))
+              .sort(([a], [b]) => (a < b ? 1 : -1))
+              .map(async ([base, pngEntry]) => {
+                try {
+                  const metaText = await volume.read(`${base}.json`);
+                  const metaJson =
+                    typeof metaText === "string"
+                      ? metaText
+                      : new TextDecoder().decode(metaText);
+                  const parsed = JSON.parse(metaJson) as Record<
+                    string,
+                    unknown
+                  >;
+                  return {
+                    pngPath: pngEntry.path,
+                    metaPath: `${base}.json`,
+                    metadata: parsed,
+                  };
+                } catch {
+                  return null;
+                }
+              }),
+          );
+          res.json({ views: views.filter((v) => v !== null) });
+        } catch (err) {
+          console.error("[saved-views] list failed:", err);
+          const msg = err instanceof Error ? err.message : String(err);
+          res.status(500).json({ error: msg });
+        }
+      });
+
+      /**
+       * Streams the PNG bytes of a saved view so `<img src>` tags in the
+       * UI can render thumbnails without exposing a general-purpose file
+       * download endpoint. Path is the volume-relative key returned by
+       * /api/dashboard/saved-views.
+       */
+      app.get("/api/dashboard/saved-view-png", async (req, res) => {
+        const path = req.query.path;
+        if (typeof path !== "string" || !path.endsWith(".png")) {
+          res
+            .status(400)
+            .json({ error: "path query param required, .png only" });
+          return;
+        }
+        try {
+          const volume = appkit.files("files").asUser(req);
+          const contents = await volume.download(path);
+          res.setHeader("Content-Type", "image/png");
+          res.setHeader("Cache-Control", "private, max-age=60");
+          if (contents instanceof Uint8Array || Buffer.isBuffer(contents)) {
+            res.end(contents);
+          } else if (typeof contents === "string") {
+            res.end(contents);
+          } else {
+            // ReadableStream fallback
+            const reader = (contents as ReadableStream<Uint8Array>).getReader();
+            const chunks: Uint8Array[] = [];
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              if (value) chunks.push(value);
+            }
+            res.end(Buffer.concat(chunks));
+          }
+        } catch (err) {
+          console.error("[saved-view-png] fetch failed:", err);
+          const msg = err instanceof Error ? err.message : String(err);
+          res.status(404).json({ error: msg });
+        }
+      });
+    })
+    .start();
+});
+
+function toSlug(s: string): string {
+  return (
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60) || "view"
+  );
+}
+
+function decodeDataUrlOrBase64(input: string): Buffer | null {
+  const stripped = input.startsWith("data:")
+    ? input.substring(input.indexOf(",") + 1)
+    : input;
+  try {
+    return Buffer.from(stripped, "base64");
+  } catch {
+    return null;
+  }
+}
 
 type ProbeResult = {
   volume: string;

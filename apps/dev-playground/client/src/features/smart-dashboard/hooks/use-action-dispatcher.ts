@@ -18,6 +18,7 @@ const DASHBOARD_TOOLS = new Set<string>([
   "highlight_period",
   "clear_highlights",
   "focus_chart",
+  "load_view",
 ]);
 
 interface UseActionDispatcherOptions {
@@ -202,6 +203,48 @@ export function useActionDispatcher({
           }
           focusChart(id as FocusableChartId);
           onAction?.(`Focused ${id.replace(/_/g, " ")}`);
+          return;
+        }
+        case "load_view": {
+          const rawFilters = (args.filters ?? {}) as Record<string, unknown>;
+          const nextFilters: DashboardFilters = {};
+          if (typeof rawFilters.date_from === "string")
+            nextFilters.date_from = rawFilters.date_from;
+          if (typeof rawFilters.date_to === "string")
+            nextFilters.date_to = rawFilters.date_to;
+          if (typeof rawFilters.pickup_zip === "string")
+            nextFilters.pickup_zip = rawFilters.pickup_zip;
+          if (typeof rawFilters.fare_min === "string")
+            nextFilters.fare_min = rawFilters.fare_min;
+          if (typeof rawFilters.fare_max === "string")
+            nextFilters.fare_max = rawFilters.fare_max;
+
+          const rawHighlights = Array.isArray(args.highlights)
+            ? (args.highlights as Array<Record<string, unknown>>)
+            : [];
+          const nextHighlights: Highlight[] = rawHighlights.flatMap((h) => {
+            const start = h.start;
+            const end = h.end;
+            if (typeof start !== "string" || typeof end !== "string") return [];
+            const color: Highlight["color"] =
+              h.color === "red" || h.color === "yellow" ? h.color : "blue";
+            const label = typeof h.label === "string" ? h.label : undefined;
+            return [{ start, end, color, label }];
+          });
+
+          // Restore: clear then re-apply both filters and highlights in one
+          // shot so partial states don't linger.
+          onClearFilters();
+          onClearHighlights();
+          if (Object.keys(nextFilters).length > 0) {
+            onFilterUpdate(() => nextFilters);
+          }
+          for (const h of nextHighlights) {
+            onAddHighlight(h);
+          }
+          const viewName =
+            typeof args.name === "string" ? args.name : "saved view";
+          onAction?.(`Loaded "${viewName}"`);
           return;
         }
         default: {

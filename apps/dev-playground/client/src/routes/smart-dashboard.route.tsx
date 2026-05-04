@@ -8,12 +8,19 @@ import {
   ApprovalCard,
   type PendingApproval,
 } from "@/features/smart-dashboard/components/approval-card";
+import {
+  ChatDrawer,
+  type ChatMessage,
+} from "@/features/smart-dashboard/components/chat-drawer";
 import { FareChart } from "@/features/smart-dashboard/components/fare-chart";
 import { FocusableChart } from "@/features/smart-dashboard/components/focusable-chart";
 import { InspectorToggle } from "@/features/smart-dashboard/components/inspector-toggle";
 import { KPICards } from "@/features/smart-dashboard/components/kpi-cards";
-import { QuerySection } from "@/features/smart-dashboard/components/query-section";
 import { QuickActionsBar } from "@/features/smart-dashboard/components/quick-actions-bar";
+import {
+  type SavedView,
+  SavedViewsPanel,
+} from "@/features/smart-dashboard/components/saved-views-panel";
 import { StreamInspector } from "@/features/smart-dashboard/components/stream-inspector";
 import { TripChart } from "@/features/smart-dashboard/components/trip-chart";
 import type { Highlight } from "@/features/smart-dashboard/hooks/use-action-dispatcher";
@@ -29,6 +36,13 @@ export const Route = createFileRoute("/smart-dashboard")({
   component: SmartDashboardRoute,
 });
 
+// Lightweight id factory for chat messages. Not using crypto.randomUUID
+// because the value is only meaningful for React keys + approval lookup
+// inside a single session.
+let messageIdCounter = 0;
+const nextMessageId = (): string =>
+  `msg_${++messageIdCounter}_${Math.random().toString(36).slice(2, 8)}`;
+
 function SmartDashboardRoute() {
   const [filters, setFilters] = useState<DashboardFilters>({});
   const [highlights, setHighlights] = useState<Highlight[]>([]);
@@ -38,11 +52,19 @@ function SmartDashboardRoute() {
   const [lastAction, setLastAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Multi-turn chat history. Messages accumulate across sends so the user
+  // can scroll back through the conversation rather than having the UI
+  // wipe itself after every reply.
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const activeAssistantIdRef = useRef<string | null>(null);
+  const lastUserMessageIdRef = useRef<string | null>(null);
+
+  // Saved-views panel bumps this token after an upload to force a list
+  // refresh without pushing props down through ApprovalCard manually.
+  const [savedViewsVersion, setSavedViewsVersion] = useState(0);
+
   useInspectorShortcuts();
 
-  // Dashboard data is keyed on the *current* filter state; the dispatcher
-  // mutates `filters` via setState updaters, so every new filter triggers
-  // a re-query automatically.
   const {
     kpis,
     tripsOverTime,
@@ -51,8 +73,6 @@ function SmartDashboardRoute() {
     error: dataError,
   } = useDashboardData(filters);
 
-  // Dispatcher surfaces actions via `onAction`; toast shows them. A small
-  // stream of summaries arrives as the agent makes calls on `.done` events.
   const pushAction = useCallback((summary: string) => {
     setLastAction(summary);
   }, []);
@@ -60,10 +80,8 @@ function SmartDashboardRoute() {
   const pushUnknown = useCallback((name: string, args: unknown) => {
     const argsPreview = typeof args === "string" ? args : JSON.stringify(args);
     setError(
-      `Agent emitted an unhandled tool call '${name}' with args ${argsPreview}. Ignoring — the dispatcher only handles the declared dashboard tools.`,
+      `Agent emitted an unhandled tool call '${name}' with args ${argsPreview}. Ignoring.`,
     );
-    // Keep the inspector warning visible too:
-    // eslint-disable-next-line no-console
     console.warn(`[dispatcher] unknown/invalid tool '${name}':`, args);
   }, []);
 
@@ -117,9 +135,6 @@ function SmartDashboardRoute() {
     [pendingApprovals],
   );
 
-  // Context prefix is recomputed when filter/highlight state changes, so
-  // every `send()` carries the freshest snapshot even though useAgentStream
-  // is mounted once at the route level.
   const contextPrefix = useMemo(
     () => buildDashboardContext(filters, highlights),
     [filters, highlights],
@@ -131,12 +146,15 @@ function SmartDashboardRoute() {
     (event: SSEEvent) => {
       handleDispatcherEvent(event);
 
+      // Capture pending approvals and pin them to the user turn that
+      // triggered them so the ChatDrawer can render the card inline.
       if (
         event.type === "appkit.approval_pending" &&
         event.approval_id &&
         event.stream_id &&
         event.tool_name
       ) {
+        const pinnedToMessageId = lastUserMessageIdRef.current;
         setPendingApprovals((prev) => [
           ...prev,
           {
@@ -145,8 +163,36 @@ function SmartDashboardRoute() {
             toolName: event.tool_name as string,
             args: event.args,
             annotations: event.annotations,
-          },
+            ...(pinnedToMessageId
+              ? { _pinnedToMessageId: pinnedToMessageId }
+              : {}),
+          } as PendingApproval & { _pinnedToMessageId?: string },
         ]);
+      }
+
+      // Stream assistant text into the in-progress assistant message.
+      if (event.type === "response.output_text.delta" && event.delta) {
+        const id = activeAssistantIdRef.current;
+        if (id) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === id
+                ? { ...m, content: m.content + (event.delta ?? "") }
+                : m,
+            ),
+          );
+        }
+      }
+
+      // Finalize the streaming assistant message when the run completes.
+      if (event.type === "response.completed") {
+        const id = activeAssistantIdRef.current;
+        if (id) {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === id ? { ...m, streaming: false } : m)),
+          );
+          activeAssistantIdRef.current = null;
+        }
       }
 
       if (event.type === "error" && event.error) {
@@ -156,22 +202,41 @@ function SmartDashboardRoute() {
     [handleDispatcherEvent],
   );
 
-  // Lifted to the route so the Quick Actions bar can dispatch through the
-  // same pipeline as the chat input. One agent stream, two callers.
-  const {
-    content,
-    isLoading: agentLoading,
-    send,
-  } = useAgentStream({
+  const { isLoading: agentLoading, send } = useAgentStream({
     agentName: "query",
     onEvent: handleStreamEvent,
   });
 
   const dispatchToAgent = useCallback(
     (message: string) => {
+      const userMsgId = nextMessageId();
+      const assistantMsgId = nextMessageId();
+      lastUserMessageIdRef.current = userMsgId;
+      activeAssistantIdRef.current = assistantMsgId;
+      setMessages((prev) => [
+        ...prev,
+        { id: userMsgId, role: "user", content: message },
+        { id: assistantMsgId, role: "assistant", content: "", streaming: true },
+      ]);
       send(message, { contextPrefix: contextPrefixRef.current });
     },
     [send],
+  );
+
+  const handleLoadSavedView = useCallback(
+    (view: SavedView) => {
+      const name = view.metadata.name ?? "saved view";
+      dispatchToAgent(`Load the saved view '${name}'`);
+    },
+    [dispatchToAgent],
+  );
+
+  const handleSavedNotification = useCallback(
+    (info: { name: string; volumePath: string }) => {
+      setLastAction(`Saved "${info.name}" to volume`);
+      setSavedViewsVersion((v) => v + 1);
+    },
+    [],
   );
 
   const handleClearFilter = useCallback((key: keyof DashboardFilters) => {
@@ -187,6 +252,56 @@ function SmartDashboardRoute() {
     setHighlights([]);
   }, []);
 
+  // Ref to the captured region for save_view. Kept on the dashboard body
+  // (not the header/chat) so the screenshot is the analytics surface only.
+  const dashboardRef = useRef<HTMLDivElement | null>(null);
+
+  // ApprovalCards render inline in the chat drawer, pinned to the user
+  // turn that triggered them. Builds a lookup per render.
+  const approvalsByMessage = useMemo(() => {
+    const map = new Map<string, PendingApproval[]>();
+    for (const a of pendingApprovals) {
+      const pinId =
+        (a as PendingApproval & { _pinnedToMessageId?: string })
+          ._pinnedToMessageId ?? "__loose";
+      const arr = map.get(pinId) ?? [];
+      arr.push(a);
+      map.set(pinId, arr);
+    }
+    return map;
+  }, [pendingApprovals]);
+
+  const approvalCardForMessage = useCallback(
+    (messageId: string): React.ReactNode | null => {
+      const bucket = approvalsByMessage.get(messageId);
+      if (!bucket || bucket.length === 0) return null;
+      return (
+        <div className="space-y-2">
+          {bucket.map((approval) => (
+            <ApprovalCard
+              key={approval.approvalId}
+              approval={approval}
+              filters={filters}
+              highlights={highlights}
+              dashboardRef={dashboardRef}
+              onDecide={decideApproval}
+              onSaved={handleSavedNotification}
+            />
+          ))}
+        </div>
+      );
+    },
+    [
+      approvalsByMessage,
+      filters,
+      highlights,
+      decideApproval,
+      handleSavedNotification,
+    ],
+  );
+
+  const looseApprovals = approvalsByMessage.get("__loose") ?? [];
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="max-w-[1400px] mx-auto px-4 py-4">
@@ -199,8 +314,7 @@ function SmartDashboardRoute() {
               Smart Dashboard
             </h1>
             <p className="text-xs text-muted-foreground">
-              NYC Taxi Analytics — powered by agents · press ⌘K for the stream
-              inspector
+              NYC Taxi Analytics · ⌘J chat · ⌘K stream inspector
             </p>
           </div>
         </header>
@@ -225,6 +339,13 @@ function SmartDashboardRoute() {
         )}
 
         <div className="mb-4">
+          <SavedViewsPanel
+            onLoad={handleLoadSavedView}
+            refreshToken={savedViewsVersion}
+          />
+        </div>
+
+        <div className="mb-4">
           <ActiveFilters
             filters={filters}
             onClear={handleClearFilter}
@@ -232,51 +353,63 @@ function SmartDashboardRoute() {
           />
         </div>
 
-        <div className="mb-5">
-          <FocusableChart chartId="kpis">
-            <KPICards data={kpis} isLoading={dataLoading} />
-          </FocusableChart>
+        {/* Everything below this ref is what gets captured for save_view. */}
+        <div ref={dashboardRef}>
+          <div className="mb-5">
+            <FocusableChart chartId="kpis">
+              <KPICards data={kpis} isLoading={dataLoading} />
+            </FocusableChart>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5 mb-5">
+            <div className="space-y-5">
+              <FocusableChart chartId="trips_over_time">
+                <TripChart
+                  data={tripsOverTime}
+                  highlights={highlights}
+                  isLoading={dataLoading}
+                />
+              </FocusableChart>
+              <FocusableChart chartId="fare_distribution">
+                <FareChart data={fareDistribution} isLoading={dataLoading} />
+              </FocusableChart>
+            </div>
+            <div className="lg:h-[580px]">
+              <AgentSidebar kpis={kpis} kpisLoaded={!dataLoading} />
+            </div>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5 mb-5">
-          <div className="space-y-5">
-            <FocusableChart chartId="trips_over_time">
-              <TripChart
-                data={tripsOverTime}
+        {/* Any approvals not pinned to a chat message (defensive fallback). */}
+        {looseApprovals.length > 0 && (
+          <div className="space-y-3">
+            {looseApprovals.map((approval) => (
+              <ApprovalCard
+                key={approval.approvalId}
+                approval={approval}
+                filters={filters}
                 highlights={highlights}
-                isLoading={dataLoading}
+                dashboardRef={dashboardRef}
+                onDecide={decideApproval}
+                onSaved={handleSavedNotification}
               />
-            </FocusableChart>
-            <FocusableChart chartId="fare_distribution">
-              <FareChart data={fareDistribution} isLoading={dataLoading} />
-            </FocusableChart>
+            ))}
           </div>
-          <div className="lg:h-[580px]">
-            <AgentSidebar kpis={kpis} kpisLoaded={!dataLoading} />
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <QuerySection
-            onSend={dispatchToAgent}
-            content={content}
-            isLoading={agentLoading}
-          />
-          {pendingApprovals.map((approval) => (
-            <ApprovalCard
-              key={approval.approvalId}
-              approval={approval}
-              filters={filters}
-              highlights={highlights}
-              onDecide={decideApproval}
-            />
-          ))}
-        </div>
+        )}
       </div>
 
       <InspectorToggle />
       <StreamInspector />
       <ActionToast message={lastAction} />
+
+      <ChatDrawer
+        messages={messages}
+        isLoading={agentLoading}
+        onSend={dispatchToAgent}
+        approvalCardForMessage={approvalCardForMessage}
+        pendingApprovals={pendingApprovals}
+        unreadCount={pendingApprovals.length}
+      />
     </div>
   );
 }
