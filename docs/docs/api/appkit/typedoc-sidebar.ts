@@ -119,6 +119,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.AutoInheritToolsConfig",
+          label: "AutoInheritToolsConfig"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.BasePluginConfig",
           label: "BasePluginConfig"
         },
@@ -209,6 +214,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.RegisteredAgent",
+          label: "RegisteredAgent"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.RequestedClaims",
           label: "RequestedClaims"
         },
@@ -271,6 +281,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.ThreadStore",
           label: "ThreadStore"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ToolAnnotations",
+          label: "ToolAnnotations"
         },
         {
           type: "doc",
@@ -367,6 +382,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.PluginData",
           label: "PluginData"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.ResolvedToolEntry",
+          label: "ResolvedToolEntry"
         },
         {
           type: "doc",

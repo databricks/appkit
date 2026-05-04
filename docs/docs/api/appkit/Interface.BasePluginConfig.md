@@ -4,8 +4,8 @@ Base configuration interface for AppKit plugins
 
 ## Extended by
 
-- [`AgentsPluginConfig`](Interface.AgentsPluginConfig.md)
 - [`IJobsConfig`](Interface.IJobsConfig.md)
+- [`AgentsPluginConfig`](Interface.AgentsPluginConfig.md)
 
 ## Indexable
 

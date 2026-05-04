@@ -119,7 +119,7 @@ const config: Config = {
       "docusaurus-plugin-typedoc",
       {
         id: "appkit",
-        entryPoints: ["../packages/appkit/src/index.ts"],
+        entryPoints: ["../packages/appkit/src/typedoc.entry.ts"],
         tsconfig: "../packages/appkit/tsconfig.json",
         out: "docs/api/appkit",
         gitRevision: "main",

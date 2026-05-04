@@ -1,7 +1,7 @@
 # @databricks/appkit
 
-Core library for building Databricks applications with type-safe SQL queries,
-plugin architecture, and React integration.
+Documentation merge entry for Typedoc — combines the stable `@databricks/appkit`
+surface with `@databricks/appkit/beta`. Not meant for application imports.
 
 ## Enumerations
 
@@ -37,6 +37,7 @@ plugin architecture, and React integration.
 | [AgentRunContext](Interface.AgentRunContext.md) | - |
 | [AgentsPluginConfig](Interface.AgentsPluginConfig.md) | Base configuration interface for AppKit plugins |
 | [AgentToolDefinition](Interface.AgentToolDefinition.md) | - |
+| [AutoInheritToolsConfig](Interface.AutoInheritToolsConfig.md) | Auto-inherit configuration. When enabled for a given agent origin, agents with no explicit `tools:` declaration receive every registered ToolProvider plugin tool whose author marked `autoInheritable: true`. Tools without that flag — destructive, state-mutating, or privilege-sensitive — never spread automatically and must be wired via `tools:`, `toolkits:`, or `fromPlugin`. |
 | [BasePluginConfig](Interface.BasePluginConfig.md) | Base configuration interface for AppKit plugins |
 | [CacheConfig](Interface.CacheConfig.md) | Configuration for the CacheInterceptor. Controls TTL, size limits, storage backend, and probabilistic cleanup. |
 | [DatabaseCredential](Interface.DatabaseCredential.md) | Database credentials with OAuth token for Postgres connection |
@@ -55,6 +56,7 @@ plugin architecture, and React integration.
 | [Message](Interface.Message.md) | - |
 | [PluginManifest](Interface.PluginManifest.md) | Plugin manifest that declares metadata and resource requirements. Attached to plugin classes as a static property. Extends the shared PluginManifest with strict resource types. |
 | [PromptContext](Interface.PromptContext.md) | Context passed to `baseSystemPrompt` callbacks. |
+| [RegisteredAgent](Interface.RegisteredAgent.md) | - |
 | [RequestedClaims](Interface.RequestedClaims.md) | Optional claims for fine-grained Unity Catalog table permissions When specified, the returned token will be scoped to only the requested tables |
 | [RequestedResource](Interface.RequestedResource.md) | Resource to request permissions for in Unity Catalog |
 | [ResourceEntry](Interface.ResourceEntry.md) | Internal representation of a resource in the registry. Extends ResourceRequirement with resolution state and plugin ownership. |
@@ -68,6 +70,7 @@ plugin architecture, and React integration.
 | [TelemetryConfig](Interface.TelemetryConfig.md) | OpenTelemetry configuration for AppKit applications |
 | [Thread](Interface.Thread.md) | - |
 | [ThreadStore](Interface.ThreadStore.md) | - |
+| [ToolAnnotations](Interface.ToolAnnotations.md) | - |
 | [ToolConfig](Interface.ToolConfig.md) | - |
 | [ToolkitEntry](Interface.ToolkitEntry.md) | A tool reference produced by a plugin's `.toolkit()` call. The agents plugin recognizes the `__toolkitRef` brand and dispatches tool invocations through `PluginContext.executeTool(req, pluginName, localName, ...)`, preserving OBO (asUser) and telemetry spans. |
 | [ToolkitOptions](Interface.ToolkitOptions.md) | - |
@@ -91,6 +94,7 @@ plugin architecture, and React integration.
 | [JobHandle](TypeAlias.JobHandle.md) | Job handle returned by `appkit.jobs("etl")`. Supports OBO access via `.asUser(req)`. |
 | [JobsExport](TypeAlias.JobsExport.md) | Public API shape of the jobs plugin. Callable to select a job by key. |
 | [PluginData](TypeAlias.PluginData.md) | Tuple of plugin class, config, and name. Created by `toPlugin()` and passed to `createApp()`. |
+| [ResolvedToolEntry](TypeAlias.ResolvedToolEntry.md) | Internal tool-index entry after a tool record has been resolved to a dispatchable form. |
 | [ResourcePermission](TypeAlias.ResourcePermission.md) | Union of all possible permission levels across all resource types. |
 | [ServingFactory](TypeAlias.ServingFactory.md) | Factory function returned by `AppKit.serving`. |
 | [ToPlugin](TypeAlias.ToPlugin.md) | Factory function type returned by `toPlugin()`. Accepts optional config and returns a PluginData tuple. |

@@ -1,5 +1,11 @@
 # Agents
 
+<!-- AUTO-GENERATED: stability-banner-start -->
+:::warning Beta plugin
+This plugin is currently **beta**. APIs may change between minor releases. Import from `@databricks/appkit/beta`. See [Plugin Stability Tiers](./stability.md).
+:::
+<!-- AUTO-GENERATED: stability-banner-end -->
+
 The `agents` plugin turns a Databricks AppKit app into an AI-agent host. It loads agent definitions from markdown on disk (one folder per agent: `config/agents/<id>/agent.md`), from TypeScript (`createAgent(def)`), or both, and exposes them at `POST /invocations` alongside routes for chat, thread management, and cancellation.
 
 This page covers the full lifecycle. For the hand-written primitives (`tool()`, `mcpServer()`), see [tools](./server.md).

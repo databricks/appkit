@@ -60,7 +60,9 @@ Milliseconds to wait before auto-denying. Default: 60_000.
 ### autoInheritTools?
 
 ```ts
-optional autoInheritTools: boolean | AutoInheritToolsConfig;
+optional autoInheritTools: 
+  | boolean
+  | AutoInheritToolsConfig;
 ```
 
 Whether to auto-inherit every ToolProvider plugin's toolkit. Accepts a boolean shorthand.
