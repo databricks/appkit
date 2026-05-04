@@ -29,6 +29,7 @@ vi.mock("../convention", () => ({
 
 const pool = {
   end: vi.fn(async () => undefined),
+  on: vi.fn(),
 } as unknown as Pool;
 
 type DatabasePluginInstance = InstanceType<
@@ -93,8 +94,69 @@ describe("DatabasePlugin", () => {
     const plugin = createPlugin();
     await plugin.setup();
 
-    plugin.abortActiveOperations();
+    await plugin.abortActiveOperations();
 
     expect(pool.end).toHaveBeenCalled();
+  });
+
+  test("abortActiveOperations awaits pool.end so SIGTERM doesn't cut drain", async () => {
+    let drainResolve: (() => void) | undefined;
+    const drainGate = new Promise<void>((resolve) => {
+      drainResolve = resolve;
+    });
+    const slowPool = {
+      end: vi.fn(() => drainGate),
+      on: vi.fn(),
+    } as unknown as Pool;
+    vi.mocked(createLakebasePool).mockReturnValueOnce(slowPool);
+
+    const plugin = createPlugin();
+    await plugin.setup();
+
+    const promise = plugin.abortActiveOperations();
+    let settled = false;
+    promise?.then(() => {
+      settled = true;
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(settled).toBe(false);
+    drainResolve?.();
+    await promise;
+    expect(settled).toBe(true);
+  });
+
+  test("setup applies statement_timeout to every new pool connection", async () => {
+    const plugin = createPlugin({ statementTimeoutMs: 7_000 });
+    await plugin.setup();
+
+    expect(pool.on).toHaveBeenCalledWith("connect", expect.any(Function));
+    const handler = vi
+      .mocked(pool.on)
+      .mock.calls.find(
+        ([event]) => event === "connect",
+      )?.[1] as unknown as (client: {
+      query: ReturnType<typeof vi.fn>;
+    }) => void;
+    const client = { query: vi.fn(async () => ({})) };
+    handler(client);
+    expect(client.query).toHaveBeenCalledWith("SET statement_timeout = 7000");
+  });
+
+  test("schema-load failure is decorated and re-raised by default", async () => {
+    vi.mocked(loadSchemaByConvention).mockRejectedValue(
+      new Error("syntax error in schema.ts"),
+    );
+
+    const plugin = createPlugin();
+    await expect(plugin.setup()).rejects.toThrow("syntax error in schema.ts");
+  });
+
+  test("schema-load failure is swallowed when tolerateSetupFailure is set", async () => {
+    vi.mocked(loadSchemaByConvention).mockRejectedValue(
+      new Error("syntax error in schema.ts"),
+    );
+
+    const plugin = createPlugin({ tolerateSetupFailure: true });
+    await expect(plugin.setup()).resolves.toBeUndefined();
   });
 });

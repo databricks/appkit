@@ -106,4 +106,24 @@ export interface IDatabaseConfig extends BasePluginConfig {
   hooks?: Record<string, EntityHooks>;
   /** The cache settings for the database. */
   cache?: CacheSettings;
+  /**
+   * Maximum number of distinct per-user (OBO) pools the registry keeps alive
+   * at once. Each pool defaults to `OBO_POOL_DEFAULTS.max = 4` connections, so
+   * the worst-case fan-out is `(1 + oboPoolMax) × poolMax`. Defaults to 25 —
+   * tune up for hot OBO traffic, down for low-tier Lakebase plans.
+   */
+  oboPoolMax?: number;
+  /**
+   * Postgres `statement_timeout` applied to every pooled connection (ms).
+   * Defaults to 15s. Set to `0` to disable the server-side cap; the AppKit
+   * timeout interceptor still applies on the client side.
+   */
+  statementTimeoutMs?: number;
+  /**
+   * When true, schema-load and drift-check failures during `setup()` are
+   * logged but do not throw. Defaults to false (fail closed). Useful in
+   * environments where the database is provisioned out of band and the boot
+   * shouldn't crash before the schema is reachable.
+   */
+  tolerateSetupFailure?: boolean;
 }

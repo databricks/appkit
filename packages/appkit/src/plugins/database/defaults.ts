@@ -25,7 +25,7 @@ export const writeDefaults: PluginExecuteConfig = {
 };
 
 /**
- * Connection pool defaults for the database.
+ * Connection pool defaults for the service-principal pool.
  * Max 10 connections
  * Idle timeout 30s
  * Connection timeout 10s
@@ -35,3 +35,9 @@ export const POOL_DEFAULTS = {
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 10_000,
 };
+
+/**
+ * Default Postgres `statement_timeout` set on every pooled connection. Caps
+ * runaway queries server-side; pairs with the AppKit timeout interceptor.
+ */
+export const STATEMENT_TIMEOUT_DEFAULT_MS = 15_000;
