@@ -5,22 +5,13 @@ import {
   toPlugin,
 } from "@databricks/appkit";
 import type { IAppRouter } from "shared";
-import * as drizzleExample from "./lakebase-examples/drizzle-example";
 import * as rawExample from "./lakebase-examples/raw-driver-example";
-import * as sequelizeExample from "./lakebase-examples/sequelize-example";
-import * as typeormExample from "./lakebase-examples/typeorm-example";
 
 /**
  * Lakebase Examples Plugin
  *
- * Orchestrates four different approaches to database integration:
- * 1. Raw pg.Pool driver - Direct SQL queries
- * 2. Drizzle ORM - Type-safe schema definitions
- * 3. TypeORM - Entity-based data access
- * 4. Sequelize - Model-based ORM with intuitive API
- *
- * Each example is self-contained and can be used as a reference for
- * implementing Lakebase integration in your own applications.
+ * Demonstrates raw pg.Pool driver with OBO (On-Behalf-Of) authentication
+ * and Row-Level Security (RLS).
  */
 
 export class LakebaseExamplesPlugin extends Plugin {
@@ -47,14 +38,7 @@ export class LakebaseExamplesPlugin extends Plugin {
 
     try {
       const user = await getUsernameWithApiLookup();
-
-      // Initialize all four examples in parallel
-      await Promise.all([
-        rawExample.setup(user),
-        drizzleExample.setup(user),
-        typeormExample.setup(user),
-        sequelizeExample.setup(user),
-      ]);
+      await rawExample.setup(user);
     } catch (error) {
       console.error("Failed to initialize Lakebase examples:", error);
       // Don't throw - allow app to start even if Lakebase examples fail
@@ -67,20 +51,11 @@ export class LakebaseExamplesPlugin extends Plugin {
       return;
     }
 
-    // Register routes for each example under /api/lakebase-examples/*
     rawExample.registerRoutes(router, "/raw");
-    drizzleExample.registerRoutes(router, "/drizzle");
-    typeormExample.registerRoutes(router, "/typeorm");
-    sequelizeExample.registerRoutes(router, "/sequelize");
   }
 
   async close() {
-    await Promise.all([
-      rawExample.cleanup(),
-      drizzleExample.cleanup(),
-      typeormExample.cleanup(),
-      sequelizeExample.cleanup(),
-    ]);
+    await rawExample.cleanup();
   }
 }
 
