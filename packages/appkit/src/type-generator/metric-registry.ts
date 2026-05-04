@@ -926,6 +926,14 @@ export type DescribeFetcher = (
  * Build a DescribeFetcher from a real WorkspaceClient + warehouseId.
  *
  * Kept narrow so it does not require importing the SDK at test time.
+ *
+ * `wait_timeout: "30s"` makes the API wait synchronously for the statement
+ * to complete (matching the SDK's own example pattern). Without an explicit
+ * wait, the call can return while the statement is still PENDING/RUNNING —
+ * the response carries no `data_array` yet, `parseDescribeTableExtendedJson`
+ * reads that as "returned no rows", and the registry ships empty. The
+ * runtime fail-closed gate then 503s every metric request, which is exactly
+ * the symptom we hit on a cold warehouse.
  */
 export function createWorkspaceDescribeFetcher(
   warehouseId: string,
@@ -935,6 +943,7 @@ export function createWorkspaceDescribeFetcher(
     const result = (await client.statementExecution.executeStatement({
       statement: `DESCRIBE TABLE EXTENDED ${fqn} AS JSON`,
       warehouse_id: warehouseId,
+      wait_timeout: "30s",
     })) as DatabricksStatementExecutionResponse;
     return result;
   };
