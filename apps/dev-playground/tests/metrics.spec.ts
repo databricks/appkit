@@ -135,25 +135,22 @@ test.describe("Metric Views Route Tests", () => {
   });
 
   test("calls expected metric endpoints on page load", async ({ page }) => {
-    const calls: string[] = [];
-    page.on("request", (request) => {
-      if (request.url().includes("/api/analytics/metric/")) {
-        calls.push(request.url());
-      }
-    });
+    // Match the codebase idiom for "this navigation should fire request X" —
+    // see reconnect.spec.ts. `waitForRequest` registers a one-shot matcher
+    // before the navigation triggers it, so listener-attachment ordering
+    // (a known sharp edge with `page.on("request")` plus `page.route()` mocks
+    // attached in beforeEach) is no longer in play. Each await doubles as the
+    // "received >= 1" assertion — it throws on timeout otherwise.
+    const revenuePromise = page.waitForRequest((req) =>
+      req.url().endsWith("/api/analytics/metric/revenue"),
+    );
+    const customerPromise = page.waitForRequest((req) =>
+      req.url().endsWith("/api/analytics/metric/customer_metrics"),
+    );
 
     await page.goto("/metrics", { waitUntil: "networkidle" });
 
-    // React 19 Strict Mode doubles useEffect invocations in dev mode; assert
-    // both routes fire (allowing for the multiplier).
-    const revenueCalls = calls.filter((u) =>
-      u.endsWith("/api/analytics/metric/revenue"),
-    );
-    const customerCalls = calls.filter((u) =>
-      u.endsWith("/api/analytics/metric/customer_metrics"),
-    );
-
-    expect(revenueCalls.length).toBeGreaterThanOrEqual(1);
-    expect(customerCalls.length).toBeGreaterThanOrEqual(1);
+    await revenuePromise;
+    await customerPromise;
   });
 });
