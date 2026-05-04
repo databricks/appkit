@@ -199,7 +199,7 @@ export class DatabricksAdapter implements AgentAdapter {
   ): Promise<DatabricksAdapter> {
     const { workspaceClient, endpointName, maxSteps, maxTokens } = options;
     return new DatabricksAdapter({
-      streamBody: (body) =>
+      streamBody: (body, signal) =>
         // Cast through the structural shape: the connector types
         // `workspaceClient` as the SDK's concrete `WorkspaceClient`, but we
         // only need `apiClient.request`.
@@ -207,6 +207,7 @@ export class DatabricksAdapter implements AgentAdapter {
           workspaceClient as unknown as Parameters<typeof servingStream>[0],
           endpointName,
           body,
+          signal,
         ),
       maxSteps,
       maxTokens,
@@ -434,7 +435,16 @@ export class DatabricksAdapter implements AgentAdapter {
         }
       }
     } finally {
-      reader.releaseLock();
+      try {
+        await reader.cancel();
+      } catch {
+        // Best-effort: reader may already be closed or the stream errored.
+      }
+      try {
+        reader.releaseLock();
+      } catch {
+        // Lock may already be released after cancel.
+      }
     }
 
     const toolCalls: OpenAIToolCall[] = Array.from(
