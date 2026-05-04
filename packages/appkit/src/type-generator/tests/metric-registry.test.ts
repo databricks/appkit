@@ -329,7 +329,7 @@ describe("syncMetrics", () => {
         ],
       });
 
-    const schemas = await syncMetrics(resolution, fetcher);
+    const { schemas } = await syncMetrics(resolution, fetcher);
     expect(schemas).toHaveLength(1);
     const [schema] = schemas;
     expect(schema.key).toBe("revenue");
@@ -346,7 +346,7 @@ describe("syncMetrics", () => {
       throw new Error("warehouse unreachable");
     };
 
-    const schemas = await syncMetrics(resolution, fetcher);
+    const { schemas } = await syncMetrics(resolution, fetcher);
     expect(schemas[0].measures).toEqual([]);
     expect(schemas[0].dimensions).toEqual([]);
   });
@@ -378,7 +378,7 @@ describe("generateMetricTypeDeclarations — snapshot", () => {
         ],
       });
 
-    const schemas = await syncMetrics(resolution, fetcher);
+    const { schemas } = await syncMetrics(resolution, fetcher);
     const output = generateMetricTypeDeclarations(schemas);
     expect(output).toMatchSnapshot();
   });
@@ -411,7 +411,7 @@ describe("generateMetricTypeDeclarations — snapshot", () => {
         ],
       });
 
-    const schemas = await syncMetrics(resolution, fetcher);
+    const { schemas } = await syncMetrics(resolution, fetcher);
     const output = generateMetricTypeDeclarations(schemas);
     expect(output).toMatchSnapshot();
 
@@ -736,12 +736,10 @@ describe("buildMetricsMetadataBundle", () => {
         ],
       });
 
-    const schemas = await syncMetrics(resolution, fetcher);
+    const { schemas } = await syncMetrics(resolution, fetcher);
     const bundle = buildMetricsMetadataBundle(schemas);
 
     expect(bundle.revenue).toMatchObject({
-      source: "appkit_demo.public.revenue_metrics",
-      lane: "sp",
       measures: {
         arr: {
           type: "DECIMAL(38,2)",
@@ -768,6 +766,10 @@ describe("buildMetricsMetadataBundle", () => {
         },
       },
     });
+    // Defense-in-depth: the client-shipped bundle must not carry server-side
+    // concerns (UC FQN, execution lane). They live in metric.json server-side.
+    expect(bundle.revenue).not.toHaveProperty("source");
+    expect(bundle.revenue).not.toHaveProperty("lane");
   });
 
   test("preserves stable alphabetical key order across metrics", async () => {
@@ -783,7 +785,7 @@ describe("buildMetricsMetadataBundle", () => {
         columns: [{ name: "v", type: "DECIMAL", is_measure: true }],
       });
 
-    const schemas = await syncMetrics(resolution, fetcher);
+    const { schemas } = await syncMetrics(resolution, fetcher);
     const bundle = buildMetricsMetadataBundle(schemas);
     expect(Object.keys(bundle)).toEqual(["a_metric", "z_metric"]);
   });
@@ -798,7 +800,7 @@ describe("buildMetricsMetadataBundle", () => {
         columns: [{ name: "arr", type: "DECIMAL", is_measure: true }],
       });
 
-    const schemas = await syncMetrics(resolution, fetcher);
+    const { schemas } = await syncMetrics(resolution, fetcher);
     const bundle = buildMetricsMetadataBundle(schemas);
     const arr = bundle.revenue.measures.arr;
     expect(arr.type).toBe("DECIMAL");
@@ -825,7 +827,7 @@ describe("buildMetricsMetadataBundle", () => {
         ],
       });
 
-    const schemas = await syncMetrics(resolution, fetcher);
+    const { schemas } = await syncMetrics(resolution, fetcher);
     const bundle = buildMetricsMetadataBundle(schemas);
     expect(bundle.revenue.measures.last_event_at.time_grain).toBeUndefined();
     expect(bundle.revenue.dimensions.ts.time_grain).toEqual([
@@ -905,7 +907,7 @@ describe("generateMetricsMetadataJson — snapshot", () => {
             ],
           });
 
-    const schemas = await syncMetrics(resolution, fetcher);
+    const { schemas } = await syncMetrics(resolution, fetcher);
     const json = generateMetricsMetadataJson(schemas);
     expect(json).toMatchSnapshot();
 
@@ -927,7 +929,14 @@ describe("generateMetricsMetadataJson — snapshot", () => {
       "week",
       "year",
     ]);
-    expect(parsed.customer_metrics.lane).toBe("obo");
+    // The client-shipped artifact must not carry server-side concerns:
+    // UC FQN (`source`) and execution lane (`lane`) live in metric.json
+    // and are consumed only on the server. Asserting their absence catches
+    // accidental re-introduction in code review or refactors.
+    expect(parsed.revenue).not.toHaveProperty("source");
+    expect(parsed.revenue).not.toHaveProperty("lane");
+    expect(parsed.customer_metrics).not.toHaveProperty("source");
+    expect(parsed.customer_metrics).not.toHaveProperty("lane");
   });
 
   test("emits `{}` when no metrics are registered", () => {
@@ -951,7 +960,7 @@ describe("syncMetrics — time-typed dimension propagation", () => {
         ],
       });
 
-    const schemas = await syncMetrics(resolution, fetcher);
+    const { schemas } = await syncMetrics(resolution, fetcher);
     expect(schemas[0].dimensions).toHaveLength(2);
     const tsDim = schemas[0].dimensions.find((d) => d.name === "ts");
     expect(tsDim?.timeGrains).toEqual([

@@ -295,9 +295,50 @@ export class AnalyticsPlugin extends Plugin {
       return;
     }
 
+    // Fail-closed: if the build-time DESCRIBE never produced a measure list
+    // for this metric, the body validator falls open (no allowlist) and the
+    // SQL constructor would let arbitrary measure/dim references through to
+    // the warehouse. Refuse the request so an empty/missing
+    // `metrics.metadata.json` cannot become a schema-enumeration vector.
+    // The clear server-side fix is to (re-)run `pnpm exec appkit metric sync`.
+    if (registration.knownMeasures.length === 0) {
+      logger.warn(
+        req,
+        "Metric %s registered but build-time metadata is empty — refusing the request. Run `appkit metric sync` to populate metrics.metadata.json.",
+        key,
+      );
+      res.status(503).json({
+        error: "Metric registry not initialized",
+        code: "METRIC_REGISTRY_NOT_READY",
+      });
+      return;
+    }
+
+    // Single try/catch covering both body validation and executor setup —
+    // OBO lane's `asUser(req)` and `resolveUserId(req)` can throw on a
+    // missing/invalid `x-forwarded-access-token` (AuthenticationError). If
+    // they bubble up unwrapped, the route returns a malformed response
+    // outside the canonical error envelope. We compute the executor inside
+    // the same `try` so the auth error lands on the canonical 401 path.
     let request: ReturnType<typeof validateMetricRequest>;
+    let executor: AnalyticsPlugin;
+    let executorKey: string;
+    let isAsUser: boolean;
     try {
       request = validateMetricRequest(registration, req.body ?? {});
+      isAsUser = registration.lane === "obo";
+      // OBO lane: dispatch via the existing asUser(req) Proxy — same pattern
+      // used by .obo.sql files in `_handleQueryRoute`. The Proxy threads the
+      // user's `x-forwarded-access-token` through every Databricks call so
+      // the warehouse executes the query under the end user's identity.
+      executor = isAsUser ? this.asUser(req) : this;
+      // OBO cache key: hash the user identity so the raw email/principal name
+      // never reaches the cache layer. SP cache key: literal "sp" — the cache
+      // is shared across every caller of the SP-lane metric.
+      executorKey = deriveMetricExecutorKey({
+        lane: registration.lane,
+        userIdentity: isAsUser ? this.resolveUserId(req) : null,
+      });
     } catch (err) {
       if (err instanceof AppKitError) {
         res.status(err.statusCode).json({
@@ -306,7 +347,9 @@ export class AnalyticsPlugin extends Plugin {
         });
         return;
       }
-      // Validator only throws ValidationError, but be defensive.
+      // Validator throws ValidationError; asUser/resolveUserId throw
+      // AuthenticationError — both are AppKitError. This branch only fires
+      // for unexpected errors; keep generic to avoid leaking internals.
       res.status(400).json({
         error: err instanceof Error ? err.message : "Invalid request body",
       });
@@ -314,19 +357,6 @@ export class AnalyticsPlugin extends Plugin {
     }
 
     const format = request.format ?? "JSON";
-    const isAsUser = registration.lane === "obo";
-    // OBO lane: dispatch via the existing asUser(req) Proxy — same pattern
-    // used by .obo.sql files in `_handleQueryRoute`. The Proxy threads the
-    // user's `x-forwarded-access-token` through every Databricks call so
-    // the warehouse executes the query under the end user's identity.
-    const executor = isAsUser ? this.asUser(req) : this;
-    // OBO cache key: hash the user identity so the raw email/principal name
-    // never reaches the cache layer. SP cache key: literal "sp" — the cache
-    // is shared across every caller of the SP-lane metric.
-    const executorKey = deriveMetricExecutorKey({
-      lane: registration.lane,
-      userIdentity: isAsUser ? this.resolveUserId(req) : null,
-    });
 
     const queryParameters =
       format === "ARROW"

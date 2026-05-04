@@ -471,22 +471,34 @@ export function makeMetricRequestSchema(
   //     are available; values cardinality is enforced per operator; AND/OR
   //     nesting is capped at METRIC_FILTER_MAX_DEPTH.
   return baseObject.superRefine((value, ctx) => {
-    // Cross-field rule for timeGrain. We can only enforce "no time-typed
-    // dimension is grouped" when metadata is available — without it the
-    // validator falls open (mirrors the dimensions-fall-open behavior at
-    // line 274-281). The warehouse will reject incompatible grains itself.
-    if (value.timeGrain != null && Object.keys(grainsByDim).length > 0) {
-      const dims = value.dimensions ?? [];
-      const hasTimeDim = dims.some(
-        (d) => Array.isArray(grainsByDim[d]) && grainsByDim[d].length > 0,
-      );
-      if (!hasTimeDim) {
+    // Cross-field rule for timeGrain. Tight check whenever the registry has
+    // ANY dimension metadata: if the metric has dims registered but none are
+    // time-typed (`grainsByDim` empty), `timeGrain` is meaningless on this
+    // metric and we reject. The pure-fall-open path now only fires when no
+    // dimension metadata is available at all — which the route's fail-closed
+    // gate (`knownMeasures.length === 0` → 503) prevents in practice.
+    if (value.timeGrain != null && knownDimensions.length > 0) {
+      const grainsByDimKeys = Object.keys(grainsByDim);
+      if (grainsByDimKeys.length === 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["timeGrain"],
           message:
-            "timeGrain specified but no time-typed dimension is included in 'dimensions'",
+            "timeGrain specified but the metric has no time-typed dimensions",
         });
+      } else {
+        const dims = value.dimensions ?? [];
+        const hasTimeDim = dims.some(
+          (d) => Array.isArray(grainsByDim[d]) && grainsByDim[d].length > 0,
+        );
+        if (!hasTimeDim) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["timeGrain"],
+            message:
+              "timeGrain specified but no time-typed dimension is included in 'dimensions'",
+          });
+        }
       }
     }
 
@@ -558,6 +570,19 @@ function validateFilterTree(
         code: z.ZodIssueCode.custom,
         path: [...path, groupKey],
         message: `filter ${groupKey} group must be an array of predicates or nested groups`,
+      });
+      return;
+    }
+
+    // Reject empty `or` groups: SQL-wise an empty disjunction is vacuously
+    // false, which silently drops the surrounding intent. Empty `and` is OK
+    // (vacuously true → no constraint contributed). Forcing the caller to
+    // omit the predicate entirely is the only unambiguous choice.
+    if (groupKey === "or" && children.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...path, "or"],
+        message: "filter 'or' group must contain at least one predicate",
       });
       return;
     }
@@ -653,6 +678,39 @@ function validateFilterTree(
       });
     }
   }
+
+  // Op⇄value-type compatibility. Catches the malformed-value case at
+  // validation time (returns 400) instead of letting it surface as a
+  // synchronous Error from `buildMetricSql` (which would render as 500).
+  // String operators always require a string value regardless of the
+  // dimension's declared type. Range operators require a numeric value when
+  // the dim is numeric — date-typed dims accept ISO date strings, so we
+  // don't tighten there.
+  if (STRING_OPERATORS.has(op) && valuesLen > 0) {
+    const v = predicate.values?.[0];
+    if (typeof v !== "string") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...path, "values"],
+        message: `filter operator "${op}" requires a string value (got ${typeof v})`,
+      });
+    }
+  }
+  if (
+    RANGE_OPERATORS.has(op) &&
+    declaredType &&
+    classifyDimensionType(declaredType) === "numeric" &&
+    valuesLen > 0
+  ) {
+    const v = predicate.values?.[0];
+    if (typeof v !== "number") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...path, "values"],
+        message: `filter operator "${op}" on numeric dimension "${predicate.member}" requires a numeric value (got ${typeof v})`,
+      });
+    }
+  }
 }
 
 /**
@@ -719,6 +777,13 @@ function collectAllowedGrains(grainsByDim: Record<string, string[]>): string[] {
  * Returns the parsed body on success; throws {@link ValidationError} with the
  * canonical 400 shape on failure. Throwing keeps the route handler simple —
  * the AppKit error pipeline handles the response shape.
+ *
+ * The thrown error's public `message` carries only the offending field paths
+ * (`measures.0`, `filter.and.0.member`, etc.) — never the registry's allowed
+ * values or the metric's measure/dimension names. The full Zod issue list,
+ * including allowlists embedded in per-issue messages, is preserved on
+ * `context.issues` for server-side telemetry. This prevents an unauthenticated
+ * caller from enumerating the registered schema by sending malformed bodies.
  */
 export function validateMetricRequest(
   registration: MetricRegistration,
@@ -727,15 +792,20 @@ export function validateMetricRequest(
   const schema = makeMetricRequestSchema(registration);
   const result = schema.safeParse(body);
   if (!result.success) {
-    const detail = result.error.issues
-      .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
-      .join("; ");
-    throw new ValidationError(`Invalid metric request body: ${detail}`, {
-      context: {
-        metric: registration.key,
-        issues: result.error.issues,
+    const fieldPaths = result.error.issues
+      .map((i) => i.path.join(".") || "(root)")
+      .join(", ");
+    throw new ValidationError(
+      fieldPaths.length > 0
+        ? `Invalid metric request body (fields: ${fieldPaths})`
+        : "Invalid metric request body",
+      {
+        context: {
+          metric: registration.key,
+          issues: result.error.issues,
+        },
       },
-    });
+    );
   }
   return result.data;
 }
@@ -978,8 +1048,14 @@ function renderFilter(
     )[groupKey];
 
     if (!Array.isArray(children) || children.length === 0) {
-      // Empty group → no constraint; an empty AND is vacuously true and an
-      // empty OR is the validator's "do not contribute" shape.
+      // Empty AND → vacuously true, render as no constraint (null).
+      // Empty OR → vacuously false. The validator rejects this case before
+      // reaching the SQL builder, but if it slips through, render `1 = 0`
+      // rather than dropping the predicate silently — defense in depth so a
+      // future validator bypass cannot turn `or: []` into "match everything".
+      if (groupKey === "or") {
+        return "1 = 0";
+      }
       return null;
     }
 
@@ -1358,10 +1434,12 @@ function canonicalizeFilter(node: MetricFilter): string {
     return `${groupKey}(${childFingerprints.join(",")})`;
   }
 
-  // Leaf predicate.
+  // Leaf predicate. Use JSON.stringify (not String) for the value segment so
+  // strings carrying the `|` separator cannot collide with split arrays —
+  // e.g. `["a", "b"]` and `["a|string:b"]` are now distinct fingerprints.
   const p = node as MetricPredicate;
   const valuesPart = p.values
-    ? p.values.map((v) => `${typeof v}:${String(v)}`).join("|")
+    ? p.values.map((v) => `${typeof v}:${JSON.stringify(v)}`).join("|")
     : "";
   return `p(${p.member}/${p.operator}/${valuesPart})`;
 }

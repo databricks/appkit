@@ -58,7 +58,9 @@ function makeDeps(
           dimensions: [],
         });
       }
-      return schemas;
+      // The mock returns no failures by default — tests that need to
+      // exercise the failures-surfacing path override this seam.
+      return { schemas, failures: [] };
     }),
     resolveMetricConfig: vi.fn((config) => {
       const cfg = config as {
@@ -506,5 +508,44 @@ describe("runMetricSync — failure modes", () => {
         process.env.DATABRICKS_WAREHOUSE_ID = previousEnv;
       }
     }
+  });
+
+  it("surfaces per-entry sync failures (parse / zero-column) as a typed error", async () => {
+    // Simulates the case where DESCRIBE returned successfully but extraction
+    // produced an empty bundle — without surfacing this, an empty bundle
+    // would ship and the runtime fail-closed gate would 503 every request.
+    const io = captureIO();
+    const deps = makeDeps({
+      syncMetrics: vi.fn(
+        async (resolution: {
+          entries: Array<{ key: string; source: string; lane: "sp" | "obo" }>;
+        }) => ({
+          schemas: resolution.entries.map((e) => ({
+            key: e.key,
+            source: e.source,
+            lane: e.lane,
+            measures: [],
+            dimensions: [],
+          })),
+          failures: [
+            {
+              key: "revenue",
+              source: "appkit_demo.public.revenue_metrics",
+              reason: "DESCRIBE response yielded zero columns",
+            },
+          ],
+        }),
+      ),
+    });
+
+    await expect(
+      runMetricSync(
+        {
+          warehouseId: "wh-x",
+          rootDir: tmp,
+        },
+        { ...io, deps, interactive: false },
+      ),
+    ).rejects.toThrowError(/zero columns/);
   });
 });

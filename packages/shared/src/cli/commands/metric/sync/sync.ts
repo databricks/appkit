@@ -234,13 +234,27 @@ export interface MetricSyncSchema {
  * loading the full ESM module graph (which would require `@databricks/appkit`
  * to be built before tests run).
  */
+/**
+ * Per-entry sync failure surfaced by `syncMetrics()`. Mirrors the shape in
+ * `@databricks/appkit/type-generator`'s `MetricSyncFailure`. Defined
+ * structurally here so the CLI doesn't load the appkit package at type-time.
+ */
+export interface MetricSyncFailureLite {
+  key: string;
+  source: string;
+  reason: string;
+}
+
 export interface MetricSyncDependencies {
   syncMetrics: (
     resolution: {
       entries: Array<{ key: string; source: string; lane: "sp" | "obo" }>;
     },
     fetcher: (fqn: string) => Promise<unknown>,
-  ) => Promise<MetricSyncSchema[]>;
+  ) => Promise<{
+    schemas: MetricSyncSchema[];
+    failures: MetricSyncFailureLite[];
+  }>;
   resolveMetricConfig: (config: unknown) => {
     entries: Array<{ key: string; source: string; lane: "sp" | "obo" }>;
   };
@@ -515,13 +529,33 @@ export async function runMetricSync(
     );
   }
 
-  const schemas = await deps.syncMetrics(resolution, wrappedFetcher);
+  const { schemas, failures } = await deps.syncMetrics(
+    resolution,
+    wrappedFetcher,
+  );
 
   // If any entry's fetch failed, surface the first failure as a typed error.
   // We deliberately defer this until after `syncMetrics()` returns so the
   // emitted artifact (if we choose to emit it) reflects what we know.
   if (firstFailure) {
     throw firstFailure;
+  }
+
+  // Even when no fetch threw (typed network errors above), `syncMetrics` may
+  // record per-entry failures: response parse errors, zero-column extraction.
+  // These represent silent corruption — the bundle would ship empty and the
+  // route's runtime fail-closed gate would 503 every request. Surface them
+  // as a typed CLI error so CI catches it instead of letting an empty bundle
+  // ship.
+  if (failures.length > 0) {
+    const summary = failures
+      .map((f) => `  ${f.key} (${f.source}): ${f.reason}`)
+      .join("\n");
+    throw new MetricSyncError(
+      "unknown",
+      `metric sync produced ${failures.length} failure(s):\n${summary}`,
+      failures[0]?.source,
+    );
   }
 
   // Step 4: Emit artifacts. `outputDir` is created (recursively) on first use.

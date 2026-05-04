@@ -54,6 +54,19 @@ declare module "@databricks/appkit/type-generator" {
 
   export type DescribeFetcher = (fqn: string) => Promise<unknown>;
 
+  /** Per-entry sync failure surfaced by `syncMetrics()`. */
+  export interface MetricSyncFailure {
+    key: string;
+    source: string;
+    reason: string;
+  }
+
+  /** Result of `syncMetrics()`: schemas + per-entry failures. */
+  export interface MetricSyncResult {
+    schemas: MetricSchema[];
+    failures: MetricSyncFailure[];
+  }
+
   export function readMetricConfig(
     queryFolder: string,
   ): Promise<MetricSourceConfig | null>;
@@ -63,7 +76,7 @@ declare module "@databricks/appkit/type-generator" {
   export function syncMetrics(
     resolution: MetricConfigResolution,
     fetcher: DescribeFetcher,
-  ): Promise<MetricSchema[]>;
+  ): Promise<MetricSyncResult>;
   export function createWorkspaceDescribeFetcher(
     warehouseId: string,
   ): DescribeFetcher;

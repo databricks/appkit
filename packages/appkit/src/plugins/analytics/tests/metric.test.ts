@@ -117,7 +117,7 @@ describe("metric — pure helpers", () => {
         validateMetricRequest(REVENUE_REGISTRATION, {
           measures: [],
         }),
-      ).toThrowError(/measures must contain at least one entry/);
+      ).toThrowError(/fields:.*measures/);
     });
 
     test("rejects a non-positive limit", () => {
@@ -126,7 +126,7 @@ describe("metric — pure helpers", () => {
           measures: ["arr"],
           limit: -1,
         }),
-      ).toThrowError(/limit must be positive/);
+      ).toThrowError(/fields:.*limit/);
     });
 
     test("rejects unknown top-level fields (strict)", () => {
@@ -223,7 +223,7 @@ describe("metric — pure helpers", () => {
           dimensions: ["created_at"],
           timeGrain: "year",
         }),
-      ).toThrowError(/timeGrain must be one of/);
+      ).toThrowError(/fields:.*timeGrain/);
     });
 
     test("rejects timeGrain when no time-typed dim is in dimensions", () => {
@@ -233,7 +233,7 @@ describe("metric — pure helpers", () => {
           dimensions: ["region"],
           timeGrain: "month",
         }),
-      ).toThrowError(/no time-typed dimension/);
+      ).toThrowError(/fields:.*timeGrain/);
     });
 
     test("rejects timeGrain when dimensions is omitted entirely", () => {
@@ -242,7 +242,26 @@ describe("metric — pure helpers", () => {
           measures: ["arr"],
           timeGrain: "month",
         }),
-      ).toThrowError(/no time-typed dimension/);
+      ).toThrowError(/fields:.*timeGrain/);
+    });
+
+    test("rejects timeGrain when metric has registered dims but none are time-typed", () => {
+      // Tighter validation: when the registry knows the metric's dims but
+      // none of them carry a time-grain set, `timeGrain` is meaningless on
+      // this metric. Earlier this case fell open (validator skipped on empty
+      // grainsByDim).
+      const noTimeRegistration: MetricRegistration = {
+        ...REVENUE_REGISTRATION,
+        knownDimensions: ["region", "segment"],
+        knownTimeGrainsByDim: {},
+      };
+      expect(() =>
+        validateMetricRequest(noTimeRegistration, {
+          measures: ["arr"],
+          dimensions: ["region"],
+          timeGrain: "month",
+        }),
+      ).toThrowError(/fields:.*timeGrain/);
     });
 
     test("rejects timeGrain when none of the requested dims are time-typed (metadata available)", () => {
@@ -530,6 +549,32 @@ describe("metric — pure helpers", () => {
       expect(a).not.toEqual(b);
     });
 
+    test("filter values containing the `|` separator do not collide across distinct shapes", () => {
+      // Regression: an earlier `String(v)` join used `|` as a separator,
+      // making `["a", "b"]` collapse with `["a|string:b"]`. The fingerprint
+      // must distinguish them so the SP cache cannot serve a different
+      // user's results to a caller with a colliding-shaped filter.
+      const a = composeMetricCacheKey({
+        metricKey: "revenue",
+        measures: ["arr"],
+        filter: { member: "region", operator: "in", values: ["a", "b"] },
+        format: "JSON",
+        executorKey: "sp",
+      });
+      const b = composeMetricCacheKey({
+        metricKey: "revenue",
+        measures: ["arr"],
+        filter: {
+          member: "region",
+          operator: "in",
+          values: ["a|string:b"],
+        },
+        format: "JSON",
+        executorKey: "sp",
+      });
+      expect(a).not.toEqual(b);
+    });
+
     // ── Phase 2: dimensions + timeGrain ─────────────────────────────────
     test("normalizes dimension order for cache hits across equivalent calls", () => {
       const a = composeMetricCacheKey({
@@ -809,6 +854,38 @@ describe("AnalyticsPlugin — metric route handler", () => {
     });
   });
 
+  test("returns 503 when the registered metric has no build-time metadata (fail-closed)", async () => {
+    // Defense-in-depth: when `metrics.metadata.json` is missing or didn't
+    // populate measures for this metric, the validator falls open and the
+    // SQL constructor would let arbitrary identifiers through to the
+    // warehouse — a schema-enumeration vector. Refuse the request.
+    const plugin = new AnalyticsPlugin(config);
+    plugin._setMetricRegistryForTesting({
+      revenue: {
+        ...REVENUE_REGISTRATION,
+        knownMeasures: [],
+        knownDimensions: [],
+      },
+    });
+    const { router, getHandler } = createMockRouter();
+    plugin.injectRoutes(router);
+
+    const handler = getHandler("POST", "/metric/:key");
+    const mockReq = createMockRequest({
+      params: { key: "revenue" },
+      body: { measures: ["arr"] },
+    });
+    const mockRes = createMockResponse();
+
+    await handler(mockReq, mockRes);
+
+    expect(mockRes.status).toHaveBeenCalledWith(503);
+    const errorPayload = (mockRes.json as any).mock.calls[0][0];
+    expect(errorPayload.code).toBe("METRIC_REGISTRY_NOT_READY");
+    // Generic message — does not name the metric or the build-time tooling.
+    expect(errorPayload.error).toBe("Metric registry not initialized");
+  });
+
   test("returns 400 with the canonical error shape on validator failure", async () => {
     const plugin = new AnalyticsPlugin(config);
     plugin._setMetricRegistryForTesting({
@@ -890,7 +967,7 @@ describe("AnalyticsPlugin — metric route handler", () => {
 
     expect(mockRes.setHeader).toHaveBeenCalledWith(
       "Content-Type",
-      "text/event-stream",
+      expect.stringContaining("text/event-stream"),
     );
     expect(mockRes.write).toHaveBeenCalledWith("event: result\n");
     expect(mockRes.write).toHaveBeenCalledWith(
@@ -1025,8 +1102,11 @@ describe("AnalyticsPlugin — metric route handler", () => {
 
     expect(mockRes.status).toHaveBeenCalledWith(400);
     const errorPayload = (mockRes.json as any).mock.calls[0][0];
-    expect(errorPayload.error).toMatch(/no time-typed dimension/);
+    expect(errorPayload.error).toMatch(/fields:.*timeGrain/);
     expect(errorPayload.code).toBe("VALIDATION_ERROR");
+    // Defense-in-depth: the public 400 must not enumerate the registered
+    // schema (allowed grain enum, dim allowlist, etc.) — only the field path.
+    expect(errorPayload.error).not.toMatch(/must be one of|no time-typed/);
   });
 
   test("returns 400 when an unknown dimension is requested", async () => {
@@ -1342,7 +1422,7 @@ describe("metric — filter translator", () => {
           measures: ["arr"],
           filter: node,
         }),
-      ).toThrowError(/maximum depth/);
+      ).toThrowError(/fields:.*filter/);
     });
 
     test("accepts exactly 8 levels of AND nesting (validator)", () => {
@@ -1430,7 +1510,7 @@ describe("metric — filter translator", () => {
             values: ["x"],
           },
         }),
-      ).toThrowError(/not a declared dimension/);
+      ).toThrowError(/fields:.*filter\.member/);
     });
 
     test("rejects an unknown operator", () => {
@@ -1443,7 +1523,7 @@ describe("metric — filter translator", () => {
             values: ["E"],
           },
         }),
-      ).toThrowError(/not one of/);
+      ).toThrowError(/fields:.*filter\.operator/);
     });
 
     test("rejects gt on a string-typed dimension (op⇄type)", () => {
@@ -1456,7 +1536,7 @@ describe("metric — filter translator", () => {
             values: ["EMEA"],
           },
         }),
-      ).toThrowError(/incompatible/);
+      ).toThrowError(/fields:.*filter\.operator/);
     });
 
     test("rejects contains on a numeric-typed dimension (op⇄type)", () => {
@@ -1469,7 +1549,7 @@ describe("metric — filter translator", () => {
             values: ["1000"],
           },
         }),
-      ).toThrowError(/incompatible/);
+      ).toThrowError(/fields:.*filter\.operator/);
     });
 
     test("rejects contains on a date-typed dimension (op⇄type)", () => {
@@ -1482,7 +1562,7 @@ describe("metric — filter translator", () => {
             values: ["2026"],
           },
         }),
-      ).toThrowError(/incompatible/);
+      ).toThrowError(/fields:.*filter\.operator/);
     });
 
     test("accepts gt on a date-typed dimension", () => {
@@ -1508,7 +1588,7 @@ describe("metric — filter translator", () => {
             values: [],
           },
         }),
-      ).toThrowError(/exactly one value/);
+      ).toThrowError(/fields:.*filter\.values/);
     });
 
     test("rejects equals with multiple values (cardinality)", () => {
@@ -1521,7 +1601,7 @@ describe("metric — filter translator", () => {
             values: ["A", "B"],
           },
         }),
-      ).toThrowError(/exactly one value/);
+      ).toThrowError(/fields:.*filter\.values/);
     });
 
     test("rejects in with empty values (cardinality)", () => {
@@ -1534,7 +1614,7 @@ describe("metric — filter translator", () => {
             values: [],
           },
         }),
-      ).toThrowError(/at least one value/);
+      ).toThrowError(/fields:.*filter\.values/);
     });
 
     test("rejects set with values (cardinality — must be absent)", () => {
@@ -1547,7 +1627,7 @@ describe("metric — filter translator", () => {
             values: ["EMEA"],
           },
         }),
-      ).toThrowError(/must not carry values/);
+      ).toThrowError(/fields:.*filter\.values/);
     });
 
     test("accepts set with no values", () => {
@@ -1592,6 +1672,54 @@ describe("metric — filter translator", () => {
       ).not.toThrow();
     });
 
+    test("rejects empty `or` group (empty disjunction is vacuously false)", () => {
+      // Empty AND is vacuously true (no constraint). Empty OR would be
+      // vacuously false — silently dropping the predicate. Force the caller
+      // to omit the predicate entirely so intent stays explicit.
+      expect(() =>
+        validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
+          measures: ["arr"],
+          filter: { or: [] },
+        }),
+      ).toThrowError(/fields:.*filter\.or/);
+    });
+
+    test("accepts empty `and` group (no constraint contributed)", () => {
+      // Empty AND is the validator's "do not contribute" shape — accepted.
+      expect(() =>
+        validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
+          measures: ["arr"],
+          filter: { and: [] },
+        }),
+      ).not.toThrow();
+    });
+
+    test("rejects `contains` with a non-string value", () => {
+      expect(() =>
+        validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
+          measures: ["arr"],
+          filter: {
+            member: "region",
+            operator: "contains",
+            values: [42 as unknown as string],
+          },
+        }),
+      ).toThrowError(/fields:.*filter\.values/);
+    });
+
+    test("rejects range op with a non-numeric value on a numeric dim", () => {
+      expect(() =>
+        validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
+          measures: ["arr"],
+          filter: {
+            member: "deal_size",
+            operator: "gt",
+            values: ["large" as unknown as number],
+          },
+        }),
+      ).toThrowError(/fields:.*filter\.values/);
+    });
+
     test("rejects member at depth — nested filter with unknown member", () => {
       expect(() =>
         validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
@@ -1603,7 +1731,7 @@ describe("metric — filter translator", () => {
             ],
           },
         }),
-      ).toThrowError(/not a declared dimension/);
+      ).toThrowError(/fields:.*filter\.and\.1\.member/);
     });
   });
 
@@ -1793,7 +1921,12 @@ describe("metric — filter translator", () => {
       expect(mockRes.status).toHaveBeenCalledWith(400);
       const errorPayload = (mockRes.json as any).mock.calls[0][0];
       expect(errorPayload.code).toBe("VALIDATION_ERROR");
-      expect(errorPayload.error).toMatch(/not a declared dimension/);
+      expect(errorPayload.error).toMatch(/fields:.*filter\.member/);
+      // Defense-in-depth: the public 400 must not name the registry's
+      // allowed dimensions. The full Zod issues stay in telemetry context.
+      expect(errorPayload.error).not.toMatch(
+        /not a declared dimension|allowed:|must be one of/,
+      );
     });
   });
 });

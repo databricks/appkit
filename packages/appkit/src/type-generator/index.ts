@@ -7,7 +7,11 @@ import {
   type DescribeFetcher,
   generateMetricsMetadataJson,
   generateMetricTypeDeclarations,
+  type MetricColumnMetadata,
+  type MetricLane,
   type MetricSchema,
+  type MetricSyncFailure,
+  type MetricSyncResult,
   readMetricConfig,
   resolveMetricConfig,
   syncMetrics,
@@ -131,10 +135,25 @@ export async function generateFromEntryPoint(options: {
       const resolution = resolveMetricConfig(metricConfig);
       const fetcher =
         metricFetcher ?? createWorkspaceDescribeFetcher(warehouseId);
-      const metricSchemas: MetricSchema[] = await syncMetrics(
+      const { schemas: metricSchemas, failures } = await syncMetrics(
         resolution,
         fetcher,
       );
+
+      // Surface DESCRIBE failures loudly so a misconfigured metric.json or a
+      // workspace-side typo doesn't silently ship an empty bundle entry. The
+      // route's runtime fail-closed gate would 503 these in production —
+      // catching the issue at type-gen time is the cheaper signal.
+      if (failures.length > 0) {
+        for (const f of failures) {
+          logger.warn(
+            "metric sync failed for %s (%s): %s",
+            f.key,
+            f.source,
+            f.reason,
+          );
+        }
+      }
 
       const metricFile =
         metricOutFile ?? path.join(path.dirname(outFile), METRIC_TYPES_FILE);
@@ -153,8 +172,9 @@ export async function generateFromEntryPoint(options: {
       await fs.writeFile(metadataFile, metadataJson, "utf-8");
 
       logger.debug(
-        "Wrote MetricRegistry augmentation + metadata bundle for %d metric(s)",
+        "Wrote MetricRegistry augmentation + metadata bundle for %d metric(s)%s",
         metricSchemas.length,
+        failures.length > 0 ? ` (${failures.length} failure(s))` : "",
       );
     }
   }
@@ -170,6 +190,17 @@ export async function generateFromEntryPoint(options: {
 // A local binding ensures the serving vite plugin's import keeps this in the dependency graph,
 // mirroring how generateFromEntryPoint (also defined here) is preserved via the analytics vite plugin.
 export const generateServingTypes = generateServingTypesImpl;
+
+// Re-export the metric-registry types so consumers (CLI, the type-generator
+// .d.ts shim in `packages/shared`) can pick them up from this entry point —
+// the .d.ts shim documents these as part of the package's public surface.
+export type {
+  MetricColumnMetadata,
+  MetricLane,
+  MetricSchema,
+  MetricSyncFailure,
+  MetricSyncResult,
+};
 
 /** Directory name for generated AppKit type declaration files. */
 export const TYPES_DIR = "appkit-types";

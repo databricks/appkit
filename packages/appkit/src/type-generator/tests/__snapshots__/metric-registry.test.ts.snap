@@ -115,8 +115,6 @@ declare module "@databricks/appkit-ui/react" {
 exports[`generateMetricsMetadataJson — snapshot > serializes a representative metric view with display_name + format + time_grain 1`] = `
 "{
   "customer_metrics": {
-    "source": "appkit_demo.public.customer_metrics",
-    "lane": "obo",
     "measures": {
       "churn_rate": {
         "type": "DOUBLE",
@@ -132,8 +130,6 @@ exports[`generateMetricsMetadataJson — snapshot > serializes a representative 
     }
   },
   "revenue": {
-    "source": "appkit_demo.public.revenue_metrics",
-    "lane": "sp",
     "measures": {
       "arr": {
         "type": "DECIMAL(38,2)",

@@ -815,10 +815,14 @@ interface MetricColumnSemanticMetadata {
  * Splits cleanly into measures + dimensions so the consuming hook can return
  * the exact subset for the queried metric without scanning the rest of the
  * registry.
+ *
+ * Server-side concerns — UC FQN (`source`) and execution lane (`lane`) — are
+ * deliberately NOT part of this artifact. They live in `metric.json` and are
+ * consumed by the server only. The bundle ships to the client in
+ * `metrics.metadata.json` and must contain frontend-safe metadata only
+ * (display names, format specs, descriptions, time-grain hints).
  */
 interface MetricSemanticMetadataEntry {
-  source: string;
-  lane: MetricLane;
   measures: Record<string, MetricColumnSemanticMetadata>;
   dimensions: Record<string, MetricColumnSemanticMetadata>;
 }
@@ -865,8 +869,6 @@ export function buildMetricsMetadataBundle(
     }
 
     bundle[schema.key] = {
-      source: schema.source,
-      lane: schema.lane,
       measures,
       dimensions,
     };
@@ -939,27 +941,59 @@ export function createWorkspaceDescribeFetcher(
 }
 
 /**
+ * One per-entry sync failure recorded by {@link syncMetrics}. Failures are
+ * surfaced to the caller (CLI / Vite plugin) so they can decide whether to
+ * exit non-zero. Without this, a silently-empty bundle would ship to
+ * production and the route's runtime fail-closed gate would 503 every
+ * affected metric.
+ */
+export interface MetricSyncFailure {
+  /** Stable metric key — matches the key in metric.json. */
+  key: string;
+  /** Three-part FQN that failed to resolve. */
+  source: string;
+  /** Single human-readable reason (DESCRIBE failed, parse failed, zero columns). */
+  reason: string;
+}
+
+/**
+ * Result shape from {@link syncMetrics}: the schemas (one per entry, possibly
+ * empty if the entry failed) plus a list of per-entry failures so the caller
+ * can emit a non-zero exit / build error when something didn't resolve.
+ */
+export interface MetricSyncResult {
+  schemas: MetricSchema[];
+  failures: MetricSyncFailure[];
+}
+
+/**
  * Run schema synchronization for every entry in `metric.json`.
  *
- * `fetcher` is injected so the same code path serves Vite, the (Phase 6) CLI,
- * and unit tests with a mock that returns a representative DESCRIBE response.
+ * `fetcher` is injected so the same code path serves Vite, the CLI, and unit
+ * tests with a mock that returns a representative DESCRIBE response.
+ *
+ * Returns `{ schemas, failures }`. The schemas array always carries one
+ * entry per registered metric (even on failure — the entry has empty
+ * measures/dimensions). The failures array is populated for any entry that
+ * (a) the DESCRIBE call rejected, (b) the response could not be parsed, or
+ * (c) extraction yielded zero columns. Callers (the CLI, the Vite plugin)
+ * inspect `failures` to decide whether to exit non-zero.
  */
 export async function syncMetrics(
   resolution: MetricConfigResolution,
   fetcher: DescribeFetcher,
-): Promise<MetricSchema[]> {
+): Promise<MetricSyncResult> {
   const schemas: MetricSchema[] = [];
+  const failures: MetricSyncFailure[] = [];
 
   for (const entry of resolution.entries) {
     let response: DatabricksStatementExecutionResponse;
     try {
       response = await fetcher(entry.source);
     } catch (err) {
-      logger.warn(
-        "DESCRIBE TABLE EXTENDED failed for %s: %s",
-        entry.source,
-        (err as Error).message,
-      );
+      const reason = `DESCRIBE TABLE EXTENDED failed: ${(err as Error).message}`;
+      logger.warn("%s for %s", reason, entry.source);
+      failures.push({ key: entry.key, source: entry.source, reason });
       schemas.push({
         key: entry.key,
         source: entry.source,
@@ -971,31 +1005,34 @@ export async function syncMetrics(
     }
 
     let columns: MetricColumnMetadata[] = [];
+    let parseError: string | null = null;
     try {
       const parsed = parseDescribeTableExtendedJson(response);
       columns = extractMetricColumns(parsed);
     } catch (err) {
-      logger.warn(
-        "Failed to extract columns from DESCRIBE response for %s: %s",
-        entry.source,
-        (err as Error).message,
-      );
+      parseError = `Failed to extract columns from DESCRIBE response: ${(err as Error).message}`;
+      logger.warn("%s for %s", parseError, entry.source);
     }
 
     const measures = columns.filter((c) => c.isMeasure);
     const dimensions = columns.filter((c) => !c.isMeasure);
 
-    // Warn when extraction succeeded but yielded no columns. The most common
-    // cause is a DESCRIBE response shape that `extractMetricColumns` doesn't
-    // recognize (e.g., joined metric views may put columns under a wrapper
-    // that the v0.1 reader doesn't traverse). Without this signal, the bundle
-    // ships with empty measures/dimensions and downstream consumers blow up
-    // on `metadata.measures.<name>.format` accesses.
-    if (columns.length === 0) {
-      logger.warn(
-        "DESCRIBE response for %s yielded zero columns — the bundle entry will have empty measures/dimensions. Check that the response shape has a top-level `columns` array (or `schema.fields`).",
-        entry.source,
-      );
+    if (parseError) {
+      failures.push({
+        key: entry.key,
+        source: entry.source,
+        reason: parseError,
+      });
+    } else if (columns.length === 0) {
+      // Extraction succeeded but yielded no columns. The most common cause
+      // is a DESCRIBE response shape that `extractMetricColumns` doesn't
+      // recognize. Treat as a failure so CI catches it instead of letting an
+      // empty bundle entry ship — the route's fail-closed gate would then
+      // 503 every request to this metric in production.
+      const reason =
+        "DESCRIBE response yielded zero columns — check the response shape (top-level `columns` array or `schema.fields`).";
+      logger.warn("%s for %s", reason, entry.source);
+      failures.push({ key: entry.key, source: entry.source, reason });
     }
 
     schemas.push({
@@ -1007,5 +1044,5 @@ export async function syncMetrics(
     });
   }
 
-  return schemas;
+  return { schemas, failures };
 }
