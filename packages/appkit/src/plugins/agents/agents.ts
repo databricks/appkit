@@ -25,6 +25,7 @@ import {
   buildBaseSystemPrompt,
   composeSystemPrompt,
 } from "../../core/agent/system-prompt";
+import { dispatchToolCall } from "../../core/agent/tool-dispatch";
 import { resolveToolkitFromProvider } from "../../core/agent/toolkit-resolver";
 import {
   functionToolToDefinition,
