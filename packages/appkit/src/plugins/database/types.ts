@@ -33,6 +33,13 @@ export interface HttpEntityOverride {
   update?: HttpAccess;
   /** The HTTP access control for the delete operation. */
   delete?: HttpAccess;
+  /**
+   * Access control for the `_columns` metadata route used to auto-render
+   * forms. Defaults to the same value as `list` — so an entity that is not
+   * HTTP-listable also does not leak its column shape. Set explicitly to
+   * `"public"` only when the schema is intentionally part of the public API.
+   */
+  columns?: HttpAccess;
 }
 
 /**

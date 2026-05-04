@@ -224,10 +224,13 @@ export class RouteGenerator {
 
 
     // `_columns` is a pure-metadata read derived from the declared schema.
-    // It doesn't consume a verb slot in the access config — it's keyed on
-    // `list` so disabling list hides _columns too, which matches "this
-    // entity is not browsable over HTTP".
-    if (access.list !== false) this.bindColumns(router, name, table);
+    // Default it to the same access mode as `list` so an entity that's not
+    // HTTP-listable also does not leak its column shape. Service- or public-
+    // accessible columns must be opted into via `columns` in the override.
+    const columnsAccess = resolveColumnsAccess(
+      this.options.config.http?.[name],
+    );
+    if (columnsAccess !== false) this.bindColumns(router, name, table);
   }
 
   /**
@@ -499,6 +502,13 @@ function resolveAccess(
   // Missing config is intentionally not "public". App authors must opt into
   // non-OBO HTTP exposure verb by verb.
   return { ...DEFAULT_ACCESS, ...override };
+}
+
+function resolveColumnsAccess(override?: HttpEntityOverride): HttpAccess {
+  if (override?.columns !== undefined) return override.columns;
+  // Inherit from `list` so disabling list hides `_columns`. Falls back to the
+  // OBO default when neither is set.
+  return override?.list ?? DEFAULT_ACCESS.list;
 }
 
 function applyFilters(
