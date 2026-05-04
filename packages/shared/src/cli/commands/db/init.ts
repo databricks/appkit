@@ -76,6 +76,16 @@ import { verifyDatabase } from "./verify";
  */
 export type InitMode = "migrate" | "introspect" | "reset";
 
+const INIT_MODES: readonly InitMode[] = [
+  "migrate",
+  "introspect",
+  "reset",
+] as const;
+
+function isInitMode(value: string): value is InitMode {
+  return (INIT_MODES as readonly string[]).includes(value);
+}
+
 export interface RunInitOptions {
   profile?: string;
   project?: string;
@@ -1154,16 +1164,16 @@ export function slugifyPrincipal(principal: string): string {
 }
 
 /**
- * 24-bit (6 hex char) prefix of a SHA-256 of the Databricks user id.
+ * 32-bit (8 hex char) prefix of a SHA-256 of the Databricks user id.
  *
  * This is a *naming* component, not a security primitive. Collision domain is
  * "users in the same Lakebase project", and the consequence of a collision is
  * "two users would share a dev branch" — Lakebase auth still applies, no data
- * leakage. Birthday-paradox at ~1k users is ~3% chance of any collision; the
- * trade-off vs. longer hashes is a more readable branch name.
+ * leakage. 8 hex chars (1 in 4 billion) keeps branch names readable while
+ * making accidental collision in any realistic team size effectively zero.
  */
 export function shortHash(id: string): string {
-  return crypto.createHash("sha256").update(id).digest("hex").slice(0, 6);
+  return crypto.createHash("sha256").update(id).digest("hex").slice(0, 8);
 }
 
 export function deriveDevBranchName(user: {
@@ -1233,7 +1243,7 @@ export const initCommand = new Command("init")
       runInit({
         profile: opts.profile ? String(opts.profile) : undefined,
         project: opts.project ? String(opts.project) : undefined,
-        from: opts.from as InitMode | undefined,
+        from: parseFromOption(opts.from),
         schema: opts.schema ? String(opts.schema) : undefined,
         // Commander turns --no-seed into seed=false; --seed into seed=true; no
         // flag leaves seed undefined (so resolveSeedChoice can prompt or
@@ -1244,3 +1254,18 @@ export const initCommand = new Command("init")
       }),
     ),
   );
+
+/**
+ * Validate `--from <action>` against the documented union before passing it
+ * down. An unknown value (e.g. `--from forced` or a typo) used to be cast
+ * silently to `InitMode`, which slipped through to `runInit` and only failed
+ * later with a less obvious error.
+ */
+function parseFromOption(value: unknown): InitMode | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const str = String(value);
+  if (isInitMode(str)) return str;
+  throw new Error(
+    `Invalid --from value: "${str}". Expected one of: ${INIT_MODES.join(", ")}.`,
+  );
+}

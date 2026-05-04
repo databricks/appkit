@@ -287,9 +287,9 @@ describe("slugifyPrincipal", () => {
 });
 
 describe("shortHash", () => {
-  test("is deterministic and 6 hex chars", () => {
+  test("is deterministic and 8 hex chars", () => {
     expect(shortHash("u-1")).toBe(shortHash("u-1"));
-    expect(shortHash("u-1")).toMatch(/^[0-9a-f]{6}$/);
+    expect(shortHash("u-1")).toMatch(/^[0-9a-f]{8}$/);
   });
 });
 
@@ -299,7 +299,7 @@ describe("deriveDevBranchName", () => {
       id: "u-9",
       principal: "a".repeat(200),
     });
-    expect(name).toMatch(/^dev-a{32}-[0-9a-f]{6}$/);
+    expect(name).toMatch(/^dev-a{32}-[0-9a-f]{8}$/);
     expect(name.length).toBeLessThanOrEqual(63);
   });
 });
