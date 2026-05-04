@@ -350,6 +350,39 @@ describe("useMetricView", () => {
     expect(capturedCallbacks.signal?.aborted).toBe(true);
   });
 
+  test("ignores late SSE events arriving after the controller was aborted", async () => {
+    // Regression: under React StrictMode the first mount's cleanup aborts
+    // the controller it owns, but the server-side SSE writer can still
+    // emit a final `event: error` envelope on the already-open stream
+    // (cancellation hand-off). Without an early `aborted` guard in
+    // onMessage, that envelope hit the error branch and surfaced a
+    // transient user-visible error before the second mount's data arrived.
+    // The fix mirrors the guard already present at the top of `onError`.
+    const { result } = renderHook(() =>
+      useMetricView("revenue", { measures: ["arr"] }),
+    );
+
+    // Simulate the abort that StrictMode's cleanup phase performs.
+    const sig = capturedCallbacks.signal as
+      | (AbortSignal & { _override?: boolean })
+      | undefined;
+    Object.defineProperty(sig, "aborted", { value: true, configurable: true });
+
+    // Now deliver a late error event for that aborted stream.
+    act(() => {
+      capturedCallbacks.onMessage?.({
+        data: JSON.stringify({
+          type: "error",
+          error: "Statement was canceled",
+          code: "EXECUTION_ERROR",
+        }),
+      });
+    });
+
+    expect(result.current.error).toBeNull();
+    expect(result.current.loading).toBe(true);
+  });
+
   test("does not refetch when re-rendered with structurally identical inline args", () => {
     const { rerender } = renderHook(
       ({ args }: { args: any }) => useMetricView("revenue", args),
