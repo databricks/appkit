@@ -36,6 +36,20 @@ vi.mock("../../../database", async () => {
   };
 });
 
+vi.mock("../../../context/service-context", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../../context/service-context")
+  >("../../../context/service-context");
+  return {
+    ...actual,
+    ServiceContext: {
+      ...actual.ServiceContext,
+      createUserContext: vi.fn(() => ({})),
+      getClientOptions: vi.fn(() => ({})),
+    },
+  };
+});
+
 vi.mock("../../../cache", () => ({
   CacheManager: {
     getInstanceSync: vi.fn(() => ({
@@ -213,6 +227,51 @@ describe("DatabasePlugin", () => {
     }
   });
 
+  test("asUser routes getPool/transaction/sql through the user pool, not SP", async () => {
+    const originalHost = process.env.DATABRICKS_HOST;
+    process.env.DATABRICKS_HOST = "https://example.cloud.databricks.com";
+    const servicePool = {
+      end: vi.fn(async () => undefined),
+    } as unknown as Pool;
+    const userPool = {
+      end: vi.fn(async () => undefined),
+    } as unknown as Pool;
+    vi.mocked(createLakebasePool)
+      .mockReturnValueOnce(servicePool)
+      .mockReturnValueOnce(userPool);
+    const schema = defineSchema(({ table }) => ({
+      user: table("user", { id: id(), email: text().notNull() }),
+    }));
+    vi.mocked(loadSchemaByConvention).mockResolvedValue({
+      schema,
+      schemaPath: "/app/config/database/schema.ts",
+    });
+
+    const plugin = createPlugin();
+    await plugin.setup();
+
+    const req = {
+      header: vi.fn((name: string) => {
+        if (name === "x-forwarded-email") return "alice@example.com";
+        if (name === "x-forwarded-access-token") return "tok-alice";
+        if (name === "x-forwarded-user") return "alice@example.com";
+        return undefined;
+      }),
+    } as unknown as import("express").Request;
+
+    const userExports = (
+      plugin.asUser(req).exports() as unknown as { getPool: () => Pool }
+    ).getPool();
+
+    expect(userExports).toBe(userPool);
+    expect(userExports).not.toBe(servicePool);
+    if (originalHost === undefined) {
+      delete process.env.DATABRICKS_HOST;
+    } else {
+      process.env.DATABRICKS_HOST = originalHost;
+    }
+  });
+
   test("exports transaction(fn) and sql`` backed by the runtime data path", async () => {
     const schema = defineSchema(({ table }) => ({
       user: table("user", { id: id(), email: text().notNull() }),
@@ -323,11 +382,9 @@ describe("DatabasePlugin", () => {
     expect(pool.on).toHaveBeenCalledWith("connect", expect.any(Function));
     const handler = vi
       .mocked(pool.on)
-      .mock.calls.find(
-        ([event]) => event === "connect",
-      )?.[1] as unknown as (client: {
-      query: ReturnType<typeof vi.fn>;
-    }) => void;
+      .mock.calls.find(([event]) => event === "connect")?.[1] as unknown as (
+      client: { query: ReturnType<typeof vi.fn> },
+    ) => void;
     const client = { query: vi.fn(async () => ({})) };
     handler(client);
     expect(client.query).toHaveBeenCalledWith(
@@ -352,5 +409,66 @@ describe("DatabasePlugin", () => {
 
     const plugin = createPlugin({ tolerateSetupFailure: true });
     await expect(plugin.setup()).resolves.toBeUndefined();
+  });
+
+  test("closeAll drains evicted per-user pools, not just live ones", async () => {
+    const originalHost = process.env.DATABRICKS_HOST;
+    process.env.DATABRICKS_HOST = "https://example.cloud.databricks.com";
+    const servicePool = {
+      end: vi.fn(async () => undefined),
+      on: vi.fn(),
+    } as unknown as Pool;
+    let drainResolve: (() => void) | undefined;
+    const drainGate = new Promise<void>((resolve) => {
+      drainResolve = resolve;
+    });
+    const userOnePool = {
+      end: vi.fn(() => drainGate),
+      on: vi.fn(),
+    } as unknown as Pool;
+    const userTwoPool = {
+      end: vi.fn(async () => undefined),
+      on: vi.fn(),
+    } as unknown as Pool;
+    vi.mocked(createLakebasePool)
+      .mockReturnValueOnce(servicePool)
+      .mockReturnValueOnce(userOnePool)
+      .mockReturnValueOnce(userTwoPool);
+    const schema = defineSchema(({ table }) => ({
+      user: table("user", { id: id(), email: text().notNull() }),
+    }));
+    vi.mocked(loadSchemaByConvention).mockResolvedValue({
+      schema,
+      schemaPath: "/app/config/database/schema.ts",
+    });
+
+    const plugin = createPlugin({ oboPoolMax: 1 });
+    await plugin.setup();
+    const exports = plugin.exports() as unknown as {
+      user: { asUser: (req: import("express").Request) => unknown };
+    };
+    const reqFor = (email: string, token: string) =>
+      ({
+        header: vi.fn((name: string) => {
+          if (name === "x-forwarded-email") return email;
+          if (name === "x-forwarded-access-token") return token;
+          return undefined;
+        }),
+      }) as unknown as import("express").Request;
+
+    exports.user.asUser(reqFor("one@example.com", "tok-1"));
+    exports.user.asUser(reqFor("two@example.com", "tok-2"));
+
+    const drained = plugin.abortActiveOperations();
+    drainResolve?.();
+    await drained;
+
+    expect(userOnePool.end).toHaveBeenCalled();
+    expect(userTwoPool.end).toHaveBeenCalled();
+    if (originalHost === undefined) {
+      delete process.env.DATABRICKS_HOST;
+    } else {
+      process.env.DATABRICKS_HOST = originalHost;
+    }
   });
 });

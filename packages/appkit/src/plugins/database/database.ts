@@ -3,7 +3,7 @@ import type { IAppRouter } from "shared";
 import { Plugin, toPlugin } from "@/plugin";
 import { createLakebasePool } from "../../connectors/lakebase";
 import type { DataPath, Schema } from "../../database";
-import { AuthenticationError, ConfigurationError } from "../../errors";
+import { ConfigurationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import type { PluginManifest } from "../../registry";
 import { loadSchemaByConvention } from "./convention";
@@ -135,21 +135,16 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
   asUser(req: import("express").Request): this {
     const baseProxy = super.asUser(req);
 
-    // Dev fallback: when no OBO header is present and we're in dev, return
-    // the SP-backed proxy so the dev loop stays unbroken. Mirrors the entity
-    // client's own asUser fallback.
-    const email = req.header("x-forwarded-email");
-    if (!email && process.env.NODE_ENV === "development") {
-      logger.warn(
-        "Database asUser() called without x-forwarded-email in development mode. Falling back to service pool.",
-      );
-      return baseProxy;
-    }
-    if (!email) {
-      throw new AuthenticationError(
-        "Missing x-forwarded-email header. Cannot create user-scoped database exports.",
-      );
-    }
+    // No registry means setup() ran without a schema. Nothing to scope.
+    if (!this.userPools) return baseProxy;
+
+    const identity = this.userPools.resolveIdentity(req);
+    // Dev fallback: identity is null when OBO headers are absent in dev.
+    // resolveIdentity already logged the warning; throws in prod.
+    if (!identity) return baseProxy;
+
+    const userPool = this.userPools.getOrCreate(identity);
+    const userDataPath = this.userPools.getOrCreateDataPath(identity);
 
     const userEntities: Record<string, EntityClient> = {};
     for (const [name, client] of Object.entries(this.entities)) {
@@ -158,11 +153,9 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
 
     const userExports = (): DatabaseExports => ({
       ...userEntities,
-      getPool: () => this.requirePool(),
-      transaction: <T>(fn: TransactionFn<T>) =>
-        this.requireDataPath().transaction(fn),
-      sql: (strings, ...values) =>
-        this.requireDataPath().raw(strings, ...values),
+      getPool: () => userPool,
+      transaction: <T>(fn: TransactionFn<T>) => userDataPath.transaction(fn),
+      sql: (strings, ...values) => userDataPath.raw(strings, ...values),
     });
 
     return new Proxy(baseProxy, {

@@ -41,10 +41,13 @@ interface WireEntitiesResult {
  *
  * `getOrCreate(identity)` returns (or builds) a `pg.Pool` whose Lakebase OAuth
  * resolves to the given user. Pools are kept in a bounded LRU keyed by email;
- * evicted pools are drained with `pool.end()`.
+ * evicted pools are moved to a draining set so `closeAll()` waits for any
+ * in-flight queries to finish before resolving.
  */
 export interface UserPoolRegistry {
+  resolveIdentity(req: import("express").Request): UserPoolIdentity | null;
   getOrCreate(identity: UserPoolIdentity): Pool;
+  getOrCreateDataPath(identity: UserPoolIdentity): DataPath;
   closeAll(): Promise<void>;
 }
 
@@ -68,10 +71,9 @@ export function wireEntities(args: WireEntitiesArgs): WireEntitiesResult {
   const makeUserDataPath = (
     req: import("express").Request,
   ): DataPath | null => {
-    const identity = resolveUserPoolIdentity(req);
+    const identity = userPools.resolveIdentity(req);
     if (!identity) return null;
-    const pool = userPools.getOrCreate(identity);
-    return createDrizzleDataPath(pool, args.schema);
+    return userPools.getOrCreateDataPath(identity);
   };
 
   const entities: Record<string, EntityClient> = {};
@@ -121,35 +123,58 @@ function derivePkColumn(table: AppKitTable): string {
  */
 function makeUserPoolRegistry(
   config: IDatabaseConfig,
-  _schema: Schema,
+  schema: Schema,
 ): UserPoolRegistry {
   const pools = new Map<string, Pool>();
+  // Pools that have been evicted but may still have in-flight queries. We hold
+  // them here so `closeAll()` waits for graceful drain before returning.
+  const draining = new Set<Pool>();
+  const dataPaths = new WeakMap<Pool, DataPath>();
   const maxPools = normalizePoolMax(config.oboPoolMax);
 
-  return {
-    getOrCreate(identity) {
-      const existing = pools.get(identity.email);
-      if (existing) {
-        pools.delete(identity.email);
-        pools.set(identity.email, existing);
-        return existing;
-      }
+  function buildDataPath(pool: Pool): DataPath {
+    let dp = dataPaths.get(pool);
+    if (!dp) {
+      dp = createDrizzleDataPath(pool, schema);
+      dataPaths.set(pool, dp);
+    }
+    return dp;
+  }
 
-      const pool = createLakebasePool({
-        ...config.connection,
-        user: identity.email,
-        workspaceClient: createUserWorkspaceClient(identity.token),
-      });
-      pools.set(identity.email, pool);
-      evictOldestIfNeeded(pools, maxPools);
-      logger.debug("Created per-user pool for %s", identity.email);
-      return pool;
+  function getOrCreate(identity: UserPoolIdentity): Pool {
+    const existing = pools.get(identity.email);
+    if (existing) {
+      pools.delete(identity.email);
+      pools.set(identity.email, existing);
+      return existing;
+    }
+
+    const pool = createLakebasePool({
+      ...config.connection,
+      user: identity.email,
+      workspaceClient: createUserWorkspaceClient(identity.token),
+    });
+    pools.set(identity.email, pool);
+    evictOldestIfNeeded(pools, draining, maxPools);
+    logger.debug("Created per-user pool for %s", identity.email);
+    return pool;
+  }
+
+  return {
+    resolveIdentity(req) {
+      return resolveUserPoolIdentity(req);
+    },
+    getOrCreate,
+    getOrCreateDataPath(identity) {
+      return buildDataPath(getOrCreate(identity));
     },
     async closeAll() {
       const entries = Array.from(pools.entries());
+      const drainingPools = Array.from(draining);
       pools.clear();
-      await Promise.all(
-        entries.map(async ([email, pool]) => {
+      draining.clear();
+      await Promise.all([
+        ...entries.map(async ([email, pool]) => {
           try {
             await pool.end();
             logger.debug("Closed per-user pool for %s", email);
@@ -157,7 +182,14 @@ function makeUserPoolRegistry(
             logger.error("Error closing per-user pool for %s: %O", email, err);
           }
         }),
-      );
+        ...drainingPools.map(async (pool) => {
+          try {
+            await pool.end();
+          } catch (err) {
+            logger.error("Error draining evicted per-user pool: %O", err);
+          }
+        }),
+      ]);
     },
   };
 }
@@ -202,7 +234,11 @@ function normalizePoolMax(value: number | undefined): number {
   return Math.max(1, Math.floor(value));
 }
 
-function evictOldestIfNeeded(pools: Map<string, Pool>, maxPools: number): void {
+function evictOldestIfNeeded(
+  pools: Map<string, Pool>,
+  draining: Set<Pool>,
+  maxPools: number,
+): void {
   while (pools.size > maxPools) {
     const oldest = pools.entries().next().value as
       | [email: string, pool: Pool]
@@ -210,9 +246,15 @@ function evictOldestIfNeeded(pools: Map<string, Pool>, maxPools: number): void {
     if (!oldest) return;
     const [email, pool] = oldest;
     pools.delete(email);
-    pool.end().catch((err) => {
-      logger.error("Error evicting per-user pool for %s: %O", email, err);
-    });
+    draining.add(pool);
+    pool
+      .end()
+      .catch((err) => {
+        logger.error("Error evicting per-user pool for %s: %O", email, err);
+      })
+      .finally(() => {
+        draining.delete(pool);
+      });
     logger.debug("Evicted per-user pool for %s", email);
   }
 }
