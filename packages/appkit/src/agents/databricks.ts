@@ -7,6 +7,28 @@ import type {
 } from "shared";
 import { stream as servingStream } from "../connectors/serving/client";
 
+/** Default cap for a single incomplete SSE line tail (DoS guard). */
+const DEFAULT_MAX_SSE_LINE_CHARS = 1024 * 1024;
+
+/** Default cap for accumulated assistant text from `delta.content`. */
+const DEFAULT_MAX_STREAM_TEXT_CHARS = 4 * 1024 * 1024;
+
+/** Default cap for accumulated JSON arguments per streamed tool call index. */
+const DEFAULT_MAX_TOOL_ARGUMENT_CHARS = 2 * 1024 * 1024;
+
+function throwIfExceedsStreamLimit(
+  label: string,
+  currentLength: number,
+  chunk: string,
+  max: number,
+): void {
+  if (currentLength + chunk.length > max) {
+    throw new Error(
+      `DatabricksAdapter: ${label} exceeds configured limit (${max} UTF-16 code units)`,
+    );
+  }
+}
+
 /**
  * Transport shim: given an OpenAI-compatible request body, returns the raw
  * SSE byte stream from the serving endpoint. Injected at construction time so
@@ -28,6 +50,12 @@ interface RawFetchAdapterOptions {
   authenticate: () => Promise<Record<string, string>>;
   maxSteps?: number;
   maxTokens?: number;
+  /** Max length of one SSE line (including an incomplete tail in the buffer). */
+  maxSseLineChars?: number;
+  /** Max total length of assistant `delta.content` across the stream. */
+  maxStreamTextChars?: number;
+  /** Max length of streamed `function.arguments` per tool call index. */
+  maxToolArgumentsChars?: number;
 }
 
 /**
@@ -40,6 +68,9 @@ interface StreamBodyAdapterOptions {
   streamBody: StreamBody;
   maxSteps?: number;
   maxTokens?: number;
+  maxSseLineChars?: number;
+  maxStreamTextChars?: number;
+  maxToolArgumentsChars?: number;
 }
 
 type DatabricksAdapterOptions =
@@ -70,12 +101,18 @@ interface ServingEndpointOptions {
   endpointName: string;
   maxSteps?: number;
   maxTokens?: number;
+  maxSseLineChars?: number;
+  maxStreamTextChars?: number;
+  maxToolArgumentsChars?: number;
 }
 
 interface ModelServingOptions {
   maxSteps?: number;
   maxTokens?: number;
   workspaceClient?: WorkspaceClientLike;
+  maxSseLineChars?: number;
+  maxStreamTextChars?: number;
+  maxToolArgumentsChars?: number;
 }
 
 interface OpenAIMessage {
@@ -154,10 +191,19 @@ export class DatabricksAdapter implements AgentAdapter {
   private streamBody: StreamBody;
   private maxSteps: number;
   private maxTokens: number;
+  private maxSseLineChars: number;
+  private maxStreamTextChars: number;
+  private maxToolArgumentsChars: number;
 
   constructor(options: DatabricksAdapterOptions) {
     this.maxSteps = options.maxSteps ?? 10;
     this.maxTokens = options.maxTokens ?? 4096;
+    this.maxSseLineChars =
+      options.maxSseLineChars ?? DEFAULT_MAX_SSE_LINE_CHARS;
+    this.maxStreamTextChars =
+      options.maxStreamTextChars ?? DEFAULT_MAX_STREAM_TEXT_CHARS;
+    this.maxToolArgumentsChars =
+      options.maxToolArgumentsChars ?? DEFAULT_MAX_TOOL_ARGUMENT_CHARS;
 
     if (isStreamBodyOptions(options)) {
       this.streamBody = options.streamBody;
@@ -197,7 +243,15 @@ export class DatabricksAdapter implements AgentAdapter {
   static async fromServingEndpoint(
     options: ServingEndpointOptions,
   ): Promise<DatabricksAdapter> {
-    const { workspaceClient, endpointName, maxSteps, maxTokens } = options;
+    const {
+      workspaceClient,
+      endpointName,
+      maxSteps,
+      maxTokens,
+      maxSseLineChars,
+      maxStreamTextChars,
+      maxToolArgumentsChars,
+    } = options;
     return new DatabricksAdapter({
       streamBody: (body, signal) =>
         // Cast through the structural shape: the connector types
@@ -211,6 +265,9 @@ export class DatabricksAdapter implements AgentAdapter {
         ),
       maxSteps,
       maxTokens,
+      maxSseLineChars,
+      maxStreamTextChars,
+      maxToolArgumentsChars,
     });
   }
 
@@ -262,6 +319,9 @@ export class DatabricksAdapter implements AgentAdapter {
       endpointName: resolvedEndpoint,
       maxSteps: options?.maxSteps,
       maxTokens: options?.maxTokens,
+      maxSseLineChars: options?.maxSseLineChars,
+      maxStreamTextChars: options?.maxStreamTextChars,
+      maxToolArgumentsChars: options?.maxToolArgumentsChars,
     });
   }
 
@@ -395,7 +455,19 @@ export class DatabricksAdapter implements AgentAdapter {
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
 
+        if (buffer.length > this.maxSseLineChars) {
+          throw new Error(
+            `DatabricksAdapter: SSE line buffer exceeds configured limit (${this.maxSseLineChars} UTF-16 code units)`,
+          );
+        }
+
         for (const line of lines) {
+          if (line.length > this.maxSseLineChars) {
+            throw new Error(
+              `DatabricksAdapter: SSE line exceeds configured limit (${this.maxSseLineChars} UTF-16 code units)`,
+            );
+          }
+
           const trimmed = line.trim();
           if (!trimmed.startsWith("data: ")) continue;
           const data = trimmed.slice(6);
@@ -412,6 +484,12 @@ export class DatabricksAdapter implements AgentAdapter {
           if (!delta) continue;
 
           if (delta.content) {
+            throwIfExceedsStreamLimit(
+              "streamed assistant text",
+              fullText.length,
+              delta.content,
+              this.maxStreamTextChars,
+            );
             fullText += delta.content;
             yield { type: "message_delta" as const, content: delta.content };
           }
@@ -421,13 +499,25 @@ export class DatabricksAdapter implements AgentAdapter {
               const existing = toolCallAccumulator.get(tc.index);
               if (existing) {
                 if (tc.function?.arguments) {
+                  throwIfExceedsStreamLimit(
+                    "tool call arguments",
+                    existing.arguments.length,
+                    tc.function.arguments,
+                    this.maxToolArgumentsChars,
+                  );
                   existing.arguments += tc.function.arguments;
                 }
               } else {
+                const initial = tc.function?.arguments ?? "";
+                if (initial.length > this.maxToolArgumentsChars) {
+                  throw new Error(
+                    `DatabricksAdapter: tool call arguments exceed configured limit (${this.maxToolArgumentsChars} UTF-16 code units)`,
+                  );
+                }
                 toolCallAccumulator.set(tc.index, {
                   id: tc.id ?? `call_${tc.index}`,
                   name: tc.function?.name ?? "",
-                  arguments: tc.function?.arguments ?? "",
+                  arguments: initial,
                 });
               }
             }

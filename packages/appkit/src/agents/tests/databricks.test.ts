@@ -93,6 +93,9 @@ function createAdapter(overrides?: {
   authenticate?: () => Promise<Record<string, string>>;
   maxSteps?: number;
   maxTokens?: number;
+  maxSseLineChars?: number;
+  maxStreamTextChars?: number;
+  maxToolArgumentsChars?: number;
 }) {
   return new DatabricksAdapter({
     endpointUrl:
@@ -345,6 +348,97 @@ describe("DatabricksAdapter", () => {
       content: '{"rows":[]}',
       tool_call_id: "call_1",
     });
+  });
+
+  test("throws when SSE line buffer exceeds maxSseLineChars", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      body: createReadableStream(["no-newline-", "xxxxxxxxxx"]),
+      text: () => Promise.resolve(""),
+    });
+
+    const adapter = createAdapter({ maxSseLineChars: 12 });
+
+    await expect(async () => {
+      for await (const _ of adapter.run(
+        { messages: createTestMessages(), tools: [], threadId: "t1" },
+        { executeTool: vi.fn() },
+      )) {
+        // drain
+      }
+    }).rejects.toThrow(/SSE line buffer exceeds configured limit/);
+  });
+
+  test("throws when a complete SSE line exceeds maxSseLineChars", async () => {
+    const longPayload = `${"x".repeat(30)}\n`;
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      body: createReadableStream([longPayload]),
+      text: () => Promise.resolve(""),
+    });
+
+    const adapter = createAdapter({ maxSseLineChars: 20 });
+
+    await expect(async () => {
+      for await (const _ of adapter.run(
+        { messages: createTestMessages(), tools: [], threadId: "t1" },
+        { executeTool: vi.fn() },
+      )) {
+        // drain
+      }
+    }).rejects.toThrow(/SSE line exceeds configured limit/);
+  });
+
+  test("throws when streamed assistant text exceeds maxStreamTextChars", async () => {
+    globalThis.fetch = mockFetch([
+      textDelta("abcde"),
+      textDelta("f"),
+      sseChunk("[DONE]"),
+    ]);
+
+    const adapter = createAdapter({ maxStreamTextChars: 5 });
+
+    await expect(async () => {
+      for await (const _ of adapter.run(
+        { messages: createTestMessages(), tools: [], threadId: "t1" },
+        { executeTool: vi.fn() },
+      )) {
+        // drain
+      }
+    }).rejects.toThrow(/streamed assistant text exceeds configured limit/);
+  });
+
+  test("throws when streamed tool arguments exceed maxToolArgumentsChars", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      body: createReadableStream([
+        toolCallDelta(0, "c1", "t", '{"a":"'),
+        toolCallDelta(0, undefined, undefined, 'xxxx"}'),
+        sseChunk("[DONE]"),
+      ]),
+      text: () => Promise.resolve(""),
+    });
+
+    const adapter = createAdapter({ maxToolArgumentsChars: 8 });
+
+    await expect(async () => {
+      for await (const _ of adapter.run(
+        {
+          messages: createTestMessages(),
+          tools: [
+            {
+              name: "t",
+              description: "x",
+              parameters: { type: "object", properties: {} },
+            },
+          ],
+          threadId: "t1",
+        },
+        { executeTool: vi.fn().mockResolvedValue("ok") },
+      )) {
+        // drain
+      }
+    }).rejects.toThrow(/tool call arguments exceed/);
   });
 
   test("throws on non-ok response", async () => {
