@@ -173,9 +173,9 @@ function RevenueChart() {
 }
 ```
 
-:::tip Memoize args
+:::tip Memoize args (optional)
 
-Wrap the `args` object in `useMemo` so reference stability prevents infinite refetches — the hook re-fires whenever the args reference changes, mirroring `useAnalyticsQuery`.
+The hook deduplicates `args` by content (JSON-serialized), so re-rendering with a fresh-but-equivalent `args` object does not refetch. Wrapping `args` in `useMemo` is still recommended for very hot render paths to skip the per-render serialization, but it is no longer required for correctness.
 :::
 
 ### Type-safe registration

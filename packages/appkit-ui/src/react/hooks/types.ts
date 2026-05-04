@@ -285,10 +285,11 @@ export interface MetricColumnMetadata {
  * by `useMetricView<K>` in its `metadata` field — TypeScript narrows
  * `metadata.measures.<measureKey>` and `metadata.dimensions.<dimKey>` from the
  * registry's per-metric `metadata` augmentation when `K` is a registered key.
+ *
+ * Server-side concerns (UC FQN, execution lane) are deliberately NOT part of
+ * this shape — they live in `metric.json` and never reach the client bundle.
  */
 export interface MetricSemanticMetadata {
-  source: string;
-  lane: "sp" | "obo";
   measures: Record<string, MetricColumnMetadata>;
   dimensions: Record<string, MetricColumnMetadata>;
 }

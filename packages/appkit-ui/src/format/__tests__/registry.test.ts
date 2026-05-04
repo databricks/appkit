@@ -13,8 +13,6 @@ afterEach(() => {
 
 const sampleBundle: MetricsMetadataBundle = {
   revenue: {
-    source: "demo.public.revenue",
-    lane: "sp",
     measures: {
       arr: {
         type: "DECIMAL(38,2)",
@@ -27,8 +25,6 @@ const sampleBundle: MetricsMetadataBundle = {
     },
   },
   customer_metrics: {
-    source: "demo.public.customer_metrics",
-    lane: "obo",
     measures: {
       churn: { type: "DOUBLE", format: "0.0%" },
     },
@@ -47,8 +43,10 @@ describe("registerMetricsMetadata + getMetricMetadata", () => {
     registerMetricsMetadata(sampleBundle);
     const metadata = getMetricMetadata("revenue");
     expect(metadata).not.toBeNull();
-    expect(metadata?.source).toBe("demo.public.revenue");
     expect(metadata?.measures.arr.format).toBe("$#,##0.00");
+    expect(metadata?.measures.arr.display_name).toBe(
+      "Annual Recurring Revenue",
+    );
   });
 
   test("returns null for an unregistered metric key", () => {
@@ -69,8 +67,6 @@ describe("registerMetricsMetadata + getMetricMetadata", () => {
 
     const newBundle: MetricsMetadataBundle = {
       orders: {
-        source: "demo.public.orders",
-        lane: "sp",
         measures: { count: { type: "BIGINT" } },
         dimensions: {},
       },
@@ -94,9 +90,14 @@ describe("registerMetricsMetadata + getMetricMetadata", () => {
     expect(_getRegisteredBundleForTesting()).toBeNull();
   });
 
-  test("supports both SP and OBO lanes in the same bundle", () => {
+  test("returns metadata for any registered key regardless of execution lane", () => {
+    // Lane is a server-side concern (lives in metric.json) and is not part
+    // of the client-facing bundle. The hook returns metadata uniformly for
+    // both SP-lane and OBO-lane metrics.
     registerMetricsMetadata(sampleBundle);
-    expect(getMetricMetadata("revenue")?.lane).toBe("sp");
-    expect(getMetricMetadata("customer_metrics")?.lane).toBe("obo");
+    expect(getMetricMetadata("revenue")?.measures.arr.format).toBe("$#,##0.00");
+    expect(getMetricMetadata("customer_metrics")?.measures.churn.format).toBe(
+      "0.0%",
+    );
   });
 });

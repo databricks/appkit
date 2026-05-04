@@ -21,8 +21,6 @@ import { useMetricView } from "../use-metric-view";
 
 const REVENUE_BUNDLE: MetricsMetadataBundle = {
   revenue: {
-    source: "appkit_demo.public.revenue_metrics",
-    lane: "sp",
     measures: {
       arr: {
         type: "DECIMAL(38,2)",
@@ -45,8 +43,6 @@ const REVENUE_BUNDLE: MetricsMetadataBundle = {
     },
   },
   other_metric: {
-    source: "demo.public.other",
-    lane: "sp",
     measures: { count: { type: "BIGINT" } },
     dimensions: {},
   },
@@ -140,17 +136,19 @@ describe("useMetricView — Phase 5 metadata return field", () => {
       },
     );
 
+    // The `key as never` cast above narrows the metadata return type to
+    // `never`; assert on the runtime shape with a structural cast.
     const revenueMetadata = result.current.metadata as unknown as {
-      source: string;
+      measures: Record<string, unknown>;
     } | null;
     rerender({ key: "other_metric" });
     const otherMetadata = result.current.metadata as unknown as {
-      source: string;
+      measures: Record<string, unknown>;
     } | null;
 
     expect(revenueMetadata).not.toBe(otherMetadata);
-    expect(revenueMetadata?.source).toBe("appkit_demo.public.revenue_metrics");
-    expect(otherMetadata?.source).toBe("demo.public.other");
+    expect(revenueMetadata?.measures).toHaveProperty("arr");
+    expect(otherMetadata?.measures).toHaveProperty("count");
   });
 
   test("metadata is null when the metric key is not in the registered bundle", () => {
@@ -197,8 +195,6 @@ describe("useMetricView — Phase 5 metadata return field", () => {
     // depends on.
     const newBundle: MetricsMetadataBundle = {
       revenue: {
-        source: "demo.public.new_revenue",
-        lane: "sp",
         measures: { arr: { type: "DECIMAL", format: "0.00" } },
         dimensions: {},
       },

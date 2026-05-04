@@ -82,26 +82,43 @@ export function useMetricView<
     [metricKey],
   );
 
+  // Stable serialization key — defends against consumers passing inline
+  // `args` (new object every render) without `useMemo`. JSON.stringify runs
+  // once per render and is bounded by `maxParametersSize`; the payload memo
+  // (and the downstream effect) only re-fires when the request body actually
+  // changes by content. Without this, every render with fresh references
+  // would reset state and refetch, producing an infinite loop.
+  const argsKey = JSON.stringify(args);
+
+  // Hold the latest `args` in a ref so the payload memo can read fresh
+  // values without listing each `args.*` field as a dep. The ref always
+  // matches the closed-over `argsKey`: when content changes, both update
+  // in the same render before the memo body runs.
+  const argsRef = useRef(args);
+  argsRef.current = args;
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: argsKey is the trigger; args read via argsRef
   const payload = useMemo(() => {
     try {
-      const dimensions = args.dimensions ? [...args.dimensions] : undefined;
+      const a = argsRef.current;
+      const dimensions = a.dimensions ? [...a.dimensions] : undefined;
       const body: Record<string, unknown> = {
-        measures: [...args.measures],
+        measures: [...a.measures],
         format,
       };
       if (dimensions && dimensions.length > 0) {
         body.dimensions = dimensions;
       }
-      if (typeof args.timeGrain === "string" && args.timeGrain.length > 0) {
-        body.timeGrain = args.timeGrain;
+      if (typeof a.timeGrain === "string" && a.timeGrain.length > 0) {
+        body.timeGrain = a.timeGrain;
       }
-      if (args.filter !== undefined) {
+      if (a.filter !== undefined) {
         // Filter is a recursive AND/OR/Predicate tree; preserve structure
         // verbatim — the server validates and translates it into SQL.
-        body.filter = args.filter;
+        body.filter = a.filter;
       }
-      if (typeof args.limit === "number") {
-        body.limit = args.limit;
+      if (typeof a.limit === "number") {
+        body.limit = a.limit;
       }
       const serialized = JSON.stringify(body);
       const sizeInBytes = new Blob([serialized]).size;
@@ -115,15 +132,7 @@ export function useMetricView<
       console.error("useMetricView: Failed to serialize request body", err);
       return null;
     }
-  }, [
-    args.measures,
-    args.dimensions,
-    args.timeGrain,
-    args.filter,
-    args.limit,
-    format,
-    maxParametersSize,
-  ]);
+  }, [argsKey, format, maxParametersSize]);
 
   const start = useCallback(() => {
     if (payload === null) {
@@ -169,13 +178,21 @@ export function useMetricView<
           }
 
           if (parsed.type === "error" || parsed.error || parsed.code) {
-            const errorMsg =
+            const rawMsg =
               parsed.error || parsed.message || "Unable to execute metric";
+            // Defense-in-depth: do not echo raw warehouse / server error
+            // text (which can contain SQL fragments, FQNs, schema detail) to
+            // the user in production. Dev mode keeps the passthrough so
+            // developers can diagnose schema-not-found, auth-failed, etc.
+            // The full message is still logged via console.error for ops.
+            const userMsg = import.meta.env.DEV
+              ? rawMsg
+              : "Unable to execute metric";
             setLoading(false);
-            setError(errorMsg);
-            if (parsed.code) {
+            setError(userMsg);
+            if (parsed.code || rawMsg !== userMsg) {
               console.error(
-                `[useMetricView] Code: ${parsed.code}, Message: ${errorMsg}`,
+                `[useMetricView] Code: ${parsed.code ?? "(none)"}, Message: ${rawMsg}`,
               );
             }
             return;

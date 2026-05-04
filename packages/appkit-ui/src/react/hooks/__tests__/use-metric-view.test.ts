@@ -350,6 +350,54 @@ describe("useMetricView", () => {
     expect(capturedCallbacks.signal?.aborted).toBe(true);
   });
 
+  test("does not refetch when re-rendered with structurally identical inline args", () => {
+    const { rerender } = renderHook(
+      ({ args }: { args: any }) => useMetricView("revenue", args),
+      {
+        initialProps: {
+          args: {
+            measures: ["arr"],
+            dimensions: ["region"],
+            filter: { member: "region", operator: "in", values: ["EMEA"] },
+          },
+        },
+      },
+    );
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+
+    // Fresh `args` reference with identical content — simulates a consumer
+    // that forgot to wrap args in useMemo.
+    rerender({
+      args: {
+        measures: ["arr"],
+        dimensions: ["region"],
+        filter: { member: "region", operator: "in", values: ["EMEA"] },
+      },
+    });
+    rerender({
+      args: {
+        measures: ["arr"],
+        dimensions: ["region"],
+        filter: { member: "region", operator: "in", values: ["EMEA"] },
+      },
+    });
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+  });
+
+  test("refetches when args content actually changes", () => {
+    const { rerender } = renderHook(
+      ({ args }: { args: any }) => useMetricView("revenue", args),
+      {
+        initialProps: { args: { measures: ["arr"] } },
+      },
+    );
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+
+    rerender({ args: { measures: ["mrr"] } });
+    expect(mockConnectSSE).toHaveBeenCalledTimes(2);
+  });
+
   test("rejects an empty metric key", () => {
     expect(() =>
       // Cast to any so the runtime guard ("non-empty string") is what fails,

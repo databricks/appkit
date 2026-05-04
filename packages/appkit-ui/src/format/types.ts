@@ -51,12 +51,13 @@ export interface ColumnMetadata {
  * One metric's complete semantic-metadata bundle.
  *
  * Top-level matches the shape in the build-time `metrics.metadata.json` file:
- * `Record<metricKey, MetricMetadata>`. Each entry carries the FQN, the
- * execution lane, and per-column metadata for measures and dimensions.
+ * `Record<metricKey, MetricMetadata>`. Each entry carries per-column metadata
+ * for measures and dimensions — display names, format specs, descriptions,
+ * time-grain hints. Server-side concerns (UC FQN, execution lane) live in
+ * `metric.json` and are deliberately NOT part of this artifact: it ships to
+ * the client.
  */
 export interface MetricMetadata {
-  source: string;
-  lane: "sp" | "obo";
   measures: Record<string, ColumnMetadata>;
   dimensions: Record<string, ColumnMetadata>;
 }
