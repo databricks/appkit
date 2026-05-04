@@ -878,9 +878,12 @@ describe("AnalyticsPlugin — metric route handler", () => {
     await handler(mockReq, mockRes);
 
     expect(mockRes.status).toHaveBeenCalledWith(404);
-    expect(mockRes.json).toHaveBeenCalledWith({
-      error: 'Metric "ghost" not registered',
-    });
+    const errorPayload = (mockRes.json as any).mock.calls[0][0];
+    expect(errorPayload.error).toBe("Metric not found");
+    // Defense-in-depth: the public 404 must not echo the user-supplied key
+    // back. Confirming "metric X is not registered" lets unauthenticated
+    // probes enumerate registered keys by elimination.
+    expect(errorPayload.error).not.toMatch(/ghost/);
   });
 
   test("returns 503 when the registered metric has no build-time metadata (fail-closed)", async () => {

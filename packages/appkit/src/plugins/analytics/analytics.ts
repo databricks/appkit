@@ -291,7 +291,13 @@ export class AnalyticsPlugin extends Plugin {
 
     const registration = this.metricRegistry[key];
     if (!registration) {
-      res.status(404).json({ error: `Metric "${key}" not registered` });
+      // Don't echo the user-supplied `key` back in the public response.
+      // Confirming "metric X is not registered" lets an unauthenticated
+      // probe enumerate registered keys by elimination. The 404 status
+      // stays — it's useful for tooling — but the body is generic; full
+      // detail goes to telemetry only.
+      event?.setContext("analytics", { unknown_metric_key: key });
+      res.status(404).json({ error: "Metric not found" });
       return;
     }
 
@@ -418,6 +424,12 @@ export class AnalyticsPlugin extends Plugin {
           );
           return { type: queryParameters.type, ...result };
         } catch (err) {
+          // Cancellation must pass through unwrapped so the framework's
+          // stream layer can distinguish client-driven aborts from real
+          // failures (different telemetry, no error event emitted).
+          if (err instanceof Error && err.name === "AbortError") {
+            throw err;
+          }
           // Server-side scrub for the SSE error envelope. Without this, any
           // 4xx from the warehouse (e.g. TABLE_OR_VIEW_NOT_FOUND with a UC
           // FQN attached) flows verbatim through the framework's pass-through
@@ -425,13 +437,28 @@ export class AnalyticsPlugin extends Plugin {
           // including non-React consumers that the round-1 client-side scrub
           // does not protect. Production gets a generic message; dev keeps
           // the original for diagnostics. Telemetry always carries the raw.
+          //
+          // Fail-closed env check: only an explicit "development" treats as
+          // dev. Containers / serverless runtimes that leave NODE_ENV unset
+          // must not leak warehouse internals.
           event?.setContext("analytics", {
             metric_query_error:
               err instanceof Error ? err.message : String(err),
             metric_key: key,
           });
-          if (err instanceof AppKitError) throw err;
-          const isProd = process.env.NODE_ENV === "production";
+          const isProd = process.env.NODE_ENV !== "development";
+          if (err instanceof AppKitError) {
+            // 5xx-class AppKitErrors (notably ExecutionError raised by the
+            // SQL connector on warehouse failures) carry raw warehouse text
+            // in their message. Scrub those in prod; let 4xx-class
+            // AppKitErrors (ValidationError, AuthenticationError) through
+            // since their messages are constructed by us with known-clean
+            // content.
+            if (isProd && err.statusCode >= 500) {
+              throw new ExecutionError("Failed to execute metric query");
+            }
+            throw err;
+          }
           throw new ExecutionError(
             isProd
               ? "Failed to execute metric query"
