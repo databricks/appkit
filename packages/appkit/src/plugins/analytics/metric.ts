@@ -827,10 +827,58 @@ const metricRequestSchemaCache = new WeakMap<
   z.ZodType<IAnalyticsMetricRequest>
 >();
 
+/**
+ * Iterative pre-parse depth check. Zod's union/object parsers walk the input
+ * recursively before our `superRefine` depth cap fires, so a deeply-nested
+ * `{ and: [{ and: [...] }] }` payload could stack-overflow during parse,
+ * never reaching the validator's depth check. This walk is iterative (uses
+ * an explicit stack) and aborts as soon as `METRIC_FILTER_MAX_DEPTH` is
+ * exceeded, so a hostile payload of any size cannot drive the call stack.
+ *
+ * Predicate leaves do NOT count toward depth — only nested `and` / `or`
+ * wrappers — matching the rule the in-tree validator enforces in
+ * {@link validateFilterTree}.
+ */
+function preCheckFilterDepth(filter: unknown): void {
+  if (filter == null || typeof filter !== "object") return;
+  const stack: Array<[unknown, number]> = [[filter, 0]];
+  while (stack.length > 0) {
+    const popped = stack.pop();
+    if (popped === undefined) continue;
+    const [node, depth] = popped;
+    if (node == null || typeof node !== "object") continue;
+    const obj = node as Record<string, unknown>;
+    let children: unknown[] | null = null;
+    if (Array.isArray(obj.and)) children = obj.and;
+    else if (Array.isArray(obj.or)) children = obj.or;
+    if (children !== null) {
+      if (depth + 1 > METRIC_FILTER_MAX_DEPTH) {
+        throw new ValidationError(
+          "Invalid metric request body (fields: filter)",
+          {
+            context: {
+              reason: `filter AND/OR nesting exceeds the maximum depth of ${METRIC_FILTER_MAX_DEPTH}`,
+            },
+          },
+        );
+      }
+      for (const child of children) {
+        stack.push([child, depth + 1]);
+      }
+    }
+  }
+}
+
 export function validateMetricRequest(
   registration: MetricRegistration,
   body: unknown,
 ): IAnalyticsMetricRequest {
+  // Bound the recursion depth before Zod sees the input — the schema's
+  // own depth check fires inside `superRefine` which only runs after Zod's
+  // recursive parse has already walked the tree on the call stack.
+  if (body != null && typeof body === "object") {
+    preCheckFilterDepth((body as { filter?: unknown }).filter);
+  }
   let schema = metricRequestSchemaCache.get(registration);
   if (schema === undefined) {
     schema = makeMetricRequestSchema(registration);

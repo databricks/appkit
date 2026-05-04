@@ -1704,6 +1704,27 @@ describe("metric — filter translator", () => {
       ).not.toThrow();
     });
 
+    test("rejects pathologically deep filter without stack-overflow (pre-parse cap)", () => {
+      // Without the iterative pre-parse depth check, Zod's recursive parse
+      // walks the union/object tree on the call stack BEFORE the validator's
+      // own depth cap fires inside `superRefine`. A 10000-deep payload would
+      // stack-overflow the Node process. The pre-walk caps it iteratively.
+      let node: any = {
+        member: "region",
+        operator: "equals",
+        values: ["EMEA"],
+      };
+      for (let i = 0; i < 10_000; i += 1) {
+        node = { and: [node] };
+      }
+      expect(() =>
+        validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
+          measures: ["arr"],
+          filter: node,
+        }),
+      ).toThrowError(/fields:.*filter/);
+    });
+
     test("rejects empty `or` group (empty disjunction is vacuously false)", () => {
       // Empty AND is vacuously true (no constraint). Empty OR would be
       // vacuously false — silently dropping the predicate. Force the caller
