@@ -2,7 +2,7 @@
   "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
   "name": "database",
   "displayName": "Database",
-  "description": "Application database with schema-driven CRUD, type generation, OBO, RLS, and LLM tools",
+  "description": "Application database with schema-driven CRUD, type generation, OBO, and RLS",
   "hidden": false,
   "stability": "beta",
   "resources": {

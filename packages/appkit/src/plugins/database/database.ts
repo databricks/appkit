@@ -6,7 +6,11 @@ import { ConfigurationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import type { PluginManifest } from "../../registry";
 import { loadSchemaByConvention } from "./convention";
-import { POOL_DEFAULTS, STATEMENT_TIMEOUT_DEFAULT_MS } from "./defaults";
+import {
+  APPLICATION_NAME,
+  POOL_DEFAULTS,
+  STATEMENT_TIMEOUT_DEFAULT_MS,
+} from "./defaults";
 import manifest from "./manifest.json";
 import type { IDatabaseConfig } from "./types";
 
@@ -30,7 +34,9 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
       ...POOL_DEFAULTS,
       ...this.config.connection,
     });
-    attachStatementTimeout(this.pool, this.config.statementTimeoutMs);
+    attachSessionDefaults(this.pool, this.config.statementTimeoutMs);
+    if (process.env.DEBUG_POOL)
+      startPoolStatsLog(this.pool, "service-principal");
     logger.info("Database plugin pool initialized");
 
     try {
@@ -97,19 +103,48 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
 export const database = toPlugin(DatabasePlugin);
 
 /**
- * Attach a `connect` listener that sets `statement_timeout` on every new
- * Postgres session checked out of the pool. Caps runaway queries server-side
- * even when the client signal is dropped.
+ * Attach a `connect` listener that sets per-session defaults on every new
+ * Postgres session checked out of the pool: `statement_timeout` (caps runaway
+ * queries even when the client signal is dropped) and `application_name` (so
+ * the connection is attributable in `pg_stat_activity`).
  */
-function attachStatementTimeout(pool: Pool, override?: number): void {
+function attachSessionDefaults(pool: Pool, override?: number): void {
   const ms = override ?? STATEMENT_TIMEOUT_DEFAULT_MS;
-  if (!Number.isFinite(ms) || ms <= 0) return;
   pool.on("connect", (client) => {
-    client.query(`SET statement_timeout = ${Math.floor(ms)}`).catch((err) => {
-      logger.error(
-        "Failed to set statement_timeout on pool connection: %O",
-        err,
-      );
-    });
+    client
+      .query(`SET application_name = '${APPLICATION_NAME}'`)
+      .catch((err) => {
+        logger.error(
+          "Failed to set application_name on pool connection: %O",
+          err,
+        );
+      });
+    if (Number.isFinite(ms) && ms > 0) {
+      client.query(`SET statement_timeout = ${Math.floor(ms)}`).catch((err) => {
+        logger.error(
+          "Failed to set statement_timeout on pool connection: %O",
+          err,
+        );
+      });
+    }
   });
+}
+
+/**
+ * When `DEBUG_POOL=1` is set, periodically log the pool's
+ * total/idle/waiting connection counts so operators can observe saturation.
+ * The interval is unrefed so it never blocks shutdown.
+ */
+function startPoolStatsLog(pool: Pool, label: string): void {
+  const intervalMs = 30_000;
+  const handle = setInterval(() => {
+    logger.info(
+      "Pool stats [%s] total=%d idle=%d waiting=%d",
+      label,
+      pool.totalCount,
+      pool.idleCount,
+      pool.waitingCount,
+    );
+  }, intervalMs);
+  if (typeof handle.unref === "function") handle.unref();
 }

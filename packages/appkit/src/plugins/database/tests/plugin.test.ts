@@ -63,6 +63,7 @@ describe("DatabasePlugin", () => {
       max: 3,
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 10_000,
+      maxUses: 1000,
     });
     expect(plugin.exports()).toEqual({ getPool: expect.any(Function) });
     expect((plugin.exports() as { getPool: () => Pool }).getPool()).toBe(pool);
@@ -125,7 +126,7 @@ describe("DatabasePlugin", () => {
     expect(settled).toBe(true);
   });
 
-  test("setup applies statement_timeout to every new pool connection", async () => {
+  test("setup applies session defaults (application_name + statement_timeout) on every new connection", async () => {
     const plugin = createPlugin({ statementTimeoutMs: 7_000 });
     await plugin.setup();
 
@@ -139,6 +140,9 @@ describe("DatabasePlugin", () => {
     }) => void;
     const client = { query: vi.fn(async () => ({})) };
     handler(client);
+    expect(client.query).toHaveBeenCalledWith(
+      "SET application_name = 'appkit:database'",
+    );
     expect(client.query).toHaveBeenCalledWith("SET statement_timeout = 7000");
   });
 

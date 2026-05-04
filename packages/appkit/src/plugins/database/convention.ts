@@ -3,6 +3,9 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Schema } from "../../database";
 import { ConfigurationError } from "../../errors";
+import { createLogger } from "../../logging/logger";
+
+const logger = createLogger("database:convention");
 
 /**
  * Convention paths for loading the database schema.
@@ -57,8 +60,10 @@ export async function loadSchemaByConvention(
   const cwd = options.cwd ?? process.cwd();
   const importer = options.importer ?? defaultImporter;
 
+  const probed: string[] = [];
   for (const candidate of CONVENTION_PATHS) {
     const absolutePath = path.resolve(cwd, candidate);
+    probed.push(absolutePath);
     if (!(await pathExists(absolutePath))) continue;
 
     const mod = await importer(absolutePath);
@@ -74,6 +79,10 @@ export async function loadSchemaByConvention(
     return { schema, schemaPath: absolutePath };
   }
 
+  logger.info(
+    "No database schema found. Probed paths:\n  - %s",
+    probed.join("\n  - "),
+  );
   return null;
 }
 

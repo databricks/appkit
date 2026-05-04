@@ -29,11 +29,14 @@ export const writeDefaults: PluginExecuteConfig = {
  * Max 10 connections
  * Idle timeout 30s
  * Connection timeout 10s
+ * MaxUses 1000 — recycle long-lived connections (mitigates Lakebase OAuth
+ * token expiry on idle keep-alives).
  */
 export const POOL_DEFAULTS = {
   max: 10,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 10_000,
+  maxUses: 1000,
 };
 
 /**
@@ -41,3 +44,10 @@ export const POOL_DEFAULTS = {
  * runaway queries server-side; pairs with the AppKit timeout interceptor.
  */
 export const STATEMENT_TIMEOUT_DEFAULT_MS = 15_000;
+
+/**
+ * Postgres `application_name` advertised on every connection. Surfaces in
+ * `pg_stat_activity` and Lakebase audit so an operator can attribute
+ * connections back to AppKit.
+ */
+export const APPLICATION_NAME = "appkit:database";
