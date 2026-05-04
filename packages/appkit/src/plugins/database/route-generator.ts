@@ -4,6 +4,7 @@ import { ZodError } from "zod";
 import type { AppKitTable, Schema } from "@/database";
 import { AppKitError } from "@/errors";
 import { createLogger } from "@/logging/logger";
+import { DatabaseRouteError } from "./database";
 import type { EntityClient, WhereInput } from "./entity-proxy";
 import type { HttpAccess, HttpEntityOverride, IDatabaseConfig } from "./types";
 
@@ -280,11 +281,26 @@ export class RouteGenerator {
             res.status(400).json({ errors: error.format() });
             return;
           }
-          const status =
-            error instanceof AppKitError ? error.statusCode : undefined;
-          res.status(status ?? 500).json({
-            error: error instanceof Error ? error.message : "Server error",
-          });
+          // AppKitError messages are author-controlled (404/409/etc) and safe.
+          // DatabaseRouteError carries the status from Plugin#execute (already
+          // scrubbed for prod). Anything else is a raw thrown Error — show its
+          // message in dev, scrub to "Server error" in prod to avoid leaking
+          // stack/internal hints.
+          if (error instanceof AppKitError) {
+            res.status(error.statusCode).json({ error: error.message });
+            return;
+          }
+          if (error instanceof DatabaseRouteError) {
+            res.status(error.statusCode).json({ error: error.message });
+            return;
+          }
+          const fallback =
+            process.env.NODE_ENV === "production"
+              ? "Server error"
+              : error instanceof Error
+                ? error.message
+                : "Server error";
+          res.status(500).json({ error: fallback });
         }
       },
     });

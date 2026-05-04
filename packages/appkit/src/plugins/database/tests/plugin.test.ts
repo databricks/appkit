@@ -194,7 +194,9 @@ describe("DatabasePlugin", () => {
       schemaPath: "/app/config/database/schema.ts",
     });
 
-    const plugin = createPlugin({ oboPoolMax: 1 });
+    const plugin = createPlugin({
+      oboPoolMax: 1,
+    });
     await plugin.setup();
     const exports = plugin.exports() as unknown as {
       user: {
@@ -387,9 +389,11 @@ describe("DatabasePlugin", () => {
     expect(pool.on).toHaveBeenCalledWith("connect", expect.any(Function));
     const handler = vi
       .mocked(pool.on)
-      .mock.calls.find(([event]) => event === "connect")?.[1] as unknown as (
-      client: { query: ReturnType<typeof vi.fn> },
-    ) => void;
+      .mock.calls.find(
+        ([event]) => event === "connect",
+      )?.[1] as unknown as (client: {
+      query: ReturnType<typeof vi.fn>;
+    }) => void;
     const client = { query: vi.fn(async () => ({})) };
     handler(client);
     expect(client.query).toHaveBeenCalledWith(
@@ -455,9 +459,11 @@ describe("DatabasePlugin", () => {
     expect(userPool.on).toHaveBeenCalledWith("connect", expect.any(Function));
     const handler = vi
       .mocked(userPool.on)
-      .mock.calls.find(([event]) => event === "connect")?.[1] as unknown as (
-      client: { query: ReturnType<typeof vi.fn> },
-    ) => void;
+      .mock.calls.find(
+        ([event]) => event === "connect",
+      )?.[1] as unknown as (client: {
+      query: ReturnType<typeof vi.fn>;
+    }) => void;
     const client = { query: vi.fn(async () => ({})) };
     handler(client);
     expect(client.query).toHaveBeenCalledWith(
@@ -503,7 +509,9 @@ describe("DatabasePlugin", () => {
       schemaPath: "/app/config/database/schema.ts",
     });
 
-    const plugin = createPlugin({ oboPoolMax: 1 });
+    const plugin = createPlugin({
+      oboPoolMax: 1,
+    });
     await plugin.setup();
     const exports = plugin.exports() as unknown as {
       user: { asUser: (req: import("express").Request) => unknown };

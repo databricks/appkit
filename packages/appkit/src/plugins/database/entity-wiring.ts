@@ -10,6 +10,7 @@ import {
 } from "@/database";
 import { AuthenticationError, ConfigurationError } from "@/errors";
 import { createLogger } from "@/logging/logger";
+import { OBO_POOL_DEFAULTS, STATEMENT_TIMEOUT_DEFAULT_MS } from "./defaults";
 import {
   type EntityClient,
   type ExecutorFn,
@@ -149,7 +150,10 @@ function makeUserPoolRegistry(
       return existing;
     }
 
+    // Per-user pool: small (`OBO_POOL_DEFAULTS.max = 4`) by default. User-level
+    // overrides via `config.connection` still win.
     const pool = createLakebasePool({
+      ...OBO_POOL_DEFAULTS,
       ...config.connection,
       user: identity.email,
       workspaceClient: createUserWorkspaceClient(identity.token),
@@ -158,6 +162,10 @@ function makeUserPoolRegistry(
     // referencing current_user_id() (the helpers emitted by `appkit db rls`)
     // resolve to the OBO user. Per-user pool means the identity is invariant
     // across connections in this pool, so a session-level setting is safe.
+    // `statement_timeout` is set on the same connect event so OBO queries get
+    // the same server-side cap as SP ones.
+    const statementTimeoutMs =
+      config.statementTimeoutMs ?? STATEMENT_TIMEOUT_DEFAULT_MS;
     pool.on("connect", (client) => {
       client
         .query("SELECT set_config('app.user_id', $1, false)", [identity.email])
@@ -168,6 +176,17 @@ function makeUserPoolRegistry(
             err,
           );
         });
+      if (Number.isFinite(statementTimeoutMs) && statementTimeoutMs > 0) {
+        client
+          .query(`SET statement_timeout = ${Math.floor(statementTimeoutMs)}`)
+          .catch((err) => {
+            logger.error(
+              "Failed to set statement_timeout on user pool connection for %s: %O",
+              identity.email,
+              err,
+            );
+          });
+      }
     });
     pools.set(identity.email, pool);
     evictOldestIfNeeded(pools, draining, maxPools);
@@ -212,9 +231,9 @@ function makeUserPoolRegistry(
 function resolveUserPoolIdentity(
   req: import("express").Request,
 ): UserPoolIdentity | null {
+  const isDev = process.env.NODE_ENV === "development";
   const email = req.header("x-forwarded-email");
   const token = req.header("x-forwarded-access-token");
-  const isDev = process.env.NODE_ENV === "development";
 
   if (email && token) return { email, token };
 
@@ -245,7 +264,10 @@ function createUserWorkspaceClient(token: string): WorkspaceClient {
 }
 
 function normalizePoolMax(value: number | undefined): number {
-  if (!Number.isFinite(value) || value === undefined) return 50;
+  // Default of 25 keeps the worst-case fan-out tractable on Lakebase tiers
+  // ((1 + 25) × 4 + SP(10) ≈ 114 conns). Apps with hot OBO traffic should
+  // raise this explicitly after sizing the database tier.
+  if (!Number.isFinite(value) || value === undefined) return 25;
   return Math.max(1, Math.floor(value));
 }
 

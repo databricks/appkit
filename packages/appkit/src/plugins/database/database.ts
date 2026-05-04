@@ -89,7 +89,11 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
       // per-user pool registry used by `EntityClient.asUser(req)` for OBO.
       const executor: ExecutorFn = async (fn, options) => {
         const result = await this.execute(fn, options);
-        if (!result.ok) throw new Error(result.message);
+        if (!result.ok) {
+          // Preserve the interceptor's status (already scrubbed for prod by
+          // Plugin#execute) so the route can echo the right HTTP code.
+          throw new DatabaseRouteError(result.status, result.message);
+        }
         return result.data;
       };
 
@@ -176,11 +180,9 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
     const drains: Array<Promise<void>> = [];
     if (this.pool) {
       logger.info("Closing database pool");
-      const draining = this.pool
-        .end()
-        .catch((err) => {
-          logger.error("Error closing database pool: %O", err);
-        });
+      const draining = this.pool.end().catch((err) => {
+        logger.error("Error closing database pool: %O", err);
+      });
       this.pool = null;
       drains.push(draining);
     }
@@ -241,6 +243,21 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
 }
 
 export const database = toPlugin(DatabasePlugin);
+
+/**
+ * Carries the interceptor-derived HTTP status from the executor up to the
+ * route handler so 4xx classifications survive the throw. The route layer
+ * checks `instanceof DatabaseRouteError` to echo `statusCode`; everything
+ * else falls back to 500 with a scrubbed message in production.
+ */
+export class DatabaseRouteError extends Error {
+  readonly statusCode: number;
+  constructor(statusCode: number, message: string) {
+    super(message);
+    this.name = "DatabaseRouteError";
+    this.statusCode = statusCode;
+  }
+}
 
 /**
  * Attach a `connect` listener that sets per-session defaults on every new

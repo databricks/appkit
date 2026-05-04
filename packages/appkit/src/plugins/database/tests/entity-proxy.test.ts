@@ -109,6 +109,24 @@ describe("EntityClient", () => {
     expect(args.limit).toBe(500);
   });
 
+  test("toArray() applies MAX_LIMIT when no limit is set", async () => {
+    const { client, dataPath } = makeClient();
+
+    await client.toArray();
+
+    const args = dataPath.calls[0].args[1] as Record<string, unknown>;
+    expect(args.limit).toBe(500);
+  });
+
+  test("unbounded() removes the default cap on toArray()", async () => {
+    const { client, dataPath } = makeClient();
+
+    await client.unbounded().toArray();
+
+    const args = dataPath.calls[0].args[1] as Record<string, unknown>;
+    expect(args.limit).toBeUndefined();
+  });
+
   test("private columns are excluded from default reads and from select()", async () => {
     const sensitive = defineSchema(({ table }) => ({
       user: table("user", {

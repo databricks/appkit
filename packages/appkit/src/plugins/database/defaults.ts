@@ -24,3 +24,13 @@ export const STATEMENT_TIMEOUT_DEFAULT_MS = 15_000;
  * connections back to AppKit.
  */
 export const APPLICATION_NAME = "appkit:database";
+
+/**
+ * Per-user (OBO) pool defaults. The plugin builds one pool per OBO user, so
+ * each pool stays small. Fan-out is `(1 + oboPoolMax) × max`; with the
+ * defaults that caps at `(1 + 25) × 4 + 10 = 114` connections per instance.
+ */
+export const OBO_POOL_DEFAULTS = {
+  ...POOL_DEFAULTS,
+  max: 4,
+};

@@ -117,6 +117,14 @@ export interface EntityClient<
   limit(n: number): EntityClient<TRow, TInsert, TUpdate, TIncludes>;
   offset(n: number): EntityClient<TRow, TInsert, TUpdate, TIncludes>;
 
+  /**
+   * Opt out of the default `MAX_LIMIT` cap for `toArray()`. Use only for
+   * background jobs that genuinely want every row — typical request handlers
+   * should page or `limit()` instead. Server-side `statement_timeout` still
+   * bounds runaway queries.
+   */
+  unbounded(): EntityClient<TRow, TInsert, TUpdate, TIncludes>;
+
   select<K extends keyof TRow & string>(
     ...cols: K[]
   ): EntityClient<Pick<TRow, K> & Row, TInsert, TUpdate, TIncludes>;
@@ -187,6 +195,8 @@ interface EntityClientState {
   offset?: number;
   columns?: string[];
   include?: IncludeSpec;
+  /** Opt-out flag set by `.unbounded()` — bypasses the default `MAX_LIMIT` cap. */
+  unbounded?: boolean;
   cacheKey: (string | number | object)[];
 }
 
@@ -239,6 +249,10 @@ class EntityClientImpl<
   }
 
   limit(n: number) {
+    if (this.state.unbounded) {
+      const explicit = Math.max(0, Math.floor(n));
+      return this.chain({ limit: explicit }, { limit: explicit });
+    }
     const limit = Math.min(MAX_LIMIT, Math.max(0, Math.floor(n)));
     return this.chain({ limit }, { limit });
   }
@@ -246,6 +260,10 @@ class EntityClientImpl<
   offset(n: number) {
     const offset = Math.max(0, Math.floor(n));
     return this.chain({ offset }, { offset });
+  }
+
+  unbounded() {
+    return this.chain({ unbounded: true }, { unbounded: true });
   }
 
   select<K extends keyof TRow & string>(...cols: K[]) {
@@ -456,15 +474,19 @@ class EntityClientImpl<
   }
 
   /**
-   * Resolve final pagination shape for read terminators. Throws when offset
-   * is set without a limit, matching the previous behavior.
+   * Resolve final pagination shape for read terminators. When no limit is set
+   * the cap is `MAX_LIMIT` so server reads stay bounded; callers that really
+   * want every row opt in via `.unbounded()`. Throws when offset is set
+   * without a limit, matching the previous behavior.
    */
   private resolvePagination(): { limit?: number; offset?: number } {
     if (this.state.offset !== undefined && this.state.limit === undefined) {
       throw new Error("offset() requires limit()");
     }
+    const limit =
+      this.state.limit ?? (this.state.unbounded ? undefined : MAX_LIMIT);
     return {
-      limit: this.state.limit,
+      limit,
       offset: this.state.offset,
     };
   }
