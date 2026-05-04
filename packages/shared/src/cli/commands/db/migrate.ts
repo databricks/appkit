@@ -209,18 +209,42 @@ export async function migrateReset(): Promise<void> {
   });
 }
 
-function drizzleArgs(
-  paths: ReturnType<typeof databasePaths>,
-  command: string[],
-): string[] {
-  return [
-    "drizzle-kit",
-    ...command,
-    "--out",
-    path.relative(paths.root, paths.migrationsDir),
-    "--schema",
-    path.relative(paths.root, paths.schemaFile),
-    "--dialect",
-    "postgresql",
-  ];
+/**
+ * Drop every app table in the target schema and the Drizzle bookkeeping
+ * schema. Used by `db init --from reset` to wipe a dev branch before
+ * re-applying `schema.ts` from scratch.
+ *
+ * Dev-only: refuses in `NODE_ENV=production`. Dev branches are per-user
+ * clones that can be recreated cheaply via `db init`, so no additional
+ * confirm prompt is layered on top of the mode select.
+ */
+export async function dropAllAppTables(options: {
+  schema: string;
+}): Promise<void> {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("db init --from reset is forbidden in production.");
+  }
+
+  await withLakebasePool(async (pool) => {
+    const result = await pool.query<{ tablename: string }>(
+      "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = $1",
+      [options.schema],
+    );
+    if (result.rows.length === 0) {
+      console.log(check(`No tables to drop in schema "${options.schema}".`));
+    } else {
+      for (const row of result.rows) {
+        await pool.query(
+          `DROP TABLE IF EXISTS ${quoteIdentifier(options.schema)}.${quoteIdentifier(row.tablename)} CASCADE`,
+        );
+      }
+      console.log(
+        check(
+          `Dropped ${result.rows.length} table(s) in schema "${options.schema}".`,
+        ),
+      );
+    }
+    await pool.query("DROP SCHEMA IF EXISTS drizzle CASCADE");
+    console.log(check("Dropped drizzle migration metadata schema."));
+  });
 }

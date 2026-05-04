@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { initCommand } from "./init";
 import { introspectCommand } from "./introspect";
 import { migrateCommand } from "./migrate";
 import { migrationCommand } from "./migration";
@@ -11,6 +12,7 @@ import { verifyCommand } from "./verify";
  */
 export const dbCommand = new Command("db")
   .description("Database (Lakebase) management commands")
+  .addCommand(initCommand)
   .addCommand(introspectCommand)
   .addCommand(migrationCommand)
   .addCommand(migrateCommand)
@@ -21,6 +23,7 @@ export const dbCommand = new Command("db")
     "after",
     `
 Examples:
+  $ appkit db init                           # one-command onboarding (interactive)
   $ appkit db introspect
   $ appkit db migration generate --name init
   $ appkit db migrate up

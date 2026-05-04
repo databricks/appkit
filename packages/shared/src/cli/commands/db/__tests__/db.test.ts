@@ -12,6 +12,7 @@ describe("dbCommand", () => {
   test("registers database subcommands", () => {
     expect(dbCommand.name()).toBe("db");
     expect(dbCommand.commands.map((command) => command.name())).toEqual([
+      "init",
       "introspect",
       "migration",
       "migrate",
