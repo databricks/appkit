@@ -832,16 +832,21 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         return `Tool execution denied by user approval gate (tool: ${name}).`;
       }
 
-      // Forward tool-call / tool-result events from nested sub-agents into
-      // the parent's outbound SSE stream. Without this the client only sees
-      // the outer `agent-<name>` function call and never the inner tool
-      // invocations the sub-agent makes — so UI-action tools (apply_filter,
-      // highlight_period, etc.) that rely on SSE-based dispatch are
-      // invisible to the browser. Message deltas and metadata are
-      // deliberately NOT forwarded: that would bleed the sub-agent's
-      // assistant text into the parent's chat and double-emit threadIds.
-      const forwardSubAgentToolEvent = (ev: AgentEvent): void => {
-        if (ev.type !== "tool_call" && ev.type !== "tool_result") return;
+      // Forward events from nested sub-agents into the parent's outbound
+      // SSE stream so the client sees inner tool calls AND the sub-agent's
+      // streaming text as it's generated. Without this the user stares at
+      // "thinking…" for the full duration of the sub-agent run.
+      //
+      // The one exception is `metadata`: sub-agents have their own
+      // threadId, and forwarding it would overwrite the parent's thread
+      // state on the client and break multi-turn continuity.
+      //
+      // `approval_pending` is not emitted by adapters directly — it comes
+      // through `checkApproval()` which already pushes to the parent's
+      // outboundEvents — so sub-agent destructive approvals surface
+      // independently of this forwarder.
+      const forwardSubAgentEvent = (ev: AgentEvent): void => {
+        if (ev.type === "metadata") return;
         for (const translated of translator.translate(ev)) {
           outboundEvents.push(translated);
         }
@@ -861,7 +866,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
             subArgs,
             signal,
             1,
-            forwardSubAgentToolEvent,
+            forwardSubAgentEvent,
             checkApproval,
           );
         },
@@ -1005,9 +1010,9 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     /**
      * Optional per-event sink installed by the parent `_streamAgent`. When
      * supplied, each adapter event the child yields is passed through —
-     * the parent's closure filters it to `tool_call` / `tool_result` so
-     * inner tool invocations surface to the client's SSE stream without
-     * also bleeding the sub-agent's assistant text.
+     * the parent's closure forwards everything except `metadata` so the
+     * sub-agent's streaming text, tool invocations, and thinking blocks
+     * all surface to the client's SSE stream in real time.
      */
     onEvent?: (event: AgentEvent) => void,
     /**
