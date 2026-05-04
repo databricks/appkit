@@ -317,7 +317,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         );
       } catch (err) {
         throw new Error(
-          `Agent '${name}' has no model configured and no DATABRICKS_AGENT_ENDPOINT default available`,
+          `Agent '${name}' has no model configured and no DATABRICKS_SERVING_ENDPOINT_NAME default available`,
           { cause: err instanceof Error ? err : undefined },
         );
       }
