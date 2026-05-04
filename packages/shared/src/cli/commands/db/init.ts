@@ -31,12 +31,14 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   autocomplete,
+  cancel,
   confirm,
   intro,
   isCancel,
   outro,
   select,
   spinner,
+  text,
 } from "@clack/prompts";
 import { Command } from "commander";
 import { execa } from "execa";
@@ -82,6 +84,12 @@ export interface RunInitOptions {
   seed?: boolean;
   /** Skip every confirmation prompt and refuse when a default is unavailable. */
   yes?: boolean;
+  /**
+   * Print the env-diff plus the resolved mode and stop without writing `.env`,
+   * dropping tables, or running the migrate/introspect flow. Pairs with `--yes`
+   * to surface what a non-interactive run would do in CI.
+   */
+  dryRun?: boolean;
   /** Override the project root used to resolve `.env` and `config/database/`. */
   cwd?: string;
 }
@@ -185,10 +193,25 @@ export async function runInit(
 
   const envPath = path.join(databasePaths(cwd).root, ".env");
   const envUpdates = buildEnvUpdates({ workspace, user, ...resources });
+  printEnvDiff(envPath, envUpdates, cwd);
+
+  if (options.dryRun) {
+    const mode = await resolveMode(options, fns.probeTableCount, interactive);
+    console.log(bullet(`Mode (planned): ${mode}`));
+    console.log(
+      warn("Dry run: .env not written, no tables touched, no flow delegated."),
+    );
+    outro("Dry run complete.");
+    return;
+  }
+
   fns.applyEnvUpdates(envPath, envUpdates);
   console.log(check(`.env updated (${path.relative(cwd, envPath)})`));
 
   const mode = await resolveMode(options, fns.probeTableCount, interactive);
+  if (mode === "reset") {
+    await confirmReset(branch.fullName, options, interactive);
+  }
   await delegateToFlow(mode, options, cwd, fns, interactive);
 
   outro("Database setup complete. Start your dev server.");
@@ -451,12 +474,79 @@ function buildEnvUpdates(input: {
  * mutation out of the test process's globals.
  */
 function defaultApplyEnvUpdates(envPath: string, updates: EnvUpdates): void {
+  // Back up the previous `.env` to `.env.bak` so a botched run is recoverable.
+  if (existsSync(envPath)) {
+    try {
+      const previous = readFileSync(envPath, "utf8");
+      writeFileSync(`${envPath}.bak`, previous, "utf8");
+    } catch (err) {
+      // Non-fatal: surface the failure so the user knows to back up manually.
+      console.warn(
+        warn(
+          `Could not write .env.bak (${(err as Error).message}); proceeding anyway`,
+        ),
+      );
+    }
+  }
   writeEnvKeys(envPath, updates);
   for (const key of OWNED_ENV_KEYS) {
     const value = updates[key];
     if (value !== undefined) {
       process.env[key] = value;
     }
+  }
+}
+
+/**
+ * Print a per-key plan ("ADD", "CHANGE", "KEEP") of the pending env update so
+ * the user can spot a host or endpoint typo before it lands. Values for known
+ * non-secret keys are printed verbatim; everything else is masked.
+ */
+function printEnvDiff(envPath: string, updates: EnvUpdates, cwd: string): void {
+  const existing: Partial<Record<OwnedEnvKey, string>> = {};
+  if (existsSync(envPath)) {
+    const previous = readFileSync(envPath, "utf8");
+    for (const line of previous.split(/\r?\n/)) {
+      const match = ENV_KEY_PATTERN.exec(line);
+      const key = match?.[1];
+      if (!key) continue;
+      const value = line.slice(line.indexOf("=") + 1);
+      if ((OWNED_ENV_KEYS as readonly string[]).includes(key)) {
+        existing[key as OwnedEnvKey] = value;
+      }
+    }
+  }
+
+  console.log(bullet(`.env plan (${path.relative(cwd, envPath)})`));
+  for (const key of OWNED_ENV_KEYS) {
+    const next = updates[key];
+    if (next === undefined) continue;
+    const prev = existing[key];
+    const tag = prev === undefined ? "ADD" : prev === next ? "KEEP" : "CHANGE";
+    console.log(`    ${tag.padEnd(7)} ${key}=${next}`);
+  }
+}
+
+/**
+ * Require the operator to type the dev branch name before dropping every app
+ * table in `--from reset`. Skipped under `--yes` (CI mode); skipped when stdin
+ * isn't interactive because there's no way to ask.
+ */
+async function confirmReset(
+  branch: string,
+  options: RunInitOptions,
+  interactive: boolean,
+): Promise<void> {
+  if (options.yes || !interactive) return;
+  console.log();
+  console.log(warn(`Reset will DROP every table in branch "${branch}".`));
+  const typed = await text({
+    message: `Type the branch name (${branch}) to confirm`,
+    placeholder: branch,
+  });
+  if (isCancel(typed) || String(typed).trim() !== branch) {
+    cancel("Reset aborted: branch name did not match.");
+    process.exit(1);
   }
 }
 
@@ -1134,6 +1224,10 @@ export const initCommand = new Command("init")
   )
   .option("--no-seed", "Skip seed.sql even if present (migrate only)")
   .option("--yes", "Run non-interactively; require flags for ambiguous choices")
+  .option(
+    "--dry-run",
+    "Print env-diff and resolved mode without writing .env or running the flow",
+  )
   .action((opts) =>
     runCommandAction(() =>
       runInit({
@@ -1146,6 +1240,7 @@ export const initCommand = new Command("init")
         // default per `--yes`).
         seed: opts.seed === undefined ? undefined : Boolean(opts.seed),
         yes: Boolean(opts.yes),
+        dryRun: Boolean(opts.dryRun),
       }),
     ),
   );

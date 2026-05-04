@@ -430,7 +430,11 @@ describe("runInit — reset flow", () => {
     testEnv = mkTempProject({ schema: true });
 
     const deps = makeDeps({});
-    await runInit(scriptedOptions({ from: "reset", seed: false }), deps);
+    // `--yes` skips the typed-branch confirmation; prod CI sets it the same way.
+    await runInit(
+      scriptedOptions({ from: "reset", seed: false, yes: true }),
+      deps,
+    );
 
     expect(deps.dropAllAppTables).toHaveBeenCalledWith({ schema: "public" });
     expect(deps.setupDev).toHaveBeenCalledWith({
@@ -450,7 +454,12 @@ describe("runInit — reset flow", () => {
 
     const deps = makeDeps({});
     await runInit(
-      scriptedOptions({ from: "reset", schema: "app", seed: false }),
+      scriptedOptions({
+        from: "reset",
+        schema: "app",
+        seed: false,
+        yes: true,
+      }),
       deps,
     );
 
@@ -461,7 +470,7 @@ describe("runInit — reset flow", () => {
     testEnv = mkTempProject({ schema: false });
 
     const deps = makeDeps({});
-    await runInit(scriptedOptions({ from: "reset" }), deps);
+    await runInit(scriptedOptions({ from: "reset", yes: true }), deps);
 
     expect(deps.dropAllAppTables).not.toHaveBeenCalled();
     expect(deps.setupDev).not.toHaveBeenCalled();
@@ -473,10 +482,29 @@ describe("runInit — reset flow", () => {
     const deps = makeDeps({
       loadSchemaFile: vi.fn(async () => ({ $drizzle: {}, $tables: {} })),
     });
-    await runInit(scriptedOptions({ from: "reset", seed: false }), deps);
+    await runInit(
+      scriptedOptions({ from: "reset", seed: false, yes: true }),
+      deps,
+    );
 
     expect(deps.dropAllAppTables).not.toHaveBeenCalled();
     expect(deps.setupDev).not.toHaveBeenCalled();
+  });
+});
+
+describe("runInit — dry-run", () => {
+  test("dry-run skips applyEnvUpdates and the migrate flow", async () => {
+    testEnv = mkTempProject({ schema: true });
+
+    const deps = makeDeps({});
+    await runInit(
+      scriptedOptions({ from: "migrate", seed: false, dryRun: true }),
+      deps,
+    );
+
+    expect(deps.applyEnvUpdates).not.toHaveBeenCalled();
+    expect(deps.setupDev).not.toHaveBeenCalled();
+    expect(deps.runIntrospect).not.toHaveBeenCalled();
   });
 });
 
