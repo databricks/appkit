@@ -33,10 +33,6 @@
       "development": "./src/beta.ts",
       "default": "./dist/beta.js"
     },
-    "./agents/databricks": {
-      "development": "./src/agents/databricks.ts",
-      "default": "./dist/agents/databricks.js"
-    },
     "./type-generator": {
       "types": "./dist/type-generator/index.d.ts",
       "development": "./src/type-generator/index.ts",
@@ -104,7 +100,6 @@
     "exports": {
       ".": "./dist/index.js",
       "./beta": "./dist/beta.js",
-      "./agents/databricks": "./dist/agents/databricks.js",
       "./dist/shared/src/plugin": "./dist/shared/src/plugin.d.ts",
       "./type-generator": "./dist/type-generator/index.js",
       "./package.json": "./package.json"

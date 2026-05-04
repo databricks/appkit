@@ -157,7 +157,7 @@ interface DeltaToolCall {
  * @example Using the factory (recommended)
  * ```ts
  * import { createApp, createAgent, agents } from "@databricks/appkit";
- * import { DatabricksAdapter } from "@databricks/appkit/agents/databricks";
+ * import { DatabricksAdapter } from "@databricks/appkit/beta";
  * import { WorkspaceClient } from "@databricks/sdk-experimental";
  *
  * const adapter = DatabricksAdapter.fromServingEndpoint({

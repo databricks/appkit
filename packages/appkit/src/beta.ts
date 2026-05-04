@@ -4,4 +4,5 @@
 //
 // The exports below are auto-generated from each plugin's manifest.json
 // "stability" field. See tools/generate-plugin-entries.ts.
+export { DatabricksAdapter, parseTextToolCalls } from "./agents/databricks";
 export * from "./plugins/beta-exports.generated";
