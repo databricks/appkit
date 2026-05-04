@@ -918,6 +918,37 @@ describe("AnalyticsPlugin — metric route handler", () => {
     expect(errorPayload.error).toBe("Metric registry not initialized");
   });
 
+  test("returns 503 when knownDimensions is empty (fail-closed on either side)", async () => {
+    // The fail-closed gate must trip on EITHER empty measures OR empty
+    // dimensions. With non-empty measures but empty knownDimensions, the
+    // validator otherwise falls open on dimension identifiers (filter
+    // members, GROUP BY targets) and the SQL constructor interpolates them
+    // into the WHERE clause directly.
+    const plugin = new AnalyticsPlugin(config);
+    plugin._setMetricRegistryForTesting({
+      revenue: {
+        ...REVENUE_REGISTRATION,
+        knownMeasures: ["arr"],
+        knownDimensions: [],
+      },
+    });
+    const { router, getHandler } = createMockRouter();
+    plugin.injectRoutes(router);
+
+    const handler = getHandler("POST", "/metric/:key");
+    const mockReq = createMockRequest({
+      params: { key: "revenue" },
+      body: { measures: ["arr"] },
+    });
+    const mockRes = createMockResponse();
+
+    await handler(mockReq, mockRes);
+
+    expect(mockRes.status).toHaveBeenCalledWith(503);
+    const errorPayload = (mockRes.json as any).mock.calls[0][0];
+    expect(errorPayload.code).toBe("METRIC_REGISTRY_NOT_READY");
+  });
+
   test("returns 400 with the canonical error shape on validator failure", async () => {
     const plugin = new AnalyticsPlugin(config);
     plugin._setMetricRegistryForTesting({

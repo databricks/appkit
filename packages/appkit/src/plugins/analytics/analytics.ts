@@ -301,17 +301,24 @@ export class AnalyticsPlugin extends Plugin {
       return;
     }
 
-    // Fail-closed: if the build-time DESCRIBE never produced a measure list
-    // for this metric, the body validator falls open (no allowlist) and the
-    // SQL constructor would let arbitrary measure/dim references through to
-    // the warehouse. Refuse the request so an empty/missing
-    // `metrics.metadata.json` cannot become a schema-enumeration vector.
-    // The clear server-side fix is to (re-)run `pnpm exec appkit metric sync`.
-    if (registration.knownMeasures.length === 0) {
+    // Fail-closed: if the build-time DESCRIBE never produced a measure or
+    // dimension list for this metric, the body validator falls open (no
+    // allowlist) and the SQL constructor would let arbitrary measure/dim
+    // references through to the warehouse — including `filter.member`
+    // identifiers that interpolate directly into the WHERE clause. Refuse
+    // the request so an empty/missing `metrics.metadata.json` cannot
+    // become a schema-enumeration vector for either field. The clear
+    // server-side fix is to (re-)run `pnpm exec appkit metric sync`.
+    if (
+      registration.knownMeasures.length === 0 ||
+      registration.knownDimensions.length === 0
+    ) {
       logger.warn(
         req,
-        "Metric %s registered but build-time metadata is empty — refusing the request. Run `appkit metric sync` to populate metrics.metadata.json.",
+        "Metric %s registered but build-time metadata is empty (measures=%d, dimensions=%d) — refusing the request. Run `appkit metric sync` to populate metrics.metadata.json.",
         key,
+        registration.knownMeasures.length,
+        registration.knownDimensions.length,
       );
       res.status(503).json({
         error: "Metric registry not initialized",

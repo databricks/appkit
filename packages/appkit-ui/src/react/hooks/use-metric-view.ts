@@ -14,6 +14,13 @@ import type {
 } from "./types";
 
 /**
+ * Module-level singleton — `new TextEncoder()` is cheap but constructing
+ * one per byte-count call is still wasted allocation. The encoder is
+ * stateless, so a single shared instance is safe.
+ */
+const TEXT_ENCODER = new TextEncoder();
+
+/**
  * Subscribe to a metric-view query over SSE.
  *
  * Phase 5 surface — accepts `{ measures, dimensions?, timeGrain?, filter?, limit? }`.
@@ -122,9 +129,11 @@ export function useMetricView<
       }
       const serialized = JSON.stringify(body);
       // Avoid the Blob allocation just to count bytes — it's a hot path
-      // on dashboards with many metric tiles. `TextEncoder` is constant-
-      // time per call and produces the same UTF-8 byte length.
-      const sizeInBytes = new TextEncoder().encode(serialized).length;
+      // on dashboards with many metric tiles. `TextEncoder.encode()` is
+      // O(n) over the serialized bytes (same big-O as Blob's internal
+      // encoding) but skips the Blob wrapper allocation. The encoder is
+      // hoisted to module scope so we don't allocate one per call either.
+      const sizeInBytes = TEXT_ENCODER.encode(serialized).length;
       if (sizeInBytes > maxParametersSize) {
         throw new Error(
           "useMetricView: Request body size exceeds the maximum allowed size",
