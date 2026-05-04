@@ -48,6 +48,19 @@ const METRIC_FILTER_OPERATORS = [
 const METRIC_FILTER_MAX_DEPTH = 8;
 
 /**
+ * Cardinality caps on user-controlled arrays. Closes the recurring
+ * `unbounded-request-parameters` finding: a hostile caller could otherwise
+ * send `values: [...10M items...]` and exhaust the validator + the named
+ * bind-var binding step. The limits below are deliberately generous —
+ * higher than any real BI UI would emit — so legitimate traffic never trips
+ * them. If a customer scenario needs more, expose a per-metric override.
+ */
+const METRIC_MEASURES_MAX = 50;
+const METRIC_DIMENSIONS_MAX = 20;
+const METRIC_FILTER_VALUES_MAX = 1000;
+const METRIC_LIMIT_MAX = 100_000;
+
+/**
  * Range ops — require numeric or date-typed dimensions. The remaining ops
  * split into:
  *   - any-type: equals, notEquals, in, notIn, set, notSet
@@ -422,7 +435,12 @@ export function makeMetricRequestSchema(
       operator: z.string().min(1, {
         message: "filter predicate 'operator' cannot be empty",
       }) as z.ZodType<MetricFilterOperatorName>,
-      values: z.array(z.union([z.string(), z.number()])).optional(),
+      values: z
+        .array(z.union([z.string(), z.number()]))
+        .max(METRIC_FILTER_VALUES_MAX, {
+          message: `filter predicate 'values' length exceeds the maximum of ${METRIC_FILTER_VALUES_MAX}`,
+        })
+        .optional(),
     })
     .strict();
 
@@ -448,8 +466,16 @@ export function makeMetricRequestSchema(
     .object({
       measures: z
         .array(measureItemSchema)
-        .min(1, { message: "measures must contain at least one entry" }),
-      dimensions: z.array(dimensionItemSchema).optional(),
+        .min(1, { message: "measures must contain at least one entry" })
+        .max(METRIC_MEASURES_MAX, {
+          message: `measures length exceeds the maximum of ${METRIC_MEASURES_MAX}`,
+        }),
+      dimensions: z
+        .array(dimensionItemSchema)
+        .max(METRIC_DIMENSIONS_MAX, {
+          message: `dimensions length exceeds the maximum of ${METRIC_DIMENSIONS_MAX}`,
+        })
+        .optional(),
       timeGrain: timeGrainSchema.optional(),
       filter: filterSchema.optional(),
       format: z.enum(["JSON", "ARROW"]).optional(),
@@ -457,6 +483,9 @@ export function makeMetricRequestSchema(
         .number()
         .int({ message: "limit must be an integer" })
         .positive({ message: "limit must be positive" })
+        .max(METRIC_LIMIT_MAX, {
+          message: `limit exceeds the maximum of ${METRIC_LIMIT_MAX}`,
+        })
         .optional(),
     })
     .strict();
@@ -785,11 +814,28 @@ function collectAllowedGrains(grainsByDim: Record<string, string[]>): string[] {
  * `context.issues` for server-side telemetry. This prevents an unauthenticated
  * caller from enumerating the registered schema by sending malformed bodies.
  */
+/**
+ * Per-registration Zod schema cache. The schema is recursive (filter tree
+ * with `z.lazy`) and constructs ~10 chained refinements, which is non-trivial
+ * to rebuild on every request. Keyed on the registration object so the cache
+ * empties automatically when the registry is reloaded (e.g., dev hot-reload
+ * of `metric.json`) — old registration objects become unreferenced and the
+ * `WeakMap` entry is garbage-collected.
+ */
+const metricRequestSchemaCache = new WeakMap<
+  MetricRegistration,
+  z.ZodType<IAnalyticsMetricRequest>
+>();
+
 export function validateMetricRequest(
   registration: MetricRegistration,
   body: unknown,
 ): IAnalyticsMetricRequest {
-  const schema = makeMetricRequestSchema(registration);
+  let schema = metricRequestSchemaCache.get(registration);
+  if (schema === undefined) {
+    schema = makeMetricRequestSchema(registration);
+    metricRequestSchemaCache.set(registration, schema);
+  }
   const result = schema.safeParse(body);
   if (!result.success) {
     const fieldPaths = result.error.issues

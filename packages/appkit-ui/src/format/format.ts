@@ -1,6 +1,37 @@
 import type { ColumnMetadata, FormatSpec } from "./types";
 
 /**
+ * Module-level cache for parsed format specs. Format strings are pinned by
+ * the metric view's YAML and reused for every cell render — without caching,
+ * `parseFormatSpec` runs ~5 regex matches per call. Cardinality in
+ * production is tiny (one entry per measure/dim column with a format), so
+ * an unbounded `Map` is safe; the cache lives for the lifetime of the
+ * module and clears with the page.
+ */
+const parsedFormatCache = new Map<string, ParsedFormat | null>();
+
+/**
+ * Module-level cache for `Intl.NumberFormat` instances. Allocation is
+ * notoriously slow in V8, and chart cells call `formatValue` per row. A
+ * 1000-row × 5-column table would otherwise pay ~5000 instantiations per
+ * render. Keyed on a stringified options bundle so identical option sets
+ * share an instance.
+ */
+const numberFormatCache = new Map<string, Intl.NumberFormat>();
+
+function getNumberFormat(options: Intl.NumberFormatOptions): Intl.NumberFormat {
+  // Locale is left at the runtime default (`undefined`) — same as the
+  // pre-cache code — so options serialization is the only key dimension.
+  const key = JSON.stringify(options);
+  let fmt = numberFormatCache.get(key);
+  if (fmt === undefined) {
+    fmt = new Intl.NumberFormat(undefined, options);
+    numberFormatCache.set(key, fmt);
+  }
+  return fmt;
+}
+
+/**
  * Library-agnostic format utilities for UC Metric View consumption.
  *
  * Phase 5 of the analytics-metric-view PRD: customers wire metric metadata
@@ -67,9 +98,7 @@ export function formatValue(value: unknown, format?: FormatSpec): string {
     // No format / unrecognized format → localized number formatting. Using
     // the user's locale (no explicit "en-US") so numbers render correctly in
     // EU/JP/etc apps without the customer wiring locale plumbing.
-    return new Intl.NumberFormat(undefined, {
-      maximumFractionDigits: 6,
-    }).format(numeric);
+    return getNumberFormat({ maximumFractionDigits: 6 }).format(numeric);
   }
 
   const { kind, fractionDigits, useGrouping, currencyPrefix, currencySuffix } =
@@ -77,7 +106,7 @@ export function formatValue(value: unknown, format?: FormatSpec): string {
 
   switch (kind) {
     case "percent":
-      return new Intl.NumberFormat(undefined, {
+      return getNumberFormat({
         style: "percent",
         minimumFractionDigits: fractionDigits,
         maximumFractionDigits: fractionDigits,
@@ -89,7 +118,7 @@ export function formatValue(value: unknown, format?: FormatSpec): string {
       // — the YAML's `$#,##0.00` does not specify ISO currency code, and
       // assuming USD would be wrong for non-US deployments. Passthrough lets
       // data engineers pin the symbol they intend.
-      const numberPart = new Intl.NumberFormat(undefined, {
+      const numberPart = getNumberFormat({
         minimumFractionDigits: fractionDigits,
         maximumFractionDigits: fractionDigits,
         useGrouping,
@@ -98,7 +127,7 @@ export function formatValue(value: unknown, format?: FormatSpec): string {
       return `${sign}${currencyPrefix ?? ""}${numberPart}${currencySuffix ?? ""}`;
     }
     case "number":
-      return new Intl.NumberFormat(undefined, {
+      return getNumberFormat({
         minimumFractionDigits: fractionDigits,
         maximumFractionDigits: fractionDigits,
         useGrouping,
@@ -211,8 +240,20 @@ interface ParsedFormat {
  * Approach: strip percent / currency markers, count fractional digits via
  * the substring after `.`, detect grouping via the presence of `,`. Anything
  * not matching the recognized shape returns null.
+ *
+ * Result is memoized in {@link parsedFormatCache} — format strings are
+ * pinned by the metric view's YAML and reused for every cell render, so we
+ * pay the regex cost once per distinct spec.
  */
 function parseFormatSpec(spec: FormatSpec): ParsedFormat | null {
+  const cached = parsedFormatCache.get(spec);
+  if (cached !== undefined) return cached;
+  const result = parseFormatSpecImpl(spec);
+  parsedFormatCache.set(spec, result);
+  return result;
+}
+
+function parseFormatSpecImpl(spec: FormatSpec): ParsedFormat | null {
   const trimmed = spec.trim();
   if (trimmed.length === 0) return null;
 

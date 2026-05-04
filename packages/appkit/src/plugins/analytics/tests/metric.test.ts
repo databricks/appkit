@@ -129,6 +129,35 @@ describe("metric — pure helpers", () => {
       ).toThrowError(/fields:.*limit/);
     });
 
+    test("rejects limit exceeding the cap (unbounded-request-parameters)", () => {
+      // Recurring pattern from prior reviews — caps prevent a hostile caller
+      // from passing absurdly large `limit` values that would force the
+      // warehouse to materialize unbounded result sets.
+      expect(() =>
+        validateMetricRequest(REVENUE_REGISTRATION, {
+          measures: ["arr"],
+          limit: 10_000_000,
+        }),
+      ).toThrowError(/fields:.*limit/);
+    });
+
+    test("rejects measures exceeding the cap", () => {
+      const tooMany = Array.from({ length: 100 }, () => "arr");
+      expect(() =>
+        validateMetricRequest(REVENUE_REGISTRATION, { measures: tooMany }),
+      ).toThrowError(/fields:.*measures/);
+    });
+
+    test("rejects a filter predicate with too many values (DoS guard)", () => {
+      const big = Array.from({ length: 2000 }, (_, i) => `v${i}`);
+      expect(() =>
+        validateMetricRequest(REVENUE_REGISTRATION, {
+          measures: ["arr"],
+          filter: { member: "region", operator: "in", values: big },
+        }),
+      ).toThrowError(/fields:.*filter\.values/);
+    });
+
     test("rejects unknown top-level fields (strict)", () => {
       expect(() =>
         validateMetricRequest(REVENUE_REGISTRATION, {
