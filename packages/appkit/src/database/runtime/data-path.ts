@@ -74,7 +74,12 @@ export interface SelectOptions {
   columns?: ReadonlyArray<string>;
   /** Eager-load related entities. */
   include?: IncludeSpec;
-  /** Aborts the underlying query when the signal fires. */
+  /**
+   * Reserved. `node-postgres` does not honor `AbortSignal` at the query level
+   * today — runaway queries are bounded server-side by Postgres
+   * `statement_timeout` (set by the plugin on every pool connection). The
+   * AppKit timeout interceptor still rejects the JS promise when fired.
+   */
   signal?: AbortSignal;
 }
 

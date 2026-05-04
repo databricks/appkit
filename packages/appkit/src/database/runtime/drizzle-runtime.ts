@@ -347,7 +347,11 @@ function projectColumns(
  * WHERE                                                                      *
  * -------------------------------------------------------------------------- */
 
-function buildWhere(
+/**
+ * @internal Exported for snapshot tests that lock in operator → SQL fragment
+ * mapping. Not part of the public surface — go through `DataPath` instead.
+ */
+export function buildWhere(
   table: AppKitTable,
   spec: WhereSpec | undefined,
 ): SQL | undefined {
@@ -415,7 +419,11 @@ function buildOperator(
  * ORDER                                                                      *
  * -------------------------------------------------------------------------- */
 
-function buildOrder(table: AppKitTable, spec: OrderSpec | undefined): SQL[] {
+/** @internal Exported for snapshot tests; same caveat as `buildWhere`. */
+export function buildOrder(
+  table: AppKitTable,
+  spec: OrderSpec | undefined,
+): SQL[] {
   if (!spec) return [];
   const out: SQL[] = [];
   for (const [columnName, direction] of Object.entries(spec)) {
@@ -660,6 +668,10 @@ async function maybeAbort<T>(
   builder: Promise<T> | { then: PromiseLike<T>["then"] },
   _signal?: AbortSignal,
 ): Promise<T> {
+  // Intentional no-op for the signal: node-postgres does not cancel in-flight
+  // queries. Server-side `statement_timeout` (set on every pool connection by
+  // the plugin) is what actually bounds runaway reads. The AppKit timeout
+  // interceptor still rejects the awaited promise when fired.
   return await (builder as Promise<T>);
 }
 
