@@ -16,12 +16,15 @@ import type {
 } from "shared";
 import { AppKitMcpClient, buildMcpHostPolicy } from "../../connectors/mcp";
 import { getWorkspaceClient } from "../../context";
+import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
 import { isFromPluginMarker } from "../../core/agent/from-plugin";
 import { loadAgentsFromDir } from "../../core/agent/load-agents";
+import { normalizeToolResult } from "../../core/agent/normalize-result";
 import {
   buildBaseSystemPrompt,
   composeSystemPrompt,
 } from "../../core/agent/system-prompt";
+import { dispatchToolCall } from "../../core/agent/tool-dispatch";
 import { resolveToolkitFromProvider } from "../../core/agent/toolkit-resolver";
 import {
   functionToolToDefinition,
@@ -41,12 +44,10 @@ import { isToolkitEntry } from "../../core/agent/types";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
-import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
 import { agentStreamDefaults } from "./defaults";
 import { EventChannel } from "./event-channel";
 import { AgentEventTranslator } from "./event-translator";
 import manifest from "./manifest.json";
-import { normalizeToolResult } from "../../core/agent/normalize-result";
 import {
   approvalRequestSchema,
   chatRequestSchema,
