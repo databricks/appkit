@@ -430,27 +430,39 @@ export class AnalyticsPlugin extends Plugin {
           );
           return { type: queryParameters.type, ...result };
         } catch (err) {
-          // Cancellation must pass through unwrapped so the framework's
-          // stream layer can distinguish client-driven aborts from real
-          // failures (different telemetry, no error event emitted).
+          // Cancellation must pass through to the framework's stream layer
+          // SHAPED AS an AbortError so `StreamManager._categorizeError`
+          // classifies it as STREAM_ABORTED (it checks `name === "AbortError"`
+          // or `message.includes("operation was aborted")`). Re-throwing
+          // unchanged would otherwise let `ExecutionError.canceled()` fall
+          // through to UPSTREAM_ERROR.
           //
-          // Two signals indicate cancellation:
+          // We identify cancellations by error CLASS/MESSAGE rather than
+          // by `signal.aborted`. The signal-state check raced concurrent
+          // warehouse errors: if `TimeoutInterceptor` aborted the signal
+          // exactly when the warehouse returned `TABLE_OR_VIEW_NOT_FOUND`,
+          // the bypass would rethrow the raw warehouse text unscrubbed
+          // (round-6 security finding). Two narrow shapes:
           //
-          //  1. The error itself reports `AbortError` — what `fetch` /
-          //     `AbortController` produce.
-          //  2. `signal.aborted` is true — what the AppKit SQL connector
-          //     surfaces via `ExecutionError.canceled()` (name
-          //     "ExecutionError", message "Statement was canceled"), which
-          //     the round-3 `name === "AbortError"` check missed and the
-          //     5xx-scrub branch then masked further. Re-checking
-          //     `signal.aborted` here catches that path: any error
-          //     observed while the abort signal was already fired is a
-          //     cancellation, regardless of the error's class or message.
-          if (
-            signal?.aborted ||
-            (err instanceof Error && err.name === "AbortError")
-          ) {
-            throw err;
+          //  1. real `AbortError` (`fetch` / `AbortController.abort()`)
+          //  2. `ExecutionError` with the static message constructed by
+          //     `ExecutionError.canceled()` ("Statement was canceled") —
+          //     the only ExecutionError variant that means cancellation.
+          //     Match the message exactly so warehouse errors that happen
+          //     to mention "canceled" cannot trick the bypass.
+          const isCancellation =
+            (err instanceof Error && err.name === "AbortError") ||
+            (err instanceof ExecutionError &&
+              err.message === "Statement was canceled");
+          if (isCancellation) {
+            if (err instanceof Error && err.name === "AbortError") {
+              throw err;
+            }
+            // Normalize the connector's `ExecutionError.canceled()` to the
+            // AbortError shape `_categorizeError` recognizes.
+            const normalized = new Error("operation was aborted");
+            normalized.name = "AbortError";
+            throw normalized;
           }
           // Server-side scrub for the SSE error envelope. Without this, any
           // 4xx from the warehouse (e.g. TABLE_OR_VIEW_NOT_FOUND with a UC
