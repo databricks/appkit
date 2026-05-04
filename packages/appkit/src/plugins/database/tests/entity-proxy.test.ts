@@ -226,6 +226,60 @@ describe("EntityClient", () => {
     );
   });
 
+  test("afterCreate, afterUpdate, before/afterDelete are awaited and passed the row", async () => {
+    const afterCreate = vi.fn(async () => undefined);
+    const afterUpdate = vi.fn(async () => undefined);
+    const beforeDelete = vi.fn(async () => undefined);
+    const afterDelete = vi.fn(async () => undefined);
+    const dataPath = fakeDataPath([{ id: 1, email: "a@x", role: "member" }]);
+    const client = makeEntityClient({
+      table: schema.user,
+      entity: "user",
+      dataPath: dataPath.path,
+      execute: makeExecutor(),
+      makeUserDataPath: () => dataPath.path,
+      hooks: { afterCreate, afterUpdate, beforeDelete, afterDelete },
+      hookContext: () => ({ entity: "user" }),
+    });
+
+    await client.create({ email: "a@x" });
+    await client.update(1, { email: "b@x" });
+    await client.delete(1);
+
+    expect(afterCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 1, email: "a@x" }),
+      { entity: "user" },
+    );
+    expect(afterUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 1 }),
+      { entity: "user" },
+    );
+    expect(beforeDelete).toHaveBeenCalledWith(1, { entity: "user" });
+    expect(afterDelete).toHaveBeenCalledWith(1, { entity: "user" });
+  });
+
+  test("upsert does NOT invoke beforeCreate/beforeUpdate (separate channel)", async () => {
+    const beforeCreate = vi.fn(async () => undefined);
+    const beforeUpdate = vi.fn(async () => undefined);
+    const beforeUpsert = vi.fn(async () => undefined);
+    const dataPath = fakeDataPath([{ id: 1, email: "a@x", role: "admin" }]);
+    const client = makeEntityClient({
+      table: schema.user,
+      entity: "user",
+      dataPath: dataPath.path,
+      execute: makeExecutor(),
+      makeUserDataPath: () => dataPath.path,
+      hooks: { beforeCreate, beforeUpdate, beforeUpsert },
+      hookContext: () => ({ entity: "user" }),
+    });
+
+    await client.upsert({ email: "a@x" }, { onConflict: "email" });
+
+    expect(beforeUpsert).toHaveBeenCalled();
+    expect(beforeCreate).not.toHaveBeenCalled();
+    expect(beforeUpdate).not.toHaveBeenCalled();
+  });
+
   test("upsert hooks can rewrite payloads before validation", async () => {
     const beforeUpsert = vi.fn(async (data: Record<string, unknown>) => ({
       ...data,

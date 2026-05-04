@@ -8,6 +8,55 @@ import { DatabaseRouteError } from "./database";
 import type { EntityClient, WhereInput } from "./entity-proxy";
 import type { HttpAccess, HttpEntityOverride, IDatabaseConfig } from "./types";
 
+type ColumnKind =
+  | "text"
+  | "number"
+  | "boolean"
+  | "date"
+  | "json"
+  | "uuid"
+  | "unknown";
+
+/**
+ * Read the Drizzle `columnType` off a table's `$drizzle` value to classify a
+ * column as text/number/boolean/etc. Used to keep `coerceFilterValue` and
+ * `coerceId` from over-eagerly coercing strings on text/uuid columns.
+ *
+ * Hand-rolled (rather than importing Drizzle's types) so this file stays out
+ * of the drizzle-orm import graph — `$drizzle` is `unknown` at the AppKit
+ * boundary, but the runtime layer already reads the same property names off
+ * it (see `database/runtime/drizzle-runtime.ts:getColumn`).
+ */
+function inferColumnKind(table: AppKitTable, name: string): ColumnKind {
+  const drizzleTable = table.$drizzle as
+    | Record<string, { columnType?: string } | undefined>
+    | undefined;
+  const ct = drizzleTable?.[name]?.columnType ?? "";
+  if (ct === "PgText" || ct === "PgVarchar") return "text";
+  if (
+    ct === "PgInteger" ||
+    ct === "PgSerial" ||
+    ct === "PgBigInt" ||
+    ct === "PgBigInt53"
+  ) {
+    return "number";
+  }
+  if (ct === "PgBoolean") return "boolean";
+  if (ct === "PgTimestamp") return "date";
+  if (ct === "PgJsonb" || ct === "PgJson") return "json";
+  if (ct === "PgUuid") return "uuid";
+  return "unknown";
+}
+
+function buildColumnKindMap(
+  table: AppKitTable,
+  cols: ReadonlySet<string>,
+): Map<string, ColumnKind> {
+  const out = new Map<string, ColumnKind>();
+  for (const name of cols) out.set(name, inferColumnKind(table, name));
+  return out;
+}
+
 const logger = createLogger("database:routes");
 
 type Verb = "list" | "find" | "count" | "create" | "update" | "delete";
@@ -64,6 +113,11 @@ interface RouteGeneratorOptions {
     req: express.Request,
     access: HttpAccess,
   ) => DatabaseExecutionSurface;
+  /**
+   * Service-principal pool used for the `_healthz` `SELECT 1` probe. Optional
+   * because some tests exercise the route generator without a real pool.
+   */
+  getServicePool?: () => import("pg").Pool;
   /** Bound wrapper around Plugin#route so endpoint registration stays central. */
   route: (router: IAppRouter, config: RouteConfig) => void;
 }
@@ -80,9 +134,46 @@ export class RouteGenerator {
   constructor(private readonly options: RouteGeneratorOptions) {}
 
   injectAll(router: IAppRouter): void {
+    this.bindHealth(router);
     for (const [name, table] of Object.entries(this.options.schema.$tables)) {
       this.injectEntity(router, name, table);
     }
+  }
+
+  /**
+   * Mount `GET /api/database/_healthz`. Runs a `SELECT 1` against the SP
+   * pool and returns `{ ok, poolStats }` so a load balancer can wait for the
+   * database side of the plugin to come up before routing traffic.
+   *
+   * The route is always public — readiness checks come from k8s/LB
+   * components that don't carry user auth headers.
+   */
+  private bindHealth(router: IAppRouter): void {
+    if (this.options.config.healthCheck === false) return;
+    const getPool = this.options.getServicePool;
+    if (!getPool) return;
+    this.options.route(router, {
+      name: "database._healthz",
+      method: "get",
+      path: "/_healthz",
+      handler: async (_req, res) => {
+        try {
+          const pool = getPool();
+          await pool.query("SELECT 1");
+          res.json({
+            ok: true,
+            poolStats: {
+              total: pool.totalCount,
+              idle: pool.idleCount,
+              waiting: pool.waitingCount,
+            },
+          });
+        } catch (error) {
+          logger.warn("database health check failed: %O", error);
+          res.status(503).json({ ok: false });
+        }
+      },
+    });
   }
 
   private injectEntity(
@@ -99,28 +190,41 @@ export class RouteGenerator {
         .filter(([, meta]) => meta.private !== true)
         .map(([colName]) => colName),
     );
+    const kinds = buildColumnKindMap(table, cols);
+    const pkColumn = derivePkColumnName(table);
+    const pkKind = pkColumn ? (kinds.get(pkColumn) ?? "unknown") : "unknown";
 
     // Six conventional routes per entity. A verb set to `false` is skipped
     // entirely so disabled endpoints are not present in Express at all.
-    if (access.list !== false) this.bindList(router, name, cols, access.list);
+    if (access.list !== false)
+      this.bindList(router, name, cols, kinds, access.list);
     if (access.count !== false)
-      this.bindCount(router, name, cols, access.count);
-    if (access.find !== false) this.bindFind(router, name, cols, access.find);
+      this.bindCount(router, name, cols, kinds, access.count);
+    if (access.find !== false)
+      this.bindFind(router, name, cols, kinds, pkKind, access.find);
     if (access.create !== false) this.bindCreate(router, name, access.create);
-    if (access.update !== false) this.bindUpdate(router, name, access.update);
-    if (access.delete !== false) this.bindDelete(router, name, access.delete);
+    if (access.update !== false)
+      this.bindUpdate(router, name, pkKind, access.update);
+    if (access.delete !== false)
+      this.bindDelete(router, name, pkKind, access.delete);
   }
   private bindList(
     router: IAppRouter,
     name: string,
     cols: ReadonlySet<string>,
+    kinds: ReadonlyMap<string, ColumnKind>,
     access: HttpAccess,
   ): void {
     this.bind(router, name, "list", "get", `/${name}`, async (req, res) => {
       let q = this.entity(req, access, name);
-      q = applyFilters(q, req.query, cols);
+      q = applyFilters(q, req.query, cols, kinds);
       q = applySelect(q, req.query.select, cols);
-      q = applyInclude(q, req.query.include);
+      q = applyInclude(
+        q,
+        req.query.include,
+        this.options.schema,
+        this.options.config,
+      );
       if (typeof req.query.order === "string") {
         q = applyOrder(q, req.query.order, cols);
       }
@@ -142,6 +246,7 @@ export class RouteGenerator {
     router: IAppRouter,
     name: string,
     cols: ReadonlySet<string>,
+    kinds: ReadonlyMap<string, ColumnKind>,
     access: HttpAccess,
   ): void {
     this.bind(
@@ -153,7 +258,12 @@ export class RouteGenerator {
       async (req, res) => {
         // Count supports the same column filters as list, but intentionally
         // ignores pagination and select/order shape controls.
-        const q = applyFilters(this.entity(req, access, name), req.query, cols);
+        const q = applyFilters(
+          this.entity(req, access, name),
+          req.query,
+          cols,
+          kinds,
+        );
         res.json({ count: await q.count() });
       },
     );
@@ -162,13 +272,20 @@ export class RouteGenerator {
     router: IAppRouter,
     name: string,
     cols: ReadonlySet<string>,
+    _kinds: ReadonlyMap<string, ColumnKind>,
+    pkKind: ColumnKind,
     access: HttpAccess,
   ): void {
     this.bind(router, name, "find", "get", `/${name}/:id`, async (req, res) => {
       let q = this.entity(req, access, name);
       q = applySelect(q, req.query.select, cols);
-      q = applyInclude(q, req.query.include);
-      const row = await q.find(coerceId(req.params.id));
+      q = applyInclude(
+        q,
+        req.query.include,
+        this.options.schema,
+        this.options.config,
+      );
+      const row = await q.find(coerceId(req.params.id, pkKind));
       if (!row) {
         res.status(404).json({ error: `${name} not found` });
         return;
@@ -210,6 +327,7 @@ export class RouteGenerator {
   private bindUpdate(
     router: IAppRouter,
     name: string,
+    pkKind: ColumnKind,
     access: HttpAccess,
   ): void {
     this.bind(
@@ -220,7 +338,7 @@ export class RouteGenerator {
       `/${name}/:id`,
       async (req, res) => {
         const row = await this.entity(req, access, name).update(
-          coerceId(req.params.id),
+          coerceId(req.params.id, pkKind),
           req.body as Partial<Record<string, unknown>>,
         );
         res.json(row);
@@ -230,6 +348,7 @@ export class RouteGenerator {
   private bindDelete(
     router: IAppRouter,
     name: string,
+    pkKind: ColumnKind,
     access: HttpAccess,
   ): void {
     this.bind(
@@ -239,7 +358,9 @@ export class RouteGenerator {
       "delete",
       `/${name}/:id`,
       async (req, res) => {
-        await this.entity(req, access, name).delete(coerceId(req.params.id));
+        await this.entity(req, access, name).delete(
+          coerceId(req.params.id, pkKind),
+        );
         res.status(204).end();
       },
     );
@@ -318,6 +439,7 @@ function applyFilters(
   q: EntityClient,
   query: express.Request["query"],
   cols: ReadonlySet<string>,
+  kinds: ReadonlyMap<string, ColumnKind>,
 ): EntityClient {
   let next = q;
 
@@ -326,20 +448,55 @@ function applyFilters(
   // hidden columns as filterable HTTP surface.
   for (const [key, raw] of Object.entries(query)) {
     if (RESERVED_QUERY_KEYS.has(key) || !cols.has(key)) continue;
-    const value = String(Array.isArray(raw) ? raw[0] : raw);
-    const dot = value.indexOf(".");
-    if (dot < 0) {
-      // Bare `?role=admin` is shorthand for `eq.admin`.
-      next = next.where({ [key]: coerceScalar(value) } as WhereInput<
-        Record<string, unknown>
-      >);
+    const kind = kinds.get(key) ?? "unknown";
+    const values = Array.isArray(raw) ? raw : [raw];
+    const decoded: unknown[] = [];
+    for (const v of values) {
+      const value = String(v);
+      const dot = value.indexOf(".");
+      if (dot < 0) {
+        decoded.push(coerceScalarTyped(value, kind));
+        continue;
+      }
+      const op = value.slice(0, dot);
+      if (!ALLOWED_OPS.has(op)) continue;
+      decoded.push({ [op]: coerceFilterValue(op, value.slice(dot + 1), kind) });
+    }
+    if (decoded.length === 0) continue;
+    if (decoded.length === 1) {
+      const only = decoded[0];
+      next = next.where({
+        [key]:
+          typeof only === "object" && only !== null && !Array.isArray(only)
+            ? (only as Record<string, unknown>)
+            : (only as unknown),
+      } as WhereInput<Record<string, unknown>>);
       continue;
     }
-    const op = value.slice(0, dot);
-    if (!ALLOWED_OPS.has(op)) continue;
-    next = next.where({
-      [key]: { [op]: coerceFilterValue(op, value.slice(dot + 1)) },
-    } as WhereInput<Record<string, unknown>>);
+    // Multiple values for the same key: prefer to AND them together by merging
+    // every decoded predicate (`?col=eq.a&col=neq.b` means both). When every
+    // entry is a bare scalar, treat it as `IN (...)` for the natural duplicate
+    // shape used by HTML forms (`col=a&col=b`).
+    const allScalars = decoded.every(
+      (d) => typeof d !== "object" || d === null || Array.isArray(d),
+    );
+    if (allScalars) {
+      next = next.where({
+        [key]: { in: decoded },
+      } as WhereInput<Record<string, unknown>>);
+      continue;
+    }
+    const merged: Record<string, unknown> = {};
+    for (const entry of decoded) {
+      if (
+        typeof entry === "object" &&
+        entry !== null &&
+        !Array.isArray(entry)
+      ) {
+        Object.assign(merged, entry);
+      }
+    }
+    next = next.where({ [key]: merged } as WhereInput<Record<string, unknown>>);
   }
   return next;
 }
@@ -367,9 +524,34 @@ function applySelect(
  * names against the schema's `$relations` metadata; unknown names throw at
  * query time, so this parser intentionally trusts the caller.
  */
-function applyInclude(q: EntityClient, raw: unknown): EntityClient {
+function applyInclude(
+  q: EntityClient,
+  raw: unknown,
+  schema: Schema,
+  config: IDatabaseConfig,
+): EntityClient {
   if (typeof raw !== "string" || raw.length === 0) return q;
   const include = parseIncludeSpec(raw);
+
+  // Strip select columns that don't exist on the related table or are
+  // private. Keeps `?include=author(password_hash)` from leaking secrets.
+  // Unknown relation names are passed through — the runtime layer is
+  // authoritative about what relations exist and rejects them at query time.
+  for (const [relation, spec] of Object.entries(include)) {
+    if (spec === true) continue;
+    const relatedTable = schema.$tables[relation];
+    if (!relatedTable) continue;
+    const allow = new Set(
+      Object.entries(relatedTable.$columns)
+        .filter(
+          ([, meta]) =>
+            meta.private !== true && config.http?.[relation]?.list !== false,
+        )
+        .map(([colName]) => colName),
+    );
+    spec.select = spec.select.filter((c) => allow.has(c));
+  }
+
   return Object.keys(include).length > 0
     ? (q.include(include) as EntityClient)
     : q;
@@ -442,27 +624,51 @@ function clampLimit(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return DEFAULT_LIMIT;
   return Math.min(MAX_LIMIT, Math.floor(value));
 }
-function coerceFilterValue(op: string, value: string): unknown {
+function coerceFilterValue(
+  op: string,
+  value: string,
+  kind: ColumnKind,
+): unknown {
   if (op === "in") {
     // Support both `in.(a,b)` and `in.a,b` shapes; the former matches PostGREST
     // URLs while the latter is a little easier to type by hand.
     const body =
       value.startsWith("(") && value.endsWith(")") ? value.slice(1, -1) : value;
-    return splitList(body).map(coerceScalar);
+    return splitList(body).map((part) => coerceScalarTyped(part, kind));
   }
-  return coerceScalar(value);
+  if (op === "like" || op === "ilike") return value;
+  return coerceScalarTyped(value, kind);
 }
-function coerceScalar(value: string): unknown {
-  // Keep coercion intentionally small and predictable. Anything more complex
-  // should be expressed by the client as a string and interpreted by Postgres.
+/**
+ * Type-aware scalar coercion for filter values pulled out of the query string.
+ *
+ * Text/uuid/json columns get the raw string back so a value like `"true"`,
+ * `"null"`, or `"42"` is filtered as the literal string the user typed.
+ * Number/boolean/date columns get the same heuristic as before so
+ * `?count=eq.42` still works.
+ */
+function coerceScalarTyped(value: string, kind: ColumnKind): unknown {
   if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
     return value.slice(1, -1).replace(/\\"/g, '"');
   }
+  if (kind === "text" || kind === "uuid" || kind === "json") return value;
   if (value === "true") return true;
   if (value === "false") return false;
   if (value === "null") return null;
-  if (value !== "" && !Number.isNaN(Number(value))) return Number(value);
+  if (
+    (kind === "number" || kind === "unknown") &&
+    value !== "" &&
+    !Number.isNaN(Number(value))
+  ) {
+    return Number(value);
+  }
   return value;
+}
+function coerceScalar(value: string): unknown {
+  // Kept for callers that have no column-kind context. Behaves like the old
+  // heuristic — prefer `coerceScalarTyped(value, kind)` when the column kind
+  // is available so we don't reinterpret strings on text columns.
+  return coerceScalarTyped(value, "unknown");
 }
 function splitList(value: string): string[] {
   const out: string[] = [];
@@ -493,11 +699,19 @@ function splitList(value: string): string[] {
   out.push(buf);
   return out;
 }
-function coerceId(raw: string): string | number {
-  // Numeric path ids become numbers so serial primary keys behave naturally;
-  // UUIDs and other string ids pass through untouched.
+function coerceId(raw: string, kind: ColumnKind): string | number {
+  // Honor the declared PK type. Text/uuid PKs that happen to look numeric
+  // (`"123"`) used to be silently turned into numbers — now they pass through.
+  if (kind === "text" || kind === "uuid") return raw;
   const numberValue = Number(raw);
   return Number.isFinite(numberValue) && String(numberValue) === raw
     ? numberValue
     : raw;
+}
+
+function derivePkColumnName(table: AppKitTable): string | null {
+  for (const [name, meta] of Object.entries(table.$columns)) {
+    if (meta.primaryKey) return name;
+  }
+  return Object.keys(table.$columns).includes("id") ? "id" : null;
 }

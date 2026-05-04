@@ -132,6 +132,7 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
       schema: this.schema,
       config: this.config,
       getSurface: (req, access) => this.getSurface(req, access),
+      getServicePool: () => this.requirePool(),
       route: (target, config) => this.route(target, config),
     }).injectAll(router);
   }

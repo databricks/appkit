@@ -35,7 +35,15 @@ export interface HookContext {
   req?: import("express").Request;
   /** The entity name. */
   entity?: string;
-  /** The user ID. */
+  /**
+   * The forwarded user identity (`x-forwarded-email`).
+   *
+   * **Do not use for authorization decisions.** This is a transport-level
+   * label populated from the same forwarded headers OBO uses; the actual
+   * authentication signal is the access token on `req`. For authz, read the
+   * verified user context off `req` — `userId` here is a convenience tag for
+   * logging, audit fields, or distinguishing cache keys.
+   */
   userId?: string;
 }
 
@@ -68,12 +76,23 @@ export interface EntityHooks {
     row: Record<string, unknown>,
     ctx: HookContext,
   ) => Promise<void>;
-  /** A hook to run before an upsert operation. */
+  /**
+   * Run before an upsert operation.
+   *
+   * Note: `upsert` is a separate channel from `create` and `update` — it
+   * does **not** invoke `beforeCreate`/`beforeUpdate` even when the resolved
+   * branch is logically an insert or update. If you need shared mutation
+   * logic, factor it into a helper and call it from both hooks (or from
+   * `beforeCreate` + `beforeUpdate` + `beforeUpsert`).
+   */
   beforeUpsert?: (
     data: Record<string, unknown>,
     ctx: HookContext,
   ) => Promise<HookMutationResult>;
-  /** A hook to run after an upsert operation. */
+  /**
+   * Run after an upsert operation. See `beforeUpsert` — this is **not** a
+   * fan-out of `afterCreate`/`afterUpdate`.
+   */
   afterUpsert?: (
     row: Record<string, unknown>,
     ctx: HookContext,
@@ -119,6 +138,11 @@ export interface IDatabaseConfig extends BasePluginConfig {
   hooks?: Record<string, EntityHooks>;
   /** Whether to check live schema drift during startup. */
   checkDrift?: boolean;
+  /**
+   * Mount `GET /api/database/_healthz` for load balancers and readiness probes.
+   * Defaults to enabled. Set to `false` to suppress the route entirely.
+   */
+  healthCheck?: false;
   /** The cache settings for the database. */
   cache?: CacheSettings;
   /**

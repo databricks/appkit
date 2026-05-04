@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { Pool } from "pg";
 import { createLakebasePool } from "@/connectors";
@@ -17,6 +18,21 @@ import {
   makeEntityClient,
 } from "./entity-proxy";
 import type { IDatabaseConfig } from "./types";
+
+/**
+ * Hashed log tag for an email. Avoids logging the raw address (PII) while
+ * keeping per-user log lines correlatable across requests.
+ *
+ * Format: `"<first-3-chars>#<sha256(email)[:8]>"`. The visible prefix gives
+ * a debugger something to grep for; the hash disambiguates collisions and
+ * makes it possible to correlate without leaking the rest of the address.
+ */
+function logTagForEmail(email: string): string {
+  const lower = email.toLowerCase();
+  const visible = lower.slice(0, Math.min(lower.length, 3));
+  const digest = createHash("sha256").update(lower).digest("hex").slice(0, 8);
+  return `${visible}#${digest}`;
+}
 
 const logger = createLogger("database:wiring");
 
@@ -92,10 +108,9 @@ export function wireEntities(args: WireEntitiesArgs): WireEntitiesResult {
     });
   }
 
-  logger.info(
-    "Database entities wired (%d tables, runtime: drizzle/pool)",
-    Object.keys(entities).length,
-  );
+  // Boot summary is logged once by the plugin in `setup()` (it has the
+  // entity names + schema metadata). Keeping a second log line here would
+  // duplicate the same fact in operator output for no debugging benefit.
 
   return { entities, dataPath: serviceDataPath, userPools };
 }
@@ -143,10 +158,12 @@ function makeUserPoolRegistry(
   }
 
   function getOrCreate(identity: UserPoolIdentity): Pool {
-    const existing = pools.get(identity.email);
+    const key = identity.email.toLowerCase();
+    const tag = logTagForEmail(identity.email);
+    const existing = pools.get(key);
     if (existing) {
-      pools.delete(identity.email);
-      pools.set(identity.email, existing);
+      pools.delete(key);
+      pools.set(key, existing);
       return existing;
     }
 
@@ -172,7 +189,7 @@ function makeUserPoolRegistry(
         .catch((err) => {
           logger.error(
             "Failed to set app.user_id on user pool connection for %s: %O",
-            identity.email,
+            tag,
             err,
           );
         });
@@ -182,15 +199,15 @@ function makeUserPoolRegistry(
           .catch((err) => {
             logger.error(
               "Failed to set statement_timeout on user pool connection for %s: %O",
-              identity.email,
+              tag,
               err,
             );
           });
       }
     });
-    pools.set(identity.email, pool);
+    pools.set(key, pool);
     evictOldestIfNeeded(pools, draining, maxPools);
-    logger.debug("Created per-user pool for %s", identity.email);
+    logger.debug("Created per-user pool for %s", tag);
     return pool;
   }
 
@@ -209,11 +226,12 @@ function makeUserPoolRegistry(
       draining.clear();
       await Promise.all([
         ...entries.map(async ([email, pool]) => {
+          const tag = logTagForEmail(email);
           try {
             await pool.end();
-            logger.debug("Closed per-user pool for %s", email);
+            logger.debug("Closed per-user pool for %s", tag);
           } catch (err) {
-            logger.error("Error closing per-user pool for %s: %O", email, err);
+            logger.error("Error closing per-user pool for %s: %O", tag, err);
           }
         }),
         ...drainingPools.map(async (pool) => {
@@ -282,16 +300,17 @@ function evictOldestIfNeeded(
       | undefined;
     if (!oldest) return;
     const [email, pool] = oldest;
+    const tag = logTagForEmail(email);
     pools.delete(email);
     draining.add(pool);
     pool
       .end()
       .catch((err) => {
-        logger.error("Error evicting per-user pool for %s: %O", email, err);
+        logger.error("Error evicting per-user pool for %s: %O", tag, err);
       })
       .finally(() => {
         draining.delete(pool);
       });
-    logger.debug("Evicted per-user pool for %s", email);
+    logger.debug("Evicted per-user pool for %s", tag);
   }
 }

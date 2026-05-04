@@ -273,10 +273,35 @@ function makeDataPath(
     },
 
     async transaction(fn) {
+      // Client-side cap for the whole `transaction(fn)` callback. The server
+      // also enforces `statement_timeout` per session, but a long-running
+      // workflow that holds the txn open between queries (e.g. waiting on an
+      // external API) wouldn't trip a per-statement cap. 30s is a default
+      // ceiling that catches stuck callers without surprising healthy ones.
+      const TRANSACTION_TIMEOUT_MS = 30_000;
       // biome-ignore lint/suspicious/noExplicitAny: tx shares the NodePgDatabase shape.
-      return await (db as any).transaction(async (tx: NodePgDatabase) => {
+      const txnPromise = (db as any).transaction(async (tx: NodePgDatabase) => {
         return await fn(makeDataPath(tx, schema));
+      }) as Promise<unknown>;
+
+      let timer: NodeJS.Timeout | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `transaction(fn) exceeded ${TRANSACTION_TIMEOUT_MS}ms client-side cap`,
+              ),
+            ),
+          TRANSACTION_TIMEOUT_MS,
+        );
+        timer.unref?.();
       });
+      try {
+        return (await Promise.race([txnPromise, timeout])) as never;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
     },
 
     async raw(strings, ...values) {

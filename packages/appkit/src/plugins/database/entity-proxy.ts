@@ -72,11 +72,16 @@ export type OrderInput<TRow extends Row> = {
   [K in keyof TRow]?: "asc" | "desc";
 };
 
-type RelatedRow<TIncludes, K extends keyof TIncludes> = TIncludes[K] extends {
+type RelatedRow<
+  TIncludes,
+  K extends keyof TIncludes,
+> = TIncludes[K] extends Array<{
   row: infer R;
-}
+}>
   ? Extract<R, Row>
-  : Row;
+  : TIncludes[K] extends { row: infer R }
+    ? Extract<R, Row>
+    : Row;
 
 export type IncludeInput<TIncludes> = {
   [K in keyof TIncludes]?:
@@ -89,8 +94,17 @@ export type IncludeInput<TIncludes> = {
       };
 };
 
+/**
+ * Project the runtime shape of `.include({ K: ... })`. One-to-many includes
+ * declare `Array<{ row: R }>` and resolve to `R[]`; one-to-one includes
+ * declare `{ row: R }` and resolve to `R | null`.
+ */
 export type ApplyIncludes<TIncludes, I> = {
-  [K in keyof I & keyof TIncludes]: RelatedRow<TIncludes, K>[];
+  [K in keyof I & keyof TIncludes]: TIncludes[K] extends Array<{ row: infer R }>
+    ? Extract<R, Row>[]
+    : TIncludes[K] extends { row: infer R }
+      ? Extract<R, Row> | null
+      : never;
 };
 
 /**
@@ -249,11 +263,19 @@ class EntityClientImpl<
   }
 
   limit(n: number) {
+    const requested = Math.max(0, Math.floor(n));
     if (this.state.unbounded) {
-      const explicit = Math.max(0, Math.floor(n));
-      return this.chain({ limit: explicit }, { limit: explicit });
+      return this.chain({ limit: requested }, { limit: requested });
     }
-    const limit = Math.min(MAX_LIMIT, Math.max(0, Math.floor(n)));
+    const limit = Math.min(MAX_LIMIT, requested);
+    if (requested > MAX_LIMIT) {
+      logger.warn(
+        "limit(%d) on %s clamped to MAX_LIMIT=%d. Use .unbounded() for full scans.",
+        requested,
+        this.deps.entity,
+        MAX_LIMIT,
+      );
+    }
     return this.chain({ limit }, { limit });
   }
 
@@ -305,12 +327,20 @@ class EntityClientImpl<
       }),
     };
 
+    // Cache key includes the user identity so SP and OBO results don't share
+    // a slot. In dev fallback (no x-forwarded-email), substitute the request
+    // id so two unrelated dev requests don't share a cache slot named
+    // `"unknown"` and cross-contaminate.
+    const reqId = (req as { id?: unknown }).id;
+    const identityKey =
+      req.header("x-forwarded-email") ??
+      (typeof reqId === "string" ? `unknown:${reqId}` : "unknown");
     return new EntityClientImpl<TRow, TInsert, TUpdate, TIncludes>(userDeps, {
       ...this.state,
       cacheKey: [
         this.deps.entity,
         "asUser",
-        req.header("x-forwarded-email") ?? "unknown",
+        identityKey,
         ...this.state.cacheKey.slice(1),
       ],
     });
