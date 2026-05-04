@@ -4,7 +4,7 @@ import { ZodError } from "zod";
 import type { AppKitTable, Schema } from "@/database";
 import { AppKitError } from "@/errors";
 import { createLogger } from "@/logging/logger";
-import { describeEntityColumns } from "./columns-route";
+import { describeAllEntities, describeEntityColumns } from "./columns-route";
 import { DatabaseRouteError } from "./database";
 import { DEFAULT_LIMIT, MAX_LIMIT } from "./defaults";
 import type { EntityClient, WhereInput } from "./entity-proxy";
@@ -121,14 +121,37 @@ export class RouteGenerator {
 
   injectAll(router: IAppRouter): void {
     this.bindHealth(router);
+    this.bindEntities(router);
     for (const [name, table] of Object.entries(this.options.schema.$tables)) {
       this.injectEntity(router, name, table);
     }
   }
 
   /**
-   * `GET /api/database/_healthz` — SP `SELECT 1` + `{ ok, poolStats }`.
-   * Always public: readiness probes from k8s/LB don't carry user auth.
+   * Mount `GET /api/database/_entities` returning a summary of every declared
+   * entity. Browsers use this for generic admin UIs without a hand-maintained
+   * registry. Pre-computed at registration; filtered to entities with `list`
+   * enabled so disabled/private entities don't leak through discovery.
+   */
+  private bindEntities(router: IAppRouter): void {
+    if (this.options.config.entitiesDiscovery === false) return;
+    const entities = describeAllEntities(this.options.schema).filter(
+      (e) => resolveAccess(this.options.config.http?.[e.name]).list !== false,
+    );
+    this.options.route(router, {
+      name: "database._entities",
+      method: "get",
+      path: "/_entities",
+      handler: async (_req, res) => {
+        res.json({ entities });
+      },
+    });
+  }
+
+  /**
+   * `GET /api/database/_healthz` — pool saturation pre-check + `SELECT 1`
+   * raced against a 1s timeout. Always public: readiness probes from k8s/LB
+   * don't carry user auth.
    */
   private bindHealth(router: IAppRouter): void {
     if (this.options.config.healthCheck === false) return;
@@ -235,9 +258,14 @@ export class RouteGenerator {
 
   /**
    * Expose a compact `ColumnInfo[]` description of the entity so the browser
-   * can auto-render edit/create forms. Handler is synchronous data derived
-   * from `schema.ts` — no pool, no token — so we bypass `this.bind`'s entity
-   * lookup but keep its error-to-JSON wrapping for consistent failure shape.
+   * can auto-render edit/create forms.
+   *
+   * Intentionally bypasses `Plugin#execute` (no retry/cache/timeout/telemetry
+   * interceptors): the handler returns a precomputed array derived from
+   * `schema.ts` at registration time, so there's nothing to retry, no pool to
+   * cap, and no per-request work to trace. Wrapping it in `execute` would
+   * just add overhead per request without changing observability — schema
+   * decoding is already deterministic and free of I/O.
    */
   private bindColumns(
     router: IAppRouter,

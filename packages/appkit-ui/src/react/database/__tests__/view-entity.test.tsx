@@ -46,7 +46,7 @@ describe("<ViewEntity>", () => {
     mockFetch([]);
     render(<ViewEntity entity={CASES} />);
     await waitFor(() => {
-      expect(screen.getByText(/No rows to display/i)).toBeDefined();
+      expect(screen.getByText(/No data available/i)).toBeDefined();
     });
   });
 

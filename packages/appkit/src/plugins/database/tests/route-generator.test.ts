@@ -54,6 +54,7 @@ describe("RouteGenerator", () => {
 
     expect(Object.keys(handlers).sort()).toEqual([
       "DELETE:/user/:id",
+      "GET:/_entities",
       "GET:/user",
       "GET:/user/:id",
       "GET:/user/_columns",

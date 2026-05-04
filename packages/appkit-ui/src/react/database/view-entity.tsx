@@ -2,6 +2,9 @@ import type { ReactElement, ReactNode } from "react";
 import type { DatabaseEntityKey } from "@/js";
 import { formatFieldLabel } from "../lib/format";
 import { cn } from "../lib/utils";
+import { EmptyState } from "../table/empty";
+import { ErrorState } from "../table/error";
+import { LoadingSkeleton } from "../table/loading";
 import {
   Table,
   TableBody,
@@ -14,51 +17,17 @@ import type { RowOf, ViewEntityProps } from "./types";
 import { useEntityRows } from "./use-entity-rows";
 
 // ---------------------------------------------------------------------------
-// Shared state components (loading / error / empty)
+// Loading / error / empty states reuse the shared table primitives so the
+// entity browser visually matches `<DataTable>` and we don't duplicate the
+// skeleton chrome between two surfaces.
 // ---------------------------------------------------------------------------
 
-export function EntityLoading() {
-  return (
-    <div className="rounded-md border overflow-hidden">
-      <div className="border-b bg-secondary p-4">
-        <div className="flex gap-4">
-          <div className="h-6 bg-muted rounded animate-pulse flex-1" />
-          <div className="h-6 bg-muted rounded animate-pulse flex-1" />
-          <div className="h-6 bg-muted rounded animate-pulse flex-1" />
-        </div>
-      </div>
-      {[0, 1, 2, 3].map((n) => (
-        <div
-          key={`entity-loading-${n}`}
-          className="border-b p-4 last:border-b-0"
-        >
-          <div className="flex gap-4">
-            <div className="h-5 bg-muted rounded animate-pulse flex-1" />
-            <div className="h-5 bg-muted rounded animate-pulse flex-1" />
-            <div className="h-5 bg-muted rounded animate-pulse flex-1" />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
+/** @deprecated Use `LoadingSkeleton` from `@databricks/appkit-ui/react`. */
+export const EntityLoading = LoadingSkeleton;
 
+/** @deprecated Use `ErrorState` from `@databricks/appkit-ui/react`. */
 export function EntityError({ message }: { message: string }) {
-  return (
-    <div className="rounded-md border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
-      Error loading entity: {message}
-    </div>
-  );
-}
-
-function EntityEmpty({ label }: { label?: string }) {
-  return (
-    <div className="rounded-md border p-8 text-center">
-      <p className="text-sm text-muted-foreground">
-        {label ?? "No rows to display."}
-      </p>
-    </div>
-  );
+  return <ErrorState error={message} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -114,15 +83,13 @@ export function ViewEntity<E extends DatabaseEntityKey>(
 
   if (variant !== "table") {
     return (
-      <EntityError
-        message={`Unknown ViewEntity variant "${String(variant)}".`}
-      />
+      <ErrorState error={`Unknown ViewEntity variant "${String(variant)}".`} />
     );
   }
 
-  if (error) return <EntityError message={error} />;
-  if (loading && rows === null) return <EntityLoading />;
-  if (!rows || rows.length === 0) return <EntityEmpty />;
+  if (error) return <ErrorState error={error} />;
+  if (loading && rows === null) return <LoadingSkeleton />;
+  if (!rows || rows.length === 0) return <EmptyState />;
 
   // Infer columns from the first row's keys — no metadata needed.
   const allColumns = Object.keys(rows[0] as Record<string, unknown>);

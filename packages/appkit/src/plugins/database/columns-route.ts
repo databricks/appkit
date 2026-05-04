@@ -76,6 +76,41 @@ export function describeEntityColumnsByName(
 }
 
 /**
+ * Summary entry returned by `GET /api/database/_entities`. The browser uses
+ * this to discover what entities exist without hand-maintaining a registry —
+ * great for generic admin UIs, navigation menus, and dev tools.
+ */
+interface EntityInfo {
+  /** Entity name (matches the URL segment under `/api/database/<entity>`). */
+  name: string;
+  /** The primary-key column, if one is declared. */
+  primaryKey: string | null;
+  /** Public column metadata (private columns are filtered out). */
+  columns: ColumnInfo[];
+}
+
+/**
+ * Describe every entity in the schema — name, primary key, public columns.
+ *
+ * The returned array is stable for the plugin's lifetime because `schema.ts`
+ * does not change at runtime; route handlers can compute it once at boot.
+ */
+export function describeAllEntities(schema: Schema): EntityInfo[] {
+  return Object.entries(schema.$tables).map(([name, table]) => ({
+    name,
+    primaryKey: pickPrimaryKey(table),
+    columns: describeEntityColumns(table),
+  }));
+}
+
+function pickPrimaryKey(table: AppKitTable): string | null {
+  for (const [colName, meta] of Object.entries(table.$columns)) {
+    if (meta.primaryKey) return colName;
+  }
+  return Object.keys(table.$columns).includes("id") ? "id" : null;
+}
+
+/**
  * Map a Postgres catalog type to a form-control bucket. Keep the buckets
  * narrow: the browser renders a single control per bucket today, so we only
  * need to distinguish things that need different inputs (text vs number vs

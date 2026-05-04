@@ -154,11 +154,10 @@ export interface IDatabaseConfig extends BasePluginConfig {
   hooks?: Record<string, EntityHooks>;
   /** Whether to check live schema drift during startup. */
   checkDrift?: boolean;
-  /**
-   * Mount `GET /api/database/_healthz` for load balancers and readiness probes.
-   * Defaults to enabled. Set to `false` to suppress the route entirely.
-   */
+  /** Set `false` to suppress the `GET /api/database/_healthz` route. */
   healthCheck?: false;
+  /** Set `false` to suppress the `GET /api/database/_entities` discovery route. */
+  entitiesDiscovery?: false;
   /** The cache settings for the database. */
   cache?: CacheSettings;
   /**
