@@ -109,6 +109,38 @@ describe("EntityClient", () => {
     expect(args.limit).toBe(500);
   });
 
+  test("private columns are excluded from default reads and from select()", async () => {
+    const sensitive = defineSchema(({ table }) => ({
+      user: table("user", {
+        id: id(),
+        email: text().notNull(),
+        passwordHash: text().notNull().private(),
+      }),
+    }));
+    const dataPath = fakeDataPath([
+      { id: 1, email: "a@x", passwordHash: "secret" },
+    ]);
+    const client = makeEntityClient({
+      table: sensitive.user,
+      entity: "user",
+      dataPath: dataPath.path,
+      execute: makeExecutor(),
+      makeUserDataPath: () => dataPath.path,
+      hookContext: () => ({ entity: "user" }),
+    });
+
+    await client.toArray();
+    const defaultArgs = dataPath.calls[0].args[1] as Record<string, unknown>;
+    expect(defaultArgs.columns).toEqual(["id", "email"]);
+
+    dataPath.calls.length = 0;
+    await client
+      .select("id" as never, "email" as never, "passwordHash" as never)
+      .toArray();
+    const selectedArgs = dataPath.calls[0].args[1] as Record<string, unknown>;
+    expect(selectedArgs.columns).toEqual(["id", "email"]);
+  });
+
   test("every terminator runs through the bound executor", async () => {
     const cases: Array<
       (

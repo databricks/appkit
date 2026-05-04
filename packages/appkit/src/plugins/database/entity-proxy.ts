@@ -6,11 +6,24 @@ import type {
   OrderSpec,
   WhereSpec,
 } from "@/database";
+import { createLogger } from "@/logging/logger";
 import { readDefaults, writeDefaults } from "./defaults";
 import type { CacheSettings, EntityHooks, HookContext } from "./types";
 
+const logger = createLogger("database:entity");
 type Row = Record<string, unknown>;
 const MAX_LIMIT = 500;
+
+/**
+ * Public column names (private columns omitted). Used as the default read
+ * projection so columns marked `.private()` never leak via `appkit.database.<e>`
+ * or generated routes unless the caller explicitly opts in via `.select()`.
+ */
+function publicColumnNames(table: AppKitTable): string[] {
+  return Object.entries(table.$columns)
+    .filter(([, meta]) => meta.private !== true)
+    .map(([name]) => name);
+}
 
 type DatabaseAction =
   | "list"
@@ -236,10 +249,18 @@ class EntityClientImpl<
   }
 
   select<K extends keyof TRow & string>(...cols: K[]) {
-    return this.chain(
-      { columns: cols.map(String) },
-      { select: cols.join(",") },
-    );
+    const allowed = new Set(publicColumnNames(this.deps.table));
+    const requested = cols.map(String);
+    const dropped = requested.filter((c) => !allowed.has(c));
+    if (dropped.length > 0) {
+      logger.debug(
+        "Dropped private/unknown column(s) from select on %s: %s",
+        this.deps.entity,
+        dropped.join(","),
+      );
+    }
+    const filtered = requested.filter((c) => allowed.has(c));
+    return this.chain({ columns: filtered }, { select: filtered.join(",") });
   }
 
   include<I extends IncludeInput<TIncludes>>(input: I) {
@@ -287,7 +308,7 @@ class EntityClientImpl<
         where: this.state.where,
         order: this.state.order,
         ...this.resolvePagination(),
-        columns: this.state.columns,
+        columns: this.state.columns ?? publicColumnNames(this.deps.table),
         include: this.state.include,
         signal,
       });
@@ -302,7 +323,7 @@ class EntityClientImpl<
         order: this.state.order,
         limit: 1,
         offset: this.state.offset,
-        columns: this.state.columns,
+        columns: this.state.columns ?? publicColumnNames(this.deps.table),
         include: this.state.include,
         signal,
       });
@@ -317,7 +338,7 @@ class EntityClientImpl<
         this.pk(),
         id,
         {
-          columns: this.state.columns,
+          columns: this.state.columns ?? publicColumnNames(this.deps.table),
           include: this.state.include,
           signal,
         },

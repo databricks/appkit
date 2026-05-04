@@ -90,7 +90,14 @@ export class RouteGenerator {
     table: AppKitTable,
   ): void {
     const access = resolveAccess(this.options.config.http?.[name]);
-    const cols = new Set(Object.keys(table.$columns));
+    // Private columns are excluded from the HTTP-addressable surface entirely:
+    // not filterable, not selectable. The entity client enforces the same
+    // policy for default reads; this set protects the parsing layer.
+    const cols = new Set(
+      Object.entries(table.$columns)
+        .filter(([, meta]) => meta.private !== true)
+        .map(([colName]) => colName),
+    );
 
     // Six conventional routes per entity. A verb set to `false` is skipped
     // entirely so disabled endpoints are not present in Express at all.
