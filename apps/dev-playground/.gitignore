@@ -11,3 +11,4 @@ config/database/migrations/
 
 # Auto-generated from config/database/schema.ts by the database vite plugin
 shared/appkit-types/database.d.ts
+shared/appkit-types/database.columns.ts

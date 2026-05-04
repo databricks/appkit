@@ -24,6 +24,7 @@
     "packages/appkit/src/core/agent/load-agents.ts",
     "packages/appkit/src/connectors/mcp/index.ts",
     "packages/appkit/src/typedoc.entry.ts",
+    "packages/appkit-ui/src/react/database/**",
     "template/**",
     "tools/**",
     "docs/**",
