@@ -18,6 +18,25 @@ export interface RegistryEntry {
   filters: string;
   /** Type literal for `includes: ...`. `"{}"` when no relations exist. */
   includes: string;
+  /** Runtime column metadata emitted to `database.columns.ts`. */
+  columns: ColumnMetadata[];
+}
+
+export interface ColumnMetadata {
+  name: string;
+  type:
+    | "string"
+    | "number"
+    | "boolean"
+    | "date"
+    | "json"
+    | "uuid"
+    | "bigint"
+    | "unknown";
+  nullable: boolean;
+  primaryKey: boolean;
+  hasDefault: boolean;
+  generated: boolean;
 }
 
 /** FK edge `table → target` from the forward pass. */
@@ -35,8 +54,8 @@ interface ReverseEdge {
 /**
  * Walk `Schema` → flat registry entries (pure, no I/O).
  *
- * Include inference: record forward + reverse FK edges per table, then render
- * `includes` — duplicate FK pairs use column keys like PostgREST (`posts!author_id`).
+ * Include inference: forward + reverse FK edges per table; duplicate FK pairs
+ * use column keys like PostgREST (`posts!author_id`).
  */
 export function walkSchema(schema: unknown): RegistryEntry[] {
   if (!schema || typeof schema !== "object") return [];
@@ -82,6 +101,14 @@ export function walkSchema(schema: unknown): RegistryEntry[] {
         forwardByEntity.get(entity) ?? [],
         reverseByEntity.get(entity) ?? [],
       ),
+      columns: columns.map((col) => ({
+        name: col.name,
+        type: pgTypeToColumnInfoKind(col.pgType),
+        nullable: col.nullable,
+        primaryKey: col.isPrimaryKey === true,
+        hasDefault: col.hasDefault,
+        generated: col.serverGenerated === true,
+      })),
     });
   }
 
@@ -225,6 +252,38 @@ function pgTypeToFilterKind(
       return "date";
     default:
       return "string";
+  }
+}
+
+function pgTypeToColumnInfoKind(pgType: string): ColumnMetadata["type"] {
+  switch (pgType) {
+    case "int2":
+    case "int4":
+    case "numeric":
+    case "float4":
+    case "float8":
+      return "number";
+    case "int8":
+      return "bigint";
+    case "bool":
+      return "boolean";
+    case "json":
+    case "jsonb":
+      return "json";
+    case "uuid":
+      return "uuid";
+    case "timestamp":
+    case "timestamptz":
+    case "date":
+    case "time":
+    case "timetz":
+      return "date";
+    case "text":
+    case "varchar":
+    case "char":
+      return "string";
+    default:
+      return "unknown";
   }
 }
 

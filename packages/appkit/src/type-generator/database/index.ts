@@ -8,6 +8,7 @@ export {
   saveDatabaseCache,
 } from "./cache";
 export {
+  DATABASE_COLUMNS_FILE,
   DATABASE_TYPES_FILE,
   type GenerateDatabaseTypesOptions,
   generateDatabaseTypes,

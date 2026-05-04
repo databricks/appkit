@@ -19,6 +19,8 @@ export interface DatabaseCacheEntry {
   hash: string;
   /** Generated `.d.ts` output last produced from this hash. */
   output: string;
+  /** Generated runtime column metadata output last produced from this hash. */
+  columnsOutput?: string;
 }
 
 /** Root shape persisted under `node_modules/.databricks/appkit/database/cache.json`. */
