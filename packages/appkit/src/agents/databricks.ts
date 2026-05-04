@@ -281,7 +281,7 @@ export class DatabricksAdapter implements AgentAdapter {
     }
 
     const tools = this.buildTools(input.tools, nameToWire);
-    const messages = this.buildMessages(input.messages);
+    const messages = this.buildMessages(input.messages, nameToWire);
 
     yield { type: "status", status: "running" };
 
@@ -521,11 +521,54 @@ export class DatabricksAdapter implements AgentAdapter {
     }
   }
 
-  private buildMessages(messages: AgentInput["messages"]): OpenAIMessage[] {
-    return messages.map((m) => ({
-      role: m.role as OpenAIMessage["role"],
-      content: m.content,
-    }));
+  /**
+   * Maps AppKit {@link AgentInput} messages into OpenAI-compatible wire messages.
+   * Preserves multi-turn tool state (`toolCalls` → `tool_calls`, `toolCallId` →
+   * `tool_call_id`) so resumed threads and hydrated history reach the model.
+   */
+  private buildMessages(
+    messages: AgentInput["messages"],
+    nameToWire: Map<string, string>,
+  ): OpenAIMessage[] {
+    const wireToolName = (name: string) =>
+      nameToWire.get(name) ?? name.replace(/\./g, "__");
+
+    return messages.map((m) => {
+      let content: string | null = m.content;
+      if (
+        m.role === "assistant" &&
+        m.toolCalls &&
+        m.toolCalls.length > 0 &&
+        (!m.content || m.content.trim() === "")
+      ) {
+        content = null;
+      }
+
+      const out: OpenAIMessage = {
+        role: m.role as OpenAIMessage["role"],
+        content,
+      };
+
+      if (m.toolCallId) {
+        out.tool_call_id = m.toolCallId;
+      }
+
+      if (m.toolCalls && m.toolCalls.length > 0) {
+        out.tool_calls = m.toolCalls.map((tc) => ({
+          id: tc.id,
+          type: "function" as const,
+          function: {
+            name: wireToolName(tc.name),
+            arguments:
+              typeof tc.args === "string"
+                ? tc.args
+                : JSON.stringify(tc.args ?? {}),
+          },
+        }));
+      }
+
+      return out;
+    });
   }
 
   private buildTools(

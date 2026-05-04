@@ -282,6 +282,71 @@ describe("DatabricksAdapter", () => {
     });
   });
 
+  test("forwards tool thread fields from input messages to the request body", async () => {
+    globalThis.fetch = mockFetch([textDelta("Done"), sseChunk("[DONE]")]);
+
+    const adapter = createAdapter();
+
+    const threadMessages: Message[] = [
+      { id: "1", role: "user", content: "Run SQL", createdAt: new Date() },
+      {
+        id: "2",
+        role: "assistant",
+        content: "",
+        createdAt: new Date(),
+        toolCalls: [
+          {
+            id: "call_1",
+            name: "analytics.query",
+            args: { query: "SELECT 1" },
+          },
+        ],
+      },
+      {
+        id: "3",
+        role: "tool",
+        content: '{"rows":[]}',
+        createdAt: new Date(),
+        toolCallId: "call_1",
+      },
+    ];
+
+    for await (const _ of adapter.run(
+      {
+        messages: threadMessages,
+        tools: createTestTools(),
+        threadId: "t1",
+      },
+      { executeTool: vi.fn() },
+    )) {
+      // drain
+    }
+
+    const [, init] = (globalThis.fetch as any).mock.calls[0];
+    const body = JSON.parse(init.body);
+
+    expect(body.messages[1]).toEqual({
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        {
+          id: "call_1",
+          type: "function",
+          function: {
+            name: "analytics__query",
+            arguments: JSON.stringify({ query: "SELECT 1" }),
+          },
+        },
+      ],
+    });
+
+    expect(body.messages[2]).toEqual({
+      role: "tool",
+      content: '{"rows":[]}',
+      tool_call_id: "call_1",
+    });
+  });
+
   test("throws on non-ok response", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,
