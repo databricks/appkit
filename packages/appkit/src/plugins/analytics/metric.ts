@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { type SQLTypeMarker, sql as sqlHelpers } from "shared";
 import { z } from "zod";
-import { ValidationError } from "../../errors";
+import { AuthenticationError, ValidationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import type {
   IAnalyticsMetricRequest,
@@ -425,6 +425,13 @@ export function makeMetricRequestSchema(
 
   // Aggregate the union of grains the metric view supports. Empty union means
   // no time-typed dimensions are declared — `timeGrain` cannot be set.
+  // Mirrors the dimensions/filter tightening: when the metric has no
+  // time-typed dimensions, `timeGrain` is rejected at validation time
+  // (typed as `z.never()`). The previous fall-open path silently accepted
+  // arbitrary grain tokens; the SQL came out identical (no time-typed dim
+  // → no `date_trunc` clause), but `composeMetricCacheKey` salts the
+  // cache entry with the raw token, so a hostile caller could vary
+  // `timeGrain` to force unbounded cache misses + warehouse re-execution.
   const grainsByDim = registration.knownTimeGrainsByDim;
   const allowedGrains = collectAllowedGrains(grainsByDim);
   const baseTimeGrainSchema = z
@@ -435,7 +442,7 @@ export function makeMetricRequestSchema(
       ? baseTimeGrainSchema.refine((g: string) => allowedGrains.includes(g), {
           message: `timeGrain must be one of: ${allowedGrains.join(", ")}`,
         })
-      : baseTimeGrainSchema;
+      : (z.never() as unknown as z.ZodType<string>);
 
   // ── Filter sub-schema (Phase 3) ──────────────────────────────────────────
   //
@@ -1539,10 +1546,12 @@ export function composeMetricCacheKey(input: {
  * what we need: same user → same key (so cache hits work), different users
  * → different keys (so isolation holds), and reverse lookup is infeasible.
  *
- * For a missing or empty identity, falls back to a literal `"anonymous"`
- * sentinel rather than an empty string. Empty-string hashes would collide
- * across all callers without an identity — which is the bug a privacy-aware
- * design must prevent.
+ * For OBO requests without a resolvable identity (missing or whitespace-
+ * only `x-forwarded-user`), throw `AuthenticationError.missingUserId()`
+ * rather than falling back to a shared `"anonymous"` sentinel — distinct
+ * misconfigured callers would otherwise share the same hash and read each
+ * other's cached results. The route's existing try/catch wraps this call,
+ * so the throw lands on the canonical 401 envelope.
  */
 export function deriveMetricExecutorKey(input: {
   lane: MetricLane;
@@ -1552,12 +1561,15 @@ export function deriveMetricExecutorKey(input: {
     return "sp";
   }
   // OBO lane — hash the user identity so the raw email/principal never
-  // reaches the cache layer. `anonymous` is a sentinel for when the request
-  // has no resolvable identity (in practice this should not happen because
-  // OBO requires `x-forwarded-user`, but we belt-and-suspender it here).
+  // reaches the cache layer. Missing/whitespace identity is treated as a
+  // hard auth failure: the alternative ("anonymous" sentinel) collides
+  // every misconfigured caller into a single cache scope, so user A's
+  // results could leak to user B.
   const identity = input.userIdentity?.trim();
-  const subject = identity && identity.length > 0 ? identity : "anonymous";
-  return createHash("sha256").update(subject).digest("hex");
+  if (!identity || identity.length === 0) {
+    throw AuthenticationError.missingUserId();
+  }
+  return createHash("sha256").update(identity).digest("hex");
 }
 
 /**

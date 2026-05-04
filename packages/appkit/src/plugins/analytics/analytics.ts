@@ -433,7 +433,23 @@ export class AnalyticsPlugin extends Plugin {
           // Cancellation must pass through unwrapped so the framework's
           // stream layer can distinguish client-driven aborts from real
           // failures (different telemetry, no error event emitted).
-          if (err instanceof Error && err.name === "AbortError") {
+          //
+          // Two signals indicate cancellation:
+          //
+          //  1. The error itself reports `AbortError` — what `fetch` /
+          //     `AbortController` produce.
+          //  2. `signal.aborted` is true — what the AppKit SQL connector
+          //     surfaces via `ExecutionError.canceled()` (name
+          //     "ExecutionError", message "Statement was canceled"), which
+          //     the round-3 `name === "AbortError"` check missed and the
+          //     5xx-scrub branch then masked further. Re-checking
+          //     `signal.aborted` here catches that path: any error
+          //     observed while the abort signal was already fired is a
+          //     cancellation, regardless of the error's class or message.
+          if (
+            signal?.aborted ||
+            (err instanceof Error && err.name === "AbortError")
+          ) {
             throw err;
           }
           // Server-side scrub for the SSE error envelope. Without this, any

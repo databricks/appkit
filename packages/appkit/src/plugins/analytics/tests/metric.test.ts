@@ -294,6 +294,27 @@ describe("metric — pure helpers", () => {
       ).toThrowError(/fields:.*timeGrain/);
     });
 
+    test("rejects timeGrain on a measure-only metric (cache-bypass guard)", () => {
+      // Round-5 finding: a measure-only metric has empty
+      // knownTimeGrainsByDim, so allowedGrains is empty. The previous
+      // schema fell open and accepted any timeGrain string. The SQL came
+      // out identical (no time-typed dim → no date_trunc), but
+      // composeMetricCacheKey salts the cache key with the raw token —
+      // an attacker could vary `month/week/foo_bar/...` to force
+      // unbounded cache misses + warehouse re-execution.
+      const measureOnlyRegistration: MetricRegistration = {
+        ...REVENUE_REGISTRATION,
+        knownDimensions: [],
+        knownTimeGrainsByDim: {},
+      };
+      expect(() =>
+        validateMetricRequest(measureOnlyRegistration, {
+          measures: ["arr"],
+          timeGrain: "month",
+        }),
+      ).toThrowError(/fields:.*timeGrain/);
+    });
+
     test("rejects timeGrain when metric has registered dims but none are time-typed", () => {
       // Tighter validation: when the registry knows the metric's dims but
       // none of them carry a time-grain set, `timeGrain` is meaningless on
@@ -2211,31 +2232,17 @@ describe("metric — Phase 4 cache executor key", () => {
       expect(key).not.toContain("@");
     });
 
-    test("OBO-lane null identity falls back to anonymous sentinel", () => {
-      const a = deriveMetricExecutorKey({ lane: "obo", userIdentity: null });
-      const b = deriveMetricExecutorKey({
-        lane: "obo",
-        userIdentity: undefined,
-      });
-      const c = deriveMetricExecutorKey({ lane: "obo", userIdentity: "" });
-      const d = deriveMetricExecutorKey({ lane: "obo", userIdentity: "   " });
-      // All map to the same sentinel hash.
-      expect(a).toBe(b);
-      expect(b).toBe(c);
-      expect(c).toBe(d);
-      expect(a).toMatch(/^[0-9a-f]{64}$/);
-    });
-
-    test("OBO sentinel hash differs from any real identity hash", () => {
-      const sentinel = deriveMetricExecutorKey({
-        lane: "obo",
-        userIdentity: undefined,
-      });
-      const realUser = deriveMetricExecutorKey({
-        lane: "obo",
-        userIdentity: "alice@example.com",
-      });
-      expect(sentinel).not.toBe(realUser);
+    test("OBO-lane missing/whitespace identity throws AuthenticationError (no shared sentinel)", () => {
+      // Round-5 hardening: the previous "anonymous" sentinel let multiple
+      // misconfigured OBO callers share the same hashed cache scope —
+      // user A's results could leak to user B if both arrived with bad
+      // headers. Reject the request hard instead so missing identity
+      // fails fast on the canonical 401 path.
+      for (const userIdentity of [null, undefined, "", "   "]) {
+        expect(() =>
+          deriveMetricExecutorKey({ lane: "obo", userIdentity }),
+        ).toThrowError(/user/i);
+      }
     });
 
     test("SP key differs from any OBO key (cross-lane isolation)", () => {
