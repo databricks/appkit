@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { createLogger } from "../logger";
+import { resolveRequestId } from "../request-id";
 import { WideEvent } from "../wide-event";
 
 describe("Logger with WideEvent Integration", () => {
@@ -19,14 +20,19 @@ describe("Logger with WideEvent Integration", () => {
       }),
     };
 
+    const headers: Record<string, string> = {
+      "user-agent": "test-agent",
+      "x-forwarded-for": "127.0.0.1",
+    };
     mockReq = {
       method: "POST",
       path: "/api/query",
       url: "/api/query",
-      headers: {
-        "user-agent": "test-agent",
-        "x-forwarded-for": "127.0.0.1",
-      },
+      headers,
+      // The shared resolveRequestId helper consults req.header(name); the
+      // wide-event logger no longer uses raw headers[] for request-id
+      // lookup, so the mock must mirror what Express sets up at runtime.
+      header: vi.fn((name: string) => headers[name.toLowerCase()]) as any,
       res: mockRes as Response,
     };
   });
@@ -226,6 +232,72 @@ describe("Logger with WideEvent Integration", () => {
       logger.info(notRequest as any, "Should not crash");
 
       infoSpy.mockRestore();
+    });
+  });
+
+  // The wide-event logger and the body-validation wrapper must agree on
+  // the correlation ID for any single request. They share the same
+  // resolver helper so this is now a property check.
+  describe("Shared requestId resolver", () => {
+    test("WideEvent.request_id matches resolveRequestId() for the same request", () => {
+      const logger = createLogger("analytics");
+      const headers: Record<string, string> = {
+        "user-agent": "test-agent",
+        "x-amzn-trace-id": "Root.1-abc-def",
+      };
+      const req: Partial<Request> = {
+        method: "POST",
+        path: "/api/query",
+        url: "/api/query",
+        headers,
+        header: vi.fn((name: string) => headers[name.toLowerCase()]) as any,
+        res: mockRes as Response,
+      };
+
+      const event = logger.event(req as Request);
+      // Both call sites must derive the same ID, so a 400 echoed
+      // requestId can be grepped against the wide-event log.
+      expect(event?.data.request_id).toBe(resolveRequestId(req as Request));
+      expect(event?.data.request_id).toBe("Root.1-abc-def");
+    });
+
+    test("falls back to x-amzn-trace-id when x-request-id is absent", () => {
+      const logger = createLogger("analytics");
+      const headers: Record<string, string> = {
+        "x-amzn-trace-id": "Root.1-abc-def",
+      };
+      const req: Partial<Request> = {
+        method: "POST",
+        path: "/api/query",
+        url: "/api/query",
+        headers,
+        header: vi.fn((name: string) => headers[name.toLowerCase()]) as any,
+        res: mockRes as Response,
+      };
+
+      const event = logger.event(req as Request);
+      expect(event?.data.request_id).toBe("Root.1-abc-def");
+    });
+
+    test("generated fallback uses 16 hex chars (~64 bits of entropy)", () => {
+      const logger = createLogger("analytics");
+      const headers: Record<string, string> = {};
+      const req: Partial<Request> = {
+        method: "POST",
+        path: "/api/query",
+        url: "/api/query",
+        headers,
+        header: vi.fn((name: string) => headers[name.toLowerCase()]) as any,
+        res: mockRes as Response,
+      };
+
+      const event = logger.event(req as Request);
+      // The fallback formula was unified across plugin.ts and logger.ts —
+      // both now use `req_<16 hex chars>` generated via
+      // `randomBytes(8).toString("hex")` so the result is exactly 16
+      // hex characters with no embedded UUID hyphens. The legacy
+      // `req_<timestamp>_<random base36>` form must no longer appear.
+      expect(event?.data.request_id).toMatch(/^req_[a-f0-9]{16}$/);
     });
   });
 });

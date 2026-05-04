@@ -223,10 +223,10 @@ describe("Analytics Plugin", () => {
     });
 
     test("/query/:query_key should return canonical 400 when a parameter value is an array", async () => {
-      // The body schema restricts parameter values to JSON primitives
-      // (string, number, boolean, null) or SQLTypeMarker objects. Arrays
-      // are neither — they have to be rejected at the HTTP boundary so
-      // oversized nested payloads never reach the query processor.
+      // The body schema restricts parameter values to SQLTypeMarker
+      // objects or `null`. Arrays are neither, so they have to be
+      // rejected at the HTTP boundary; otherwise oversized nested
+      // payloads would reach the query processor.
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -258,10 +258,9 @@ describe("Analytics Plugin", () => {
 
     test("/query/:query_key should accept SQLTypeMarker values in parameters", async () => {
       // The body schema accepts SQLTypeMarker objects (sql.string(),
-      // sql.number(), etc.) at value position alongside JSON primitives.
-      // The handler must run, the marker must pass through to the query
-      // processor, and the SQL parameter list must reflect the marker's
-      // type.
+      // sql.number(), etc.) at value position; the handler must run,
+      // the marker must pass through to the query processor, and the
+      // SQL parameter list must reflect the marker's type.
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -412,9 +411,83 @@ describe("Analytics Plugin", () => {
       expect((plugin as any).app.getAppQuery).not.toHaveBeenCalled();
     });
 
-    test("/query/:query_key should accept primitive values in parameters", async () => {
-      // JSON primitives (string, number, boolean, null) must continue to
-      // pass through validation alongside SQLTypeMarker shapes.
+    test("/query/:query_key should reject raw primitive values in parameters", async () => {
+      // Raw JSON primitives (string, number, boolean) are rejected at the
+      // HTTP boundary so the handler never starts SSE streaming with
+      // values the query processor would later refuse. Callers must wrap
+      // primitives with `sql.string()`, `sql.number()`, etc.
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      const executeMock = vi.fn();
+      (plugin as any).SQLClient.executeStatement = executeMock;
+      (plugin as any).app.getAppQuery = vi.fn();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: {
+          parameters: {
+            str: "hello",
+            num: 42,
+            bool: true,
+          },
+        },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: "Invalid request body",
+          code: "VALIDATION_ERROR",
+        }),
+      );
+      expect(executeMock).not.toHaveBeenCalled();
+      expect((plugin as any).app.getAppQuery).not.toHaveBeenCalled();
+    });
+
+    test("/query/:query_key should reject a raw number parameter", async () => {
+      // Specific regression for the late-failure-via-SSE concern: a raw
+      // number (not a marker) must produce VALIDATION_ERROR before the
+      // handler dispatches to executeStream.
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      const executeMock = vi.fn();
+      (plugin as any).SQLClient.executeStatement = executeMock;
+      (plugin as any).app.getAppQuery = vi.fn();
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: { user_id: 123 } },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: "Invalid request body",
+          code: "VALIDATION_ERROR",
+        }),
+      );
+      expect(executeMock).not.toHaveBeenCalled();
+      expect((plugin as any).app.getAppQuery).not.toHaveBeenCalled();
+    });
+
+    test("/query/:query_key should accept null parameter values", async () => {
+      // `null` is the only non-marker value that passes the schema —
+      // the query processor's `_createParameter` returns null for null
+      // entries (effectively skipping them).
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -433,14 +506,7 @@ describe("Analytics Plugin", () => {
       const handler = getHandler("POST", "/query/:query_key");
       const mockReq = createMockRequest({
         params: { query_key: "test_query" },
-        body: {
-          parameters: {
-            str: "hello",
-            num: 42,
-            bool: true,
-            nullish: null,
-          },
-        },
+        body: { parameters: { nullish: null } },
       });
       const mockRes = createMockResponse();
 

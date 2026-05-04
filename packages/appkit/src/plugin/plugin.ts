@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type express from "express";
 import type {
@@ -24,7 +23,7 @@ import {
 } from "../context";
 import { AppKitError, AuthenticationError } from "../errors";
 import { createLogger } from "../logging/logger";
-import { sanitizeRequestId } from "../logging/request-id";
+import { resolveRequestId } from "../logging/request-id";
 import { StreamManager } from "../stream";
 import {
   type ITelemetry,
@@ -57,31 +56,6 @@ function hasHttpStatusCode(
     "statusCode" in error &&
     typeof (error as Record<string, unknown>).statusCode === "number"
   );
-}
-
-/**
- * Resolve a request ID from the `x-request-id` header (if present), falling
- * back to a freshly generated UUID-derived token. Used by the body
- * validation wrapper so operators can correlate a client-facing 400 with
- * the full server-side issue log.
- *
- * The header value is validated against the shared {@link sanitizeRequestId}
- * allowlist (also used by the wide-event logger), so a value accepted here
- * matches the `request_id` recorded server-side. Invalid values are silently
- * discarded — they are never logged or reflected anywhere — and a fresh ID
- * is generated instead. The fallback uses 16 hex characters (~64 bits) so
- * birthday collisions stay astronomically unlikely while keeping IDs short
- * enough to skim in logs.
- */
-function resolveRequestId(req: express.Request): string {
-  const headerId = req.header("x-request-id");
-  if (typeof headerId === "string") {
-    const sanitized = sanitizeRequestId(headerId);
-    if (sanitized !== undefined) {
-      return sanitized;
-    }
-  }
-  return `req_${randomUUID().slice(0, 16)}`;
 }
 
 /** Maximum number of Standard Schema issues retained on a validation failure. */
@@ -611,6 +585,24 @@ export abstract class Plugin<
       );
     }
 
+    // Surface a one-time warning at route registration when a route
+    // exposes raw schema details (field names, refinement messages,
+    // constraint metadata) to anonymous callers in production. Body
+    // validation runs BEFORE plugin-level authentication, so the 400
+    // payload reaches every caller — only public routes should opt in.
+    if (
+      config.exposeValidationErrors === true &&
+      process.env.NODE_ENV === "production"
+    ) {
+      logger.warn(
+        "Route registered with exposeValidationErrors=true in production. " +
+          "This exposes schema details (field names, constraints, refinement messages) " +
+          "to anonymous callers in 400 responses. Body validation runs BEFORE plugin-level " +
+          "authentication. Only use on routes that are intentionally public.",
+        { method, path, plugin: this.name },
+      );
+    }
+
     // Zero-overhead pass-through when no body schema is provided.
     const effectiveHandler = config.body
       ? this._wrapHandlerWithBodyValidation(
@@ -679,33 +671,33 @@ export abstract class Plugin<
       }
 
       // Strict discriminated-union shape check per the Standard Schema
-      // spec: only `{ value }` (with no issues or an empty issues array)
-      // is success; only `{ issues: [nonEmpty] }` is failure; anything
-      // else is a validator programmer error (malformed shape) that must
-      // route to a canonical 500 — never the success path, which would
-      // otherwise let a `result.value === undefined` crash the handler.
+      // v1 spec. The spec defines `FailureResult` as
+      // `{ readonly issues: ReadonlyArray<Issue> }` with no minimum
+      // cardinality, so any array-valued `issues` field — including an
+      // empty array — is a failure shape. Only a result that is missing
+      // `issues` and has `value` qualifies as success; anything else
+      // (e.g. `{ issues: undefined }`, `{}`, `null`) is a validator
+      // programmer error and must route to a canonical 500.
+      //
+      // Mixed shapes such as `{ value, issues: [] }` route to failure
+      // because `'issues' in result && Array.isArray(...)` matches —
+      // this matches the spec's "any array-valued issues = failure"
+      // rule and avoids treating buggy validators as accidentally
+      // passing.
       const resultObject =
         typeof result === "object" && result !== null
           ? (result as { value?: unknown; issues?: unknown })
           : undefined;
-      const issuesField = resultObject?.issues;
+      const hasIssuesField =
+        resultObject !== undefined && "issues" in resultObject;
       const issuesArray: ReadonlyArray<StandardSchemaV1.Issue> | undefined =
-        Array.isArray(issuesField)
-          ? (issuesField as ReadonlyArray<StandardSchemaV1.Issue>)
+        hasIssuesField && Array.isArray(resultObject?.issues)
+          ? (resultObject?.issues as ReadonlyArray<StandardSchemaV1.Issue>)
           : undefined;
-      const hasNonEmptyIssues =
-        issuesArray !== undefined && issuesArray.length > 0;
       const hasValueField =
         resultObject !== undefined && "value" in resultObject;
-      const isValidationFailure = hasNonEmptyIssues;
-      // Empty issues array counts as success per the review spec, even
-      // though no `value` is promised by the validator in that case.
-      const isSuccess =
-        !hasNonEmptyIssues &&
-        (hasValueField ||
-          (issuesArray !== undefined && issuesArray.length === 0));
 
-      if (isValidationFailure && issuesArray !== undefined) {
+      if (issuesArray !== undefined) {
         const requestId = resolveRequestId(req);
         const totalIssueCount = issuesArray.length;
         const truncated = totalIssueCount > MAX_VALIDATION_ISSUES;
@@ -767,12 +759,19 @@ export abstract class Plugin<
         return;
       }
 
-      if (!isSuccess) {
-        // Validator returned a shape that is neither `{ value }` nor a
-        // non-empty `{ issues: [...] }` — e.g. `{ issues: undefined }`,
-        // `{}`, or `null`. Treat it as a validator programmer error and
-        // fail closed with a 500. Never invoke the handler; never mutate
-        // `req.body`.
+      if (hasIssuesField || !hasValueField) {
+        // Validator returned a shape that is neither `{ value }` (clean
+        // success) nor `{ issues: [array] }` (which the 400 path above
+        // already caught). Examples that land here:
+        // - `{ issues: undefined }` / `{ issues: "string" }` — `issues`
+        //   present but not an array (`hasIssuesField && !arrayValued`)
+        // - `{ value, issues: undefined }` — same; the 400 path missed
+        //   it because `Array.isArray(undefined) === false`, and the
+        //   success path would otherwise mutate `req.body` with a
+        //   value the validator clearly meant to reject.
+        // - `{}`, `null`, non-objects — `!hasValueField`
+        // All are validator programmer errors; fail closed with a 500.
+        // Never invoke the handler; never mutate `req.body`.
         const requestId = resolveRequestId(req);
         logger.error("validation schema returned malformed result", {
           plugin: this.name,
@@ -786,17 +785,13 @@ export abstract class Plugin<
         return;
       }
 
-      // Success. Narrow req.body to the validated value when the result
-      // carries one; for the rare `{ issues: [] }` shape (empty issues =
-      // no issues found, per the review spec), leave `req.body` as-is so
-      // the handler sees the original body. This preserves any
-      // transformation performed by the schema (e.g. coercion), though
-      // v1 docs advise against relying on transforms.
-      if (hasValueField) {
-        (req as { body: unknown }).body = (
-          resultObject as { value: TBody }
-        ).value;
-      }
+      // Success. The result is `{ value }` with no `issues` field
+      // (per the strict spec reading above). Narrow req.body to the
+      // validated value, preserving any transformation performed by
+      // the schema (e.g. coercion).
+      (req as { body: unknown }).body = (
+        resultObject as { value: TBody }
+      ).value;
 
       await handler(req as IAppRequestWithBody<TBody>, res);
     };

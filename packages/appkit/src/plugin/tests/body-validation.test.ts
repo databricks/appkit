@@ -44,15 +44,18 @@ vi.mock("../../telemetry", () => ({
   }),
 }));
 
-// Silence logger output during validation-failure tests.
+// Silence logger output during validation-failure tests, but expose a
+// stable shared mock so individual tests can introspect warn/error
+// calls (e.g. the exposeValidationErrors-in-production warning).
+const loggerMock = vi.hoisted(() => ({
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  event: vi.fn(),
+}));
 vi.mock("../../logging/logger", () => ({
-  createLogger: vi.fn(() => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    event: vi.fn(),
-  })),
+  createLogger: vi.fn(() => loggerMock),
 }));
 
 class TestPlugin extends Plugin<BasePluginConfig> {
@@ -668,9 +671,10 @@ describe("route body validation", () => {
     await handler(req, res);
 
     const body = (res.json as any).mock.calls[0][0];
-    // randomUUID().slice(0, 16) is `xxxxxxxx-xxxx-xx` — 14 hex chars
-    // plus 2 hyphens, all matching `[a-f0-9-]`, total length 16.
-    expect(body.requestId).toMatch(/^req_[a-f0-9-]{16}$/);
+    // `randomBytes(8).toString("hex")` produces exactly 16 hex chars
+    // — no embedded hyphens (the previous `randomUUID().slice(0, 16)`
+    // form contained 2 hyphens and only 14 hex chars).
+    expect(body.requestId).toMatch(/^req_[a-f0-9]{16}$/);
   });
 
   test("truncates the issues array to 20 entries and flags issuesTruncated", async () => {
@@ -899,7 +903,103 @@ describe("route body validation", () => {
     );
   });
 
-  test("empty issues array counts as success: handler is called", async () => {
+  // Regression: `{ value, issues: <non-array> }` is a malformed shape
+  // (the spec requires `issues` to be a `ReadonlyArray<Issue>`). The
+  // earlier 400 gate only fires when `Array.isArray(issues)` is true,
+  // so without the tightened 500 gate this result would slip through
+  // to the success path with a possibly-invalid `value`. Both cases
+  // (string `issues`, `undefined` `issues`) must route to 500.
+  test("malformed: returns canonical 500 when validator returns { value, issues: 'string' }", async () => {
+    process.env.NODE_ENV = "development";
+    const plugin = createTestPlugin();
+    const { router, getHandler } = createMockRouter();
+
+    const malformed: StandardSchemaV1<unknown, unknown> = {
+      "~standard": {
+        version: 1,
+        vendor: "test",
+        validate: () =>
+          ({ value: { ok: true }, issues: "not-an-array" }) as any,
+      },
+    };
+
+    const handlerSpy = vi.fn();
+
+    plugin.exposedRoute(router, {
+      name: "bad",
+      method: "post",
+      path: "/bad",
+      body: malformed,
+      handler: handlerSpy,
+    });
+
+    const handler = getHandler("POST", "/bad");
+    const originalBody = { sentinel: "should-not-be-mutated" };
+    const req = createMockRequest({ body: originalBody });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(handlerSpy).not.toHaveBeenCalled();
+    expect(req.body).toBe(originalBody);
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: "Internal validation error",
+        code: "VALIDATION_INTERNAL_ERROR",
+        requestId: expect.any(String),
+      }),
+    );
+  });
+
+  test("malformed: returns canonical 500 when validator returns { value, issues: undefined }", async () => {
+    process.env.NODE_ENV = "development";
+    const plugin = createTestPlugin();
+    const { router, getHandler } = createMockRouter();
+
+    const malformed: StandardSchemaV1<unknown, unknown> = {
+      "~standard": {
+        version: 1,
+        vendor: "test",
+        validate: () => ({ value: { ok: true }, issues: undefined }) as any,
+      },
+    };
+
+    const handlerSpy = vi.fn();
+
+    plugin.exposedRoute(router, {
+      name: "bad",
+      method: "post",
+      path: "/bad",
+      body: malformed,
+      handler: handlerSpy,
+    });
+
+    const handler = getHandler("POST", "/bad");
+    const originalBody = { sentinel: "should-not-be-mutated" };
+    const req = createMockRequest({ body: originalBody });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(handlerSpy).not.toHaveBeenCalled();
+    expect(req.body).toBe(originalBody);
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: "Internal validation error",
+        code: "VALIDATION_INTERNAL_ERROR",
+      }),
+    );
+  });
+
+  test("empty issues array routes to canonical 400 (any array-valued issues = failure)", async () => {
+    // Standard Schema v1's `FailureResult` is defined as
+    // `{ readonly issues: ReadonlyArray<Issue> }` with no minimum
+    // cardinality, so any array-valued `issues` field — including an
+    // empty array — is a failure shape. The handler must NOT run; the
+    // wrapper emits a canonical 400 with `issues: []` in the response
+    // body in development / override mode.
     process.env.NODE_ENV = "development";
     const plugin = createTestPlugin();
     const { router, getHandler } = createMockRouter();
@@ -908,14 +1008,11 @@ describe("route body validation", () => {
       "~standard": {
         version: 1,
         vendor: "test",
-        // Empty issues array is treated as success — "no issues found".
         validate: () => ({ issues: [] }) as any,
       },
     };
 
-    const handlerSpy = vi.fn(async (_req: any, res: any) => {
-      res.status(200).json({ ok: true });
-    });
+    const handlerSpy = vi.fn();
 
     plugin.exposedRoute(router, {
       name: "good",
@@ -926,13 +1023,110 @@ describe("route body validation", () => {
     });
 
     const handler = getHandler("POST", "/good");
-    const req = createMockRequest({ body: { any: "thing" } });
+    const originalBody = { any: "thing" };
+    const req = createMockRequest({ body: originalBody });
     const res = createMockResponse();
 
     await handler(req, res);
 
-    expect(handlerSpy).toHaveBeenCalledTimes(1);
-    expect(res.status).toHaveBeenCalledWith(200);
+    expect(handlerSpy).not.toHaveBeenCalled();
+    // req.body must not be mutated when validation fails.
+    expect(req.body).toBe(originalBody);
+    expect(res.status).toHaveBeenCalledWith(400);
+    const body = (res.json as any).mock.calls[0][0];
+    expect(body).toMatchObject({
+      error: "Invalid request body",
+      code: "VALIDATION_ERROR",
+      requestId: expect.any(String),
+    });
+    // Empty issues array is reflected in the response body in dev mode.
+    expect(body.issues).toEqual([]);
+    expect(body).not.toHaveProperty("issuesTruncated");
+  });
+
+  test("empty issues array in production omits issues from response", async () => {
+    // Production hides issues by default regardless of count.
+    process.env.NODE_ENV = "production";
+    const plugin = createTestPlugin();
+    const { router, getHandler } = createMockRouter();
+
+    const emptyIssues: StandardSchemaV1<unknown, unknown> = {
+      "~standard": {
+        version: 1,
+        vendor: "test",
+        validate: () => ({ issues: [] }) as any,
+      },
+    };
+
+    const handlerSpy = vi.fn();
+
+    plugin.exposedRoute(router, {
+      name: "good",
+      method: "post",
+      path: "/good",
+      body: emptyIssues,
+      handler: handlerSpy,
+    });
+
+    const handler = getHandler("POST", "/good");
+    const req = createMockRequest({ body: {} });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(handlerSpy).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+    const body = (res.json as any).mock.calls[0][0];
+    expect(body).toMatchObject({
+      error: "Invalid request body",
+      code: "VALIDATION_ERROR",
+      requestId: expect.any(String),
+    });
+    expect(body).not.toHaveProperty("issues");
+  });
+
+  test("mixed shape { value, issues: [] } routes to validation failure", async () => {
+    // Per the strict spec reading, the discriminator is the presence
+    // of an array-valued `issues` field — not its length, and not the
+    // absence of `value`. A validator that returns both `value` and an
+    // array `issues` is buggy; we route it to failure (not success) so
+    // the handler never sees a possibly-invalid body.
+    process.env.NODE_ENV = "development";
+    const plugin = createTestPlugin();
+    const { router, getHandler } = createMockRouter();
+
+    const mixed: StandardSchemaV1<unknown, unknown> = {
+      "~standard": {
+        version: 1,
+        vendor: "test",
+        validate: () => ({ value: { any: "thing" }, issues: [] }) as any,
+      },
+    };
+
+    const handlerSpy = vi.fn();
+
+    plugin.exposedRoute(router, {
+      name: "mixed",
+      method: "post",
+      path: "/mixed",
+      body: mixed,
+      handler: handlerSpy,
+    });
+
+    const handler = getHandler("POST", "/mixed");
+    const req = createMockRequest({ body: {} });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(handlerSpy).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: "Invalid request body",
+        code: "VALIDATION_ERROR",
+      }),
+    );
   });
 
   test("non-empty issues array is a validation failure (canonical 400)", async () => {
@@ -974,5 +1168,272 @@ describe("route body validation", () => {
         code: "VALIDATION_ERROR",
       }),
     );
+  });
+
+  // Item 3: route() must surface a one-time warning at registration time
+  // when a route opts in to exposing schema details to anonymous callers
+  // in production. Body validation runs BEFORE plugin-level
+  // authentication, so the 400 payload is reachable by any client.
+  describe("exposeValidationErrors production warning", () => {
+    test("warns at route registration when exposeValidationErrors=true in production", () => {
+      process.env.NODE_ENV = "production";
+      const plugin = createTestPlugin();
+      const { router } = createMockRouter();
+      loggerMock.warn.mockClear();
+
+      const schema = z.object({ content: z.string().min(1) });
+      plugin.exposedRoute(router, {
+        name: "public",
+        method: "post",
+        path: "/public",
+        body: schema,
+        exposeValidationErrors: true,
+        handler: vi.fn(),
+      });
+
+      expect(loggerMock.warn).toHaveBeenCalledTimes(1);
+      const [message, context] = loggerMock.warn.mock.calls[0];
+      expect(message).toMatch(/exposeValidationErrors/i);
+      expect(message).toMatch(/production/i);
+      expect(message).toMatch(/before plugin-level/i);
+      expect(context).toEqual(
+        expect.objectContaining({
+          method: "post",
+          path: "/public",
+          plugin: "test",
+        }),
+      );
+    });
+
+    test("does not warn when exposeValidationErrors is undefined", () => {
+      process.env.NODE_ENV = "production";
+      const plugin = createTestPlugin();
+      const { router } = createMockRouter();
+      loggerMock.warn.mockClear();
+
+      const schema = z.object({ content: z.string().min(1) });
+      plugin.exposedRoute(router, {
+        name: "internal",
+        method: "post",
+        path: "/internal",
+        body: schema,
+        handler: vi.fn(),
+      });
+
+      expect(loggerMock.warn).not.toHaveBeenCalled();
+    });
+
+    test("does not warn when exposeValidationErrors=false in production", () => {
+      process.env.NODE_ENV = "production";
+      const plugin = createTestPlugin();
+      const { router } = createMockRouter();
+      loggerMock.warn.mockClear();
+
+      const schema = z.object({ content: z.string().min(1) });
+      plugin.exposedRoute(router, {
+        name: "internal",
+        method: "post",
+        path: "/internal",
+        body: schema,
+        exposeValidationErrors: false,
+        handler: vi.fn(),
+      });
+
+      expect(loggerMock.warn).not.toHaveBeenCalled();
+    });
+
+    test("does not warn when NODE_ENV is development", () => {
+      process.env.NODE_ENV = "development";
+      const plugin = createTestPlugin();
+      const { router } = createMockRouter();
+      loggerMock.warn.mockClear();
+
+      const schema = z.object({ content: z.string().min(1) });
+      plugin.exposedRoute(router, {
+        name: "public",
+        method: "post",
+        path: "/public",
+        body: schema,
+        exposeValidationErrors: true,
+        handler: vi.fn(),
+      });
+
+      expect(loggerMock.warn).not.toHaveBeenCalled();
+    });
+
+    test("does not warn when NODE_ENV is test", () => {
+      process.env.NODE_ENV = "test";
+      const plugin = createTestPlugin();
+      const { router } = createMockRouter();
+      loggerMock.warn.mockClear();
+
+      const schema = z.object({ content: z.string().min(1) });
+      plugin.exposedRoute(router, {
+        name: "public",
+        method: "post",
+        path: "/public",
+        body: schema,
+        exposeValidationErrors: true,
+        handler: vi.fn(),
+      });
+
+      expect(loggerMock.warn).not.toHaveBeenCalled();
+    });
+
+    test("does not warn when route has no body schema", () => {
+      process.env.NODE_ENV = "production";
+      const plugin = createTestPlugin();
+      const { router } = createMockRouter();
+      loggerMock.warn.mockClear();
+
+      // exposeValidationErrors is meaningless without a body schema, but
+      // even if a plugin author sets it, no warning fires because the
+      // wrapper is never attached.
+      plugin.exposedRoute(router, {
+        name: "noBody",
+        method: "post",
+        path: "/no-body",
+        handler: vi.fn(),
+      });
+
+      expect(loggerMock.warn).not.toHaveBeenCalled();
+    });
+  });
+
+  // Item 4: the validation wrapper consults the same correlation
+  // headers as the wide-event logger (in the same order) so the
+  // canonical 4xx requestId matches the wide-event log's request_id.
+  describe("requestId header precedence (shared resolver)", () => {
+    test("falls back to x-amzn-trace-id when x-request-id is absent", async () => {
+      // Without the shared resolver, the validation wrapper only saw
+      // x-request-id while the wide-event logger reads x-amzn-trace-id
+      // — operators got two different IDs for the same request and
+      // could not correlate.
+      process.env.NODE_ENV = "development";
+      const plugin = createTestPlugin();
+      const { router, getHandler } = createMockRouter();
+
+      const schema = z.object({ content: z.string().min(1) });
+      plugin.exposedRoute(router, {
+        name: "sendMessage",
+        method: "post",
+        path: "/messages",
+        body: schema,
+        handler: vi.fn(),
+      });
+
+      const handler = getHandler("POST", "/messages");
+      const req = createMockRequest({
+        body: {},
+        headers: { "x-amzn-trace-id": "Root.1-abc-def" },
+      });
+      const res = createMockResponse();
+
+      await handler(req, res);
+
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestId: "Root.1-abc-def",
+        }),
+      );
+    });
+
+    test("falls back to x-correlation-id when x-request-id is absent", async () => {
+      process.env.NODE_ENV = "development";
+      const plugin = createTestPlugin();
+      const { router, getHandler } = createMockRouter();
+
+      const schema = z.object({ content: z.string().min(1) });
+      plugin.exposedRoute(router, {
+        name: "sendMessage",
+        method: "post",
+        path: "/messages",
+        body: schema,
+        handler: vi.fn(),
+      });
+
+      const handler = getHandler("POST", "/messages");
+      const req = createMockRequest({
+        body: {},
+        headers: { "x-correlation-id": "corr-abc-123" },
+      });
+      const res = createMockResponse();
+
+      await handler(req, res);
+
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestId: "corr-abc-123",
+        }),
+      );
+    });
+
+    test("prefers x-request-id over later headers", async () => {
+      process.env.NODE_ENV = "development";
+      const plugin = createTestPlugin();
+      const { router, getHandler } = createMockRouter();
+
+      const schema = z.object({ content: z.string().min(1) });
+      plugin.exposedRoute(router, {
+        name: "sendMessage",
+        method: "post",
+        path: "/messages",
+        body: schema,
+        handler: vi.fn(),
+      });
+
+      const handler = getHandler("POST", "/messages");
+      const req = createMockRequest({
+        body: {},
+        headers: {
+          "x-request-id": "primary-id",
+          "x-correlation-id": "secondary-id",
+          "x-amzn-trace-id": "tertiary-id",
+        },
+      });
+      const res = createMockResponse();
+
+      await handler(req, res);
+
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestId: "primary-id",
+        }),
+      );
+    });
+
+    test("skips a malformed earlier header and uses a valid later one", async () => {
+      process.env.NODE_ENV = "development";
+      const plugin = createTestPlugin();
+      const { router, getHandler } = createMockRouter();
+
+      const schema = z.object({ content: z.string().min(1) });
+      plugin.exposedRoute(router, {
+        name: "sendMessage",
+        method: "post",
+        path: "/messages",
+        body: schema,
+        handler: vi.fn(),
+      });
+
+      const handler = getHandler("POST", "/messages");
+      const req = createMockRequest({
+        body: {},
+        headers: {
+          // Malformed: starts with a dash (rejected by sanitizer).
+          "x-request-id": "-rf",
+          "x-correlation-id": "fallback-ok",
+        },
+      });
+      const res = createMockResponse();
+
+      await handler(req, res);
+
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestId: "fallback-ok",
+        }),
+      );
+    });
   });
 });

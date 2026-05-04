@@ -24,12 +24,19 @@ import type { IAnalyticsConfig } from "./types";
  * defaults to "JSON" via the schema so the handler sees a fully-populated
  * body with no manual fallback needed.
  *
- * `parameters` accepts both JSON primitives (string, number, boolean,
- * null) AND `SQLTypeMarker` objects produced by `sql.string()`,
- * `sql.number()`, `sql.date()`, `sql.timestamp()`, `sql.boolean()`. The
- * marker shape is `{ __sql_type, value }` and its `value` field is capped
- * at 4096 characters. `.strict()` on the marker schema rejects unknown
- * fields so callers can't smuggle additional keys past validation.
+ * `parameters` accepts only `SQLTypeMarker` objects produced by
+ * `sql.string()`, `sql.number()`, `sql.date()`, `sql.timestamp()`,
+ * `sql.boolean()` (or explicit `null`). Raw JSON primitives are rejected
+ * here at the HTTP boundary because `QueryProcessor._createParameter`
+ * accepts only markers and `null`; if primitives passed schema
+ * validation, `executeStream()` would have already flipped the response
+ * to SSE before the processor's `isSQLTypeMarker` guard ran, leaving the
+ * client with a stream error instead of the canonical 400. Callers must
+ * wrap raw values with `sql.string()`, `sql.number()`, etc., before
+ * sending. The marker shape is `{ __sql_type, value }` and its `value`
+ * field is capped at 4096 characters. `.strict()` on the marker schema
+ * rejects unknown fields so callers can't smuggle additional keys past
+ * validation.
  *
  * Per-query parameter shape validation remains the application's concern;
  * this schema is the minimum safety net the plugin enforces for every
@@ -46,16 +53,7 @@ const sqlTypeMarkerSchema = z
 
 const queryBodySchema = z.object({
   parameters: z
-    .record(
-      z.string().max(255),
-      z.union([
-        z.string().max(4096),
-        z.number(),
-        z.boolean(),
-        z.null(),
-        sqlTypeMarkerSchema,
-      ]),
-    )
+    .record(z.string().max(255), z.union([sqlTypeMarkerSchema, z.null()]))
     .refine((obj) => Object.keys(obj).length <= 100, {
       message: "parameters may not contain more than 100 keys",
     })
@@ -235,18 +233,14 @@ export class AnalyticsPlugin extends Plugin {
     await executor.executeStream(
       res,
       async (signal) => {
-        // Body schema accepts string | number | boolean | null |
-        // SQLTypeMarker. `QueryProcessor.processQueryParams` is typed
-        // narrower — `Record<string, SQLTypeMarker | null | undefined>`
-        // — so we cast the validated input down to that shape. The
-        // processor's `isSQLTypeMarker` guard re-validates each value
-        // before trusting it: primitives reaching the processor today
-        // surface as a runtime ValidationError there. Bridging primitives
-        // to markers (or rejecting them at the handler) is a separate
-        // concern; see the corresponding test.
+        // Body schema restricts parameter values to `SQLTypeMarker | null`
+        // (raw JSON primitives are rejected at the HTTP boundary — see the
+        // `queryBodySchema` JSDoc). `processQueryParams` accepts
+        // `Record<string, SQLTypeMarker | null | undefined>`, which is
+        // type-compatible with the validated input.
         const processedParams = await this.queryProcessor.processQueryParams(
           query,
-          parameters as Record<string, SQLTypeMarker | null | undefined>,
+          parameters,
         );
 
         const result = await executor.query(

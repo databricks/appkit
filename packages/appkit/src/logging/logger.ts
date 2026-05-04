@@ -3,7 +3,7 @@ import { format } from "node:util";
 import { trace } from "@opentelemetry/api";
 import type { NextFunction, Request, Response } from "express";
 import { createDebug as createObug } from "obug";
-import { sanitizeRequestId } from "./request-id";
+import { resolveRequestId } from "./request-id";
 import { DEFAULT_SAMPLING_CONFIG, shouldSample } from "./sampling";
 import { WideEvent } from "./wide-event";
 import { WideEventEmitter } from "./wide-event-emitter";
@@ -42,36 +42,10 @@ const eventsByRequest = new WeakMap<Request, WideEvent>();
 const emitter = new WideEventEmitter();
 
 /**
- * Generate a request ID from the request.
- *
- * Prefers a client-supplied correlation header (`x-request-id`,
- * `x-correlation-id`, or `x-amzn-trace-id`) when it passes the shared
- * {@link sanitizeRequestId} allowlist; otherwise generates a fresh
- * fallback. The same allowlist is used by `plugin.ts`'s
- * `resolveRequestId` so the wide-event log's `request_id` matches the
- * value echoed in any canonical 4xx response.
- */
-function generateRequestId(req: Request): string {
-  const existingId =
-    req.headers["x-request-id"] ||
-    req.headers["x-correlation-id"] ||
-    req.headers["x-amzn-trace-id"];
-
-  if (existingId && typeof existingId === "string" && existingId.length > 0) {
-    const sanitized = sanitizeRequestId(existingId);
-    if (sanitized !== undefined) {
-      return sanitized;
-    }
-  }
-
-  return `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-}
-
-/**
  * Create a WideEvent for a request
  */
 function createEventForRequest(req: Request): WideEvent {
-  const requestId = generateRequestId(req);
+  const requestId = resolveRequestId(req);
   const wideEvent = new WideEvent(requestId);
 
   // extract path from request (strip query string)
