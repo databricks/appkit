@@ -43,18 +43,22 @@ export interface ColumnInfo {
  *
  * Uses the same `adaptDrizzleTable` boundary as drift detection so the
  * browser sees exactly what the server considers the declared schema —
- * no separate "form schema" source of truth.
+ * no separate "form schema" source of truth. Columns marked `.private()`
+ * are omitted so secrets like password hashes never appear in the form
+ * builder, the autocomplete surface, or anywhere a curious client looks.
  */
 export function describeEntityColumns(table: AppKitTable): ColumnInfo[] {
   const adapted = adaptDrizzleTable(table);
-  return adapted.columns.map((col) => ({
-    name: col.name,
-    type: pgTypeToFormType(col.pgType),
-    nullable: col.nullable,
-    primaryKey: col.isPrimaryKey === true,
-    hasDefault: col.hasDefault,
-    generated: col.serverGenerated === true,
-  }));
+  return adapted.columns
+    .filter((col) => table.$columns[col.name]?.private !== true)
+    .map((col) => ({
+      name: col.name,
+      type: pgTypeToFormType(col.pgType),
+      nullable: col.nullable,
+      primaryKey: col.isPrimaryKey === true,
+      hasDefault: col.hasDefault,
+      generated: col.serverGenerated === true,
+    }));
 }
 
 /**

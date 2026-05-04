@@ -2,6 +2,7 @@ export { createDatabaseClient, db } from "./client";
 export { DatabaseHTTPError } from "./errors";
 export type {
   ApplyIncludes,
+  ColumnInfo,
   DatabaseClient,
   DatabaseClientConfig,
   DatabaseEntityKey,

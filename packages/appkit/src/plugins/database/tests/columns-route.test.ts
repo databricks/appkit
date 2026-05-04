@@ -68,6 +68,21 @@ describe("describeEntityColumns", () => {
   });
 });
 
+describe("describeEntityColumns private columns", () => {
+  test("private columns are omitted from the form metadata", () => {
+    const schema = defineSchema(({ table }) => ({
+      user: table("user", {
+        id: id(),
+        email: text().notNull(),
+        passwordHash: text().notNull().private(),
+      }),
+    }));
+
+    const info = describeEntityColumns(schema.user);
+    expect(info.map((c) => c.name)).toEqual(["id", "email"]);
+  });
+});
+
 describe("describeEntityColumnsByName", () => {
   test("resolves an entity in the declared schema", () => {
     const schema = defineSchema(({ table }) => ({

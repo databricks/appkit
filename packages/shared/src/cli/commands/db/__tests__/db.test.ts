@@ -18,6 +18,7 @@ describe("dbCommand", () => {
       "migrate",
       "seed",
       "setup:dev",
+      "types",
       "verify",
     ]);
   });
