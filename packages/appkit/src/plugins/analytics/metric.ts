@@ -61,6 +61,16 @@ const METRIC_FILTER_VALUES_MAX = 1000;
 const METRIC_LIMIT_MAX = 100_000;
 
 /**
+ * Maximum number of children per AND/OR group node. Without this cap a
+ * single flat group like `{ and: [...10M empty objects...] }` would push
+ * tens of millions of frames onto the iterative pre-check's stack — OOM
+ * before validation even gets to Zod. The Zod schema enforces the same
+ * cap so the rejection point is consistent regardless of which validator
+ * catches it first.
+ */
+const METRIC_FILTER_GROUP_MAX = 100;
+
+/**
  * Range ops — require numeric or date-typed dimensions. The remaining ops
  * split into:
  *   - any-type: equals, notEquals, in, notIn, set, notSet
@@ -449,12 +459,16 @@ export function makeMetricRequestSchema(
       filterPredicateSchema,
       z
         .object({
-          and: z.array(filterSchema),
+          and: z.array(filterSchema).max(METRIC_FILTER_GROUP_MAX, {
+            message: `filter 'and' group exceeds the maximum of ${METRIC_FILTER_GROUP_MAX} children`,
+          }),
         })
         .strict(),
       z
         .object({
-          or: z.array(filterSchema),
+          or: z.array(filterSchema).max(METRIC_FILTER_GROUP_MAX, {
+            message: `filter 'or' group exceeds the maximum of ${METRIC_FILTER_GROUP_MAX} children`,
+          }),
         })
         .strict(),
     ]),
@@ -848,6 +862,16 @@ const metricRequestSchemaCache = new WeakMap<
  * an explicit stack) and aborts as soon as `METRIC_FILTER_MAX_DEPTH` is
  * exceeded, so a hostile payload of any size cannot drive the call stack.
  *
+ * Walks BOTH `and` and `or` branches when both are present on the same node
+ * — Zod's `.strict()` will reject the multi-key shape downstream, but the
+ * pre-check has to inspect every branch Zod might recurse into. An earlier
+ * version used `else if` and was bypassed by `{ and: [], or: <deep> }`.
+ *
+ * Group-children breadth is also capped: a flat `{ and: [...10M items...] }`
+ * payload cannot push 10M frames onto the explicit stack here. The Zod
+ * schema enforces the same `.max()` so the failure surfaces at the same
+ * point regardless of which validator catches it first.
+ *
  * Predicate leaves do NOT count toward depth — only nested `and` / `or`
  * wrappers — matching the rule the in-tree validator enforces in
  * {@link validateFilterTree}.
@@ -861,10 +885,23 @@ function preCheckFilterDepth(filter: unknown): void {
     const [node, depth] = popped;
     if (node == null || typeof node !== "object") continue;
     const obj = node as Record<string, unknown>;
-    let children: unknown[] | null = null;
-    if (Array.isArray(obj.and)) children = obj.and;
-    else if (Array.isArray(obj.or)) children = obj.or;
-    if (children !== null) {
+    // Inspect BOTH `and` and `or` if present. Using `else if` here was a
+    // critical bypass: a payload of `{ and: [], or: <deeply-nested> }` slid
+    // past the pre-check (empty `and` walked, `or` ignored) and Zod's
+    // union recursion then stack-overflowed on the `or` branch.
+    for (const groupKey of ["and", "or"] as const) {
+      const children = obj[groupKey];
+      if (!Array.isArray(children)) continue;
+      if (children.length > METRIC_FILTER_GROUP_MAX) {
+        throw new ValidationError(
+          "Invalid metric request body (fields: filter)",
+          {
+            context: {
+              reason: `filter ${groupKey} group has ${children.length} children; the maximum is ${METRIC_FILTER_GROUP_MAX}`,
+            },
+          },
+        );
+      }
       if (depth + 1 > METRIC_FILTER_MAX_DEPTH) {
         throw new ValidationError(
           "Invalid metric request body (fields: filter)",

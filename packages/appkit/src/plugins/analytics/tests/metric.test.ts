@@ -1704,6 +1704,45 @@ describe("metric — filter translator", () => {
       ).not.toThrow();
     });
 
+    test("rejects deep `or` even when paired with empty `and` (else-if bypass guard)", () => {
+      // Regression for the round-4 finding: the previous pre-check used
+      // `if (and) ... else if (or) ...` and walked only one branch. A
+      // payload of `{ and: [], or: <deeply nested> }` slid past the
+      // empty-`and` walk and Zod's union recursion then stack-overflowed
+      // on the `or` branch. The pre-check now inspects BOTH keys.
+      let deepOr: any = {
+        member: "region",
+        operator: "equals",
+        values: ["EMEA"],
+      };
+      for (let i = 0; i < 10_000; i += 1) {
+        deepOr = { or: [deepOr] };
+      }
+      expect(() =>
+        validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
+          measures: ["arr"],
+          filter: { and: [], or: [deepOr] } as any,
+        }),
+      ).toThrowError(/fields:.*filter/);
+    });
+
+    test("rejects breadth-DoS: a single group with too many children", () => {
+      // Without the breadth cap, `{ and: [...100k empty nodes...] }` would
+      // push 100k frames onto the iterative pre-check's stack — eventual
+      // OOM. Cap the per-group child count at the validation boundary.
+      const wide = Array.from({ length: 1000 }, () => ({
+        member: "region",
+        operator: "equals" as const,
+        values: ["EMEA"],
+      }));
+      expect(() =>
+        validateMetricRequest(REVENUE_PHASE3_REGISTRATION, {
+          measures: ["arr"],
+          filter: { and: wide },
+        }),
+      ).toThrowError(/fields:.*filter/);
+    });
+
     test("rejects pathologically deep filter without stack-overflow (pre-parse cap)", () => {
       // Without the iterative pre-parse depth check, Zod's recursive parse
       // walks the union/object tree on the call stack BEFORE the validator's
