@@ -221,6 +221,73 @@ describe("DatabricksAdapter", () => {
     expect(mockAuthenticate).toHaveBeenCalledTimes(2);
   });
 
+  test("text-parsed tool calls use wire names on follow-up requests", async () => {
+    const executeTool = vi.fn().mockResolvedValue({ ok: true });
+    let callCount = 0;
+
+    const llamaToolJson =
+      '[{"name": "analytics.query", "parameters": {"query": "SELECT 1"}}]';
+
+    globalThis.fetch = vi.fn().mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve({
+          ok: true,
+          body: createReadableStream([
+            textDelta(llamaToolJson),
+            sseChunk("[DONE]"),
+          ]),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        body: createReadableStream([textDelta("Done."), sseChunk("[DONE]")]),
+      });
+    });
+
+    const adapter = createAdapter();
+
+    for await (const _ of adapter.run(
+      {
+        messages: createTestMessages(),
+        tools: createTestTools(),
+        threadId: "t1",
+      },
+      { executeTool },
+    )) {
+      // drain
+    }
+
+    expect(executeTool).toHaveBeenCalledWith("analytics.query", {
+      query: "SELECT 1",
+    });
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    const [, secondInit] = (globalThis.fetch as any).mock.calls[1];
+    const secondBody = JSON.parse(secondInit.body);
+
+    expect(secondBody.messages[1]).toEqual({
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        {
+          id: "text_call_0",
+          type: "function",
+          function: {
+            name: "analytics__query",
+            arguments: JSON.stringify({ query: "SELECT 1" }),
+          },
+        },
+      ],
+    });
+
+    expect(secondBody.messages[2]).toEqual({
+      role: "tool",
+      content: JSON.stringify({ ok: true }),
+      tool_call_id: "text_call_0",
+    });
+  });
+
   test("respects maxSteps limit", async () => {
     globalThis.fetch = vi.fn().mockImplementation(() =>
       Promise.resolve({

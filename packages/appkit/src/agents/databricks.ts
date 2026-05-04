@@ -357,7 +357,7 @@ export class DatabricksAdapter implements AgentAdapter {
       if (toolCalls.length === 0) {
         const parsed = parseTextToolCalls(text);
         if (parsed.length > 0) {
-          yield* this.executeToolCalls(parsed, messages, context);
+          yield* this.executeToolCalls(parsed, messages, context, nameToWire);
           continue;
         }
         break;
@@ -552,12 +552,16 @@ export class DatabricksAdapter implements AgentAdapter {
     calls: Array<{ name: string; args: unknown }>,
     messages: OpenAIMessage[],
     context: AgentRunContext,
+    nameToWire: Map<string, string>,
   ): AsyncGenerator<AgentEvent, void, unknown> {
+    const wireToolName = (name: string) =>
+      nameToWire.get(name) ?? name.replace(/\./g, "__");
+
     const toolCallObjs: OpenAIToolCall[] = calls.map((c, i) => ({
       id: `text_call_${i}`,
       type: "function" as const,
       function: {
-        name: c.name,
+        name: wireToolName(c.name),
         arguments: JSON.stringify(c.args),
       },
     }));
@@ -568,8 +572,9 @@ export class DatabricksAdapter implements AgentAdapter {
       tool_calls: toolCallObjs,
     });
 
-    for (const tc of toolCallObjs) {
-      const name = tc.function.name;
+    for (let i = 0; i < toolCallObjs.length; i++) {
+      const tc = toolCallObjs[i];
+      const originalName = calls[i]?.name ?? tc.function.name;
       let args: unknown;
       try {
         args = JSON.parse(tc.function.arguments);
@@ -577,10 +582,10 @@ export class DatabricksAdapter implements AgentAdapter {
         args = {};
       }
 
-      yield { type: "tool_call", callId: tc.id, name, args };
+      yield { type: "tool_call", callId: tc.id, name: originalName, args };
 
       try {
-        const result = await context.executeTool(name, args);
+        const result = await context.executeTool(originalName, args);
         const resultStr =
           typeof result === "string" ? result : JSON.stringify(result);
 
