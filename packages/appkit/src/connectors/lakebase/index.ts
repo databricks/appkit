@@ -35,3 +35,8 @@ export {
   RequestedClaimsPermissionSet,
   type RequestedResource,
 } from "@databricks/lakebase";
+
+export {
+  createLakebasePoolManager,
+  type LakebasePoolManager,
+} from "./pool-manager";
