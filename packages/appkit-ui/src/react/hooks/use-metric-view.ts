@@ -121,7 +121,10 @@ export function useMetricView<
         body.limit = a.limit;
       }
       const serialized = JSON.stringify(body);
-      const sizeInBytes = new Blob([serialized]).size;
+      // Avoid the Blob allocation just to count bytes — it's a hot path
+      // on dashboards with many metric tiles. `TextEncoder` is constant-
+      // time per call and produces the same UTF-8 byte length.
+      const sizeInBytes = new TextEncoder().encode(serialized).length;
       if (sizeInBytes > maxParametersSize) {
         throw new Error(
           "useMetricView: Request body size exceeds the maximum allowed size",

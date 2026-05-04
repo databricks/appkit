@@ -788,16 +788,29 @@ function classifyDimensionType(sqlType: string): MetricDimensionTypeClass {
  * Aggregate the set of allowed time-grains across every time-typed dimension.
  *
  * Sorted + deduplicated so the validator's error messages and the cache-key
- * construction are deterministic.
+ * construction are deterministic. Memoized per `grainsByDim` reference: the
+ * input is static per `MetricRegistration`, so steady-state hits reuse the
+ * sorted array without re-walking + re-sorting on every `buildMetricSql`
+ * call. (The validator's path only invokes this once per metric thanks to
+ * the schema cache; the SQL builder still calls it per request.)
  */
+const collectAllowedGrainsCache = new WeakMap<
+  Record<string, string[]>,
+  string[]
+>();
+
 function collectAllowedGrains(grainsByDim: Record<string, string[]>): string[] {
+  const cached = collectAllowedGrainsCache.get(grainsByDim);
+  if (cached !== undefined) return cached;
   const set = new Set<string>();
   for (const grains of Object.values(grainsByDim)) {
     for (const g of grains) {
       set.add(g);
     }
   }
-  return [...set].sort();
+  const result = [...set].sort();
+  collectAllowedGrainsCache.set(grainsByDim, result);
+  return result;
 }
 
 /**
