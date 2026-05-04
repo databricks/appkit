@@ -1,0 +1,8 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`formatMetricSourceErrors > produces a stable error message for a multi-issue input 1`] = `
+"  sp: does not match expected pattern (must match pattern "^[a-zA-Z_][a-zA-Z0-9_]*$")
+  sp: property name must be valid
+  sp.revenue: missing required property "source"
+  sp.1bad.source: does not match expected pattern (must match pattern "^[a-zA-Z0-9_][a-zA-Z0-9_-]*\\.[a-zA-Z0-9_][a-zA-Z0-9_-]*\\.[a-zA-Z0-9_][a-zA-Z0-9_-]*$")"
+`;

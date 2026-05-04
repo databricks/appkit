@@ -8,6 +8,7 @@ import { codemodCommand } from "./commands/codemod/index.js";
 import { docsCommand } from "./commands/docs.js";
 import { generateTypesCommand } from "./commands/generate-types.js";
 import { lintCommand } from "./commands/lint.js";
+import { metricCommand } from "./commands/metric/index.js";
 import { pluginCommand } from "./commands/plugin/index.js";
 import { setupCommand } from "./commands/setup.js";
 
@@ -27,6 +28,7 @@ cmd.addCommand(generateTypesCommand);
 cmd.addCommand(lintCommand);
 cmd.addCommand(docsCommand);
 cmd.addCommand(pluginCommand);
+cmd.addCommand(metricCommand);
 cmd.addCommand(codemodCommand);
 
 cmd.parse();
