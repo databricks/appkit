@@ -411,21 +411,35 @@ export class ServerPlugin extends Plugin {
 
     TelemetryReporter.getInstance()?.stop();
 
-    // 1. abort active operations from plugins
+    // 1. abort active operations from plugins; await any returned promises so
+    //    pool drains finish before we trigger process.exit on shutdown timeout.
     const shutdownPlugins = this.context?.getPlugins();
     if (shutdownPlugins) {
-      for (const plugin of shutdownPlugins.values()) {
-        if (plugin.abortActiveOperations) {
+      const drains = Array.from(shutdownPlugins.values())
+        .map((plugin) => {
+          if (!plugin.abortActiveOperations) return null;
           try {
-            plugin.abortActiveOperations();
+            return Promise.resolve(plugin.abortActiveOperations()).catch(
+              (err) => {
+                logger.error(
+                  "Error aborting operations for plugin %s: %O",
+                  plugin.name,
+                  err,
+                );
+              },
+            );
           } catch (err) {
             logger.error(
               "Error aborting operations for plugin %s: %O",
               plugin.name,
               err,
             );
+            return null;
           }
-        }
+        })
+        .filter((p): p is Promise<void> => p !== null);
+      if (drains.length > 0) {
+        await Promise.all(drains);
       }
     }
 
