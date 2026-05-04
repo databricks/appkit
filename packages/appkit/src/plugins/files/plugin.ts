@@ -672,8 +672,25 @@ export class FilesPlugin extends Plugin implements ToolProvider {
     };
 
     if (isRootLevel) {
-      // A rootless `list()` produced the `"__root__"` key.
+      // The list cache may be keyed under either `"__root__"` (when
+      // `_handleList` ran without a `?path=` query) or
+      // `connector.resolvePath("/")` (when it ran with `?path=/`). Both
+      // produce the same listing, so a write to a root-level file must
+      // invalidate both keys to keep reads consistent.
       await tryDelete("__root__");
+      let rootResolved: string | null = null;
+      try {
+        rootResolved = connector.resolvePath("/");
+      } catch (err) {
+        logger.debug(
+          'List-cache invalidation: resolvePath("/") failed for volume=%s: %O',
+          volumeKey,
+          err,
+        );
+      }
+      if (rootResolved !== null && rootResolved !== "__root__") {
+        await tryDelete(rootResolved);
+      }
       return;
     }
 
@@ -801,10 +818,14 @@ export class FilesPlugin extends Plugin implements ToolProvider {
 
     await this._runWithAuth(userCtx, async () => {
       try {
-        // Stream the file body, capping at `maxReadSize` to avoid buffering
-        // arbitrary-size files. Uses download-tier settings (no cache) —
-        // `/read` no longer participates in the read-tier cache. Programmatic
-        // callers wanting a cached small-file read should use the SDK
+        // Drain the file body into a memory buffer capped at `maxReadSize`.
+        // `/read` is for small text reads — clients wanting large or
+        // streaming bodies use `/download` or `/raw`. Buffering preserves
+        // the all-or-nothing contract: if the file exceeds the cap we
+        // respond 413 atomically without leaking a partial 200 body.
+        // Uses download-tier settings (no cache) — `/read` no longer
+        // participates in the read-tier cache. Programmatic callers wanting
+        // a cached small-file read should use the SDK
         // `volume.read(path, { maxSize })` method directly.
         const response = await this.execute(
           async () => connector.download(getWorkspaceClient(), path),
@@ -819,48 +840,37 @@ export class FilesPlugin extends Plugin implements ToolProvider {
           return;
         }
 
-        let bytesSent = 0;
-        const limited = response.data.contents.pipeThrough(
-          new TransformStream<Uint8Array, Uint8Array>({
-            transform(chunk, controller) {
-              bytesSent += chunk.byteLength;
-              if (bytesSent > maxReadSize) {
-                controller.error(
-                  new Error(
-                    `File exceeds maxReadSize (${maxReadSize} bytes). Use /download for large files.`,
-                  ),
-                );
-                return;
+        const reader = response.data.contents.getReader();
+        const chunks: Uint8Array[] = [];
+        let bytesRead = 0;
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            bytesRead += value.byteLength;
+            if (bytesRead > maxReadSize) {
+              res.status(413).json({
+                error: `File exceeds maxReadSize (${maxReadSize} bytes). Use /download for large files.`,
+                plugin: this.name,
+              });
+              try {
+                await reader.cancel();
+              } catch {
+                // best-effort cleanup
               }
-              controller.enqueue(chunk);
-            },
-          }),
-        );
-
-        res.type("text/plain");
-        const nodeStream = Readable.fromWeb(
-          limited as import("node:stream/web").ReadableStream,
-        );
-        nodeStream.on("error", (err) => {
-          if (
-            err instanceof Error &&
-            err.message.includes("exceeds maxReadSize")
-          ) {
-            if (!res.headersSent) {
-              res.status(413).json({ error: err.message, plugin: this.name });
               return;
             }
-            res.destroy(err);
-            return;
+            chunks.push(value);
           }
-          logger.error("Stream error during read: %O", err);
-          if (!res.headersSent) {
-            this._sendStatusError(res, 500);
-          } else {
-            res.destroy();
+        } finally {
+          try {
+            reader.releaseLock();
+          } catch {
+            // best-effort cleanup
           }
-        });
-        nodeStream.pipe(res);
+        }
+
+        res.type("text/plain").send(Buffer.concat(chunks, bytesRead));
       } catch (error) {
         this._handleApiError(res, error, "Read failed");
       }
