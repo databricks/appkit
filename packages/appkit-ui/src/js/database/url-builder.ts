@@ -16,9 +16,15 @@ export interface RequestState {
   include?: string;
 }
 
-/** Fresh empty state — used when a new chain is started from `db.<entity>`. */
+/**
+ * Fresh empty state — used when a new chain is started from `db.<entity>`.
+ *
+ * Both the outer object and the inner `filters` array are frozen so a
+ * misbehaving consumer can't mutate the shared singleton. Chain methods
+ * always copy via `[...state.filters]` before pushing.
+ */
 export const EMPTY_STATE: RequestState = Object.freeze({
-  filters: [] as RequestState["filters"],
+  filters: Object.freeze([]) as unknown as RequestState["filters"],
 }) as RequestState;
 
 /**

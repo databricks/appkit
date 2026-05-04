@@ -162,8 +162,20 @@ export function createDatabaseClient(
   });
 }
 
-/** Default client — reads from `/api/database`. Override via `createDatabaseClient`. */
-export const db: DatabaseClient = createDatabaseClient();
+let defaultClient: DatabaseClient | undefined;
+
+/**
+ * Default browser client — reads from `/api/database`. Constructed lazily on
+ * first property access so that bundles that import other named exports
+ * (`createDatabaseClient`, types, etc.) without using `db` don't pay the
+ * construction cost.
+ */
+export const db: DatabaseClient = new Proxy({} as DatabaseClient, {
+  get(_target, prop) {
+    defaultClient ??= createDatabaseClient();
+    return Reflect.get(defaultClient as object, prop);
+  },
+});
 
 function normalizeBaseUrl(value: string): string {
   return value.endsWith("/") ? value.slice(0, -1) : value;

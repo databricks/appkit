@@ -6,7 +6,7 @@ import { createLogger } from "../../logging/logger";
 import {
   CACHE_VERSION,
   type DatabaseCache,
-  hashSchemaSource,
+  hashSchemaSourceWithDeps,
   loadDatabaseCache,
   saveDatabaseCache,
 } from "./cache";
@@ -69,9 +69,8 @@ export async function generateDatabaseTypes(
   const loadModule = options.loadModule ?? defaultLoader;
   const start = performance.now();
 
-  let source: string;
   try {
-    source = await fs.readFile(schemaPath, "utf8");
+    await fs.access(schemaPath);
   } catch {
     logger.debug(
       "No schema.ts at %s; skipping database type generation",
@@ -80,7 +79,10 @@ export async function generateDatabaseTypes(
     return;
   }
 
-  const hash = hashSchemaSource(source);
+  // Hash the entire reachable graph (schema.ts + every relative import). A
+  // refactor that splits the schema into `./tables/*.ts` no longer fools the
+  // cache into returning stale `.d.ts` output.
+  const hash = await hashSchemaSourceWithDeps(schemaPath);
   const cache = options.noCache
     ? { version: CACHE_VERSION }
     : await loadDatabaseCache(options.projectRoot);

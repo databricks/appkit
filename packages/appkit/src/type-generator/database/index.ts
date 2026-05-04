@@ -3,6 +3,7 @@ export {
   type DatabaseCache,
   type DatabaseCacheEntry,
   hashSchemaSource,
+  hashSchemaSourceWithDeps,
   loadDatabaseCache,
   saveDatabaseCache,
 } from "./cache";

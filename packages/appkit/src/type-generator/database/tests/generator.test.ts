@@ -12,9 +12,7 @@ const fakeSchema = defineSchema(({ table }) => ({
   }),
 }));
 
-async function mkApp(
-  source: string,
-): Promise<{
+async function mkApp(source: string): Promise<{
   projectRoot: string;
   outFile: string;
   cleanup: () => Promise<void>;
@@ -183,6 +181,39 @@ describe("generateDatabaseTypes — cache", () => {
       projectRoot: app.projectRoot,
       loadModule: loader,
       noCache: true,
+    });
+
+    expect(loader).toHaveBeenCalledTimes(2);
+  });
+
+  test("invalidates when a relative import target changes", async () => {
+    // Reproduces F41: split-schema imports were not folded into the cache key,
+    // so editing `./tables/user.ts` left the generator returning stale `.d.ts`.
+    const app = await track(
+      await mkApp(
+        `import { user } from "./tables/user";\nexport default user;\n`,
+      ),
+    );
+    const tablesDir = path.join(app.projectRoot, "config/database/tables");
+    const userTable = path.join(tablesDir, "user.ts");
+    await fs.mkdir(tablesDir, { recursive: true });
+    await fs.writeFile(userTable, "export const user = 'v1';\n", "utf8");
+
+    const loader = vi.fn(async () => ({ default: fakeSchema }));
+
+    await generateDatabaseTypes({
+      outFile: app.outFile,
+      projectRoot: app.projectRoot,
+      loadModule: loader,
+    });
+
+    // Edit the imported file (not schema.ts itself). Cache must miss.
+    await fs.writeFile(userTable, "export const user = 'v2';\n", "utf8");
+
+    await generateDatabaseTypes({
+      outFile: app.outFile,
+      projectRoot: app.projectRoot,
+      loadModule: loader,
     });
 
     expect(loader).toHaveBeenCalledTimes(2);
