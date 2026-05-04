@@ -6,6 +6,7 @@ import {
   introspect,
   schemaToIntrospection,
 } from "../../database/introspector";
+import { formatDriftResolution } from "../../database/introspector/drift-help";
 import { ConfigurationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 
@@ -28,6 +29,12 @@ interface DriftCheckOptions {
  * tables/columns the code doesn't know about) is logged but does not block
  * boot, so blue/green and rolling deploys are not stalled by a forward-running
  * migration on the other side.
+ *
+ * Transient errors during introspection (network blips, the database briefly
+ * unavailable during failover) are logged and treated as "drift unknown" —
+ * boot continues so we don't trade a fail-closed safety net for an availability
+ * regression. `setup()` still surfaces fatal config issues via its outer
+ * try/catch.
  */
 export async function checkDrift(
   options: DriftCheckOptions,
@@ -36,7 +43,17 @@ export async function checkDrift(
     return { hasDrift: false, entries: [] };
   }
 
-  const live = await (options.introspectFn ?? introspect)(options.pool);
+  let live: Awaited<ReturnType<typeof introspect>>;
+  try {
+    live = await (options.introspectFn ?? introspect)(options.pool);
+  } catch (err) {
+    logger.warn(
+      "Drift check skipped — introspection failed (treating as drift-unknown): %O",
+      err,
+    );
+    return { hasDrift: false, entries: [] };
+  }
+
   const declared = schemaToIntrospection(options.schema);
   const report = diffIntrospections(live, declared);
 
@@ -69,9 +86,6 @@ function formatDrift(report: DriftReport): string {
   return [
     ...report.entries.map((entry) => `   ${entry.message}`),
     "",
-    "Resolve with one of:",
-    "   npx appkit db migrate up",
-    "   npx appkit db introspect --merge",
-    "   npx appkit db verify --explain",
+    formatDriftResolution({ includeVerify: true }),
   ].join("\n");
 }

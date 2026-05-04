@@ -20,11 +20,12 @@ interface AdaptedTable {
 export function adaptDrizzleTable(table: AppKitTable): AdaptedTable {
   const config = getTableConfig(table.$drizzle as never) as DrizzleTableConfig;
   const relations = new Map(table.$relations.map((r) => [r.fromColumn, r]));
+  const schema = config.schema ?? "public";
 
   return {
-    schema: config.schema ?? "public",
+    schema,
     columns: config.columns.map((column) =>
-      adaptColumn(column, table, relations.get(column.name)),
+      adaptColumn(column, table, relations.get(column.name), schema),
     ),
   };
 }
@@ -37,7 +38,8 @@ export function adaptDrizzleTable(table: AppKitTable): AdaptedTable {
 function adaptColumn(
   column: DrizzleColumn,
   table: AppKitTable,
-  relation?: Relation,
+  relation: Relation | undefined,
+  schema: string,
 ): IntrospectedColumn {
   const meta = table.$columns[column.name];
   const adapted: IntrospectedColumn = {
@@ -57,8 +59,12 @@ function adaptColumn(
     adapted.serverGenerated = true;
   }
   if (relation) {
+    // FK targets live in the same logical schema as the source table.
+    // `defineSchema({ schemaName })` is the single knob; we pass the
+    // resolved name through so introspection diffs don't fight references
+    // when the app uses `public` or a custom schema instead of `app`.
     adapted.references = {
-      schema: "app",
+      schema,
       table: relation.toTable,
       column: relation.toColumn,
     };

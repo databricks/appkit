@@ -4,6 +4,7 @@ import {
   check,
   cross,
   databasePaths,
+  loadDriftHelp,
   loadIntrospector,
   loadSchemaFile,
   openLakebasePool,
@@ -56,9 +57,8 @@ export const verifyCommand = new Command("verify")
         console.log(`   ${icon} ${entry.message}`);
       }
       console.log("");
-      console.log("Resolve with one of:");
-      console.log("   npx appkit db migrate up");
-      console.log("   npx appkit db introspect --merge");
+      const { formatDriftResolution } = await loadDriftHelp();
+      console.log(formatDriftResolution());
 
       if (opts.explain) {
         console.log("");

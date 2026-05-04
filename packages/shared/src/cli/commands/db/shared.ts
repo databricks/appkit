@@ -98,8 +98,14 @@ interface AppKitIntrospectorModule {
   schemaToIntrospection: (schema: unknown) => IntrospectionResult;
 }
 
+export interface LakebasePoolClient {
+  query: (sql: string) => Promise<unknown>;
+  release: () => void;
+}
+
 export interface LakebasePool {
   query: (sql: string) => Promise<unknown>;
+  connect: () => Promise<LakebasePoolClient>;
   end: () => Promise<void>;
 }
 
@@ -111,6 +117,20 @@ export async function openLakebasePool(): Promise<LakebasePool | null> {
 
 export function loadIntrospector(): Promise<AppKitIntrospectorModule> {
   return runtimeImport<AppKitIntrospectorModule>(
+    "@databricks/appkit/database/introspector",
+  );
+}
+
+interface AppKitDriftHelpModule {
+  formatDriftResolution: (opts?: { includeVerify?: boolean }) => string;
+}
+
+/**
+ * Load the shared drift-resolution help block from `@databricks/appkit` so
+ * the CLI and the runtime plugin print the same hint when drift is detected.
+ */
+export function loadDriftHelp(): Promise<AppKitDriftHelpModule> {
+  return runtimeImport<AppKitDriftHelpModule>(
     "@databricks/appkit/database/introspector",
   );
 }

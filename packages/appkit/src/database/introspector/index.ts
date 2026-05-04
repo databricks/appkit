@@ -8,6 +8,7 @@ export {
   type DriftSeverity,
   diffIntrospections,
 } from "./diff";
+export { formatDriftResolution } from "./drift-help";
 export { renderSchema } from "./render";
 export { schemaToIntrospection } from "./schema-to-introspection";
 export { mapPostgresType } from "./type-map";
