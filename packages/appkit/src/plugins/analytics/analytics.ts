@@ -49,6 +49,18 @@ export class AnalyticsPlugin extends Plugin {
    */
   private metricRegistry: Record<string, MetricRegistration> = {};
 
+  /**
+   * Latched error from the most recent `loadMetricRegistry()` attempt.
+   * `null` means the registry loaded cleanly (or `metric.json` was absent
+   * — also fine; metric views are an opt-in feature). When non-null, every
+   * `/metric/:key` request returns 503 with code `METRIC_REGISTRY_LOAD_FAILED`
+   * so deployment errors (malformed JSON, schema violations, missing
+   * required fields) surface as a clear server status rather than
+   * masquerading as 404s for every metric. Surfaces via the route only —
+   * the rest of the analytics plugin stays available.
+   */
+  private metricRegistryLoadError: string | null = null;
+
   constructor(config: IAnalyticsConfig) {
     super(config);
     this.config = config;
@@ -61,19 +73,30 @@ export class AnalyticsPlugin extends Plugin {
   }
 
   /**
-   * Eagerly load the metric registry. Failures are logged at warn level (not
-   * thrown) so a malformed `metric.json` does not take down the whole app —
-   * the route handler returns a clean 404 for unregistered keys regardless.
+   * Eagerly load the metric registry.
+   *
+   * `setup()` does not throw — failures here would otherwise prevent the
+   * whole app (including unrelated plugins) from starting, which is too
+   * blunt for what is conceptually a single-route configuration error.
+   * Instead, latch the failure on `metricRegistryLoadError`: the metric
+   * route then returns 503 with a clear code so deployment pipelines + the
+   * /metric/:key surface itself reflect the broken state. Other analytics
+   * routes (`/query/:key`, `/arrow-result/:jobId`) continue to work.
+   *
+   * The previous behavior — empty `metricRegistry` plus a warn log — made
+   * malformed `metric.json` indistinguishable from missing keys (every
+   * metric returned 404 "Metric not found"), which masked deployment
+   * errors and matched a recurring review pattern across multiple rounds.
    */
   async setup(): Promise<void> {
     try {
       this.metricRegistry = await loadMetricRegistry();
+      this.metricRegistryLoadError = null;
     } catch (err) {
-      logger.warn(
-        "Failed to load metric registry: %s",
-        err instanceof Error ? err.message : String(err),
-      );
+      const reason = err instanceof Error ? err.message : String(err);
+      logger.warn("Failed to load metric registry: %s", reason);
       this.metricRegistry = {};
+      this.metricRegistryLoadError = reason;
     }
   }
 
@@ -286,6 +309,21 @@ export class AnalyticsPlugin extends Plugin {
 
     if (!key) {
       res.status(400).json({ error: "metric key is required" });
+      return;
+    }
+
+    // Surface a startup-time registry-load failure on the route. Without
+    // this, a malformed metric.json would yield 404 for every key — which
+    // looks identical to "key never registered" and hides the deployment
+    // error. The full reason goes to telemetry only.
+    if (this.metricRegistryLoadError !== null) {
+      event?.setContext("analytics", {
+        metric_registry_load_error: this.metricRegistryLoadError,
+      });
+      res.status(503).json({
+        error: "Metric registry not available",
+        code: "METRIC_REGISTRY_LOAD_FAILED",
+      });
       return;
     }
 
@@ -518,6 +556,17 @@ export class AnalyticsPlugin extends Plugin {
     registry: Record<string, MetricRegistration>,
   ): void {
     this.metricRegistry = registry;
+  }
+
+  /**
+   * Test-only seam: simulate a `loadMetricRegistry()` failure latched by
+   * `setup()`. Production code never calls this — `setup()` is the sole
+   * setter of `metricRegistryLoadError`.
+   *
+   * @internal
+   */
+  _setMetricRegistryLoadErrorForTesting(reason: string | null): void {
+    this.metricRegistryLoadError = reason;
   }
 
   /**

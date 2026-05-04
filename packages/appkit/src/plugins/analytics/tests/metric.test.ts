@@ -918,6 +918,40 @@ describe("AnalyticsPlugin — metric route handler", () => {
     expect(errorPayload.error).not.toMatch(/ghost/);
   });
 
+  test("returns 503 when setup() failed to load metric.json (no silent 404)", async () => {
+    // Recurring review pattern: a malformed metric.json silently turned
+    // every metric request into 404 "Metric not found" because setup()
+    // swallowed the error and reset the registry to {}. That hid the
+    // deployment-config error from operators. Now a startup-time load
+    // failure is latched and surfaced on the route as 503 with a
+    // distinct code so deployment pipelines + the route reflect the
+    // broken state. The full reason stays in telemetry only.
+    const plugin = new AnalyticsPlugin(config);
+    plugin._setMetricRegistryForTesting({});
+    plugin._setMetricRegistryLoadErrorForTesting(
+      "Invalid metric.json at /path: sp.0.source must be a three-part FQN",
+    );
+    const { router, getHandler } = createMockRouter();
+    plugin.injectRoutes(router);
+
+    const handler = getHandler("POST", "/metric/:key");
+    const mockReq = createMockRequest({
+      params: { key: "revenue" },
+      body: { measures: ["arr"] },
+    });
+    const mockRes = createMockResponse();
+
+    await handler(mockReq, mockRes);
+
+    expect(mockRes.status).toHaveBeenCalledWith(503);
+    const errorPayload = (mockRes.json as any).mock.calls[0][0];
+    expect(errorPayload.code).toBe("METRIC_REGISTRY_LOAD_FAILED");
+    // Public message must not echo the parser failure (which would
+    // include filesystem paths). The detail is logged via setContext.
+    expect(errorPayload.error).toBe("Metric registry not available");
+    expect(errorPayload.error).not.toContain("metric.json");
+  });
+
   test("returns 503 when the registered metric has no build-time metadata (fail-closed)", async () => {
     // Defense-in-depth: when `metrics.metadata.json` is missing or didn't
     // populate measures for this metric, the validator falls open and the
