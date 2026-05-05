@@ -128,9 +128,13 @@ pnpm docs:serve  # Serve built docs
 
 See [docs/README.md](./docs/README.md) for more details.
 
-## CLI compatibility manifest
+## Version resolution in Databricks CLI
 
-The [`cli-compat.json`](https://github.com/databricks/cli/blob/main/internal/build/cli-compat.json) manifest that maps CLI versions to compatible AppKit and Agent Skills versions lives in the [CLI repository](https://github.com/databricks/cli). See the CLI repo's contributing docs for update instructions.
+The Databricks CLI uses [`cli-compat.json`](https://github.com/databricks/cli/blob/main/internal/build/cli-compat.json)
+to determine which AppKit template version to use for `apps init`. The manifest maps
+CLI versions to compatible AppKit versions. It lives in the
+[CLI repository](https://github.com/databricks/cli) — see the
+[README](https://github.com/databricks/cli/blob/main/internal/build/README.md) for details.
 
 ## Adding or changing a resource type
 
