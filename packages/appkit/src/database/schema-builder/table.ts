@@ -5,8 +5,52 @@ import {
   APPKIT_TABLE,
   type AppKitColumn,
   type AppKitTable,
+  type ColumnMeta,
   type Relation,
 } from "./types";
+
+/**
+ * Build the resolved `$relations` list for a table from its column metadata.
+ */
+function buildRelations(columns: Record<string, AppKitColumn>): Relation[] {
+  const relations: Relation[] = [];
+  for (const [columnName, column] of Object.entries(columns)) {
+    const reference = column.$meta.references;
+    if (!reference?.toTable || !reference?.toColumn) continue;
+    const relation: Relation = {
+      fromColumn: columnName,
+      toTable: reference.toTable,
+      toColumn: reference.toColumn,
+    };
+    if (reference.onDelete) relation.onDelete = reference.onDelete;
+    if (reference.onUpdate) relation.onUpdate = reference.onUpdate;
+    relations.push(relation);
+  }
+  return relations;
+}
+
+/**
+ * Rebuild `$relations` from the column-meta map.
+ * Used by `defineSchema` after resolving cross-table deferred references.
+ */
+export function rebuildRelationsFromColumns(
+  columnMetas: Record<string, ColumnMeta>,
+): Relation[] {
+  const relations: Relation[] = [];
+  for (const [columnName, meta] of Object.entries(columnMetas)) {
+    const reference = meta.references;
+    if (!reference?.toTable || !reference?.toColumn) continue;
+    const relation: Relation = {
+      fromColumn: columnName,
+      toTable: reference.toTable,
+      toColumn: reference.toColumn,
+    };
+    if (reference.onDelete) relation.onDelete = reference.onDelete;
+    if (reference.onUpdate) relation.onUpdate = reference.onUpdate;
+    relations.push(relation);
+  }
+  return relations;
+}
 
 /**
  * Build a table. Returns an AppKit table object that can be used to define the table schema and relationships.
@@ -28,6 +72,19 @@ export function buildTable<
     column.$meta.columnName = columnName;
   }
 
+  // Resolve any self-FK targets now that names on this table are stamped.
+  for (const column of Object.values(columns)) {
+    const reference = column.$meta.references;
+    if (!reference?.target) continue;
+    if (reference.toTable && reference.toColumn) continue;
+    const targetTable = reference.target.$meta.tableName;
+    const targetColumn = reference.target.$meta.columnName;
+    if (targetTable === name && targetColumn) {
+      reference.toTable = targetTable;
+      reference.toColumn = targetColumn;
+    }
+  }
+
   const drizzleColumns = Object.fromEntries(
     Object.entries(columns).map(([columnName, definition]) => [
       columnName,
@@ -44,20 +101,7 @@ export function buildTable<
     ]),
   );
 
-  const $relations: Relation[] = Object.entries(columns)
-    .map(([columnName, definition]): Relation | null => {
-      const reference = definition.$meta.references;
-      if (!reference?.toTable || !reference?.toColumn) return null;
-      const relation: Relation = {
-        fromColumn: columnName,
-        toTable: reference.toTable,
-        toColumn: reference.toColumn,
-      };
-      if (reference.onDelete) relation.onDelete = reference.onDelete;
-      if (reference.onUpdate) relation.onUpdate = reference.onUpdate;
-      return relation;
-    })
-    .filter((relation): relation is Relation => relation !== null);
+  const $relations: Relation[] = buildRelations(columns);
 
   const privateMask = Object.fromEntries(
     Object.entries(columns)

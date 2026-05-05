@@ -15,6 +15,7 @@ import type {
   AppKitColumn,
   AppKitColumnChain,
   ColumnMeta,
+  FkColumnChain,
   Relation,
 } from "./types";
 
@@ -170,39 +171,72 @@ export function enumColumn(
 }
 
 /**
- * Create a foreign key column.
+ * Create a foreign key column. The reference target is captured live and
+ * resolved at `buildTable()` time, so forward references (e.g. `fk(other.id)`
+ * declared before `table("other", ...)`) work.
+ *
+ * The FK column type is currently fixed to `integer`. If the target is a
+ * `bigid()` (`bigserial`) or `uuid()` PK, declare the FK column with the
+ * matching type explicitly until per-target type inference is added.
+ *
  * @param target - The target column to reference.
- * @returns The wrapped column chain.
+ * @returns A FK column chain. `onDelete`/`onUpdate` return the FK chain so
+ * order does not matter; chain methods (`.notNull()`, `.unique()`, etc.) also
+ * return the FK chain so `.notNull().onDelete("cascade")` typechecks.
  */
-export function fk(target: AppKitColumn): AppKitColumnChain & {
-  onDelete(value: NonNullable<Relation["onDelete"]>): AppKitColumnChain;
-  onUpdate(value: NonNullable<Relation["onUpdate"]>): AppKitColumnChain;
-} {
-  const chain = wrap(pgInteger(), {
-    references:
-      target.$meta.tableName && target.$meta.columnName
-        ? {
-            toTable: target.$meta.tableName,
-            toColumn: target.$meta.columnName,
-          }
-        : undefined,
-  }) as AppKitColumnChain & {
-    onDelete(value: NonNullable<Relation["onDelete"]>): AppKitColumnChain;
-    onUpdate(value: NonNullable<Relation["onUpdate"]>): AppKitColumnChain;
-  };
-  chain.onDelete = (value) => {
-    chain.$meta.references = {
-      ...(chain.$meta.references ?? { toTable: "", toColumn: "" }),
-      onDelete: value,
-    };
-    return chain;
-  };
-  chain.onUpdate = (value) => {
-    chain.$meta.references = {
-      ...(chain.$meta.references ?? { toTable: "", toColumn: "" }),
-      onUpdate: value,
-    };
-    return chain;
-  };
-  return chain;
+export function fk(target: AppKitColumn): FkColumnChain {
+  const baseChain = wrap(pgInteger(), {
+    // Live target reference; buildTable() resolves to toTable/toColumn after
+    // all tables have been built and column names stamped.
+    references: { target },
+  });
+
+  // Override chain methods to return FkColumnChain at the type level. Runtime
+  // returns the same chain object so the cast is safe.
+  const fkChain: FkColumnChain = Object.assign(baseChain, {
+    notNull: () => {
+      baseChain.notNull();
+      return fkChain;
+    },
+    unique: () => {
+      baseChain.unique();
+      return fkChain;
+    },
+    primaryKey: () => {
+      baseChain.primaryKey();
+      return fkChain;
+    },
+    default<T>(value: T) {
+      baseChain.default(value);
+      return fkChain;
+    },
+    defaultNow: () => {
+      baseChain.defaultNow();
+      return fkChain;
+    },
+    defaultRandom: () => {
+      baseChain.defaultRandom();
+      return fkChain;
+    },
+    private: () => {
+      baseChain.private();
+      return fkChain;
+    },
+    onDelete: (value: NonNullable<Relation["onDelete"]>) => {
+      fkChain.$meta.references = {
+        ...(fkChain.$meta.references ?? {}),
+        onDelete: value,
+      };
+      return fkChain;
+    },
+    onUpdate: (value: NonNullable<Relation["onUpdate"]>) => {
+      fkChain.$meta.references = {
+        ...(fkChain.$meta.references ?? {}),
+        onUpdate: value,
+      };
+      return fkChain;
+    },
+  }) as FkColumnChain;
+
+  return fkChain;
 }

@@ -7,39 +7,35 @@ export const APPKIT_TABLE = Symbol.for("appkit.database.table");
 
 /**
  * Metadata for an AppKit column. This is used to store the column metadata in the schema.
- * @example
- * ```ts
- * const columnMeta: ColumnMeta = {
- *   serverGenerated: true,
- * };
- * ```
  */
 export interface ColumnMeta {
   serverGenerated?: boolean;
   primaryKey?: boolean;
   /**
-   * Hides the column from default reads, writes, and column metadata. Set via
-   * `.private()` on the column chain. Used to keep secrets like password hashes
-   * out of the public surface without forking the schema.
+   * Marks this column as private.
+   * Excludes the column from the generated `$insertSchema` and `$updateSchema` (i.e. blocks writes through the validators).
    */
   private?: boolean;
   /** @internal */
   tableName?: string;
   /** @internal */
   columnName?: string;
-  /** @internal */
-  references?: Pick<Relation, "toTable" | "toColumn" | "onDelete" | "onUpdate">;
+  /**
+   * @internal
+   * Foreign-key reference in one of two states: **deferred** (`target` set)
+   * or **resolved** (`toTable`/`toColumn` populated).
+   */
+  references?: {
+    target?: AppKitColumn;
+    toTable?: string;
+    toColumn?: string;
+    onDelete?: Relation["onDelete"];
+    onUpdate?: Relation["onUpdate"];
+  };
 }
 
 /**
  * An AppKit column. This is returned by the column builder methods.
- * @example
- * ```ts
- * const column: AppKitColumn = {
- *   $builder: unknown,
- *   $meta: columnMeta,
- * };
- * ```
  */
 export interface AppKitColumn {
   $builder: unknown;
@@ -48,13 +44,6 @@ export interface AppKitColumn {
 
 /**
  * A chain of AppKit column methods. This is returned by the column builder methods.
- * @example
- * ```ts
- * const column: AppKitColumnChain = {
- *   $builder: unknown,
- *   $meta: columnMeta,
- * };
- * ```
  */
 export interface AppKitColumnChain extends AppKitColumn {
   notNull(): AppKitColumnChain;
@@ -67,17 +56,22 @@ export interface AppKitColumnChain extends AppKitColumn {
 }
 
 /**
+ * A foreign-key column chain. Returned by `fk(target)`.
+ */
+export interface FkColumnChain extends AppKitColumnChain {
+  notNull(): FkColumnChain;
+  unique(): FkColumnChain;
+  primaryKey(): FkColumnChain;
+  default<T>(value: T): FkColumnChain;
+  defaultNow(): FkColumnChain;
+  defaultRandom(): FkColumnChain;
+  private(): FkColumnChain;
+  onDelete(value: NonNullable<Relation["onDelete"]>): FkColumnChain;
+  onUpdate(value: NonNullable<Relation["onUpdate"]>): FkColumnChain;
+}
+
+/**
  * A relation between two tables. This is used to define the foreign key relationships between tables.
- * @example
- * ```ts
- * const relation: Relation = {
- *   fromColumn: "userId",
- *   toTable: "users",
- *   toColumn: "id",
- *   onDelete: "cascade",
- *   onUpdate: "cascade",
- * };
- * ```
  */
 export interface Relation {
   fromColumn: string;
@@ -90,13 +84,6 @@ export interface Relation {
 /**
  * An AppKit table. This is returned by the table builder methods.
  * This is used to define the table schema and relationships.
- * @example
- * ```ts
- * const table: AppKitTable = {
- *   $builder: unknown,
- *   $meta: tableMeta,
- * };
- * ```
  */
 export interface AppKitTable<TName extends string = string> {
   readonly [APPKIT_TABLE]: true;
@@ -110,14 +97,6 @@ export interface AppKitTable<TName extends string = string> {
 
 /**
  * A schema. This is used to define the schema for the database.
- * @example
- * ```ts
- * const schema: Schema = {
- *   $drizzle: unknown,
- *   $tables: { tableName: AppKitTable },
- *   $migrations: { snapshotHints: unknown },
- * };
- * ```
  */
 export type Schema<
   T extends Record<string, unknown> = Record<string, unknown>,
@@ -129,13 +108,6 @@ export type Schema<
 
 /**
  * A context for the schema builder. This is used to build the schema.
- * @example
- * ```ts
- * const context: SchemaBuilderContext = {
- *   table: (name, columns) => table(name, columns),
- *   enum: (name, values) => enum(name, values),
- * };
- * ```
  */
 export interface SchemaBuilderContext {
   table: <TName extends string, TCols extends Record<string, AppKitColumn>>(

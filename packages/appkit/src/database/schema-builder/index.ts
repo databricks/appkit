@@ -1,6 +1,7 @@
 export {
   bigint,
   boolean,
+  enumColumn,
   enumColumn as enumeration,
   fk,
   id,
@@ -12,11 +13,17 @@ export {
   varchar,
 } from "./columns";
 export { type DefineSchemaOptions, defineSchema } from "./define-schema";
+export {
+  isPrivateColumn,
+  nonPrivateColumnNames,
+  privateColumnNames,
+} from "./private";
 export type {
   AppKitColumn,
   AppKitColumnChain,
   AppKitTable,
   ColumnMeta,
+  FkColumnChain,
   Relation,
   Schema,
   SchemaBuilderContext,
