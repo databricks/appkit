@@ -179,7 +179,7 @@ The dev-mode fallback exists so local testing without a Databricks Apps reverse 
 #### Limitations
 
 - The plugin manifest's `getResourceRequirements()` declares `WRITE_VOLUME` on the **service principal** for every volume, regardless of the volume's `auth` mode. For OBO volumes, the actual permission requirement is on the **end user** — communicate this out-of-band (deployment runbooks, customer onboarding docs) until the plugin manifest schema gains a per-volume auth scope field.
-- Cache keys include `getCurrentUserId()`, so OBO volumes get per-user cache isolation automatically. SP volumes share a single cache slice keyed by the SP id.
+- OBO volumes disable the read/list cache entirely. The cache layer keys by `getCurrentUserId()`, so a write by user A wouldn't invalidate user B's view of the same path; rather than risk cross-user staleness, OBO traffic skips the cache and fetches fresh on every request. SP volumes still cache (single slice keyed by the SP id).
 
 ### Permission model
 
@@ -445,7 +445,7 @@ await vol.asUser(req).list();
 
 `asUser(req)` is the supported path for programmatic per-user execution. The returned API runs every method inside `runInUserContext` so the underlying `WorkspaceClient` is the user-token client — the SDK call executes as the user, not just the policy check.
 
-In production, `asUser(req)` throws `AuthenticationError.missingToken` when `x-forwarded-user` is absent. In development (`NODE_ENV === "development"`) it logs a warning and falls back to the service principal so local testing without a Databricks Apps reverse proxy keeps working — the fallback skips the `runInUserContext` wrap.
+In production, `asUser(req)` throws `AuthenticationError.missingToken` when either `x-forwarded-user` or `x-forwarded-access-token` is absent — both headers are required to mint a user-scoped client. In development (`NODE_ENV === "development"`) it logs a warning and falls back to the service principal so local testing without a Databricks Apps reverse proxy keeps working — the fallback skips the `runInUserContext` wrap.
 
 :::warning Programmatic OBO without `asUser(req)`
 
@@ -597,7 +597,7 @@ HTTP routes execute as either the service principal or the end user, depending o
 - **Service-principal volumes** (the default): the SP's Databricks credentials are used for the API call. User identity is extracted from the `x-forwarded-user` header and passed to the volume's [access policy](#access-policies) for authorization, but the SDK call still runs as the SP. When the header is absent the policy is handed `{ id: <sp-id>, isServicePrincipal: true }` and decides whether to allow the call — in practice that branch only fires in development without a reverse proxy or when an upstream proxy is misconfigured, since real Databricks Apps runtimes always forward the header. UC grants on the **SP** determine what operations are possible.
 - **On-behalf-of-user volumes**: the end user's access token (from `x-forwarded-access-token`) is used to mint the SDK client, so the API call runs with the user's identity. Both the policy and the SDK see the user. UC grants on the **end user** determine what operations are possible. In production, requests with a missing token return `401`; in development (`NODE_ENV === "development"`) they fall back to the SP with a warning.
 
-The programmatic API returns a `VolumeHandle` that exposes all `VolumeAPI` methods directly and an `asUser(req)` method for forcing per-user execution. Calling a method without `asUser()` runs the policy and the SDK call as the SP. `asUser(req)` is a hard override at the SDK level: it forces every subsequent call to execute as the end user inside `runInUserContext`, regardless of the volume's `auth` setting. In production, `asUser(req)` throws `AuthenticationError.missingToken` when the `x-forwarded-user` header is missing. In development it falls back to the service principal instead, so local testing without a reverse proxy continues to work.
+The programmatic API returns a `VolumeHandle` that exposes all `VolumeAPI` methods directly and an `asUser(req)` method for forcing per-user execution. Calling a method without `asUser()` runs the policy and the SDK call as the SP. `asUser(req)` is a hard override at the SDK level: it forces every subsequent call to execute as the end user inside `runInUserContext`, regardless of the volume's `auth` setting. In production, `asUser(req)` throws `AuthenticationError.missingToken` when either `x-forwarded-user` or `x-forwarded-access-token` is absent — both headers are required. In development it falls back to the service principal instead, so local testing without a reverse proxy continues to work.
 
 ## Resource requirements
 

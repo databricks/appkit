@@ -194,7 +194,9 @@ export class FilesPlugin extends Plugin {
       return { id: getCurrentUserId(), isServicePrincipal: true };
     }
     throw AuthenticationError.missingToken(
-      "Missing x-forwarded-access-token header for on-behalf-of-user volume.",
+      !token
+        ? "Missing x-forwarded-access-token header for on-behalf-of-user volume."
+        : "Missing x-forwarded-user header for on-behalf-of-user volume.",
     );
   }
 
@@ -600,6 +602,12 @@ export class FilesPlugin extends Plugin {
    *   `"/Volumes/c/s/v/foo"` → resolved path key.
    * - `"/bar.txt"` and `"bar.txt"` → root-level files: matching list cache
    *   was a rootless `list()` call → `"__root__"` sentinel.
+   * - `"/Volumes/c/s/v/bar.txt"` → `parentDirectory` returns the UC
+   *   volume path (`"/Volumes/c/s/v"`). That's also root-level — a
+   *   rootless `list()` would have cached under `"__root__"`, while
+   *   `list("/Volumes/c/s/v")` and `list("/Volumes/c/s/v/")` would have
+   *   cached under the volume path with and without trailing slash. All
+   *   three are invalidated.
    *
    * On OBO volumes the read cache is disabled (see `_readSettings`), so
    * invalidation is a no-op here for `mode === "on-behalf-of-user"`. The
@@ -634,11 +642,6 @@ export class FilesPlugin extends Plugin {
       return;
     }
     const parent = parentDirectory(writtenPath);
-    // The list cache stored under `"__root__"` whenever the matching read
-    // came from a rootless `list()` (no `?path=`). `parentDirectory`
-    // returns `"/"` for root-level files like `/bar.txt`, and `""` for
-    // relative root-level files like `bar.txt`. Both map to the sentinel.
-    const isRootLevel = !parent || parent === "/";
     const userKey = getCurrentUserId();
     const tryDelete = async (segment: string): Promise<void> => {
       try {
@@ -655,25 +658,38 @@ export class FilesPlugin extends Plugin {
       }
     };
 
+    // Compute the UC volume root (e.g. `"/Volumes/c/s/v"`) when the
+    // connector has a default volume. Used both to detect absolute-path
+    // root-level writes and to invalidate every cache key shape that
+    // mapped to the volume root listing. `resolvePath("")` returns
+    // `"<defaultVolume>/"`; strip the trailing slash for comparison.
+    let volumeRoot: string | null = null;
+    try {
+      volumeRoot = connector.resolvePath("").replace(/\/+$/, "");
+    } catch (err) {
+      logger.debug(
+        'List-cache invalidation: resolvePath("") failed for volume=%s: %O',
+        volumeKey,
+        err,
+      );
+    }
+
+    // Root-level when the parent is empty/`"/"` (relative or `/foo.txt`)
+    // OR when the parent equals the UC volume root (absolute UC path
+    // `"/Volumes/c/s/v/foo.txt"`).
+    const isRootLevel =
+      !parent ||
+      parent === "/" ||
+      (volumeRoot !== null && parent === volumeRoot);
+
     if (isRootLevel) {
-      // The list cache may be keyed under either `"__root__"` (when
-      // `_handleList` ran without a `?path=` query) or
-      // `connector.resolvePath("/")` (when it ran with `?path=/`). Both
-      // produce the same listing, so a write to a root-level file must
-      // invalidate both keys to keep reads consistent.
+      // A rootless `list()` cached under `"__root__"`. Listings via
+      // `?path=<volumeRoot>` or `?path=<volumeRoot>/` cached under the
+      // volume path with/without trailing slash. Invalidate every shape.
       await tryDelete("__root__");
-      let rootResolved: string | null = null;
-      try {
-        rootResolved = connector.resolvePath("/");
-      } catch (err) {
-        logger.debug(
-          'List-cache invalidation: resolvePath("/") failed for volume=%s: %O',
-          volumeKey,
-          err,
-        );
-      }
-      if (rootResolved !== null && rootResolved !== "__root__") {
-        await tryDelete(rootResolved);
+      if (volumeRoot !== null) {
+        await tryDelete(volumeRoot);
+        await tryDelete(`${volumeRoot}/`);
       }
       return;
     }

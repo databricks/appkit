@@ -2967,45 +2967,69 @@ describe("FilesPlugin", () => {
     });
 
     /**
-     * Fix 3 regression: SP root-level write (e.g. mkdir of a relative path
-     * like "newdir") must invalidate the `"__root__"` sentinel that
-     * `_handleList` uses for rootless listings.
+     * SP root-level writes must invalidate every cache key shape that
+     * `_handleList` could have stored a root listing under:
+     *
+     * - `"__root__"`: rootless `GET /list` (no `?path=`)
+     * - `<volumeRoot>` (e.g. `/Volumes/catalog/schema/uploads`): client
+     *   listed via `?path=<volumeRoot>`
+     * - `<volumeRoot>/`: same, with a trailing slash
+     *
+     * Two write shapes both reach the root-level branch:
+     * - relative path (`"newdir"` → `parentDirectory` returns `""`)
+     * - absolute UC path (`/Volumes/catalog/schema/uploads/newdir` →
+     *   `parentDirectory` returns `/Volumes/catalog/schema/uploads`,
+     *   which equals the volume root)
      */
-    test("SP write of root-level path uses the __root__ sentinel for invalidation (matches _handleList's rootless cache key)", async () => {
-      const plugin = new FilesPlugin({
-        volumes: {
-          uploads: { policy: policy.allowAll() },
-          exports: {},
-        },
+    const rootInvalidationCases = [
+      { label: "relative root", writePath: "newdir" },
+      {
+        label: "absolute UC root",
+        writePath: "/Volumes/catalog/schema/uploads/newdir",
+      },
+    ];
+    for (const { label, writePath } of rootInvalidationCases) {
+      test(`SP write at ${label} invalidates __root__ + volumeRoot variants (matches _handleList's possible cache keys)`, async () => {
+        const plugin = new FilesPlugin({
+          volumes: {
+            uploads: { policy: policy.allowAll() },
+            exports: {},
+          },
+        });
+        const mkdirHandler = getRouteHandler(plugin, "post", "/mkdir");
+
+        mockClient.files.createDirectory.mockResolvedValue(undefined);
+
+        const generateKeyCalls: Array<{
+          parts: (string | number | object)[];
+          userKey: string;
+        }> = [];
+        mockCacheInstance.generateKey.mockImplementation(
+          (parts: (string | number | object)[], userKey: string) => {
+            generateKeyCalls.push({ parts, userKey });
+            return "stub-key";
+          },
+        );
+
+        await mkdirHandler(
+          mockReq("uploads", {}, { body: { path: writePath } }),
+          mockRes(),
+        );
+
+        const listInvalidations = generateKeyCalls.filter(
+          (c) => Array.isArray(c.parts) && c.parts[0] === "files:uploads:list",
+        );
+        const segments = listInvalidations.map((c) => c.parts[1]);
+        expect(segments).toEqual(
+          expect.arrayContaining([
+            "__root__",
+            "/Volumes/catalog/schema/uploads",
+            "/Volumes/catalog/schema/uploads/",
+          ]),
+        );
+        expect(segments).toHaveLength(3);
       });
-      const mkdirHandler = getRouteHandler(plugin, "post", "/mkdir");
-
-      mockClient.files.createDirectory.mockResolvedValue(undefined);
-
-      const generateKeyCalls: Array<{
-        parts: (string | number | object)[];
-        userKey: string;
-      }> = [];
-      mockCacheInstance.generateKey.mockImplementation(
-        (parts: (string | number | object)[], userKey: string) => {
-          generateKeyCalls.push({ parts, userKey });
-          return "stub-key";
-        },
-      );
-
-      // Relative path "newdir" → parentDirectory returns "" → root-level
-      // → must use the "__root__" sentinel.
-      await mkdirHandler(
-        mockReq("uploads", {}, { body: { path: "newdir" } }),
-        mockRes(),
-      );
-
-      const listInvalidations = generateKeyCalls.filter(
-        (c) => Array.isArray(c.parts) && c.parts[0] === "files:uploads:list",
-      );
-      expect(listInvalidations).toHaveLength(1);
-      expect(listInvalidations[0].parts[1]).toBe("__root__");
-    });
+    }
 
     /**
      * Fix A regression: SP-volume writes must AWAIT the underlying
