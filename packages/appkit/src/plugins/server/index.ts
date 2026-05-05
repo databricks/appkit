@@ -401,6 +401,13 @@ export class ServerPlugin extends Plugin {
   private async _gracefulShutdown() {
     logger.info("Starting graceful shutdown...");
 
+    // 15 seconds to force the process to exit
+    const forceExit = setTimeout(() => {
+      logger.debug("Force shutdown after timeout");
+      process.exit(1);
+    }, 15000);
+    forceExit.unref();
+
     if (this.viteDevServer) {
       await this.viteDevServer.close();
     }
@@ -413,21 +420,35 @@ export class ServerPlugin extends Plugin {
 
     // 1. abort active operations from plugins; await any returned promises so
     //    pool drains finish before we trigger process.exit on shutdown timeout.
+    //    Each drain is capped at DRAIN_TIMEOUT_MS so a single hung pool can't
+    //    starve the rest. Total wall time is bounded by the force-exit timer
+    //    above.
     const shutdownPlugins = this.context?.getPlugins();
     if (shutdownPlugins) {
+      const DRAIN_TIMEOUT_MS = 13_000;
       const drains = Array.from(shutdownPlugins.values())
         .map((plugin) => {
           if (!plugin.abortActiveOperations) return null;
           try {
-            return Promise.resolve(plugin.abortActiveOperations()).catch(
-              (err) => {
-                logger.error(
-                  "Error aborting operations for plugin %s: %O",
+            const drain = Promise.resolve(plugin.abortActiveOperations());
+            const timeout = new Promise<void>((resolve) => {
+              const handle = setTimeout(() => {
+                logger.warn(
+                  "Drain timed out for plugin %s after %d ms",
                   plugin.name,
-                  err,
+                  DRAIN_TIMEOUT_MS,
                 );
-              },
-            );
+                resolve();
+              }, DRAIN_TIMEOUT_MS);
+              handle.unref();
+            });
+            return Promise.race([drain, timeout]).catch((err) => {
+              logger.error(
+                "Error aborting operations for plugin %s: %O",
+                plugin.name,
+                err,
+              );
+            });
           } catch (err) {
             logger.error(
               "Error aborting operations for plugin %s: %O",
@@ -449,12 +470,6 @@ export class ServerPlugin extends Plugin {
         logger.debug("Server closed gracefully");
         process.exit(0);
       });
-
-      // 3. timeout to force shutdown after 15 seconds
-      setTimeout(() => {
-        logger.debug("Force shutdown after timeout");
-        process.exit(1);
-      }, 15000);
     } else {
       process.exit(0);
     }
