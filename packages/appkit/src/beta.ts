@@ -21,13 +21,21 @@ export { DatabricksAdapter, parseTextToolCalls } from "./agents/databricks";
 
 // Tool authoring primitives
 export {
+  AppKitMcpClient,
+  defineTool,
+  executeFromRegistry,
   type FunctionTool,
+  functionToolToDefinition,
   type HostedTool,
   isFunctionTool,
   isHostedTool,
   mcpServer,
+  resolveHostedTools,
   type ToolConfig,
+  type ToolEntry,
+  type ToolRegistry,
   tool,
+  toolsFromRegistry,
 } from "./core/agent/tools";
 export {
   type AgentTool,
