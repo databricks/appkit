@@ -53,6 +53,7 @@ vi.mock("../../../connectors/lakebase", () => ({
   getUsernameWithApiLookup: vi.fn(async () => "test-user"),
 }));
 
+import type { Pool, PoolClient } from "pg";
 import { LakebasePlugin } from "../lakebase";
 import type { LakebaseExposeAsAgentTool } from "../types";
 
@@ -176,7 +177,7 @@ describe("LakebasePlugin — readOnly enforcement", () => {
     // Poison the client so the middle query throws (simulates a Postgres
     // error like "cannot execute UPDATE in a read-only transaction").
     const { createLakebasePool } = await import("../../../connectors/lakebase");
-    const connect = vi.fn(async () => ({
+    const fakeClient = {
       query: vi
         .fn()
         .mockResolvedValueOnce({ rows: [] })
@@ -185,13 +186,14 @@ describe("LakebasePlugin — readOnly enforcement", () => {
       release: vi.fn(() => {
         clientReleases.push(clientReleases.length + 1);
       }),
-    }));
+    } as unknown as PoolClient;
+
     const poolFactory = vi.mocked(createLakebasePool);
     poolFactory.mockReturnValueOnce({
       query: vi.fn(),
-      connect,
+      connect: vi.fn(async (): Promise<PoolClient> => fakeClient),
       end: vi.fn(),
-    });
+    } as unknown as Pool);
 
     clientQueries.length = 0;
     clientReleases.length = 0;
