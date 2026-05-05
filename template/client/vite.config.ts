@@ -2,20 +2,19 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'node:path';
+import reactSourceLoc from './vite-plugin-react-source-loc';
 
 // https://vite.dev/config/
 export default defineConfig({
   root: __dirname,
-  plugins: [
-    react(),
-    tailwindcss(),
-  ],
+  plugins: [react(), reactSourceLoc(), tailwindcss()],
   server: {
     middlewareMode: true,
   },
   build: {
     outDir: path.resolve(__dirname, './dist'),
     emptyOutDir: true,
+    sourcemap: true,
   },
   optimizeDeps: {
     include: ['react', 'react-dom', 'react/jsx-dev-runtime', 'react/jsx-runtime', 'recharts'],

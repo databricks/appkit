@@ -50,6 +50,8 @@
   },
   "devDependencies": {
     "@ast-grep/napi": "0.37.0",
+    "@babel/parser": "7.29.2",
+    "@babel/traverse": "7.29.0",
     "@eslint/compat": "2.0.0",
     "@eslint/js": "9.39.1",
     "@playwright/test": "1.57.0",
@@ -68,6 +70,7 @@
     "eslint-plugin-react": "7.37.5",
     "eslint-plugin-react-hooks": "7.0.1",
     "eslint-plugin-react-refresh": "0.4.24",
+    "magic-string": "0.30.21",
     "prettier": "3.6.2",
     "sharp": "0.34.5",
     "tailwindcss": "4.0.14",
