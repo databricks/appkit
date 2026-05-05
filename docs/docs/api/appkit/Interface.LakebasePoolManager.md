@@ -23,7 +23,7 @@ Number of active pools.
 closeAll(): Promise<void>;
 ```
 
-Close all managed pools (for graceful shutdown).
+Close all managed pools and stop cleanup (for graceful shutdown).
 
 #### Returns
 

@@ -9,7 +9,6 @@ import {
   ActivityLogsPanel,
   OboProductsPanel,
   OrdersPanel,
-  ProductsPanel,
   TasksPanel,
 } from "@/components/lakebase";
 
@@ -24,7 +23,6 @@ function LakebaseRoute() {
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-6xl mx-auto px-6 py-12">
-        {/* Page header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">Lakebase Examples</h1>
           <p className="text-base text-muted-foreground">
@@ -34,22 +32,16 @@ function LakebaseRoute() {
           </p>
         </div>
 
-        {/* Tabs for different examples */}
-        <Tabs defaultValue="raw-obo" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5">
-            <TabsTrigger value="raw-obo">Raw Driver OBO</TabsTrigger>
-            <TabsTrigger value="raw">Raw Driver</TabsTrigger>
+        <Tabs defaultValue="raw" className="space-y-6">
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="raw">Raw Driver (OBO)</TabsTrigger>
             <TabsTrigger value="drizzle">Drizzle ORM</TabsTrigger>
             <TabsTrigger value="typeorm">TypeORM</TabsTrigger>
             <TabsTrigger value="sequelize">Sequelize</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="raw-obo">
-            <OboProductsPanel />
-          </TabsContent>
-
           <TabsContent value="raw">
-            <ProductsPanel />
+            <OboProductsPanel />
           </TabsContent>
 
           <TabsContent value="drizzle">

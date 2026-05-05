@@ -12,9 +12,10 @@ import { useState, useEffect } from 'react';
 import { Check, X } from 'lucide-react';
 
 interface Todo {
-  id: number;
+  id: string;
   title: string;
   completed: boolean;
+  created_by: string | null;
   created_at: string;
 }
 
@@ -59,7 +60,7 @@ export function LakebasePage() {
     }
   };
 
-  const toggleTodo = async (id: number) => {
+  const toggleTodo = async (id: string) => {
     try {
       const res = await fetch(`/api/lakebase/todos/${id}`, { method: 'PATCH' });
       if (!res.ok) throw new Error(`Failed to update todo: ${res.statusText}`);
@@ -70,7 +71,7 @@ export function LakebasePage() {
     }
   };
 
-  const deleteTodo = async (id: number) => {
+  const deleteTodo = async (id: string) => {
     try {
       const res = await fetch(`/api/lakebase/todos/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(`Failed to delete todo: ${res.statusText}`);
@@ -149,9 +150,16 @@ export function LakebasePage() {
                     {todo.completed && <Check className="h-3 w-3" />}
                   </button>
 
-                  <span className={`flex-1 ${todo.completed ? 'line-through text-muted-foreground' : ''}`}>
-                    {todo.title}
-                  </span>
+                  <div className="flex-1 min-w-0">
+                    <span className={todo.completed ? 'line-through text-muted-foreground' : ''}>
+                      {todo.title}
+                    </span>
+                    {todo.created_by && (
+                      <span className="block text-xs text-muted-foreground truncate">
+                        by {todo.created_by}
+                      </span>
+                    )}
+                  </div>
 
                   <Button
                     variant="ghost"
