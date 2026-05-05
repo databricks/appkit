@@ -236,6 +236,11 @@ export class SQLWarehouseConnector {
               code: SpanStatusCode.ERROR,
               message: error instanceof Error ? error.message : String(error),
             });
+
+            logger.error(
+              "Statement execution failed: %s",
+              error instanceof Error ? error.message : String(error),
+            );
           }
 
           if (error instanceof AppKitError) {
@@ -377,6 +382,7 @@ export class SQLWarehouseConnector {
             message: error instanceof Error ? error.message : String(error),
           });
 
+          // error logging is handled by executeStatement's catch block (gated on isAborted)
           if (error instanceof AppKitError) {
             throw error;
           }

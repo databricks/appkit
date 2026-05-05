@@ -17,6 +17,7 @@ import { Route as ServingRouteRouteImport } from './routes/serving.route'
 import { Route as ReconnectRouteRouteImport } from './routes/reconnect.route'
 import { Route as PolicyMatrixRouteRouteImport } from './routes/policy-matrix.route'
 import { Route as LakebaseRouteRouteImport } from './routes/lakebase.route'
+import { Route as JobsRouteRouteImport } from './routes/jobs.route'
 import { Route as GenieRouteRouteImport } from './routes/genie.route'
 import { Route as FilesRouteRouteImport } from './routes/files.route'
 import { Route as DataVisualizationRouteRouteImport } from './routes/data-visualization.route'
@@ -65,6 +66,11 @@ const LakebaseRouteRoute = LakebaseRouteRouteImport.update({
   path: '/lakebase',
   getParentRoute: () => rootRouteImport,
 } as any)
+const JobsRouteRoute = JobsRouteRouteImport.update({
+  id: '/jobs',
+  path: '/jobs',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const GenieRouteRoute = GenieRouteRouteImport.update({
   id: '/genie',
   path: '/genie',
@@ -109,6 +115,7 @@ export interface FileRoutesByFullPath {
   '/data-visualization': typeof DataVisualizationRouteRoute
   '/files': typeof FilesRouteRoute
   '/genie': typeof GenieRouteRoute
+  '/jobs': typeof JobsRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
   '/policy-matrix': typeof PolicyMatrixRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
@@ -126,6 +133,7 @@ export interface FileRoutesByTo {
   '/data-visualization': typeof DataVisualizationRouteRoute
   '/files': typeof FilesRouteRoute
   '/genie': typeof GenieRouteRoute
+  '/jobs': typeof JobsRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
   '/policy-matrix': typeof PolicyMatrixRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
@@ -144,6 +152,7 @@ export interface FileRoutesById {
   '/data-visualization': typeof DataVisualizationRouteRoute
   '/files': typeof FilesRouteRoute
   '/genie': typeof GenieRouteRoute
+  '/jobs': typeof JobsRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
   '/policy-matrix': typeof PolicyMatrixRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
@@ -163,6 +172,7 @@ export interface FileRouteTypes {
     | '/data-visualization'
     | '/files'
     | '/genie'
+    | '/jobs'
     | '/lakebase'
     | '/policy-matrix'
     | '/reconnect'
@@ -180,6 +190,7 @@ export interface FileRouteTypes {
     | '/data-visualization'
     | '/files'
     | '/genie'
+    | '/jobs'
     | '/lakebase'
     | '/policy-matrix'
     | '/reconnect'
@@ -197,6 +208,7 @@ export interface FileRouteTypes {
     | '/data-visualization'
     | '/files'
     | '/genie'
+    | '/jobs'
     | '/lakebase'
     | '/policy-matrix'
     | '/reconnect'
@@ -215,6 +227,7 @@ export interface RootRouteChildren {
   DataVisualizationRouteRoute: typeof DataVisualizationRouteRoute
   FilesRouteRoute: typeof FilesRouteRoute
   GenieRouteRoute: typeof GenieRouteRoute
+  JobsRouteRoute: typeof JobsRouteRoute
   LakebaseRouteRoute: typeof LakebaseRouteRoute
   PolicyMatrixRouteRoute: typeof PolicyMatrixRouteRoute
   ReconnectRouteRoute: typeof ReconnectRouteRoute
@@ -283,6 +296,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LakebaseRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/jobs': {
+      id: '/jobs'
+      path: '/jobs'
+      fullPath: '/jobs'
+      preLoaderRoute: typeof JobsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/genie': {
       id: '/genie'
       path: '/genie'
@@ -343,6 +363,7 @@ const rootRouteChildren: RootRouteChildren = {
   DataVisualizationRouteRoute: DataVisualizationRouteRoute,
   FilesRouteRoute: FilesRouteRoute,
   GenieRouteRoute: GenieRouteRoute,
+  JobsRouteRoute: JobsRouteRoute,
   LakebaseRouteRoute: LakebaseRouteRoute,
   PolicyMatrixRouteRoute: PolicyMatrixRouteRoute,
   ReconnectRouteRoute: ReconnectRouteRoute,

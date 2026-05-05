@@ -12,6 +12,70 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+## [0.30.0](https://github.com/databricks/appkit/compare/v0.29.0...v0.30.0) (2026-05-05)
+
+### appkit
+
+* **appkit:** improve Databricks auth failure UX at startup ([#342](https://github.com/databricks/appkit/issues/342)) ([ae2ba2c](https://github.com/databricks/appkit/commit/ae2ba2c5a54f3d04a9de54d94de311e71b236fd5))
+
+
+## [0.29.0](https://github.com/databricks/appkit/compare/v0.28.0...v0.29.0) (2026-05-05)
+
+### appkit
+
+* **appkit:** shared agent types and LLM adapter implementations ([#301](https://github.com/databricks/appkit/issues/301)) ([b5b695d](https://github.com/databricks/appkit/commit/b5b695d8e6c8b1162e70661ae6a507c06389b08d))
+
+
+## [0.28.0](https://github.com/databricks/appkit/compare/v0.27.1...v0.28.0) (2026-04-30)
+
+### plugin
+
+* **plugin:** add stability system (beta/ga) with promote command ([#264](https://github.com/databricks/appkit/issues/264)) ([1a77ce9](https://github.com/databricks/appkit/commit/1a77ce9c5b8e3306b47139e4ce891795e5ec14a1)), closes [databricks/cli#5090](https://github.com/databricks/cli/issues/5090) [#280](https://github.com/databricks/appkit/issues/280) [databricks/cli#5090](https://github.com/databricks/cli/issues/5090)
+
+* add execution context attributes to telemetry spans ([#288](https://github.com/databricks/appkit/issues/288)) ([ae259ca](https://github.com/databricks/appkit/commit/ae259ca9fc363ef1e927e2919e8c1ee6d0d7d748)), closes [#197](https://github.com/databricks/appkit/issues/197)
+
+
+## [0.27.1](https://github.com/databricks/appkit/compare/v0.27.0...v0.27.1) (2026-04-30)
+
+### appkit
+
+* **appkit:** harden SSE response headers in setupHeaders ([#331](https://github.com/databricks/appkit/issues/331)) ([8b90a15](https://github.com/databricks/appkit/commit/8b90a1528fe0d724ae235c6c27130c8103fb072d))
+
+
+## [0.27.0](https://github.com/databricks/appkit/compare/v0.26.1...v0.27.0) (2026-04-28)
+
+### jobs
+
+* **jobs:** add HTTP routes, validation, streaming, and review fixes ([4e92340](https://github.com/databricks/appkit/commit/4e923408e5ff9248906bae512432b94b0815188e))
+
+* add resource-scoped jobs plugin for Databricks Lakeflow Jobs ([7092d06](https://github.com/databricks/appkit/commit/7092d069cec3a75b8922222a1520e3236e304e1b))
+
+
+## [0.26.1](https://github.com/databricks/appkit/compare/v0.26.0...v0.26.1) (2026-04-27)
+
+* log execution errors server-side (stream, Lakebase, SQL Warehouse) ([#255](https://github.com/databricks/appkit/issues/255)) ([390d9e5](https://github.com/databricks/appkit/commit/390d9e502f996d217054fa57375ed56fc82e90f2))
+
+
+## [0.26.0](https://github.com/databricks/appkit/compare/v0.25.1...v0.26.0) (2026-04-27)
+
+* add appkit codemod on-plugins-ready CLI ([#291](https://github.com/databricks/appkit/issues/291)) ([f2f0504](https://github.com/databricks/appkit/commit/f2f05044f3216b1eafcd118bd995960c35392020))
+* add onPluginsReady callback to createApp, remove autoStart ([#280](https://github.com/databricks/appkit/issues/280)) ([a06b6e3](https://github.com/databricks/appkit/commit/a06b6e392de2bab2004e7ea2ccf8bb080dfea545))
+
+
 ## [0.25.1](https://github.com/databricks/appkit/compare/v0.25.0...v0.25.1) (2026-04-27)
 
 ### appkit

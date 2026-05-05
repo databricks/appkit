@@ -95,6 +95,12 @@
       "type": "boolean",
       "default": false,
       "description": "When true, this plugin is excluded from the template plugins manifest (appkit.plugins.json) during sync."
+    },
+    "stability": {
+      "type": "string",
+      "enum": ["beta", "ga"],
+      "default": "ga",
+      "description": "Plugin stability level. Beta plugins may have breaking API changes between minor releases but are on a path to GA. GA (general availability) plugins follow semver strictly."
     }
   },
   "additionalProperties": false,

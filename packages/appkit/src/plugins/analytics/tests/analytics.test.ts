@@ -174,16 +174,13 @@ describe("Analytics Plugin", () => {
 
       expect(mockRes.setHeader).toHaveBeenCalledWith(
         "Content-Type",
-        "text/event-stream",
+        "text/event-stream; charset=utf-8",
       );
       expect(mockRes.setHeader).toHaveBeenCalledWith(
         "Cache-Control",
-        "no-cache",
+        "no-cache, no-transform",
       );
-      expect(mockRes.setHeader).toHaveBeenCalledWith(
-        "Connection",
-        "keep-alive",
-      );
+      expect(mockRes.setHeader).toHaveBeenCalledWith("X-Accel-Buffering", "no");
 
       expect(mockRes.write).toHaveBeenCalledWith("event: result\n");
       expect(mockRes.write).toHaveBeenCalledWith(
@@ -245,7 +242,7 @@ describe("Analytics Plugin", () => {
 
       expect(mockRes.setHeader).toHaveBeenCalledWith(
         "Content-Type",
-        "text/event-stream",
+        "text/event-stream; charset=utf-8",
       );
 
       expect(mockRes.write).toHaveBeenCalledWith("event: result\n");

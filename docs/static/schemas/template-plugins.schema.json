@@ -12,7 +12,7 @@
     },
     "version": {
       "type": "string",
-      "const": "1.0",
+      "enum": ["1.0", "1.1"],
       "description": "Schema version for the template plugins manifest"
     },
     "plugins": {
@@ -68,6 +68,12 @@
         "onSetupMessage": {
           "type": "string",
           "description": "Message displayed to the user after project initialization. Use this to inform about manual setup steps (e.g. environment variables, resource provisioning)."
+        },
+        "stability": {
+          "type": "string",
+          "enum": ["beta", "ga"],
+          "default": "ga",
+          "description": "Plugin stability level. Beta is heading to GA; APIs may change between minor releases. GA (general availability) follows semver."
         },
         "resources": {
           "type": "object",

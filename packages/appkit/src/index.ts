@@ -15,6 +15,7 @@ export type {
 } from "shared";
 export { isSQLTypeMarker, sql } from "shared";
 export { CacheManager } from "./cache";
+export type { JobsConnectorConfig } from "./connectors/jobs";
 export type {
   DatabaseCredential,
   GenerateDatabaseCredentialRequest,
@@ -53,7 +54,6 @@ export {
   type ToPlugin,
   toPlugin,
 } from "./plugin";
-export { analytics, files, genie, lakebase, server, serving } from "./plugins";
 // Files plugin types (for custom policy authoring)
 export type {
   FileAction,
@@ -66,6 +66,14 @@ export {
   READ_ACTIONS,
   WRITE_ACTIONS,
 } from "./plugins/files/policy";
+export * from "./plugins/ga-exports.generated";
+export type {
+  IJobsConfig,
+  JobAPI,
+  JobConfig,
+  JobHandle,
+  JobsExport,
+} from "./plugins/jobs";
 export type {
   EndpointConfig,
   ServingEndpointEntry,

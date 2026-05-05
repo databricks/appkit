@@ -79,4 +79,5 @@ This Software contains code from the following open source projects:
 | [tailwind-merge](https://www.npmjs.com/package/tailwind-merge) | 3.4.0 | MIT | https://github.com/dcastil/tailwind-merge |
 | [vaul](https://www.npmjs.com/package/vaul) | 1.1.2 | MIT | https://vaul.emilkowal.ski/ |
 | [ws](https://www.npmjs.com/package/ws) | 7.5.10, 8.18.3 | MIT | https://github.com/websockets/ws |
+| [zod](https://www.npmjs.com/package/zod) | 4.3.6 | MIT | https://zod.dev |
 

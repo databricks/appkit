@@ -44,7 +44,7 @@ describe("StreamManager", () => {
 
       expect(mockRes.setHeader).toHaveBeenCalledWith(
         "Content-Type",
-        "text/event-stream",
+        "text/event-stream; charset=utf-8",
       );
       expect(events).toContain(
         'data: {"type":"start","message":"Starting"}\n\n',
@@ -193,6 +193,43 @@ describe("StreamManager", () => {
 
       expect(streamManager.getActiveCount()).toBe(0);
     });
+
+    test("should abort generator when last client disconnects", async () => {
+      const { mockRes } = createMockResponse();
+      let closeHandler: (() => void) | undefined;
+
+      mockRes.on.mockImplementation((event: string, handler: () => void) => {
+        if (event === "close") closeHandler = handler;
+      });
+
+      let signalAborted = false;
+
+      async function* generator(signal: AbortSignal) {
+        yield { type: "start" };
+        // Simulate a long-running polling loop that respects the signal
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) {
+            resolve();
+            return;
+          }
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        signalAborted = signal.aborted;
+      }
+
+      const streamPromise = streamManager.stream(mockRes as any, generator);
+
+      // Let the generator yield "start" and enter the signal wait
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Simulate client disconnect
+      if (closeHandler) closeHandler();
+
+      await streamPromise;
+
+      expect(signalAborted).toBe(true);
+      expect(streamManager.getActiveCount()).toBe(0);
+    });
   });
 
   describe("error handling", () => {
@@ -276,6 +313,36 @@ describe("StreamManager", () => {
       expect(events.filter((e) => e.includes("Error after ended")).length).toBe(
         0,
       );
+    });
+
+    test("should not log the full error object (query redaction)", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const { mockRes } = createMockResponse();
+
+      const dbError = new Error('column "email" does not exist') as any;
+      dbError.query = "SELECT email, secret_token FROM users WHERE id = $1";
+      dbError.parameters = ["sensitive-id"];
+
+      async function* generator() {
+        yield { type: "start" };
+        throw dbError;
+      }
+
+      await streamManager.stream(mockRes as any, generator);
+
+      const loggedOutput = errorSpy.mock.calls
+        .map((call) => call.join(" "))
+        .join(" ");
+
+      // Should log the error message (contains column name, which is OK)
+      expect(loggedOutput).toContain('column "email" does not exist');
+
+      // Should NOT log the raw query or parameters from the error object
+      expect(loggedOutput).not.toContain("secret_token");
+      expect(loggedOutput).not.toContain("sensitive-id");
+
+      errorSpy.mockRestore();
     });
   });
 

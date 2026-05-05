@@ -38,7 +38,11 @@ plugin architecture, and React integration.
 | [FilePolicyUser](Interface.FilePolicyUser.md) | Minimal user identity passed to the policy function. |
 | [FileResource](Interface.FileResource.md) | Describes the file or directory being acted upon. |
 | [GenerateDatabaseCredentialRequest](Interface.GenerateDatabaseCredentialRequest.md) | Request parameters for generating database OAuth credentials |
+| [IJobsConfig](Interface.IJobsConfig.md) | Configuration for the Jobs plugin. |
 | [ITelemetry](Interface.ITelemetry.md) | Plugin-facing interface for OpenTelemetry instrumentation. Provides a thin abstraction over OpenTelemetry APIs for plugins. |
+| [JobAPI](Interface.JobAPI.md) | User-facing API for a single configured job. |
+| [JobConfig](Interface.JobConfig.md) | Per-job configuration options. |
+| [JobsConnectorConfig](Interface.JobsConnectorConfig.md) | - |
 | [LakebasePoolConfig](Interface.LakebasePoolConfig.md) | Configuration for creating a Lakebase connection pool |
 | [PluginManifest](Interface.PluginManifest.md) | Plugin manifest that declares metadata and resource requirements. Attached to plugin classes as a static property. Extends the shared PluginManifest with strict resource types. |
 | [RequestedClaims](Interface.RequestedClaims.md) | Optional claims for fine-grained Unity Catalog table permissions When specified, the returned token will be scoped to only the requested tables |
@@ -61,6 +65,8 @@ plugin architecture, and React integration.
 | [FileAction](TypeAlias.FileAction.md) | Every action the files plugin can perform. |
 | [FilePolicy](TypeAlias.FilePolicy.md) | A policy function that decides whether `user` may perform `action` on `resource`. Return `true` to allow, `false` to deny. |
 | [IAppRouter](TypeAlias.IAppRouter.md) | Express router type for plugin route registration |
+| [JobHandle](TypeAlias.JobHandle.md) | Job handle returned by `appkit.jobs("etl")`. Supports OBO access via `.asUser(req)`. |
+| [JobsExport](TypeAlias.JobsExport.md) | Public API shape of the jobs plugin. Callable to select a job by key. |
 | [PluginData](TypeAlias.PluginData.md) | Tuple of plugin class, config, and name. Created by `toPlugin()` and passed to `createApp()`. |
 | [ResourcePermission](TypeAlias.ResourcePermission.md) | Union of all possible permission levels across all resource types. |
 | [ServingFactory](TypeAlias.ServingFactory.md) | Factory function returned by `AppKit.serving`. |

@@ -11,11 +11,15 @@ import { StreamValidator } from "./validator";
 export class SSEWriter {
   // setup SSE headers
   setupHeaders(res: IAppResponse): void {
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("Content-Encoding", "none");
-
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    // X-Accel-Buffering: no — disables nginx-style proxy response buffering
+    // for SSE (used by Cloudflare, AWS, GCP, and most corporate proxies).
+    res.setHeader("X-Accel-Buffering", "no");
+    // Intentionally NOT setting:
+    //   - Connection: keep-alive   (HTTP/2 forbids it; Node manages keep-alive)
+    //   - Content-Encoding: none   (invalid value; can trigger 502/RST in
+    //                                strict intermediaries)
     res.flushHeaders?.();
   }
 

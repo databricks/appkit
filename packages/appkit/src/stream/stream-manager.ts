@@ -1,12 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { context } from "@opentelemetry/api";
 import type { IAppResponse, StreamConfig } from "shared";
+import { createLogger } from "../logging/logger";
 import { EventRingBuffer } from "./buffers";
 import { streamDefaults } from "./defaults";
 import { SSEWriter } from "./sse-writer";
 import { StreamRegistry } from "./stream-registry";
 import { SSEErrorCode, type StreamEntry, type StreamOperation } from "./types";
 import { StreamValidator } from "./validator";
+
+const logger = createLogger("stream");
 
 // main entry point for Server-Sent events streaming
 export class StreamManager {
@@ -135,6 +138,11 @@ export class StreamManager {
       streamEntry.clients.delete(res);
       this.activeOperations.delete(streamOperation);
 
+      // Stop the generator when no clients remain
+      if (streamEntry.clients.size === 0 && !streamEntry.isCompleted) {
+        streamEntry.abortController.abort("All clients disconnected");
+      }
+
       // cleanup if stream is completed and no clients are connected
       if (streamEntry.isCompleted && streamEntry.clients.size === 0) {
         setTimeout(() => {
@@ -215,6 +223,12 @@ export class StreamManager {
       clearInterval(heartbeat);
       this.activeOperations.delete(streamOperation);
       streamEntry.clients.delete(res);
+
+      // Stop the generator when no clients remain so polling loops
+      // (e.g. jobs runAndWait) don't keep running in the background.
+      if (streamEntry.clients.size === 0 && !streamEntry.isCompleted) {
+        abortController.abort("Client disconnected");
+      }
     });
 
     await this._processGeneratorInBackground(streamEntry);
@@ -275,6 +289,17 @@ export class StreamManager {
           error instanceof Error ? error.message : "Internal server error";
         const errorEventId = randomUUID();
         const errorCode = this._categorizeError(error);
+
+        // client cancellation is a normal control-flow signal, not a failure
+        if (errorCode === SSEErrorCode.STREAM_ABORTED) {
+          logger.info("Stream aborted by client (code=%s)", errorCode);
+        } else {
+          logger.error(
+            "Stream execution failed: %s (code=%s)",
+            errorMsg,
+            errorCode,
+          );
+        }
 
         // buffer error event
         streamEntry.eventBuffer.add({

@@ -158,6 +158,12 @@ export class LakebaseV1Connector {
           span.recordException(error as Error);
           span.setStatus({ code: SpanStatusCode.ERROR });
 
+          logger.error(
+            "Query execution failed: %s (code=%s)",
+            error instanceof Error ? error.message : String(error),
+            (error as any)?.code,
+          );
+
           if (error instanceof AppKitError) {
             throw error;
           }
@@ -244,6 +250,12 @@ export class LakebaseV1Connector {
           }
           span.recordException(error as Error);
           span.setStatus({ code: SpanStatusCode.ERROR });
+
+          logger.error(
+            "Transaction execution failed: %s (code=%s)",
+            error instanceof Error ? error.message : String(error),
+            (error as any)?.code,
+          );
 
           if (error instanceof AppKitError) {
             throw error;

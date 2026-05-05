@@ -1,3 +1,4 @@
+import { createContextKey, context as otelContext } from "@opentelemetry/api";
 import type express from "express";
 import type {
   BasePlugin,
@@ -40,6 +41,20 @@ import type {
 } from "./interceptors/types";
 
 const logger = createLogger("plugin");
+
+/**
+ * OTel context key for marking OBO dev mode fallback.
+ * Set when asUser() is called in development mode without a user token.
+ */
+const DEV_OBO_FALLBACK_KEY = createContextKey("appkit.devOboFallback");
+
+/**
+ * Returns true if the current execution is an OBO dev mode fallback
+ * (asUser() was called but fell back to service principal due to missing token).
+ */
+export function isDevOboFallback(): boolean {
+  return otelContext.active().getValue(DEV_OBO_FALLBACK_KEY) === true;
+}
 
 /**
  * Narrow an unknown thrown value to an Error that carries a numeric
@@ -338,7 +353,23 @@ export abstract class Plugin<
         "asUser() called without user token in development mode. Skipping user impersonation.",
       );
 
-      return this;
+      // Return a proxy that marks execution as OBO dev fallback via OTel context,
+      // so telemetry spans can distinguish intended OBO calls from regular SP calls
+      return new Proxy(this, {
+        get: (target, prop, receiver) => {
+          const value = Reflect.get(target, prop, receiver);
+          if (typeof value !== "function") return value;
+          if (typeof prop === "string" && EXCLUDED_FROM_PROXY.has(prop))
+            return value;
+
+          return (...args: unknown[]) => {
+            const ctx = otelContext
+              .active()
+              .setValue(DEV_OBO_FALLBACK_KEY, true);
+            return otelContext.with(ctx, () => value.apply(target, args));
+          };
+        },
+      }) as this;
     }
 
     if (!token) {
@@ -409,6 +440,9 @@ export abstract class Plugin<
     const effectiveUserKey = userKey ?? getCurrentUserId();
 
     const self = this;
+    // capture the active OTel context (HTTP span) before entering the async generator,
+    // where it would otherwise be lost across the async boundary
+    const parentOtelContext = otelContext.active();
 
     // wrapper function to ensure it returns a generator
     const asyncWrapperFn = async function* (streamSignal?: AbortSignal) {
@@ -428,11 +462,14 @@ export abstract class Plugin<
         return result;
       };
 
-      // execute the function with interceptors
-      const result = await self._executeWithInterceptors(
-        wrappedFn as (signal?: AbortSignal) => Promise<T>,
-        interceptors,
-        context,
+      // execute the function with interceptors, restoring the parent OTel context
+      // so telemetry spans are linked as children of the HTTP request span
+      const result = await otelContext.with(parentOtelContext, () =>
+        self._executeWithInterceptors(
+          wrappedFn as (signal?: AbortSignal) => Promise<T>,
+          interceptors,
+          context,
+        ),
       );
 
       // check if result is a generator
