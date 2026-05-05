@@ -16,6 +16,39 @@ const DEFAULT_MAX_STREAM_TEXT_CHARS = 4 * 1024 * 1024;
 /** Default cap for accumulated JSON arguments per streamed tool call index. */
 const DEFAULT_MAX_TOOL_ARGUMENT_CHARS = 2 * 1024 * 1024;
 
+/** Cap text length before running Python-style tool-call regex (ReDoS guard). */
+const PYTHON_STYLE_TOOL_PARSE_MAX_INPUT = 64 * 1024;
+
+/** Fallback HTTP timeout when the raw fetch adapter path receives no AbortSignal from the runner. */
+const RAW_FETCH_DEFAULT_TIMEOUT_MS = 120_000;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function extractLlamaToolJsonSlice(text: string): string | undefined {
+  const start = text.indexOf("[{");
+  if (start < 0) return undefined;
+  const endBracket = text.lastIndexOf("}]");
+  if (endBracket < start) return undefined;
+  return text.slice(start, endBracket + 2);
+}
+
+/** OpenAI SSE payload: `{ choices: [{ delta }] }`. */
+function openAiChoicesDelta(parsed: unknown): unknown {
+  if (!isRecord(parsed)) return undefined;
+  const choices = parsed.choices;
+  if (!Array.isArray(choices) || choices.length < 1) return undefined;
+  const first = choices[0];
+  if (!isRecord(first)) return undefined;
+  return first.delta;
+}
+
+function isStreamingDeltaToolCall(value: unknown): value is DeltaToolCall {
+  if (!isRecord(value)) return false;
+  return typeof value.index === "number";
+}
+
 function throwIfExceedsStreamLimit(
   label: string,
   currentLength: number,
@@ -210,6 +243,8 @@ export class DatabricksAdapter implements AgentAdapter {
     } else {
       const { endpointUrl, authenticate } = options;
       this.streamBody = async (body, signal) => {
+        const fetchSignal =
+          signal ?? AbortSignal.timeout(RAW_FETCH_DEFAULT_TIMEOUT_MS);
         const authHeaders = await authenticate();
         const response = await fetch(endpointUrl, {
           method: "POST",
@@ -218,7 +253,7 @@ export class DatabricksAdapter implements AgentAdapter {
             ...authHeaders,
           },
           body: JSON.stringify(body),
-          signal,
+          signal: fetchSignal,
         });
         if (!response.ok) {
           const errorText = await response.text().catch(() => "Unknown error");
@@ -448,7 +483,15 @@ export class DatabricksAdapter implements AgentAdapter {
       body.tools = tools;
     }
 
-    const responseBody = await this.streamBody(body, context.signal);
+    let responseBody: ReadableStream<Uint8Array>;
+    try {
+      responseBody = await this.streamBody(body, context.signal);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Stream request failed";
+      yield { type: "status", status: "error", error: msg };
+      throw err;
+    }
+
     const reader = responseBody.getReader();
 
     const decoder = new TextDecoder();
@@ -488,53 +531,61 @@ export class DatabricksAdapter implements AgentAdapter {
           const data = trimmed.slice(6);
           if (data === "[DONE]") continue;
 
-          let parsed: any;
+          let parsed: unknown;
           try {
             parsed = JSON.parse(data);
-          } catch {
+          } catch (parseErr) {
+            console.debug(
+              "[DatabricksAdapter] malformed SSE data line JSON",
+              { line: `${data.slice(0, 256)}${data.length > 256 ? "…" : ""}` },
+              parseErr,
+            );
             continue;
           }
 
-          const delta = parsed.choices?.[0]?.delta;
-          if (!delta) continue;
+          const deltaUnknown = openAiChoicesDelta(parsed);
+          if (!isRecord(deltaUnknown)) continue;
 
-          if (delta.content) {
+          if (typeof deltaUnknown.content === "string") {
+            const content = deltaUnknown.content;
             throwIfExceedsStreamLimit(
               "streamed assistant text",
               fullText.length,
-              delta.content,
+              content,
               this.maxStreamTextChars,
             );
-            fullText += delta.content;
-            yield { type: "message_delta" as const, content: delta.content };
+            fullText += content;
+            yield { type: "message_delta" as const, content };
           }
 
-          if (delta.tool_calls) {
-            for (const tc of delta.tool_calls as DeltaToolCall[]) {
-              const existing = toolCallAccumulator.get(tc.index);
-              if (existing) {
-                if (tc.function?.arguments) {
-                  throwIfExceedsStreamLimit(
-                    "tool call arguments",
-                    existing.arguments.length,
-                    tc.function.arguments,
-                    this.maxToolArgumentsChars,
-                  );
-                  existing.arguments += tc.function.arguments;
-                }
-              } else {
-                const initial = tc.function?.arguments ?? "";
-                if (initial.length > this.maxToolArgumentsChars) {
-                  throw new Error(
-                    `DatabricksAdapter: tool call arguments exceed configured limit (${this.maxToolArgumentsChars} UTF-16 code units)`,
-                  );
-                }
-                toolCallAccumulator.set(tc.index, {
-                  id: tc.id ?? `call_${tc.index}`,
-                  name: tc.function?.name ?? "",
-                  arguments: initial,
-                });
+          const toolCallsRaw = deltaUnknown.tool_calls;
+          if (!Array.isArray(toolCallsRaw)) continue;
+
+          for (const tc of toolCallsRaw) {
+            if (!isStreamingDeltaToolCall(tc)) continue;
+            const existing = toolCallAccumulator.get(tc.index);
+            if (existing) {
+              if (tc.function?.arguments) {
+                throwIfExceedsStreamLimit(
+                  "tool call arguments",
+                  existing.arguments.length,
+                  tc.function.arguments,
+                  this.maxToolArgumentsChars,
+                );
+                existing.arguments += tc.function.arguments;
               }
+            } else {
+              const initial = tc.function?.arguments ?? "";
+              if (initial.length > this.maxToolArgumentsChars) {
+                throw new Error(
+                  `DatabricksAdapter: tool call arguments exceed configured limit (${this.maxToolArgumentsChars} UTF-16 code units)`,
+                );
+              }
+              toolCallAccumulator.set(tc.index, {
+                id: tc.id ?? `call_${tc.index}`,
+                name: tc.function?.name ?? "",
+                arguments: initial,
+              });
             }
           }
         }
@@ -542,13 +593,19 @@ export class DatabricksAdapter implements AgentAdapter {
     } finally {
       try {
         await reader.cancel();
-      } catch {
-        // Best-effort: reader may already be closed or the stream errored.
+      } catch (cancelErr) {
+        console.debug(
+          "[DatabricksAdapter] reader.cancel() failed during teardown",
+          cancelErr,
+        );
       }
       try {
         reader.releaseLock();
-      } catch {
-        // Lock may already be released after cancel.
+      } catch (unlockErr) {
+        console.debug(
+          "[DatabricksAdapter] reader.releaseLock() failed during teardown",
+          unlockErr,
+        );
       }
     }
 
@@ -684,27 +741,30 @@ export function parseTextToolCalls(
   return [];
 }
 
+function isLlamaToolJsonItem(value: unknown): value is Record<
+  string,
+  unknown
+> & {
+  name: string;
+} {
+  if (!isRecord(value)) return false;
+  return typeof value.name === "string";
+}
+
 function tryParseLlamaJsonToolCalls(
   text: string,
 ): Array<{ name: string; args: unknown }> {
-  const match = text.match(/\[\s*\{[\s\S]*\}\s*\]/);
-  if (!match) return [];
+  const slice = extractLlamaToolJsonSlice(text);
+  if (!slice) return [];
 
   try {
-    const parsed = JSON.parse(match[0]);
+    const parsed: unknown = JSON.parse(slice);
     if (!Array.isArray(parsed)) return [];
 
-    return parsed
-      .filter(
-        (item: any) =>
-          typeof item === "object" &&
-          item !== null &&
-          typeof item.name === "string",
-      )
-      .map((item: any) => ({
-        name: item.name,
-        args: item.parameters ?? item.arguments ?? item.args ?? {},
-      }));
+    return parsed.filter(isLlamaToolJsonItem).map((item) => ({
+      name: item.name,
+      args: item.parameters ?? item.arguments ?? item.args ?? {},
+    }));
   } catch {
     return [];
   }
@@ -713,6 +773,10 @@ function tryParseLlamaJsonToolCalls(
 function tryParsePythonStyleToolCalls(
   text: string,
 ): Array<{ name: string; args: unknown }> {
+  if (text.length > PYTHON_STYLE_TOOL_PARSE_MAX_INPUT) {
+    return [];
+  }
+
   const pattern = /\[?([a-zA-Z_][\w.]*)\(([^)]*)\)\]?/g;
   const results: Array<{ name: string; args: unknown }> = [];
 

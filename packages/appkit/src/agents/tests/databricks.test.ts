@@ -557,6 +557,138 @@ describe("DatabricksAdapter", () => {
       }
     }).rejects.toThrow("Databricks API error (401): Unauthorized");
   });
+
+  test("yields error status then throws when injected streamBody fails", async () => {
+    const adapter = new DatabricksAdapter({
+      streamBody: async () => Promise.reject(new Error("serving_unreachable")),
+      maxSteps: 1,
+    });
+
+    const events: AgentEvent[] = [];
+    await expect(async () => {
+      for await (const ev of adapter.run(
+        { messages: createTestMessages(), tools: [], threadId: "t1" },
+        { executeTool: vi.fn() },
+      )) {
+        events.push(ev);
+      }
+    }).rejects.toThrow("serving_unreachable");
+
+    expect(events[0]).toEqual({ type: "status", status: "running" });
+    expect(events[1]).toEqual({
+      type: "status",
+      status: "error",
+      error: "serving_unreachable",
+    });
+  });
+
+  test("yields tool_result with error when executeTool rejects", async () => {
+    const executeTool = vi.fn().mockRejectedValue(new Error("tool_denied"));
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      body: createReadableStream([
+        toolCallDelta(
+          0,
+          "call_fail",
+          "analytics__query",
+          '{"query":"SELECT 2"}',
+        ),
+        sseChunk("[DONE]"),
+      ]),
+      text: () => Promise.resolve(""),
+    });
+
+    const adapter = createAdapter({ maxSteps: 1 });
+    const events: AgentEvent[] = [];
+
+    for await (const ev of adapter.run(
+      {
+        messages: createTestMessages(),
+        tools: createTestTools(),
+        threadId: "t1",
+      },
+      { executeTool },
+    )) {
+      events.push(ev);
+    }
+
+    expect(events).toContainEqual({
+      type: "tool_call",
+      callId: "call_fail",
+      name: "analytics.query",
+      args: { query: "SELECT 2" },
+    });
+
+    expect(events).toContainEqual({
+      type: "tool_result",
+      callId: "call_fail",
+      result: null,
+      error: "tool_denied",
+    });
+
+    expect(executeTool).toHaveBeenCalledWith("analytics.query", {
+      query: "SELECT 2",
+    });
+  });
+
+  test("uses AbortSignal.timeout for raw fetch when context has no signal", async () => {
+    globalThis.fetch = mockFetch([textDelta("Hello"), sseChunk("[DONE]")]);
+
+    const ac = new AbortController();
+    const timeoutSpy = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockReturnValue(ac.signal);
+
+    const adapter = createAdapter();
+
+    for await (const _ of adapter.run(
+      {
+        messages: createTestMessages(),
+        tools: createTestTools(),
+        threadId: "t1",
+      },
+      { executeTool: vi.fn(), signal: undefined },
+    )) {
+      // drain
+    }
+
+    expect(timeoutSpy).toHaveBeenCalledWith(120_000);
+    timeoutSpy.mockRestore();
+  });
+
+  test("logs and skips malformed JSON in SSE lines", async () => {
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+    globalThis.fetch = mockFetch([
+      sseChunk("{not-json-truncated"),
+      textDelta("ok"),
+      sseChunk("[DONE]"),
+    ]);
+
+    const adapter = createAdapter();
+    const events: AgentEvent[] = [];
+
+    for await (const ev of adapter.run(
+      {
+        messages: createTestMessages(),
+        tools: createTestTools(),
+        threadId: "t1",
+      },
+      { executeTool: vi.fn() },
+    )) {
+      events.push(ev);
+    }
+
+    expect(
+      debugSpy.mock.calls.some(([msg]) => {
+        return typeof msg === "string" && msg.includes("malformed SSE");
+      }),
+    ).toBe(true);
+    expect(
+      events.some((e) => e.type === "message_delta" && e.content === "ok"),
+    ).toBe(true);
+    debugSpy.mockRestore();
+  });
 });
 
 describe("DatabricksAdapter.fromServingEndpoint", () => {
@@ -739,5 +871,12 @@ describe("parseTextToolCalls", () => {
     expect(result).toEqual([
       { name: "lakebase.query", args: { text: "SELECT 1" } },
     ]);
+  });
+
+  test("returns empty when Python-style fallback text exceeds size cap", () => {
+    const cap = 64 * 1024;
+    const filler = "x".repeat(cap);
+    const suffix = "[analytics.query(query='SELECT 1')]";
+    expect(parseTextToolCalls(`${filler}${suffix}`)).toEqual([]);
   });
 });

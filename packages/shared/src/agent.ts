@@ -200,6 +200,7 @@ export interface AgentInput {
 }
 
 export interface AgentRunContext {
+  /** Tool implementations should sanitize failure text — errors become `tool_result.error` and can flow back into the LLM transcript. */
   executeTool: (name: string, args: unknown) => Promise<unknown>;
   signal?: AbortSignal;
 }
