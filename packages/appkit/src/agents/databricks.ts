@@ -336,6 +336,11 @@ export class DatabricksAdapter implements AgentAdapter {
     const wireToName = new Map<string, string>();
     for (const tool of input.tools) {
       const wire = tool.name.replace(/\./g, "__");
+      if (wireToName.has(wire) && wireToName.get(wire) !== tool.name) {
+        throw new Error(
+          `Tool name collision: '${tool.name}' and '${wireToName.get(wire)}' both map to wire name '${wire}'`,
+        );
+      }
       nameToWire.set(tool.name, wire);
       wireToName.set(wire, tool.name);
     }

@@ -153,6 +153,37 @@ describe("DatabricksAdapter", () => {
     expect(init.headers.Authorization).toBe("Bearer test-token");
   });
 
+  test("throws when two tool names map to the same wire format", async () => {
+    const adapter = createAdapter();
+    const conflictingTools: AgentToolDefinition[] = [
+      {
+        name: "foo.bar",
+        description: "one",
+        parameters: { type: "object", properties: {} },
+      },
+      {
+        name: "foo__bar",
+        description: "two",
+        parameters: { type: "object", properties: {} },
+      },
+    ];
+
+    await expect(async () => {
+      for await (const _ of adapter.run(
+        {
+          messages: createTestMessages(),
+          tools: conflictingTools,
+          threadId: "t1",
+        },
+        { executeTool: vi.fn() },
+      )) {
+        // drain
+      }
+    }).rejects.toThrow(
+      /Tool name collision: .* both map to wire name 'foo__bar'/,
+    );
+  });
+
   test("handles structured tool calls and executes them", async () => {
     const executeTool = vi.fn().mockResolvedValue([{ trip_id: 1 }]);
 
