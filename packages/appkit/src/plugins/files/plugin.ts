@@ -244,10 +244,12 @@ export class FilesPlugin extends Plugin {
    * Then runs the volume policy (403 on denial, 500 on unexpected error).
    * Returns `true` if the request may proceed, `false` if a response was sent.
    *
-   * NOTE: This method only selects which identity the policy sees. It does
-   * NOT change which `WorkspaceClient` the SDK calls execute against — that
-   * still uses the service principal until a later phase wires the actual
-   * OBO `runInUserContext` plumbing.
+   * NOTE: This method only selects which identity the *policy* sees. The
+   * matching SDK execution identity is selected separately by
+   * `_resolveAuthForRequest` and applied via `_runWithAuth` /
+   * `runInUserContext` in each handler. The two selections are designed to
+   * converge on the same identity per the policy-user matrix in the docs —
+   * see `docs/docs/plugins/files.md#policy-user-matrix`.
    */
   private async _enforcePolicy(
     req: express.Request,
