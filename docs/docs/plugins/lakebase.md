@@ -113,6 +113,68 @@ await createApp({
 });
 ```
 
+## On-Behalf-Of (OBO) — per-user connections
+
+When your app needs Row-Level Security (RLS) or per-user data isolation, use `asUser(req)` to execute queries using a per-user Lakebase connection pool. Each user's pool is authenticated with their Databricks identity, so PostgreSQL's `current_user` reflects the actual user.
+
+### Prerequisites
+
+1. **Enable user authorization** in your Databricks App. See [User authorization](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/auth#user-authorization) for setup instructions.
+2. Each user needs an **OAuth role** in Lakebase (created automatically on first connection, or via the Lakebase UI).
+
+### Usage
+
+No configuration needed — just call `asUser(req)`:
+
+```ts
+const AppKit = await createApp({
+  plugins: [server(), lakebase()],
+});
+
+// Service principal query (default — bypasses RLS as table owner)
+const all = await AppKit.lakebase.query("SELECT * FROM app.orders");
+
+// User-scoped query (per-user pool, RLS enforced)
+app.get("/api/my-orders", async (req, res) => {
+  const result = await AppKit.lakebase
+    .asUser(req)
+    .query("SELECT * FROM app.orders ORDER BY created_at DESC");
+  res.json(result.rows);
+});
+```
+
+When `asUser(req)` is called:
+1. The user's token and identity are extracted from `x-forwarded-access-token` and `x-forwarded-user` headers (set automatically by Databricks Apps).
+2. A per-user `pg.Pool` is created (or reused) with the user's OAuth credentials.
+3. `query()` and `pool` use the user's pool — `current_user` in PostgreSQL reflects the user's identity.
+
+### Row-Level Security example
+
+```sql
+-- As the service principal (during app setup):
+ALTER TABLE app.orders ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY user_orders ON app.orders
+  FOR ALL TO PUBLIC
+  USING (owner = current_user);
+
+-- Grant access so OBO users can query
+GRANT USAGE ON SCHEMA app TO PUBLIC;
+GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA app TO PUBLIC;
+```
+
+### How it works
+
+- The **service principal pool** (`AppKit.lakebase.pool`) is always created and used for DDL operations, seeding, and admin queries.
+- **Per-user pools** are created on the first `asUser(req)` call and cached by user identity. Each pool has its own OAuth token refresh cycle.
+- Idle connections within per-user pools close automatically (30s idle timeout). Empty pool objects are cleaned up periodically.
+- On shutdown, all pools (SP + user) are closed gracefully.
+- In development mode (`NODE_ENV=development`), if no user token is available, `asUser(req)` falls back to the SP pool with a warning.
+
+:::caution[RLS and superusers]
+PostgreSQL superusers bypass Row-Level Security entirely. Users with the `databricks_superuser` role will see all rows regardless of RLS policies. For RLS enforcement, use [fine-grained grants](#fine-grained-permissions) instead of the superuser role.
+:::
+
 ## Database Permissions
 
 When you create the app with the Lakebase resource using the [Getting started](#getting-started-with-the-lakebase) guide, the Service Principal is automatically granted `CONNECT_AND_CREATE` permission on the `postgres` resource. This lets the Service Principal connect to the database and create new objects, but **not access any existing schemas or tables.**

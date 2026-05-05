@@ -1,26 +1,20 @@
-import {
-  createLakebasePool,
-  createLakebasePoolManager,
-  type LakebasePoolManager,
-} from "@databricks/appkit";
-import { WorkspaceClient } from "@databricks/sdk-experimental";
+import { createLakebasePool } from "@databricks/appkit";
 import type { Pool } from "pg";
 import type { IAppRouter } from "shared";
 
 let pool: Pool;
-let oboPoolManager: LakebasePoolManager;
 
 /**
  * Raw PostgreSQL driver example using pg.Pool with automatic OAuth token refresh.
  *
  * This example demonstrates:
  * - Direct pg.Pool usage without ORM abstraction
- * - Manual SQL query writing with parameterized queries
  * - Schema and table creation (idempotent)
- * - Basic CRUD operations
- * - Connection health checking
- * - On-Behalf-Of (OBO) authentication with per-user pools
- * - Row-Level Security (RLS) enforcement via OBO
+ * - Row-Level Security (RLS) setup
+ * - Basic CRUD operations (SP pool)
+ *
+ * OBO routes are registered separately in index.ts via the Lakebase plugin's
+ * `asUser(req)` pattern — see `onPluginsReady`.
  */
 
 interface Product {
@@ -37,13 +31,7 @@ export async function setup(user?: string) {
   // Create service principal pool with automatic OAuth token refresh
   pool = createLakebasePool({ user });
 
-  // Create OBO pool manager for per-user pools
-  oboPoolManager = createLakebasePoolManager();
-
-  // Drop and recreate (SERIAL→UUID migration; safe for POC)
-  await pool.query(`DROP TABLE IF EXISTS raw_example.products CASCADE`);
-
-  // Create schema and table
+  // Create schema and table (idempotent)
   await pool.query(`
     CREATE SCHEMA IF NOT EXISTS raw_example;
 
@@ -53,7 +41,7 @@ export async function setup(user?: string) {
       category VARCHAR(100),
       price DECIMAL(10, 2),
       stock INTEGER DEFAULT 0,
-      created_by VARCHAR(255),
+      created_by VARCHAR(255) DEFAULT current_user,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -96,43 +84,6 @@ export async function setup(user?: string) {
   if (Number(rows[0].count) === 0) {
     await seedProducts(pool);
   }
-}
-
-/**
- * Get a per-user pool from the OBO pool manager.
- * Falls back to the service principal pool in development when no user token is available.
- */
-function getUserPool(
-  req: { header(name: string): string | undefined },
-  fallbackPool: Pool,
-): { pool: Pool; userName: string | null } {
-  const userToken = req.header("x-forwarded-access-token");
-  const userEmail = req.header("x-forwarded-email");
-
-  if (!userToken || !userEmail) {
-    console.log("[lakebase-obo] No user token/email — falling back to SP pool");
-    return { pool: fallbackPool, userName: null };
-  }
-
-  const isNewPool = !oboPoolManager.hasPool(userEmail);
-  const userPool = oboPoolManager.getPool(userEmail, {
-    workspaceClient: new WorkspaceClient({
-      token: userToken,
-      host: process.env.DATABRICKS_HOST,
-      authType: "pat",
-    }),
-    user: userEmail,
-  });
-
-  if (isNewPool) {
-    console.log(
-      `[lakebase-obo] Created new OBO pool for user "${userEmail}" (total pools: ${oboPoolManager.size})`,
-    );
-  } else {
-    console.log(`[lakebase-obo] Reusing OBO pool for user "${userEmail}"`);
-  }
-
-  return { pool: userPool, userName: userEmail };
 }
 
 export function registerRoutes(router: IAppRouter, basePath: string) {
@@ -192,61 +143,10 @@ export function registerRoutes(router: IAppRouter, basePath: string) {
       });
     }
   });
-
-  // GET /raw/debug-token - Show forwarded headers for debugging
-  router.get(`${basePath}/debug-token`, (req, res) => {
-    const allForwarded = Object.fromEntries(
-      Object.entries(req.headers).filter(([k]) => k.startsWith("x-forwarded")),
-    );
-    res.json(allForwarded);
-  });
-
-  // ── OBO routes (per-user pool, RLS enforced) ─────────────────────
-
-  // GET /raw/my-products - List products visible to the current user (RLS-filtered)
-  router.get(`${basePath}/my-products`, async (req, res) => {
-    try {
-      const { pool: userPool, userName } = getUserPool(req, pool);
-      const result = await userPool.query<Product>(
-        "SELECT * FROM raw_example.products ORDER BY id",
-      );
-      res.json({
-        user: userName ?? "service-principal (dev fallback)",
-        products: result.rows,
-      });
-    } catch (error: unknown) {
-      const err = error as Error;
-      res.status(500).json({
-        error: "Failed to fetch user products",
-        message: err.message,
-      });
-    }
-  });
-
-  // POST /raw/my-products - Create product as current user (sets created_by)
-  router.post(`${basePath}/my-products`, async (req, res) => {
-    try {
-      const { pool: userPool, userName } = getUserPool(req, pool);
-      const { name, category, price, stock } = req.body;
-
-      const result = await userPool.query<Product>(
-        `INSERT INTO raw_example.products (name, category, price, stock, created_by)
-           VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [name, category, Number(price), Number(stock), userName],
-      );
-      res.json(result.rows[0]);
-    } catch (error: unknown) {
-      const err = error as Error;
-      res.status(500).json({
-        error: "Failed to create product",
-        message: err.message,
-      });
-    }
-  });
 }
 
 export async function cleanup() {
-  await Promise.all([pool.end(), oboPoolManager.closeAll()]);
+  await pool.end();
 }
 
 async function seedProducts(pool: Pool) {

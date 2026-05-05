@@ -9,6 +9,9 @@ Create a pool manager that maintains per-key Lakebase connection pools.
 Each pool is created via `createLakebasePool` with the base config merged
 with per-pool overrides (e.g. a user's `workspaceClient` and `user`).
 
+A periodic cleanup removes empty Pool objects (where all connections have
+been closed by pg's built-in `idleTimeoutMillis`) from the internal Map.
+
 ## Parameters
 
 | Parameter | Type |

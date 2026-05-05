@@ -2,6 +2,9 @@ import type { LakebasePoolConfig } from "@databricks/lakebase";
 import type { Pool } from "pg";
 import { createLakebasePool } from "./index";
 
+/** Interval for removing empty (connectionless) pools from the Map. */
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
 /**
  * Manages multiple Lakebase connection pools keyed by an identifier (e.g. userId).
  *
@@ -22,7 +25,7 @@ export interface LakebasePoolManager {
   /** Close and remove a specific pool. */
   closePool(key: string): Promise<void>;
 
-  /** Close all managed pools (for graceful shutdown). */
+  /** Close all managed pools and stop cleanup (for graceful shutdown). */
   closeAll(): Promise<void>;
 
   /** Number of active pools. */
@@ -34,6 +37,9 @@ export interface LakebasePoolManager {
  *
  * Each pool is created via `createLakebasePool` with the base config merged
  * with per-pool overrides (e.g. a user's `workspaceClient` and `user`).
+ *
+ * A periodic cleanup removes empty Pool objects (where all connections have
+ * been closed by pg's built-in `idleTimeoutMillis`) from the internal Map.
  *
  * @example OBO usage
  * ```typescript
@@ -51,6 +57,19 @@ export function createLakebasePoolManager(
   baseConfig?: Partial<LakebasePoolConfig>,
 ): LakebasePoolManager {
   const pools = new Map<string, Pool>();
+
+  // Periodically remove empty Pool objects from the Map.
+  // pg.Pool's idleTimeoutMillis closes idle connections automatically;
+  // this just cleans up the Map entries once all connections are gone.
+  const cleanupTimer = setInterval(() => {
+    for (const [key, pool] of pools) {
+      if (pool.totalCount === 0) {
+        pool.end().catch(() => {});
+        pools.delete(key);
+      }
+    }
+  }, CLEANUP_INTERVAL_MS);
+  cleanupTimer.unref();
 
   return {
     getPool(key: string, perPoolConfig: Partial<LakebasePoolConfig>): Pool {
@@ -75,6 +94,7 @@ export function createLakebasePoolManager(
     },
 
     async closeAll(): Promise<void> {
+      clearInterval(cleanupTimer);
       const endPromises = [...pools.values()].map((p) => p.end());
       await Promise.all(endPromises);
       pools.clear();

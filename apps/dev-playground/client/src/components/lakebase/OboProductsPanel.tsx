@@ -22,11 +22,6 @@ interface Product {
   created_at: string;
 }
 
-interface MyProductsResponse {
-  user: string;
-  products: Product[];
-}
-
 interface CreateProductRequest {
   name: string;
   category: string;
@@ -41,13 +36,11 @@ export function OboProductsPanel() {
   const stockId = useId();
 
   const {
-    data: myData,
+    data: myProducts,
     loading: myLoading,
     error: myError,
     refetch: refetchMy,
-  } = useLakebaseData<MyProductsResponse>(
-    "/api/lakebase-examples/raw/my-products",
-  );
+  } = useLakebaseData<Product[]>("/api/lakebase-examples/raw/my-products");
 
   const {
     data: allProducts,
@@ -102,7 +95,7 @@ export function OboProductsPanel() {
     }
   };
 
-  const myProducts = myData?.products ?? [];
+  const myProductsList = myProducts ?? [];
 
   return (
     <div className="space-y-4">
@@ -122,11 +115,6 @@ export function OboProductsPanel() {
                 <code>current_user</code>.
               </CardDescription>
             </div>
-            {myData && (
-              <Badge className="bg-amber-100 text-amber-700 border-amber-200">
-                User: {myData.user}
-              </Badge>
-            )}
           </div>
         </CardHeader>
       </Card>
@@ -242,7 +230,8 @@ export function OboProductsPanel() {
                   My Products (OBO pool)
                 </CardTitle>
                 <CardDescription>
-                  RLS-filtered: only your rows visible
+                  RLS-filtered via per-user pool. Users with{" "}
+                  <code>databricks_superuser</code> role bypass RLS.
                 </CardDescription>
               </div>
               <Button variant="outline" size="sm" onClick={() => refetchMy()}>
@@ -262,14 +251,14 @@ export function OboProductsPanel() {
                 {myError.message}
               </div>
             )}
-            {!myLoading && myProducts.length === 0 && (
+            {!myLoading && myProductsList.length === 0 && (
               <div className="text-center py-8 text-muted-foreground">
                 <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
                 <p className="text-sm">No products yet. Create one above.</p>
               </div>
             )}
-            {myProducts.length > 0 && (
-              <ProductTable products={myProducts} showCreatedBy />
+            {myProductsList.length > 0 && (
+              <ProductTable products={myProductsList} showCreatedBy />
             )}
           </CardContent>
         </Card>
@@ -326,9 +315,6 @@ function ProductTable({
         <thead>
           <tr className="border-b">
             <th className="text-left py-2 px-2 font-medium text-muted-foreground">
-              ID
-            </th>
-            <th className="text-left py-2 px-2 font-medium text-muted-foreground">
               Name
             </th>
             <th className="text-left py-2 px-2 font-medium text-muted-foreground">
@@ -347,7 +333,6 @@ function ProductTable({
         <tbody>
           {products.map((p) => (
             <tr key={p.id} className="border-b last:border-0">
-              <td className="py-2 px-2">{p.id}</td>
               <td className="py-2 px-2 font-medium">{p.name}</td>
               <td className="py-2 px-2">
                 <Badge variant="outline">{p.category}</Badge>
