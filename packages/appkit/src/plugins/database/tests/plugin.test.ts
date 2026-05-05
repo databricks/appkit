@@ -62,7 +62,10 @@ describe("DatabasePlugin", () => {
     expect(createLakebasePool).toHaveBeenCalledWith({
       max: 3,
       idleTimeoutMillis: 30_000,
-      connectionTimeoutMillis: 10_000,
+      // POOL_DEFAULTS.connectionTimeoutMillis was lowered to fail-fast on
+      // pool acquire so the timeout interceptor + retry can re-route under
+      // saturation (was 10_000).
+      connectionTimeoutMillis: 3_000,
       maxUses: 1000,
     });
     expect(plugin.exports()).toEqual({ getPool: expect.any(Function) });

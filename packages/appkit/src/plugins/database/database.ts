@@ -35,8 +35,9 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
       ...this.config.connection,
     });
     attachSessionDefaults(this.pool, this.config.statementTimeoutMs);
-    if (process.env.DEBUG_POOL)
+    if (process.env.APPKIT_DEBUG_POOL || process.env.DEBUG_POOL) {
       startPoolStatsLog(this.pool, "service-principal");
+    }
     logger.info("Database plugin pool initialized");
 
     try {
@@ -56,16 +57,24 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
         Object.keys(loaded.schema.$tables).length,
       );
     } catch (err) {
-      // A throwing schema-load otherwise cascades through Promise.all in core
-      // and crashes every plugin's boot. Decorate the error with the
-      // convention path so the operator can find it, then re-raise unless the
-      // caller opted into tolerant boot.
       const message = err instanceof Error ? err.message : String(err);
       logger.error(
         "Database schema load failed (config/database/schema.ts): %s",
         message,
       );
-      if (!this.config.tolerateSetupFailure) throw err;
+      if (!this.config.tolerateSetupFailure) {
+        const stalePool = this.pool;
+        this.pool = null;
+        if (stalePool) {
+          await stalePool.end().catch((endErr) => {
+            logger.error(
+              "Error draining stale pool after schema-load failure: %O",
+              endErr,
+            );
+          });
+        }
+        throw err;
+      }
     }
   }
 
@@ -103,38 +112,59 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
 export const database = toPlugin(DatabasePlugin);
 
 /**
- * Attach a `connect` listener that sets per-session defaults on every new
- * Postgres session checked out of the pool: `statement_timeout` (caps runaway
- * queries even when the client signal is dropped) and `application_name` (so
- * the connection is attributable in `pg_stat_activity`).
+ * Attach a `connect` listener that sets per-session defaults on
+ * every new Postgres session checked out of the pool
+ * @param pool
+ * @param override
  */
 function attachSessionDefaults(pool: Pool, override?: number): void {
   const ms = override ?? STATEMENT_TIMEOUT_DEFAULT_MS;
+  const applicationName = applicationNameForSession();
   pool.on("connect", (client) => {
+    let destroyed = false;
+    const destroy = (label: string, err: unknown) => {
+      if (destroyed) return;
+      destroyed = true;
+      logger.error(
+        "Failed to set %s on pool connection; destroying client to prevent unguarded use: %O",
+        label,
+        err,
+      );
+      // `release(true)` removes the client from the pool entirely. pg will
+      // build a fresh connection on next acquire and re-fire `connect`.
+      const maybeRelease = (
+        client as unknown as { release?: (destroy?: boolean) => void }
+      ).release;
+      try {
+        maybeRelease?.call(client, true);
+      } catch (releaseErr) {
+        logger.error("Failed to destroy pool client: %O", releaseErr);
+      }
+    };
     client
-      .query(`SET application_name = '${APPLICATION_NAME}'`)
-      .catch((err) => {
-        logger.error(
-          "Failed to set application_name on pool connection: %O",
-          err,
-        );
-      });
+      .query(`SET application_name = '${applicationName}'`)
+      .catch((err) => destroy("application_name", err));
     if (Number.isFinite(ms) && ms > 0) {
-      client.query(`SET statement_timeout = ${Math.floor(ms)}`).catch((err) => {
-        logger.error(
-          "Failed to set statement_timeout on pool connection: %O",
-          err,
-        );
-      });
+      client
+        .query(`SET statement_timeout = ${Math.floor(ms)}`)
+        .catch((err) => destroy("statement_timeout", err));
     }
   });
 }
 
 /**
- * When `DEBUG_POOL=1` is set, periodically log the pool's
- * total/idle/waiting connection counts so operators can observe saturation.
- * The interval is unrefed so it never blocks shutdown.
+ * Build a per-session `application_name` string.
  */
+function applicationNameForSession(): string {
+  const appName = process.env.DATABRICKS_APP_NAME;
+  // Sanitize: only allow common identifier characters in the discriminator.
+  const safeAppName = appName?.replace(/[^A-Za-z0-9._-]/g, "_") ?? "";
+  const composed = safeAppName
+    ? `${APPLICATION_NAME}:${safeAppName}`
+    : APPLICATION_NAME;
+  return composed.slice(0, 60);
+}
+
 function startPoolStatsLog(pool: Pool, label: string): void {
   const intervalMs = 30_000;
   const handle = setInterval(() => {
