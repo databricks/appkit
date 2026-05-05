@@ -42,11 +42,3 @@ export {
 } from "./pool-manager";
 
 export { type LakebasePool, RoutingPool } from "./routing-pool";
-
-// Export Lakebase PostgREST client related types and functions.
-export {
-  createLakebasePostgrestClient,
-  type LakebasePostgrestClient,
-  type LakebasePostgrestClientConfig,
-  type LakebaseTokenResolver,
-} from "./postgrest";
