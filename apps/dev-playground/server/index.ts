@@ -11,7 +11,12 @@ import {
   serving,
   WRITE_ACTIONS,
 } from "@databricks/appkit";
-import { agents, createAgent, tool } from "@databricks/appkit/beta";
+import {
+  agents,
+  createAgent,
+  fromSupervisorApi,
+  tool,
+} from "@databricks/appkit/beta";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import { z } from "zod";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
@@ -66,6 +71,33 @@ const helper = createAgent({
       }),
     };
   },
+});
+
+// Supervisor API demo agent. Tools are configured on the adapter (the SA
+// endpoint executes them server-side), not on the createAgent definition.
+// Uncomment a `supervisorTools.*` entry (and import 'supervisorTools' from
+// '@databricks/appkit/beta') to give the model real powers.
+//
+// We `await` the factory at module init so a misconfigured workspace
+// (missing host, bad credentials) fails fast with a clear error here
+// instead of as an unhandled rejection. Top-level await is fine in this
+// ESM module.
+const supervisor = createAgent({
+  instructions:
+    "You are an assistant powered by the Databricks Supervisor API.",
+  model: fromSupervisorApi({
+    model: "databricks-claude-sonnet-4-5",
+    tools: [
+      // supervisorTools.genieSpace(
+      //   "01ABCDEF12345678",
+      //   "NYC taxi trip records and zones",
+      // ),
+      // supervisorTools.ucFunction(
+      //   "main.default.add",
+      //   "Adds two integers and returns the sum.",
+      // ),
+    ],
+  }),
 });
 
 /*
@@ -385,7 +417,7 @@ createApp({
     }),
     serving(),
     agents({
-      agents: { helper, sql_analyst, dashboard_pilot },
+      agents: { helper, sql_analyst, dashboard_pilot, supervisor },
       // `query` (markdown dispatcher) + `sql_analyst` + `dashboard_pilot`
       // wire the /smart-dashboard route. `insights` and `anomaly` are
       // ephemeral markdown agents auto-fired by the route's AgentSidebar.

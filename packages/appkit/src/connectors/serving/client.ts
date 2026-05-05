@@ -42,6 +42,20 @@ function cancellationTokenFromAbortSignal(
 }
 
 /**
+ * Structural shape of a Databricks SDK client we need for the low-level
+ * `apiClient.request` call. Lets `streamPath` be reused by adapters that
+ * don't want a hard dependency on the concrete `WorkspaceClient` type.
+ */
+export interface ApiClientLike {
+  apiClient: {
+    request(
+      options: Record<string, unknown>,
+      context?: unknown,
+    ): Promise<unknown>;
+  };
+}
+
+/**
  * Invokes a serving endpoint using the SDK's high-level query API.
  * Returns a typed QueryEndpointResponse.
  */
@@ -62,22 +76,23 @@ export async function invoke(
 }
 
 /**
- * Returns the raw SSE byte stream from a serving endpoint.
- * No parsing is performed — bytes are passed through as-is.
+ * POSTs `body` as JSON to an arbitrary workspace API path and returns the raw
+ * SSE byte stream. No parsing is performed — bytes are passed through as-is.
  *
- * Uses the SDK's low-level `apiClient.request({ raw: true })` because
- * the high-level `servingEndpoints.query()` returns `Promise<QueryEndpointResponse>`
- * and does not support SSE streaming.
+ * Uses the SDK's low-level `apiClient.request({ raw: true })` so callers
+ * inherit URL resolution, the SDK credential chain (PAT/OAuth/OIDC), and
+ * any future retries/telemetry baked into the SDK transport.
+ *
+ * When `signal` is provided it is bridged to the SDK's `Context` /
+ * `CancellationToken` so aborts cancel the outbound HTTP request.
  */
-export async function stream(
-  client: WorkspaceClient,
-  endpointName: string,
+export async function streamPath(
+  client: ApiClientLike,
+  path: string,
   body: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<ReadableStream<Uint8Array>> {
-  const { stream: _stream, ...cleanBody } = body;
-
-  logger.debug("Streaming from endpoint %s", endpointName);
+  logger.debug("Streaming from path %s", path);
 
   const context = signal
     ? new Context({
@@ -87,21 +102,41 @@ export async function stream(
 
   const response = (await client.apiClient.request(
     {
-      path: `/serving-endpoints/${encodeURIComponent(endpointName)}/invocations`,
+      path,
       method: "POST",
       headers: new Headers({
         "Content-Type": "application/json",
         Accept: "text/event-stream",
       }),
-      payload: { ...cleanBody, stream: true },
+      payload: body,
       raw: true,
     },
     context,
-  )) as { contents: ReadableStream<Uint8Array> };
+  )) as { contents: ReadableStream<Uint8Array> | null };
 
   if (!response.contents) {
     throw new Error("Response body is null — streaming not supported");
   }
 
   return response.contents;
+}
+
+/**
+ * Returns the raw SSE byte stream from a serving endpoint. Thin wrapper over
+ * {@link streamPath} that handles serving-specific URL encoding and forces
+ * `stream: true` in the payload.
+ */
+export async function stream(
+  client: WorkspaceClient,
+  endpointName: string,
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<ReadableStream<Uint8Array>> {
+  const { stream: _stream, ...cleanBody } = body;
+  return streamPath(
+    client as unknown as ApiClientLike,
+    `/serving-endpoints/${encodeURIComponent(endpointName)}/invocations`,
+    { ...cleanBody, stream: true },
+    signal,
+  );
 }

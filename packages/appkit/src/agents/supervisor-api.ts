@@ -1,0 +1,577 @@
+import type {
+  AgentAdapter,
+  AgentEvent,
+  AgentInput,
+  AgentRunContext,
+  Message,
+  ResponseStreamEvent,
+} from "shared";
+import { type ApiClientLike, streamPath } from "../connectors/serving/client";
+import { createLogger } from "../logging/logger";
+import { readSseEvents } from "../stream";
+
+const logger = createLogger("agents:supervisor-api");
+
+/**
+ * Transport shim: given a request body, returns the raw SSE byte stream from
+ * the Supervisor API endpoint. Injected at construction time so callers can
+ * swap in the workspace SDK (the {@link fromSupervisorApi} factory), a bare
+ * `fetch` (a reverse proxy / mock), or a test fake. Mirrors `StreamBody` in
+ * `agents/databricks.ts` so both adapters share one transport surface.
+ */
+type StreamBody = (
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+) => Promise<ReadableStream<Uint8Array>>;
+
+/**
+ * Structural shape of a Databricks SDK client used by {@link fromSupervisorApi}.
+ * Only what we need: `apiClient.request` for streaming and
+ * `config.ensureResolved` to materialise the host/credentials.
+ */
+interface WorkspaceClientLike extends ApiClientLike {
+  config: { ensureResolved(): Promise<void> };
+}
+
+// ---------------------------------------------------------------------------
+// Supervisor API tool surface (wire format)
+// ---------------------------------------------------------------------------
+
+/**
+ * Tools supported by the Databricks AI Gateway Responses API. The shapes match
+ * the wire format the endpoint expects, so the adapter passes the array
+ * straight into the request body.
+ *
+ * Prefer the {@link supervisorTools} factories — they fill in the
+ * SA-validation-bug workaround for `description` (must be non-empty).
+ */
+export type SupervisorTool =
+  | { type: "genie_space"; genie_space: { id: string; description: string } }
+  | { type: "uc_function"; uc_function: { name: string; description: string } }
+  | {
+      type: "knowledge_assistant";
+      knowledge_assistant: {
+        knowledge_assistant_id: string;
+        description: string;
+      };
+    }
+  | { type: "app"; app: { name: string; description: string } }
+  | {
+      type: "uc_connection";
+      uc_connection: { name: string; description: string };
+    };
+
+/**
+ * Concise factories for declaring Supervisor API tools.
+ *
+ * `description` is required: SA's protobuf validation rejects `null`/`""`,
+ * AND the LLM running on SA reads this string to decide when to route to
+ * the tool. Two genie spaces both labelled "Genie space" give the model
+ * nothing to discriminate on, so callers always own the routing hint.
+ *
+ * @example
+ * ```ts
+ * fromSupervisorApi({
+ *   model: "databricks-claude-sonnet-4",
+ *   tools: [
+ *     supervisorTools.genieSpace(
+ *       "01ABCDEF12345678",
+ *       "NYC taxi trip records and zones",
+ *     ),
+ *     supervisorTools.ucFunction(
+ *       "main.default.add",
+ *       "Adds two integers and returns the sum.",
+ *     ),
+ *   ],
+ * });
+ * ```
+ */
+export const supervisorTools = {
+  genieSpace: (id: string, description: string): SupervisorTool => ({
+    type: "genie_space",
+    genie_space: { id, description },
+  }),
+  ucFunction: (name: string, description: string): SupervisorTool => ({
+    type: "uc_function",
+    uc_function: { name, description },
+  }),
+  knowledgeAssistant: (
+    knowledgeAssistantId: string,
+    description: string,
+  ): SupervisorTool => ({
+    type: "knowledge_assistant",
+    knowledge_assistant: {
+      knowledge_assistant_id: knowledgeAssistantId,
+      description,
+    },
+  }),
+  app: (name: string, description: string): SupervisorTool => ({
+    type: "app",
+    app: { name, description },
+  }),
+  ucConnection: (name: string, description: string): SupervisorTool => ({
+    type: "uc_connection",
+    uc_connection: { name, description },
+  }),
+};
+
+// ---------------------------------------------------------------------------
+// Adapter
+// ---------------------------------------------------------------------------
+
+export interface SupervisorApiAdapterOptions {
+  /**
+   * Model identifier to pass in the request body
+   * (e.g. "databricks-claude-sonnet-4").
+   */
+  model: string;
+  /**
+   * Hosted tools the SA endpoint should expose to the model. Use the
+   * {@link supervisorTools} factories for the most common shapes.
+   */
+  tools?: SupervisorTool[];
+  /**
+   * A WorkspaceClient (or structural equivalent) used for host resolution
+   * and per-request authentication. When omitted, a `WorkspaceClient({})`
+   * is created internally using the default SDK credential chain
+   * (`DATABRICKS_HOST`, OAuth, PAT, etc.).
+   */
+  workspaceClient?: WorkspaceClientLike;
+}
+
+export interface SupervisorApiAdapterCtorOptions {
+  streamBody: StreamBody;
+  model: string;
+  tools?: SupervisorTool[];
+}
+
+/**
+ * Adapter that calls the Databricks AI Gateway Responses API
+ * (`/ai-gateway/mlflow/v1/responses`).
+ *
+ * Streams SSE events in the OpenAI Responses API wire format and maps them
+ * to the AppKit `AgentEvent` protocol. Tool execution is handled
+ * server-side, so the adapter ignores the agents-plugin tool index.
+ *
+ * Authentication is handled via the Databricks SDK credential chain — the
+ * same mechanism used by `DatabricksAdapter.fromModelServing`. The transport
+ * is injected via {@link SupervisorApiAdapterCtorOptions.streamBody}; the
+ * {@link fromSupervisorApi} factory wires it through the SDK's
+ * `apiClient.request({ raw: true })`.
+ *
+ * Set `DEBUG=appkit:agents:supervisor-api` to log the outbound request
+ * shape (model, instructions length, input shape, tool count) and to be
+ * notified when the recovery path engages (no incremental deltas, text
+ * pulled from `response.completed.output[]`). The no-delta warning includes
+ * a per-turn event-type histogram and the SA-reported status/error/
+ * incomplete_details, so it's already actionable without DEBUG.
+ *
+ * @example
+ * ```ts
+ * import { createApp, createAgent, agents } from "@databricks/appkit";
+ * import {
+ *   fromSupervisorApi,
+ *   supervisorTools,
+ * } from "@databricks/appkit/agents/supervisor-api";
+ *
+ * const adapter = await fromSupervisorApi({
+ *   model: "databricks-claude-sonnet-4",
+ *   tools: [
+ *     supervisorTools.genieSpace(
+ *       "01ABCDEF12345678",
+ *       "NYC taxi trip records and zones",
+ *     ),
+ *   ],
+ * });
+ *
+ * await createApp({
+ *   plugins: [
+ *     agents({
+ *       agents: {
+ *         assistant: createAgent({
+ *           instructions: "You are a helpful assistant.",
+ *           model: adapter,
+ *         }),
+ *       },
+ *     }),
+ *   ],
+ * });
+ * ```
+ */
+export class SupervisorApiAdapter implements AgentAdapter {
+  private streamBody: StreamBody;
+  private model: string;
+  private tools: SupervisorTool[];
+
+  constructor(options: SupervisorApiAdapterCtorOptions) {
+    this.streamBody = options.streamBody;
+    this.model = options.model;
+    this.tools = options.tools ?? [];
+  }
+
+  async *run(
+    input: AgentInput,
+    context: AgentRunContext,
+  ): AsyncGenerator<AgentEvent, void, unknown> {
+    if (context.signal?.aborted) return;
+
+    yield { type: "status", status: "running" };
+
+    const { instructions, input: payloadInput } = this.buildInput(
+      input.messages,
+    );
+    yield* this.streamResponse(instructions, payloadInput, context.signal);
+  }
+
+  private async *streamResponse(
+    instructions: string | undefined,
+    input: ResponseInput,
+    signal?: AbortSignal,
+  ): AsyncGenerator<AgentEvent, void, unknown> {
+    const body: Record<string, unknown> = {
+      model: this.model,
+      input,
+      stream: true,
+    };
+    if (instructions) {
+      body.instructions = instructions;
+    }
+    // SA's protobuf validation rejects `tools: []` and `tools: null`. Only
+    // include the field when at least one tool is configured.
+    if (this.tools.length > 0) {
+      body.tools = this.tools;
+    }
+
+    logger.debug(
+      "model=%s instructionsLen=%d inputType=%s tools=%d",
+      this.model,
+      instructions?.length ?? 0,
+      typeof input === "string" ? "string" : `array[${input.length}]`,
+      this.tools.length,
+    );
+
+    let stream: ReadableStream<Uint8Array>;
+    try {
+      stream = await this.streamBody(body, signal);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn("Supervisor API request failed: %s", message);
+      yield {
+        type: "status",
+        status: "error",
+        error: `Supervisor API error: ${message}`,
+      };
+      return;
+    }
+
+    let receivedAnyDelta = false;
+    // Tracks `item_id`s we've already streamed text deltas for. Used by
+    // `mapEvent` to fall back to the final item text on `output_item.done`
+    // only when no incremental deltas streamed for that item — avoids
+    // double-emitting text when SA does both delta and done.
+    const streamedItemIds = new Set<string>();
+    // Histogram of received event types — surfaced in the no-delta warning
+    // so it's actionable without re-running with DEBUG.
+    const eventCounts = new Map<string, number>();
+    // Set to true once we've yielded a terminal `{status:"error"}` event so
+    // the recovery / completion / no-delta-warning blocks below all bail
+    // out — the consumer's already seen the terminal status, anything
+    // further would contradict the protocol's terminal-event semantics.
+    let terminated = false;
+    // Diagnostic snapshot of the last `response.completed` event. SA stuffs
+    // the final assistant message into `response.output[]` even when it
+    // didn't emit any deltas (e.g. when a tool failed or the model produced
+    // nothing). Keeping it lets us recover the text and surface useful
+    // errors instead of a silent empty turn.
+    let lastCompleted:
+      | {
+          status?: string;
+          output?: Array<{
+            type?: string;
+            content?: Array<{ type?: string; text?: string }>;
+          }>;
+          error?: unknown;
+          incomplete_details?: unknown;
+        }
+      | undefined;
+
+    for await (const { event, data } of readSseEvents(stream, signal)) {
+      if (data === "[DONE]") continue;
+
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(data);
+      } catch (err) {
+        logger.debug(
+          "Failed to parse SSE data line: %s (%O)",
+          data.slice(0, 200),
+          err,
+        );
+        continue;
+      }
+
+      const eventType = event || (parsed.type as string) || "";
+      eventCounts.set(eventType, (eventCounts.get(eventType) ?? 0) + 1);
+
+      // `response.completed` is held back until after the loop so we can
+      // synthesise a `message_delta` from `response.output[]` when the
+      // stream produced no incremental deltas (intermittent SA behaviour).
+      // Emitting `complete` first would let UIs finalise the turn before the
+      // recovered text arrives.
+      if (eventType === "response.completed") {
+        lastCompleted = parsed.response as typeof lastCompleted;
+        continue;
+      }
+
+      const out = mapEvent(eventType, parsed, streamedItemIds);
+      if (out) {
+        if (out.type === "message_delta") receivedAnyDelta = true;
+        yield out;
+        if (out.type === "status" && out.status === "error") {
+          terminated = true;
+          break;
+        }
+      }
+    }
+
+    if (signal?.aborted) return;
+
+    if (eventCounts.size === 0) {
+      logger.warn(
+        "Supervisor API stream closed without emitting any SSE events.",
+      );
+      return;
+    }
+
+    if (terminated) return;
+
+    // Recovery path: no deltas streamed but SA finished — pull the assistant
+    // text out of `response.completed.response.output[]`.
+    if (!receivedAnyDelta) {
+      const recovered = extractTextFromCompletedResponse(lastCompleted);
+      if (recovered) {
+        logger.debug(
+          "Recovered %d chars from response.completed.output[]",
+          recovered.length,
+        );
+        yield { type: "message_delta", content: recovered };
+        receivedAnyDelta = true;
+      }
+    }
+
+    if (eventCounts.has("response.completed")) {
+      yield { type: "status", status: "complete" };
+    }
+
+    if (!receivedAnyDelta) {
+      const histogram = [...eventCounts.entries()]
+        .map(([t, n]) => `${t}=${n}`)
+        .join(", ");
+      const completedError = lastCompleted?.error
+        ? JSON.stringify(lastCompleted.error)
+        : undefined;
+      const completedIncomplete = lastCompleted?.incomplete_details
+        ? JSON.stringify(lastCompleted.incomplete_details)
+        : undefined;
+      logger.warn(
+        "Supervisor API stream completed without any output_text deltas. " +
+          "events={%s} completed.status=%s completed.error=%s completed.incomplete=%s",
+        histogram,
+        lastCompleted?.status ?? "<none>",
+        completedError ?? "<none>",
+        completedIncomplete ?? "<none>",
+      );
+    }
+  }
+
+  /**
+   * Splits the agent's message list into a Responses-API payload. System
+   * messages are concatenated (in order) into the top-level `instructions`
+   * field; user/assistant turns become `input` (as a plain string for the
+   * common single-user-turn case, otherwise as `{role,content}[]`). Tool-role
+   * messages are skipped — SA owns its own tool history server-side, so
+   * re-feeding our tool-result records would only confuse it.
+   */
+  private buildInput(messages: Message[]): {
+    instructions: string | undefined;
+    input: ResponseInput;
+  } {
+    const instructionsParts: string[] = [];
+    const turns: Array<{
+      role: "user" | "assistant" | "system";
+      content: string;
+    }> = [];
+
+    for (const m of messages) {
+      if (m.role === "system") instructionsParts.push(m.content);
+      else if (m.role !== "tool")
+        turns.push({ role: m.role, content: m.content });
+    }
+
+    const instructions = instructionsParts.length
+      ? instructionsParts.join("\n\n")
+      : undefined;
+
+    if (turns.length === 1 && turns[0].role === "user") {
+      return { instructions, input: turns[0].content };
+    }
+    return { instructions, input: turns };
+  }
+}
+
+type ResponseInput =
+  | string
+  | Array<{ role: "user" | "assistant" | "system"; content: string }>;
+
+/**
+ * Pulls the final assistant text out of the `response` payload attached to a
+ * `response.completed` event. SA always materialises the full response there,
+ * so this is our last-resort recovery path when the stream produced neither
+ * `output_text.delta` nor an actionable `output_item.done` (observed
+ * intermittently with tool-enabled SA agents).
+ */
+function extractTextFromCompletedResponse(
+  response:
+    | {
+        output?: Array<{
+          type?: string;
+          content?: Array<{ type?: string; text?: string }>;
+        }>;
+      }
+    | undefined,
+): string {
+  if (!response?.output) return "";
+  let text = "";
+  for (const item of response.output) {
+    if (item?.type !== "message" || !Array.isArray(item.content)) continue;
+    for (const part of item.content) {
+      if (part?.type === "output_text" && typeof part.text === "string") {
+        text += part.text;
+      }
+    }
+  }
+  return text;
+}
+
+function mapEvent(
+  eventType: string,
+  data: Record<string, unknown>,
+  streamedItemIds: Set<string>,
+): AgentEvent | null {
+  // The cast restricts the switch domain to the closed wire-event union
+  // exported by `shared`, so typos in case clauses (e.g. `response.faled`)
+  // become compile errors instead of silent string mismatches. Unknown
+  // event names still fall through to `default` at runtime — we don't
+  // require exhaustive matching since SA emits more lifecycle events
+  // than we care to map.
+  switch (eventType as ResponseStreamEvent["type"]) {
+    case "response.output_text.delta": {
+      const itemId = data.item_id as string | undefined;
+      if (itemId) streamedItemIds.add(itemId);
+      return { type: "message_delta", content: (data.delta as string) ?? "" };
+    }
+
+    // `response.completed` is intentionally absent: `streamResponse` holds
+    // it back so it can synthesise a delta from `response.output[]` when
+    // the stream produced none, then emits `{status:"complete"}` itself.
+
+    case "response.failed":
+      return { type: "status", status: "error", error: "Response failed" };
+
+    case "error": {
+      const errMsg =
+        typeof data.error === "string"
+          ? data.error
+          : JSON.stringify(data.error ?? "Unknown error");
+      return { type: "status", status: "error", error: errMsg };
+    }
+
+    case "response.output_item.done": {
+      const item = data.item as
+        | {
+            id?: string;
+            type?: string;
+            content?: Array<{ text?: string; type?: string }>;
+          }
+        | undefined;
+
+      if (item?.id === "error") {
+        const errText = item.content?.[0]?.text ?? "Unknown tool error from SA";
+        return { type: "status", status: "error", error: errText };
+      }
+
+      // Fallback: when SA produces a tool-driven response (e.g. Genie space),
+      // it often omits `response.output_text.delta` events and only emits the
+      // final assistant message via `output_item.done`. Surface that text as
+      // a single delta so the UI sees the answer.
+      if (
+        item?.type === "message" &&
+        item.id &&
+        !streamedItemIds.has(item.id)
+      ) {
+        const text = (item.content ?? [])
+          .map((c) => (c.type === "output_text" ? (c.text ?? "") : ""))
+          .join("");
+        if (text.length > 0) {
+          streamedItemIds.add(item.id);
+          return { type: "message_delta", content: text };
+        }
+      }
+      return null;
+    }
+
+    // All other event types are intentionally ignored. Notable lifecycle
+    // events we drop on the floor: `response.created`, `response.in_progress`,
+    // `response.output_text.done`, `response.output_item.added`,
+    // `response.content_part.added`, `response.content_part.done`.
+    default:
+      return null;
+  }
+}
+
+/**
+ * Creates an {@link AgentAdapter} backed by the Databricks AI Gateway
+ * Responses API (`/ai-gateway/mlflow/v1/responses`).
+ *
+ * Uses the SDK's default credential chain for auth (reads DATABRICKS_HOST,
+ * DATABRICKS_TOKEN, OAuth config, etc.).
+ *
+ * @example
+ * ```ts
+ * import {
+ *   fromSupervisorApi,
+ *   supervisorTools,
+ * } from "@databricks/appkit/agents/supervisor-api";
+ *
+ * const adapter = await fromSupervisorApi({
+ *   model: "databricks-claude-sonnet-4",
+ *   tools: [
+ *     supervisorTools.genieSpace(
+ *       "01ABCDEF12345678",
+ *       "NYC taxi trip records and zones",
+ *     ),
+ *   ],
+ * });
+ * ```
+ */
+export async function fromSupervisorApi(
+  options: SupervisorApiAdapterOptions,
+): Promise<SupervisorApiAdapter> {
+  let client = options.workspaceClient;
+  if (!client) {
+    const sdk = await import("@databricks/sdk-experimental");
+    client = new sdk.WorkspaceClient({}) as unknown as WorkspaceClientLike;
+  }
+
+  await client.config.ensureResolved();
+
+  // Capture the resolved client so the closure doesn't depend on the outer
+  // `let` binding being reassigned later.
+  const resolved = client;
+  return new SupervisorApiAdapter({
+    streamBody: (body, signal) =>
+      streamPath(resolved, "/ai-gateway/mlflow/v1/responses", body, signal),
+    model: options.model,
+    tools: options.tools ?? [],
+  });
+}

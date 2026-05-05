@@ -23,6 +23,16 @@ export {
   type GenerationParams,
   parseTextToolCalls,
 } from "./agents/databricks";
+export type {
+  SupervisorApiAdapterCtorOptions,
+  SupervisorApiAdapterOptions,
+  SupervisorTool,
+} from "./agents/supervisor-api";
+export {
+  fromSupervisorApi,
+  SupervisorApiAdapter,
+  supervisorTools,
+} from "./agents/supervisor-api";
 
 // Agent runtime
 export { createAgent } from "./core/agent/create-agent";
