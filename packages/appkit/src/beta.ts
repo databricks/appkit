@@ -74,10 +74,10 @@ export {
 
 export * from "./plugins/beta-exports.generated";
 export type {
+  DatabasePoolTuning,
   EntityHooks,
   HookContext,
   HttpAccess,
   HttpEntityOverride,
   IDatabaseConfig,
 } from "./plugins/database";
-export { readDefaults, writeDefaults } from "./plugins/database/defaults";
