@@ -1,5 +1,14 @@
 import type { BasePluginConfig } from "shared";
-import type { LakebasePoolConfig } from "@/connectors";
+
+/** Pool tuning forwarded to `createLakebasePool` (no auth fields). */
+export interface DatabasePoolTuning {
+  max?: number;
+  idleTimeoutMillis?: number;
+  connectionTimeoutMillis?: number;
+  maxUses?: number;
+  statement_timeout?: number;
+  statement_timeout_jitter_ms?: number;
+}
 
 /**
  * HTTP access control for entity operations.
@@ -131,7 +140,7 @@ export interface CacheSettings {
  */
 export interface IDatabaseConfig extends BasePluginConfig {
   /** The connection settings for the database. */
-  connection?: Partial<LakebasePoolConfig>;
+  connection?: DatabasePoolTuning;
   /** The HTTP entity overrides for the database. */
   http?: Record<string, HttpEntityOverride>;
   /** The entity hooks for the database. */
