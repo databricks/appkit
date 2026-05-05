@@ -11,9 +11,6 @@ import type {
 import { z } from "zod";
 import { SQLWarehouseConnector } from "../../connectors";
 import { getWarehouseId, getWorkspaceClient } from "../../context";
-import { createLogger } from "../../logging/logger";
-import { Plugin, toPlugin } from "../../plugin";
-import type { PluginManifest } from "../../registry";
 import { buildToolkitEntries } from "../../core/agent/build-toolkit";
 import {
   defineTool,
@@ -21,6 +18,9 @@ import {
   toolsFromRegistry,
 } from "../../core/agent/tools/define-tool";
 import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
+import { createLogger } from "../../logging/logger";
+import { Plugin, toPlugin } from "../../plugin";
+import type { PluginManifest } from "../../registry";
 import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import { QueryProcessor } from "./query";

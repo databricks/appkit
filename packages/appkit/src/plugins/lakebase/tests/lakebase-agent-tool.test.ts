@@ -54,6 +54,7 @@ vi.mock("../../../connectors/lakebase", () => ({
 }));
 
 import { LakebasePlugin } from "../lakebase";
+import type { LakebaseExposeAsAgentTool } from "../types";
 
 function makePlugin(
   config: ConstructorParameters<typeof LakebasePlugin>[0],
@@ -75,9 +76,7 @@ describe("LakebasePlugin — agent tool opt-in", () => {
   test("throws when exposeAsAgentTool is set without the acknowledgement flag", () => {
     expect(() =>
       makePlugin({
-        exposeAsAgentTool:
-          // biome-ignore lint/suspicious/noExplicitAny: intentionally bypass the required flag for the negative case
-          {} as any,
+        exposeAsAgentTool: {} as unknown as LakebaseExposeAsAgentTool,
       }),
     ).toThrow(/iUnderstandRunsAsServicePrincipal/);
   });
@@ -187,10 +186,12 @@ describe("LakebasePlugin — readOnly enforcement", () => {
         clientReleases.push(clientReleases.length + 1);
       }),
     }));
-    // biome-ignore lint/suspicious/noExplicitAny: test override
-    (
-      createLakebasePool as unknown as { mockReturnValueOnce: any }
-    ).mockReturnValueOnce({ query: vi.fn(), connect, end: vi.fn() });
+    const poolFactory = vi.mocked(createLakebasePool);
+    poolFactory.mockReturnValueOnce({
+      query: vi.fn(),
+      connect,
+      end: vi.fn(),
+    });
 
     clientQueries.length = 0;
     clientReleases.length = 0;

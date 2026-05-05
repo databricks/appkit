@@ -7,9 +7,6 @@ import {
   getLakebasePgConfig,
   getUsernameWithApiLookup,
 } from "../../connectors/lakebase";
-import { createLogger } from "../../logging/logger";
-import { Plugin, toPlugin } from "../../plugin";
-import type { PluginManifest } from "../../registry";
 import { buildToolkitEntries } from "../../core/agent/build-toolkit";
 import {
   defineTool,
@@ -17,6 +14,9 @@ import {
   toolsFromRegistry,
 } from "../../core/agent/tools/define-tool";
 import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
+import { createLogger } from "../../logging/logger";
+import { Plugin, toPlugin } from "../../plugin";
+import type { PluginManifest } from "../../registry";
 import manifest from "./manifest.json";
 import type { ILakebaseConfig } from "./types";
 

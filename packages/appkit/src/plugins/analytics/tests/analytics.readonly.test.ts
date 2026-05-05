@@ -47,7 +47,6 @@ describe("AnalyticsPlugin.query agent tool — runtime enforcement", () => {
     const plugin = makePlugin();
     const spy = vi
       .spyOn(plugin, "query")
-      // biome-ignore lint/suspicious/noExplicitAny: mocked return
       .mockResolvedValue({ rows: [] } as any);
     await expect(
       plugin.executeAgentTool("query", { query: "DROP TABLE users" }),
@@ -59,7 +58,6 @@ describe("AnalyticsPlugin.query agent tool — runtime enforcement", () => {
     const plugin = makePlugin();
     const spy = vi
       .spyOn(plugin, "query")
-      // biome-ignore lint/suspicious/noExplicitAny: mocked return
       .mockResolvedValue({ rows: [] } as any);
     for (const q of [
       "UPDATE users SET email='x'",
@@ -79,7 +77,6 @@ describe("AnalyticsPlugin.query agent tool — runtime enforcement", () => {
     const plugin = makePlugin();
     const spy = vi
       .spyOn(plugin, "query")
-      // biome-ignore lint/suspicious/noExplicitAny: mocked return
       .mockResolvedValue({ rows: [] } as any);
     await expect(
       plugin.executeAgentTool("query", {
@@ -93,7 +90,6 @@ describe("AnalyticsPlugin.query agent tool — runtime enforcement", () => {
     const plugin = makePlugin();
     const spy = vi
       .spyOn(plugin, "query")
-      // biome-ignore lint/suspicious/noExplicitAny: mocked return
       .mockResolvedValue({ rows: [{ id: 1 }] } as any);
     const result = await plugin.executeAgentTool("query", {
       query: "SELECT * FROM main.sales.orders",
@@ -111,7 +107,6 @@ describe("AnalyticsPlugin.query agent tool — runtime enforcement", () => {
     const plugin = makePlugin();
     const spy = vi
       .spyOn(plugin, "query")
-      // biome-ignore lint/suspicious/noExplicitAny: mocked return
       .mockResolvedValue({ rows: [] } as any);
     await plugin.executeAgentTool("query", {
       query: "WITH a AS (SELECT 1) SELECT * FROM a",
@@ -123,7 +118,6 @@ describe("AnalyticsPlugin.query agent tool — runtime enforcement", () => {
     const plugin = makePlugin();
     const spy = vi
       .spyOn(plugin, "query")
-      // biome-ignore lint/suspicious/noExplicitAny: mocked return
       .mockResolvedValue({ rows: [] } as any);
     await plugin.executeAgentTool("query", {
       query: "SHOW TABLES IN main.sales",

@@ -23,8 +23,8 @@
  * transport.
  */
 import type { AgentToolDefinition } from "shared";
-import { createLogger } from "../../../logging/logger";
 import type { McpEndpointConfig } from "../../../core/agent/tools/hosted-tools";
+import { createLogger } from "../../../logging/logger";
 import {
   assertResolvedHostSafe,
   checkMcpUrl,

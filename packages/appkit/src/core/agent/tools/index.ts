@@ -1,3 +1,4 @@
+export { AppKitMcpClient } from "../../../plugins/agents/tools/mcp-client";
 export {
   defineTool,
   executeFromRegistry,
@@ -16,5 +17,4 @@ export {
   mcpServer,
   resolveHostedTools,
 } from "./hosted-tools";
-export { AppKitMcpClient } from "../../../plugins/agents/tools/mcp-client";
 export { type ToolConfig, tool } from "./tool";

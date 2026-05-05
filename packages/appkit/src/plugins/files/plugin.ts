@@ -21,11 +21,6 @@ import {
   getWorkspaceClient,
 } from "../../context";
 import { isUserContext } from "../../context/user-context";
-import { AuthenticationError } from "../../errors";
-import { createLogger } from "../../logging/logger";
-import { Plugin, toPlugin } from "../../plugin";
-import type { PluginManifest, ResourceRequirement } from "../../registry";
-import { ResourceType } from "../../registry";
 import { buildToolkitEntries } from "../../core/agent/build-toolkit";
 import {
   defineTool,
@@ -33,6 +28,11 @@ import {
   type ToolRegistry,
   toolsFromRegistry,
 } from "../../core/agent/tools/define-tool";
+import { AuthenticationError } from "../../errors";
+import { createLogger } from "../../logging/logger";
+import { Plugin, toPlugin } from "../../plugin";
+import type { PluginManifest, ResourceRequirement } from "../../registry";
+import { ResourceType } from "../../registry";
 import {
   FILES_DOWNLOAD_DEFAULTS,
   FILES_MAX_UPLOAD_SIZE,
@@ -49,7 +49,6 @@ import {
   policy,
 } from "./policy";
 import type {
-  DownloadResponse,
   FilesExport,
   IFilesConfig,
   VolumeAPI,

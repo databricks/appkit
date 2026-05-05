@@ -9,9 +9,6 @@ import type {
 import { z } from "zod";
 import { GenieConnector } from "../../connectors";
 import { getWorkspaceClient } from "../../context";
-import { createLogger } from "../../logging";
-import { Plugin, toPlugin } from "../../plugin";
-import type { PluginManifest } from "../../registry";
 import { buildToolkitEntries } from "../../core/agent/build-toolkit";
 import {
   defineTool,
@@ -19,6 +16,9 @@ import {
   type ToolRegistry,
   toolsFromRegistry,
 } from "../../core/agent/tools/define-tool";
+import { createLogger } from "../../logging";
+import { Plugin, toPlugin } from "../../plugin";
+import type { PluginManifest } from "../../registry";
 import { genieStreamDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import type {
