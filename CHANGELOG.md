@@ -20,6 +20,17 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.28.0](https://github.com/databricks/appkit/compare/v0.27.1...v0.28.0) (2026-04-30)
+
+### plugin
+
+* **plugin:** add stability system (beta/ga) with promote command ([#264](https://github.com/databricks/appkit/issues/264)) ([1a77ce9](https://github.com/databricks/appkit/commit/1a77ce9c5b8e3306b47139e4ce891795e5ec14a1)), closes [databricks/cli#5090](https://github.com/databricks/cli/issues/5090) [#280](https://github.com/databricks/appkit/issues/280) [databricks/cli#5090](https://github.com/databricks/cli/issues/5090)
+
+* add execution context attributes to telemetry spans ([#288](https://github.com/databricks/appkit/issues/288)) ([ae259ca](https://github.com/databricks/appkit/commit/ae259ca9fc363ef1e927e2919e8c1ee6d0d7d748)), closes [#197](https://github.com/databricks/appkit/issues/197)
+
+
 ## [0.27.1](https://github.com/databricks/appkit/compare/v0.27.0...v0.27.1) (2026-04-30)
 
 ### appkit
