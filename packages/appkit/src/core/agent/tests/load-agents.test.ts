@@ -5,14 +5,17 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { z } from "zod";
 import { buildToolkitEntries } from "../../../core/agent/build-toolkit";
 import {
+  defineTool,
+  type ToolRegistry,
+} from "../../../core/agent/tools/define-tool";
+import { tool } from "../../../core/agent/tools/tool";
+import type { AgentDefinition } from "../../../core/agent/types";
+import {
   agentIdFromMarkdownPath,
   loadAgentFromFile,
   loadAgentsFromDir,
   parseFrontmatter,
 } from "../load-agents";
-import { defineTool, type ToolRegistry } from "../../../core/agent/tools/define-tool";
-import { tool } from "../../../core/agent/tools/tool";
-import type { AgentDefinition } from "../../../core/agent/types";
 
 let workDir: string;
 
