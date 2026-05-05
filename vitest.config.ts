@@ -58,13 +58,6 @@ export default defineConfig({
           environment: "node",
         },
       },
-      {
-        test: {
-          name: "tools",
-          root: "./tools",
-          environment: "node",
-        },
-      },
     ],
   },
 });

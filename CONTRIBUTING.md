@@ -128,43 +128,9 @@ pnpm docs:serve  # Serve built docs
 
 See [docs/README.md](./docs/README.md) for more details.
 
-## Updating the CLI compatibility manifest
+## CLI compatibility manifest
 
-`cli-compat.json` maps Databricks CLI versions to compatible AppKit and Agent Skills versions. The CLI fetches this file at runtime to determine which template version to use for `apps init` and `aitools install`.
-
-### Manifest format
-
-```json
-{
-  "next": { "appkit": "0.24.0", "skills": "0.1.4" },
-  "0.299.0": { "appkit": "0.24.0", "skills": "0.1.4" }
-}
-```
-
-- Each key is a CLI version (`X.Y.Z`) or `"next"`.
-- Each value specifies the compatible `appkit` and `skills` versions.
-- `"next"` is used for CLI versions newer than any listed entry.
-
-### How the CLI resolves versions
-
-1. **Exact match** on CLI version → use that entry.
-2. **No exact match**, between two entries → use the nearest lower version's entry.
-3. **Newer than all entries** → use `"next"`.
-4. **Older than all entries** → use the oldest versioned entry.
-
-### When to update
-
-After each AppKit release:
-
-1. **Run evals** on the new AppKit version. If there is no regression, proceed.
-2. **Open a PR** to update `cli-compat.json`. The change depends on the type of release:
-   - **No template changes** (just an AppKit/skills version bump): search & replace all version occurrences in the manifest and update `next`.
-   - **Template changes that don't require new CLI features**: test the last 3 CLI versions with the new template and update matching entries.
-   - **Template changes that require new CLI features**: add a new entry for the minimum CLI version that supports them; older entries keep pointing to the previous template version.
-
-This process is manual for now but can be automated as part of the release workflow in the future. Use the `/bump-cli-compat` Claude Code skill to automate the update and PR creation.
-
-CI validates the manifest structure and invariants via `tools/check-cli-compat.ts`.
+The [`cli-compat.json`](https://github.com/databricks/cli/blob/main/internal/build/cli-compat.json) manifest that maps CLI versions to compatible AppKit and Agent Skills versions lives in the [CLI repository](https://github.com/databricks/cli). See the CLI repo's contributing docs for update instructions.
 
 ## Adding or changing a resource type
 
