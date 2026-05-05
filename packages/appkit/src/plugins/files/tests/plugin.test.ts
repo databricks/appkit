@@ -3780,7 +3780,7 @@ describe("FilesPlugin", () => {
       );
 
       const handler = getRouteHandler(plugin, "get", "/list");
-      // Provide x-forwarded-user (so `_extractObiUser` accepts the dev
+      // Provide x-forwarded-user (so `_extractOboUser` accepts the dev
       // fallback identity) but no x-forwarded-access-token.
       await handler(
         mockReq("obo_vol", {

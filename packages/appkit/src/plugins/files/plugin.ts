@@ -180,7 +180,7 @@ export class FilesPlugin extends Plugin {
    *   and fall back to the service principal identity so local testing
    *   without a reverse proxy continues to work.
    */
-  private _extractObiUser(req: express.Request): FilePolicyUser {
+  private _extractOboUser(req: express.Request): FilePolicyUser {
     const token = req.header("x-forwarded-access-token")?.trim();
     const userId = req.header("x-forwarded-user")?.trim();
     if (token && userId) {
@@ -261,7 +261,7 @@ export class FilesPlugin extends Plugin {
     try {
       const auth = this._resolveAuth(volumeKey);
       if (auth === "on-behalf-of-user") {
-        user = this._extractObiUser(req);
+        user = this._extractOboUser(req);
       } else {
         const headerUserId = req.header("x-forwarded-user")?.trim();
         if (headerUserId) {
