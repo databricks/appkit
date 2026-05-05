@@ -13,7 +13,7 @@ export type { ResourceFieldEntry };
 export interface BasePlugin {
   name: string;
 
-  abortActiveOperations?(): void;
+  abortActiveOperations?(): void | Promise<void>;
 
   setup(): Promise<void>;
 
