@@ -377,45 +377,55 @@ export class DatabricksAdapter implements AgentAdapter {
       for (const tc of toolCalls) {
         const wireName = tc.function.name;
         const originalName = wireToName.get(wireName) ?? wireName;
-        let args: unknown;
-        try {
-          args = JSON.parse(tc.function.arguments);
-        } catch {
-          args = {};
-        }
-
-        yield { type: "tool_call", callId: tc.id, name: originalName, args };
-
-        try {
-          const result = await context.executeTool(originalName, args);
-          const resultStr =
-            typeof result === "string" ? result : JSON.stringify(result);
-
-          yield { type: "tool_result", callId: tc.id, result };
-
-          messages.push({
-            role: "tool",
-            content: resultStr,
-            tool_call_id: tc.id,
-          });
-        } catch (error) {
-          const errMsg =
-            error instanceof Error ? error.message : "Tool execution failed";
-
-          yield {
-            type: "tool_result",
-            callId: tc.id,
-            result: null,
-            error: errMsg,
-          };
-
-          messages.push({
-            role: "tool",
-            content: JSON.stringify({ error: errMsg }),
-            tool_call_id: tc.id,
-          });
-        }
+        yield* this.executeSingleTool(tc, originalName, messages, context);
       }
+    }
+  }
+
+  /** Parse wire arguments, emit tool_call / tool_result, append tool messages. */
+  private async *executeSingleTool(
+    tc: OpenAIToolCall,
+    originalName: string,
+    messages: OpenAIMessage[],
+    context: AgentRunContext,
+  ): AsyncGenerator<AgentEvent, void, unknown> {
+    let args: unknown;
+    try {
+      args = JSON.parse(tc.function.arguments);
+    } catch {
+      args = {};
+    }
+
+    yield { type: "tool_call", callId: tc.id, name: originalName, args };
+
+    try {
+      const result = await context.executeTool(originalName, args);
+      const resultStr =
+        typeof result === "string" ? result : JSON.stringify(result);
+
+      yield { type: "tool_result", callId: tc.id, result };
+
+      messages.push({
+        role: "tool",
+        content: resultStr,
+        tool_call_id: tc.id,
+      });
+    } catch (error) {
+      const errMsg =
+        error instanceof Error ? error.message : "Tool execution failed";
+
+      yield {
+        type: "tool_result",
+        callId: tc.id,
+        result: null,
+        error: errMsg,
+      };
+
+      messages.push({
+        role: "tool",
+        content: JSON.stringify({ error: errMsg }),
+        tool_call_id: tc.id,
+      });
     }
   }
 
@@ -580,44 +590,7 @@ export class DatabricksAdapter implements AgentAdapter {
     for (let i = 0; i < toolCallObjs.length; i++) {
       const tc = toolCallObjs[i];
       const originalName = calls[i]?.name ?? tc.function.name;
-      let args: unknown;
-      try {
-        args = JSON.parse(tc.function.arguments);
-      } catch {
-        args = {};
-      }
-
-      yield { type: "tool_call", callId: tc.id, name: originalName, args };
-
-      try {
-        const result = await context.executeTool(originalName, args);
-        const resultStr =
-          typeof result === "string" ? result : JSON.stringify(result);
-
-        yield { type: "tool_result", callId: tc.id, result };
-
-        messages.push({
-          role: "tool",
-          content: resultStr,
-          tool_call_id: tc.id,
-        });
-      } catch (error) {
-        const errMsg =
-          error instanceof Error ? error.message : "Tool execution failed";
-
-        yield {
-          type: "tool_result",
-          callId: tc.id,
-          result: null,
-          error: errMsg,
-        };
-
-        messages.push({
-          role: "tool",
-          content: JSON.stringify({ error: errMsg }),
-          tool_call_id: tc.id,
-        });
-      }
+      yield* this.executeSingleTool(tc, originalName, messages, context);
     }
   }
 
