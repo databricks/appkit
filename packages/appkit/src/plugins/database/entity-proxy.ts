@@ -10,15 +10,23 @@ import { createLogger } from "@/logging/logger";
 import { readDefaults, writeDefaults } from "./defaults";
 import type { CacheSettings, EntityHooks, HookContext } from "./types";
 
+// RFC 5321 §4.5.3.1.3 caps email at 320 octets.
+const MAX_EMAIL_LEN = 320;
+
+/** Trim, lowercase, length-cap. Returns `null` for missing/empty/oversize. */
+export function normalizeOboEmail(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim().toLowerCase();
+  if (trimmed.length === 0 || trimmed.length > MAX_EMAIL_LEN) return null;
+  return trimmed;
+}
+
 const logger = createLogger("database:entity");
 type Row = Record<string, unknown>;
 const MAX_LIMIT = 500;
 
-/**
- * Public column names (private columns omitted). Used as the default read
- * projection so columns marked `.private()` never leak via `appkit.database.<e>`
- * or generated routes unless the caller explicitly opts in via `.select()`.
- */
+// Default read projection — `.private()` columns never leak via
+// `appkit.database.<e>` or generated routes unless `.select()`-ed in.
 function publicColumnNames(table: AppKitTable): string[] {
   return Object.entries(table.$columns)
     .filter(([, meta]) => meta.private !== true)
@@ -35,12 +43,9 @@ type DatabaseAction =
   | "delete";
 
 /**
- * Bound `Plugin#execute` wrapper passed in by `entity-wiring.ts`.
- *
- * `Plugin#execute` is `protected` and returns an `ExecutionResult<T>`
- * discriminated union. The wiring layer constructs an executor that calls the
- * protected method (legal in the same module), unwraps the result, and
- * rethrows on failure. Entity terminators see a flat "promise of T" contract.
+ * Bound `Plugin#execute` wrapper from `entity-wiring.ts`. Wiring unwraps the
+ * `ExecutionResult<T>` union and rethrows on failure so entity terminators
+ * see a flat `Promise<T>` contract.
  */
 export type ExecutorFn = <T>(
   fn: (signal?: AbortSignal) => Promise<T>,
@@ -108,13 +113,11 @@ export type ApplyIncludes<TIncludes, I> = {
 };
 
 /**
- * Public server-side entity facade exposed as `appkit.database.<entity>`.
+ * Public server-side entity facade — `appkit.database.<entity>`.
  *
- * Chain methods accumulate query state and return a new client (immutable);
- * terminators run the query through the bound executor (`Plugin#execute`
- * wrap) and return a promise. All filter/order operators map one-to-one to
- * `DataPath` operators — AppKit does not own SQL translation; the runtime
- * (Drizzle) does.
+ * Chain methods are immutable; terminators run via the bound executor.
+ * Filter/order operators map 1:1 to `DataPath` — SQL translation is the
+ * runtime's job, not AppKit's.
  */
 export interface EntityClient<
   TRow extends Row = Row,
@@ -132,10 +135,8 @@ export interface EntityClient<
   offset(n: number): EntityClient<TRow, TInsert, TUpdate, TIncludes>;
 
   /**
-   * Opt out of the default `MAX_LIMIT` cap for `toArray()`. Use only for
-   * background jobs that genuinely want every row — typical request handlers
-   * should page or `limit()` instead. Server-side `statement_timeout` still
-   * bounds runaway queries.
+   * Opt out of `MAX_LIMIT` for `toArray()`. Background jobs only — request
+   * handlers should page or `limit()`. `statement_timeout` still bounds runaway.
    */
   unbounded(): EntityClient<TRow, TInsert, TUpdate, TIncludes>;
 
@@ -162,10 +163,9 @@ export interface EntityClient<
   delete(id: string | number): Promise<void>;
 
   /**
-   * Per-request OBO clone. Resolves the user identity from
-   * `req.header("x-forwarded-email")` and swaps the underlying DataPath for a
-   * per-user one. In dev without the OBO header, falls through to the SP
-   * client (this) so the dev loop stays unbroken.
+   * Per-request OBO clone — resolves identity from `x-forwarded-email` and
+   * swaps in a per-user DataPath. Without the header in dev, returns the SP
+   * client so the dev loop stays unbroken.
    */
   asUser(
     req: import("express").Request,
@@ -186,21 +186,14 @@ interface EntityClientDeps {
   hookContext: () => HookContext;
   /** Bound `Plugin#execute` wrapper. Every terminator must go through this. */
   execute: ExecutorFn;
-  /**
-   * Build (or reuse) a per-user DataPath for this request. Returns `null` only
-   * for the local dev fallback when the request lacks forwarded OBO identity.
-   */
+  /** Build per-user DataPath. Returns `null` only in dev when OBO headers are absent. */
   makeUserDataPath: (req: import("express").Request) => DataPath | null;
   cache?: CacheSettings;
 }
 
 /**
- * Internal chain state.
- *
- * Pagination is tracked separately because PostgREST-style `offset(n).limit(m)`
- * needs to emit at the right moment, and `range(start, end)` competes with
- * the `offset/limit` pair. Everything else accumulates straight into the spec
- * objects.
+ * Internal chain state. Pagination is tracked separately so `offset/limit`
+ * can be resolved against `MAX_LIMIT` at terminator time.
  */
 interface EntityClientState {
   where?: WhereSpec;
@@ -226,11 +219,9 @@ export function makeEntityClient<
 }
 
 /**
- * Thin immutable wrapper around the `DataPath` runtime.
- *
- * Each chain method returns a new wrapper with the spec extended. Terminators
- * call `this.run(action, fn)` which wraps the call in `Plugin#execute` so
- * telemetry, retry, cache, and timeout flow consistently for every action.
+ * Thin immutable wrapper around `DataPath`. Terminators go through
+ * `this.run(action, fn)` → `Plugin#execute`, so telemetry, retry, cache,
+ * and timeout flow consistently per action.
  */
 class EntityClientImpl<
   TRow extends Row = Row,
@@ -244,9 +235,8 @@ class EntityClientImpl<
   ) {}
 
   where(predicate: WhereInput<TRow>) {
-    // Filter spec is shallow-merged into the existing where so successive
-    // `.where()` calls accumulate AND-style — matches the Supabase / Drizzle
-    // intuition (no clobbering on repeated calls for distinct columns).
+    // Successive .where() calls shallow-merge into AND. Matches Supabase/Drizzle
+    // intuition; no clobbering on distinct columns.
     return this.chain(
       {
         where: { ...this.state.where, ...(predicate as WhereSpec) },
@@ -311,30 +301,28 @@ class EntityClientImpl<
   }
 
   asUser(req: import("express").Request) {
-    // Dev fallback: when no user identity is forwarded and we're running
-    // locally, return self so routes don't 401 / fail the dev loop. In
-    // production, makeUserDataPath throws instead of silently falling back.
+    // Dev fallback: no OBO header → return self so routes don't 401. In prod
+    // `makeUserDataPath` throws instead of silently falling back.
     const userDataPath = this.deps.makeUserDataPath(req);
     if (!userDataPath) return this;
 
+    const email = normalizeOboEmail(req.header("x-forwarded-email"));
     const userDeps: EntityClientDeps = {
       ...this.deps,
       dataPath: userDataPath,
       hookContext: () => ({
         ...this.deps.hookContext(),
         req,
-        userId: req.header("x-forwarded-email"),
+        userId: email ?? undefined,
       }),
     };
 
-    // Cache key includes the user identity so SP and OBO results don't share
-    // a slot. In dev fallback (no x-forwarded-email), substitute the request
-    // id so two unrelated dev requests don't share a cache slot named
-    // `"unknown"` and cross-contaminate.
+    // Identity is in the cache key so SP and OBO don't share a slot. Dev
+    // fallback uses req.id so unrelated requests don't collide on a shared
+    // `"unknown"` slot.
     const reqId = (req as { id?: unknown }).id;
     const identityKey =
-      req.header("x-forwarded-email") ??
-      (typeof reqId === "string" ? `unknown:${reqId}` : "unknown");
+      email ?? (typeof reqId === "string" ? `unknown:${reqId}` : "unknown");
     return new EntityClientImpl<TRow, TInsert, TUpdate, TIncludes>(userDeps, {
       ...this.state,
       cacheKey: [
@@ -445,7 +433,14 @@ class EntityClientImpl<
         signal,
       );
       if (!row) {
-        throw new Error(`update: ${this.deps.table.name} id=${id} not found`);
+        // id may be user-supplied — strip control chars + length-cap before logging.
+        const safeId = String(id)
+          // biome-ignore lint/suspicious/noControlCharactersInRegex: deliberate
+          .replace(/[\x00-\x1f\x7f]/g, "?")
+          .slice(0, 64);
+        throw new Error(
+          `update: ${this.deps.table.name} not found (id=${safeId})`,
+        );
       }
       await this.deps.hooks?.afterUpdate?.(row, ctx);
       return row as TRow;
@@ -504,10 +499,8 @@ class EntityClientImpl<
   }
 
   /**
-   * Resolve final pagination shape for read terminators. When no limit is set
-   * the cap is `MAX_LIMIT` so server reads stay bounded; callers that really
-   * want every row opt in via `.unbounded()`. Throws when offset is set
-   * without a limit, matching the previous behavior.
+   * Default cap is `MAX_LIMIT` so reads stay bounded; opt out via `.unbounded()`.
+   * Throws when offset is set without limit.
    */
   private resolvePagination(): { limit?: number; offset?: number } {
     if (this.state.offset !== undefined && this.state.limit === undefined) {

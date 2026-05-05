@@ -16,16 +16,13 @@ import {
   type EntityClient,
   type ExecutorFn,
   makeEntityClient,
+  normalizeOboEmail,
 } from "./entity-proxy";
 import type { IDatabaseConfig } from "./types";
 
 /**
- * Hashed log tag for an email. Avoids logging the raw address (PII) while
- * keeping per-user log lines correlatable across requests.
- *
- * Format: `"<first-3-chars>#<sha256(email)[:8]>"`. The visible prefix gives
- * a debugger something to grep for; the hash disambiguates collisions and
- * makes it possible to correlate without leaking the rest of the address.
+ * Hashed log tag — keeps per-user lines correlatable without logging the raw
+ * email (PII). Format: `<first-3-chars>#<sha256(email)[:8]>`.
  */
 function logTagForEmail(email: string): string {
   const lower = email.toLowerCase();
@@ -54,12 +51,9 @@ interface WireEntitiesResult {
 }
 
 /**
- * Per-user pool registry.
- *
- * `getOrCreate(identity)` returns (or builds) a `pg.Pool` whose Lakebase OAuth
- * resolves to the given user. Pools are kept in a bounded LRU keyed by email;
- * evicted pools are moved to a draining set so `closeAll()` waits for any
- * in-flight queries to finish before resolving.
+ * Per-user pool registry. `getOrCreate(identity)` returns a `pg.Pool` whose
+ * Lakebase OAuth resolves to the given user. Bounded LRU keyed by email;
+ * evicted pools drain in the background so `closeAll()` awaits in-flight queries.
  */
 export interface UserPoolRegistry {
   resolveIdentity(req: import("express").Request): UserPoolIdentity | null;
@@ -74,12 +68,9 @@ interface UserPoolIdentity {
 }
 
 /**
- * Wire one EntityClient per table on top of the service-principal pool, plus
- * a per-user pool factory used by `EntityClient.asUser(req)` to swap identity.
- *
- * The runtime data path is `DataPath` (Drizzle behind a thin AppKit-shaped
- * interface). The wiring layer never sees Drizzle; it only constructs
- * `DataPath` instances and passes them down.
+ * Wire one EntityClient per table on the SP pool, plus a per-user pool factory
+ * for `EntityClient.asUser(req)`. Wiring never touches Drizzle — only
+ * `DataPath` instances flow through.
  */
 export function wireEntities(args: WireEntitiesArgs): WireEntitiesResult {
   const serviceDataPath = createDrizzleDataPath(args.servicePool, args.schema);
@@ -108,18 +99,13 @@ export function wireEntities(args: WireEntitiesArgs): WireEntitiesResult {
     });
   }
 
-  // Boot summary is logged once by the plugin in `setup()` (it has the
-  // entity names + schema metadata). Keeping a second log line here would
-  // duplicate the same fact in operator output for no debugging benefit.
-
+  // Plugin's `setup()` already logs the boot summary; don't duplicate.
   return { entities, dataPath: serviceDataPath, userPools };
 }
 
 /**
- * Resolve a table's primary-key column name. Falls back to the conventional
- * `"id"` when the schema has no column flagged as primary key. Composite PKs
- * are intentionally rejected at schema-builder time, so a single name is
- * always sufficient here.
+ * Resolve PK column name; defaults to `"id"`. Composite PKs are rejected at
+ * schema-builder time, so a single name always suffices.
  */
 function derivePkColumn(table: AppKitTable): string {
   for (const [name, meta] of Object.entries(table.$columns)) {
@@ -129,21 +115,17 @@ function derivePkColumn(table: AppKitTable): string {
 }
 
 /**
- * Build the per-user pool registry. Pools are created lazily on first
- * `getOrCreate(email)` and reused across requests for the same identity.
- *
- * Each pool is constructed via `createLakebasePool({ user, workspaceClient })`,
- * where the workspace client is authenticated with the forwarded user token.
- * Lakebase OAuth refresh still happens inside the pool; this layer only selects
- * the identity and bounds the number of open pools.
+ * Per-user pool registry. Lazy create on first `getOrCreate(email)`, reused
+ * for the same identity. Built via `createLakebasePool` with a workspace
+ * client bound to the forwarded user token; OAuth refresh happens inside
+ * the pool. This layer only selects identity and bounds open-pool count.
  */
 function makeUserPoolRegistry(
   config: IDatabaseConfig,
   schema: Schema,
 ): UserPoolRegistry {
   const pools = new Map<string, Pool>();
-  // Pools that have been evicted but may still have in-flight queries. We hold
-  // them here so `closeAll()` waits for graceful drain before returning.
+  // Evicted pools held here so `closeAll()` awaits graceful drain.
   const draining = new Set<Pool>();
   const dataPaths = new WeakMap<Pool, DataPath>();
   const maxPools = normalizePoolMax(config.oboPoolMax);
@@ -167,19 +149,16 @@ function makeUserPoolRegistry(
       return existing;
     }
 
-    // Per-user pool: small (`OBO_POOL_DEFAULTS.max = 4`) by default. User-level
-    // overrides via `config.connection` still win.
+    // Small per-user pool (default max=4); `config.connection` overrides win.
     const pool = createLakebasePool({
       ...OBO_POOL_DEFAULTS,
       ...config.connection,
       user: identity.email,
       workspaceClient: createUserWorkspaceClient(identity.token),
     });
-    // Set session-local app.user_id on every connection so RLS predicates
-    // referencing current_user_id() (the helpers emitted by `appkit db rls`)
-    // resolve to the OBO user. Per-user pool means the identity is invariant
-    // across connections in this pool, so a session-level setting is safe.
-    // `statement_timeout` is set on the same connect event so OBO queries get
+    // Session-local `app.user_id` so `current_user_id()` RLS helpers resolve
+    // to the OBO user — safe at session scope since identity is invariant in
+    // this per-user pool. `statement_timeout` set here too so OBO queries get
     // the same server-side cap as SP ones.
     const statementTimeoutMs =
       config.statementTimeoutMs ?? STATEMENT_TIMEOUT_DEFAULT_MS;
@@ -250,7 +229,7 @@ function resolveUserPoolIdentity(
   req: import("express").Request,
 ): UserPoolIdentity | null {
   const isDev = process.env.NODE_ENV === "development";
-  const email = req.header("x-forwarded-email");
+  const email = normalizeOboEmail(req.header("x-forwarded-email"));
   const token = req.header("x-forwarded-access-token");
 
   if (email && token) return { email, token };
@@ -282,9 +261,8 @@ function createUserWorkspaceClient(token: string): WorkspaceClient {
 }
 
 function normalizePoolMax(value: number | undefined): number {
-  // Default of 25 keeps the worst-case fan-out tractable on Lakebase tiers
-  // ((1 + 25) × 4 + SP(10) ≈ 114 conns). Apps with hot OBO traffic should
-  // raise this explicitly after sizing the database tier.
+  // Default 25 keeps fan-out tractable on Lakebase tiers ((1+25)×4 + SP(10)
+  // ≈ 114 conns). Hot-OBO apps should raise explicitly after sizing the tier.
   if (!Number.isFinite(value) || value === undefined) return 25;
   return Math.max(1, Math.floor(value));
 }
