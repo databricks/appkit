@@ -1,8 +1,8 @@
-name: PR Breaking Change Check
+name: PR Metadata Verification
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
     branches:
       - main
 
@@ -15,6 +15,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-title:
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+
+    name: Conventional Commit Title
+    steps:
+      - name: Validate PR title
+        uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            test
+            ci
+            refactor
+            perf
+            chore
+            revert
+            style
+            build
+
   detect-breaking:
     name: Detect Breaking Commits
     runs-on:
@@ -26,12 +51,17 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
       - name: Find breaking commits
         id: scan
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: bash .github/scripts/detect-breaking-commits.sh
+        # Node 24 strips TS type annotations natively, so no tsx/transpile step needed.
+        run: node tools/detect-breaking-commits.ts
 
       - name: Upsert sticky PR comment
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
