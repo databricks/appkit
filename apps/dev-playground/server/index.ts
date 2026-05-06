@@ -59,7 +59,7 @@ createApp({
     genie({
       spaces: { demo: process.env.DATABRICKS_GENIE_SPACE_ID ?? "placeholder" },
     }),
-    lakebase(),
+    ...(process.env.LAKEBASE_ENDPOINT ? [lakebase()] : []),
     lakebaseExamples(),
     files({
       volumes: {
@@ -103,44 +103,46 @@ createApp({
     appkit.server.extend((app) => {
       // ── Lakebase OBO routes (per-user pool, RLS enforced) ──────────
 
-      // GET /api/lakebase-examples/raw/my-products — RLS-filtered list
-      app.get("/api/lakebase-examples/raw/my-products", async (req, res) => {
-        try {
-          const result = await appkit.lakebase
-            .asUser(req)
-            .query(
-              "SELECT * FROM raw_example.products ORDER BY created_at DESC",
+      if ("lakebase" in appkit) {
+        // GET /api/lakebase-examples/raw/my-products — RLS-filtered list
+        app.get("/api/lakebase-examples/raw/my-products", async (req, res) => {
+          try {
+            const result = await appkit.lakebase
+              .asUser(req)
+              .query(
+                "SELECT * FROM raw_example.products ORDER BY created_at DESC",
+              );
+            res.json(result.rows);
+          } catch (error: unknown) {
+            const err = error as Error;
+            res.status(500).json({
+              error: "Failed to fetch user products",
+              message: err.message,
+            });
+          }
+        });
+
+        // POST /api/lakebase-examples/raw/my-products — create as user
+        // created_by is set to current_user by the per-user pool's identity
+        app.post("/api/lakebase-examples/raw/my-products", async (req, res) => {
+          try {
+            const { name, category, price, stock } = req.body;
+
+            const result = await appkit.lakebase.asUser(req).query(
+              `INSERT INTO raw_example.products (name, category, price, stock, created_by)
+                   VALUES ($1, $2, $3, $4, current_user) RETURNING *`,
+              [name, category, Number(price), Number(stock)],
             );
-          res.json(result.rows);
-        } catch (error: unknown) {
-          const err = error as Error;
-          res.status(500).json({
-            error: "Failed to fetch user products",
-            message: err.message,
-          });
-        }
-      });
-
-      // POST /api/lakebase-examples/raw/my-products — create as user
-      // created_by is set to current_user by the per-user pool's identity
-      app.post("/api/lakebase-examples/raw/my-products", async (req, res) => {
-        try {
-          const { name, category, price, stock } = req.body;
-
-          const result = await appkit.lakebase.asUser(req).query(
-            `INSERT INTO raw_example.products (name, category, price, stock, created_by)
-                 VALUES ($1, $2, $3, $4, current_user) RETURNING *`,
-            [name, category, Number(price), Number(stock)],
-          );
-          res.json(result.rows[0]);
-        } catch (error: unknown) {
-          const err = error as Error;
-          res.status(500).json({
-            error: "Failed to create product",
-            message: err.message,
-          });
-        }
-      });
+            res.json(result.rows[0]);
+          } catch (error: unknown) {
+            const err = error as Error;
+            res.status(500).json({
+              error: "Failed to create product",
+              message: err.message,
+            });
+          }
+        });
+      }
 
       // ── Analytics examples ──────────
 
