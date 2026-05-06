@@ -123,21 +123,18 @@ To develop locally against a deployed Lakebase database:
 
 1. **Deploy the app first.** The Service Principal creates the database schema and tables on first deploy. Apps generated from `databricks apps init` handle this automatically - they check if tables exist on startup and skip creation if they do.
 
-2. **Grant `databricks_superuser` via the Lakebase UI:**
-   1. Open the Lakebase Autoscaling UI and navigate to your project's **Branch Overview** page.
-   2. Click **Add role** (or **Edit role** if your OAuth role already exists).
-   3. Select your Databricks identity as the principal and check the **`databricks_superuser`** system role.
+2. **Grant `databricks_superuser` for collaborators:** If you created the Lakebase project, your identity was automatically granted database access when the project was created. No UI grant needed. For teammates who need local access, open the Lakebase Autoscaling UI and navigate to your project's **Branch Overview** page. Click **Add role** (or **Edit role** if their OAuth role already exists), select their Databricks identity, and check the **`databricks_superuser`** system role.
 
-3. **Run locally** - your Databricks user identity (email) is used for OAuth authentication. The `databricks_superuser` role gives full **DML access** (read/write data) but **not DDL** (creating schemas or tables) - that's why deploying first matters (see note below).
-
-For other users, use the same **Add role** flow in the Lakebase UI to create an OAuth role with `databricks_superuser` for each user.
+3. **Run locally**: your Databricks user identity (email) is used for OAuth authentication. The `databricks_superuser` role gives full **DML access** (read/write data) but **not DDL** (creating schemas or tables) - that's why deploying first matters (see note below).
 
 :::tip
 [Postgres password authentication](https://docs.databricks.com/aws/en/oltp/projects/authentication#overview) is a simpler alternative that avoids OAuth role permission complexity. However, it requires you to set up a password for the user in the **Branch Overview** page in the Lakebase Autoscaling UI.
 :::
 
 :::info[Why deploy first?]
-When the app is deployed, the Service Principal creates schemas and tables and becomes their owner. A `databricks_superuser` has full **DML access** (SELECT, INSERT, UPDATE, DELETE) to these objects, but **cannot run DDL** (CREATE SCHEMA, CREATE TABLE) on schemas owned by the Service Principal. Deploying first ensures all objects exist before local development begins.
+When the app is deployed, the Service Principal creates schemas and tables and becomes their owner. `databricks_superuser` gives full DML access (read/write) but not DDL, so local development works only after the schema exists.
+
+If you run `npm run dev` first, your credentials own the schema and the deployed app hits `permission denied`. To recover, export any data first (`pg_dump` or a temporary schema copy), then drop the schema and redeploy. After redeploying, the Service Principal recreates the schema on startup. (PostgreSQL schema ownership is tied to the role that created it and cannot be reassigned by regular users.)
 :::
 
 ### Fine-grained permissions
