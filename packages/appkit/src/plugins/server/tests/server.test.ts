@@ -6,6 +6,7 @@ const {
   mockExpressApp,
   mockRemoteTunnelControllerMiddleware,
   mockRemoteTunnelControllerInstance,
+  mockGetPort,
 } = vi.hoisted(() => {
   const httpServer = {
     close: vi.fn((cb: any) => cb?.()),
@@ -36,11 +37,29 @@ const {
     isActive: vi.fn().mockReturnValue(false),
   };
 
+  const mockGetPort = vi.fn(
+    async (opts?: { port?: number | Iterable<number>; host?: string }) => {
+      if (opts?.port == null) return 8000;
+      if (typeof opts.port === "number") return opts.port;
+      for (const p of opts.port) return p;
+      return 8000;
+    },
+  );
+
   return {
     mockHttpServer: httpServer,
     mockExpressApp: expressApp,
     mockRemoteTunnelControllerMiddleware: remoteTunnelControllerMiddleware,
     mockRemoteTunnelControllerInstance: remoteTunnelControllerInstance,
+    mockGetPort,
+  };
+});
+
+vi.mock("get-port", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("get-port")>();
+  return {
+    ...actual,
+    default: mockGetPort,
   };
 });
 
@@ -240,6 +259,70 @@ describe("ServerPlugin", () => {
 
       await plugin.start();
 
+      expect(mockExpressApp.listen).toHaveBeenCalledWith(
+        3000,
+        expect.any(String),
+        expect.any(Function),
+      );
+    });
+
+    test("uses get-port portNumbers in development when default preferred", async () => {
+      process.env.NODE_ENV = "development";
+      mockGetPort.mockResolvedValueOnce(8123);
+      const plugin = new ServerPlugin({});
+
+      await plugin.start();
+
+      expect(mockGetPort).toHaveBeenCalledWith(
+        expect.objectContaining({
+          host: ServerPlugin.DEFAULT_CONFIG.host,
+        }),
+      );
+      const opts = mockGetPort.mock.calls[0][0] as {
+        port: Iterable<number>;
+      };
+      expect([...opts.port].slice(0, 2)).toEqual([
+        ServerPlugin.DEFAULT_CONFIG.port,
+        ServerPlugin.DEFAULT_CONFIG.port + 1,
+      ]);
+      expect(mockExpressApp.listen).toHaveBeenCalledWith(
+        8123,
+        expect.any(String),
+        expect.any(Function),
+      );
+    });
+
+    test("uses get-port portNumbers in development when explicit port preferred", async () => {
+      process.env.NODE_ENV = "development";
+      mockGetPort.mockResolvedValueOnce(9123);
+      const plugin = new ServerPlugin({ port: 4000 });
+
+      await plugin.start();
+
+      expect(mockGetPort).toHaveBeenCalledWith(
+        expect.objectContaining({
+          host: ServerPlugin.DEFAULT_CONFIG.host,
+        }),
+      );
+      const opts = mockGetPort.mock.calls[0][0] as {
+        port: Iterable<number>;
+      };
+      expect([...opts.port].slice(0, 2)).toEqual([4000, 4001]);
+      expect(mockExpressApp.listen).toHaveBeenCalledWith(
+        9123,
+        expect.any(String),
+        expect.any(Function),
+      );
+    });
+
+    test("does not use get-port outside development", async () => {
+      process.env.NODE_ENV = "production";
+      mockGetPort.mockClear();
+      const plugin = new ServerPlugin({ port: 3000 });
+
+      await plugin.start();
+
+      expect(mockGetPort).not.toHaveBeenCalled();
       expect(mockExpressApp.listen).toHaveBeenCalledWith(
         3000,
         expect.any(String),

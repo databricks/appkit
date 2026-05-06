@@ -3,6 +3,7 @@ import type { Server as HTTPServer } from "node:http";
 import path from "node:path";
 import dotenv from "dotenv";
 import express from "express";
+import getPort, { portNumbers } from "get-port";
 import type { PluginClientConfigs, PluginPhase } from "shared";
 import { ServerError } from "../../errors";
 import { createLogger } from "../../logging/logger";
@@ -20,6 +21,9 @@ import { ViteDevServer } from "./vite-dev-server";
 dotenv.config({ path: path.resolve(process.cwd(), "./.env") });
 
 const logger = createLogger("server");
+
+/** Dev-only: try `requested` then consecutive ports (see `get-port` `portNumbers`). */
+const devListenPortSpan = 100;
 
 /**
  * Server plugin for the AppKit.
@@ -54,6 +58,8 @@ export class ServerPlugin extends Plugin {
   private server: HTTPServer | null;
   private viteDevServer?: ViteDevServer;
   private remoteTunnelController?: RemoteTunnelController;
+  /** Bound listen port after optional dev-time resolution. */
+  private resolvedListenPort?: number;
   protected declare config: ServerConfig;
   private serverExtensions: ((app: express.Application) => void)[] = [];
   private rawBodyPaths: Set<string> = new Set();
@@ -125,8 +131,10 @@ export class ServerPlugin extends Plugin {
 
     await this.setupFrontend(endpoints, pluginConfigs);
 
+    const listenPort = await this.resolveListenPort();
+
     const server = this.serverApplication.listen(
-      this.config.port ?? ServerPlugin.DEFAULT_CONFIG.port,
+      listenPort,
       this.config.host ?? ServerPlugin.DEFAULT_CONFIG.host,
       () => this.logStartupInfo(),
     );
@@ -306,10 +314,36 @@ export class ServerPlugin extends Plugin {
     return undefined;
   }
 
+  /**
+   * In development, prefers {@link ServerConfig.port} / env / default (8000), then
+   * scans upward using `get-port`'s `portNumbers()` on the listen host until one binds.
+   * In non-development, uses config / env / default only (no fallback).
+   */
+  private async resolveListenPort(): Promise<number> {
+    const requested = this.config.port ?? ServerPlugin.DEFAULT_CONFIG.port;
+
+    if (process.env.NODE_ENV !== "development") {
+      this.resolvedListenPort = requested;
+      return requested;
+    }
+
+    const host = this.config.host ?? ServerPlugin.DEFAULT_CONFIG.host;
+    const upper = Math.min(requested + devListenPortSpan - 1, 65_535);
+    const port = await getPort({
+      host,
+      port: portNumbers(requested, upper),
+    });
+    this.resolvedListenPort = port;
+    return port;
+  }
+
   private logStartupInfo() {
     const isDev = process.env.NODE_ENV === "development";
     const hasExplicitStaticPath = this.config.staticPath !== undefined;
-    const port = this.config.port ?? ServerPlugin.DEFAULT_CONFIG.port;
+    const port =
+      this.resolvedListenPort ??
+      this.config.port ??
+      ServerPlugin.DEFAULT_CONFIG.port;
     const host = this.config.host ?? ServerPlugin.DEFAULT_CONFIG.host;
 
     logger.info("Server running on http://%s:%d", host, port);

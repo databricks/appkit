@@ -71,6 +71,7 @@
     "@types/semver": "7.7.1",
     "dotenv": "16.6.1",
     "express": "4.22.0",
+    "get-port": "7.2.0",
     "obug": "2.1.1",
     "pg": "8.18.0",
     "picocolors": "1.1.1",
