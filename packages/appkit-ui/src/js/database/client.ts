@@ -19,9 +19,7 @@ import {
 } from "./url-builder";
 
 /**
- * Build a browser-side `DatabaseClient` bound to the given config. The returned
- * object is a `Proxy` — any property access (`db.user`, `db.team`, ...) yields
- * a fresh chain whose terminators call `fetch` against `<baseUrl>/<entity>`.
+ * Browser `DatabaseClient`: `Proxy` over `<baseUrl>/<entity>` chains that end in `fetch`.
  *
  * @example
  * ```ts
@@ -93,7 +91,7 @@ export function createDatabaseClient(
       find: async (id, signal) => {
         const url = `${baseUrl}/${entity}/${encodeURIComponent(String(id))}`;
         const res = await fetchImpl(url, { signal });
-        if (res.status === 404) return null;
+        if (res.status === 404 || res.status === 204) return null;
         return readJson<TRow>(res);
       },
       count: async (signal) => {
@@ -105,7 +103,7 @@ export function createDatabaseClient(
           select: undefined,
           include: undefined,
         };
-        const url = buildUrl(baseUrl, `${entity}/count`, countState);
+        const url = buildUrl(baseUrl, entity, countState, "count");
         const res = await fetchImpl(url, { signal });
         const json = await readJson<{ count: number }>(res);
         return json.count;
@@ -128,6 +126,8 @@ export function createDatabaseClient(
           body: JSON.stringify(patch),
           signal,
         });
+        // 404 → null like `find()` so callers distinguish missing rows from bad responses.
+        if (res.status === 404) return null;
         return readJson<TRow>(res);
       },
       upsert: async (data, options, signal) => {
@@ -164,12 +164,7 @@ export function createDatabaseClient(
 
 let defaultClient: DatabaseClient | undefined;
 
-/**
- * Default browser client — reads from `/api/database`. Constructed lazily on
- * first property access so that bundles that import other named exports
- * (`createDatabaseClient`, types, etc.) without using `db` don't pay the
- * construction cost.
- */
+/** Lazy singleton default client (`/api/database`) — avoids work when `db` isn't imported. */
 export const db: DatabaseClient = new Proxy({} as DatabaseClient, {
   get(_target, prop) {
     defaultClient ??= createDatabaseClient();
@@ -184,7 +179,24 @@ function normalizeBaseUrl(value: string): string {
 async function readJson<T>(res: Response): Promise<T> {
   if (!res.ok) throw await buildError(res);
   if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  // Empty body → typed error (JSON.parse("") throws SyntaxError, not DatabaseHTTPError).
+  const text = await res.text();
+  if (text === "") {
+    throw new DatabaseHTTPError(
+      res.status,
+      "Server returned an empty response body",
+      undefined,
+    );
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch (err) {
+    throw new DatabaseHTTPError(
+      res.status,
+      `Server returned non-JSON response: ${(err as Error).message}`,
+      text,
+    );
+  }
 }
 
 async function buildError(res: Response): Promise<DatabaseHTTPError> {

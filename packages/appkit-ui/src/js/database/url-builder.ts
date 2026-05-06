@@ -1,9 +1,8 @@
 import type { OrderInput, WhereInput } from "./types";
 
 /**
- * Internal request descriptor accumulated by chain methods on `EntityClient`.
- * Each field holds the pre-serialized AppKit route literal — `buildUrl` just
- * concatenates them into a `URLSearchParams` string.
+ * Accumulated query state for `EntityClient` chains — fields are literal strings
+ * that `buildUrl` joins into `URLSearchParams`.
  */
 export interface RequestState {
   filters: Array<{ col: string; expr: string }>;
@@ -17,19 +16,31 @@ export interface RequestState {
 }
 
 /**
- * Fresh empty state — used when a new chain is started from `db.<entity>`.
- *
- * Both the outer object and the inner `filters` array are frozen so a
- * misbehaving consumer can't mutate the shared singleton. Chain methods
- * always copy via `[...state.filters]` before pushing.
+ * Starting state for `db.<entity>` — frozen so callers can't mutate the shared empty filters.
  */
 export const EMPTY_STATE: RequestState = Object.freeze({
   filters: Object.freeze([]) as unknown as RequestState["filters"],
 }) as RequestState;
 
+// Mirror route allowlist — runtime JSON can bypass TS.
+const ALLOWED_OPS = new Set([
+  "eq",
+  "neq",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "like",
+  "ilike",
+  "in",
+  "is",
+]);
+
+// Cap `in` size — long URLs hit proxy/browser limits (414 / truncation).
+const MAX_IN_LIST = 100;
+
 /**
- * Apply a `.where(...)` input to the state. Bare values become `eq.<value>`;
- * operator objects expand to one filter per op (`role=in.(admin,owner)`).
+ * Merge `.where(...)`: scalars → `eq`; objects expand ops; bare `null` → `is.null`.
  */
 export function pushFilter<TRow>(
   state: RequestState,
@@ -40,20 +51,40 @@ export function pushFilter<TRow>(
     filters: [...state.filters],
   };
   for (const [col, value] of Object.entries(input)) {
-    if (value === null || typeof value !== "object") {
+    if (value === null) {
+      next.filters.push({ col, expr: "is.null" });
+      continue;
+    }
+    if (typeof value !== "object") {
       next.filters.push({ col, expr: `eq.${encodeScalar(value)}` });
       continue;
     }
     if (Array.isArray(value)) {
+      assertInListSize(value, col);
       next.filters.push({ col, expr: `in.${encodeList(value)}` });
       continue;
     }
     for (const [op, raw] of Object.entries(value as Record<string, unknown>)) {
       if (raw === undefined) continue;
+      if (!ALLOWED_OPS.has(op)) {
+        throw new Error(
+          `Unsupported where operator "${op}" on column "${col}"`,
+        );
+      }
+      if (op === "in" && Array.isArray(raw)) assertInListSize(raw, col);
       next.filters.push({ col, expr: `${op}.${encodeOperand(op, raw)}` });
     }
   }
   return next;
+}
+
+function assertInListSize(values: readonly unknown[], col: string): void {
+  if (values.length > MAX_IN_LIST) {
+    throw new Error(
+      `where(${col}.in) accepts at most ${MAX_IN_LIST} values; got ${values.length}. ` +
+        `Page the parent query or batch the IN list.`,
+    );
+  }
 }
 
 /** Merge an `.order(...)` input into the state, preserving prior directives. */
@@ -81,12 +112,7 @@ export function pushSelect(
 }
 
 /**
- * Serialize an `.include({ posts: true, author: { select: ["id"] } })` input
- * into the route layer's `?include=` syntax. Bare `true` keeps the relation
- * with all default columns; an options bag with `select` projects them.
- *
- * Stored separately from `select` so column projection and relation embedding
- * stay independent and the server can parse each axis cleanly.
+ * Serialize `.include(...)` to `?include=` — independent of column `select`.
  */
 export function pushInclude(
   state: RequestState,
@@ -118,12 +144,24 @@ export function pushInclude(
   return { ...state, include: next };
 }
 
-/** Compose the final URL for this entity/state. */
+/**
+ * Final URL for `entity` + `state`. Optional `subpath` (e.g. `count`) is allowlisted
+ * so dynamic entity keys can't escape the mount.
+ */
 export function buildUrl(
   baseUrl: string,
   entity: string,
   state: RequestState,
+  subpath?: string,
 ): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(entity)) {
+    throw new Error(
+      `Invalid entity name "${entity}". Must match /^[A-Za-z_][A-Za-z0-9_]*$/.`,
+    );
+  }
+  if (subpath !== undefined && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(subpath)) {
+    throw new Error(`Invalid subpath "${subpath}".`);
+  }
   const params = new URLSearchParams();
   for (const f of state.filters) params.append(f.col, f.expr);
   if (state.order) params.set("order", state.order);
@@ -132,7 +170,8 @@ export function buildUrl(
   if (state.select) params.set("select", state.select);
   if (state.include) params.set("include", state.include);
   const qs = params.toString();
-  return `${baseUrl}/${entity}${qs ? `?${qs}` : ""}`;
+  const tail = subpath ? `/${encodeURIComponent(subpath)}` : "";
+  return `${baseUrl}/${encodeURIComponent(entity)}${tail}${qs ? `?${qs}` : ""}`;
 }
 
 function encodeOperand(op: string, value: unknown): string {

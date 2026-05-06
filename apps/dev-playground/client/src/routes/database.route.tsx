@@ -21,10 +21,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 
 /**
- * Demo page for the database plugin. Every call on `db.cases` is typed
- * end-to-end from `config/database/schema.ts` — no local interface, no cast.
- * Changing the schema regenerates `shared/appkit-types/database.d.ts` via the
- * Vite plugin and this file breaks at compile time until it agrees again.
+ * Database plugin demo: `db.cases` is typed from `config/database/schema.ts`;
+ * the Vite-generated `database.d.ts` keeps this route honest at compile time.
  */
 
 const STATUS_VALUES = [
@@ -438,7 +436,7 @@ function CreateCase() {
 function describeError(err: unknown): string {
   if (err instanceof DatabaseHTTPError) {
     const body = err.body as { error?: string; message?: string } | undefined;
-    return `HTTP ${err.status} — ${body?.error ?? body?.message ?? err.message}`;
+    return `HTTP ${err.statusCode} — ${body?.error ?? body?.message ?? err.message}`;
   }
   if (err instanceof Error) return err.message;
   return String(err);

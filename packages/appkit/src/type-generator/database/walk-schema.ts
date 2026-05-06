@@ -1,11 +1,9 @@
 import { adaptDrizzleTable } from "../../database/introspector/drizzle-adapter";
 import type { IntrospectedColumn } from "../../database/introspector/types";
-import type { AppKitTable, Schema } from "../../database/schema-builder/types";
+import type { Schema } from "../../database/schema-builder/types";
 
 /**
- * One entry in the emitted `DatabaseRegistry`. Each string field is a
- * pre-rendered TypeScript type literal ready to splice into the `.d.ts`
- * output — the generator does no further formatting on these.
+ * One registry entry — string fields are ready-to-splice TS type literals.
  */
 export interface RegistryEntry {
   /** JS entity key (the property name in `$tables`, e.g. `"activityLog"`). */
@@ -22,28 +20,23 @@ export interface RegistryEntry {
   includes: string;
 }
 
-/** Edge recorded during the forward pass so the reverse pass can consume it. */
+/** FK edge `table → target` from the forward pass. */
 interface ForwardEdge {
   fromColumn: string;
   target: string;
 }
 
-/** Edge recorded as "other entity points at me" during the forward pass. */
+/** Incoming FK `target ← source` for one-to-many rendering. */
 interface ReverseEdge {
   fromEntity: string;
   fromColumn: string;
 }
 
 /**
- * Walk a `Schema` and produce the flat registry entries that the generator
- * splices into the emitted `.d.ts`. This is pure — no I/O.
+ * Walk `Schema` → flat registry entries (pure, no I/O).
  *
- * Include inference runs in two passes. During the first pass, for each FK on
- * a table we record a forward edge (`table → target`) and, symmetrically, a
- * reverse edge on the target (`target ← table`). After all tables have been
- * visited we render the includes literal per entity, disambiguating
- * multi-FK pairs with the column name — which is exactly how PostgREST
- * disambiguates the same ambiguity in its embed syntax (`posts!author_id(*)`).
+ * Include inference: record forward + reverse FK edges per table, then render
+ * `includes` — duplicate FK pairs use column keys like PostgREST (`posts!author_id`).
  */
 export function walkSchema(schema: unknown): RegistryEntry[] {
   if (!schema || typeof schema !== "object") return [];
@@ -51,8 +44,7 @@ export function walkSchema(schema: unknown): RegistryEntry[] {
   const tables = s.$tables;
   if (!tables || typeof tables !== "object") return [];
 
-  // Map SQL table name → entity (JS) key. `Relation.toTable` is a SQL name and
-  // must be translated back to the entity key the registry is indexed by.
+  // SQL table name → JS entity key (`Relation.toTable` is SQL, not the registry key).
   const sqlNameToEntity = new Map<string, string>();
   for (const [entity, table] of Object.entries(tables)) {
     sqlNameToEntity.set(table.name, entity);
@@ -76,7 +68,10 @@ export function walkSchema(schema: unknown): RegistryEntry[] {
 
   const entries: RegistryEntry[] = [];
   for (const [entity, table] of Object.entries(tables)) {
-    const columns = adaptDrizzleTable(table).columns;
+    // Strip `column.private()` before emit — avoids leaking credential-ish fields in `.d.ts`.
+    const columns = adaptDrizzleTable(table).columns.filter(
+      (c) => table.$columns[c.name]?.private !== true,
+    );
     entries.push({
       entity,
       row: renderRow(columns),
@@ -103,10 +98,7 @@ function renderRow(columns: IntrospectedColumn[]): string {
   return `{ ${fields.join(" ")} }`;
 }
 
-/**
- * Render insert shape. Columns are optional when nullable, have a default, or
- * are server-generated (serial PKs, `defaultNow()`-style timestamps, etc.).
- */
+/** Insert shape — optional when nullable, defaulted, or server-generated. */
 function renderInsert(columns: IntrospectedColumn[]): string {
   if (columns.length === 0) return "{}";
   const fields = columns.map((c) => {
@@ -138,10 +130,8 @@ function renderFilters(columns: IntrospectedColumn[]): string {
 }
 
 /**
- * Render `includes: { ... }` combining forward (many-to-one, single object) and
- * reverse (one-to-many, array) relations. Colliding pairs (multiple FKs from
- * the same source to the same target) are keyed by column name so callers can
- * pick the one they want — matching PostgREST's `posts!author_id(*)` syntax.
+ * `includes` literal — forward edges as `{ row }`, reverse as `Array<{ row }>`;
+ * multiple FKs to the same target key by column (PostgREST-style).
  */
 function renderIncludes(
   forward: ForwardEdge[],
@@ -183,11 +173,7 @@ function renderIncludes(
   return `{ ${parts.join(" ")} }`;
 }
 
-/**
- * Collapse a Postgres column type to a TypeScript type literal. Timestamps
- * stay as `string` because the browser path always receives JSON text; the
- * server path can widen to `string | Date` locally if it ever needs to.
- */
+/** Map pg types to TS — timestamps stay `string` (JSON always delivers text). */
 function pgTypeToTs(pgType: string): string {
   switch (pgType) {
     case "int2":
@@ -217,12 +203,7 @@ function pgTypeToTs(pgType: string): string {
   }
 }
 
-/**
- * Classifier used by the `filters` literal — a coarse kind that keeps the
- * type generator's output stable when new pg types are added. The classifier
- * lives here because the registry's `filters` shape is a client-facing
- * contract, not a Postgres one.
- */
+/** Coarse filter kind for stable generator output when new pg types appear. */
 function pgTypeToFilterKind(
   pgType: string,
 ): "string" | "number" | "boolean" | "date" {

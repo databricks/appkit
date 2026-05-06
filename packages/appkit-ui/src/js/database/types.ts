@@ -1,32 +1,23 @@
 /**
- * Database registry — augmented by the `appkit` type generator (C10).
+ * Database registry — augmented by the AppKit type generator from `schema.ts`.
  *
- * Starts empty. The type generator emits a `.d.ts` with
- * `declare module "@databricks/appkit-ui/js" { interface DatabaseRegistry { ... } }`
- * so that `db.<entity>` is typed end-to-end once a `config/database/schema.ts`
- * exists in the consuming app.
- *
- * Consumed by both the browser `db` (this file) and the server
- * `appkit.database` via `import type { DatabaseRegistry } from "@databricks/appkit-ui/js"`.
- * Single declaration, single source of truth.
+ * Emits `declare module "@databricks/appkit-ui/js" { interface DatabaseRegistry { … } }`.
+ * Shared by the browser `db` client and server `appkit.database` imports.
  */
 // biome-ignore lint/suspicious/noEmptyInterface: intentionally empty — populated via module augmentation
 export interface DatabaseRegistry {}
 
-/** Extracts only the literal keys added via module augmentation, skipping any index signature. */
+/** Literal keys from augmentation only (drops index signatures). */
 type AugmentedKeys<T> = keyof {
   [K in keyof T as string extends K ? never : K]: T[K];
 };
 
-/**
- * Resolves to the union of augmented entity names, or `string` as a loose
- * fallback when the registry hasn't been populated by the type generator yet.
- */
+/** Augmented entity names, or `string` before the generator runs. */
 export type DatabaseEntityKey = AugmentedKeys<DatabaseRegistry> extends never
   ? string
   : AugmentedKeys<DatabaseRegistry>;
 
-/** Row shape for entity `E`. Falls back to `unknown` before C10 augments. */
+/** Row shape for entity `E`. Unknown before module augmentation. */
 export type DatabaseRow<E extends DatabaseEntityKey> =
   DatabaseRegistry extends {
     [K in E]: { row: infer R };
@@ -53,8 +44,7 @@ export type DatabaseIncludes<E extends DatabaseEntityKey> =
     : Record<string, never>;
 
 /**
- * Operator-style predicate accepted by `.where(...)`. Any bare value is shorthand
- * for equality. An object picks one or more operators for the column.
+ * `.where(...)` predicate: bare values are `eq`; objects pick operators per column.
  */
 export type WhereInput<TRow> = {
   [K in keyof TRow]?:
@@ -76,10 +66,7 @@ export type WhereInput<TRow> = {
 /** Sort directive for `.order(...)`. */
 export type OrderInput<TRow> = { [K in keyof TRow]?: "asc" | "desc" };
 
-/**
- * The underlying row for a related entity. Handles both many-to-one
- * (single `{ row: R }`) and one-to-many (`{ row: R }[]`) registry shapes.
- */
+/** Related row shape: single `{ row }` or `{ row }[]` from the registry. */
 export type RelatedRow<
   TIncludes,
   K extends keyof TIncludes,
@@ -98,10 +85,7 @@ export type IncludeInput<TIncludes> = {
       };
 };
 
-/**
- * Maps the `I` include input to additional fields on the returned row. Arrays
- * for one-to-many relations, plain objects for many-to-one.
- */
+/** Maps included relation keys onto extra fields (object vs array per cardinality). */
 export type ApplyIncludes<TIncludes, I> = {
   [K in keyof I & keyof TIncludes]: TIncludes[K] extends Array<infer _>
     ? RelatedRow<TIncludes, K>[]
@@ -109,10 +93,8 @@ export type ApplyIncludes<TIncludes, I> = {
 };
 
 /**
- * Browser `EntityClient` — structurally symmetric with the server-side
- * `EntityClient` from `@databricks/appkit`. Each terminator performs a single
- * HTTP request against `/api/database/<entity>`; the chain methods mutate an
- * internal request descriptor.
+ * Browser `EntityClient` — mirrors server `EntityClient`; chain methods build
+ * one HTTP request to `/api/database/<entity>`.
  */
 export interface EntityClient<
   TRow,
@@ -132,10 +114,7 @@ export interface EntityClient<
     ...cols: K[]
   ): EntityClient<Pick<TRow, K>, TInsert, TUpdate, TIncludes>;
 
-  /**
-   * Eager-load related entities. Serializes `{ posts: true }` into AppKit's
-   * route-owned `?include=posts` query syntax.
-   */
+  /** Eager-load relations → `?include=` (PostgREST-style). */
   include<I extends IncludeInput<TIncludes>>(
     input: I,
   ): EntityClient<
@@ -151,11 +130,14 @@ export interface EntityClient<
   count(signal?: AbortSignal): Promise<number>;
 
   create(data: TInsert, signal?: AbortSignal): Promise<TRow>;
+  /**
+   * PATCH by id — `null` on 404 (like `find()`); otherwise rejects with `DatabaseHTTPError`.
+   */
   update(
     id: string | number,
     patch: TUpdate,
     signal?: AbortSignal,
-  ): Promise<TRow>;
+  ): Promise<TRow | null>;
   upsert(
     data: TInsert,
     options: { onConflict: keyof TRow & string },
@@ -165,10 +147,8 @@ export interface EntityClient<
 }
 
 /**
- * The shape returned by `createDatabaseClient()`. Entity names resolve to typed
- * `EntityClient`s once `DatabaseRegistry` is augmented by the type generator.
- * Before augmentation, each entity is `EntityClient<unknown, ...>` — still
- * functional at runtime but loosely typed.
+ * Return type of `createDatabaseClient()`. Entity keys become typed clients once
+ * `DatabaseRegistry` is augmented; before that, entities are loose `unknown` rows.
  */
 export type DatabaseClient = {
   [E in DatabaseEntityKey]: EntityClient<
