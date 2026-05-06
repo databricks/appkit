@@ -502,7 +502,6 @@ describe("Files Plugin Integration", () => {
           serverPlugin({
             port: 0,
             host: "127.0.0.1",
-            autoStart: false,
           }),
           files({
             volumes: {
@@ -513,7 +512,6 @@ describe("Files Plugin Integration", () => {
       });
 
       try {
-        await appkit.server.start();
         const port = await getListeningPort(appkit.server.getServer());
         const localBase = `http://127.0.0.1:${port}`;
 
@@ -542,7 +540,6 @@ describe("Files Plugin Integration", () => {
           serverPlugin({
             port: 0,
             host: "127.0.0.1",
-            autoStart: false,
           }),
           files({
             volumes: {
@@ -553,7 +550,6 @@ describe("Files Plugin Integration", () => {
       });
 
       try {
-        await appkit.server.start();
         const port = await getListeningPort(appkit.server.getServer());
         const localBase = `http://127.0.0.1:${port}`;
 
