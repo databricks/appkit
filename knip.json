@@ -23,7 +23,8 @@
     "packages/appkit/src/plugins/agents/load-agents.ts",
     "template/**",
     "tools/**",
-    "docs/**"
+    "docs/**",
+    ".github/scripts/**"
   ],
   "ignoreDependencies": ["json-schema-to-typescript"],
   "ignoreBinaries": ["tarball"]
