@@ -9,6 +9,7 @@ let pool: Pool;
  *
  * This example demonstrates:
  * - Direct pg.Pool usage without ORM abstraction
+ * - Manual SQL query writing with parameterized queries
  * - Schema and table creation (idempotent)
  * - Row-Level Security (RLS) setup
  * - Basic CRUD operations (SP pool)
