@@ -93,10 +93,47 @@ describe("generateDatabaseTypes — output", () => {
     expect(content).toContain("update: { id?: number; email?: string; };");
     expect(content).toContain("includes: {};");
     expect(columns).toContain("export const databaseColumns");
-    expect(columns).toContain("configureDatabaseClient");
+    expect(columns).toContain("registerDatabaseColumns(databaseColumns)");
     expect(columns).toContain("user: [");
     expect(columns).toContain('name: "id"');
     expect(columns).toContain("primaryKey: true");
+  });
+
+  test("generated database.columns.ts only imports symbols actually exported from @databricks/appkit-ui/js", async () => {
+    // Regression: a typo in the emitted import name parses fine but throws on
+    // first page load. Assert every imported binding exists in the barrel.
+    const app = await track(await mkApp("// fake schema source\n"));
+    await generateDatabaseTypes({
+      outFile: app.outFile,
+      projectRoot: app.projectRoot,
+      loadModule: async () => ({ default: fakeSchema }),
+      noCache: true,
+    });
+
+    const generated = await fs.readFile(app.columnsOutFile, "utf8");
+    const importedNames = Array.from(
+      generated.matchAll(
+        /^import\s*(?:type\s*)?{([^}]+)}\s*from\s*"@databricks\/appkit-ui\/js";$/gm,
+      ),
+    ).flatMap((m) =>
+      (m[1] ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    );
+    expect(importedNames.length).toBeGreaterThan(0);
+
+    const barrel = await fs.readFile(
+      path.resolve(
+        __dirname,
+        "../../../../../appkit-ui/src/js/database/index.ts",
+      ),
+      "utf8",
+    );
+    for (const name of importedNames) {
+      const re = new RegExp(`\\b${name}\\b`);
+      expect(barrel).toMatch(re);
+    }
   });
 
   test("emits an empty module when the schema has no tables", async () => {
@@ -116,6 +153,7 @@ describe("generateDatabaseTypes — output", () => {
     expect(columns).toContain(
       "export const databaseColumns: Record<string, readonly ColumnInfo[]> = {};",
     );
+    expect(columns).toContain("registerDatabaseColumns(databaseColumns)");
   });
 
   test("throws when the module has no default export", async () => {
@@ -144,7 +182,6 @@ describe("generateDatabaseTypes — cache", () => {
     });
     const first = await fs.readFile(app.outFile, "utf8");
 
-    // Second run with identical source should hit the cache and skip the loader.
     await generateDatabaseTypes({
       outFile: app.outFile,
       projectRoot: app.projectRoot,
@@ -166,7 +203,6 @@ describe("generateDatabaseTypes — cache", () => {
       loadModule: loader,
     });
 
-    // Bump the schema source — cache should miss and the loader should run again.
     await fs.writeFile(
       path.join(app.projectRoot, SCHEMA_REL),
       "// v2\n",
@@ -203,8 +239,7 @@ describe("generateDatabaseTypes — cache", () => {
   });
 
   test("invalidates when a relative import target changes", async () => {
-    // Reproduces F41: split-schema imports were not folded into the cache key,
-    // so editing `./tables/user.ts` left the generator returning stale `.d.ts`.
+    // Split-schema setup: editing an imported table file must bust the cache.
     const app = await track(
       await mkApp(
         `import { user } from "./tables/user";\nexport default user;\n`,
@@ -223,7 +258,6 @@ describe("generateDatabaseTypes — cache", () => {
       loadModule: loader,
     });
 
-    // Edit the imported file (not schema.ts itself). Cache must miss.
     await fs.writeFile(userTable, "export const user = 'v2';\n", "utf8");
 
     await generateDatabaseTypes({

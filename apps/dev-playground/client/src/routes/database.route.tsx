@@ -3,6 +3,12 @@ import {
   Badge,
   Button,
   Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  CreateEntity,
+  EditEntity,
   Input,
   Label,
   Select,
@@ -16,9 +22,18 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  ViewEntity,
 } from "@databricks/appkit-ui/react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+} from "react";
+import { codeToHtml } from "shiki";
 
 /**
  * Database plugin demo: `db.cases` is typed from `config/database/schema.ts`;
@@ -41,6 +56,73 @@ const RISK_BADGE: Record<string, "default" | "secondary" | "destructive"> = {
   Low: "default",
 };
 
+const CASE_VIEW_FIELDS = [
+  "case_id",
+  "entity_name",
+  "risk_level",
+  "status",
+  "assigned_to",
+] as const;
+
+const CASE_MUTATION_FIELDS = [
+  "case_id",
+  "entity_id",
+  "entity_name",
+  "risk_level",
+  "status",
+] as const;
+
+const MANUAL_DB_SNIPPET = `const base =
+  status === "All" ? db.cases : db.cases.where({ status });
+
+const [rows, count] = await Promise.all([
+  base.order({ created_at: "desc" }).limit(50).toArray(),
+  base.count(),
+]);
+
+await db.cases.create({
+  case_id: "CASE-1001",
+  entity_id: "ENT-5001",
+  entity_name: "Acme Trading",
+  risk_level: "Medium",
+  status: "New",
+});
+
+await db.cases.update("CASE-1001", {
+  status: "Closed",
+  updated_at: new Date().toISOString(),
+});
+
+await db.cases.delete("CASE-1001");`;
+
+const ENTITY_COMPONENTS_SNIPPET = `const [createOpen, setCreateOpen] = useState(false);
+const [editingId, setEditingId] = useState<string | null>(null);
+
+<ViewEntity
+  entity="cases"
+  fields={["case_id", "entity_name", "risk_level", "status", "assigned_to"]}
+  order={{ created_at: "desc" }}
+  limit={8}
+  onRowClick={(row) => setEditingId(row.case_id)}
+/>
+
+<CreateEntity
+  entity="cases"
+  fields={["case_id", "entity_id", "entity_name", "risk_level", "status"]}
+  open={createOpen}
+  onOpenChange={setCreateOpen}
+/>
+
+{editingId && (
+  <EditEntity
+    entity="cases"
+    id={editingId}
+    fields={["entity_id", "entity_name", "risk_level", "status"]}
+    open
+    onOpenChange={(open) => !open && setEditingId(null)}
+  />
+)}`;
+
 export const Route = createFileRoute("/database")({
   component: DatabaseRoute,
 });
@@ -48,53 +130,192 @@ export const Route = createFileRoute("/database")({
 function DatabaseRoute() {
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-6xl mx-auto px-6 py-12">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">Database Plugin Demo</h1>
+      <div className="max-w-7xl mx-auto px-6 py-10">
+        <div className="mb-8 max-w-3xl">
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground mb-3">
+            Database plugin beta
+          </div>
+          <h1 className="text-3xl font-bold tracking-tight mb-3">
+            Two ways to build on the same typed entity API
+          </h1>
           <p className="text-base text-muted-foreground">
-            Full CRUD flow against <code>cases</code> via the typed{" "}
-            <code>db</code> client. Every action hits an auto-generated route at{" "}
-            <code>/api/database/cases</code>. The <em>Activity</em> and{" "}
-            <em>AI summary</em> columns are loaded in the same request via{" "}
-            <code>.include()</code>, driven by <code>fk()</code> declarations in{" "}
-            <code>schema.ts</code>.
+            Both sections hit the auto-mounted <code>/api/database/cases</code>{" "}
+            routes. The left side shows hand-built product UI using{" "}
+            <code>db.cases</code>; the right side shows the schema-driven entity
+            components that generate the table and forms from metadata.
           </p>
         </div>
 
-        <div className="grid lg:grid-cols-[2fr_1fr] gap-6">
-          <CaseList />
-          <CreateCase />
+        <div className="grid xl:grid-cols-2 gap-6 items-start">
+          <ManualDbSection />
+          <EntityComponentsSection />
         </div>
       </div>
     </div>
   );
 }
 
-async function fetchCasesWithIncludes(status: string, signal?: AbortSignal) {
-  const base =
-    status === STATUS_FILTER_ALL ? db.cases : db.cases.where({ status });
-  return base
-    .include({
-      ai_summaries: true,
-      activity_log: { select: ["log_id", "action", "created_at"] },
-    })
-    .order({ created_at: "desc" })
-    .limit(50)
-    .toArray(signal);
+function CodeBlock({
+  code,
+  lang = "typescript",
+}: {
+  code: string;
+  lang?: string;
+}) {
+  const [html, setHtml] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    codeToHtml(code, {
+      lang,
+      theme: "dark-plus",
+    }).then((highlighted) => {
+      if (active) setHtml(highlighted);
+    });
+    return () => {
+      active = false;
+    };
+  }, [code, lang]);
+
+  return (
+    <div
+      className="rounded-md overflow-hidden border bg-zinc-950 [&>pre]:m-0 [&>pre]:max-h-[420px] [&>pre]:overflow-auto [&>pre]:p-4 [&>pre]:text-xs [&>pre]:leading-relaxed"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
 }
 
-type CaseRow = Awaited<ReturnType<typeof fetchCasesWithIncludes>>[number];
+function CodeDisclosure({
+  code,
+  label = "Show snippet",
+}: {
+  code: string;
+  label?: string;
+}) {
+  const [open, setOpen] = useState(false);
 
-function useCases(status: string) {
-  const [data, setData] = useState<CaseRow[] | null>(null);
+  return (
+    <div className="space-y-3">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => setOpen((value) => !value)}
+      >
+        {open ? "Hide snippet" : label}
+      </Button>
+      {open && <CodeBlock code={code} />}
+    </div>
+  );
+}
+
+function ManualDbSection() {
+  const [refreshToken, setRefreshToken] = useState(0);
+  const refresh = useCallback(() => setRefreshToken((value) => value + 1), []);
+
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader className="border-b">
+        <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+          Side A
+        </div>
+        <CardTitle>Hand-built UI, typed database client</CardTitle>
+        <CardDescription>
+          Custom AML case workflow using direct, typed calls like{" "}
+          <code>db.cases.where(...)</code>, <code>create</code>,{" "}
+          <code>update</code>, and <code>delete</code>.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <CodeDisclosure code={MANUAL_DB_SNIPPET} />
+        <CaseList refreshToken={refreshToken} />
+        <CreateCase onCreated={refresh} />
+      </CardContent>
+    </Card>
+  );
+}
+
+function EntityComponentsSection() {
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [refreshToken, setRefreshToken] = useState(0);
+  const refresh = useCallback(() => setRefreshToken((value) => value + 1), []);
+
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader className="border-b">
+        <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+          Side B
+        </div>
+        <CardTitle>Entity components from the same schema</CardTitle>
+        <CardDescription>
+          Generic table and mutation dialogs driven by column metadata from{" "}
+          <code>config/database/schema.ts</code>.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <CodeDisclosure code={ENTITY_COMPONENTS_SNIPPET} />
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/20 p-3">
+          <div>
+            <div className="font-medium">Cases entity</div>
+            <div className="text-sm text-muted-foreground">
+              Click a row to open the generated edit dialog.
+            </div>
+          </div>
+          <Button onClick={() => setCreateOpen(true)}>
+            New with component
+          </Button>
+        </div>
+        <ViewEntity
+          key={refreshToken}
+          entity="cases"
+          fields={CASE_VIEW_FIELDS}
+          order={{ created_at: "desc" }}
+          limit={8}
+          onRowClick={(row) => setEditingId(row.case_id)}
+        />
+        <CreateEntity
+          entity="cases"
+          fields={CASE_MUTATION_FIELDS}
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          onSuccess={refresh}
+          title="Create case with Entity component"
+          description="The form is generated from database.columns.ts metadata."
+        />
+        {editingId && (
+          <EditEntity
+            entity="cases"
+            id={editingId}
+            fields={["entity_id", "entity_name", "risk_level", "status"]}
+            open
+            onOpenChange={(open) => {
+              if (!open) setEditingId(null);
+            }}
+            onSuccess={refresh}
+            title={`Edit ${editingId}`}
+            description="Only editable, non-generated columns are shown."
+          />
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function useCases(status: string, refreshToken: number) {
+  const [data, setData] = useState<Awaited<
+    ReturnType<typeof db.cases.toArray>
+  > | null>(null);
   const [total, setTotal] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [_tick, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
 
   const refetch = useCallback(() => setTick((n) => n + 1), []);
 
   useEffect(() => {
+    void refreshToken;
+    void tick;
     const ctrl = new AbortController();
     let active = true;
 
@@ -105,7 +326,7 @@ function useCases(status: string) {
         const base =
           status === STATUS_FILTER_ALL ? db.cases : db.cases.where({ status });
         const [rows, count] = await Promise.all([
-          fetchCasesWithIncludes(status, ctrl.signal),
+          base.order({ created_at: "desc" }).limit(50).toArray(ctrl.signal),
           base.count(ctrl.signal),
         ]);
         if (!active) return;
@@ -125,14 +346,17 @@ function useCases(status: string) {
       active = false;
       ctrl.abort();
     };
-  }, [status]);
+  }, [status, refreshToken, tick]);
 
   return { data, total, loading, error, refetch };
 }
 
-function CaseList() {
+function CaseList({ refreshToken }: { refreshToken: number }) {
   const [statusFilter, setStatusFilter] = useState<string>(STATUS_FILTER_ALL);
-  const { data, total, loading, error, refetch } = useCases(statusFilter);
+  const { data, total, loading, error, refetch } = useCases(
+    statusFilter,
+    refreshToken,
+  );
   const statusFilterId = useId();
 
   const filterLabel = useMemo(
@@ -144,7 +368,7 @@ function CaseList() {
   );
 
   return (
-    <Card className="p-6">
+    <div>
       <div className="flex items-center justify-between gap-4 mb-4">
         <div>
           <h2 className="text-xl font-semibold">Cases</h2>
@@ -190,8 +414,6 @@ function CaseList() {
               <TableHead>Entity</TableHead>
               <TableHead>Risk</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Activity</TableHead>
-              <TableHead>AI summary</TableHead>
               <TableHead>Assigned to</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -200,7 +422,7 @@ function CaseList() {
             {data === null && loading && (
               <TableRow>
                 <TableCell
-                  colSpan={8}
+                  colSpan={6}
                   className="text-center text-muted-foreground py-8"
                 >
                   Loading cases…
@@ -210,7 +432,7 @@ function CaseList() {
             {data !== null && data.length === 0 && !loading && (
               <TableRow>
                 <TableCell
-                  colSpan={8}
+                  colSpan={6}
                   className="text-center text-muted-foreground py-8"
                 >
                   No cases match the current filter.
@@ -223,7 +445,7 @@ function CaseList() {
           </TableBody>
         </Table>
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -231,12 +453,9 @@ function CaseRowItem({
   row,
   onChanged,
 }: {
-  row: CaseRow;
+  row: Awaited<ReturnType<typeof db.cases.toArray>>[number];
   onChanged: () => void;
 }) {
-  const activityLog = row.activity_log ?? [];
-  const aiSummary = row.ai_summaries?.[0];
-
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -304,27 +523,6 @@ function CaseRowItem({
         </Select>
         {error && <div className="text-xs text-destructive mt-1">{error}</div>}
       </TableCell>
-      <TableCell className="text-sm">
-        {activityLog.length > 0 ? (
-          <span title={activityLog.map((e) => e.action).join(", ")}>
-            {activityLog.length} event{activityLog.length === 1 ? "" : "s"}
-          </span>
-        ) : (
-          <span className="text-muted-foreground">—</span>
-        )}
-      </TableCell>
-      <TableCell className="max-w-[200px]">
-        {aiSummary ? (
-          <span
-            className="text-xs text-muted-foreground line-clamp-2"
-            title={aiSummary.summary}
-          >
-            {aiSummary.summary}
-          </span>
-        ) : (
-          <span className="text-muted-foreground text-sm">—</span>
-        )}
-      </TableCell>
       <TableCell className="text-sm">{row.assigned_to ?? "—"}</TableCell>
       <TableCell className="text-right">
         <Button
@@ -341,7 +539,7 @@ function CaseRowItem({
   );
 }
 
-function CreateCase() {
+function CreateCase({ onCreated }: { onCreated: () => void }) {
   const [caseId, setCaseId] = useState("");
   const [entityId, setEntityId] = useState("");
   const [entityName, setEntityName] = useState("");
@@ -361,7 +559,7 @@ function CreateCase() {
 
   const disabled = busy || caseId.trim() === "" || entityId.trim() === "";
 
-  const submit = async (e: React.FormEvent) => {
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (disabled) return;
     setBusy(true);
@@ -378,6 +576,7 @@ function CreateCase() {
       setCaseId("");
       setEntityId("");
       setEntityName("");
+      onCreated();
     } catch (err) {
       setMessage({ kind: "err", text: describeError(err) });
     } finally {

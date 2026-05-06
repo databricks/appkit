@@ -1,7 +1,7 @@
+import { getRegisteredColumns } from "./column-registry";
 import { DatabaseHTTPError } from "./errors";
 import type {
   ApplyIncludes,
-  ColumnInfo,
   DatabaseClient,
   DatabaseClientConfig,
   EntityClient,
@@ -110,11 +110,13 @@ export function createDatabaseClient(
         return json.count;
       },
       columns: async (signal) => {
-        // Metadata-only endpoint — chain state (where/order/limit/...)
-        // would be meaningless here, so we deliberately ignore it.
-        const url = `${baseUrl}/${entity}/_columns`;
-        const res = await fetchImpl(url, { signal });
-        return readJson<ColumnInfo[]>(res);
+        void signal;
+        const cached = getRegisteredColumns(entity);
+        if (cached) return [...cached];
+        throw new Error(
+          `Column metadata for database entity "${entity}" is not registered. ` +
+            "Enable appKitDatabaseTypesPlugin() or run appkit db types generate so generated database.columns.ts is loaded.",
+        );
       },
 
       create: async (data, signal) => {
@@ -134,7 +136,7 @@ export function createDatabaseClient(
           body: JSON.stringify(patch),
           signal,
         });
-        // 404 → null like `find()` so callers distinguish missing rows from bad responses.
+        // 404 → null like `find()`.
         if (res.status === 404) return null;
         return readJson<TRow>(res);
       },
@@ -187,7 +189,7 @@ function normalizeBaseUrl(value: string): string {
 async function readJson<T>(res: Response): Promise<T> {
   if (!res.ok) throw await buildError(res);
   if (res.status === 204) return undefined as T;
-  // Empty body → typed error (JSON.parse("") throws SyntaxError, not DatabaseHTTPError).
+  // Empty body throws a typed error instead of a raw SyntaxError.
   const text = await res.text();
   if (text === "") {
     throw new DatabaseHTTPError(

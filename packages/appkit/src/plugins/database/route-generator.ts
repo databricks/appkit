@@ -4,7 +4,7 @@ import { ZodError } from "zod";
 import type { AppKitTable, Schema } from "@/database";
 import { AppKitError } from "@/errors";
 import { createLogger } from "@/logging/logger";
-import { describeAllEntities, describeEntityColumns } from "./columns-route";
+import { describeAllEntities } from "./columns-route";
 import { DatabaseRouteError } from "./database";
 import { DEFAULT_LIMIT, MAX_LIMIT } from "./defaults";
 import type { EntityClient, WhereInput } from "./entity-proxy";
@@ -19,11 +19,7 @@ type ColumnKind =
   | "uuid"
   | "unknown";
 
-/**
- * Classify a column from Drizzle's `columnType` so `coerceFilterValue`/`coerceId`
- * don't over-coerce on text/uuid. Hand-rolled to keep this file out of the
- * drizzle-orm import graph — `$drizzle` is `unknown` at the AppKit boundary.
- */
+/** Hand-rolled to keep drizzle-orm out of this file's import graph. */
 function inferColumnKind(table: AppKitTable, name: string): ColumnKind {
   const drizzleTable = table.$drizzle as
     | Record<string, { columnType?: string } | undefined>
@@ -59,8 +55,7 @@ const logger = createLogger("database:routes");
 type Verb = "list" | "find" | "count" | "create" | "update" | "delete";
 type DatabaseExecutionSurface = Record<string, EntityClient>;
 
-// Zero-trust default: every generated route runs OBO unless the app author
-// explicitly opts that verb into service/public mode or disables it.
+// Default OBO; app authors must opt verbs into service/public/disabled.
 const DEFAULT_ACCESS: Record<Verb, HttpAccess> = {
   list: "obo",
   find: "obo",
@@ -70,7 +65,7 @@ const DEFAULT_ACCESS: Record<Verb, HttpAccess> = {
   delete: "obo",
 };
 
-// Read-shape controls; everything else is a potential column filter (if declared).
+// Read-shape controls; anything else may be a column filter.
 const RESERVED_QUERY_KEYS = new Set([
   "select",
   "order",
@@ -80,8 +75,7 @@ const RESERVED_QUERY_KEYS = new Set([
   "on_conflict",
 ]);
 
-// Keep the HTTP dialect intentionally identical to PostGREST's builder methods:
-// `?age=gte.18`, `?name=ilike.%foo%`, `?id=in.(1,2,3)`.
+// PostGREST dialect: `?age=gte.18`, `?name=ilike.%foo%`, `?id=in.(1,2,3)`.
 const ALLOWED_OPS = new Set([
   "eq",
   "neq",
@@ -98,24 +92,18 @@ const ALLOWED_OPS = new Set([
 interface RouteGeneratorOptions {
   schema: Schema;
   config: IDatabaseConfig;
-  /**
-   * Identity selection lives in DatabasePlugin; this generator only forwards
-   * the configured access mode and uses the returned entity map.
-   */
+  /** Identity selection lives in DatabasePlugin; we just forward the access mode. */
   getSurface: (
     req: express.Request,
     access: HttpAccess,
   ) => DatabaseExecutionSurface;
-  /** SP pool for the `_healthz` `SELECT 1`. Optional for tests without a pool. */
+  /** SP pool for `_healthz`'s `SELECT 1`. Optional for pool-less tests. */
   getServicePool?: () => import("pg").Pool;
-  /** Bound wrapper around Plugin#route so endpoint registration stays central. */
+  /** Bound wrapper around `Plugin#route`. */
   route: (router: IAppRouter, config: RouteConfig) => void;
 }
 
-/**
- * HTTP layer for every schema table. Translates Express requests into the
- * EntityClient API — no PostGREST client, pool, or auth internals here.
- */
+/** Generates the HTTP layer for every schema table over `EntityClient`. */
 export class RouteGenerator {
   constructor(private readonly options: RouteGeneratorOptions) {}
 
@@ -127,12 +115,7 @@ export class RouteGenerator {
     }
   }
 
-  /**
-   * Mount `GET /api/database/_entities` returning a summary of every declared
-   * entity. Browsers use this for generic admin UIs without a hand-maintained
-   * registry. Pre-computed at registration; filtered to entities with `list`
-   * enabled so disabled/private entities don't leak through discovery.
-   */
+  /** `GET /_entities`: schema discovery, pre-computed at registration. */
   private bindEntities(router: IAppRouter): void {
     if (this.options.config.entitiesDiscovery === false) return;
     const entities = describeAllEntities(this.options.schema).filter(
@@ -148,11 +131,7 @@ export class RouteGenerator {
     });
   }
 
-  /**
-   * `GET /api/database/_healthz` — pool saturation pre-check + `SELECT 1`
-   * raced against a 1s timeout. Always public: readiness probes from k8s/LB
-   * don't carry user auth.
-   */
+  /** `GET /_healthz`: saturation pre-check + 1s-bounded `SELECT 1`. */
   private bindHealth(router: IAppRouter): void {
     if (this.options.config.healthCheck === false) return;
     const getPool = this.options.getServicePool;
@@ -164,8 +143,7 @@ export class RouteGenerator {
       handler: async (_req, res) => {
         const pool = getPool();
         // Detect saturation BEFORE pool.query — that call blocks on connect()
-        // up to `connectionTimeoutMillis` under load, exceeding typical k8s
-        // probe timeouts and stealing a real conn slot from app traffic.
+        // and would steal a real conn slot.
         const poolMax =
           (pool as unknown as { options?: { max?: number } }).options?.max ??
           Number.POSITIVE_INFINITY;
@@ -185,7 +163,7 @@ export class RouteGenerator {
           });
           return;
         }
-        // 1s race so a slow `SELECT 1` doesn't pin the probe past LB timeout.
+        // 1s cap so a slow probe doesn't blow the LB timeout.
         const probe = pool.query("SELECT 1");
         const timeout = new Promise<"timeout">((resolve) => {
           const t = setTimeout(() => resolve("timeout"), 1_000);
@@ -219,8 +197,7 @@ export class RouteGenerator {
     table: AppKitTable,
   ): void {
     const access = resolveAccess(this.options.config.http?.[name]);
-    // Private columns are off the HTTP surface entirely (not filterable, not
-    // selectable). EntityClient enforces this for reads; this set guards parsing.
+    // Private columns are off the HTTP surface (not filterable, not selectable).
     const cols = new Set(
       Object.entries(table.$columns)
         .filter(([, meta]) => meta.private !== true)
@@ -230,8 +207,7 @@ export class RouteGenerator {
     const pkColumn = derivePkColumnName(table);
     const pkKind = pkColumn ? (kinds.get(pkColumn) ?? "unknown") : "unknown";
 
-    // Six conventional routes per entity. A verb set to `false` is skipped
-    // entirely so disabled endpoints are not present in Express at all.
+    // Six routes per entity; `false` skips registration entirely.
     if (access.list !== false)
       this.bindList(router, name, cols, kinds, access.list);
     if (access.count !== false)
@@ -244,45 +220,6 @@ export class RouteGenerator {
       this.bindUpdate(router, name, pkKind, access.update);
     if (access.delete !== false)
       this.bindDelete(router, name, pkKind, access.delete);
-
-
-    // `_columns` is a pure-metadata read derived from the declared schema.
-    // Default it to the same access mode as `list` so an entity that's not
-    // HTTP-listable also does not leak its column shape. Service- or public-
-    // accessible columns must be opted into via `columns` in the override.
-    const columnsAccess = resolveColumnsAccess(
-      this.options.config.http?.[name],
-    );
-    if (columnsAccess !== false) this.bindColumns(router, name, table);
-  }
-
-  /**
-   * Expose a compact `ColumnInfo[]` description of the entity so the browser
-   * can auto-render edit/create forms.
-   *
-   * Intentionally bypasses `Plugin#execute` (no retry/cache/timeout/telemetry
-   * interceptors): the handler returns a precomputed array derived from
-   * `schema.ts` at registration time, so there's nothing to retry, no pool to
-   * cap, and no per-request work to trace. Wrapping it in `execute` would
-   * just add overhead per request without changing observability — schema
-   * decoding is already deterministic and free of I/O.
-   */
-  private bindColumns(
-    router: IAppRouter,
-    name: string,
-    table: AppKitTable,
-  ): void {
-    // Describe once at registration; the result is stable for the plugin's
-    // lifetime because schema.ts does not change at runtime.
-    const columns = describeEntityColumns(table);
-    this.options.route(router, {
-      name: `${name}.columns`,
-      method: "get",
-      path: `/${name}/_columns`,
-      handler: async (_req, res) => {
-        res.json(columns);
-      },
-    });
   }
   private bindList(
     router: IAppRouter,
@@ -332,7 +269,6 @@ export class RouteGenerator {
       "get",
       `/${name}/count`,
       async (req, res) => {
-        // Same filters as list — ignores pagination and shape controls.
         const q = applyFilters(
           this.entity(req, access, name),
           req.query,
@@ -376,8 +312,7 @@ export class RouteGenerator {
   ): void {
     this.bind(router, name, "create", "post", `/${name}`, async (req, res) => {
       // PostgREST-style upsert: POST + `Prefer: resolution=merge-duplicates`
-      // + `?on_conflict=<col>` → INSERT ... ON CONFLICT DO UPDATE. Lets the
-      // browser share one verb for create/upsert.
+      // + `?on_conflict=<col>` → ON CONFLICT DO UPDATE.
       const prefer = String(req.header("prefer") ?? "").toLowerCase();
       const onConflict = req.query.on_conflict;
       if (
@@ -385,8 +320,7 @@ export class RouteGenerator {
         typeof onConflict === "string" &&
         onConflict
       ) {
-        // Allowlist vs the public column set — rejects private/proto-pollution/
-        // unknown names before they reach Drizzle internals.
+        // Reject private/proto-pollution/unknown names before they reach Drizzle.
         if (!cols.has(onConflict)) {
           res
             .status(400)
@@ -453,8 +387,7 @@ export class RouteGenerator {
     access: HttpAccess,
     name: string,
   ): EntityClient {
-    // `public` and `service` both → SP surface today; kept distinct for future
-    // policy/logging without changing route registration.
+    // `public`/`service` resolve to SP today; kept distinct for future policy.
     const entity = this.options.getSurface(req, access)[name];
     if (!entity) {
       throw new Error(`Database entity "${name}" is not available`);
@@ -469,8 +402,7 @@ export class RouteGenerator {
     path: string,
     handler: (req: express.Request, res: express.Response) => Promise<void>,
   ): void {
-    // Central route wrapper: Plugin#route handles endpoint registration, while
-    // this wrapper keeps generated handlers from leaking raw exceptions.
+    // Central wrapper so generated handlers don't leak raw exceptions.
     this.options.route(router, {
       name: `${entity}.${verb}`,
       method,
@@ -484,10 +416,8 @@ export class RouteGenerator {
             res.status(400).json({ errors: error.format() });
             return;
           }
-          // AppKitError: author-controlled, safe to show. DatabaseRouteError
-          // carries status from Plugin#execute (already scrubbed in prod).
-          // Anything else is raw — show in dev, scrub in prod to avoid leaking
-          // stack/internals.
+          // AppKitError + DatabaseRouteError: message is safe; raw errors get
+          // scrubbed in prod to avoid leaking stack/internals.
           if (error instanceof AppKitError) {
             res.status(error.statusCode).json({ error: error.message });
             return;
@@ -496,8 +426,7 @@ export class RouteGenerator {
             res.status(error.statusCode).json({ error: error.message });
             return;
           }
-          // pg/Drizzle errors carry SQLSTATE in `code`. Map common cases to
-          // sane HTTP status codes; everything else falls through to 500.
+          // pg/Drizzle SQLSTATE → HTTP status; unmapped codes fall through to 500.
           const pgCode = (error as { code?: unknown }).code;
           if (typeof pgCode === "string") {
             const status = pgErrorToHttpStatus(pgCode);
@@ -527,16 +456,7 @@ export class RouteGenerator {
 function resolveAccess(
   override?: HttpEntityOverride,
 ): Record<Verb, HttpAccess> {
-  // Missing config is intentionally not "public". App authors must opt into
-  // non-OBO HTTP exposure verb by verb.
   return { ...DEFAULT_ACCESS, ...override };
-}
-
-function resolveColumnsAccess(override?: HttpEntityOverride): HttpAccess {
-  if (override?.columns !== undefined) return override.columns;
-  // Inherit from `list` so disabling list hides `_columns`. Falls back to the
-  // OBO default when neither is set.
-  return override?.list ?? DEFAULT_ACCESS.list;
 }
 
 function applyFilters(
@@ -547,8 +467,7 @@ function applyFilters(
 ): EntityClient {
   let next = q;
 
-  // Query params: `column=operator.value`. Undeclared columns are ignored so
-  // hidden columns don't accidentally become HTTP-filterable.
+  // `?column=operator.value`. Undeclared columns are silently ignored.
   for (const [key, raw] of Object.entries(query)) {
     if (RESERVED_QUERY_KEYS.has(key) || !cols.has(key)) continue;
     const kind = kinds.get(key) ?? "unknown";
@@ -576,8 +495,7 @@ function applyFilters(
       } as WhereInput<Record<string, unknown>>);
       continue;
     }
-    // Multiple values for the same key. When every entry is a bare scalar,
-    // treat as `IN (...)` to match HTML form `col=a&col=b`.
+    // Multiple bare scalars on one key → `IN (...)` (matches `col=a&col=b`).
     const allScalars = decoded.every(
       (d) => typeof d !== "object" || d === null || Array.isArray(d),
     );
@@ -587,9 +505,7 @@ function applyFilters(
       } as WhereInput<Record<string, unknown>>);
       continue;
     }
-    // Duplicate operators on one key would clobber via shallow-merge. Promote
-    // duplicate `eq` to `in: [values]` so intent isn't silently dropped;
-    // mixed-operator dups (eq + neq) still merge — last write per op wins.
+    // Promote duplicate `eq` to `in: [values]`; mixed ops merge (last write wins).
     const eqValues: unknown[] = [];
     const merged: Record<string, unknown> = {};
     for (const entry of decoded) {
@@ -617,10 +533,7 @@ function applyFilters(
   }
   return next;
 }
-/**
- * Validate `?select=` and project. Unknown columns drop silently — same
- * posture as `applyFilters` to keep undeclared columns off the HTTP surface.
- */
+/** `?select=col,col`. Unknown columns drop silently (same as `applyFilters`). */
 function applySelect(
   q: EntityClient,
   raw: unknown,
@@ -634,11 +547,7 @@ function applySelect(
   return picked.length > 0 ? q.select(...picked) : q;
 }
 
-/**
- * Parse `?include=posts,author` (or `posts(id,title),author(name)`) and forward
- * to `entity.include({ ... })`. Relation names are resolved at query time —
- * unknown names throw there, so this parser trusts the caller.
- */
+/** `?include=posts,author` or `posts(id,title),author(name)`. */
 function applyInclude(
   q: EntityClient,
   raw: unknown,
@@ -648,9 +557,8 @@ function applyInclude(
   if (typeof raw !== "string" || raw.length === 0) return q;
   const include = parseIncludeSpec(raw);
 
-  // Strip private/unknown select cols on related tables — keeps
-  // `?include=author(password_hash)` from leaking secrets. Unknown relation
-  // names pass through; the runtime is authoritative and rejects at query time.
+  // Strip private/unknown select cols on related tables so
+  // `?include=author(password_hash)` can't leak.
   for (const [relation, spec] of Object.entries(include)) {
     if (spec === true) continue;
     const relatedTable = schema.$tables[relation];
@@ -671,10 +579,7 @@ function applyInclude(
     : q;
 }
 
-/**
- * Tokenise `?include=` into `{ relation: true | { select: [...] } }`. Splits
- * on top-level (paren-aware) commas; whitespace trimmed; empty fragments dropped.
- */
+/** Paren-aware tokenizer for `?include=`. Returns `{}` on unbalanced input. */
 function parseIncludeSpec(
   raw: string,
 ): Record<string, true | { select: string[] }> {
@@ -685,8 +590,6 @@ function parseIncludeSpec(
   for (const ch of raw) {
     if (ch === "(") depth++;
     if (ch === ")") {
-      // Reject unbalanced `?include=)foo` rather than letting depth go negative
-      // and silently treating subsequent commas as fragment separators.
       if (depth === 0) return {};
       depth--;
     }
@@ -697,7 +600,6 @@ function parseIncludeSpec(
     }
     buf += ch;
   }
-  // Unclosed `?include=foo(` — drop rather than emit a partial spec.
   if (depth !== 0) return {};
   if (buf) fragments.push(buf);
 
@@ -722,6 +624,7 @@ function parseIncludeSpec(
   return out;
 }
 
+/** `?order=email.desc,createdAt.asc`. Unknown columns dropped. */
 function applyOrder(
   q: EntityClient,
   raw: string,
@@ -729,8 +632,6 @@ function applyOrder(
 ): EntityClient {
   const order: Record<string, "asc" | "desc"> = {};
 
-  // PostGREST-style order list: `?order=email.desc,createdAt.asc`.
-  // Unknown columns are skipped for the same reason filters are constrained.
   for (const clause of raw.split(",")) {
     const [column, direction] = clause.split(".");
     if (!cols.has(column)) continue;
@@ -738,9 +639,8 @@ function applyOrder(
   }
   return Object.keys(order).length ? q.order(order) : q;
 }
+/** Hard cap so accidental huge reads don't turn into table scans. */
 function clampLimit(value: number): number {
-  // Hard clamp keeps accidental large browser reads from turning into expensive
-  // table scans. Callers that need more should page explicitly.
   if (!Number.isFinite(value) || value <= 0) return DEFAULT_LIMIT;
   return Math.min(MAX_LIMIT, Math.floor(value));
 }
@@ -750,8 +650,7 @@ function coerceFilterValue(
   kind: ColumnKind,
 ): unknown {
   if (op === "in") {
-    // Support both `in.(a,b)` and `in.a,b` shapes; the former matches PostGREST
-    // URLs while the latter is a little easier to type by hand.
+    // Accept both `in.(a,b)` (PostGREST) and `in.a,b` (terser).
     const body =
       value.startsWith("(") && value.endsWith(")") ? value.slice(1, -1) : value;
     return splitList(body).map((part) => coerceScalarTyped(part, kind));
@@ -759,11 +658,7 @@ function coerceFilterValue(
   if (op === "like" || op === "ilike") return value;
   return coerceScalarTyped(value, kind);
 }
-/**
- * Type-aware scalar coercion. Text/uuid/json get the raw string (`"true"`,
- * `"null"`, `"42"` stay literal); number/boolean/date go through the heuristic
- * so `?count=eq.42` still works.
- */
+/** Text/uuid/json keep raw string; number/boolean/date go through heuristics. */
 function coerceScalarTyped(value: string, kind: ColumnKind): unknown {
   if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
     return value.slice(1, -1).replace(/\\"/g, '"');
@@ -781,11 +676,7 @@ function coerceScalarTyped(value: string, kind: ColumnKind): unknown {
   }
   return value;
 }
-// No-kind fallback — prefer `coerceScalarTyped(value, kind)` when available
-// so strings on text columns aren't reinterpreted.
-function coerceScalar(value: string): unknown {
-  return coerceScalarTyped(value, "unknown");
-}
+
 function splitList(value: string): string[] {
   const out: string[] = [];
   let buf = "";
@@ -815,9 +706,8 @@ function splitList(value: string): string[] {
   out.push(buf);
   return out;
 }
+/** Honor the declared PK type so numeric-looking text PKs aren't coerced. */
 function coerceId(raw: string, kind: ColumnKind): string | number {
-  // Honor the declared PK type. Text/uuid PKs that happen to look numeric
-  // (`"123"`) used to be silently turned into numbers — now they pass through.
   if (kind === "text" || kind === "uuid") return raw;
   const numberValue = Number(raw);
   return Number.isFinite(numberValue) && String(numberValue) === raw
@@ -832,8 +722,7 @@ function derivePkColumnName(table: AppKitTable): string | null {
   return Object.keys(table.$columns).includes("id") ? "id" : null;
 }
 
-// Map common pg SQLSTATE codes to HTTP status. Returns `null` to mean "fall
-// through to 500".
+/** pg SQLSTATE → HTTP status. `null` falls through to 500. */
 function pgErrorToHttpStatus(code: string): number | null {
   switch (code) {
     case "23505": // unique_violation

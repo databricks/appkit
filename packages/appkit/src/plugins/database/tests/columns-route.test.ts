@@ -1,3 +1,4 @@
+import type { ColumnInfo } from "shared";
 import { describe, expect, test } from "vitest";
 import {
   boolean,
@@ -10,7 +11,6 @@ import {
   uuid,
 } from "../../../database";
 import {
-  type ColumnInfo,
   describeEntityColumns,
   describeEntityColumnsByName,
 } from "../columns-route";

@@ -1,69 +1,39 @@
+import { type ColumnInfo, pgTypeToColumnInfoKind } from "shared";
 import { adaptDrizzleTable } from "../../database/introspector/drizzle-adapter";
 import type { IntrospectedColumn } from "../../database/introspector/types";
 import type { Schema } from "../../database/schema-builder/types";
 
-/**
- * One registry entry — string fields are ready-to-splice TS type literals.
- */
+/** Registry entry: string fields are ready-to-splice TS type literals. */
 export interface RegistryEntry {
-  /** JS entity key (the property name in `$tables`, e.g. `"activityLog"`). */
   entity: string;
-  /** Type literal for `row: ...`. */
   row: string;
-  /** Type literal for `insert: ...`. */
   insert: string;
-  /** Type literal for `update: ...`. */
   update: string;
-  /** Type literal for `filters: ...`. */
   filters: string;
-  /** Type literal for `includes: ...`. `"{}"` when no relations exist. */
+  /** `"{}"` when no relations. */
   includes: string;
-  /** Runtime column metadata emitted to `database.columns.ts`. */
-  columns: ColumnMetadata[];
+  /** Emitted to `database.columns.ts`. */
+  columns: ColumnInfo[];
 }
 
-export interface ColumnMetadata {
-  name: string;
-  type:
-    | "string"
-    | "number"
-    | "boolean"
-    | "date"
-    | "json"
-    | "uuid"
-    | "bigint"
-    | "unknown";
-  nullable: boolean;
-  primaryKey: boolean;
-  hasDefault: boolean;
-  generated: boolean;
-}
-
-/** FK edge `table → target` from the forward pass. */
 interface ForwardEdge {
   fromColumn: string;
   target: string;
 }
 
-/** Incoming FK `target ← source` for one-to-many rendering. */
 interface ReverseEdge {
   fromEntity: string;
   fromColumn: string;
 }
 
-/**
- * Walk `Schema` → flat registry entries (pure, no I/O).
- *
- * Include inference: forward + reverse FK edges per table; duplicate FK pairs
- * use column keys like PostgREST (`posts!author_id`).
- */
+/** Walk `Schema` → flat registry entries (pure, no I/O). */
 export function walkSchema(schema: unknown): RegistryEntry[] {
   if (!schema || typeof schema !== "object") return [];
   const s = schema as Schema;
   const tables = s.$tables;
   if (!tables || typeof tables !== "object") return [];
 
-  // SQL table name → JS entity key (`Relation.toTable` is SQL, not the registry key).
+  // `Relation.toTable` is a SQL name; map it back to the JS entity key.
   const sqlNameToEntity = new Map<string, string>();
   for (const [entity, table] of Object.entries(tables)) {
     sqlNameToEntity.set(table.name, entity);
@@ -87,7 +57,7 @@ export function walkSchema(schema: unknown): RegistryEntry[] {
 
   const entries: RegistryEntry[] = [];
   for (const [entity, table] of Object.entries(tables)) {
-    // Strip `column.private()` before emit — avoids leaking credential-ish fields in `.d.ts`.
+    // Filter `private()` columns before emit — they must not reach the bundle.
     const columns = adaptDrizzleTable(table).columns.filter(
       (c) => table.$columns[c.name]?.private !== true,
     );
@@ -115,7 +85,6 @@ export function walkSchema(schema: unknown): RegistryEntry[] {
   return entries;
 }
 
-/** Render `{ col: TS | null; ... }` for all columns. */
 function renderRow(columns: IntrospectedColumn[]): string {
   if (columns.length === 0) return "{}";
   const fields = columns.map(
@@ -125,7 +94,7 @@ function renderRow(columns: IntrospectedColumn[]): string {
   return `{ ${fields.join(" ")} }`;
 }
 
-/** Insert shape — optional when nullable, defaulted, or server-generated. */
+/** Insert: optional when nullable, defaulted, or server-generated. */
 function renderInsert(columns: IntrospectedColumn[]): string {
   if (columns.length === 0) return "{}";
   const fields = columns.map((c) => {
@@ -136,7 +105,7 @@ function renderInsert(columns: IntrospectedColumn[]): string {
   return `{ ${fields.join(" ")} }`;
 }
 
-/** Render update shape — every column is optional. */
+/** Update: every column optional. */
 function renderUpdate(columns: IntrospectedColumn[]): string {
   if (columns.length === 0) return "{}";
   const fields = columns.map(
@@ -146,7 +115,6 @@ function renderUpdate(columns: IntrospectedColumn[]): string {
   return `{ ${fields.join(" ")} }`;
 }
 
-/** Render the `filters` map used by the type generator to classify columns. */
 function renderFilters(columns: IntrospectedColumn[]): string {
   if (columns.length === 0) return "{}";
   const fields = columns.map(
@@ -156,10 +124,7 @@ function renderFilters(columns: IntrospectedColumn[]): string {
   return `{ ${fields.join(" ")} }`;
 }
 
-/**
- * `includes` literal — forward edges as `{ row }`, reverse as `Array<{ row }>`;
- * multiple FKs to the same target key by column (PostgREST-style).
- */
+/** Forward edges → `{ row }`, reverse → `Array<{ row }>`; dup FKs key by column (PostgREST). */
 function renderIncludes(
   forward: ForwardEdge[],
   reverse: ReverseEdge[],
@@ -200,7 +165,7 @@ function renderIncludes(
   return `{ ${parts.join(" ")} }`;
 }
 
-/** Map pg types to TS — timestamps stay `string` (JSON always delivers text). */
+/** pg → TS for `.d.ts` literals. Timestamps are `string` (JSON wire format). */
 function pgTypeToTs(pgType: string): string {
   switch (pgType) {
     case "int2":
@@ -218,6 +183,7 @@ function pgTypeToTs(pgType: string): string {
     case "text":
     case "varchar":
     case "char":
+    case "bpchar":
     case "uuid":
     case "timestamp":
     case "timestamptz":
@@ -230,7 +196,7 @@ function pgTypeToTs(pgType: string): string {
   }
 }
 
-/** Coarse filter kind for stable generator output when new pg types appear. */
+/** Coarse filter kind so unknown pg types don't break codegen. */
 function pgTypeToFilterKind(
   pgType: string,
 ): "string" | "number" | "boolean" | "date" {
@@ -255,43 +221,11 @@ function pgTypeToFilterKind(
   }
 }
 
-function pgTypeToColumnInfoKind(pgType: string): ColumnMetadata["type"] {
-  switch (pgType) {
-    case "int2":
-    case "int4":
-    case "numeric":
-    case "float4":
-    case "float8":
-      return "number";
-    case "int8":
-      return "bigint";
-    case "bool":
-      return "boolean";
-    case "json":
-    case "jsonb":
-      return "json";
-    case "uuid":
-      return "uuid";
-    case "timestamp":
-    case "timestamptz":
-    case "date":
-    case "time":
-    case "timetz":
-      return "date";
-    case "text":
-    case "varchar":
-    case "char":
-      return "string";
-    default:
-      return "unknown";
-  }
-}
-
 function withNull(ts: string, nullable: boolean): string {
   return nullable ? `${ts} | null` : ts;
 }
 
-/** Quote object keys only when they wouldn't be a valid JS identifier bare. */
+/** Quote keys that aren't valid bare JS identifiers. */
 function safeProp(name: string): string {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : JSON.stringify(name);
 }

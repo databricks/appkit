@@ -1,4 +1,5 @@
 export { createDatabaseClient, db } from "./client";
+export { registerDatabaseColumns } from "./column-registry";
 export { DatabaseHTTPError } from "./errors";
 export type {
   ApplyIncludes,

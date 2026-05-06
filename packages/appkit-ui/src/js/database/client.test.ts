@@ -18,6 +18,7 @@ type UserClient = {
   first: () => Promise<UserRow | null>;
   find: (id: string | number) => Promise<UserRow | null>;
   count: () => Promise<number>;
+  columns: () => Promise<unknown[]>;
   create: (data: Partial<UserRow>) => Promise<UserRow>;
   update: (id: string | number, patch: Partial<UserRow>) => Promise<UserRow>;
   upsert: (
@@ -130,6 +131,18 @@ describe("createDatabaseClient — find/count", () => {
     expect(total).toBe(17);
     const [url] = fetchSpy.mock.calls[0] ?? [];
     expect(url).toBe("/api/database/user/count?role=eq.admin");
+  });
+});
+
+describe("createDatabaseClient — columns", () => {
+  test("requires generated column metadata instead of fetching _columns", async () => {
+    const { db, fetchSpy } = setup([]);
+    const typed = db as unknown as { missing_columns_entity: UserClient };
+
+    await expect(typed.missing_columns_entity.columns()).rejects.toThrow(
+      /Column metadata for database entity "missing_columns_entity" is not registered/,
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 
