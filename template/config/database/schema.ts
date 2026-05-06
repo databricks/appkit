@@ -1,22 +1,21 @@
 import { defineSchema } from "@databricks/appkit";
 
 /**
- * Application database schema. The database plugin auto-loads this file
- * (see config/database/) and uses it as the single source of truth for
- *  - the typed `db.<entity>` browser client,
- *  - the auto-mounted `/api/database/<entity>` REST routes,
- *  - and runtime drift detection against the live Lakebase DB.
+ * Application database schema. Source of truth for the typed browser client,
+ * `/api/database/<entity>` routes, and drift detection.
  *
- * Add tables under the returned object and run:
- *   npx appkit db migration generate
- *   npx appkit db migrate up
+ * Add tables, then `npx appkit db migration generate <name>` + `migrate up`.
  *
  * Example:
- *   user: table("user", {
- *     id: id(),
- *     email: text().notNull(),
- *     createdAt: timestamp().defaultNow().notNull(),
- *   }),
+ *   import { defineSchema, id, text, timestamp } from "@databricks/appkit";
+ *
+ *   export default defineSchema(({ table }) => ({
+ *     user: table("user", {
+ *       id: id(),
+ *       email: text().notNull(),
+ *       createdAt: timestamp().defaultNow().notNull(),
+ *     }),
+ *   }));
  */
 // biome-ignore lint/correctness/noEmptyPattern: schema is intentionally empty in the starter template.
 export default defineSchema(({}) => ({}));

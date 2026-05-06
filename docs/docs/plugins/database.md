@@ -4,6 +4,12 @@ sidebar_position: 4
 
 # Database plugin (beta)
 
+<!-- AUTO-GENERATED: stability-banner-start -->
+:::warning Beta plugin
+This plugin is currently **beta**. APIs may change between minor releases. Import from `@databricks/appkit/beta`. See [Plugin Stability Tiers](./stability.md).
+:::
+<!-- AUTO-GENERATED: stability-banner-end -->
+
 The **database plugin** is the application-level layer over Lakebase. It owns
 schema declaration, type generation, drift detection, auto-mounted CRUD
 routes, and a typed `db` browser client — all driven by a single
@@ -11,6 +17,7 @@ routes, and a typed `db` browser client — all driven by a single
 
 > **Beta:** the manifest declares `stability: "beta"`. The CLI and runtime
 > APIs are stable enough for non-critical workloads but may change before GA.
+> See [Known limitations](#known-limitations-beta) for what is not yet covered.
 
 **Key features:**
 
@@ -59,7 +66,7 @@ export default defineSchema(({ table }) => ({
 
 ## Auto-mounted routes
 
-Each table gets six conventional routes plus a metadata pair:
+Each table gets six conventional routes plus discovery and health metadata:
 
 | Method | Path                            | Purpose                            |
 |--------|----------------------------------|------------------------------------|
@@ -69,7 +76,6 @@ Each table gets six conventional routes plus a metadata pair:
 | POST   | `/api/database/<e>`              | Create a row (upsert via `Prefer`) |
 | PATCH  | `/api/database/<e>/:id`          | Update by primary key              |
 | DELETE | `/api/database/<e>/:id`          | Delete by primary key              |
-| GET    | `/api/database/<e>/_columns`     | Public column metadata for forms   |
 | GET    | `/api/database/_entities`        | Discovery — list of entities       |
 | GET    | `/api/database/_healthz`         | Readiness probe (`SELECT 1`)       |
 
@@ -82,7 +88,6 @@ database({
     user: {
       list: "service",   // service-principal
       delete: false,     // disable the DELETE route entirely
-      columns: "service" // override the metadata gate
     },
   },
 });
@@ -91,13 +96,16 @@ database({
 ## CLI lifecycle
 
 ```bash
-npx appkit db init                 # one-command Lakebase onboarding
-npx appkit db generate <name>      # scaffold a table (greenfield)
-npx appkit db introspect           # pull existing schema (brownfield)
-npx appkit db migration generate   # author a new SQL migration
-npx appkit db migrate up           # apply migrations (advisory-locked)
-npx appkit db verify               # detect drift between schema.ts and DB
-npx appkit db rls <table> <args>   # scaffold a Row-Level Security policy
+npx appkit db init                      # one-command Lakebase onboarding
+npx appkit db introspect                # pull existing schema (brownfield)
+npx appkit db migration generate <name> # author a new SQL migration
+npx appkit db migrate up                # apply migrations (advisory-locked)
+npx appkit db migrate status            # list applied vs pending migrations
+npx appkit db verify                    # detect drift between schema.ts and DB
+npx appkit db rls <entity> <spec>       # scaffold a Row-Level Security policy
+npx appkit db seed                      # apply config/database/seed.sql
+npx appkit db setup:dev                 # provision a per-user dev branch
+npx appkit db types generate            # regenerate typed client artifacts
 ```
 
 `db migrate up` takes a Postgres advisory lock so two concurrent deploys
@@ -110,44 +118,99 @@ without an interactive confirmation.
 
 ## Hooks
 
-Add per-entity lifecycle hooks via `database({ hooks: { ... } })`:
+`ctx.userId` is the forwarded email — a label, not authz; `undefined` under
+SP. Guard before writing it as audit metadata:
 
 ```ts
 database({
   hooks: {
     user: {
-      beforeCreate: async (data, ctx) => ({ ...data, createdBy: ctx.userId }),
+      beforeCreate: async (data, ctx) => ({
+        ...data,
+        ...(ctx.userId ? { createdBy: ctx.userId } : {}),
+      }),
       afterCreate: async (row) => audit(row.id, "created"),
     },
   },
 });
 ```
 
-`upsert` is a separate channel from `create` and `update` — `beforeUpsert`
-does **not** fan out into `beforeCreate` / `beforeUpdate`. Use a shared
-helper if you need the same logic in both branches.
+`upsert` is its own channel — `beforeUpsert` / `afterUpsert` fire on
+`create({ upsert: true })`; `beforeCreate` / `beforeUpdate` do **not**.
+
+## Row-Level Security
+
+`appkit db rls <entity> <spec>` writes a numbered migration, registers it
+in `meta/_journal.json`, and emits `ENABLE` + `FORCE ROW LEVEL SECURITY`
+(Postgres bypasses RLS for table owners by default — `FORCE` covers the SP
+pool). The first run also emits a helpers migration with `current_user_email()`,
+which reads the `app.user_id` GUC AppKit `SET`s on every OBO connection
+(rename via [`rls.sessionVariable`](#configuration)).
+
+```bash
+npx appkit db rls case "owner_email:owner_email"        # SELECT/UPDATE/DELETE
+npx appkit db rls case "owner_email:owner_email" --action insert
+npx appkit db rls case "tenant_id = current_setting('app.tenant_id')::uuid"
+```
+
+`owner_email:<col>` expands to `<col> = current_user_email()`. Anything else
+is raw SQL (rejected on semicolons, comments, unbalanced parens). Use
+`--dry-run` to preview without writing.
+
+`--action select,update` emits one policy per verb with derived names
+(`<base>_select`, `<base>_update`); `all` is exclusive.
 
 ## OBO and forwarded headers
 
-Per-user execution reads `x-forwarded-email` and `x-forwarded-access-token`
-from the request. The Databricks Apps gateway strips inbound copies and
-injects authentic values, so the plugin trusts these headers in production.
-In dev the same headers are accepted from anywhere so the local loop stays
-unblocked.
+OBO reads `x-forwarded-email` and `x-forwarded-access-token`. The Databricks
+Apps gateway strips inbound copies and injects authentic values; the plugin
+trusts them in production. Dev accepts them from anywhere — **don't expose
+the dev server beyond loopback** unless you front it with the same trust
+boundary.
 
 ## Pool sizing
 
-The service-principal (SP) pool defaults to 10 connections. Per-user (OBO)
-pools default to 4 connections each, and the registry caps at 25 distinct
-users. Worst-case fan-out is therefore `(1 + 25) × 4 + 10 = 114` connections
-per app instance — tune via `connection.max` and `oboPoolMax` for your
-Lakebase tier.
+SP pool: 10. OBO pools: 2 connections each, registry capped at 100 users
+(LRU). Worst-case fan-out per instance: `(1 + 100) × 2 + 10 = 212`. Tune via
+`connection.max` and `oboPoolMax`. Lakebase's PgBouncer multiplexes client
+connections, so effective headroom is larger than the raw tier limit.
 
 ## Drift detection
 
 Boot fails closed in production when `schema.ts` and the live DB disagree on
 column types or declared-but-missing tables. Additive drift (live-only
-columns/tables) is logged as a warning so blue/green deploys aren't blocked.
+columns/tables) is logged. Policies are not compared.
 
-Customize with `database({ checkDrift: false })` to skip the check, or
-`tolerateSetupFailure: true` to log-and-continue on schema-load errors.
+`database({ checkDrift: false })` skips the check;
+`tolerateSetupFailure: true` logs schema-load errors instead of throwing.
+
+## Configuration
+
+| Key                              | Default        | Notes                                                      |
+|----------------------------------|----------------|------------------------------------------------------------|
+| `connection.max`                 | 10             | SP pool max connections                                     |
+| `oboPoolMax`                     | 100            | Distinct OBO pools kept alive (LRU evicts beyond this)      |
+| `statementTimeoutMs`             | 15_000         | Server-side `statement_timeout` per pooled connection       |
+| `checkDrift`                     | `true`         | Run drift introspection at boot                             |
+| `tolerateSetupFailure`           | `false`        | Log instead of throw on schema-load / drift errors          |
+| `healthCheck`                    | enabled        | Set `false` to suppress `/api/database/_healthz`            |
+| `entitiesDiscovery`              | enabled        | Set `false` to suppress `/api/database/_entities`           |
+| `rls.sessionVariable`            | `"app.user_id"` | GUC name AppKit `SET`s on OBO connect (RLS reads it)        |
+
+## `column.private()` — partial
+
+Filters the typegen registry, but row payloads from
+`select`/`find`/`update().returning()` still include the value. **Treat as a
+"hide from forms" hint, not authz** — keep true secrets in a separate table
+with stricter ACLs.
+
+## Known limitations (beta)
+
+- **`column.private()` is a UX hint, not authz** — see above.
+- **No policy drift detection** — `db verify` doesn't compare `pg_policies`.
+- **Browser 404 semantics** — `db.<entity>.find(missingId)` and
+  `update(missingId, ...)` return `null` (not throw).
+- **`in` lists capped** — URL builder bounds `in` to stay under proxy
+  limits; partition large lists client-side.
+- **Dev mode trusts forwarded headers from any source** — see *OBO and
+  forwarded headers*.

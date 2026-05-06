@@ -18,16 +18,16 @@ export interface DefineSchemaOptions {
 }
 
 /**
- * Define a schema. This is used to build the schema for the database.
- * @param build - A function that builds the schema.
- * @param options - Options for defining the schema.
- * @returns The defined schema.
+ * Define a schema. Single source of truth for tables, types, and routes.
+ *
+ * @param build - Receives `{ table, enum }`.
+ * @param options - `schemaName` defaults to `"public"`.
  */
 export function defineSchema<T extends Record<string, AppKitTable>>(
   build: (ctx: SchemaBuilderContext) => T,
-  options: DefineSchemaOptions = {},
+  options?: DefineSchemaOptions,
 ): Schema<T> {
-  const schemaName = options.schemaName ?? "public";
+  const schemaName = options?.schemaName ?? "public";
   const schemaInstance =
     schemaName === "public" ? { table: pgTable } : pgSchema(schemaName);
 

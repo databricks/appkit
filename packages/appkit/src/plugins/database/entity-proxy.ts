@@ -216,15 +216,17 @@ export function makeEntityClient<
 
 /**
  * Thin immutable wrapper around `DataPath`. Terminators go through
- * `this.run(action, fn)` → `Plugin#execute`, so telemetry, retry, cache,
- * and timeout flow consistently per action.
+ * `this.run(action, fn)` → `Plugin#execute` so telemetry/retry/cache/timeout
+ * flow per action. `implements EntityClient` catches drift at the declaration
+ * site instead of via the factory's `as unknown as` cast.
  */
 class EntityClientImpl<
   TRow extends Row = Row,
   TInsert = TRow,
   TUpdate = Partial<TRow>,
   TIncludes = Record<string, { row: Row }>,
-> {
+> implements EntityClient<TRow, TInsert, TUpdate, TIncludes>
+{
   constructor(
     private readonly deps: EntityClientDeps,
     private readonly state: EntityClientState,

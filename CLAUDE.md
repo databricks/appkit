@@ -267,6 +267,20 @@ const result = await pool.query('SELECT * FROM users');
 **ORM Integration:**
 Works with Drizzle, Sequelize, TypeORM - see the `@databricks/lakebase` README and `apps/dev-playground/server/lakebase-examples/` for examples.
 
+### Database Plugin
+
+Application-level layer over Lakebase (beta). Owns schema declaration, type generation, drift detection, auto-mounted CRUD routes, and a typed `db` browser client — all driven by `config/database/schema.ts`. See [`docs/docs/plugins/database.md`](./docs/docs/plugins/database.md) for the full guide.
+
+```typescript
+import { createApp, server } from '@databricks/appkit';
+import { database } from '@databricks/appkit/beta';
+
+const app = await createApp({ plugins: [server(), database()] });
+const cases = await app.database.cases.where({ status: 'New' }).limit(50).toArray();
+```
+
+CLI: `npx appkit db init | introspect | migration generate <name> | migrate up | rls <entity> <spec> | seed | setup:dev | types generate | verify`.
+
 ### Frontend-Backend Interaction
 
 ```

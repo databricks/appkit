@@ -165,8 +165,8 @@ export interface DataPath {
 
   /**
    * Tagged-template SQL escape hatch. Values are bound as parameters; column
-   * and identifier interpolation is intentionally not supported here — use
-   * `getDrizzle()` from the plugin's exports for that case.
+   * and identifier interpolation is intentionally not supported here — drop
+   * to `appkit.database.getPool().query(...)` if you need that.
    */
   raw<T = Row>(
     strings: TemplateStringsArray,
