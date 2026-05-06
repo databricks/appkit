@@ -82,8 +82,20 @@
         },
         "oboPoolMax": {
           "type": "number",
-          "default": 25,
-          "description": "Maximum number of per-user OBO pools to keep open. Worst-case fan-out is (1 + oboPoolMax) × OBO_POOL_DEFAULTS.max + POOL_DEFAULTS.max connections per app instance."
+          "default": 100,
+          "description": "Maximum number of per-user OBO pools to keep open. Worst-case fan-out is (1 + oboPoolMax) × OBO_POOL_DEFAULTS.max + POOL_DEFAULTS.max connections per app instance (default 212)."
+        },
+        "rls": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Row-level security tunables.",
+          "properties": {
+            "sessionVariable": {
+              "type": "string",
+              "default": "app.user_id",
+              "description": "GUC name AppKit SETs on every OBO connection. Override to align with existing policies that read another setting."
+            }
+          }
         },
         "cache": {
           "type": "object",

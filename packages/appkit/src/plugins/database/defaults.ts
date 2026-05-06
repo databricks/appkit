@@ -14,13 +14,17 @@ export const STATEMENT_TIMEOUT_DEFAULT_MS = 15_000;
 /** `application_name` per connection — surfaces in `pg_stat_activity`/Lakebase audit. */
 export const APPLICATION_NAME = "appkit:database";
 
+/** GUC name AppKit `SET`s on every OBO connection for RLS policies to read. */
+export const DEFAULT_RLS_SESSION_VARIABLE = "app.user_id";
+
 /**
- * OBO pool defaults — small (one pool per user). Fan-out = `(1 + oboPoolMax) × max`;
- * defaults cap at `(1+25)×4 + 10 ≈ 114` conns per instance.
+ * OBO pool defaults. `max=2` because a single user typically serializes HTTP
+ * requests; 2 conns covers occasional overlap without bloating fan-out.
+ * Combined with `oboPoolMax=100`, fan-out is `(1+100)×2 + 10 ≈ 212` conns.
  */
 export const OBO_POOL_DEFAULTS = {
   ...POOL_DEFAULTS,
-  max: 4,
+  max: 2,
 };
 
 /** Default page size when no `?limit=` is given. */

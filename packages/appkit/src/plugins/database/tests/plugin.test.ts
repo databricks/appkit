@@ -496,8 +496,67 @@ describe("DatabasePlugin", () => {
     const client = { query: vi.fn(async () => ({})) };
     handler(client);
     expect(client.query).toHaveBeenCalledWith(
-      "SELECT set_config('app.user_id', $1, false)",
-      ["alice@example.com"],
+      "SELECT set_config($1, $2, false)",
+      ["app.user_id", "alice@example.com"],
+    );
+
+    if (originalHost === undefined) {
+      delete process.env.DATABRICKS_HOST;
+    } else {
+      process.env.DATABRICKS_HOST = originalHost;
+    }
+  });
+
+  test("rls.sessionVariable override flows into the SET on user pool connect", async () => {
+    const originalHost = process.env.DATABRICKS_HOST;
+    process.env.DATABRICKS_HOST = "https://example.cloud.databricks.com";
+    const servicePool = {
+      end: vi.fn(async () => undefined),
+      on: vi.fn(),
+    } as unknown as Pool;
+    const userPool = {
+      end: vi.fn(async () => undefined),
+      on: vi.fn(),
+    } as unknown as Pool;
+    vi.mocked(createLakebasePool)
+      .mockReturnValueOnce(servicePool)
+      .mockReturnValueOnce(userPool);
+    const schema = defineSchema(({ table }) => ({
+      user: table("user", { id: id(), email: text().notNull() }),
+    }));
+    vi.mocked(loadSchemaByConvention).mockResolvedValue({
+      schema,
+      schemaPath: "/app/config/database/schema.ts",
+    });
+
+    const plugin = createPlugin({
+      rls: { sessionVariable: "myapp.uid" },
+    });
+    await plugin.setup();
+    const exports = plugin.exports() as unknown as {
+      user: { asUser: (req: import("express").Request) => unknown };
+    };
+    const req = {
+      header: vi.fn((name: string) => {
+        if (name === "x-forwarded-email") return "alice@example.com";
+        if (name === "x-forwarded-access-token") return "tok-alice";
+        return undefined;
+      }),
+    } as unknown as import("express").Request;
+    exports.user.asUser(req);
+
+    const handler = vi
+      .mocked(userPool.on)
+      .mock.calls.find(
+        ([event]) => event === "connect",
+      )?.[1] as unknown as (client: {
+      query: ReturnType<typeof vi.fn>;
+    }) => void;
+    const client = { query: vi.fn(async () => ({})) };
+    handler(client);
+    expect(client.query).toHaveBeenCalledWith(
+      "SELECT set_config($1, $2, false)",
+      ["myapp.uid", "alice@example.com"],
     );
 
     if (originalHost === undefined) {

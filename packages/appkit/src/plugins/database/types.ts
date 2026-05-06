@@ -155,9 +155,9 @@ export interface IDatabaseConfig extends BasePluginConfig {
   cache?: CacheSettings;
   /**
    * Maximum number of distinct per-user (OBO) pools the registry keeps alive
-   * at once. Each pool defaults to `OBO_POOL_DEFAULTS.max = 4` connections, so
-   * the worst-case fan-out is `(1 + oboPoolMax) × poolMax`. Defaults to 25 —
-   * tune up for hot OBO traffic, down for low-tier Lakebase plans.
+   * at once. Each pool defaults to `OBO_POOL_DEFAULTS.max = 2` connections, so
+   * worst-case fan-out is `(1 + oboPoolMax) × poolMax + 10`. Defaults to 100 —
+   * tune up for hot OBO traffic, down for 0.5 CU Lakebase tiers.
    */
   oboPoolMax?: number;
   /**
@@ -166,6 +166,14 @@ export interface IDatabaseConfig extends BasePluginConfig {
    * timeout interceptor still applies on the client side.
    */
   statementTimeoutMs?: number;
+  /** Row-level security tunables. */
+  rls?: {
+    /**
+     * GUC name AppKit `SET`s on every OBO connection. Override to align with
+     * existing policies that read another setting. Defaults to `app.user_id`.
+     */
+    sessionVariable?: string;
+  };
   /**
    * When true, schema-load and drift-check failures during `setup()` are
    * logged but do not throw. Defaults to false (fail closed). Useful in

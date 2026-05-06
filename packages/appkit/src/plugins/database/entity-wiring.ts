@@ -13,6 +13,7 @@ import { AuthenticationError, ConfigurationError } from "@/errors";
 import { createLogger } from "@/logging/logger";
 import {
   APPLICATION_NAME,
+  DEFAULT_RLS_SESSION_VARIABLE,
   OBO_POOL_DEFAULTS,
   STATEMENT_TIMEOUT_DEFAULT_MS,
 } from "./defaults";
@@ -160,14 +161,14 @@ function makeUserPoolRegistry(
       user: identity.email,
       workspaceClient: createUserWorkspaceClient(identity.token),
     });
-    // Session-local `app.user_id` so `current_user_id()` RLS helpers resolve
-    // to the OBO user — safe at session scope since identity is invariant in
-    // this per-user pool. `statement_timeout` set here too so OBO queries get
-    // the same server-side cap as SP ones.
+    // Session-local GUC so RLS helpers resolve to the OBO user — safe at
+    // session scope since identity is invariant in this per-user pool.
+    // `statement_timeout` set here too so OBO matches SP server-side cap.
     const statementTimeoutMs =
       config.statementTimeoutMs ?? STATEMENT_TIMEOUT_DEFAULT_MS;
+    const sessionVariable =
+      config.rls?.sessionVariable ?? DEFAULT_RLS_SESSION_VARIABLE;
     pool.on("connect", (client) => {
-      // Tag OBO conns in pg_stat_activity so operators can split SP vs OBO traffic.
       client
         .query(`SET application_name = '${APPLICATION_NAME}:obo'`)
         .catch((err) => {
@@ -178,10 +179,14 @@ function makeUserPoolRegistry(
           );
         });
       client
-        .query("SELECT set_config('app.user_id', $1, false)", [identity.email])
+        .query("SELECT set_config($1, $2, false)", [
+          sessionVariable,
+          identity.email,
+        ])
         .catch((err) => {
           logger.error(
-            "Failed to set app.user_id on user pool connection for %s: %O",
+            "Failed to set %s on user pool connection for %s: %O",
+            sessionVariable,
             tag,
             err,
           );
@@ -249,7 +254,7 @@ function resolveUserPoolIdentity(
   if (email && token) return { email, token };
 
   if (isDev) {
-    logger.warn(
+    logger.debug(
       "Database OBO requested without x-forwarded-email/x-forwarded-access-token; falling back to service pool in development.",
     );
     return null;
@@ -275,9 +280,10 @@ function createUserWorkspaceClient(token: string): WorkspaceClient {
 }
 
 function normalizePoolMax(value: number | undefined): number {
-  // Default 25 keeps fan-out tractable on Lakebase tiers ((1+25)×4 + SP(10)
-  // ≈ 114 conns). Hot-OBO apps should raise explicitly after sizing the tier.
-  if (!Number.isFinite(value) || value === undefined) return 25;
+  // Default 100 active users per instance before LRU evicts; with
+  // OBO_POOL_DEFAULTS.max=2, fan-out is (1+100)×2 + SP(10) ≈ 212 conns.
+  // Sized for 1+ CU Lakebase tiers; tune up for hot OBO, down for 0.5 CU.
+  if (!Number.isFinite(value) || value === undefined) return 100;
   return Math.max(1, Math.floor(value));
 }
 
