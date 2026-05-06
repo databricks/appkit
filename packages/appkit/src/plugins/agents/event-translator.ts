@@ -6,6 +6,7 @@ import type {
   ResponseOutputMessage,
   ResponseStreamEvent,
 } from "shared";
+import type { AgentEventStreamTranslator } from "./translator";
 
 /**
  * Translates internal `AgentEvent` stream into Responses API SSE events.
@@ -23,7 +24,9 @@ import type {
  * added, so subsequent text resumes as a new message item at a strictly
  * later index.
  */
-export class AgentEventTranslator {
+export class AgentEventTranslator
+  implements AgentEventStreamTranslator<ResponseStreamEvent>
+{
   private seqNum = 0;
   private nextOutputIndex = 0;
   private currentMessage: {

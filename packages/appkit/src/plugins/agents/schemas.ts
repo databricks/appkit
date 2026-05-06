@@ -67,3 +67,30 @@ export const approvalRequestSchema = z.object({
   approvalId: z.string().min(1, "approvalId is required"),
   decision: z.enum(["approve", "deny"]),
 });
+
+// Vercel AI SDK `DefaultChatTransport` request shape (from `@ai-sdk/react`).
+// Mirrors the body produced by useChat's default transport. Selected at
+// runtime when the request advertises `Accept: application/vnd.ai-sdk.ui-message-stream`.
+//
+// `id` carries the chat id and is mapped 1:1 to AppKit's `threadId`. The
+// latest user message is read from `messages.at(-1).parts` (text parts only).
+export const vercelAIChatRequestSchema = z.object({
+  id: z.string().min(1, "id is required"),
+  messages: z
+    .array(
+      z.object({
+        id: z.string(),
+        role: z.enum(["user", "assistant", "system"]),
+        parts: z.array(z.any()),
+        metadata: z.unknown().optional(),
+      }),
+    )
+    .min(1, "messages must not be empty")
+    .max(
+      MAX_INVOCATIONS_INPUT_ITEMS,
+      `messages exceeds the ${MAX_INVOCATIONS_INPUT_ITEMS}-item limit`,
+    ),
+  trigger: z.enum(["submit-message", "regenerate-message"]).optional(),
+  messageId: z.string().optional(),
+  agent: z.string().optional(),
+});

@@ -1,5 +1,6 @@
 export * from "./agent";
 export * from "./cache";
+export * from "./chat-protocol";
 export * from "./execute";
 export * from "./genie";
 export * from "./plugin";

@@ -1,54 +1,30 @@
+import { useChat } from "@ai-sdk/react";
 import { getPluginClientConfig } from "@databricks/appkit-ui/js";
 import { Button } from "@databricks/appkit-ui/react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { DefaultChatTransport } from "ai";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  VERCEL_AI_UI_MESSAGE_STREAM_ACCEPT,
+  type VercelAIAgentDataParts,
+  type VercelAIAgentUIMessage,
+} from "../lib/vercel-ai-agent-chat";
 
 export const Route = createFileRoute("/agent")({
   component: AgentRoute,
 });
 
-interface SSEEvent {
-  type: string;
-  delta?: string;
-  item_id?: string;
-  item?: {
-    type?: string;
-    id?: string;
-    call_id?: string;
-    name?: string;
-    arguments?: string;
-    output?: string;
-    status?: string;
-  };
-  content?: string;
-  data?: Record<string, unknown>;
-  error?: string;
-  sequence_number?: number;
-  output_index?: number;
-  approval_id?: string;
-  stream_id?: string;
-  tool_name?: string;
-  args?: unknown;
-  annotations?: {
-    readOnly?: boolean;
-    destructive?: boolean;
-    idempotent?: boolean;
-  };
-}
+type ApprovalPendingPayload = VercelAIAgentDataParts["approval-pending"];
 
-interface ChatMessage {
-  id: number;
-  role: "user" | "assistant";
-  content: string;
-}
+type PendingApproval = ApprovalPendingPayload;
 
-interface PendingApproval {
-  approvalId: string;
-  streamId: string;
-  toolName: string;
-  args: unknown;
-}
-
+/**
+ * Inline-suggestion autocomplete still uses the legacy Responses-API SSE
+ * shape on `/api/agents/chat`. The autocomplete agent runs as a one-shot
+ * stateless completion (its `agent.md` flags `ephemeral: true`), so it
+ * doesn't share the chat thread with the conversational `useChat` flow
+ * and there's nothing to gain from migrating it here.
+ */
 function useAutocomplete(enabled: boolean) {
   const [suggestion, setSuggestion] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -136,15 +112,87 @@ function useAutocomplete(enabled: boolean) {
   };
 }
 
+/**
+ * Concatenate all `text` parts of a message — `useChat` keeps text
+ * streamed across multiple `text-delta` chunks as a single `TextUIPart`,
+ * but if the agent loop reopens text after a tool call, the message
+ * carries multiple text parts. For chat-bubble rendering we want them
+ * joined.
+ */
+function messageBodyText(message: VercelAIAgentUIMessage): string {
+  let body = "";
+  for (const part of message.parts) {
+    if (part.type === "text") body += part.text;
+  }
+  return body;
+}
+
 function AgentRoute() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [events, setEvents] = useState<AgentEvent[]>([]);
-  const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [threadId, setThreadId] = useState<string | null>(null);
   const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>(
     [],
   );
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [input, setInput] = useState("");
+
+  const agentConfig = getPluginClientConfig<{
+    agents?: string[];
+    defaultAgent?: string;
+  }>("agents");
+  const hasAutocomplete = (agentConfig.agents ?? []).includes("autocomplete");
+
+  const transport = useMemo(
+    () =>
+      new DefaultChatTransport<VercelAIAgentUIMessage>({
+        api: "/api/agents/chat",
+        headers: {
+          Accept: VERCEL_AI_UI_MESSAGE_STREAM_ACCEPT,
+        },
+      }),
+    [],
+  );
+
+  // We deliberately do NOT pass `id` to useChat. The hook auto-mints one
+  // through the AI SDK's own `generateId` (which doesn't depend on the
+  // browser's `crypto.randomUUID`, so it survives environments where the
+  // global is shimmed or stripped) and exposes it on the return value.
+  // The chat id is sent to the server as the request body `id` and the
+  // agents plugin maps it 1:1 to its `threadId`.
+  const {
+    id: chatId,
+    messages,
+    sendMessage,
+    status,
+    error,
+    stop,
+  } = useChat<VercelAIAgentUIMessage>({
+    transport,
+    onData: (part) => {
+      if (part.type === "data-approval-pending") {
+        const payload = part.data as ApprovalPendingPayload;
+        setPendingApprovals((prev) =>
+          prev.some((p) => p.approvalId === payload.approvalId)
+            ? prev
+            : [...prev, payload],
+        );
+      }
+    },
+  });
+
+  const isLoading = status === "submitted" || status === "streaming";
+
+  // `useChat` creates the assistant `UIMessage` stub the moment the server
+  // emits its `start` chunk — well before any text-delta arrives. We want
+  // to show "Thinking..." until the assistant has produced visible text
+  // (either rendered tokens or a fully-materialised message). Tool-only
+  // turns therefore keep the indicator up until the model speaks.
+  const lastMessage = messages[messages.length - 1];
+  const lastAssistantHasText =
+    lastMessage?.role === "assistant" &&
+    messageBodyText(lastMessage).length > 0;
+  const showThinking =
+    isLoading && pendingApprovals.length === 0 && !lastAssistantHasText;
 
   const decideApproval = useCallback(
     async (approvalId: string, decision: "approve" | "deny") => {
@@ -170,15 +218,6 @@ function AgentRoute() {
     },
     [pendingApprovals],
   );
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const msgIdCounter = useRef(0);
-
-  const agentConfig = getPluginClientConfig<{
-    agents?: string[];
-    defaultAgent?: string;
-  }>("agents");
-  const hasAutocomplete = (agentConfig.agents ?? []).includes("autocomplete");
 
   const {
     suggestion,
@@ -192,125 +231,13 @@ function AgentRoute() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const sendMessage = useCallback(async () => {
-    if (!input.trim() || isLoading) return;
-
+  const submit = useCallback(() => {
+    const text = input.trim();
+    if (!text || isLoading) return;
     clearSuggestion();
-    const userMessage = input.trim();
     setInput("");
-    setMessages((prev) => [
-      ...prev,
-      { id: ++msgIdCounter.current, role: "user", content: userMessage },
-    ]);
-    setEvents([]);
-    setIsLoading(true);
-
-    try {
-      const response = await fetch("/api/agents/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: userMessage,
-          ...(threadId && { threadId }),
-        }),
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: ++msgIdCounter.current,
-            role: "assistant",
-            content: `Error: ${error.error}`,
-          },
-        ]);
-        return;
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) return;
-
-      const decoder = new TextDecoder();
-      let assistantContent = "";
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const data = line.slice(6).trim();
-          if (!data || data === "[DONE]") continue;
-
-          try {
-            const event: SSEEvent = JSON.parse(data);
-            if (!event.type) continue;
-            setEvents((prev) => [...prev, event]);
-
-            if (
-              event.type === "appkit.approval_pending" &&
-              event.approval_id &&
-              event.stream_id &&
-              event.tool_name
-            ) {
-              setPendingApprovals((prev) => [
-                ...prev,
-                {
-                  approvalId: event.approval_id as string,
-                  streamId: event.stream_id as string,
-                  toolName: event.tool_name as string,
-                  args: event.args,
-                },
-              ]);
-            }
-            if (event.type === "appkit.metadata" && event.data?.threadId) {
-              setThreadId(event.data.threadId as string);
-            }
-
-            if (event.type === "response.output_text.delta" && event.delta) {
-              assistantContent += event.delta;
-              setMessages((prev) => {
-                const updated = [...prev];
-                const last = updated[updated.length - 1];
-                if (last?.role === "assistant") {
-                  updated[updated.length - 1] = {
-                    ...last,
-                    content: assistantContent,
-                  };
-                } else {
-                  updated.push({
-                    id: ++msgIdCounter.current,
-                    role: "assistant",
-                    content: assistantContent,
-                  });
-                }
-                return updated;
-              });
-            }
-          } catch {
-            // skip malformed events
-          }
-        }
-      }
-    } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: ++msgIdCounter.current,
-          role: "assistant",
-          content: `Error: ${err instanceof Error ? err.message : "Unknown error"}`,
-        },
-      ]);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [input, isLoading, threadId, clearSuggestion]);
+    sendMessage({ text });
+  }, [input, isLoading, clearSuggestion, sendMessage]);
 
   const handleInputChange = (value: string) => {
     setInput(value);
@@ -333,11 +260,9 @@ function AgentRoute() {
             <h1 className="text-3xl font-bold mb-2">Agent Chat</h1>
             <p className="text-base text-muted-foreground">
               AI agent with auto-discovered tools from all AppKit plugins.
-              {threadId && (
-                <span className="ml-2 text-xs font-mono opacity-60">
-                  Thread: {threadId.slice(0, 8)}...
-                </span>
-              )}
+              <span className="ml-2 text-xs font-mono opacity-60">
+                Chat: {chatId.slice(0, 8)}...
+              </span>
             </p>
           </div>
           {hasAutocomplete && (
@@ -363,22 +288,28 @@ function AgentRoute() {
                 </div>
               )}
 
-              {messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-                >
+              {messages.map((msg) => {
+                const body = messageBodyText(msg);
+                if (!body) return null;
+                return (
                   <div
-                    className={`max-w-[85%] rounded-lg px-4 py-2 ${
-                      msg.role === "user"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted"
+                    key={msg.id}
+                    className={`flex ${
+                      msg.role === "user" ? "justify-end" : "justify-start"
                     }`}
                   >
-                    <p className="whitespace-pre-wrap text-sm">{msg.content}</p>
+                    <div
+                      className={`max-w-[85%] rounded-lg px-4 py-2 ${
+                        msg.role === "user"
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted"
+                      }`}
+                    >
+                      <p className="whitespace-pre-wrap text-sm">{body}</p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
 
               {pendingApprovals.map((approval) => (
                 <div key={approval.approvalId} className="flex justify-start">
@@ -419,17 +350,23 @@ function AgentRoute() {
                 </div>
               ))}
 
-              {isLoading &&
-                pendingApprovals.length === 0 &&
-                messages[messages.length - 1]?.role === "user" && (
-                  <div className="flex justify-start">
-                    <div className="bg-muted rounded-lg px-4 py-2">
-                      <p className="text-sm text-muted-foreground animate-pulse">
-                        Thinking...
-                      </p>
-                    </div>
+              {showThinking && (
+                <div className="flex justify-start">
+                  <div className="bg-muted rounded-lg px-4 py-2">
+                    <p className="text-sm text-muted-foreground animate-pulse">
+                      Thinking...
+                    </p>
                   </div>
-                )}
+                </div>
+              )}
+
+              {error && (
+                <div className="flex justify-start">
+                  <div className="max-w-[85%] rounded-lg border border-red-500/60 bg-red-500/10 px-4 py-2">
+                    <p className="text-sm">Error: {error.message}</p>
+                  </div>
+                </div>
+              )}
 
               <div ref={messagesEndRef} />
             </div>
@@ -454,7 +391,7 @@ function AgentRoute() {
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
-                  sendMessage();
+                  submit();
                 }}
                 className="flex gap-2"
               >
@@ -482,7 +419,7 @@ function AgentRoute() {
                       }
                       if (e.key === "Enter" && !e.shiftKey && !suggestion) {
                         e.preventDefault();
-                        sendMessage();
+                        submit();
                       }
                     }}
                     placeholder="Ask a question..."
@@ -491,77 +428,146 @@ function AgentRoute() {
                     className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 resize-none"
                   />
                 </div>
-                <Button
-                  type="submit"
-                  disabled={isLoading || !input.trim()}
-                  className="self-end"
-                >
-                  Send
-                </Button>
+                {isLoading ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={stop}
+                    className="self-end"
+                  >
+                    Stop
+                  </Button>
+                ) : (
+                  <Button
+                    type="submit"
+                    disabled={!input.trim()}
+                    className="self-end"
+                  >
+                    Send
+                  </Button>
+                )}
               </form>
             </div>
           </div>
 
-          <div className="w-80 shrink-0 flex flex-col border rounded-lg bg-card">
-            <div className="px-3 py-2 border-b">
-              <h3 className="text-sm font-semibold text-muted-foreground">
-                Event Stream
-              </h3>
-            </div>
-            <div className="flex-1 overflow-y-auto p-3 space-y-1">
-              {events.length === 0 && (
-                <p className="text-xs text-muted-foreground/50 text-center py-8">
-                  Events will appear here
-                </p>
-              )}
-              {events.map((event, i) => {
-                let detail: string;
-                switch (event.type) {
-                  case "response.output_text.delta":
-                    detail = event.delta?.slice(0, 60) ?? "";
-                    break;
-                  case "response.output_item.added":
-                  case "response.output_item.done":
-                    detail =
-                      event.item?.type === "function_call"
-                        ? `${event.item.name}(${(event.item.arguments ?? "").slice(0, 40)})`
-                        : event.item?.type === "function_call_output"
-                          ? (event.item.output?.slice(0, 60) ?? "")
-                          : (event.item?.status ?? event.item?.type ?? "");
-                    break;
-                  case "response.completed":
-                    detail = "done";
-                    break;
-                  case "error":
-                    detail = event.error ?? "unknown";
-                    break;
-                  case "appkit.metadata":
-                    detail = JSON.stringify(event.data).slice(0, 60);
-                    break;
-                  case "appkit.thinking":
-                    detail = event.content?.slice(0, 60) ?? "";
-                    break;
-                  default:
-                    detail = JSON.stringify(event).slice(0, 60);
-                }
-                return (
-                  <div
-                    key={`${event.type}-${i}`}
-                    className="font-mono text-xs text-muted-foreground"
-                  >
-                    <span className="inline-block w-24 text-right mr-2 opacity-50">
-                      {event.type
-                        .replace("response.", "")
-                        .replace("appkit.", "")}
-                    </span>
-                    <span className="opacity-80 break-all">{detail}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <EventStreamPanel messages={messages} approvals={pendingApprovals} />
         </div>
       </div>
     </div>
   );
+}
+
+interface EventStreamRow {
+  /** Stable React key. */
+  key: string;
+  /** Short label rendered in the left column. */
+  label: string;
+  /** Free-form right-column detail. */
+  detail: string;
+}
+
+/**
+ * Right-hand debug panel. Walks every part of every message and renders a
+ * compact, terse log entry per part. Pairs with `pendingApprovals` so the
+ * panel surfaces approval prompts (which arrive via `onData`, not as
+ * message parts) alongside the message-derived rows.
+ */
+function EventStreamPanel({
+  messages,
+  approvals,
+}: {
+  messages: VercelAIAgentUIMessage[];
+  approvals: PendingApproval[];
+}) {
+  const rows: EventStreamRow[] = [];
+
+  for (const message of messages) {
+    let partIndex = 0;
+    for (const part of message.parts) {
+      const key = `${message.id}:${partIndex++}`;
+      if (part.type === "text") {
+        rows.push({
+          key,
+          label: message.role === "user" ? "user" : "text",
+          detail: part.text.slice(0, 80),
+        });
+      } else if (part.type === "reasoning") {
+        rows.push({
+          key,
+          label: "reasoning",
+          detail: part.text.slice(0, 80),
+        });
+      } else if (part.type === "dynamic-tool") {
+        const detail =
+          part.state === "output-available"
+            ? safeStringify(part.output).slice(0, 80)
+            : part.state === "output-error"
+              ? `error: ${part.errorText}`
+              : safeStringify(part.input).slice(0, 80);
+        rows.push({
+          key,
+          label: `tool:${part.toolName}`,
+          detail: `${part.state} ${detail}`,
+        });
+      } else if (part.type === "step-start") {
+        rows.push({ key, label: "step", detail: "start" });
+      } else if (
+        typeof part.type === "string" &&
+        part.type.startsWith("data-")
+      ) {
+        const data = (part as { data?: unknown }).data;
+        rows.push({
+          key,
+          label: part.type.replace(/^data-/, "data:"),
+          detail: safeStringify(data).slice(0, 80),
+        });
+      }
+    }
+  }
+
+  for (const approval of approvals) {
+    rows.push({
+      key: `pending:${approval.approvalId}`,
+      label: "approval",
+      detail: `pending: ${approval.toolName}`,
+    });
+  }
+
+  return (
+    <div className="w-80 shrink-0 flex flex-col border rounded-lg bg-card">
+      <div className="px-3 py-2 border-b">
+        <h3 className="text-sm font-semibold text-muted-foreground">
+          Event Stream
+        </h3>
+      </div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-1">
+        {rows.length === 0 && (
+          <p className="text-xs text-muted-foreground/50 text-center py-8">
+            Events will appear here
+          </p>
+        )}
+        {rows.map((row) => (
+          <div
+            key={row.key}
+            className="font-mono text-xs text-muted-foreground"
+          >
+            <span className="inline-block w-24 text-right mr-2 opacity-50">
+              {row.label}
+            </span>
+            <span className="opacity-80 break-all">{row.detail}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function safeStringify(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === undefined) return "";
+  try {
+    return JSON.stringify(value) ?? "";
+  } catch {
+    return String(value);
+  }
 }

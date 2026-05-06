@@ -8,8 +8,8 @@ import { dispatchToolCall } from "../../core/agent/tool-dispatch";
 import type { ResolvedToolEntry } from "../../core/agent/types";
 import type { PluginContext } from "../../core/plugin-context";
 import type { EventChannel } from "./event-channel";
-import type { AgentEventTranslator } from "./event-translator";
 import type { ToolApprovalGate } from "./tool-approval-gate";
+import type { AgentEventStreamTranslator } from "./translator";
 
 /**
  * Decision returned by the approval check. `null` means "no gate fires"
@@ -52,15 +52,19 @@ export interface ToolBudget {
   limit: number;
 }
 
-interface HttpToolExecutorDeps {
+interface HttpToolExecutorDeps<T> {
   toolIndex: Map<string, ResolvedToolEntry>;
   /** Approval policy as resolved from `agents({ approval: ... })`. */
   approvalPolicy: { requireForDestructive: boolean; timeoutMs: number };
   approvalGate: ToolApprovalGate;
-  /** Translator used to emit `approval_pending` to the SSE stream. */
-  translator: AgentEventTranslator;
-  /** Channel the SSE stream drains. Approval events are pushed here. */
-  outboundEvents: EventChannel<ResponseStreamEvent>;
+  /**
+   * Translator used to emit `approval_pending` to the outbound stream.
+   * Generic in `T` so the same executor works for the legacy
+   * Responses-API SSE wire format and the Vercel AI UI Message Stream.
+   */
+  translator: AgentEventStreamTranslator<T>;
+  /** Channel the outbound stream drains. Approval events are pushed here. */
+  outboundEvents: EventChannel<T>;
   /** Aborted on budget exhaustion to unwind the adapter promptly. */
   abortController: AbortController;
   /**
@@ -99,8 +103,8 @@ interface HttpToolExecutorDeps {
  * the top-level cap — the parent already incremented when it dispatched
  * the `agent-<key>` call.
  */
-export class HttpToolExecutor implements ToolExecutor {
-  constructor(private deps: HttpToolExecutorDeps) {}
+export class HttpToolExecutor<T = ResponseStreamEvent> implements ToolExecutor {
+  constructor(private deps: HttpToolExecutorDeps<T>) {}
 
   async execute(
     name: string,

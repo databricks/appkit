@@ -31,7 +31,8 @@
     "drizzle-orm": "0.45.1",
     "reflect-metadata": "0.2.2",
     "sequelize": "6.37.7",
-    "typeorm": "0.3.28"
+    "typeorm": "0.3.28",
+    "zod": "^4.1.13"
   },
   "devDependencies": {
     "@playwright/test": "1.58.1",

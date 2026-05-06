@@ -48,14 +48,18 @@ import {
 } from "./http-tool-executor";
 import manifest from "./manifest.json";
 import { composePromptForAgent, normalizeAutoInherit } from "./prompt";
+import { detectChatProtocol, extractVercelAIUserText } from "./protocol";
 import { printRegistry } from "./registry-printer";
 import {
   approvalRequestSchema,
   chatRequestSchema,
   invocationsRequestSchema,
+  vercelAIChatRequestSchema,
 } from "./schemas";
 import { InMemoryThreadStore } from "./thread-store";
 import { ToolApprovalGate } from "./tool-approval-gate";
+import type { AgentEventStreamTranslator } from "./translator";
+import { VercelAIUIMessageStreamTranslator } from "./vercel-ai-ui-message-stream-translator";
 
 const logger = createLogger("agents");
 
@@ -665,6 +669,18 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   }
 
   private async _handleChat(req: express.Request, res: express.Response) {
+    // Content-negotiate the wire protocol. Default is the Responses-API SSE
+    // shape used by AppKit's existing UI; clients sending the Vercel AI SDK
+    // vendor MIME (emitted by `@ai-sdk/react`'s `useChat` via our
+    // configured `Accept` header) get the UI Message Stream protocol
+    // instead. The two protocols share the same engine — only the request
+    // body shape and the on-the-wire translator differ.
+    const protocol = detectChatProtocol(req);
+
+    if (protocol === "vercel-ai-ui-message-stream") {
+      return this._handleVercelAIChat(req, res);
+    }
+
     const parsed = chatRequestSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({
@@ -718,6 +734,97 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     return this._streamAgent(req, res, registered, thread, userId);
   }
 
+  /**
+   * Vercel AI SDK UI Message Stream branch of `_handleChat`. Selected via
+   * `Accept: application/vnd.ai-sdk.ui-message-stream`. The request body
+   * is the shape `@ai-sdk/react`'s `DefaultChatTransport` produces:
+   * `{ id, messages, trigger?, ... }`.
+   *
+   * The chat `id` is mapped 1:1 to AppKit's `threadId` so re-use of an
+   * existing chat picks up the persisted history. The latest user turn is
+   * extracted from the last entry of `messages` (text parts only).
+   */
+  private async _handleVercelAIChat(
+    req: express.Request,
+    res: express.Response,
+  ) {
+    const parsed = vercelAIChatRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "Invalid request",
+        details: parsed.error.flatten().fieldErrors,
+      });
+      return;
+    }
+    const { id: chatId, messages: uiMessages, agent: agentName } = parsed.data;
+
+    const lastMessage = uiMessages.at(-1);
+    if (!lastMessage || lastMessage.role !== "user") {
+      res.status(400).json({
+        error:
+          "Vercel AI SDK chat request must end with a user message; got role " +
+          (lastMessage?.role ?? "<empty>"),
+      });
+      return;
+    }
+
+    const userText = extractVercelAIUserText(lastMessage.parts);
+    if (!userText) {
+      res.status(400).json({
+        error: "Last user message has no text content",
+      });
+      return;
+    }
+
+    const registered = this.resolveAgent(agentName);
+    if (!registered) {
+      res.status(400).json({
+        error: agentName
+          ? `Agent "${agentName}" not found`
+          : "No agent registered",
+      });
+      return;
+    }
+
+    const userId = this.resolveUserId(req);
+
+    const limits = this.resolvedLimits;
+    if (this.countUserStreams(userId) >= limits.maxConcurrentStreamsPerUser) {
+      res.setHeader("Retry-After", "5");
+      res.status(429).json({
+        error: `Too many concurrent streams for this user (limit ${limits.maxConcurrentStreamsPerUser}). Wait for an existing stream to complete before starting another.`,
+      });
+      return;
+    }
+
+    // The chat id is reused as the thread id. First-turn requests produce
+    // a thread under that id; subsequent turns load it. We tolerate a
+    // thread the user already owns under a different store id by falling
+    // back to a freshly-created thread when `get` returns null AND there
+    // is exactly one user message in the request — i.e. this is the
+    // start of a brand-new conversation.
+    let thread = await this.threadStore.get(chatId, userId);
+    if (!thread) {
+      // The thread-store API allocates ids itself; we cannot force it to
+      // mint a thread under `chatId`. Best-effort: create a fresh thread
+      // for the user. The chat id will still be the stable client-side
+      // handle the UI uses.
+      thread = await this.threadStore.create(userId);
+    }
+
+    const userMessage: Message = {
+      id: randomUUID(),
+      role: "user",
+      content: userText,
+      createdAt: new Date(),
+    };
+    await this.threadStore.addMessage(thread.id, userId, userMessage);
+
+    return this._streamAgent(req, res, registered, thread, userId, {
+      translatorFactory: () => new VercelAIUIMessageStreamTranslator(),
+    });
+  }
+
   private async _handleInvocations(
     req: express.Request,
     res: express.Response,
@@ -766,12 +873,20 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     return this._streamAgent(req, res, registered, thread, userId);
   }
 
-  private async _streamAgent(
+  private async _streamAgent<T = ResponseStreamEvent>(
     req: express.Request,
     res: express.Response,
     registered: RegisteredAgent,
     thread: Thread,
     userId: string,
+    options?: {
+      /**
+       * Wire-protocol translator factory. Defaults to the legacy
+       * Responses-API SSE translator. The Vercel AI SDK UI Message Stream
+       * branch passes its own factory.
+       */
+      translatorFactory?: () => AgentEventStreamTranslator<T>;
+    },
   ): Promise<void> {
     const abortController = new AbortController();
     const signal = abortController.signal;
@@ -780,8 +895,10 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
     const tools = Array.from(registered.toolIndex.values()).map((e) => e.def);
     const limits = this.resolvedLimits;
-    const outboundEvents = new EventChannel<ResponseStreamEvent>();
-    const translator = new AgentEventTranslator();
+    const outboundEvents = new EventChannel<T>();
+    const translator: AgentEventStreamTranslator<T> = options?.translatorFactory
+      ? options.translatorFactory()
+      : (new AgentEventTranslator() as unknown as AgentEventStreamTranslator<T>);
     // Per-run tool-call budget shared across the top-level adapter and any
     // sub-agents it delegates to. Counted pre-dispatch so a prompt-injected
     // agent cannot drain the budget silently via denied calls.
@@ -912,7 +1029,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       outboundEvents.close();
     })();
 
-    await this.executeStream<ResponseStreamEvent>(
+    await this.executeStream<T>(
       res,
       async function* () {
         try {
