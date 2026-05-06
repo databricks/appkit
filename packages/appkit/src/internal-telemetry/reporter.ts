@@ -133,7 +133,7 @@ export class TelemetryReporter {
     return this.#send([
       this.#wrap({
         event_name: "APP_STARTUP",
-        app_startup_event: { placeholder: true },
+        app_startup_event: {},
       }),
     ]);
   }
@@ -142,7 +142,7 @@ export class TelemetryReporter {
     return this.#send([
       this.#wrap({
         event_name: "HEARTBEAT",
-        heartbeat_event: { placeholder: true },
+        heartbeat_event: {},
       }),
     ]);
   }

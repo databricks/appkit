@@ -8,13 +8,9 @@ export type AppkitEventName =
   | "HEARTBEAT"
   | "REQUEST_METRICS";
 
-export interface AppStartupEvent {
-  placeholder?: boolean;
-}
+export type AppStartupEvent = Record<string, never>;
 
-export interface HeartbeatEvent {
-  placeholder?: boolean;
-}
+export type HeartbeatEvent = Record<string, never>;
 
 export interface RequestMetricsEvent {
   endpoint?: string;

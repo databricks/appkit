@@ -56,7 +56,7 @@ describe("TelemetryReporter", () => {
       event_name: "APP_STARTUP",
       app_id: "app-uuid-1",
       appkit_version: "0.27.0",
-      app_startup_event: { placeholder: true },
+      app_startup_event: {},
     });
   });
 
@@ -67,7 +67,7 @@ describe("TelemetryReporter", () => {
     const log = lastProtoLog();
     expect(log.entry.appkit_log).toMatchObject({
       event_name: "HEARTBEAT",
-      heartbeat_event: { placeholder: true },
+      heartbeat_event: {},
     });
   });
 
