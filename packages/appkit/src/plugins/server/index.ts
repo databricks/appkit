@@ -334,6 +334,9 @@ export class ServerPlugin extends Plugin {
       port: portNumbers(requested, upper),
     });
     this.resolvedListenPort = port;
+    if (port !== requested) {
+      logger.info("Port %d was busy, picking %d", requested, port);
+    }
     return port;
   }
 

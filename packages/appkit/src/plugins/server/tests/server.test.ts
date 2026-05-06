@@ -330,6 +330,36 @@ describe("ServerPlugin", () => {
       );
     });
 
+    test("logs info when dev preferred port was busy and another was picked", async () => {
+      process.env.NODE_ENV = "development";
+      mockLoggerInfo.mockClear();
+      mockGetPort.mockResolvedValueOnce(8123);
+      const plugin = new ServerPlugin({});
+
+      await plugin.start();
+
+      expect(mockLoggerInfo).toHaveBeenCalledWith(
+        "Port %d was busy, picking %d",
+        ServerPlugin.DEFAULT_CONFIG.port,
+        8123,
+      );
+    });
+
+    test("does not log busy info when dev preferred port was free", async () => {
+      process.env.NODE_ENV = "development";
+      mockLoggerInfo.mockClear();
+      mockGetPort.mockResolvedValueOnce(ServerPlugin.DEFAULT_CONFIG.port);
+      const plugin = new ServerPlugin({});
+
+      await plugin.start();
+
+      expect(mockLoggerInfo).not.toHaveBeenCalledWith(
+        "Port %d was busy, picking %d",
+        expect.any(Number),
+        expect.any(Number),
+      );
+    });
+
     test("should setup ViteDevServer in development mode", async () => {
       process.env.NODE_ENV = "development";
       const plugin = new ServerPlugin({});
