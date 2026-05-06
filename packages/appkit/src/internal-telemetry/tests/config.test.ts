@@ -38,4 +38,14 @@ describe("isInternalTelemetryEnabled", () => {
       false,
     );
   });
+
+  test("returns false when DO_NOT_TRACK env var is 1", () => {
+    vi.stubEnv("DO_NOT_TRACK", "1");
+    expect(isInternalTelemetryEnabled()).toBe(false);
+  });
+
+  test("returns true when DO_NOT_TRACK env var is 0", () => {
+    vi.stubEnv("DO_NOT_TRACK", "0");
+    expect(isInternalTelemetryEnabled()).toBe(true);
+  });
 });

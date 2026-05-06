@@ -1,8 +1,8 @@
 // Internal telemetry: APP_STARTUP, HEARTBEAT, and REQUEST_METRICS events
 // POSTed to /telemetry-ext so the Databricks team can prioritize SDK work.
-// Disable with disableInternalTelemetry: true on createApp, or
-// DISABLE_APPKIT_INTERNAL_TELEMETRY=true.
-// Full data inventory: docs/docs/internal-telemetry.mdx.
+// Disable with disableInternalTelemetry: true on createApp,
+// DISABLE_APPKIT_INTERNAL_TELEMETRY=true, or DO_NOT_TRACK=1.
+// Full data inventory: docs/docs/privacy.mdx.
 
 export { isInternalTelemetryEnabled } from "./config.js";
 export { TelemetryReporter } from "./reporter.js";

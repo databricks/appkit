@@ -1,0 +1,61 @@
+---
+sidebar_position: 99
+---
+
+# Privacy
+
+AppKit sends a small amount of anonymized usage telemetry to Databricks
+so the team can understand how the SDK is used and prioritize
+improvements. This page documents exactly what is sent, when, and how
+to turn it off.
+
+## What we collect
+
+Every event is a single record with three top-level fields:
+
+| Field            | Type   | Source                              |
+| ---------------- | ------ | ----------------------------------- |
+| `event_name`     | enum   | One of `APP_STARTUP`, `HEARTBEAT`, `REQUEST_METRICS` |
+| `app_id`         | string | The app's OAuth client UUID (`DATABRICKS_CLIENT_ID`) |
+| `appkit_version` | string | The AppKit SDK version              |
+
+Each event also carries one of three event-specific bodies:
+
+- **`APP_STARTUP`** — emitted once when `createApp` finishes booting.
+  Empty body.
+- **`HEARTBEAT`** — emitted every five minutes from a running app.
+  Empty body.
+- **`REQUEST_METRICS`** — emitted once per minute, one record per HTTP
+  endpoint that received traffic in the window. Each record contains:
+  - `endpoint` — the route template (e.g. `GET /api/genie/:space_id/messages`),
+    never the raw request URL or any user-provided values.
+  - `request_count`
+  - `request_latency_ms_avg`
+  - `response_count_http4xx`
+  - `response_count_http5xx`
+
+That is the entire payload. AppKit does not send request bodies,
+response bodies, headers, query parameters, user identifiers, or any
+other content of your traffic.
+
+## How it's sent
+
+Events are POSTed to the workspace's authenticated `/telemetry-ext`
+endpoint, signed with your app's service-principal token. Sending
+happens fire-and-forget — every send is wrapped in a catch so a
+failure in the telemetry path can never affect a running app.
+
+## How to opt out
+
+Set any one of the following:
+
+```sh
+# AppKit-specific kill switch
+DISABLE_APPKIT_INTERNAL_TELEMETRY=true
+
+# Cross-tool standard (https://consoledonottrack.com)
+DO_NOT_TRACK=1
+```
+
+Either fully disables the reporter — no events are emitted and no
+network calls are made.
