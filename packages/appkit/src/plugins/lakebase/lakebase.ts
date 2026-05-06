@@ -114,12 +114,12 @@ class LakebasePlugin extends Plugin {
    * separate `pg.Pool` instances per user (each with their own OAuth token
    * refresh), rather than the standard AsyncLocalStorage context swap.
    *
-   * @param req - Express request containing `x-forwarded-access-token` and `x-forwarded-user` headers
+   * @param req - Express request containing `x-forwarded-access-token` and `x-forwarded-email` headers
    * @returns A proxied plugin instance where `query()` and `pool` use the user's pool
    */
   asUser(req: express.Request): this {
     const token = req.header("x-forwarded-access-token");
-    const userId = req.header("x-forwarded-user");
+    const userEmail = req.header("x-forwarded-email");
     const isDev = process.env.NODE_ENV === "development";
 
     // In dev mode without token, delegate to the base class dev fallback
@@ -132,29 +132,32 @@ class LakebasePlugin extends Plugin {
       throw AuthenticationError.missingToken("user token");
     }
 
-    if (!userId && !isDev) {
-      throw AuthenticationError.missingUserId();
+    if (!userEmail && !isDev) {
+      throw AuthenticationError.missingToken(
+        "x-forwarded-email header (required for Lakebase per-user pools)",
+      );
     }
 
-    const effectiveUserId = userId || "dev-user";
+    // Lakebase OAuth roles use email as postgres_role
+    const effectiveUser = userEmail || "local-dev-user";
 
     // Get or create a per-user pool
     // biome-ignore lint/style/noNonNullAssertion: oboPoolManager is guaranteed non-null after setup()
-    const isNew = !this.oboPoolManager!.hasPool(effectiveUserId);
+    const isNew = !this.oboPoolManager!.hasPool(effectiveUser);
     // biome-ignore lint/style/noNonNullAssertion: oboPoolManager is guaranteed non-null after setup()
-    const userPool = this.oboPoolManager!.getPool(effectiveUserId, {
+    const userPool = this.oboPoolManager!.getPool(effectiveUser, {
       workspaceClient: new WorkspaceClient({
         token,
         host: process.env.DATABRICKS_HOST,
         authType: "pat",
       }),
-      user: effectiveUserId,
+      user: effectiveUser,
     });
 
     if (isNew) {
       logger.info(
         'Created OBO pool for user "%s" (total: %d)',
-        effectiveUserId,
+        effectiveUser,
         // biome-ignore lint/style/noNonNullAssertion: oboPoolManager is guaranteed non-null after setup()
         this.oboPoolManager!.size,
       );
@@ -187,7 +190,7 @@ class LakebasePlugin extends Plugin {
                   host: process.env.DATABRICKS_HOST,
                   authType: "pat",
                 }),
-                user: effectiveUserId,
+                user: effectiveUser,
               }),
             getPgConfig: () =>
               getLakebasePgConfig({
@@ -197,7 +200,7 @@ class LakebasePlugin extends Plugin {
                   host: process.env.DATABRICKS_HOST,
                   authType: "pat",
                 }),
-                user: effectiveUserId,
+                user: effectiveUser,
               }),
           });
         }
