@@ -119,6 +119,15 @@ export function useAnalyticsQuery<
       payload: payload,
       signal: abortController.signal,
       onMessage: async (message) => {
+        // Bail silently if the controller we own is already aborted. Mirrors
+        // the guard at the top of `onError` below. Without this, the server-
+        // side SSE writer's final error envelope (emitted in response to our
+        // own cleanup-driven abort) lands on this handler, hits the
+        // `parsed.type === "error"` branch, and surfaces a transient error to
+        // the user — visible in dev under React StrictMode's double-mount,
+        // hidden in prod where StrictMode is a no-op. The next mount/refetch
+        // creates a fresh controller and runs cleanly.
+        if (abortController.signal.aborted) return;
         try {
           const parsed = JSON.parse(message.data);
 
