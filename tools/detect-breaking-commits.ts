@@ -27,11 +27,16 @@ const TRACKED_PATHS = [
   "packages/shared",
 ];
 
-// Conventional Commits breaking-change markers:
-//   1. `type!:` or `type(scope)!:` in the subject line
-//   2. `BREAKING CHANGE:` or `BREAKING-CHANGE:` footer line
+// Matches what `conventional-changelog-conventionalcommits` (used by
+// release-it) treats as a major-bumping breaking change. Verified against
+// the live parser; covers:
+//   - Subject `type!:` / `type(scope)!:` (case-insensitive)
+//   - Footer line `BREAKING CHANGE` or `BREAKING-CHANGE`, with optional
+//     leading whitespace, optional colon, case-insensitive
+// Excludes the plural `BREAKING CHANGES` (parser does NOT treat it as
+// breaking — `\b(?!S)` enforces this) and mid-line / list-item occurrences.
 const BREAKING_PATTERN =
-  /^(feat|fix|chore|refactor|perf|build|ci|docs|style|test|revert)(\([^)]+\))?!:|^BREAKING[ -]CHANGE:/m;
+  /^(feat|fix|chore|refactor|perf|build|ci|docs|style|test|revert)(\([^)]+\))?!:|^\s*BREAKING[ -]CHANGE\b(?!S)/im;
 
 function requireEnv(name: string): string {
   const value = process.env[name];
