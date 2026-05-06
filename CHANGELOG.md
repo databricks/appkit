@@ -2,17 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
-# Changelog
+## Unreleased
 
-# Changelog
+### appkit (files plugin) — per-volume auth mode
 
-# Changelog
+* **feat(files):** add per-volume `auth` field (`VolumeConfig.auth`) and plugin-level `auth` default (`IFilesConfig.auth`) for selecting between service-principal and on-behalf-of-user execution. Resolution order: `volume.auth ?? plugin.auth ?? "service-principal"`. OBO mode wires HTTP route handlers and `VolumeHandle.asUser` through `runInUserContext` so SDK calls execute as the end user.
+* **feat(files):** add `files.auth_mode` OpenTelemetry span attribute on every operation, set to either `"service-principal"` or `"on-behalf-of-user"` for trace filtering. The attribute lands on the connector's existing `files.<op>` span (no duplicate spans).
+* **feat(files)!:** `appKit.files("vol").asUser(req).list()` now executes the SDK call as the **end user** (previously the SDK still ran as the service principal — only the policy user was swapped). Programmatic callers that relied on SP credentials post-`asUser(req)` must remove the `asUser` wrap.
+* **fix(files):** `asUser(req)` now requires both `x-forwarded-user` AND `x-forwarded-access-token` in production; throws `AuthenticationError.missingToken` when either is missing. Previously, a request with only the user header silently fell back to SP credentials at the SDK level while the policy saw a real-user identity — a privilege-confusion bug. Dev fallback marks the policy user as `isServicePrincipal: true`.
+* **fix(files):** OBO volume read responses are no longer cached. SP volume reads still cache. Trade-off: every OBO read hits the SDK; in exchange, no cross-user staleness. (Follow-up: per-(volume, path) generation counter for OBO list cache.)
+* **fix(files):** write handlers (`upload`, `mkdir`, `delete`) now `await` cache invalidation before sending the HTTP response, eliminating a write→read race within the same client tick.
+* **chore(files):** remove undocumented `bypassPolicy` option on `createVolumeAPI`. Zero consumers in `packages/` or `apps/`; no migration needed.
 
-# Changelog
+#### Honest limitation
 
-# Changelog
-
-# Changelog
+Programmatic calls on an OBO volume **without** `asUser(req)` (i.e. `appKit.files("obo-vol").list()`) cannot synthesize a user identity and continue to execute against the service principal client at the call site. For programmatic per-user execution, use `asUser(req)`. The OBO volume default applies to **HTTP route traffic**, where the request headers are available.
 
 # Changelog
 
