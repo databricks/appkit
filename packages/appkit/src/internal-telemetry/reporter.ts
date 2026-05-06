@@ -3,8 +3,8 @@ import {
   type AppkitLog,
   buildAppkitPayload,
   type RequestMetricsEvent,
-} from "./appkit-log.js";
-import { postTelemetry, type TelemetrySendResult } from "./client.js";
+} from "./appkit-log";
+import { postTelemetry, type TelemetrySendResult } from "./client";
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
 const DEFAULT_METRICS_FLUSH_INTERVAL_MS = 60 * 1000;
