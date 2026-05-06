@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
 import {
@@ -11,32 +18,50 @@ import {
 } from "./shared";
 
 /**
- * `appkit db rls <entity> <spec>` — scaffold a row-level security policy.
- *
- * Generates a numbered SQL migration that enables RLS on the entity's table
- * and creates the policy, plus a TypeScript snippet that the user pastes
- * inside `defineSchema(...)` so the policy stays declared next to the table.
- *
- * Examples:
- *   appkit db rls user owner:userId
- *   appkit db rls case tenant:org_id --actions select,update
- *   appkit db rls post "status <> 'archived'" --name posts_active_only
+ * `appkit db rls <entity> <spec>` — scaffold an RLS policy. Emits a numbered
+ * `.sql` and registers it in `meta/_journal.json` so `drizzle-orm/migrator`
+ * actually applies it on `appkit db migrate up`.
  */
 export const rlsCommand = new Command("rls")
   .description("Scaffold a row-level security policy for an entity")
   .argument("<entity>", "Logical entity key (matches a defineSchema export)")
   .argument(
     "<spec>",
-    "Policy expression. Shorthand: 'owner:<column>' or 'tenant:<column>'. Anything else is treated as raw SQL.",
+    "Policy expression. Shorthand: 'owner_email:<column>' compares to current_user_email(). Anything else is treated as raw SQL.",
   )
   .option(
     "--name <name>",
-    "Policy name. Defaults to '<entity>_<expression-summary>'.",
+    "Policy name. Defaults to '<entity>_<expression-summary>'. Must match [A-Za-z_][A-Za-z0-9_]*.",
   )
   .option(
     "--actions <list>",
-    "Comma-separated verbs (select,insert,update,delete,all). Defaults to 'all'.",
+    "Comma-separated verbs (select,insert,update,delete,all). Multi-verb emits one CREATE POLICY per verb. Defaults to 'all'.",
     "all",
+  )
+  .option(
+    "--dry-run",
+    "Print intended SQL and target paths; do not write or update the journal.",
+  )
+  .addHelpText(
+    "after",
+    [
+      "",
+      "RLS threat model & prerequisites:",
+      "  • Generated SQL emits FORCE ROW LEVEL SECURITY so the SP pool",
+      "    (table owner) is also constrained — every server query through",
+      "    appkit.database.<entity> is now subject to the policy.",
+      "  • Identity GUC: AppKit's per-user pool sets app.user_id to the OBO",
+      "    user's email on connection check-out (entity-wiring.ts). The",
+      "    helper current_user_email() reads that GUC; it returns NULL on",
+      "    SP connections so policies fail-closed (deny every row).",
+      "  • The owner_email: shorthand expects a column that stores the user's",
+      "    email (case-sensitive comparison). Map any other identifier to a",
+      "    raw SQL expression instead.",
+      "  • Re-run is safe: helpers + policies use CREATE OR REPLACE / DROP IF",
+      "    EXISTS. But repeated runs grow the migration count — re-emit only",
+      "    when the predicate genuinely changes.",
+      "",
+    ].join("\n"),
   )
   .action(async (entity: string, spec: string, options: RlsCliOptions) => {
     await runCommandAction(() => runRls({ entity, spec, options }));
@@ -45,6 +70,7 @@ export const rlsCommand = new Command("rls")
 interface RlsCliOptions {
   name?: string;
   actions?: string;
+  dryRun?: boolean;
 }
 
 interface RunRlsArgs {
@@ -64,12 +90,14 @@ interface RlsScaffoldOptions {
 
 interface RlsScaffold {
   migrationSql: string;
-  schemaTsInsert: string;
 }
 
 interface RlsSchema {
   $schemaName?: string;
-  $tables?: Record<string, { name?: string }>;
+  $tables?: Record<
+    string,
+    { name?: string; $columns?: Record<string, unknown> }
+  >;
 }
 
 const ALLOWED_ACTIONS = new Set([
@@ -82,73 +110,157 @@ const ALLOWED_ACTIONS = new Set([
 
 type AllowedAction = "select" | "insert" | "update" | "delete" | "all";
 
+/** Journal format `drizzle-orm/migrator` reads. */
+interface DrizzleJournal {
+  version: string;
+  dialect: string;
+  entries: DrizzleJournalEntry[];
+}
+
+interface DrizzleJournalEntry {
+  idx: number;
+  version: string;
+  when: number;
+  tag: string;
+  breakpoints: boolean;
+}
+
+const JOURNAL_VERSION = "7";
+const JOURNAL_DIALECT = "postgresql";
+const FORBIDDEN_RAW_SQL = /;|--|\/\*|\*\//;
+const POLICY_NAME_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 /* ============================================================ */
 /* Pure helpers                                                  */
 /* ============================================================ */
 
 /**
- * Parse a shorthand RLS expression into a SQL predicate suitable for a
- * `CREATE POLICY ... USING (<expr>)` clause.
- *
- * Supported shorthands:
- *
- * - `owner:<column>` — `<column> = current_user_id()`
- * - `tenant:<column>` — `<column> = current_tenant_id()`
- *
- * Anything else is treated as raw SQL and passed through verbatim.
+ * Resolve `owner_email:<col>` to `<col> = <schema>.current_user_email()`.
+ * Anything else is raw SQL, gated by `validateRawSqlPredicate`.
  */
-export function compileRlsExpression(spec: string): string {
+export function compileRlsExpression(
+  spec: string,
+  options: { schemaName?: string } = {},
+): { sql: string; shorthandColumn: string | null } {
   const trimmed = spec.trim();
-  if (!trimmed) {
-    throw new Error("RLS expression must not be empty");
+  if (!trimmed) throw new Error("RLS expression must not be empty");
+
+  const schema = escapeIdent(options.schemaName ?? "app");
+  const match = /^owner_email:([A-Za-z_][A-Za-z0-9_]*)$/.exec(trimmed);
+  if (match) {
+    const [, column] = match;
+    return {
+      sql: `${column} = ${schema}.current_user_email()`,
+      shorthandColumn: column,
+    };
   }
 
-  const match = /^(owner|tenant):([A-Za-z_][A-Za-z0-9_]*)$/.exec(trimmed);
-  if (!match) {
-    return trimmed;
+  if (/^(owner|tenant):/.test(trimmed)) {
+    throw new Error(
+      "owner: / tenant: shorthands were removed. Use owner_email:<column> " +
+        "(compares to current_user_email()) or write raw SQL. The runtime " +
+        "currently only sets app.user_id (= identity email).",
+    );
   }
 
-  const [, kind, column] = match;
-  if (kind === "owner") {
-    return `${column} = current_user_id()`;
-  }
-  return `${column} = current_tenant_id()`;
+  validateRawSqlPredicate(trimmed);
+  return { sql: trimmed, shorthandColumn: null };
 }
 
 /**
- * Build the migration SQL and the TypeScript snippet for a new policy.
- *
- * The migration is idempotent in development: it drops a policy of the
- * same name if it already exists, then re-creates it. The TS snippet uses
- * the schema-builder's `policy(...)` DSL with a string `using()` body.
+ * Build migration SQL: ENABLE+FORCE RLS once, then one DROP/CREATE POLICY
+ * block per action. Multi-verb specs get one policy per verb, suffixed.
  */
 export function buildRlsScaffold(options: RlsScaffoldOptions): RlsScaffold {
+  validatePolicyName(options.policyName);
   const schemaName = options.schemaName ?? "app";
-  const using = compileRlsExpression(options.spec);
+  const compiled = compileRlsExpression(options.spec, { schemaName });
   const actions = options.actions ?? ["all"];
-  const verb = actions.length === 1 ? actions[0] : "all";
   const qualified = `${escapeIdent(schemaName)}.${escapeIdent(options.tableName)}`;
 
-  const migrationSql = [
+  const blocks: string[] = [
     `-- RLS policy ${options.policyName} on ${qualified}`,
     `ALTER TABLE ${qualified} ENABLE ROW LEVEL SECURITY;`,
-    `DROP POLICY IF EXISTS ${escapeIdent(options.policyName)} ON ${qualified};`,
-    `CREATE POLICY ${escapeIdent(options.policyName)} ON ${qualified}`,
-    `  FOR ${verb.toUpperCase()}`,
-    `  USING (${using});`,
+    `ALTER TABLE ${qualified} FORCE ROW LEVEL SECURITY;`,
+  ];
+
+  const isMultiVerb = actions.length > 1;
+  for (const action of actions) {
+    const policyName = isMultiVerb
+      ? `${options.policyName}_${action}`
+      : options.policyName;
+    validatePolicyName(policyName);
+    blocks.push(
+      `DROP POLICY IF EXISTS ${escapeIdent(policyName)} ON ${qualified};`,
+      renderCreatePolicy(qualified, policyName, action, compiled.sql),
+    );
+  }
+  blocks.push("");
+
+  return { migrationSql: blocks.join("\n") };
+}
+
+/**
+ * Helpers SQL. `current_user_email()` reads the `app.user_id` GUC set by
+ * the per-user pool; schema-qualified so `search_path` can't rebind it.
+ */
+export function buildHelpersMigrationSql(schemaName: string): string {
+  const schema = escapeIdent(schemaName);
+  return [
+    "-- AppKit RLS helpers — see entity-wiring.ts for the GUC contract.",
+    `CREATE OR REPLACE FUNCTION ${schema}.current_user_email() RETURNS text`,
+    "  LANGUAGE sql STABLE AS",
+    "  $$ SELECT current_setting('app.user_id', true) $$;",
     "",
   ].join("\n");
+}
 
-  const tsActions = actions.map((a) => JSON.stringify(a)).join(", ");
-  const schemaTsInsert = [
-    `policy(${JSON.stringify(options.policyName)})`,
-    `  .on(${options.entity})`,
-    `  .for(${tsActions})`,
-    `  .using(() => ${JSON.stringify(using)})`,
-    `  .$build();`,
-  ].join("\n");
+function renderCreatePolicy(
+  qualified: string,
+  policyName: string,
+  action: AllowedAction,
+  predicate: string,
+): string {
+  const head = `CREATE POLICY ${escapeIdent(policyName)} ON ${qualified}\n  FOR ${action.toUpperCase()}`;
+  switch (action) {
+    case "select":
+    case "delete":
+      return `${head}\n  USING (${predicate});`;
+    case "insert":
+      return `${head}\n  WITH CHECK (${predicate});`;
+    default:
+      return `${head}\n  USING (${predicate})\n  WITH CHECK (${predicate});`;
+  }
+}
 
-  return { migrationSql, schemaTsInsert };
+function validateRawSqlPredicate(expr: string): void {
+  if (FORBIDDEN_RAW_SQL.test(expr)) {
+    throw new Error(
+      `Raw RLS predicate must not contain ';', SQL comments ('--', '/*', '*/'). Got: ${expr}`,
+    );
+  }
+  let depth = 0;
+  for (const ch of expr) {
+    if (ch === "(") depth++;
+    else if (ch === ")") {
+      depth--;
+      if (depth < 0) {
+        throw new Error(`Unbalanced ')' in RLS predicate: ${expr}`);
+      }
+    }
+  }
+  if (depth !== 0) {
+    throw new Error(`Unbalanced parens in RLS predicate: ${expr}`);
+  }
+}
+
+function validatePolicyName(name: string): void {
+  if (!POLICY_NAME_REGEX.test(name)) {
+    throw new Error(
+      `Policy name must match ${POLICY_NAME_REGEX.source} (got '${name}'). ` +
+        "Used both as a SQL identifier and migration filename — strict for safety.",
+    );
+  }
 }
 
 /* ============================================================ */
@@ -177,11 +289,21 @@ async function runRls({ entity, spec, options }: RunRlsArgs): Promise<void> {
   }
 
   const tableName = table.name ?? entity;
+  const schemaName = schema.$schemaName ?? "app";
   const actions = parseActions(options.actions);
-  const policyName = options.name ?? defaultPolicyName(entity, spec);
+  const policyName =
+    options.name ?? defaultPolicyName(entity, spec, options.name === undefined);
+  validatePolicyName(policyName);
+
+  const compiled = compileRlsExpression(spec, { schemaName });
+  if (compiled.shorthandColumn) {
+    assertColumnExists(table, entity, compiled.shorthandColumn);
+  } else {
+    console.log(warn(`Using raw SQL predicate: ${compiled.sql}`));
+  }
 
   const scaffold = buildRlsScaffold({
-    schemaName: schema.$schemaName,
+    schemaName,
     entity,
     tableName,
     policyName,
@@ -189,11 +311,15 @@ async function runRls({ entity, spec, options }: RunRlsArgs): Promise<void> {
     actions,
   });
 
-  // Owner/tenant shorthands compile to current_user_id()/current_tenant_id().
-  // Both are app-level helpers Postgres doesn't know about; emit them once,
-  // before any rls policy migration tries to reference them, otherwise
-  // `migrate up` fails closed and RLS denies every read.
-  const helpersFile = ensureRlsHelpersMigration(paths.migrationsDir);
+  if (options.dryRun) {
+    runDryRun(paths, schemaName, scaffold.migrationSql);
+    return;
+  }
+
+  const helpersFile = ensureRlsHelpersMigration(
+    paths.migrationsDir,
+    schemaName,
+  );
   if (helpersFile) {
     console.log(check(`Wrote ${path.relative(paths.root, helpersFile)}`));
   }
@@ -204,26 +330,43 @@ async function runRls({ entity, spec, options }: RunRlsArgs): Promise<void> {
     policyName,
     scaffold.migrationSql,
   );
-
   console.log(check(`Wrote ${path.relative(paths.root, migrationFile)}`));
-  console.log("");
-  console.log(
-    bullet(
-      `Add this block inside defineSchema(...) in ${path.relative(
-        paths.root,
-        paths.schemaFile,
-      )} so the policy stays declared next to the table:`,
-    ),
-  );
-  console.log("");
-  console.log(indent(scaffold.schemaTsInsert, 2));
   console.log("");
   console.log(bullet(`Apply with: appkit db migrate up`));
   console.log(
-    warn(
-      "Schema-side automatic injection is not yet AST-aware; the snippet above is informational only.",
+    bullet(
+      "Track the policy in the migration file above. The schema-side `policy()` DSL is not yet implemented.",
     ),
   );
+}
+
+function runDryRun(
+  paths: ReturnType<typeof databasePaths>,
+  schemaName: string,
+  migrationSql: string,
+): void {
+  console.log(bullet(`Dry run: would write into ${paths.migrationsDir}`));
+  console.log(bullet(`Helpers (schema-qualified to "${schemaName}"):`));
+  console.log("");
+  console.log(indent(buildHelpersMigrationSql(schemaName), 2));
+  console.log(bullet("Policy migration:"));
+  console.log("");
+  console.log(indent(migrationSql, 2));
+  console.log(bullet("No journal entries were written."));
+}
+
+function assertColumnExists(
+  table: { $columns?: Record<string, unknown> },
+  entity: string,
+  column: string,
+): void {
+  const columns = table.$columns ?? {};
+  if (!Object.hasOwn(columns, column)) {
+    const known = Object.keys(columns).join(", ") || "(none)";
+    throw new Error(
+      `Column "${column}" not found on entity "${entity}". Available: ${known}`,
+    );
+  }
 }
 
 function parseActions(raw: string | undefined): AllowedAction[] | undefined {
@@ -239,82 +382,140 @@ function parseActions(raw: string | undefined): AllowedAction[] | undefined {
       );
     }
   }
+  if (parts.includes("all") && parts.length > 1) {
+    throw new Error("'all' cannot be combined with other actions.");
+  }
   return parts as AllowedAction[];
 }
 
-function defaultPolicyName(entity: string, spec: string): string {
-  const summary = spec
+/** Slug the spec; append a hash on truncation to avoid 30-char collisions. */
+function defaultPolicyName(
+  entity: string,
+  spec: string,
+  appendHash: boolean,
+): string {
+  const slug = spec
     .replace(/[^A-Za-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "")
-    .toLowerCase()
-    .slice(0, 30);
-  return `${entity}_${summary || "policy"}`;
+    .toLowerCase();
+  const truncated = slug.slice(0, 30);
+  if (appendHash && truncated !== slug) {
+    const suffix = createHash("sha1").update(spec).digest("hex").slice(0, 6);
+    return `${entity}_${truncated || "policy"}_${suffix}`;
+  }
+  return `${entity}_${truncated || "policy"}`;
 }
 
-function writeMigration(
+/* ============================================================ */
+/* Filesystem + journal                                          */
+/* ============================================================ */
+
+export function writeMigration(
   migrationsDir: string,
   entity: string,
   policyName: string,
   sql: string,
 ): string {
-  if (!existsSync(migrationsDir)) {
-    mkdirSync(migrationsDir, { recursive: true });
-  }
-  const next = nextMigrationNumber(migrationsDir);
-  const baseName = `${next}_rls_${entity}_${policyName}.sql`;
-  const filePath = path.join(migrationsDir, baseName);
+  ensureDir(migrationsDir);
+  const tag = `${nextMigrationNumber(migrationsDir)}_rls_${entity}_${policyName}`;
+  assertSafeFilename(tag);
+  const filePath = path.join(migrationsDir, `${tag}.sql`);
   writeFileSync(filePath, sql, "utf8");
+  appendJournalEntry(migrationsDir, tag);
   return filePath;
 }
 
-/**
- * Emit `<NNNN>_appkit_rls_helpers.sql` defining `current_user_id()` and
- * `current_tenant_id()` if no helpers migration exists yet. Returns the
- * absolute path of a newly written file, or `null` when one already exists.
- *
- * The functions read from session-local config keys `app.user_id` and
- * `app.tenant_id` set by AppKit's per-user pool on connection check-out
- * (see `entity-wiring.ts`). Without those settings they return NULL and
- * RLS predicates referencing them deny every row — fail-closed by design.
- */
-function ensureRlsHelpersMigration(migrationsDir: string): string | null {
-  if (!existsSync(migrationsDir)) {
-    mkdirSync(migrationsDir, { recursive: true });
-  }
-  const files = readdirSync(migrationsDir);
-  if (files.some((f) => /_appkit_rls_helpers\.sql$/.test(f))) {
+export function ensureRlsHelpersMigration(
+  migrationsDir: string,
+  schemaName: string,
+): string | null {
+  ensureDir(migrationsDir);
+  const journal = readJournal(migrationsDir);
+  if (journal.entries.some((e) => /_appkit_rls_helpers$/.test(e.tag))) {
     return null;
   }
-  const next = nextMigrationNumber(migrationsDir);
-  const filePath = path.join(migrationsDir, `${next}_appkit_rls_helpers.sql`);
-  const sql = [
-    "-- AppKit RLS helpers: current_user_id() / current_tenant_id().",
-    "-- Read from session-local config keys set by the per-user pool.",
-    "CREATE OR REPLACE FUNCTION current_user_id() RETURNS text",
-    "  LANGUAGE sql STABLE AS",
-    "  $$ SELECT current_setting('app.user_id', true) $$;",
-    "",
-    "CREATE OR REPLACE FUNCTION current_tenant_id() RETURNS text",
-    "  LANGUAGE sql STABLE AS",
-    "  $$ SELECT current_setting('app.tenant_id', true) $$;",
-    "",
-  ].join("\n");
-  writeFileSync(filePath, sql, "utf8");
+  const tag = `${nextMigrationNumber(migrationsDir)}_appkit_rls_helpers`;
+  assertSafeFilename(tag);
+  const filePath = path.join(migrationsDir, `${tag}.sql`);
+  writeFileSync(filePath, buildHelpersMigrationSql(schemaName), "utf8");
+  appendJournalEntry(migrationsDir, tag);
   return filePath;
 }
 
+/** Append to `meta/_journal.json` — `drizzle-orm/migrator` skips anything not listed. */
+function appendJournalEntry(migrationsDir: string, tag: string): void {
+  const journalPath = journalFilePath(migrationsDir);
+  const journal = readJournal(migrationsDir);
+  if (journal.entries.some((entry) => entry.tag === tag)) return;
+  const idx = journal.entries.length;
+  journal.entries.push({
+    idx,
+    version: JOURNAL_VERSION,
+    when: Date.now(),
+    tag,
+    breakpoints: false,
+  });
+  ensureDir(path.dirname(journalPath));
+  writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`, "utf8");
+}
+
+function readJournal(migrationsDir: string): DrizzleJournal {
+  const journalPath = journalFilePath(migrationsDir);
+  if (!existsSync(journalPath)) {
+    return { version: JOURNAL_VERSION, dialect: JOURNAL_DIALECT, entries: [] };
+  }
+  const raw = readFileSync(journalPath, "utf8");
+  const parsed = JSON.parse(raw) as Partial<DrizzleJournal>;
+  return {
+    version: parsed.version ?? JOURNAL_VERSION,
+    dialect: parsed.dialect ?? JOURNAL_DIALECT,
+    entries: Array.isArray(parsed.entries) ? parsed.entries : [],
+  };
+}
+
+function journalFilePath(migrationsDir: string): string {
+  return path.join(migrationsDir, "meta", "_journal.json");
+}
+
+/** Max of journal + on-disk so we outrun orphans from prior bad runs. */
 function nextMigrationNumber(migrationsDir: string): string {
-  const files = readdirSync(migrationsDir);
-  // Pick the highest 4-digit prefix that any existing file uses (sql or json).
-  // We don't care about the file extension — we just want the next ordinal.
   let max = -1;
-  for (const file of files) {
-    const match = /^(\d{4})_/.exec(file);
+  const journal = readJournal(migrationsDir);
+  for (const entry of journal.entries) {
+    const match = /^(\d{4})_/.exec(entry.tag);
     if (!match) continue;
     const n = Number(match[1]);
     if (Number.isFinite(n) && n > max) max = n;
   }
+  if (existsSync(migrationsDir)) {
+    for (const file of readDirSafe(migrationsDir)) {
+      const match = /^(\d{4})_/.exec(file);
+      if (!match) continue;
+      const n = Number(match[1]);
+      if (Number.isFinite(n) && n > max) max = n;
+    }
+  }
   return String(max + 1).padStart(4, "0");
+}
+
+function readDirSafe(dir: string): string[] {
+  try {
+    return readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+function ensureDir(dir: string): void {
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+}
+
+function assertSafeFilename(tag: string): void {
+  if (!/^[A-Za-z0-9_]+$/.test(tag)) {
+    throw new Error(
+      `Refusing to write migration tag '${tag}' — only [A-Za-z0-9_] allowed.`,
+    );
+  }
 }
 
 function indent(text: string, spaces: number): string {

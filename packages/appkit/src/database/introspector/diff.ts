@@ -1,27 +1,23 @@
 import type { IntrospectedTable, IntrospectionResult } from "./types";
 
-/** Severity of a drift entry. */
 export type DriftSeverity = "info" | "warn" | "error";
 
-/** A single drift entry. */
 export interface DriftEntry {
-  /** The severity of the drift entry. */
   severity: DriftSeverity;
-  /** The kind of drift entry. */
   kind: "live-only" | "schema-only" | "type-mismatch";
-  /** The message of the drift entry. */
   message: string;
 }
 
-/** A report of drift entries. */
 export interface DriftReport {
-  /** Whether there is any drift. */
   hasDrift: boolean;
-  /** The entries of the drift report. */
   entries: DriftEntry[];
 }
 
-/** Diff two introspections and return a report of drift entries. */
+/**
+ * TODO(rls): policies are not compared — `schemaToIntrospection` always
+ * returns `policies: []`, so any DB-side policy would show as `live-only`.
+ * Re-enable once the schema-builder declares policies.
+ */
 export function diffIntrospections(
   live: IntrospectionResult,
   declared: IntrospectionResult,
@@ -56,7 +52,6 @@ export function diffIntrospections(
   return { hasDrift: entries.length > 0, entries };
 }
 
-/** Diff two tables and return a report of drift entries. */
 function diffColumns(
   key: string,
   live: IntrospectedTable,
@@ -98,24 +93,15 @@ function diffColumns(
   }
 }
 
-/** Get the key of a table. */
 function tableKey(table: Pick<IntrospectedTable, "schema" | "name">): string {
   return `${table.schema}.${table.name}`;
 }
 
 /**
- * Compares the column contract beyond the raw Postgres type.
- *
- * Runtime writes and migrations depend on nullability, defaults, keys,
- * generated columns, and FK actions, so drift detection must compare the
- * metadata captured by introspection instead of stopping at `pgType`.
- *
- * Server-generated columns get special treatment: when both sides agree the
- * column is server-generated, we skip `hasDefault` and `defaultExpression`
- * comparisons because the live DB stores the literal `nextval(...)` /
- * `GENERATED AS IDENTITY` expression while the schema models the same fact
- * as `serverGenerated: true` metadata. Comparing them would produce noise on
- * every introspect → verify roundtrip for serial / bigserial / identity PKs.
+ * Compare column metadata beyond `pgType` (nullable, default, PK, FK).
+ * Skip default/hasDefault when both sides are server-generated — the live DB
+ * stores `nextval(...)` / `GENERATED AS IDENTITY` while the schema flags it
+ * as `serverGenerated: true`; direct compare would noise-flag every serial PK.
  */
 function diffColumnMetadata(
   table: string,
@@ -184,7 +170,6 @@ function diffColumnMetadata(
   }
 }
 
-/** Compare a field of a column and return a report of drift entries. */
 function compareField(
   table: string,
   column: string,
@@ -203,10 +188,7 @@ function compareField(
   });
 }
 
-/**
- * Normalizes FK metadata into one comparable value so missing references and
- * action changes produce a single readable drift entry.
- */
+/** Flatten FK metadata to one comparable string for a single drift entry. */
 function normalizeReference(
   reference: IntrospectedTable["columns"][number]["references"],
 ): string {
@@ -223,17 +205,10 @@ function formatValue(value: unknown): string {
 }
 
 /**
- * Strip the trivial `'literal'::type` cast Postgres emits around quoted
- * string defaults so that `'member'::text` (live) compares equal to `member`
- * (declared). Also unescapes `''` -> `'` inside the literal.
- *
- * Deliberately conservative:
- *   - Matches a SINGLE quoted literal followed by a single `::type` cast.
- *   - Does NOT touch expressions that contain `||`, function calls, or
- *     additional casts — those are kept verbatim and compared as-is so we
- *     don't claim equality between two non-trivially-different expressions
- *     and silently miss real drift. Example: `'foo'::text || 'bar'::text`
- *     and `'foobar'` stay distinct.
+ * Strip Postgres's `'literal'::type` cast so `'member'::text` (live) compares
+ * equal to `member` (declared); unescape `''` → `'`. Conservative: only one
+ * quoted literal + one cast; expressions with `||`, function calls, or extra
+ * casts pass through verbatim — better a false positive than missed drift.
  */
 function normalizeDefaultExpression(
   value: string | undefined,
@@ -245,10 +220,6 @@ function normalizeDefaultExpression(
   return trimmed;
 }
 
-/**
- * Matches `'literal'::type` where the literal is a single quoted string with
- * `''` escaping and the type is a simple identifier (no parens, no `||`,
- * no further casts).
- */
+/** `'literal'::type` — single quoted string + simple type identifier only. */
 const SIMPLE_CAST_LITERAL =
   /^'((?:[^']|'')*)'::[a-zA-Z_][\w]*(?:\s*\(\s*\d+\s*\))?$/;
