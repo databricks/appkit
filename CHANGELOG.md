@@ -32,6 +32,323 @@ Programmatic calls on an OBO volume **without** `asUser(req)` (i.e. `appKit.file
 
 # Changelog
 
+# Changelog
+
+## [1.0.0](https://github.com/databricks/appkit/compare/v0.30.1...v1.0.0) (2026-05-06)
+
+### ⚠ BREAKING CHANGES
+
+* programmatic callers of
+appKit.files("vol").asUser(req).<op>() that expected the SDK call to
+execute as the service principal (with only the policy seeing the
+user) now see the SDK call execute as the user. Audit programmatic
+asUser callers and remove the asUser wrap if SP credentials were the
+desired behavior.
+
+Co-authored-by: Isaac
+Signed-off-by: Atila Fassina <atila@fassina.eu>
+
+* feat(appkit): files.auth_mode span attribute + manifest scope JSDoc (phase 6)
+
+Tags every Files plugin trace span with `files.auth_mode` set to either
+`"service-principal"` or `"on-behalf-of-user"`, reflecting what
+operationally happened (whether the SDK call ran inside
+`runInUserContext`). Two complementary plumbing paths land on the same
+attribute key:
+
+- HTTP routes: route handlers compute the effective mode via a new
+  `_effectiveAuthMode(req, volumeKey)` helper and thread it into the
+  existing `PluginExecutionSettings.telemetryInterceptor.attributes`
+  shape — `TelemetryInterceptor` already passes those attributes to
+  `tracer.startActiveSpan`, so the attribute lands on the existing
+  `plugin.execute` span without new infrastructure.
+- Programmatic API (`exports()` SP path + `asUser` OBO path): wraps each
+  VolumeAPI method in a new `_withAuthModeSpan(operation, mode, fn)`
+  helper that calls `this.telemetry.startActiveSpan("files.<op>", ...)`.
+  Programmatic calls previously created NO span, so this introduces new
+  `files.<op>` spans on programmatic surface — a small observability
+  enrichment beyond pure attribute plumbing. Spans respect the plugin's
+  `traces` config; the noop tracer takes over when traces are disabled.
+
+Updates `getResourceRequirements()` JSDoc to document the per-volume
+permission split: SP volumes need the SP to hold `WRITE_VOLUME`; OBO
+volumes need the end user (not the SP) to hold it. Adds a
+`// TODO: extend plugin-manifest.schema.json` marker for the eventual
+schema-level fix.
+
+Phase 6 of files-per-volume-auth-mode. Phase 7 (docs, playground,
+changelog) is next.
+
+Co-authored-by: Isaac
+Signed-off-by: Atila Fassina <atila@fassina.eu>
+
+* docs(appkit): files OBO docs, playground demo, changelog (phase 7)
+
+Final polish phase for files-per-volume-auth-mode:
+
+JSDoc:
+- Expand `VolumeConfig.auth` and `IFilesConfig.auth` with SP and OBO
+  example blocks plus resolution-order notes.
+- Extend `FilePolicyUser.isServicePrincipal` JSDoc with the full
+  six-row matrix covering SP/OBO x HTTP/programmatic x header
+  presence, including the `asUser(req)` rows.
+
+Docs (`docs/docs/plugins/files.md`):
+- New "Auth modes" section: two modes, resolution order, per-mode
+  permission requirements, prod/dev OBO behavior, manifest-scope
+  limitation, side-by-side config examples.
+- New `usersOnly` policy example using `isServicePrincipal: false`
+  and a "Policy user matrix" subsection.
+- Rewrites every "all operations execute as the service principal"
+  paragraph to describe both modes.
+- Dedicated `asUser(req)` subsection with the honest limitation that
+  programmatic OBO defaults don't apply without `asUser`.
+
+Dev-playground:
+- Server: new `obo_demo` volume with `auth: "on-behalf-of-user"` and
+  a `usersOnly` policy; new smoke route `GET /policy/obo-volume`
+  using `asUser(req)`. `app.yaml` gets the matching
+  `DATABRICKS_VOLUME_OBO_DEMO` resource binding.
+- Client: `policy-matrix.route.tsx` gets a "Per-volume OBO mode"
+  section with two probes (HTTP route + programmatic smoke) so the
+  end-to-end OBO path is exercisable from the UI.
+
+Changelog:
+- New `## Unreleased` section in `CHANGELOG.md` (lives above the
+  release-it generated `[0.24.0]` block) covering the per-volume auth
+  feature, the `files.auth_mode` span, the `asUser` SDK identity
+  behavior change, the `bypassPolicy` removal, and the honest
+  limitation about programmatic OBO without `asUser`.
+
+Generated:
+- `types.generated.ts` and `plugin-manifest.generated.ts` are
+  regenerated formatting (line-collapsing) from `pnpm build`'s
+  generator step. Content unchanged.
+
+Backpressure: pnpm build, pnpm docs:build, pnpm check:fix,
+pnpm -r typecheck, pnpm test (1666 passing) all clean.
+
+Phase 7 of files-per-volume-auth-mode — feature is shippable.
+
+Co-authored-by: Isaac
+Signed-off-by: Atila Fassina <atila@fassina.eu>
+
+* fix(appkit): files OBO review fixes — auth strictness, allocation, cache, spans
+
+Addresses four findings from the multi-model review of the files OBO
+feature.
+
+1. asUser privilege confusion in production (CRITICAL, security)
+   `_extractUser` now requires BOTH `x-forwarded-user` AND
+   `x-forwarded-access-token` in production — throws
+   `AuthenticationError.missingToken` when either is missing. Previously
+   a request with the user header but no token returned a SP-wrapped
+   API where the policy saw the request as a real end user
+   (isServicePrincipal: undefined) but the SDK ran with SP credentials,
+   so policies like `usersOnly: !user.isServicePrincipal` were
+   satisfiable while wielding the SP's broader UC grants. CWE-639.
+   Dev fallback now marks the returned policy user as
+   `isServicePrincipal: true` and warns (was debug) so policies can't
+   be tricked even in dev.
+
+2. Double WorkspaceClient allocation per OBO request (HIGH, perf)
+   New `_resolveAuthForRequest(req, volumeKey)` returns
+   { mode, userCtx } and builds the UserContext at most once per
+   request. `_runWithAuth(userCtx, fn)` now takes the pre-built ctx.
+   Removes `_effectiveAuthMode` (no longer needed). Every OBO HTTP
+   request previously constructed two WorkspaceClients; cache hits
+   paid that cost too. Now: one allocation, even on cache hits.
+
+3. Write-cache invalidation on OBO + wrong path arg (HIGH, correctness)
+   Two related bugs at `_invalidateListCache`: (a) cache keys included
+   `getCurrentUserId()`, so user A's write only busted user A's list
+   cache — user B continued to see stale listings; (b) the `path` arg
+   was the file path instead of the parent directory.
+
+   Fix: list-cache is disabled on OBO volumes (no cross-user staleness
+   possible). On SP volumes, invalidation now derives the parent
+   directory via `parentDirectory()`, falling back to the `"__root__"`
+   sentinel for root-level writes — matches `_handleList`'s key shape.
+   Cache delete + path resolution are wrapped in best-effort try/catch
+   so an invalidation failure cannot convert a successful write into
+   HTTP 500.
+
+4. Duplicate `files.<op>` spans on programmatic calls (HIGH, perf)
+   `FilesConnector.<op>` already opens a `files.<op>` span via its
+   `traced()` decorator. The Phase 6 `_withAuthModeSpan` opened an
+   identical span on top, doubling span allocation/export volume on
+   every programmatic call.
+
+   Fix: new `runWithFilesSpanAttributes(attrs, fn)` exported from
+   `connectors/files/client.ts` uses AsyncLocalStorage to make ambient
+   attributes available to the connector's `traced()` decorator.
+   `_withAuthModeSpan` renamed to `_withAuthModeAttributes` — no longer
+   creates a span; just sets `files.auth_mode` on the connector's
+   existing span via the ALS channel. Programmatic calls now produce
+   exactly one `files.<op>` span. HTTP route attribute path
+   (`PluginExecutionSettings.telemetryInterceptor.attributes`) is
+   unchanged.
+
+Tests: 8 new regression guards covering each fix's failure mode (1674
+total, was 1666). The pre-existing `DownloadResponse` unused-import
+warning is also resolved as cleanup fallout.
+
+User-facing notes (for changelog follow-up):
+- asUser(req) throws on missing token in production (was silent SP
+  fallback — the previous behavior was a privilege-confusion bug).
+- OBO volume reads are no longer cached. Trade-off: every OBO read
+  hits the SDK; in exchange, no cross-user staleness. SP volume reads
+  still cache.
+- Programmatic appKit.files(vol).<op>() emits one `files.<op>` span
+  instead of two. The `files.auth_mode` attribute now lands on the
+  connector's existing span.
+
+Co-authored-by: Isaac
+Signed-off-by: Atila Fassina <atila@fassina.eu>
+
+* fix(appkit): files invalidate-cache await + integration ephemeral ports
+
+Two follow-up review fixes on top of 3f98628d.
+
+A — _invalidateListCache not awaited (medium, correctness)
+   Write handlers (_handleUpload, _handleMkdir, _handleDelete) called
+   _invalidateListCache without `await`, so res.json() shipped before
+   cache invalidation completed. A client that issued a follow-up
+   GET /list in the same tick could hit the stale cache.
+
+   Fix: _invalidateListCache is now genuinely `async` and all three
+   call sites `await` it before sending the response. Best-effort
+   try/catch around cache.delete and connector.resolvePath remains, so
+   an invalidation failure cannot convert a successful write into 500.
+
+   Regression test installs a deferred-promise cache.delete and
+   asserts res.json is NOT called until the delete settles. Verified
+   the test fails when the `await` is removed and passes when it is
+   added back.
+
+B — hardcoded ports in integration tests (medium, CI hygiene)
+   plugin.integration.test.ts bound to fixed offsets of TEST_PORT
+   (9880, 9881, 9882). Concurrent CI runs or stale test processes
+   risked EADDRINUSE flakiness.
+
+   Fix: bind `port: 0` so the OS assigns ephemeral ports. New
+   getListeningPort() helper waits for the server's `listening` event
+   and returns the assigned port for building localBase URLs. Chose
+   port-0 over supertest because the tests build their own AppKit
+   instance, hold the Server for afterAll cleanup, and use real fetch
+   calls — moving to supertest would have required restructuring the
+   fixture lifecycle.
+
+Tests: 1675 (was 1674 + 1 new). typecheck + biome clean.
+
+Co-authored-by: Isaac
+Signed-off-by: Atila Fassina <atila@fassina.eu>
+
+* fix(appkit): files plugin OBO review hardening (5 findings)
+
+- _readPathQuery helper rejects array/object query params with 400 across
+  all 7 path-bearing handlers (was: req.query.path raw-cast)
+- /read streams via connector.download + size-enforcing TransformStream
+  capped at maxReadSize (new VolumeConfig field, default 10MB); /read no
+  longer participates in the read-tier cache
+- Upload TransformStream enforces bytesReceived <= contentLength when
+  declared, closing a per-user policy bypass where small Content-Length
+  + larger body would exceed an approved upload size
+- _enforcePolicy 401 and _handleApiError 4xx now return generic public
+  bodies (Unauthorized / standard HTTP STATUS_CODES); raw error.message
+  goes to server-side logs only (CWE-209)
+
+Co-authored-by: Isaac
+
+Co-authored-by: Orca <help@stably.ai>
+Signed-off-by: Atila Fassina <atila@fassina.eu>
+
+* fix(appkit): files /read atomic 413 + list-cache key parity for ?path=/
+
+Two HIGH correctness findings from multi-model review of sp-files vs main:
+
+1. /read could leak a partial 200 body before triggering 413. Once
+   nodeStream.pipe(res) began, headers were sent and the size-cap
+   fallback became res.destroy() mid-stream — breaking the all-or-nothing
+   contract. Replaced the pipe with a bounded getReader() drain into
+   chunks; on overflow we respond 413 atomically (and reader.cancel()
+   the upstream), otherwise res.send(Buffer.concat(chunks, bytesRead))
+   ships the body in one shot. Memory still bounded by maxReadSize.
+
+2. _invalidateListCache deleted only "__root__" for root-level writes,
+   but _handleList keys ?path=/ listings under connector.resolvePath("/").
+   A client listing via ?path=/ saw stale data after a sibling write.
+   Invalidator now deletes both keys (with try/catch around resolvePath
+   and a no-op when it equals the sentinel).
+
+113 plugin tests + 28 integration tests + workspace typecheck green.
+
+Co-authored-by: Isaac
+Signed-off-by: Atila Fassina <atila@fassina.eu>
+
+* fix(appkit): files Copilot review findings — root invalidation, error msg, docs
+
+Four findings from the GitHub Copilot review on PR #310:
+
+1. _invalidateListCache missed absolute UC root paths. A write to
+   /Volumes/<c>/<s>/<v>/foo.txt has parentDirectory("/Volumes/<c>/<s>/<v>"),
+   which the prior code didn't recognize as root-level — the rootless
+   "__root__" listing stayed stale. Now the invalidator computes the
+   volume root via connector.resolvePath(""), recognizes it as
+   root-level, and invalidates all three keys "__root__", <volumeRoot>,
+   <volumeRoot>/. Replaces the previous resolvePath("/") attempt that
+   was a no-op (resolvePath rejects "/" since it's not /Volumes/...).
+
+2. _extractObiUser threw "Missing x-forwarded-access-token" in every
+   non-(token && userId) production case, so a request with only the
+   token (but no x-forwarded-user) got a misleading server-side error.
+   Now distinguishes: !token throws "missing token", token-but-no-userId
+   throws "missing user header". HTTP body remains generic "Unauthorized"
+   either way.
+
+3. docs/plugins/files.md said OBO volumes get per-user cache isolation
+   automatically. Code disables read/list cache entirely on OBO
+   (cross-user invalidation isn't possible with the current key scheme).
+   Doc updated to match.
+
+4. docs/plugins/files.md said asUser(req) throws when x-forwarded-user
+   is absent. Code requires BOTH x-forwarded-user AND
+   x-forwarded-access-token in production. Doc updated at both
+   occurrences.
+
+Tests: existing root-level invalidation test rewritten as a
+parameterized matrix covering both relative ("newdir") and absolute
+("/Volumes/.../newdir") root-level writes; both must invalidate
+__root__ + <volumeRoot> + <volumeRoot>/. 188 plugin tests + workspace
+typecheck green.
+
+Co-authored-by: Isaac
+Signed-off-by: Atila Fassina <atila@fassina.eu>
+
+* fix(appkit): rename files plugin _extractObiUser → _extractOboUser
+
+Typo fix per review (OBO = on-behalf-of-user, not "Obi").
+Touches the declaration, the single call site in `_enforcePolicy`, and
+one test-comment reference.
+
+Co-authored-by: Isaac
+Signed-off-by: Atila Fassina <atila@fassina.eu>
+
+* docs(appkit): refresh stale _enforcePolicy NOTE about SDK identity
+
+The NOTE claimed SDK calls "still use the service principal until a later
+phase wires the actual OBO runInUserContext plumbing" — but that phase
+shipped: every handler now wraps in `_runWithAuth` / `runInUserContext`
+when the volume resolves to OBO. Replace the NOTE with the current truth:
+the policy and SDK identities are selected separately and converge per
+the policy-user matrix.
+
+Co-authored-by: Isaac
+Signed-off-by: Atila Fassina <atila@fassina.eu>
+
+* unblock SP calls for UC in production ([#310](https://github.com/databricks/appkit/issues/310)) ([9856a6b](https://github.com/databricks/appkit/commit/9856a6b309b32f98b3c25aa03055778edb2036d4))
+
+
 ## [0.30.1](https://github.com/databricks/appkit/compare/v0.30.0...v0.30.1) (2026-05-06)
 
 ### appkit
