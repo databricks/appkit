@@ -60,11 +60,13 @@ The following command will compile all the packages and app in watch mode.
 pnpm dev
 ```
 
-> **Note:** The dev server prefers port `8000` and automatically falls back to a free OS-assigned port if it's busy (e.g., `clean-app` is already running on `8000`). To pin a specific port instead, set `DATABRICKS_APP_PORT` in `apps/dev-playground/.env`:
+> **Note:** The dev server prefers port `8000` and automatically falls back to a free OS-assigned port if it's busy (e.g., `clean-app` is already running on `8000`). To prefer a different port, set `DATABRICKS_APP_PORT` in `apps/dev-playground/.env`:
 >
 > ```
 > DATABRICKS_APP_PORT=8001
 > ```
+>
+> In dev, this is treated as a preference: if `8001` is also busy, the server warns and falls back to a free port. The actual bound port is logged on startup.
 
 
 ## Running the project in production mode

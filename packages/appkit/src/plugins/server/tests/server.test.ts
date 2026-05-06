@@ -522,16 +522,25 @@ describe("ServerPlugin", () => {
       );
     });
 
-    test("dev with DATABRICKS_APP_PORT does not fall back", async () => {
+    test("dev with DATABRICKS_APP_PORT falls back on EADDRINUSE with a warning", async () => {
       process.env.NODE_ENV = "development";
-      process.env.DATABRICKS_APP_PORT = "8000";
+      process.env.DATABRICKS_APP_PORT = "8001";
       listenState.failureMode = { errCode: "EADDRINUSE", failTimes: 1 };
 
       const plugin = new ServerPlugin({});
-      await expect(plugin.start()).rejects.toMatchObject({
-        code: "EADDRINUSE",
-      });
-      expect(mockExpressApp.listen).toHaveBeenCalledTimes(1);
+      await plugin.start();
+
+      expect(mockExpressApp.listen).toHaveBeenCalledTimes(2);
+      expect(mockExpressApp.listen).toHaveBeenNthCalledWith(
+        2,
+        0,
+        expect.any(String),
+        expect.any(Function),
+      );
+      expect(mockLoggerWarn).toHaveBeenCalledWith(
+        expect.stringContaining("falling back"),
+        expect.any(Number),
+      );
     });
 
     test("explicit port in config disables fallback even in dev", async () => {

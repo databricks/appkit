@@ -128,13 +128,11 @@ export class ServerPlugin extends Plugin {
     const preferredPort = this.config.port ?? ServerPlugin.DEFAULT_CONFIG.port;
     const host = this.config.host ?? ServerPlugin.DEFAULT_CONFIG.host;
     // In dev, fall back to an OS-assigned port if the preferred one is busy
-    // so concurrent dev servers don't collide. An explicit pin via
-    // DATABRICKS_APP_PORT or `port` config disables the fallback — surfacing
-    // the bind error rather than silently drifting from the requested port.
+    // so concurrent dev servers don't collide. DATABRICKS_APP_PORT is treated
+    // as a preference (warns and falls back). A code-level `port` config is
+    // a strict pin — throw on EADDRINUSE so the explicit choice isn't masked.
     const fallbackToDynamic =
-      this.config.port === undefined &&
-      process.env.NODE_ENV === "development" &&
-      !process.env.DATABRICKS_APP_PORT;
+      this.config.port === undefined && process.env.NODE_ENV === "development";
 
     const server = await this.listenWithFallback(
       preferredPort,
