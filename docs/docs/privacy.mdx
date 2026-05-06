@@ -34,17 +34,6 @@ Each event also carries one of three event-specific bodies:
   - `response_count_http4xx`
   - `response_count_http5xx`
 
-That is the entire payload. AppKit does not send request bodies,
-response bodies, headers, query parameters, user identifiers, or any
-other content of your traffic.
-
-## How it's sent
-
-Events are POSTed to the workspace's authenticated `/telemetry-ext`
-endpoint, signed with your app's service-principal token. Sending
-happens fire-and-forget — every send is wrapped in a catch so a
-failure in the telemetry path can never affect a running app.
-
 ## How to opt out
 
 Set any one of the following:
