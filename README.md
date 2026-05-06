@@ -1,4 +1,5 @@
 # AppKit
+RANDOM
 
 Build Databricks Apps faster with our brand-new Node.js + React SDK. Built for humans and AI.
 
