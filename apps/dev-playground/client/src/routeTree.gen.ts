@@ -18,7 +18,6 @@ import { Route as ReconnectRouteRouteImport } from './routes/reconnect.route'
 import { Route as PolicyMatrixRouteRouteImport } from './routes/policy-matrix.route'
 import { Route as LakebaseRouteRouteImport } from './routes/lakebase.route'
 import { Route as JobsRouteRouteImport } from './routes/jobs.route'
-import { Route as InternalTelemetryRouteRouteImport } from './routes/internal-telemetry.route'
 import { Route as GenieRouteRouteImport } from './routes/genie.route'
 import { Route as FilesRouteRouteImport } from './routes/files.route'
 import { Route as DataVisualizationRouteRouteImport } from './routes/data-visualization.route'
@@ -72,11 +71,6 @@ const JobsRouteRoute = JobsRouteRouteImport.update({
   path: '/jobs',
   getParentRoute: () => rootRouteImport,
 } as any)
-const InternalTelemetryRouteRoute = InternalTelemetryRouteRouteImport.update({
-  id: '/internal-telemetry',
-  path: '/internal-telemetry',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const GenieRouteRoute = GenieRouteRouteImport.update({
   id: '/genie',
   path: '/genie',
@@ -121,7 +115,6 @@ export interface FileRoutesByFullPath {
   '/data-visualization': typeof DataVisualizationRouteRoute
   '/files': typeof FilesRouteRoute
   '/genie': typeof GenieRouteRoute
-  '/internal-telemetry': typeof InternalTelemetryRouteRoute
   '/jobs': typeof JobsRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
   '/policy-matrix': typeof PolicyMatrixRouteRoute
@@ -140,7 +133,6 @@ export interface FileRoutesByTo {
   '/data-visualization': typeof DataVisualizationRouteRoute
   '/files': typeof FilesRouteRoute
   '/genie': typeof GenieRouteRoute
-  '/internal-telemetry': typeof InternalTelemetryRouteRoute
   '/jobs': typeof JobsRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
   '/policy-matrix': typeof PolicyMatrixRouteRoute
@@ -160,7 +152,6 @@ export interface FileRoutesById {
   '/data-visualization': typeof DataVisualizationRouteRoute
   '/files': typeof FilesRouteRoute
   '/genie': typeof GenieRouteRoute
-  '/internal-telemetry': typeof InternalTelemetryRouteRoute
   '/jobs': typeof JobsRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
   '/policy-matrix': typeof PolicyMatrixRouteRoute
@@ -181,7 +172,6 @@ export interface FileRouteTypes {
     | '/data-visualization'
     | '/files'
     | '/genie'
-    | '/internal-telemetry'
     | '/jobs'
     | '/lakebase'
     | '/policy-matrix'
@@ -200,7 +190,6 @@ export interface FileRouteTypes {
     | '/data-visualization'
     | '/files'
     | '/genie'
-    | '/internal-telemetry'
     | '/jobs'
     | '/lakebase'
     | '/policy-matrix'
@@ -219,7 +208,6 @@ export interface FileRouteTypes {
     | '/data-visualization'
     | '/files'
     | '/genie'
-    | '/internal-telemetry'
     | '/jobs'
     | '/lakebase'
     | '/policy-matrix'
@@ -239,7 +227,6 @@ export interface RootRouteChildren {
   DataVisualizationRouteRoute: typeof DataVisualizationRouteRoute
   FilesRouteRoute: typeof FilesRouteRoute
   GenieRouteRoute: typeof GenieRouteRoute
-  InternalTelemetryRouteRoute: typeof InternalTelemetryRouteRoute
   JobsRouteRoute: typeof JobsRouteRoute
   LakebaseRouteRoute: typeof LakebaseRouteRoute
   PolicyMatrixRouteRoute: typeof PolicyMatrixRouteRoute
@@ -316,13 +303,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof JobsRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/internal-telemetry': {
-      id: '/internal-telemetry'
-      path: '/internal-telemetry'
-      fullPath: '/internal-telemetry'
-      preLoaderRoute: typeof InternalTelemetryRouteRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/genie': {
       id: '/genie'
       path: '/genie'
@@ -383,7 +363,6 @@ const rootRouteChildren: RootRouteChildren = {
   DataVisualizationRouteRoute: DataVisualizationRouteRoute,
   FilesRouteRoute: FilesRouteRoute,
   GenieRouteRoute: GenieRouteRoute,
-  InternalTelemetryRouteRoute: InternalTelemetryRouteRoute,
   JobsRouteRoute: JobsRouteRoute,
   LakebaseRouteRoute: LakebaseRouteRoute,
   PolicyMatrixRouteRoute: PolicyMatrixRouteRoute,

@@ -24,7 +24,6 @@ plugin architecture, and React integration.
 | [PolicyDeniedError](Class.PolicyDeniedError.md) | Thrown when a policy denies an action. |
 | [ResourceRegistry](Class.ResourceRegistry.md) | Central registry for tracking plugin resource requirements. Deduplication uses type + resourceKey (machine-stable); alias is for display only. |
 | [ServerError](Class.ServerError.md) | Error thrown when server lifecycle operations fail. Use for server start/stop issues, configuration conflicts, etc. |
-| [TelemetryReporter](Class.TelemetryReporter.md) | - |
 | [TunnelError](Class.TunnelError.md) | Error thrown when remote tunnel operations fail. Use for tunnel connection issues, message parsing failures, etc. |
 | [ValidationError](Class.ValidationError.md) | Error thrown when input validation fails. Use for invalid parameters, missing required fields, or type mismatches. |
 
@@ -55,9 +54,6 @@ plugin architecture, and React integration.
 | [ServingEndpointRegistry](Interface.ServingEndpointRegistry.md) | Registry interface for serving endpoint type generation. Empty by default — augmented by the Vite type generator's `.d.ts` output via module augmentation. When populated, provides autocomplete for alias names and typed request/response/chunk per endpoint. |
 | [StreamExecutionSettings](Interface.StreamExecutionSettings.md) | Execution settings for streaming endpoints. Extends PluginExecutionSettings with SSE stream configuration. |
 | [TelemetryConfig](Interface.TelemetryConfig.md) | OpenTelemetry configuration for AppKit applications |
-| [TelemetrySendRequest](Interface.TelemetrySendRequest.md) | - |
-| [TelemetrySendResponse](Interface.TelemetrySendResponse.md) | - |
-| [TelemetrySendResult](Interface.TelemetrySendResult.md) | - |
 | [ValidationResult](Interface.ValidationResult.md) | Result of validating all registered resources against the environment. |
 
 ## Type Aliases

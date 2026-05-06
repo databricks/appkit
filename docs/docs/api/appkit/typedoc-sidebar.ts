@@ -73,11 +73,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Class.TelemetryReporter",
-          label: "TelemetryReporter"
-        },
-        {
-          type: "doc",
           id: "api/appkit/Class.TunnelError",
           label: "TunnelError"
         },
@@ -206,21 +201,6 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.TelemetryConfig",
           label: "TelemetryConfig"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.TelemetrySendRequest",
-          label: "TelemetrySendRequest"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.TelemetrySendResponse",
-          label: "TelemetrySendResponse"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.TelemetrySendResult",
-          label: "TelemetrySendResult"
         },
         {
           type: "doc",

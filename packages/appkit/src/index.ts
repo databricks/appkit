@@ -47,12 +47,6 @@ export {
   TunnelError,
   ValidationError,
 } from "./errors";
-export {
-  TelemetryReporter,
-  type TelemetrySendRequest,
-  type TelemetrySendResponse,
-  type TelemetrySendResult,
-} from "./internal-telemetry";
 // Plugin authoring
 export {
   type ExecutionResult,

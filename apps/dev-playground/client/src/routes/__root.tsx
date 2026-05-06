@@ -72,14 +72,6 @@ function RootComponent() {
                     Telemetry
                   </Button>
                 </Link>
-                <Link to="/internal-telemetry" className="no-underline">
-                  <Button
-                    variant="ghost"
-                    className="text-foreground hover:text-secondary-foreground"
-                  >
-                    Internal Telemetry
-                  </Button>
-                </Link>
                 <Link to="/sql-helpers" className="no-underline">
                   <Button
                     variant="ghost"

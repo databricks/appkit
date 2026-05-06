@@ -14,7 +14,6 @@ import {
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 // TODO: re-enable once vector-search is exported from @databricks/appkit
 // import { vectorSearch } from "@databricks/appkit";
-import { internalTelemetryDebug } from "./internal-telemetry-debug-plugin";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
@@ -55,7 +54,6 @@ createApp({
     server(),
     reconnect(),
     telemetryExamples(),
-    internalTelemetryDebug(),
     analytics({}),
     genie({
       spaces: { demo: process.env.DATABRICKS_GENIE_SPACE_ID ?? "placeholder" },
