@@ -44,7 +44,7 @@ module.exports = async ({ github, context }) => {
     MARKER,
     "### Breaking change detected",
     "",
-    "The following commits in this PR contain Conventional Commits breaking-change markers (`type!:` or `BREAKING CHANGE:` footer) and touch packages tracked by `.release-it.json`:",
+    "This PR contains Conventional Commits breaking-change markers (`type!:` or `BREAKING CHANGE:` footer) in one or more of the following surfaces, all of which feed `release-it` after a squash merge:",
     "",
     list.trim(),
     "",

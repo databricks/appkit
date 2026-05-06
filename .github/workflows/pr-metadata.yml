@@ -55,11 +55,13 @@ jobs:
         with:
           node-version-file: .nvmrc
 
-      - name: Find breaking commits
+      - name: Find breaking-change markers
         id: scan
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         # Node 24 strips TS type annotations natively, so no tsx/transpile step needed.
         run: node tools/detect-breaking-commits.ts
 
