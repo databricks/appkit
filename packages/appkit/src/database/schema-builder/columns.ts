@@ -44,6 +44,9 @@ function wrap(builder: unknown, meta: ColumnMeta = {}): AppKitColumnChain {
       column.$builder = (
         column.$builder as { primaryKey: () => unknown }
       ).primaryKey();
+      // Stamp meta so derivePkColumn / $updateSchema PK omit don't have to
+      // round-trip through the Drizzle table to discover this is a PK.
+      column.$meta.primaryKey = true;
       return chain;
     },
     default<T>(value: T) {
@@ -82,6 +85,7 @@ function wrap(builder: unknown, meta: ColumnMeta = {}): AppKitColumnChain {
 export function id(): AppKitColumnChain {
   return wrap(serial().primaryKey(), {
     serverGenerated: true,
+    primaryKey: true,
   });
 }
 
@@ -161,9 +165,10 @@ export function enumColumn(
   values: readonly string[],
 ): AppKitColumnChain {
   if (values.length === 0) {
-    throw new ValidationError(`enumColumn ${name} values must not be empty`, {
-      context: { enumName: name },
-    });
+    throw new ValidationError(
+      `enum "${name}" must declare at least one value`,
+      { context: { enumName: name } },
+    );
   }
 
   const enumType = pgEnum(name, values as [string, ...string[]]);
