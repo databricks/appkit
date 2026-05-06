@@ -185,14 +185,28 @@ To develop locally against a deployed Lakebase database:
 
 1. **Deploy the app first.** The Service Principal creates the database schema and tables on first deploy. Apps generated from `databricks apps init` handle this automatically - they check if tables exist on startup and skip creation if they do.
 
-2. **Grant `databricks_superuser` via the Lakebase UI:**
-   1. Open the Lakebase Autoscaling UI and navigate to your project's **Branch Overview** page.
-   2. Click **Add role** (or **Edit role** if your OAuth role already exists).
-   3. Select your Databricks identity as the principal and check the **`databricks_superuser`** system role.
+2. **Grant `databricks_superuser`** (skip if you are the Lakebase project owner — you already have full access):
+
+   ```bash
+   # Create a new role with databricks_superuser
+   databricks postgres create-role "projects/{project_id}/branches/{branch_id}" \
+     --json '{"spec": {"identity_type": "USER", "postgres_role": "user@example.com", "membership_roles": ["DATABRICKS_SUPERUSER"]}}'
+   ```
+
+   To grant superuser to an existing role, use [`update-role`](https://docs.databricks.com/aws/en/dev-tools/cli/reference/postgres-commands#databricks-postgres-update-role):
+
+   ```bash
+   databricks postgres update-role \
+     "projects/{project_id}/branches/{branch_id}/roles/{role_id}" \
+     "spec.membership_roles" \
+     --json '{"spec": {"membership_roles": ["DATABRICKS_SUPERUSER"]}}'
+   ```
+
+   Alternatively, you can manage roles in the Lakebase Autoscaling UI under your project's **Branch Overview** page → **Add role** / **Edit role**.
 
 3. **Run locally** - your Databricks user identity (email) is used for OAuth authentication. The `databricks_superuser` role gives full **DML access** (read/write data) but **not DDL** (creating schemas or tables) - that's why deploying first matters (see note below).
 
-For other users, use the same **Add role** flow in the Lakebase UI to create an OAuth role with `databricks_superuser` for each user.
+For other users, repeat step 2 to create an OAuth role with `databricks_superuser` for each user.
 
 :::tip
 [Postgres password authentication](https://docs.databricks.com/aws/en/oltp/projects/authentication#overview) is a simpler alternative that avoids OAuth role permission complexity. However, it requires you to set up a password for the user in the **Branch Overview** page in the Lakebase Autoscaling UI.
