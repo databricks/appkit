@@ -233,8 +233,6 @@ export class AppKit<TPlugins extends InputPluginMap> {
   private static bootstrapInternalTelemetry(): void {
     const serviceCtx = ServiceContext.get();
     const reporter = TelemetryReporter.initialize({
-      workspaceHost:
-        serviceCtx.client.config?.host || process.env.DATABRICKS_HOST || "",
       workspaceId: serviceCtx.workspaceId,
       client: serviceCtx.client,
       appId: process.env.DATABRICKS_CLIENT_ID || "",

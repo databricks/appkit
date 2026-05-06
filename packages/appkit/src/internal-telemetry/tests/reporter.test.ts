@@ -1,45 +1,49 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { TelemetryReporter } from "../reporter";
 
-function createMockClient(): WorkspaceClient {
-  return {
-    config: {
-      authenticate: vi.fn(async (headers: Headers) => {
-        headers.set("Authorization", "Bearer mock-sp-token");
-      }),
-    },
-  } as unknown as WorkspaceClient;
+type RequestSpy = ReturnType<typeof vi.fn>;
+
+function createMockClient(): {
+  client: WorkspaceClient;
+  request: RequestSpy;
+} {
+  const request = vi.fn().mockResolvedValue({});
+  const client = { apiClient: { request } } as unknown as WorkspaceClient;
+  return { client, request };
 }
 
-const baseOpts = () => ({
-  workspaceHost: "https://my-workspace.cloud.databricks.com",
-  workspaceId: "1234567890",
-  client: createMockClient(),
-  appId: "app-uuid-1",
-  appkitVersion: "0.27.0",
-  heartbeatIntervalMs: 1_000_000,
-  metricsFlushIntervalMs: 1_000_000,
-});
-
-let fetchSpy: ReturnType<typeof vi.fn>;
-
-beforeEach(() => {
-  fetchSpy = vi.fn().mockResolvedValue(new Response("", { status: 200 }));
-  vi.stubGlobal("fetch", fetchSpy);
-});
+function baseOpts(): {
+  workspaceId: string;
+  client: WorkspaceClient;
+  appId: string;
+  appkitVersion: string;
+  heartbeatIntervalMs: number;
+  metricsFlushIntervalMs: number;
+  __spy: RequestSpy;
+} {
+  const { client, request } = createMockClient();
+  return {
+    workspaceId: "1234567890",
+    client,
+    appId: "app-uuid-1",
+    appkitVersion: "0.27.0",
+    heartbeatIntervalMs: 1_000_000,
+    metricsFlushIntervalMs: 1_000_000,
+    __spy: request,
+  };
+}
 
 afterEach(() => {
   TelemetryReporter._reset();
   vi.restoreAllMocks();
-  vi.unstubAllGlobals();
 });
 
-function lastProtoLog() {
-  const calls = fetchSpy.mock.calls;
-  const [, options] = calls[calls.length - 1];
-  const body = JSON.parse(options.body as string);
-  return JSON.parse(body.protoLogs[0]);
+function lastProtoLog(spy: RequestSpy, callIndex = -1) {
+  const calls = spy.mock.calls;
+  const idx = callIndex < 0 ? calls.length + callIndex : callIndex;
+  const payload = calls[idx][0].payload as { protoLogs: string[] };
+  return JSON.parse(payload.protoLogs[0]);
 }
 
 describe("TelemetryReporter", () => {
@@ -47,12 +51,20 @@ describe("TelemetryReporter", () => {
     expect(TelemetryReporter.getInstance()).toBeNull();
   });
 
-  test("sendStartup emits an APP_STARTUP appkit_log", async () => {
-    const reporter = TelemetryReporter.initialize(baseOpts());
+  test("sendStartup emits an APP_STARTUP appkit_log via apiClient.request", async () => {
+    const opts = baseOpts();
+    const reporter = TelemetryReporter.initialize(opts);
     await reporter.sendStartup();
 
-    const log = lastProtoLog();
-    expect(log.entry.appkit_log).toMatchObject({
+    expect(opts.__spy).toHaveBeenCalledOnce();
+    const reqArg = opts.__spy.mock.calls[0][0];
+    expect(reqArg).toMatchObject({
+      path: "/telemetry-ext",
+      method: "POST",
+      query: { o: "1234567890" },
+      raw: false,
+    });
+    expect(lastProtoLog(opts.__spy).entry.appkit_log).toMatchObject({
       event_name: "APP_STARTUP",
       app_id: "app-uuid-1",
       appkit_version: "0.27.0",
@@ -61,18 +73,19 @@ describe("TelemetryReporter", () => {
   });
 
   test("sendHeartbeat emits a HEARTBEAT appkit_log", async () => {
-    const reporter = TelemetryReporter.initialize(baseOpts());
+    const opts = baseOpts();
+    const reporter = TelemetryReporter.initialize(opts);
     await reporter.sendHeartbeat();
 
-    const log = lastProtoLog();
-    expect(log.entry.appkit_log).toMatchObject({
+    expect(lastProtoLog(opts.__spy).entry.appkit_log).toMatchObject({
       event_name: "HEARTBEAT",
       heartbeat_event: {},
     });
   });
 
   test("recordRequest aggregates by method+route and flush sends one log per endpoint", async () => {
-    const reporter = TelemetryReporter.initialize(baseOpts());
+    const opts = baseOpts();
+    const reporter = TelemetryReporter.initialize(opts);
     reporter.recordRequest("GET", "/api/x", 200, 100);
     reporter.recordRequest("get", "/api/x", 200, 200);
     reporter.recordRequest("GET", "/api/x", 500, 50);
@@ -80,9 +93,8 @@ describe("TelemetryReporter", () => {
 
     await reporter.flushRequestMetrics();
 
-    expect(fetchSpy).toHaveBeenCalledOnce();
-    const [, options] = fetchSpy.mock.calls[0];
-    const protoLogs = JSON.parse(options.body as string).protoLogs as string[];
+    expect(opts.__spy).toHaveBeenCalledOnce();
+    const protoLogs = opts.__spy.mock.calls[0][0].payload.protoLogs as string[];
     expect(protoLogs).toHaveLength(2);
 
     const events = protoLogs
@@ -106,25 +118,28 @@ describe("TelemetryReporter", () => {
   });
 
   test("flushRequestMetrics is a no-op when there are no buckets", async () => {
-    const reporter = TelemetryReporter.initialize(baseOpts());
+    const opts = baseOpts();
+    const reporter = TelemetryReporter.initialize(opts);
     await reporter.flushRequestMetrics();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(opts.__spy).not.toHaveBeenCalled();
   });
 
   test("flushRequestMetrics drains the aggregator after sending", async () => {
-    const reporter = TelemetryReporter.initialize(baseOpts());
+    const opts = baseOpts();
+    const reporter = TelemetryReporter.initialize(opts);
     reporter.recordRequest("GET", "/api/x", 200, 10);
     await reporter.flushRequestMetrics();
-    fetchSpy.mockClear();
+    opts.__spy.mockClear();
     await reporter.flushRequestMetrics();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(opts.__spy).not.toHaveBeenCalled();
   });
 
   test("recordRequest ignores entries without a route template", async () => {
-    const reporter = TelemetryReporter.initialize(baseOpts());
+    const opts = baseOpts();
+    const reporter = TelemetryReporter.initialize(opts);
     reporter.recordRequest("GET", "", 200, 10);
     await reporter.flushRequestMetrics();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(opts.__spy).not.toHaveBeenCalled();
   });
 
   test("start schedules heartbeat and metrics flush; stop clears them", () => {
@@ -136,10 +151,10 @@ describe("TelemetryReporter", () => {
     });
     const heartbeatSpy = vi
       .spyOn(reporter, "sendHeartbeat")
-      .mockResolvedValue(null);
+      .mockResolvedValue();
     const flushSpy = vi
       .spyOn(reporter, "flushRequestMetrics")
-      .mockResolvedValue(null);
+      .mockResolvedValue();
 
     reporter.start();
     vi.advanceTimersByTime(1_500);
@@ -153,26 +168,29 @@ describe("TelemetryReporter", () => {
     vi.useRealTimers();
   });
 
-  test("propagates fetch errors so callers can surface them", async () => {
-    fetchSpy.mockRejectedValue(new Error("network down"));
-    const reporter = TelemetryReporter.initialize(baseOpts());
+  test("propagates request errors so callers can surface them", async () => {
+    const opts = baseOpts();
+    opts.__spy.mockRejectedValue(new Error("network down"));
+    const reporter = TelemetryReporter.initialize(opts);
     await expect(reporter.sendHeartbeat()).rejects.toThrow("network down");
   });
 
   test("propagates a rejecting workspaceId promise", async () => {
+    const opts = baseOpts();
     const reporter = TelemetryReporter.initialize({
-      ...baseOpts(),
+      ...opts,
       workspaceId: Promise.reject(new Error("nope")),
     });
     await expect(reporter.sendHeartbeat()).rejects.toThrow("nope");
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(opts.__spy).not.toHaveBeenCalled();
   });
 
   test("interval timers swallow rejections silently", async () => {
     vi.useFakeTimers();
-    fetchSpy.mockRejectedValue(new Error("network down"));
+    const opts = baseOpts();
+    opts.__spy.mockRejectedValue(new Error("network down"));
     const reporter = TelemetryReporter.initialize({
-      ...baseOpts(),
+      ...opts,
       heartbeatIntervalMs: 100,
       metricsFlushIntervalMs: 1_000_000,
     });
@@ -190,9 +208,7 @@ describe("TelemetryReporter", () => {
       heartbeatIntervalMs: 100,
       metricsFlushIntervalMs: 100,
     });
-    const firstHeartbeat = vi
-      .spyOn(first, "sendHeartbeat")
-      .mockResolvedValue(null);
+    const firstHeartbeat = vi.spyOn(first, "sendHeartbeat").mockResolvedValue();
     first.start();
 
     TelemetryReporter.initialize({
@@ -205,13 +221,5 @@ describe("TelemetryReporter", () => {
     // The first reporter's timers must have been cleared by the re-init.
     expect(firstHeartbeat).not.toHaveBeenCalled();
     vi.useRealTimers();
-  });
-
-  test("returns dispatched request and response from sendStartup", async () => {
-    fetchSpy.mockResolvedValue(new Response("ok", { status: 200 }));
-    const reporter = TelemetryReporter.initialize(baseOpts());
-    const result = await reporter.sendStartup();
-    expect(result?.request.method).toBe("POST");
-    expect(result?.response.status).toBe(200);
   });
 });

@@ -4,13 +4,11 @@ import {
   buildAppkitPayload,
   type RequestMetricsEvent,
 } from "./appkit-log";
-import { postTelemetry, type TelemetrySendResult } from "./client";
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
 const DEFAULT_METRICS_FLUSH_INTERVAL_MS = 60 * 1000;
 
 interface ReporterOptions {
-  workspaceHost: string;
   workspaceId: Promise<string> | string;
   client: WorkspaceClient;
   appId: string;
@@ -36,7 +34,6 @@ function envIntervalMs(name: string, fallback: number): number {
 export class TelemetryReporter {
   static #instance: TelemetryReporter | null = null;
 
-  readonly #host: string;
   readonly #workspaceIdPromise: Promise<string>;
   readonly #client: WorkspaceClient;
   readonly #appId: string;
@@ -49,7 +46,6 @@ export class TelemetryReporter {
   #buckets: Map<string, RequestBucket> = new Map();
 
   private constructor(opts: ReporterOptions) {
-    this.#host = opts.workspaceHost;
     this.#workspaceIdPromise = Promise.resolve(opts.workspaceId);
     // Mark the rejection (if any) as handled so a misconfigured workspaceId
     // doesn't trigger an unhandled-rejection warning before the first #send
@@ -129,26 +125,20 @@ export class TelemetryReporter {
     this.#buckets.set(key, bucket);
   }
 
-  async sendStartup(): Promise<TelemetrySendResult | null> {
-    return this.#send([
-      this.#wrap({
-        event_name: "APP_STARTUP",
-        app_startup_event: {},
-      }),
+  async sendStartup(): Promise<void> {
+    await this.#send([
+      this.#wrap({ event_name: "APP_STARTUP", app_startup_event: {} }),
     ]);
   }
 
-  async sendHeartbeat(): Promise<TelemetrySendResult | null> {
-    return this.#send([
-      this.#wrap({
-        event_name: "HEARTBEAT",
-        heartbeat_event: {},
-      }),
+  async sendHeartbeat(): Promise<void> {
+    await this.#send([
+      this.#wrap({ event_name: "HEARTBEAT", heartbeat_event: {} }),
     ]);
   }
 
-  async flushRequestMetrics(): Promise<TelemetrySendResult | null> {
-    if (this.#buckets.size === 0) return null;
+  async flushRequestMetrics(): Promise<void> {
+    if (this.#buckets.size === 0) return;
     const drained = this.#buckets;
     this.#buckets = new Map();
 
@@ -170,7 +160,7 @@ export class TelemetryReporter {
         }),
       );
     }
-    return this.#send(logs);
+    await this.#send(logs);
   }
 
   #wrap(partial: AppkitLog): AppkitLog {
@@ -181,14 +171,16 @@ export class TelemetryReporter {
     };
   }
 
-  async #send(logs: AppkitLog[]): Promise<TelemetrySendResult | null> {
-    if (logs.length === 0) return null;
+  async #send(logs: AppkitLog[]): Promise<void> {
+    if (logs.length === 0) return;
     const workspaceId = await this.#workspaceIdPromise;
-    return postTelemetry({
-      workspaceHost: this.#host,
-      workspaceId,
-      client: this.#client,
+    await this.#client.apiClient.request({
+      path: "/telemetry-ext",
+      method: "POST",
+      query: { o: workspaceId },
+      headers: new Headers(),
       payload: buildAppkitPayload(logs),
+      raw: false,
     });
   }
 }
