@@ -347,6 +347,8 @@ export class ServerPlugin extends Plugin {
       this.remoteTunnelController.cleanup();
     }
 
+    TelemetryReporter.getInstance()?.stop();
+
     // 1. abort active operations from plugins
     if (this.config.plugins) {
       for (const plugin of Object.values(this.config.plugins)) {
@@ -416,7 +418,8 @@ export class ServerPlugin extends Plugin {
 
 const EXCLUDED_PLUGINS: string[] = [ServerPlugin.manifest.name];
 
-function requestMetricsMiddleware(
+/** @internal Exported for unit tests. */
+export function requestMetricsMiddleware(
   req: express.Request,
   res: express.Response,
   next: express.NextFunction,
