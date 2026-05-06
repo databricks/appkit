@@ -119,7 +119,16 @@ When your app needs Row-Level Security (RLS) or per-user data isolation, use `as
 
 ### Prerequisites
 
-1. **Enable user authorization** in your Databricks App. See [User authorization](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/auth#user-authorization) for setup instructions.
+1. **Enable user authorization** in your Databricks App with the **`postgres`** scope. See [User authorization](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/auth#user-authorization) for setup instructions. In your `databricks.yml`:
+   ```yaml
+   resources:
+     apps:
+       app:
+         user_api_scopes:
+           - postgres
+   ```
+   Apps scaffolded with `databricks apps init` and the Lakebase plugin include this automatically.
+
 2. Each user needs an **OAuth role** in Lakebase (created automatically on first connection, or via the Lakebase UI).
 
 ### Usage
