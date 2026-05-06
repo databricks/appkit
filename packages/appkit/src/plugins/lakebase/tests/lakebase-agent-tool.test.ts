@@ -55,7 +55,6 @@ vi.mock("../../../connectors/lakebase", () => ({
 
 import type { Pool, PoolClient } from "pg";
 import { LakebasePlugin } from "../lakebase";
-import type { LakebaseExposeAsAgentTool } from "../types";
 
 function makePlugin(
   config: ConstructorParameters<typeof LakebasePlugin>[0],
@@ -74,17 +73,9 @@ describe("LakebasePlugin — agent tool opt-in", () => {
     expect(plugin.getAgentTools()).toEqual([]);
   });
 
-  test("throws when exposeAsAgentTool is set without the acknowledgement flag", () => {
-    expect(() =>
-      makePlugin({
-        exposeAsAgentTool: {} as unknown as LakebaseExposeAsAgentTool,
-      }),
-    ).toThrow(/iUnderstandRunsAsServicePrincipal/);
-  });
-
   test("registers a read-only tool when opted in with defaults", () => {
     const plugin = makePlugin({
-      exposeAsAgentTool: { iUnderstandRunsAsServicePrincipal: true },
+      exposeAsAgentTool: {},
     });
     const defs = plugin.getAgentTools();
     expect(defs).toHaveLength(1);
@@ -98,10 +89,7 @@ describe("LakebasePlugin — agent tool opt-in", () => {
 
   test("registers a destructive tool when readOnly: false is explicit", () => {
     const plugin = makePlugin({
-      exposeAsAgentTool: {
-        iUnderstandRunsAsServicePrincipal: true,
-        readOnly: false,
-      },
+      exposeAsAgentTool: { readOnly: false },
     });
     const defs = plugin.getAgentTools();
     expect(defs[0].annotations).toEqual({
@@ -119,7 +107,7 @@ describe("LakebasePlugin — readOnly enforcement", () => {
     clientQueries.length = 0;
     clientReleases.length = 0;
     plugin = makePlugin({
-      exposeAsAgentTool: { iUnderstandRunsAsServicePrincipal: true },
+      exposeAsAgentTool: {},
     });
     await plugin.setup();
   });
@@ -198,7 +186,7 @@ describe("LakebasePlugin — readOnly enforcement", () => {
     clientQueries.length = 0;
     clientReleases.length = 0;
     const leakyPlugin = makePlugin({
-      exposeAsAgentTool: { iUnderstandRunsAsServicePrincipal: true },
+      exposeAsAgentTool: {},
     });
     await leakyPlugin.setup();
 
@@ -217,10 +205,7 @@ describe("LakebasePlugin — destructive mode", () => {
       Promise.resolve({ rows: [] }),
     );
     const plugin = makePlugin({
-      exposeAsAgentTool: {
-        iUnderstandRunsAsServicePrincipal: true,
-        readOnly: false,
-      },
+      exposeAsAgentTool: { readOnly: false },
     });
     await plugin.setup();
     vi.spyOn(plugin, "query").mockImplementation(async (text, values) => {

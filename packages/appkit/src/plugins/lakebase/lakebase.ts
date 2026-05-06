@@ -151,11 +151,6 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
     super(config);
     this.config = config;
     if (config.exposeAsAgentTool) {
-      if (config.exposeAsAgentTool.iUnderstandRunsAsServicePrincipal !== true) {
-        throw new Error(
-          "lakebase.exposeAsAgentTool requires iUnderstandRunsAsServicePrincipal: true — this acknowledges that SQL statements authored by the LLM run with the application's service-principal credentials regardless of which end user initiated the request.",
-        );
-      }
       this.tools = { query: this.buildQueryTool(config.exposeAsAgentTool) };
       logger.warn(
         "Lakebase agent tool is enabled (readOnly=%s). Every agent with access to this plugin can execute SQL against the Lakebase database as the service principal.",

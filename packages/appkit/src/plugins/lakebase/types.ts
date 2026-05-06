@@ -7,9 +7,9 @@ import type { LakebasePoolConfig } from "../../connectors/lakebase";
  * This tool executes LLM-authored SQL against the Lakebase pool. The pool is
  * **always bound to the application's service-principal credentials**, so any
  * agent that can call this tool effectively has full SP access to the database
- * regardless of which end user initiated the request. Exposing it is a
- * deliberate decision the developer must make explicitly — hence the required
- * acknowledgement flag.
+ * regardless of which end user initiated the request — setting
+ * `exposeAsAgentTool` is itself the deliberate opt-in. The plugin emits a
+ * startup `warn` log whenever the tool is enabled.
  *
  * When `readOnly: true` (default when opted in), every statement is:
  * 1. Classified by {@link @databricks/appkit's sql-policy classifier}; anything
@@ -23,11 +23,6 @@ import type { LakebasePoolConfig } from "../../connectors/lakebase";
  * `AgentsPluginConfig.approval`).
  */
 export interface LakebaseExposeAsAgentTool {
-  /**
-   * Required acknowledgement that tool invocations run as the service principal
-   * and share that privilege across end users. Must be set to `true` to opt in.
-   */
-  iUnderstandRunsAsServicePrincipal: true;
   /**
    * Enforce read-only execution. Defaults to `true`. Set to `false` to allow
    * destructive statements — highly discouraged outside of tightly controlled
