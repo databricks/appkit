@@ -78,7 +78,7 @@ import { createApp, server } from "@databricks/appkit";
 await createApp({
   plugins: [
     server({
-      port: 8000,          // default: Number(process.env.DATABRICKS_APP_PORT) || 8000
+      port: 8000,          // default: Number(process.env.DATABRICKS_APP_PORT) || 8000 — in dev, falls back to a free port if 8000 is busy
       host: "0.0.0.0",     // default: process.env.FLASK_RUN_HOST || "0.0.0.0"
       staticPath: "dist",  // optional: force a specific static directory
     }),

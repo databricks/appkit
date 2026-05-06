@@ -45,9 +45,7 @@ const logger = createLogger("server");
 export class ServerPlugin extends Plugin {
   public static DEFAULT_CONFIG = {
     host: process.env.FLASK_RUN_HOST || "0.0.0.0",
-    port:
-      Number(process.env.DATABRICKS_APP_PORT) ||
-      (process.env.NODE_ENV === "development" ? 0 : 8000),
+    port: Number(process.env.DATABRICKS_APP_PORT) || 8000,
   };
 
   /** Plugin manifest declaring metadata and resource requirements */
@@ -127,13 +125,25 @@ export class ServerPlugin extends Plugin {
 
     await this.setupFrontend(endpoints, pluginConfigs);
 
-    const server = this.serverApplication.listen(
-      this.config.port ?? ServerPlugin.DEFAULT_CONFIG.port,
-      this.config.host ?? ServerPlugin.DEFAULT_CONFIG.host,
-      () => this.logStartupInfo(),
+    const preferredPort = this.config.port ?? ServerPlugin.DEFAULT_CONFIG.port;
+    const host = this.config.host ?? ServerPlugin.DEFAULT_CONFIG.host;
+    // In dev, fall back to an OS-assigned port if the preferred one is busy
+    // so concurrent dev servers don't collide. An explicit pin via
+    // DATABRICKS_APP_PORT or `port` config disables the fallback — surfacing
+    // the bind error rather than silently drifting from the requested port.
+    const fallbackToDynamic =
+      this.config.port === undefined &&
+      process.env.NODE_ENV === "development" &&
+      !process.env.DATABRICKS_APP_PORT;
+
+    const server = await this.listenWithFallback(
+      preferredPort,
+      host,
+      fallbackToDynamic,
     );
 
     this.server = server;
+    this.logStartupInfo();
 
     // attach server to remote tunnel controller
     this.remoteTunnelController.setServer(server);
@@ -306,6 +316,34 @@ export class ServerPlugin extends Plugin {
       }
     }
     return undefined;
+  }
+
+  private listenWithFallback(
+    preferredPort: number,
+    host: string,
+    fallbackToDynamic: boolean,
+  ): Promise<HTTPServer> {
+    return new Promise((resolve, reject) => {
+      const tryListen = (port: number, isFallback: boolean) => {
+        const server = this.serverApplication.listen(port, host, () => {
+          server.removeListener("error", onError);
+          resolve(server);
+        });
+        const onError = (err: NodeJS.ErrnoException) => {
+          if (!isFallback && fallbackToDynamic && err.code === "EADDRINUSE") {
+            logger.warn(
+              "Port %d is in use; falling back to a dynamically assigned port.",
+              port,
+            );
+            tryListen(0, true);
+            return;
+          }
+          reject(err);
+        };
+        server.once("error", onError);
+      };
+      tryListen(preferredPort, false);
+    });
   }
 
   private logStartupInfo() {

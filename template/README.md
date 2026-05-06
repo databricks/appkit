@@ -34,7 +34,7 @@ Edit `.env` and set the environment variables you need:
 
 ```env
 DATABRICKS_HOST=https://your-workspace.cloud.databricks.com
-DATABRICKS_APP_PORT=8000
+# DATABRICKS_APP_PORT=8000  # Optional: pin the dev port (default: 8000, falls back to a free port in dev if busy)
 # ... other environment variables, depending on the plugins you use
 ```
 {{- if .plugins.lakebase}}

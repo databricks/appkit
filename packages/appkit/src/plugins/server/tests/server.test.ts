@@ -6,18 +6,55 @@ const {
   mockExpressApp,
   mockRemoteTunnelControllerMiddleware,
   mockRemoteTunnelControllerInstance,
+  listenState,
 } = vi.hoisted(() => {
+  const listenState: {
+    failureMode: { errCode: string; failTimes: number } | null;
+    attempts: number;
+  } = { failureMode: null, attempts: 0 };
+
+  const httpServerListeners = new Map<
+    string,
+    Array<(...args: any[]) => void>
+  >();
   const httpServer = {
     close: vi.fn((cb: any) => cb?.()),
     on: vi.fn(),
+    once: vi.fn((event: string, cb: (...args: any[]) => void) => {
+      const list = httpServerListeners.get(event) ?? [];
+      list.push(cb);
+      httpServerListeners.set(event, list);
+    }),
+    removeListener: vi.fn((event: string, cb: any) => {
+      const list = httpServerListeners.get(event) ?? [];
+      const idx = list.indexOf(cb);
+      if (idx >= 0) list.splice(idx, 1);
+    }),
     address: vi.fn().mockReturnValue({ port: 8000 }),
+    _listeners: httpServerListeners,
   };
 
   const expressApp = {
     use: vi.fn().mockReturnThis(),
     get: vi.fn().mockReturnThis(),
     listen: vi.fn((_port: any, _host: any, cb: any) => {
-      cb?.();
+      listenState.attempts++;
+      const fail = listenState.failureMode;
+      if (fail && listenState.attempts <= fail.failTimes) {
+        queueMicrotask(() => {
+          const err: NodeJS.ErrnoException = new Error(
+            `listen ${fail.errCode}`,
+          );
+          err.code = fail.errCode;
+          const errs = httpServerListeners.get("error") ?? [];
+          for (const fn of [...errs]) fn(err);
+        });
+      } else {
+        // Real Node fires the 'listening' callback asynchronously after the
+        // bind completes; the mock matches that so closures referencing the
+        // returned server inside cb don't observe a TDZ.
+        queueMicrotask(() => cb?.());
+      }
       return httpServer;
     }),
     _router: {
@@ -41,6 +78,7 @@ const {
     mockExpressApp: expressApp,
     mockRemoteTunnelControllerMiddleware: remoteTunnelControllerMiddleware,
     mockRemoteTunnelControllerInstance: remoteTunnelControllerInstance,
+    listenState,
   };
 });
 
@@ -180,6 +218,11 @@ describe("ServerPlugin", () => {
 
     // Reset mock router stack for health endpoint test
     mockExpressApp._router.stack = [];
+
+    // Reset listen-fallback state between tests
+    listenState.failureMode = null;
+    listenState.attempts = 0;
+    mockHttpServer._listeners.clear();
   });
 
   afterEach(() => {
@@ -457,6 +500,72 @@ describe("ServerPlugin", () => {
       await plugin.start();
 
       expect(StaticServer).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("port resolution", () => {
+    test("dev with no DATABRICKS_APP_PORT falls back to 0 on EADDRINUSE", async () => {
+      process.env.NODE_ENV = "development";
+      delete process.env.DATABRICKS_APP_PORT;
+      listenState.failureMode = { errCode: "EADDRINUSE", failTimes: 1 };
+
+      const plugin = new ServerPlugin({});
+      await plugin.start();
+
+      expect(mockExpressApp.listen).toHaveBeenCalledTimes(2);
+      // second attempt is on port 0 (OS-assigned)
+      expect(mockExpressApp.listen).toHaveBeenNthCalledWith(
+        2,
+        0,
+        expect.any(String),
+        expect.any(Function),
+      );
+    });
+
+    test("dev with DATABRICKS_APP_PORT does not fall back", async () => {
+      process.env.NODE_ENV = "development";
+      process.env.DATABRICKS_APP_PORT = "8000";
+      listenState.failureMode = { errCode: "EADDRINUSE", failTimes: 1 };
+
+      const plugin = new ServerPlugin({});
+      await expect(plugin.start()).rejects.toMatchObject({
+        code: "EADDRINUSE",
+      });
+      expect(mockExpressApp.listen).toHaveBeenCalledTimes(1);
+    });
+
+    test("explicit port in config disables fallback even in dev", async () => {
+      process.env.NODE_ENV = "development";
+      delete process.env.DATABRICKS_APP_PORT;
+      listenState.failureMode = { errCode: "EADDRINUSE", failTimes: 1 };
+
+      const plugin = new ServerPlugin({ port: 3000 });
+      await expect(plugin.start()).rejects.toMatchObject({
+        code: "EADDRINUSE",
+      });
+      expect(mockExpressApp.listen).toHaveBeenCalledTimes(1);
+    });
+
+    test("production does not fall back on EADDRINUSE", async () => {
+      process.env.NODE_ENV = "production";
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      listenState.failureMode = { errCode: "EADDRINUSE", failTimes: 1 };
+
+      const plugin = new ServerPlugin({});
+      await expect(plugin.start()).rejects.toMatchObject({
+        code: "EADDRINUSE",
+      });
+      expect(mockExpressApp.listen).toHaveBeenCalledTimes(1);
+    });
+
+    test("non-EADDRINUSE error is not retried even in dev", async () => {
+      process.env.NODE_ENV = "development";
+      delete process.env.DATABRICKS_APP_PORT;
+      listenState.failureMode = { errCode: "EACCES", failTimes: 1 };
+
+      const plugin = new ServerPlugin({});
+      await expect(plugin.start()).rejects.toMatchObject({ code: "EACCES" });
+      expect(mockExpressApp.listen).toHaveBeenCalledTimes(1);
     });
   });
 
