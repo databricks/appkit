@@ -129,7 +129,18 @@ When your app needs Row-Level Security (RLS) or per-user data isolation, use `as
    ```
    Apps scaffolded with `databricks apps init` and the Lakebase plugin include this automatically.
 
-2. Each user needs an **OAuth role** in Lakebase (created automatically on first connection, or via the Lakebase UI).
+2. Each app user needs a **Postgres role** in Lakebase. Create one with the Databricks CLI:
+
+   ```bash
+   databricks postgres create-role "projects/{project_id}/branches/{branch_id}" \
+     --json '{"spec": {"identity_type": "USER", "postgres_role": "user@example.com"}}'
+   ```
+
+   Alternatively, create roles in the Lakebase UI under **Branch Overview** → **Add role**.
+
+   :::note
+   Do not grant `databricks_superuser` to OBO users — superusers bypass RLS. Use [fine-grained grants](#fine-grained-permissions) instead.
+   :::
 
 ### Usage
 
@@ -153,7 +164,7 @@ app.get("/api/my-orders", async (req, res) => {
 ```
 
 When `asUser(req)` is called:
-1. The user's token and identity are extracted from `x-forwarded-access-token` and `x-forwarded-user` headers (set automatically by Databricks Apps).
+1. The user's token and identity are extracted from `x-forwarded-access-token` and `x-forwarded-email` headers (set automatically by Databricks Apps).
 2. A per-user `pg.Pool` is created (or reused) with the user's OAuth credentials.
 3. `query()` and `pool` use the user's pool — `current_user` in PostgreSQL reflects the user's identity.
 

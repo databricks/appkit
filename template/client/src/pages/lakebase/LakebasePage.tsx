@@ -28,8 +28,11 @@ export function LakebasePage() {
 
   useEffect(() => {
     fetch('/api/lakebase/todos')
-      .then((res) => {
-        if (!res.ok) throw new Error(`Failed to fetch todos: ${res.statusText}`);
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          throw new Error(body?.error ?? `Failed to fetch todos: ${res.statusText}`);
+        }
         return res.json() as Promise<Todo[]>;
       })
       .then(setTodos)
@@ -49,7 +52,10 @@ export function LakebasePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title }),
       });
-      if (!res.ok) throw new Error(`Failed to create todo: ${res.statusText}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? `Failed to create todo: ${res.statusText}`);
+      }
       const created = (await res.json()) as Todo;
       setTodos((prev) => [created, ...prev]);
       setNewTitle('');
@@ -63,7 +69,10 @@ export function LakebasePage() {
   const toggleTodo = async (id: string) => {
     try {
       const res = await fetch(`/api/lakebase/todos/${id}`, { method: 'PATCH' });
-      if (!res.ok) throw new Error(`Failed to update todo: ${res.statusText}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? `Failed to update todo: ${res.statusText}`);
+      }
       const updated = (await res.json()) as Todo;
       setTodos((prev) => prev.map((t) => (t.id === id ? updated : t)));
     } catch (err) {
@@ -74,7 +83,10 @@ export function LakebasePage() {
   const deleteTodo = async (id: string) => {
     try {
       const res = await fetch(`/api/lakebase/todos/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(`Failed to delete todo: ${res.statusText}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? `Failed to delete todo: ${res.statusText}`);
+      }
       setTodos((prev) => prev.filter((t) => t.id !== id));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete todo');

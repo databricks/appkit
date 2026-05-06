@@ -65,7 +65,15 @@ export async function setupSampleLakebaseRoutes(appkit: AppKitWithLakebase) {
         res.json(result.rows);
       } catch (err) {
         console.error('Failed to list todos:', err);
-        res.status(500).json({ error: 'Failed to list todos' });
+        const pgErr = err as { code?: string };
+        if (pgErr.code === '28P01') {
+          res.status(403).json({
+            error: 'Lakebase authentication failed — your user may not have a Postgres role. '
+              + 'See https://databricks.github.io/appkit/docs/plugins/lakebase#on-behalf-of-obo--per-user-connections',
+          });
+          return;
+        }
+        res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to list todos' });
       }
     });
 
@@ -85,7 +93,15 @@ export async function setupSampleLakebaseRoutes(appkit: AppKitWithLakebase) {
         res.status(201).json(result.rows[0]);
       } catch (err) {
         console.error('Failed to create todo:', err);
-        res.status(500).json({ error: 'Failed to create todo' });
+        const pgErr = err as { code?: string };
+        if (pgErr.code === '28P01') {
+          res.status(403).json({
+            error: 'Lakebase authentication failed — your user may not have a Postgres role. '
+              + 'See https://databricks.github.io/appkit/docs/plugins/lakebase#on-behalf-of-obo--per-user-connections',
+          });
+          return;
+        }
+        res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to create todo' });
       }
     });
 
@@ -103,7 +119,15 @@ export async function setupSampleLakebaseRoutes(appkit: AppKitWithLakebase) {
         res.json(result.rows[0]);
       } catch (err) {
         console.error('Failed to update todo:', err);
-        res.status(500).json({ error: 'Failed to update todo' });
+        const pgErr = err as { code?: string };
+        if (pgErr.code === '28P01') {
+          res.status(403).json({
+            error: 'Lakebase authentication failed — your user may not have a Postgres role. '
+              + 'See https://databricks.github.io/appkit/docs/plugins/lakebase#on-behalf-of-obo--per-user-connections',
+          });
+          return;
+        }
+        res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to update todo' });
       }
     });
 
@@ -121,7 +145,15 @@ export async function setupSampleLakebaseRoutes(appkit: AppKitWithLakebase) {
         res.status(204).send();
       } catch (err) {
         console.error('Failed to delete todo:', err);
-        res.status(500).json({ error: 'Failed to delete todo' });
+        const pgErr = err as { code?: string };
+        if (pgErr.code === '28P01') {
+          res.status(403).json({
+            error: 'Lakebase authentication failed — your user may not have a Postgres role. '
+              + 'See https://databricks.github.io/appkit/docs/plugins/lakebase#on-behalf-of-obo--per-user-connections',
+          });
+          return;
+        }
+        res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to delete todo' });
       }
     });
   });
