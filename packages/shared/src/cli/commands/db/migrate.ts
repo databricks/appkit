@@ -44,11 +44,9 @@ export const migrateCommand = new Command("migrate")
   );
 
 /**
- * Run `drizzle-kit migrate` guarded by a Postgres session-level advisory lock
- * so two concurrent deploys cannot race the same migration. The lock is held
- * on the CLI's own pg connection for the lifetime of the drizzle-kit
- * subprocess; a second runner blocks on its own `pg_advisory_lock` call
- * instead of fighting drizzle-kit head-on.
+ * Run `drizzle-kit migrate` under a session-level advisory lock so two deploys
+ * can't race. Held on the CLI's pg conn for the subprocess lifetime; a second
+ * runner waits on its own `pg_advisory_lock`.
  */
 async function runMigrateUp(opts: { dryRun: boolean }): Promise<void> {
   const paths = databasePaths();
@@ -74,9 +72,28 @@ async function runMigrateUp(opts: { dryRun: boolean }): Promise<void> {
   let client: LakebasePoolClient | null = null;
   try {
     client = await pool.connect();
-    await client.query(
-      `SELECT pg_advisory_lock(hashtext('${ADVISORY_LOCK_NAME}'))`,
-    );
+    // pg_try_advisory_lock + bounded retry so a wedged CI session can't block
+    // follow-on deploys forever.
+    const LOCK_TIMEOUT_MS = 10 * 60 * 1000;
+    const LOCK_RETRY_MS = 5_000;
+    const lockDeadline = Date.now() + LOCK_TIMEOUT_MS;
+    let acquired = false;
+    while (!acquired) {
+      const { rows } = await client.query<{ acquired: boolean }>(
+        `SELECT pg_try_advisory_lock(hashtext('${ADVISORY_LOCK_NAME}')) AS acquired`,
+      );
+      if (rows[0]?.acquired) {
+        acquired = true;
+        break;
+      }
+      if (Date.now() >= lockDeadline) {
+        throw new Error(
+          `Migration advisory lock not acquired within ${LOCK_TIMEOUT_MS / 1000}s; another deploy may be wedged.`,
+        );
+      }
+      console.log(bullet("Migration lock held by another runner; retrying…"));
+      await new Promise((r) => setTimeout(r, LOCK_RETRY_MS));
+    }
     console.log(bullet("Acquired migration advisory lock."));
 
     try {

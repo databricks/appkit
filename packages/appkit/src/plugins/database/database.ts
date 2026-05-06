@@ -57,9 +57,8 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
   }
 
   async setup() {
-    // Service-principal pool. Same factory the standalone `lakebase` plugin
-    // uses — Lakebase OAuth refresh is built in. Dev = current user OAuth,
-    // prod = SP OAuth, both transparent.
+    // SP pool via the standalone `lakebase` factory — OAuth refresh built in,
+    // user OAuth in dev, SP OAuth in prod.
     this.pool = createLakebasePool({
       ...POOL_DEFAULTS,
       ...this.config.connection,
@@ -86,8 +85,8 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
         Object.keys(loaded.schema.$tables).length,
       );
 
-      // Wiring builds an EntityClient per table on top of the SP pool, plus a
-      // per-user pool registry used by `EntityClient.asUser(req)` for OBO.
+      // Wiring → one EntityClient per table on the SP pool + per-user pool
+      // registry for `EntityClient.asUser(req)` (OBO).
       const executor: ExecutorFn = async (fn, options) => {
         const result = await this.execute(fn, options);
         if (!result.ok) {
@@ -113,23 +112,20 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
         Object.keys(this.entities).join(", "),
       );
 
-      // Compare the live database against the declared schema; warns in dev,
-      // throws in prod when the two have diverged. See drift.ts for the matrix.
-      await checkDrift({
-        pool: this.requirePool(),
-        schema: this.schema,
-        enabled: this.config.checkDrift !== false,
-      });
-    } catch (err) {
-      // A throwing schema-load otherwise cascades through Promise.all in core
-      // and crashes every plugin's boot. Decorate the error with the
-      // convention path so the operator can find it, then re-raise unless the
-      // caller opted into tolerant boot.
-      const message = err instanceof Error ? err.message : String(err);
-      logger.error(
-        "Database setup failed (config/database/schema.ts): %s",
-        message,
+      // Cap drift introspection so a wedged pool can't hang boot indefinitely.
+      await withTimeout(
+        checkDrift({
+          pool: this.requirePool(),
+          schema: this.schema,
+          enabled: this.config.checkDrift !== false,
+          tolerateIntrospectionFailure: this.config.tolerateSetupFailure,
+        }),
+        10_000,
+        "Database drift check exceeded 10s timeout during setup",
       );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error("Database setup failed: %s", message);
       if (!this.config.tolerateSetupFailure) throw err;
     }
   }
@@ -255,10 +251,8 @@ class DatabasePlugin extends Plugin<IDatabaseConfig> {
 export const database = toPlugin(DatabasePlugin);
 
 /**
- * Carries the interceptor-derived HTTP status from the executor up to the
- * route handler so 4xx classifications survive the throw. The route layer
- * checks `instanceof DatabaseRouteError` to echo `statusCode`; everything
- * else falls back to 500 with a scrubbed message in production.
+ * Carries the interceptor-derived HTTP status to the route handler so 4xx
+ * classifications survive the throw. Other errors fall back to scrubbed 500.
  */
 export class DatabaseRouteError extends Error {
   readonly statusCode: number;
@@ -269,11 +263,26 @@ export class DatabaseRouteError extends Error {
   }
 }
 
+async function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  message: string,
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /**
- * Attach a `connect` listener that sets per-session defaults on every new
- * Postgres session checked out of the pool: `statement_timeout` (caps runaway
- * queries even when the client signal is dropped) and `application_name` (so
- * the connection is attributable in `pg_stat_activity`).
+ * Set per-session defaults on every new pooled connection: `statement_timeout`
+ * caps runaway queries; `application_name` attributes traffic in `pg_stat_activity`.
  */
 function attachSessionDefaults(pool: Pool, override?: number): void {
   const ms = override ?? STATEMENT_TIMEOUT_DEFAULT_MS;
@@ -298,9 +307,8 @@ function attachSessionDefaults(pool: Pool, override?: number): void {
 }
 
 /**
- * When `DEBUG_POOL=1` is set, periodically log the pool's
- * total/idle/waiting connection counts so operators can observe saturation.
- * The interval is unrefed so it never blocks shutdown.
+ * Log pool total/idle/waiting every 30s when `DEBUG_POOL=1` is set. Unrefed
+ * so it never blocks shutdown.
  */
 function startPoolStatsLog(pool: Pool, label: string): void {
   const intervalMs = 30_000;

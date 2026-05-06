@@ -5,6 +5,7 @@ import type { AppKitTable, Schema } from "@/database";
 import { AppKitError } from "@/errors";
 import { createLogger } from "@/logging/logger";
 import { DatabaseRouteError } from "./database";
+import { DEFAULT_LIMIT, MAX_LIMIT } from "./defaults";
 import type { EntityClient, WhereInput } from "./entity-proxy";
 import type { HttpAccess, HttpEntityOverride, IDatabaseConfig } from "./types";
 
@@ -18,14 +19,9 @@ type ColumnKind =
   | "unknown";
 
 /**
- * Read the Drizzle `columnType` off a table's `$drizzle` value to classify a
- * column as text/number/boolean/etc. Used to keep `coerceFilterValue` and
- * `coerceId` from over-eagerly coercing strings on text/uuid columns.
- *
- * Hand-rolled (rather than importing Drizzle's types) so this file stays out
- * of the drizzle-orm import graph — `$drizzle` is `unknown` at the AppKit
- * boundary, but the runtime layer already reads the same property names off
- * it (see `database/runtime/drizzle-runtime.ts:getColumn`).
+ * Classify a column from Drizzle's `columnType` so `coerceFilterValue`/`coerceId`
+ * don't over-coerce on text/uuid. Hand-rolled to keep this file out of the
+ * drizzle-orm import graph — `$drizzle` is `unknown` at the AppKit boundary.
  */
 function inferColumnKind(table: AppKitTable, name: string): ColumnKind {
   const drizzleTable = table.$drizzle as
@@ -73,11 +69,7 @@ const DEFAULT_ACCESS: Record<Verb, HttpAccess> = {
   delete: "obo",
 };
 
-const DEFAULT_LIMIT = 50;
-const MAX_LIMIT = 500;
-
-// These query params control the shape of the read. Everything else is treated
-// as a potential column filter, but only if it matches a declared schema column.
+// Read-shape controls; everything else is a potential column filter (if declared).
 const RESERVED_QUERY_KEYS = new Set([
   "select",
   "order",
@@ -106,29 +98,22 @@ interface RouteGeneratorOptions {
   schema: Schema;
   config: IDatabaseConfig;
   /**
-   * DatabasePlugin owns identity selection. The route generator only says which
-   * access mode was configured for the verb and receives the right entity map.
+   * Identity selection lives in DatabasePlugin; this generator only forwards
+   * the configured access mode and uses the returned entity map.
    */
   getSurface: (
     req: express.Request,
     access: HttpAccess,
   ) => DatabaseExecutionSurface;
-  /**
-   * Service-principal pool used for the `_healthz` `SELECT 1` probe. Optional
-   * because some tests exercise the route generator without a real pool.
-   */
+  /** SP pool for the `_healthz` `SELECT 1`. Optional for tests without a pool. */
   getServicePool?: () => import("pg").Pool;
   /** Bound wrapper around Plugin#route so endpoint registration stays central. */
   route: (router: IAppRouter, config: RouteConfig) => void;
 }
 
 /**
- * Generates the HTTP layer for every schema table.
- *
- * This class deliberately does not know about PostGREST clients, pg pools, or
- * auth internals. It translates Express requests into the L3 EntityClient API;
- * the entity client then handles validation, hooks, execute wrapping, retries,
- * cache, telemetry, and DataPath calls.
+ * HTTP layer for every schema table. Translates Express requests into the
+ * EntityClient API — no PostGREST client, pool, or auth internals here.
  */
 export class RouteGenerator {
   constructor(private readonly options: RouteGeneratorOptions) {}
@@ -141,12 +126,8 @@ export class RouteGenerator {
   }
 
   /**
-   * Mount `GET /api/database/_healthz`. Runs a `SELECT 1` against the SP
-   * pool and returns `{ ok, poolStats }` so a load balancer can wait for the
-   * database side of the plugin to come up before routing traffic.
-   *
-   * The route is always public — readiness checks come from k8s/LB
-   * components that don't carry user auth headers.
+   * `GET /api/database/_healthz` — SP `SELECT 1` + `{ ok, poolStats }`.
+   * Always public: readiness probes from k8s/LB don't carry user auth.
    */
   private bindHealth(router: IAppRouter): void {
     if (this.options.config.healthCheck === false) return;
@@ -157,9 +138,41 @@ export class RouteGenerator {
       method: "get",
       path: "/_healthz",
       handler: async (_req, res) => {
+        const pool = getPool();
+        // Detect saturation BEFORE pool.query — that call blocks on connect()
+        // up to `connectionTimeoutMillis` under load, exceeding typical k8s
+        // probe timeouts and stealing a real conn slot from app traffic.
+        const poolMax =
+          (pool as unknown as { options?: { max?: number } }).options?.max ??
+          Number.POSITIVE_INFINITY;
+        const saturated =
+          pool.totalCount >= poolMax &&
+          pool.idleCount === 0 &&
+          pool.waitingCount > 0;
+        if (saturated) {
+          res.status(503).json({
+            ok: false,
+            reason: "pool saturated",
+            poolStats: {
+              total: pool.totalCount,
+              idle: pool.idleCount,
+              waiting: pool.waitingCount,
+            },
+          });
+          return;
+        }
+        // 1s race so a slow `SELECT 1` doesn't pin the probe past LB timeout.
+        const probe = pool.query("SELECT 1");
+        const timeout = new Promise<"timeout">((resolve) => {
+          const t = setTimeout(() => resolve("timeout"), 1_000);
+          t.unref?.();
+        });
         try {
-          const pool = getPool();
-          await pool.query("SELECT 1");
+          const result = await Promise.race([probe, timeout]);
+          if (result === "timeout") {
+            res.status(503).json({ ok: false, reason: "probe timeout" });
+            return;
+          }
           res.json({
             ok: true,
             poolStats: {
@@ -182,9 +195,8 @@ export class RouteGenerator {
     table: AppKitTable,
   ): void {
     const access = resolveAccess(this.options.config.http?.[name]);
-    // Private columns are excluded from the HTTP-addressable surface entirely:
-    // not filterable, not selectable. The entity client enforces the same
-    // policy for default reads; this set protects the parsing layer.
+    // Private columns are off the HTTP surface entirely (not filterable, not
+    // selectable). EntityClient enforces this for reads; this set guards parsing.
     const cols = new Set(
       Object.entries(table.$columns)
         .filter(([, meta]) => meta.private !== true)
@@ -202,7 +214,8 @@ export class RouteGenerator {
       this.bindCount(router, name, cols, kinds, access.count);
     if (access.find !== false)
       this.bindFind(router, name, cols, kinds, pkKind, access.find);
-    if (access.create !== false) this.bindCreate(router, name, access.create);
+    if (access.create !== false)
+      this.bindCreate(router, name, cols, access.create);
     if (access.update !== false)
       this.bindUpdate(router, name, pkKind, access.update);
     if (access.delete !== false)
@@ -256,8 +269,7 @@ export class RouteGenerator {
       "get",
       `/${name}/count`,
       async (req, res) => {
-        // Count supports the same column filters as list, but intentionally
-        // ignores pagination and select/order shape controls.
+        // Same filters as list — ignores pagination and shape controls.
         const q = applyFilters(
           this.entity(req, access, name),
           req.query,
@@ -296,13 +308,13 @@ export class RouteGenerator {
   private bindCreate(
     router: IAppRouter,
     name: string,
+    cols: ReadonlySet<string>,
     access: HttpAccess,
   ): void {
     this.bind(router, name, "create", "post", `/${name}`, async (req, res) => {
-      // PostgREST-compatible upsert: a POST carrying `Prefer:
-      // resolution=merge-duplicates` plus `?on_conflict=<column>` is treated as
-      // INSERT ... ON CONFLICT DO UPDATE. Lets the browser client share one
-      // verb (POST) for both create and upsert.
+      // PostgREST-style upsert: POST + `Prefer: resolution=merge-duplicates`
+      // + `?on_conflict=<col>` → INSERT ... ON CONFLICT DO UPDATE. Lets the
+      // browser share one verb for create/upsert.
       const prefer = String(req.header("prefer") ?? "").toLowerCase();
       const onConflict = req.query.on_conflict;
       if (
@@ -310,6 +322,14 @@ export class RouteGenerator {
         typeof onConflict === "string" &&
         onConflict
       ) {
+        // Allowlist vs the public column set — rejects private/proto-pollution/
+        // unknown names before they reach Drizzle internals.
+        if (!cols.has(onConflict)) {
+          res
+            .status(400)
+            .json({ error: `Unknown on_conflict column for ${name}` });
+          return;
+        }
         const row = await this.entity(req, access, name).upsert(
           req.body as Record<string, unknown>,
           { onConflict },
@@ -370,9 +390,8 @@ export class RouteGenerator {
     access: HttpAccess,
     name: string,
   ): EntityClient {
-    // `public` and `service` both resolve to the SP entity surface today. The
-    // distinction is still kept in config so future policy/logging can treat
-    // them differently without changing route registration.
+    // `public` and `service` both → SP surface today; kept distinct for future
+    // policy/logging without changing route registration.
     const entity = this.options.getSurface(req, access)[name];
     if (!entity) {
       throw new Error(`Database entity "${name}" is not available`);
@@ -402,11 +421,10 @@ export class RouteGenerator {
             res.status(400).json({ errors: error.format() });
             return;
           }
-          // AppKitError messages are author-controlled (404/409/etc) and safe.
-          // DatabaseRouteError carries the status from Plugin#execute (already
-          // scrubbed for prod). Anything else is a raw thrown Error — show its
-          // message in dev, scrub to "Server error" in prod to avoid leaking
-          // stack/internal hints.
+          // AppKitError: author-controlled, safe to show. DatabaseRouteError
+          // carries status from Plugin#execute (already scrubbed in prod).
+          // Anything else is raw — show in dev, scrub in prod to avoid leaking
+          // stack/internals.
           if (error instanceof AppKitError) {
             res.status(error.statusCode).json({ error: error.message });
             return;
@@ -414,6 +432,22 @@ export class RouteGenerator {
           if (error instanceof DatabaseRouteError) {
             res.status(error.statusCode).json({ error: error.message });
             return;
+          }
+          // pg/Drizzle errors carry SQLSTATE in `code`. Map common cases to
+          // sane HTTP status codes; everything else falls through to 500.
+          const pgCode = (error as { code?: unknown }).code;
+          if (typeof pgCode === "string") {
+            const status = pgErrorToHttpStatus(pgCode);
+            if (status) {
+              const message =
+                process.env.NODE_ENV === "production"
+                  ? defaultMessageForStatus(status)
+                  : error instanceof Error
+                    ? error.message
+                    : defaultMessageForStatus(status);
+              res.status(status).json({ error: message });
+              return;
+            }
           }
           const fallback =
             process.env.NODE_ENV === "production"
@@ -443,9 +477,8 @@ function applyFilters(
 ): EntityClient {
   let next = q;
 
-  // Query params follow `column=operator.value`. Params for undeclared columns
-  // are ignored rather than forwarded, which avoids accidentally exposing
-  // hidden columns as filterable HTTP surface.
+  // Query params: `column=operator.value`. Undeclared columns are ignored so
+  // hidden columns don't accidentally become HTTP-filterable.
   for (const [key, raw] of Object.entries(query)) {
     if (RESERVED_QUERY_KEYS.has(key) || !cols.has(key)) continue;
     const kind = kinds.get(key) ?? "unknown";
@@ -473,10 +506,8 @@ function applyFilters(
       } as WhereInput<Record<string, unknown>>);
       continue;
     }
-    // Multiple values for the same key: prefer to AND them together by merging
-    // every decoded predicate (`?col=eq.a&col=neq.b` means both). When every
-    // entry is a bare scalar, treat it as `IN (...)` for the natural duplicate
-    // shape used by HTML forms (`col=a&col=b`).
+    // Multiple values for the same key. When every entry is a bare scalar,
+    // treat as `IN (...)` to match HTML form `col=a&col=b`.
     const allScalars = decoded.every(
       (d) => typeof d !== "object" || d === null || Array.isArray(d),
     );
@@ -486,8 +517,22 @@ function applyFilters(
       } as WhereInput<Record<string, unknown>>);
       continue;
     }
+    // Duplicate operators on one key would clobber via shallow-merge. Promote
+    // duplicate `eq` to `in: [values]` so intent isn't silently dropped;
+    // mixed-operator dups (eq + neq) still merge — last write per op wins.
+    const eqValues: unknown[] = [];
     const merged: Record<string, unknown> = {};
     for (const entry of decoded) {
+      if (
+        typeof entry === "object" &&
+        entry !== null &&
+        !Array.isArray(entry) &&
+        "eq" in entry &&
+        Object.keys(entry).length === 1
+      ) {
+        eqValues.push((entry as { eq: unknown }).eq);
+        continue;
+      }
       if (
         typeof entry === "object" &&
         entry !== null &&
@@ -496,14 +541,15 @@ function applyFilters(
         Object.assign(merged, entry);
       }
     }
+    if (eqValues.length > 1) merged.in = eqValues;
+    else if (eqValues.length === 1) merged.eq = eqValues[0];
     next = next.where({ [key]: merged } as WhereInput<Record<string, unknown>>);
   }
   return next;
 }
 /**
- * Validate `?select=col1,col2` against the schema's columns and project.
- * Unknown columns are dropped silently — same posture as `applyFilters` so
- * undeclared columns never become HTTP-addressable.
+ * Validate `?select=` and project. Unknown columns drop silently — same
+ * posture as `applyFilters` to keep undeclared columns off the HTTP surface.
  */
 function applySelect(
   q: EntityClient,
@@ -519,10 +565,9 @@ function applySelect(
 }
 
 /**
- * Parse `?include=posts,author` (or `?include=posts(id,title),author(name)`)
- * and forward to `entity.include({ ... })`. The runtime resolves relation
- * names against the schema's `$relations` metadata; unknown names throw at
- * query time, so this parser intentionally trusts the caller.
+ * Parse `?include=posts,author` (or `posts(id,title),author(name)`) and forward
+ * to `entity.include({ ... })`. Relation names are resolved at query time —
+ * unknown names throw there, so this parser trusts the caller.
  */
 function applyInclude(
   q: EntityClient,
@@ -533,10 +578,9 @@ function applyInclude(
   if (typeof raw !== "string" || raw.length === 0) return q;
   const include = parseIncludeSpec(raw);
 
-  // Strip select columns that don't exist on the related table or are
-  // private. Keeps `?include=author(password_hash)` from leaking secrets.
-  // Unknown relation names are passed through — the runtime layer is
-  // authoritative about what relations exist and rejects them at query time.
+  // Strip private/unknown select cols on related tables — keeps
+  // `?include=author(password_hash)` from leaking secrets. Unknown relation
+  // names pass through; the runtime is authoritative and rejects at query time.
   for (const [relation, spec] of Object.entries(include)) {
     if (spec === true) continue;
     const relatedTable = schema.$tables[relation];
@@ -558,9 +602,8 @@ function applyInclude(
 }
 
 /**
- * Tokenise an `?include=` value into `{ relation: true | { select: [...] } }`.
- * Splits on top-level commas (paren-aware) and parses each `name(col,col)`
- * fragment. Whitespace is trimmed everywhere; empty fragments are skipped.
+ * Tokenise `?include=` into `{ relation: true | { select: [...] } }`. Splits
+ * on top-level (paren-aware) commas; whitespace trimmed; empty fragments dropped.
  */
 function parseIncludeSpec(
   raw: string,
@@ -571,7 +614,12 @@ function parseIncludeSpec(
   const fragments: string[] = [];
   for (const ch of raw) {
     if (ch === "(") depth++;
-    if (ch === ")") depth--;
+    if (ch === ")") {
+      // Reject unbalanced `?include=)foo` rather than letting depth go negative
+      // and silently treating subsequent commas as fragment separators.
+      if (depth === 0) return {};
+      depth--;
+    }
     if (ch === "," && depth === 0) {
       fragments.push(buf);
       buf = "";
@@ -579,6 +627,8 @@ function parseIncludeSpec(
     }
     buf += ch;
   }
+  // Unclosed `?include=foo(` — drop rather than emit a partial spec.
+  if (depth !== 0) return {};
   if (buf) fragments.push(buf);
 
   for (const fragment of fragments) {
@@ -640,12 +690,9 @@ function coerceFilterValue(
   return coerceScalarTyped(value, kind);
 }
 /**
- * Type-aware scalar coercion for filter values pulled out of the query string.
- *
- * Text/uuid/json columns get the raw string back so a value like `"true"`,
- * `"null"`, or `"42"` is filtered as the literal string the user typed.
- * Number/boolean/date columns get the same heuristic as before so
- * `?count=eq.42` still works.
+ * Type-aware scalar coercion. Text/uuid/json get the raw string (`"true"`,
+ * `"null"`, `"42"` stay literal); number/boolean/date go through the heuristic
+ * so `?count=eq.42` still works.
  */
 function coerceScalarTyped(value: string, kind: ColumnKind): unknown {
   if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
@@ -664,10 +711,9 @@ function coerceScalarTyped(value: string, kind: ColumnKind): unknown {
   }
   return value;
 }
+// No-kind fallback — prefer `coerceScalarTyped(value, kind)` when available
+// so strings on text columns aren't reinterpreted.
 function coerceScalar(value: string): unknown {
-  // Kept for callers that have no column-kind context. Behaves like the old
-  // heuristic — prefer `coerceScalarTyped(value, kind)` when the column kind
-  // is available so we don't reinterpret strings on text columns.
   return coerceScalarTyped(value, "unknown");
 }
 function splitList(value: string): string[] {
@@ -714,4 +760,33 @@ function derivePkColumnName(table: AppKitTable): string | null {
     if (meta.primaryKey) return name;
   }
   return Object.keys(table.$columns).includes("id") ? "id" : null;
+}
+
+// Map common pg SQLSTATE codes to HTTP status. Returns `null` to mean "fall
+// through to 500".
+function pgErrorToHttpStatus(code: string): number | null {
+  switch (code) {
+    case "23505": // unique_violation
+      return 409;
+    case "23503": // foreign_key_violation
+    case "23514": // check_violation
+    case "23502": // not_null_violation
+    case "22P02": // invalid_text_representation
+      return 400;
+    case "42501": // insufficient_privilege (RLS denial, missing GRANT)
+      return 403;
+    case "40001": // serialization_failure
+    case "40P01": // deadlock_detected
+      return 503;
+    default:
+      return null;
+  }
+}
+
+function defaultMessageForStatus(status: number): string {
+  if (status === 409) return "Conflict";
+  if (status === 400) return "Bad request";
+  if (status === 403) return "Forbidden";
+  if (status === 503) return "Service temporarily unavailable";
+  return "Server error";
 }

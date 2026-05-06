@@ -12,12 +12,9 @@ export default defineSchema(({ table }) => {
 `;
 
 /**
- * Renders a live database snapshot into a `defineSchema()` module.
- *
- * The renderer intentionally emits one Postgres schema per file because
- * `defineSchema()` currently has one `schemaName` option. The schema is derived
- * from the tables actually returned by introspection, not from the requested
- * schema list, because the default request can include both `app` and `public`.
+ * Render a live database snapshot into a `defineSchema()` module. One Postgres
+ * schema per file (`defineSchema()` takes a single `schemaName`); the schema is
+ * derived from returned tables since the default request spans `app` + `public`.
  */
 export function renderSchema(result: IntrospectionResult): string {
   const schemaName = resolveSchemaName(result);
@@ -68,14 +65,13 @@ function renderTable(
     `  const ${colsName} = {`,
     columns.join("\n"),
     "  };",
-    `  const ${varName} = table("${table.name}", ${colsName});`,
+    `  const ${varName} = table(${JSON.stringify(table.name)}, ${colsName});`,
   ].join("\n");
 }
 
 /**
- * Renders a column expression, falling back to a scalar column for self or cyclic
- * foreign keys so the generated file remains importable and visibly marks the
- * relation for manual cleanup.
+ * Render a column expression. Falls back to scalar for self/cyclic FKs so
+ * the file stays importable; the relation is marked TODO for manual cleanup.
  */
 function renderColumn(
   column: IntrospectedColumn,
@@ -83,9 +79,7 @@ function renderColumn(
 ): string {
   if (column.references) {
     if (!renderedTables.has(column.references.table)) {
-      return `${renderScalarColumn(column)} /* TODO: foreign key to ${
-        column.references.table
-      }.${column.references.column} */`;
+      return `${renderScalarColumn(column)} /* TODO: foreign key to ${safeComment(column.references.table)}.${safeComment(column.references.column)} */`;
     }
 
     const targetTable = toIdentifier(toCamelCase(column.references.table));
@@ -94,13 +88,13 @@ function renderColumn(
       column.references.onDelete &&
       column.references.onDelete !== "no action"
     ) {
-      expr += `.onDelete("${column.references.onDelete}")`;
+      expr += `.onDelete(${JSON.stringify(column.references.onDelete)})`;
     }
     if (
       column.references.onUpdate &&
       column.references.onUpdate !== "no action"
     ) {
-      expr += `.onUpdate("${column.references.onUpdate}")`;
+      expr += `.onUpdate(${JSON.stringify(column.references.onUpdate)})`;
     }
     if (!column.nullable) expr += ".notNull()";
     return expr;
@@ -135,16 +129,22 @@ function renderDefault(expression: string): string {
     const literal = expression.slice(1, expression.indexOf("'::"));
     return `.default(${JSON.stringify(literal)})`;
   }
-  return ` /* TODO: default ${expression} */`;
+  return ` /* TODO: default ${safeComment(expression)} */`;
 }
 
 function renderPolicies(table: IntrospectedTable): string {
   return table.policies
     .map(
       (policy) =>
-        `  // TODO: policy "${policy.name}" on ${table.name} (for: ${policy.for.join(", ")})`,
+        `  // TODO: policy ${JSON.stringify(policy.name)} on ${safeComment(table.name)} (for: ${policy.for.map(safeComment).join(", ")})`,
     )
     .join("\n");
+}
+
+// Strip comment terminators and newlines so DB-supplied strings can't escape
+// the surrounding /* ... */ or // line comment. Closes RCE via hostile DB.
+function safeComment(text: string): string {
+  return text.replace(/\*\//g, "* /").replace(/[\r\n]+/g, " ");
 }
 
 /**
@@ -161,11 +161,8 @@ function sortTablesByDependencies(
 
   function visit(table: IntrospectedTable): void {
     if (visited.has(table.name)) return;
-    if (visiting.has(table.name)) {
-      // Cycles cannot be topologically sorted; keep deterministic output and
-      // let the generated file surface any manual cleanup that is needed.
-      return;
-    }
+    // Cycle — leave for manual cleanup; topo sort can't break it deterministically.
+    if (visiting.has(table.name)) return;
 
     visiting.add(table.name);
     for (const column of table.columns) {
@@ -183,10 +180,8 @@ function sortTablesByDependencies(
 }
 
 /**
- * Resolves the single schema that can be represented by `defineSchema()`.
- *
- * Mixed-schema output would map at least one table to the wrong schema, so the
- * renderer fails before writing misleading code.
+ * Single-schema-only — mixed schemas would map at least one table wrong, so
+ * fail before writing misleading code.
  */
 function resolveSchemaName(result: IntrospectionResult): string {
   const tableSchemas = [...new Set(result.tables.map((table) => table.schema))];

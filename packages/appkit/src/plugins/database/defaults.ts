@@ -1,12 +1,6 @@
 import type { PluginExecuteConfig } from "shared";
 
-/**
- * Connection pool defaults for the service-principal pool.
- * 10 connections in the pool at maximum
- * 30 seconds to keep the connection alive
- * 3 seconds to acquire a connection
- * 1000 uses to recycle the connection
- */
+/** SP pool defaults — max 10, 30s idle, 3s acquire, 1000 uses per conn. */
 export const POOL_DEFAULTS = {
   max: 10,
   idleTimeoutMillis: 30_000,
@@ -14,28 +8,25 @@ export const POOL_DEFAULTS = {
   maxUses: 1000,
 };
 
-/**
- * Default Postgres `statement_timeout` set on every pooled connection.
- * Caps runaway queries server-side; pairs with the AppKit timeout interceptor.
- */
+/** Server-side `statement_timeout` per pooled connection. Pairs with the AppKit timeout interceptor. */
 export const STATEMENT_TIMEOUT_DEFAULT_MS = 15_000;
 
-/**
- * Postgres `application_name` advertised on every connection. Surfaces in
- * `pg_stat_activity` and Lakebase audit so an operator can attribute
- * connections back to AppKit.
- */
+/** `application_name` per connection — surfaces in `pg_stat_activity`/Lakebase audit. */
 export const APPLICATION_NAME = "appkit:database";
 
 /**
- * Per-user (OBO) pool defaults. The plugin builds one pool per OBO user, so
- * each pool stays small. Fan-out is `(1 + oboPoolMax) × max`; with the
- * defaults that caps at `(1 + 25) × 4 + 10 = 114` connections per instance.
+ * OBO pool defaults — small (one pool per user). Fan-out = `(1 + oboPoolMax) × max`;
+ * defaults cap at `(1+25)×4 + 10 ≈ 114` conns per instance.
  */
 export const OBO_POOL_DEFAULTS = {
   ...POOL_DEFAULTS,
   max: 4,
 };
+
+/** Default page size when no `?limit=` is given. */
+export const DEFAULT_LIMIT = 50;
+/** Hard cap; opt out via `.unbounded()` for background jobs. */
+export const MAX_LIMIT = 500;
 
 export const readDefaults: PluginExecuteConfig = {
   timeout: 30_000,

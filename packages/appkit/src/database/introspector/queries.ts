@@ -7,43 +7,45 @@ import type {
 } from "./types";
 
 /**
- * Run introspection on a database and return the result.
- *
- * Catalog data is queried in focused passes and merged into table shells. This
- * keeps each SQL query small while callers still receive one deterministic
- * `IntrospectedTable[]` shape with columns, keys, FKs, and policies attached.
- *
- * @param pool - The database pool to use.
- * @param schemas - The schemas to introspect.
- * @param exclude - The tables to exclude from introspection.
- * @returns The introspection result.
+ * Introspect a database into one deterministic `IntrospectedTable[]`. Catalog
+ * data is queried in focused passes and merged into table shells, keeping
+ * each SQL query small.
  */
 export async function runIntrospection(
   pool: Pool,
   schemas: string[],
   exclude: ReadonlySet<string>,
 ): Promise<IntrospectedTable[]> {
+  // Tables must come first since columns/policies attach to them; the four
+  // remaining catalog passes are independent so we fan them out in parallel.
   const tables = await fetchTables(pool, schemas, exclude);
   const tableMap = new Map(tables.map((t) => [`${t.schema}.${t.name}`, t]));
 
-  for (const col of await fetchColumns(pool, schemas)) {
+  const [columns, foreignKeys, primaryKeys, policies] = await Promise.all([
+    fetchColumns(pool, schemas),
+    fetchForeignKeys(pool, schemas),
+    fetchPrimaryKeys(pool, schemas),
+    fetchPolicies(pool, schemas),
+  ]);
+
+  for (const col of columns) {
     const table = tableMap.get(`${col.schema}.${col.table}`);
     if (table) table.columns.push(col.column);
   }
 
-  for (const fk of await fetchForeignKeys(pool, schemas)) {
+  for (const fk of foreignKeys) {
     const table = tableMap.get(`${fk.schema}.${fk.table}`);
     const column = table?.columns.find((c) => c.name === fk.column);
     if (column) column.references = fk.target;
   }
 
-  for (const pk of await fetchPrimaryKeys(pool, schemas)) {
+  for (const pk of primaryKeys) {
     const table = tableMap.get(`${pk.schema}.${pk.table}`);
     const column = table?.columns.find((c) => c.name === pk.column);
     if (column) column.isPrimaryKey = true;
   }
 
-  for (const policy of await fetchPolicies(pool, schemas)) {
+  for (const policy of policies) {
     const table = tableMap.get(`${policy.schema}.${policy.table}`);
     if (table) table.policies.push(policy.policy);
   }
@@ -51,7 +53,6 @@ export async function runIntrospection(
   return tables;
 }
 
-/** Fetch the tables from the database. */
 async function fetchTables(
   pool: Pool,
   schemas: string[],
@@ -79,7 +80,6 @@ async function fetchTables(
     }));
 }
 
-/** Fetch the columns from the database. */
 async function fetchColumns(
   pool: Pool,
   schemas: string[],
@@ -127,13 +127,8 @@ async function fetchColumns(
   }));
 }
 
-/**
- * Fetches foreign-key metadata from `information_schema`.
- *
- * Constraint names are not globally unique, so every catalog join carries the
- * constraint schema as well. Without that qualifier, two schemas can cross-wire
- * foreign-key targets during introspection.
- */
+// Constraint names aren't globally unique, so every catalog join carries the
+// constraint schema. Without it, two schemas can cross-wire FK targets.
 async function fetchForeignKeys(pool: Pool, schemas: string[]) {
   const { rows } = await pool.query<{
     schema: string;
@@ -186,7 +181,6 @@ async function fetchForeignKeys(pool: Pool, schemas: string[]) {
   }));
 }
 
-/** Fetch the primary keys from the database. */
 async function fetchPrimaryKeys(pool: Pool, schemas: string[]) {
   const { rows } = await pool.query<{
     schema: string;
@@ -212,7 +206,6 @@ async function fetchPrimaryKeys(pool: Pool, schemas: string[]) {
   return rows;
 }
 
-/** Fetch the policies from the database. */
 async function fetchPolicies(
   pool: Pool,
   schemas: string[],
@@ -262,7 +255,6 @@ async function fetchPolicies(
   }));
 }
 
-/** Convert a cascade action to a string. */
 function cascadeAction(value: string): CascadeAction {
   switch (value) {
     case "CASCADE":

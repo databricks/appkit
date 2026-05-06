@@ -12,9 +12,7 @@ interface TableFactory {
   table: (name: string, columns: never) => unknown;
 }
 
-/**
- * Build the resolved `$relations` list for a table from its column metadata.
- */
+// Build resolved `$relations` from column metadata.
 function buildRelations(columns: Record<string, AppKitColumn>): Relation[] {
   const relations: Relation[] = [];
   for (const [columnName, column] of Object.entries(columns)) {
@@ -32,10 +30,7 @@ function buildRelations(columns: Record<string, AppKitColumn>): Relation[] {
   return relations;
 }
 
-/**
- * Rebuild `$relations` from the column-meta map.
- * Used by `defineSchema` after resolving cross-table deferred references.
- */
+/** Rebuild `$relations` after `defineSchema` resolves cross-table deferred refs. */
 export function rebuildRelationsFromColumns(
   columnMetas: Record<string, ColumnMeta>,
 ): Relation[] {
@@ -55,13 +50,7 @@ export function rebuildRelationsFromColumns(
   return relations;
 }
 
-/**
- * Build a table. Returns an AppKit table object that can be used to define the table schema and relationships.
- * @param schemaInstance - The schema instance.
- * @param name - The name of the table.
- * @param columns - The columns of the table.
- * @returns The built table.
- */
+/** Build an AppKit table from columns + a Drizzle table factory. */
 export function buildTable<
   TName extends string,
   TCols extends Record<string, AppKitColumn>,
@@ -122,6 +111,13 @@ export function buildTable<
       .map(([columnName]) => [columnName, true as const]),
   );
 
+  // PKs go in the URL on PATCH /:id — accepting them in the body lets a caller
+  // mutate a row's identity. Drop from the update validator.
+  const updateMask: Record<string, true> = { ...privateMask };
+  for (const [columnName, definition] of Object.entries(columns)) {
+    if (definition.$meta.primaryKey) updateMask[columnName] = true;
+  }
+
   const insertSchema = createInsertSchema(drizzleTable as never);
   const updateSchema = createUpdateSchema(drizzleTable as never);
 
@@ -138,21 +134,19 @@ export function buildTable<
           )
         : insertSchema,
     $updateSchema:
-      Object.keys(privateMask).length > 0
+      Object.keys(updateMask).length > 0
         ? (updateSchema as unknown as z.ZodObject<z.ZodRawShape>).omit(
-            privateMask as never,
+            updateMask as never,
           )
         : updateSchema,
   };
 }
 
 /**
- * Wires deferred `fk()` metadata into Drizzle's native `.references()` API.
- *
- * `fk()` can run before the referenced table exists, so it stores the target
- * AppKit column first. Once a table has been built, the target column metadata
- * contains the concrete Drizzle column, which is the value drizzle-kit needs to
- * generate real foreign-key constraints in migrations.
+ * Wire deferred `fk()` metadata into Drizzle's `.references()`. `fk()` can run
+ * before the target table exists, so it stores the AppKit column first; once
+ * the target is built, its `drizzleColumn` is what drizzle-kit needs to emit
+ * real FK constraints in migrations.
  */
 function applyDrizzleReference(definition: AppKitColumn): void {
   const reference = definition.$meta.references;

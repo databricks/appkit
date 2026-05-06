@@ -64,10 +64,26 @@
         "http": { "type": "object", "additionalProperties": true },
         "hooks": { "type": "object", "additionalProperties": true },
         "checkDrift": { "type": "boolean", "default": true },
+        "tolerateSetupFailure": {
+          "type": "boolean",
+          "description": "If true, plugin boot continues when schema-load OR drift introspection fails. Off by default (fail closed in production)."
+        },
+        "statementTimeoutMs": {
+          "type": "number",
+          "description": "Server-side `statement_timeout` (ms) applied per pool connection. Defaults to 15_000."
+        },
+        "healthCheck": {
+          "type": "boolean",
+          "description": "Set false to suppress the `GET /api/database/_healthz` route."
+        },
+        "entitiesDiscovery": {
+          "type": "boolean",
+          "description": "Set false to suppress the `GET /api/database/_entities` discovery route."
+        },
         "oboPoolMax": {
           "type": "number",
-          "default": 50,
-          "description": "Maximum number of per-user OBO pools to keep open."
+          "default": 25,
+          "description": "Maximum number of per-user OBO pools to keep open. Worst-case fan-out is (1 + oboPoolMax) × OBO_POOL_DEFAULTS.max + POOL_DEFAULTS.max connections per app instance."
         },
         "cache": {
           "type": "object",

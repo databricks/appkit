@@ -7,7 +7,7 @@ import type {
   WhereSpec,
 } from "@/database";
 import { createLogger } from "@/logging/logger";
-import { readDefaults, writeDefaults } from "./defaults";
+import { MAX_LIMIT, readDefaults, writeDefaults } from "./defaults";
 import type { CacheSettings, EntityHooks, HookContext } from "./types";
 
 // RFC 5321 §4.5.3.1.3 caps email at 320 octets.
@@ -23,7 +23,6 @@ export function normalizeOboEmail(raw: string | undefined): string | null {
 
 const logger = createLogger("database:entity");
 type Row = Record<string, unknown>;
-const MAX_LIMIT = 500;
 
 // Default read projection — `.private()` columns never leak via
 // `appkit.database.<e>` or generated routes unless `.select()`-ed in.
@@ -52,10 +51,7 @@ export type ExecutorFn = <T>(
   options: PluginExecutionSettings,
 ) => Promise<T>;
 
-/**
- * Predicate accepted by `where`. A bare value is shorthand for equality; an
- * array is shorthand for `IN`; an object selects one or more operators.
- */
+/** `where` predicate — bare value = `eq`, array = `IN`, object = operators. */
 type WhereOperator<T> = {
   eq?: T;
   neq?: T;

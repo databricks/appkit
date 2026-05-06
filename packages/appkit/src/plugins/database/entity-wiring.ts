@@ -11,7 +11,11 @@ import {
 } from "@/database";
 import { AuthenticationError, ConfigurationError } from "@/errors";
 import { createLogger } from "@/logging/logger";
-import { OBO_POOL_DEFAULTS, STATEMENT_TIMEOUT_DEFAULT_MS } from "./defaults";
+import {
+  APPLICATION_NAME,
+  OBO_POOL_DEFAULTS,
+  STATEMENT_TIMEOUT_DEFAULT_MS,
+} from "./defaults";
 import {
   type EntityClient,
   type ExecutorFn,
@@ -163,6 +167,16 @@ function makeUserPoolRegistry(
     const statementTimeoutMs =
       config.statementTimeoutMs ?? STATEMENT_TIMEOUT_DEFAULT_MS;
     pool.on("connect", (client) => {
+      // Tag OBO conns in pg_stat_activity so operators can split SP vs OBO traffic.
+      client
+        .query(`SET application_name = '${APPLICATION_NAME}:obo'`)
+        .catch((err) => {
+          logger.error(
+            "Failed to set application_name on user pool connection for %s: %O",
+            tag,
+            err,
+          );
+        });
       client
         .query("SELECT set_config('app.user_id', $1, false)", [identity.email])
         .catch((err) => {

@@ -16,25 +16,21 @@ interface DriftCheckOptions {
   pool: Pool;
   schema: Schema;
   enabled?: boolean;
+  /** When true, swallow introspection errors instead of failing boot. */
+  tolerateIntrospectionFailure?: boolean;
   nodeEnv?: string;
   introspectFn?: typeof introspect;
 }
 
 /**
- * Compares the live database catalog against the convention-loaded schema.
+ * Compare the live catalog against the convention-loaded schema.
  *
- * Development only warns so local iteration can continue. Production fails
- * closed on fatal drift — `schema-only` (column/table declared but missing
- * in db) or `type-mismatch`. Additive drift (`live-only`: db has extra
- * tables/columns the code doesn't know about) is logged but does not block
- * boot, so blue/green and rolling deploys are not stalled by a forward-running
- * migration on the other side.
+ * Dev: warn only. Prod: fail closed on fatal drift (`schema-only` or
+ * `type-mismatch`); additive drift (`live-only`) is logged but allowed so
+ * blue/green deploys aren't stalled by forward-running migrations.
  *
- * Transient errors during introspection (network blips, the database briefly
- * unavailable during failover) are logged and treated as "drift unknown" —
- * boot continues so we don't trade a fail-closed safety net for an availability
- * regression. `setup()` still surfaces fatal config issues via its outer
- * try/catch.
+ * Transient introspection failures (failover, blips) are logged as
+ * "drift unknown" — boot continues to avoid trading safety for availability.
  */
 export async function checkDrift(
   options: DriftCheckOptions,
@@ -47,6 +43,15 @@ export async function checkDrift(
   try {
     live = await (options.introspectFn ?? introspect)(options.pool);
   } catch (err) {
+    const isProd = (options.nodeEnv ?? process.env.NODE_ENV) === "production";
+    // Fail closed in prod (Migration 4x #28) unless the caller opted in.
+    // Swallowing here would mask a missing-table migration as "no drift".
+    if (isProd && !options.tolerateIntrospectionFailure) {
+      throw new ConfigurationError(
+        "Database drift introspection failed; refusing to boot in production. Set tolerateSetupFailure to override.",
+        { cause: err instanceof Error ? err : undefined },
+      );
+    }
     logger.warn(
       "Drift check skipped — introspection failed (treating as drift-unknown): %O",
       err,
