@@ -50,6 +50,15 @@ const adminOnly: FilePolicy = (action, _resource, user) => {
   return true;
 };
 
+/**
+ * OBO demo policy: deny anything running as the SP (including the dev
+ * fallback when no `x-forwarded-access-token` is present). Only real
+ * end-users (`isServicePrincipal: false`) get through.
+ */
+const usersOnly: FilePolicy = (_action, _resource, user) => {
+  return user.isServicePrincipal !== true;
+};
+
 createApp({
   plugins: [
     server(),
@@ -82,6 +91,14 @@ createApp({
         write_only: { policy: files.policy.not(files.policy.publicRead()) },
         // no explicit policy → falls back to publicRead() + startup warning
         implicit: {},
+        // OBO demo volume — auth: "on-behalf-of-user" routes HTTP traffic
+        // through `runInUserContext` so SDK calls execute with the end
+        // user's access token. The `usersOnly` policy denies any traffic
+        // that wasn't authenticated via `x-forwarded-access-token`.
+        obo_demo: {
+          auth: "on-behalf-of-user",
+          policy: usersOnly,
+        },
       },
     }),
     jobs(),
@@ -241,6 +258,43 @@ createApp({
           identity: "user",
           xForwardedUser: req.header("x-forwarded-user") ?? null,
           results,
+        });
+      });
+
+      /**
+       * Per-volume OBO mode demo. Hits the `obo_demo` volume — configured
+       * with `auth: "on-behalf-of-user"` — to confirm:
+       *
+       * 1. With a forwarded user identity, HTTP routes execute the SDK
+       *    call as the end user (request goes through `runInUserContext`).
+       * 2. Without `x-forwarded-access-token`, production returns 401;
+       *    development falls back to the SP and the `usersOnly` policy
+       *    rejects with 403.
+       * 3. Programmatic `appkit.files("obo_demo").asUser(req).list()` runs
+       *    inside the same user context.
+       *
+       * Returns the HTTP status, body, and the user identity the server
+       * observes — so the policy-matrix client can render a clear
+       * pass/fail panel.
+       */
+      app.get("/policy/obo-volume", async (req, res) => {
+        const xForwardedUser = req.header("x-forwarded-user") ?? null;
+        const xForwardedToken =
+          (req.header("x-forwarded-access-token")?.length ?? 0) > 0;
+
+        const programmatic: ProbeResult[] = await runProbes([
+          [
+            "obo_demo",
+            "list",
+            () => appkit.files("obo_demo").asUser(req).list(),
+          ],
+        ]);
+
+        res.json({
+          mode: "on-behalf-of-user",
+          xForwardedUser,
+          xForwardedAccessTokenPresent: xForwardedToken,
+          programmatic,
         });
       });
     });
