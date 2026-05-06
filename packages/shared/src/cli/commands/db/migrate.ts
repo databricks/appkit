@@ -41,10 +41,9 @@ export const migrateCommand = new Command("migrate")
   );
 
 /**
- * Apply pending migrations under a Postgres session-level advisory lock so
- * two concurrent deploys cannot race the same migration. The lock is held on
- * the migration client for the lifetime of the migrator; a second runner
- * blocks on its own `pg_advisory_lock` call until the first releases.
+ * Apply pending migrations under a session-level advisory lock so two
+ * concurrent deploys can't race. A second runner blocks on its own
+ * `pg_advisory_lock` until the first releases.
  */
 export async function migrateUp(
   opts: { dryRun?: boolean } = {},
@@ -67,9 +66,8 @@ export async function migrateUp(
       try {
         await setMigrationSearchPath(client);
         console.log(bullet("Applying migrations with drizzle-orm migrator"));
-        // drizzle-orm typings expect a `pg` PoolClient; the LakebaseClient shape
-        // we expose is structurally compatible at runtime. Use `never` to opt out
-        // of the strict positional typing.
+        // LakebaseClient is structurally pg.PoolClient at runtime; cast `never`
+        // to bypass drizzle-orm's strict positional typing.
         const db = drizzle(client as never);
         await migrate(db, { migrationsFolder: paths.migrationsDir });
       } finally {
@@ -83,8 +81,7 @@ export async function migrateUp(
 }
 
 async function acquireMigrationLock(client: LakebaseClient): Promise<void> {
-  // pg_try_advisory_lock + bounded retry so a wedged CI session can't block
-  // follow-on deploys forever.
+  // try_advisory_lock + bounded retry so a wedged CI session can't block forever.
   const LOCK_TIMEOUT_MS = 10 * 60 * 1000;
   const LOCK_RETRY_MS = 5_000;
   const lockDeadline = Date.now() + LOCK_TIMEOUT_MS;
@@ -110,33 +107,34 @@ async function releaseMigrationLock(client: LakebaseClient): Promise<void> {
       `SELECT pg_advisory_unlock(hashtext('${ADVISORY_LOCK_NAME}'))`,
     );
   } catch (error) {
+    // Surface as a real failure with the recovery hint — a stuck lock blocks
+    // every subsequent deploy. New users won't know to look at pg_locks.
     console.error(
       warn(
-        `Failed to release migration advisory lock: ${(error as Error).message}`,
+        `Failed to release migration advisory lock: ${(error as Error).message}\n` +
+          `  → Run \`SELECT pg_advisory_unlock_all()\` from a fresh psql session, ` +
+          `or check pg_locks for the stuck owner.`,
       ),
     );
   }
 }
 
 /**
- * Check out a dedicated client when the pool supports it; fall back to running
- * statements directly on the pool otherwise.
- *
- * Migrations need a single connection so `SET search_path` and the migrator's
- * `BEGIN/COMMIT` see the same session state.
+ * Dedicated client: `SET search_path`, the advisory lock, and BEGIN/COMMIT
+ * MUST share one session — running through the pool would scatter them.
  */
 async function getMigrationClient(pool: LakebasePool): Promise<LakebaseClient> {
-  if (pool.connect) return pool.connect();
-  return {
-    query: pool.query,
-    release: undefined,
-  };
+  if (!pool.connect) {
+    throw new Error(
+      "Migration pool must support `connect()` so the advisory lock, search_path, and migrations share one session.",
+    );
+  }
+  return pool.connect();
 }
 
 /**
- * Pin the migration session to the schema declared by the user so that the
- * generated CREATE TABLE statements (which use unqualified names) land in the
- * right schema instead of falling back to `public`.
+ * Pin the session to the declared schema so unqualified CREATE TABLE statements
+ * land there instead of falling back to `public`.
  */
 async function setMigrationSearchPath(client: LakebaseClient): Promise<void> {
   const schemaName = await getDeclaredSchemaName();
@@ -155,7 +153,15 @@ async function getDeclaredSchemaName(): Promise<string | null> {
 
   const { schemaToIntrospection } = await loadIntrospector();
   const schemas = schemaToIntrospection(schema).schemas;
-  return schemas.length === 1 ? schemas[0] : null;
+  if (schemas.length === 1) return schemas[0];
+  if (schemas.length > 1) {
+    console.warn(
+      warn(
+        `Schema declares ${schemas.length} schemas (${schemas.join(", ")}); skipping search_path. Tables will land in the migrator default — pin the schema explicitly to avoid surprises.`,
+      ),
+    );
+  }
+  return null;
 }
 
 function quoteIdentifier(value: string): string {
@@ -183,9 +189,7 @@ export async function migrateStatus(): Promise<void> {
         console.log(`[applied] ${row.created_at} ${row.hash}`);
       }
     } catch (error) {
-      // First-time invocation: the drizzle bookkeeping schema does not exist
-      // yet. Treat it as "no migrations applied" rather than surfacing a
-      // confusing internal-state error.
+      // First run: drizzle bookkeeping schema doesn't exist yet → "no migrations".
       if (
         error instanceof Error &&
         /drizzle\.__drizzle_migrations|does not exist/i.test(error.message)
@@ -210,19 +214,22 @@ export async function migrateReset(): Promise<void> {
 }
 
 /**
- * Drop every app table in the target schema and the Drizzle bookkeeping
- * schema. Used by `db init --from reset` to wipe a dev branch before
- * re-applying `schema.ts` from scratch.
- *
- * Dev-only: refuses in `NODE_ENV=production`. Dev branches are per-user
- * clones that can be recreated cheaply via `db init`, so no additional
- * confirm prompt is layered on top of the mode select.
+ * Drop every app table + the drizzle bookkeeping schema. Used by
+ * `db init --from reset` to wipe a dev branch before re-applying schema.ts.
+ * Dev-only — refuses in `NODE_ENV=production`.
  */
 export async function dropAllAppTables(options: {
   schema: string;
+  /** Defense-in-depth so a future caller can't bypass `confirmReset`. */
+  allowDestructive?: boolean;
 }): Promise<void> {
   if (process.env.NODE_ENV === "production") {
     throw new Error("db init --from reset is forbidden in production.");
+  }
+  if (!options.allowDestructive) {
+    throw new Error(
+      "dropAllAppTables refused: caller must pass allowDestructive=true (db init --from reset wires this through confirmReset).",
+    );
   }
 
   await withLakebasePool(async (pool) => {
@@ -232,19 +239,39 @@ export async function dropAllAppTables(options: {
     );
     if (result.rows.length === 0) {
       console.log(check(`No tables to drop in schema "${options.schema}".`));
-    } else {
+      await pool.query("DROP SCHEMA IF EXISTS drizzle CASCADE");
+      console.log(check("Dropped drizzle migration metadata schema."));
+      return;
+    }
+    // Wrap all drops in a transaction — partial failure leaves the DB
+    // half-dropped otherwise, which makes the dev branch unrecoverable
+    // without manually finishing the wipe.
+    if (!pool.connect) {
+      throw new Error(
+        "Reset requires `pool.connect` so drops can run in a single transaction.",
+      );
+    }
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
       for (const row of result.rows) {
-        await pool.query(
+        await client.query(
           `DROP TABLE IF EXISTS ${quoteIdentifier(options.schema)}.${quoteIdentifier(row.tablename)} CASCADE`,
         );
       }
-      console.log(
-        check(
-          `Dropped ${result.rows.length} table(s) in schema "${options.schema}".`,
-        ),
-      );
+      await client.query("DROP SCHEMA IF EXISTS drizzle CASCADE");
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release?.();
     }
-    await pool.query("DROP SCHEMA IF EXISTS drizzle CASCADE");
+    console.log(
+      check(
+        `Dropped ${result.rows.length} table(s) in schema "${options.schema}".`,
+      ),
+    );
     console.log(check("Dropped drizzle migration metadata schema."));
   });
 }

@@ -1,37 +1,30 @@
 /**
  * `appkit db init` — one-command Lakebase onboarding.
  *
- * Both flows always create or reuse a per-user dev branch (cloned from the
- * project's default branch) and write `.env` so the database plugin can
- * connect. What differs is the direction of the schema sync that follows:
+ * Always creates or reuses a per-user dev branch and writes `.env`. The
+ * schema sync direction differs by mode:
+ *   - migrate:    schema.ts → branch (generate + apply, optional seed).
+ *   - introspect: branch → schema.ts (then verify).
+ *   - reset:      drop all app tables, then migrate.
  *
- *   - migrate:    schema.ts is the source of truth.
- *                 Generates + applies a migration so the live branch matches
- *                 schema.ts. Optionally runs seed.sql.
- *   - introspect: the live branch is the source of truth.
- *                 Writes schema.ts from the live tables, then verifies that
- *                 schema.ts matches the live state.
+ * Auto-detect picks `migrate` for empty schemas, `introspect` otherwise.
+ * Pass `--from` to override.
  *
- * Auto-detect picks `migrate` when the target schema has zero tables and
- * `introspect` when it has any. Pass `--from migrate|introspect` to override.
- *
- * Calls the Databricks CLI for Lakebase resource lookups (profiles, projects,
- * branches, endpoints, databases). Reuses existing `setupDev`, `runIntrospect`,
- * and `verifyDatabase` runners as the underlying primitives.
- *
- * Architecture: a thin top-level `runInit` orchestrator delegates to named
- * phase helpers (`pickWorkspace`, `resolveDevBranch`, `resolveLakebaseResources`,
- * `applyEnvUpdates`, `resolveMode`, `delegate`). Phases are kept inside this
- * single file per the implementation tracker spec, but each is independently
- * testable through the `RunInitDeps` injection point.
+ * Phase helpers (pickWorkspace, resolveDevBranch, …) are testable via the
+ * `RunInitDeps` injection point.
  */
 
 import crypto from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import {
   autocomplete,
-  cancel,
   confirm,
   intro,
   isCancel,
@@ -62,17 +55,9 @@ import { verifyDatabase } from "./verify";
 /* ============================================================ */
 
 /**
- * Direction of the schema sync that follows the workspace + branch + .env
- * setup. Names mirror the underlying CLI commands so the user sees exactly
- * which primitives `db init` is going to compose.
- *
- * - `migrate`: generate + apply a migration so the live branch matches schema.ts.
- * - `introspect`: write schema.ts from the live tables.
- * - `reset`: drop every app table in the branch, then fall through to the
- *   migrate flow. Intended for dev branches whose schema has diverged from
- *   `schema.ts` and should be re-created from scratch. Cheap and reversible
- *   because dev branches are per-user clones of the project's default
- *   branch — `db init` can always recreate the state.
+ * Schema sync direction. Names mirror the underlying CLI commands.
+ * `reset` drops every app table then falls through to migrate — safe on
+ * dev branches because they're per-user clones that `db init` can recreate.
  */
 export type InitMode = "migrate" | "introspect" | "reset";
 
@@ -92,51 +77,32 @@ export interface RunInitOptions {
   from?: InitMode;
   schema?: string;
   seed?: boolean;
-  /** Skip every confirmation prompt and refuse when a default is unavailable. */
+  /** Skip every confirmation prompt; refuse when a default is unavailable. */
   yes?: boolean;
-  /**
-   * Print the env-diff plus the resolved mode and stop without writing `.env`,
-   * dropping tables, or running the migrate/introspect flow. Pairs with `--yes`
-   * to surface what a non-interactive run would do in CI.
-   */
+  /** Print env-diff and mode, then stop. Use with `--yes` to preview a CI run. */
   dryRun?: boolean;
+  /** Required with `--yes` for `--from reset`; otherwise the wipe refuses. */
+  allowDestructive?: boolean;
   /** Override the project root used to resolve `.env` and `config/database/`. */
   cwd?: string;
 }
 
 export type EnvWriter = (envPath: string, updates: EnvUpdates) => void;
 
-/**
- * Injection points used by tests so `runInit` can be exercised end-to-end
- * without contacting Databricks, hitting Lakebase, or mutating the developer's
- * `.env` and `process.env`.
- */
+/** Injection points so tests can run `runInit` without touching Databricks, Lakebase, or `.env`. */
 export interface RunInitDeps {
-  /** Replace the Databricks CLI runner. */
   databricksCli?: CliRunner;
-  /** Replace the table-count probe used to auto-detect migrate vs introspect. */
+  /** Probe used to auto-detect migrate vs introspect. */
   probeTableCount?: (schema: string) => Promise<number>;
-  /** Replace `setupDev` (the migrate-flow runner). */
   setupDev?: typeof setupDev;
-  /** Replace `runIntrospect` (the introspect-flow runner). */
   runIntrospect?: typeof runIntrospect;
-  /** Replace `verifyDatabase` (post-introspect validator). */
   verifyDatabase?: typeof verifyDatabase;
-  /**
-   * Replace the schema loader used by the migrate/reset preflight to detect
-   * "file exists but declares no tables". Defaults to the real `loadSchemaFile`
-   * from `./shared`. Tests inject a fake so fixtures don't need real Drizzle
-   * tables.
-   */
+  /** Lets tests skip the "file exists but declares no tables" preflight without real Drizzle tables. */
   loadSchemaFile?: (schemaFile: string) => Promise<unknown>;
-  /**
-   * Replace `dropAllAppTables` used by the `reset` flow. Defaults to the real
-   * implementation from `./migrate` that hits the live pool.
-   */
   dropAllAppTables?: typeof dropAllAppTables;
-  /** Replace the `.env` writer. Defaults to file write + `process.env` mutation. */
+  /** Defaults to file write + `process.env` mutation. */
   applyEnvUpdates?: EnvWriter;
-  /** Whether stdin is interactive. Defaults to `process.stdin.isTTY === true`. */
+  /** Defaults to `process.stdin.isTTY === true`. */
   isInteractive?: () => boolean;
 }
 
@@ -145,9 +111,8 @@ export interface RunInitDeps {
 /* ============================================================ */
 
 /**
- * Env keys this command owns. Anything outside this list is preserved verbatim
- * in `.env`. Increment-only — removing a key here is a breaking change for
- * apps that already source `.env` and rely on the variable.
+ * Env keys this command owns; keys outside this list are preserved verbatim.
+ * Increment-only — removing a key is breaking for apps already sourcing `.env`.
  */
 export const OWNED_ENV_KEYS = [
   "DATABRICKS_HOST",
@@ -166,7 +131,7 @@ export type EnvUpdates = Partial<Record<OwnedEnvKey, string>>;
 const PG_PORT = "5432";
 const PG_SSLMODE = "require";
 
-/** Length of the autocomplete-vs-select threshold for prompt UX. */
+/** Switch from plain select to autocomplete once the choice list grows past this. */
 const PROMPT_AUTOCOMPLETE_THRESHOLD = 8;
 
 /* ============================================================ */
@@ -238,9 +203,8 @@ interface ResolvedWorkspace {
 }
 
 /**
- * Pick the Databricks profile and Lakebase project, returning them along with
- * the profile's host URL. Combined into one phase so we list profiles once
- * (instead of once for the prompt and once again later for the host).
+ * Pick profile + project and return them with the profile's host URL.
+ * Combined so we list profiles once instead of twice (prompt + host lookup).
  */
 async function pickWorkspace(
   cli: CliRunner,
@@ -336,8 +300,7 @@ async function promptChoice(
   message: string,
   choices: Array<{ value: string; label: string; hint?: string }>,
 ): Promise<string> {
-  // Workspaces with many profiles/projects benefit from typing-to-filter once
-  // the list grows past a small threshold; below that, a plain select is fine.
+  // Long lists benefit from type-to-filter; short lists don't.
   const useAutocomplete = choices.length > PROMPT_AUTOCOMPLETE_THRESHOLD;
   const choice = useAutocomplete
     ? await autocomplete({
@@ -356,11 +319,11 @@ async function promptChoice(
 /* ============================================================ */
 
 interface ResolvedBranch {
-  /** Short id used to address the branch in CLI commands (`dev-{slug}-{hash}`). */
+  /** Short id used in CLI commands (`dev-{slug}-{hash}`). */
   id: string;
-  /** Resource name returned by Lakebase (`projects/foo/branches/dev-...`). */
+  /** Lakebase resource name (`projects/foo/branches/dev-...`). */
   fullName: string;
-  /** Whether we created the branch on this run, vs. reused an existing one. */
+  /** True when created on this run; false when reused. */
   created: boolean;
 }
 
@@ -429,11 +392,7 @@ interface ResolvedResources {
   database: DatabaseSummary;
 }
 
-/**
- * Fetch endpoint and database concurrently — they are independent reads
- * keyed by the same branch resource name and each is a ~500ms shellout to
- * the Databricks CLI.
- */
+/** Fetch endpoint + database in parallel; each is a ~500ms CLI shellout. */
 async function resolveLakebaseResources(
   cli: CliRunner,
   profile: string,
@@ -475,22 +434,21 @@ function buildEnvUpdates(input: {
 }
 
 /**
- * Default env writer: persists to disk AND mirrors into `process.env` so the
- * follow-on phases (`probeTableCount`, `setupDev`, `runIntrospect`,
- * `verifyDatabase`) see the just-written values without requiring the user to
- * source the file or re-invoke the command.
- *
- * Tests typically pass a stub via `RunInitDeps.applyEnvUpdates` to keep the
- * mutation out of the test process's globals.
+ * Persist to disk and mirror into `process.env` so follow-on phases
+ * (`probeTableCount`, `setupDev`, …) see the new values without re-sourcing.
  */
 function defaultApplyEnvUpdates(envPath: string, updates: EnvUpdates): void {
-  // Back up the previous `.env` to `.env.bak` so a botched run is recoverable.
+  // Snapshot the prior `.env` to `.env.bak.<ms>` (chmod 0600 in case it had secrets).
   if (existsSync(envPath)) {
     try {
       const previous = readFileSync(envPath, "utf8");
-      writeFileSync(`${envPath}.bak`, previous, "utf8");
+      const bakPath = `${envPath}.bak.${Date.now()}`;
+      writeFileSync(bakPath, previous, { encoding: "utf8", mode: 0o600 });
+      try {
+        chmodSync(bakPath, 0o600);
+      } catch {}
     } catch (err) {
-      // Non-fatal: surface the failure so the user knows to back up manually.
+      // Non-fatal: warn so the user can back up manually.
       console.warn(
         warn(
           `Could not write .env.bak (${(err as Error).message}); proceeding anyway`,
@@ -508,9 +466,8 @@ function defaultApplyEnvUpdates(envPath: string, updates: EnvUpdates): void {
 }
 
 /**
- * Print a per-key plan ("ADD", "CHANGE", "KEEP") of the pending env update so
- * the user can spot a host or endpoint typo before it lands. Values for known
- * non-secret keys are printed verbatim; everything else is masked.
+ * Print a per-key ADD/CHANGE/KEEP plan so the user can catch typos before
+ * the write lands. Owned-key values are shown verbatim (none are secrets).
  */
 function printEnvDiff(envPath: string, updates: EnvUpdates, cwd: string): void {
   const existing: Partial<Record<OwnedEnvKey, string>> = {};
@@ -520,9 +477,10 @@ function printEnvDiff(envPath: string, updates: EnvUpdates, cwd: string): void {
       const match = ENV_KEY_PATTERN.exec(line);
       const key = match?.[1];
       if (!key) continue;
-      const value = line.slice(line.indexOf("=") + 1);
+      // Last-wins matches dotenv loader semantics; previous KEEP/CHANGE diff
+      // would otherwise contradict what the runtime ends up with.
       if ((OWNED_ENV_KEYS as readonly string[]).includes(key)) {
-        existing[key as OwnedEnvKey] = value;
+        existing[key as OwnedEnvKey] = parseEnvValue(line);
       }
     }
   }
@@ -538,16 +496,28 @@ function printEnvDiff(envPath: string, updates: EnvUpdates, cwd: string): void {
 }
 
 /**
- * Require the operator to type the dev branch name before dropping every app
- * table in `--from reset`. Skipped under `--yes` (CI mode); skipped when stdin
- * isn't interactive because there's no way to ask.
+ * Require the user to type the branch name before reset drops every table.
+ * Under `--yes`, the typed-name check is replaced by `--allow-destructive`
+ * so a fat-fingered command can't silently wipe a branch.
  */
 async function confirmReset(
   branch: string,
   options: RunInitOptions,
   interactive: boolean,
 ): Promise<void> {
-  if (options.yes || !interactive) return;
+  if (options.yes) {
+    if (!options.allowDestructive) {
+      throw new Error(
+        `Reset refused: --from reset --yes requires --allow-destructive (would drop every table in "${branch}").`,
+      );
+    }
+    return;
+  }
+  if (!interactive) {
+    throw new Error(
+      `Reset refused: non-interactive shell. Re-run with --yes --allow-destructive to confirm dropping every table in "${branch}".`,
+    );
+  }
   console.log();
   console.log(warn(`Reset will DROP every table in branch "${branch}".`));
   const typed = await text({
@@ -555,8 +525,7 @@ async function confirmReset(
     placeholder: branch,
   });
   if (isCancel(typed) || String(typed).trim() !== branch) {
-    cancel("Reset aborted: branch name did not match.");
-    process.exit(1);
+    throw new Error("Reset aborted: branch name did not match.");
   }
 }
 
@@ -569,8 +538,7 @@ async function resolveMode(
   probeTableCount: (schema: string) => Promise<number>,
   interactive: boolean,
 ): Promise<InitMode> {
-  // Explicit --from short-circuits the probe + prompt and is honored verbatim
-  // (no auto-pivot to the other mode based on probe results).
+  // Explicit --from short-circuits the probe; no auto-pivot.
   if (options.from) return options.from;
 
   const schemaName = options.schema ?? "public";
@@ -669,7 +637,10 @@ async function delegateToFlow(
     if (mode === "reset") {
       const schemaName = options.schema ?? "public";
       console.log(bullet(`Dropping all tables in schema "${schemaName}"`));
-      await fns.dropAllAppTables({ schema: schemaName });
+      await fns.dropAllAppTables({
+        schema: schemaName,
+        allowDestructive: true,
+      });
     }
 
     const seedFile = path.join(paths.configDir, "seed.sql");
@@ -684,19 +655,9 @@ async function delegateToFlow(
 }
 
 /**
- * Gate the migrate/reset flow on a usable `config/database/schema.ts`.
- *
- * Two soft-fail cases where we want guidance, not a thrown stack trace:
- *   - No schema file: print a starter snippet and stop. This is the
- *     greenfield "I just ran db init" case — the user hasn't written any
- *     tables yet. Throwing here would make `db init` feel unsafe to
- *     re-run as a discovery step.
- *   - File exists but declares no tables: print the "add a table" hint
- *     and stop before `generateMigration` throws its internal "does not
- *     define any tables" error.
- *
- * Any other error from `loadSchemaFile` (invalid export, bad syntax) is
- * allowed to propagate — that's a real authoring bug the user should see.
+ * Soft-fail with guidance (not a stack trace) when schema.ts is missing or
+ * declares no tables. Real authoring bugs (bad syntax, invalid export) still
+ * propagate.
  */
 async function preflightMigrate(
   paths: ReturnType<typeof databasePaths>,
@@ -748,13 +709,9 @@ async function resolveSeedChoice(
 ): Promise<boolean> {
   const seedExists = existsSync(seedFile);
 
-  // `--no-seed`: honored verbatim regardless of the file.
   if (options.seed === false) return false;
 
-  // `--seed` with no file: warn and skip instead of crashing downstream in
-  // runSeed when it tries to `readFile(seedFile)`. The seed step is
-  // optional; we'd rather complete `db init` successfully and let the user
-  // create seed.sql later.
+  // `--seed` without seed.sql: warn and skip rather than crash in runSeed.
   if (options.seed === true && !seedExists) {
     console.log(
       warn(
@@ -764,13 +721,8 @@ async function resolveSeedChoice(
     return false;
   }
 
-  // `--seed` with file: honor verbatim.
   if (options.seed === true) return true;
-
-  // No explicit flag + no file: nothing to seed, silently skip.
   if (!seedExists) return false;
-
-  // Non-interactive + file present: default to seed (matches prior behavior).
   if (!interactive) return true;
 
   const choice = await confirm({
@@ -786,12 +738,9 @@ async function resolveSeedChoice(
 /* ============================================================ */
 
 /**
- * Run `fn` with a clack spinner that always closes — including when `fn`
- * throws. Without this wrapper a thrown error would leave the cursor hidden
- * and the spinner animating in the user's terminal until they reset it.
- *
- * `successMessage` may be a static string or a function of the resolved value
- * so call sites can include data from the result (e.g. "Found 3 branches").
+ * Run `fn` with a clack spinner that always closes (even on throw), so a
+ * crash can't leave the cursor hidden and the spinner animating.
+ * `successMessage` may be a function of the resolved value.
  */
 async function withSpinner<T>(
   startMessage: string,
@@ -818,7 +767,7 @@ async function withSpinner<T>(
 /* Databricks CLI shellouts                                      */
 /* ============================================================ */
 
-/** Shape of every Databricks CLI invocation. Args do NOT include `databricks` itself. */
+/** Shape of every Databricks CLI invocation. Args exclude the `databricks` binary. */
 export type CliRunner = (args: string[]) => Promise<unknown>;
 
 interface ProfileSummary {
@@ -832,9 +781,9 @@ interface ProjectSummary {
 }
 
 interface BranchSummary {
-  /** Resource name as returned by Lakebase: `projects/foo/branches/main`. */
+  /** Lakebase resource name (`projects/foo/branches/main`). */
   name: string;
-  /** Last path segment, used to address the branch in subsequent CLI calls. */
+  /** Last path segment; used to address the branch in CLI calls. */
   id: string;
   isDefault: boolean;
 }
@@ -851,19 +800,17 @@ interface DatabaseSummary {
 
 interface UserSummary {
   id: string;
-  /** Stable, human-friendly identifier used to derive a deterministic branch slug. */
+  /** Stable identifier used to derive the dev branch slug. */
   principal: string;
-  /** Postgres role name (typically the user's email). Goes straight to PGUSER. */
+  /** Postgres role name (typically the email); written verbatim to PGUSER. */
   userName: string;
 }
 
 /**
- * Default Databricks CLI runner: invokes the user's `databricks` binary and
- * parses the JSON response.
+ * Invoke the user's `databricks` binary and parse the JSON response.
  *
- * `--output json` controls the *response* format and is orthogonal to the
- * `--json <body>` flag that some commands use to pass a *request* body. Both
- * may appear in the same invocation (e.g. `create-branch`).
+ * `--output json` (response format) is independent of `--json <body>`
+ * (request body); both can appear in the same call (e.g. `create-branch`).
  */
 async function defaultDatabricksCli(args: string[]): Promise<unknown> {
   const fullArgs = [...args, "--output", "json"];
@@ -986,14 +933,9 @@ async function listBranches(
 }
 
 /**
- * Create a per-user dev branch by cloning the project's default branch.
- *
- * `no_expiry: true` is intentional for dev branches: `db init` cannot predict
- * how long the user will keep the branch around, and the alternative
- * (`expire_at`) would silently delete branches mid-development. Users who
- * want a TTL can `databricks postgres delete-branch` when they're done, or
- * pass an explicit body via `databricks postgres create-branch --json` by
- * hand.
+ * Clone the project's default branch into a per-user dev branch.
+ * `no_expiry: true` avoids silent mid-development deletion; users who want
+ * a TTL can `databricks postgres delete-branch` manually.
  */
 async function createBranch(
   cli: CliRunner,
@@ -1027,12 +969,9 @@ async function createBranch(
 }
 
 /**
- * Resolve the read-write endpoint for a branch.
- *
- * `db init` always needs write access (to apply migrations or write rows),
- * so we explicitly require an `ENDPOINT_TYPE_READ_WRITE`. Falling back to
- * the first endpoint silently would let `setupDev` run a few statements
- * before failing with a confusing "permission denied" deep in pg.
+ * Resolve the read-write endpoint. We require `ENDPOINT_TYPE_READ_WRITE`
+ * explicitly so a silent fallback to a read-only endpoint can't surface as
+ * a confusing pg "permission denied" mid-migration.
  */
 async function getEndpoint(
   cli: CliRunner,
@@ -1096,6 +1035,23 @@ async function getDatabase(
 
 const ENV_KEY_PATTERN = /^([A-Z][A-Z0-9_]*)=/;
 
+/**
+ * Read a `.env` line's value, stripping surrounding double or single quotes
+ * and trailing carriage returns (Windows). Used by `printEnvDiff` so re-runs
+ * don't show spurious "CHANGE" diffs on hand-quoted values or CRLF files.
+ */
+function parseEnvValue(line: string): string {
+  let value = line.slice(line.indexOf("=") + 1);
+  if (value.endsWith("\r")) value = value.slice(0, -1);
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    value = value.slice(1, -1);
+  }
+  return value;
+}
+
 function writeEnvKeys(envPath: string, updates: EnvUpdates): void {
   const remaining = new Map<string, string>();
   for (const [key, value] of Object.entries(updates)) {
@@ -1103,16 +1059,26 @@ function writeEnvKeys(envPath: string, updates: EnvUpdates): void {
   }
   const existing = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
   const lines = existing === "" ? [] : existing.split(/\r?\n/);
-  // Drop a single trailing empty line so we don't double-newline before appending.
+  // Drop trailing empty line to avoid double-newline on append.
   if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
 
+  // Track which keys we've written so duplicate KEY= lines collapse — dotenv
+  // loads the last occurrence; if we replace only the first, the runtime gets
+  // a different value than the diff promised.
+  const written = new Set<string>();
   const out: string[] = [];
   for (const line of lines) {
     const match = ENV_KEY_PATTERN.exec(line);
     const key = match?.[1];
     if (key && remaining.has(key)) {
-      out.push(`${key}=${remaining.get(key) ?? ""}`);
-      remaining.delete(key);
+      if (!written.has(key)) {
+        out.push(`${key}=${remaining.get(key) ?? ""}`);
+        written.add(key);
+        remaining.delete(key);
+      }
+      // Skip subsequent lines for the same owned key (dedupe).
+    } else if (key && written.has(key)) {
+      // Drop duplicate of an owned key we already wrote.
     } else {
       out.push(line);
     }
@@ -1121,7 +1087,13 @@ function writeEnvKeys(envPath: string, updates: EnvUpdates): void {
     out.push(`${key}=${value}`);
   }
   out.push("");
-  writeFileSync(envPath, out.join("\n"), "utf8");
+  // tmp + rename: POSIX-atomic so Ctrl-C can't truncate `.env`.
+  const tmpPath = `${envPath}.tmp.${process.pid}.${Date.now()}`;
+  writeFileSync(tmpPath, out.join("\n"), { encoding: "utf8", mode: 0o600 });
+  try {
+    chmodSync(tmpPath, 0o600);
+  } catch {}
+  renameSync(tmpPath, envPath);
 }
 
 /* ============================================================ */
@@ -1129,15 +1101,9 @@ function writeEnvKeys(envPath: string, updates: EnvUpdates): void {
 /* ============================================================ */
 
 /**
- * Pick a stable, human-friendly identifier from the user-info payload.
- *
- * Order matters and is intentional:
- *   1. Email local-part — short, stable, almost always present for SSO users.
- *   2. userName — falls through for service principals that lack email but
- *      still have a workspace-scoped username.
- *   3. displayName — last-resort fallback for very minimal user records.
- *   4. Literal `"user"` — guarantees a non-empty string so we never emit a
- *      branch named `dev--abc123`.
+ * Pick a stable identifier in this order: email local-part → userName →
+ * displayName → `"user"`. The literal fallback guarantees a non-empty slug
+ * (no `dev--abc123`).
  */
 function pickPrincipal(input: {
   userName?: string;
@@ -1164,13 +1130,9 @@ export function slugifyPrincipal(principal: string): string {
 }
 
 /**
- * 32-bit (8 hex char) prefix of a SHA-256 of the Databricks user id.
- *
- * This is a *naming* component, not a security primitive. Collision domain is
- * "users in the same Lakebase project", and the consequence of a collision is
- * "two users would share a dev branch" — Lakebase auth still applies, no data
- * leakage. 8 hex chars (1 in 4 billion) keeps branch names readable while
- * making accidental collision in any realistic team size effectively zero.
+ * 8 hex chars of SHA-256(user id). Naming only, not security: a collision
+ * just means two users share a dev branch (Lakebase auth still applies).
+ * 1-in-4B is enough for any realistic team size.
  */
 export function shortHash(id: string): string {
   return crypto.createHash("sha256").update(id).digest("hex").slice(0, 8);
@@ -1188,13 +1150,9 @@ function defaultIsInteractive(): boolean {
 }
 
 /**
- * Probe whether the target schema already has tables. Used to suggest
- * `migrate` (empty schema → push schema.ts to DB) vs. `introspect` (populated
- * schema → pull DB into schema.ts) without forcing the user to pick `--from`.
- *
- * Counts via `pg_catalog.pg_tables`, which excludes views, materialized views,
- * foreign tables, and partitions — that matches the heuristic intent: we want
- * "ordinary tables a migration might create or conflict with".
+ * Count tables in the target schema to suggest migrate (empty) vs introspect
+ * (populated). Uses `pg_catalog.pg_tables` to exclude views, materialized
+ * views, foreign tables, and partitions — only ordinary tables count.
  */
 async function defaultProbeTableCount(schemaName: string): Promise<number> {
   const pool: LakebasePool | null = await openLakebasePool();
@@ -1210,7 +1168,7 @@ async function defaultProbeTableCount(schemaName: string): Promise<number> {
     return typeof value === "number" ? value : Number(value);
   } finally {
     await pool.end().catch(() => {
-      /* swallow: do not mask the original error */
+      /* swallow so we don't mask the original error */
     });
   }
 }
@@ -1225,18 +1183,22 @@ export const initCommand = new Command("init")
   .option("--project <name>", "Lakebase project resource name")
   .option(
     "--from <action>",
-    "Setup action: migrate | introspect | reset (default: auto-detect)",
+    "Setup action: migrate | introspect | reset — `reset` is destructive (drops every app table); default auto-detects",
   )
   .option("--schema <name>", "Target Postgres schema (default: public)")
   .option(
     "--seed",
-    "Run config/database/seed.sql after migration (migrate only)",
+    "Run config/database/seed.sql after migration (no-op when seed.sql is missing; migrate only)",
   )
   .option("--no-seed", "Skip seed.sql even if present (migrate only)")
   .option("--yes", "Run non-interactively; require flags for ambiguous choices")
   .option(
     "--dry-run",
-    "Print env-diff and resolved mode without writing .env or running the flow",
+    "Print env-diff and resolved mode without writing .env or running the flow (still requires a Lakebase connection)",
+  )
+  .option(
+    "--allow-destructive",
+    "Required with --yes for --from reset (otherwise the wipe refuses)",
   )
   .action((opts) =>
     runCommandAction(() =>
@@ -1245,21 +1207,19 @@ export const initCommand = new Command("init")
         project: opts.project ? String(opts.project) : undefined,
         from: parseFromOption(opts.from),
         schema: opts.schema ? String(opts.schema) : undefined,
-        // Commander turns --no-seed into seed=false; --seed into seed=true; no
-        // flag leaves seed undefined (so resolveSeedChoice can prompt or
-        // default per `--yes`).
+        // Commander: --no-seed → false, --seed → true, absent → undefined
+        // (so resolveSeedChoice can prompt or default per `--yes`).
         seed: opts.seed === undefined ? undefined : Boolean(opts.seed),
         yes: Boolean(opts.yes),
         dryRun: Boolean(opts.dryRun),
+        allowDestructive: Boolean(opts.allowDestructive),
       }),
     ),
   );
 
 /**
- * Validate `--from <action>` against the documented union before passing it
- * down. An unknown value (e.g. `--from forced` or a typo) used to be cast
- * silently to `InitMode`, which slipped through to `runInit` and only failed
- * later with a less obvious error.
+ * Validate `--from <action>` against the union so a typo (e.g. `--from forced`)
+ * fails loudly here rather than slipping into `runInit`.
  */
 function parseFromOption(value: unknown): InitMode | undefined {
   if (value === undefined || value === null || value === "") return undefined;

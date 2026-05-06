@@ -108,10 +108,8 @@ const DEFAULT_CREATE_BRANCH = {
 };
 
 /**
- * Build a fake Databricks CLI runner. Each call inspects the args and returns
- * the canned response for the matching subcommand. Strongly typed so a typo
- * in a fixture (e.g. `endpoint_typee`) fails to compile instead of silently
- * misbehaving at runtime.
+ * Fake Databricks CLI runner that returns a canned response per subcommand.
+ * Typed so a fixture typo (e.g. `endpoint_typee`) is a compile error.
  */
 function fakeCli(responses: FakeCliResponses = {}) {
   const tracked = vi.fn(async (args: string[]): Promise<unknown> => {
@@ -156,7 +154,7 @@ function mkTempProject(
   opts: { schema?: boolean; seed?: boolean } = {},
 ): TestEnv {
   const cwd = mkdtempSync(path.join(tmpdir(), "appkit-init-"));
-  // databasePaths() walks up from cwd until it finds package.json.
+  // databasePaths() walks up from cwd looking for package.json.
   writeFileSync(path.join(cwd, "package.json"), '{"name":"fixture"}');
   if (opts.schema) {
     const configDir = path.join(cwd, "config", "database");
@@ -180,9 +178,7 @@ let testEnv: TestEnv | undefined;
 let envSnapshot: Record<string, string | undefined>;
 
 beforeEach(() => {
-  // Snapshot the OWNED env keys so tests that go through the default writer
-  // don't bleed state into one another. Anything outside the owned set is
-  // left alone.
+  // Snapshot OWNED keys so the default writer can't bleed state between tests.
   envSnapshot = Object.fromEntries(
     OWNED_ENV_KEYS.map((key) => [key, process.env[key]]),
   );
@@ -199,13 +195,9 @@ afterEach(() => {
 });
 
 /**
- * Build deps with sane defaults plus an env-update collector and an
- * always-interactive `isInteractive`. Tests that need real `.env` writes can
- * override `applyEnvUpdates`.
- *
- * `loadSchemaFile` defaults to a fake that returns a non-empty `$tables` map
- * so the migrate/reset preflight passes without requiring tests to write a
- * real Drizzle schema. Tests that exercise the preflight can override this.
+ * Build deps with sane defaults: env-update collector, interactive=true, and
+ * a `loadSchemaFile` fake with non-empty `$tables` so the migrate preflight
+ * passes. Tests that exercise either path override the relevant field.
  */
 function makeDeps(
   overrides: Partial<RunInitDeps> & {
@@ -256,9 +248,8 @@ function makeDeps(
 }
 
 function scriptedOptions(extra: Partial<RunInitOptions> = {}): RunInitOptions {
-  // Always pass --profile, --project, --from, --cwd to skip every interactive
-  // prompt so tests stay deterministic and don't try to render @clack/prompts
-  // on a non-TTY stdin.
+  // Pass every flag that would otherwise prompt, so tests never render @clack
+  // on non-TTY stdin and stay deterministic.
   return {
     profile: "DEFAULT",
     project: "projects/foo",
@@ -341,9 +332,8 @@ describe("initCommand", () => {
   });
 
   test("commander parses --no-seed as seed=false; --seed as true; absent as undefined", async () => {
-    // Guards against a future Commander upgrade quietly changing this. We
-    // assert against `opts()` directly rather than re-running the action so
-    // we don't have to mock everything `runInit` touches.
+    // Guards against a future Commander upgrade silently changing this.
+    // Assert on opts() directly so we don't have to mock all of runInit.
     const cases: Array<[string[], boolean | undefined]> = [
       [[], undefined],
       [["--seed"], true],
@@ -391,8 +381,7 @@ describe("runInit — migrate flow", () => {
   });
 
   test("soft-fails gracefully when config/database/schema.ts is missing", async () => {
-    // Previously this threw; now the preflight prints a starter snippet and
-    // returns so the user can treat `db init` as a safe first-run command.
+    // Used to throw; now prints a starter snippet so `db init` is safe to re-run.
     testEnv = mkTempProject({ schema: false });
 
     const deps = makeDeps({ tableCount: 0 });
@@ -430,20 +419,27 @@ describe("runInit — reset flow", () => {
     testEnv = mkTempProject({ schema: true });
 
     const deps = makeDeps({});
-    // `--yes` skips the typed-branch confirmation; prod CI sets it the same way.
+    // `--yes` skips the typed-branch confirm (same flag CI uses).
     await runInit(
-      scriptedOptions({ from: "reset", seed: false, yes: true }),
+      scriptedOptions({
+        from: "reset",
+        seed: false,
+        yes: true,
+        allowDestructive: true,
+      }),
       deps,
     );
 
-    expect(deps.dropAllAppTables).toHaveBeenCalledWith({ schema: "public" });
+    expect(deps.dropAllAppTables).toHaveBeenCalledWith({
+      schema: "public",
+      allowDestructive: true,
+    });
     expect(deps.setupDev).toHaveBeenCalledWith({
       name: "init",
       seed: false,
       force: false,
     });
-    // dropAllAppTables must run BEFORE setupDev — ordering matters so we
-    // don't try to apply migrations on top of stale tables.
+    // dropAllAppTables MUST precede setupDev: we don't migrate over stale tables.
     const dropOrder = deps.dropAllAppTables.mock.invocationCallOrder[0];
     const setupOrder = deps.setupDev.mock.invocationCallOrder[0];
     expect(dropOrder).toBeLessThan(setupOrder);
@@ -459,18 +455,25 @@ describe("runInit — reset flow", () => {
         schema: "app",
         seed: false,
         yes: true,
+        allowDestructive: true,
       }),
       deps,
     );
 
-    expect(deps.dropAllAppTables).toHaveBeenCalledWith({ schema: "app" });
+    expect(deps.dropAllAppTables).toHaveBeenCalledWith({
+      schema: "app",
+      allowDestructive: true,
+    });
   });
 
   test("reset short-circuits on missing schema.ts (does NOT drop tables)", async () => {
     testEnv = mkTempProject({ schema: false });
 
     const deps = makeDeps({});
-    await runInit(scriptedOptions({ from: "reset", yes: true }), deps);
+    await runInit(
+      scriptedOptions({ from: "reset", yes: true, allowDestructive: true }),
+      deps,
+    );
 
     expect(deps.dropAllAppTables).not.toHaveBeenCalled();
     expect(deps.setupDev).not.toHaveBeenCalled();
@@ -483,7 +486,12 @@ describe("runInit — reset flow", () => {
       loadSchemaFile: vi.fn(async () => ({ $drizzle: {}, $tables: {} })),
     });
     await runInit(
-      scriptedOptions({ from: "reset", seed: false, yes: true }),
+      scriptedOptions({
+        from: "reset",
+        seed: false,
+        yes: true,
+        allowDestructive: true,
+      }),
       deps,
     );
 
@@ -510,7 +518,7 @@ describe("runInit — dry-run", () => {
 
 describe("runInit — seed gate", () => {
   test("--seed with missing seed.sql warns and skips instead of crashing", async () => {
-    // schema: true, seed: false on disk — but caller passes --seed=true.
+    // No seed.sql on disk, but caller passes --seed=true.
     testEnv = mkTempProject({ schema: true, seed: false });
 
     const deps = makeDeps({});
@@ -540,7 +548,7 @@ describe("runInit — seed gate", () => {
     testEnv = mkTempProject({ schema: true, seed: false });
 
     const deps = makeDeps({});
-    // Omit seed entirely (scriptedOptions defaults seed=false; strip it).
+    // scriptedOptions defaults seed=false; strip it to test "absent" path.
     const opts = scriptedOptions({ from: "migrate" });
     delete (opts as { seed?: unknown }).seed;
     await runInit(opts, deps);
@@ -665,7 +673,7 @@ describe("runInit — env writer", () => {
       "utf8",
     );
 
-    // Use the default writer (no override) so we exercise the real file path.
+    // No override → exercise the real file-path writer.
     const deps = makeDeps({ tableCount: 0 });
     deps.applyEnvUpdates = undefined as unknown as ReturnType<typeof vi.fn>;
     await runInit(scriptedOptions({ from: "migrate", seed: false }), {

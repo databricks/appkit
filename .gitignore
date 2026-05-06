@@ -3,6 +3,9 @@ build
 tmp
 node_modules
 .env
+.env.bak
+.env.bak.*
+.env.tmp.*
 
 coverage
 

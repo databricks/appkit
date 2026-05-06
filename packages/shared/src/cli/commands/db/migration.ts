@@ -31,7 +31,15 @@ export async function generateMigration(
     "--dialect",
     "postgresql",
   ];
-  if (options.name) args.push("--name", options.name);
+  if (options.name) {
+    // Drizzle-kit puts this in a filename; allowlist alphanumerics + `_-`.
+    if (!/^[a-zA-Z0-9_-]+$/.test(options.name)) {
+      throw new Error(
+        `Invalid --name "${options.name}"; allowed: letters, digits, '_', '-'.`,
+      );
+    }
+    args.push("--name", options.name);
+  }
 
   console.log(bullet(`drizzle-kit ${args.slice(1).join(" ")}`));
   await execa(process.execPath, [drizzleKitBinPath(), ...args.slice(1)], {
