@@ -208,12 +208,12 @@ Plugin initialization phase.
 ### abortActiveOperations()
 
 ```ts
-abortActiveOperations(): void;
+abortActiveOperations(): void | Promise<void>;
 ```
 
 #### Returns
 
-`void`
+`void` \| `Promise`\<`void`\>
 
 #### Implementation of
 
