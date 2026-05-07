@@ -78,10 +78,10 @@ export function appKitDatabaseTypesPlugin(
     },
 
     configResolved(config) {
-      // When Vite runs from client/ (cd client && vite build), the project
-      // root is the parent directory; when Vite runs from the app root the
-      // client/ is a subdir. Resolving from config.root handles both shapes.
-      projectRoot = path.resolve(config.root, "..");
+      const viteRoot = path.resolve(config.root);
+      projectRoot = fs.existsSync(path.resolve(viteRoot, SCHEMA_REL))
+        ? viteRoot
+        : path.resolve(viteRoot, "..");
       outFile = path.resolve(
         projectRoot,
         options.outFile ?? DATABASE_TYPES_FILE,
