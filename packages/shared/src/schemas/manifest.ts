@@ -7,13 +7,13 @@
  * be asserted before downstream consumers are migrated.
  *
  * - Phase 2: cross-field constraints (cycle/dangling-reference checks,
- *   `<PROFILE>` placeholder, post-scaffold instruction non-empty) are now
+ *   `<PROFILE>` placeholder, post-scaffold instruction non-empty) are
  *   refinements co-located with the shape they constrain. Validation is
  *   driven through the Standard Schema interface from `validate-manifest.ts`.
- * - Phase 3: `templateFieldEntrySchema` will move `origin` from an optional
- *   input slot to a `.transform()` output. For now, `origin` is allowed
- *   on input as an optional enum to keep parity with the existing template
- *   schema's `resourceFieldEntry`.
+ * - Phase 3: `templateFieldEntrySchema` is a transform that emits `origin`
+ *   from `localOnly`/`value`/`resolve`. The input slot is still allowed so
+ *   re-parsing previously-synced template manifests does not fail, but the
+ *   transform always overwrites it — drift-by-construction for hand-edits.
  * - Phase 4: `discoveryDescriptorSchema` will become a discriminated union.
  *   For now it remains in the existing free-form shape.
  * - Phase 6: scaffolding rule items get a `maxLength`, and a volume MUST
@@ -486,18 +486,46 @@ export const originSchema = z
     "How the field value is determined. Computed during sync, not authored by plugin developers.",
   );
 
-// ── Template field entry (origin still input-optional until Phase 3) ─────
+// ── Template field entry (origin computed by transform) ─────────────────
+
+/**
+ * Derives the canonical origin of a resource field value from its shape.
+ *
+ * - `localOnly: true` → `"platform"` (auto-injected by the Databricks Apps
+ *   platform at deploy time; takes precedence over `value`/`resolve`).
+ * - `value !== undefined` → `"static"` (hardcoded value).
+ * - `resolve !== undefined` → `"cli"` (resolved by the CLI during init).
+ * - else → `"user"` (user must provide the value at init time).
+ *
+ * Co-located with `templateFieldEntrySchema` because the transform is the
+ * only consumer. Kept private so any other "origin computation" goes
+ * through the schema rather than re-implementing the rules.
+ */
+function computeOriginFromField(field: {
+  localOnly?: boolean;
+  value?: string;
+  resolve?: string;
+}): z.infer<typeof originSchema> {
+  if (field.localOnly) return "platform";
+  if (field.value !== undefined) return "static";
+  if (field.resolve !== undefined) return "cli";
+  return "user";
+}
 
 /**
  * Template field entry: extends the plugin manifest field entry with an
- * optional `origin` field. Phase 3 will move `origin` to a `.transform()`
- * output and remove the input slot. For parity with the existing
- * hand-written template schema, `origin` is currently an optional input
- * (consumers still emit it via `enrichFieldsWithOrigin`).
+ * optional `origin` input slot, then runs a `.transform()` that overwrites
+ * `origin` with the computed value. Allowing `origin` on input means
+ * re-parsing a previously-synced template manifest does not fail; emitting
+ * `origin` always means hand-edits in synced JSON are silently corrected
+ * on the next parse — drift-by-construction.
  */
-export const templateFieldEntrySchema = resourceFieldEntrySchema.extend({
-  origin: originSchema.optional(),
-});
+export const templateFieldEntrySchema = resourceFieldEntrySchema
+  .extend({ origin: originSchema.optional() })
+  .transform((field) => ({
+    ...field,
+    origin: computeOriginFromField(field),
+  }));
 
 // ── Template resource requirement (uses templateFieldEntrySchema) ────────
 

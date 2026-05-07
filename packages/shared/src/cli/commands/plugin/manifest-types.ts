@@ -3,6 +3,11 @@
  * Base types (ResourceFieldEntry, ResourceRequirement, PluginManifest) are
  * generated from plugin-manifest.schema.json — only CLI-specific extensions
  * (TemplatePlugin, TemplatePluginsManifest) are hand-written here.
+ *
+ * Origin computation moved to `schemas/manifest.ts` in Phase 3 — origin is
+ * now a `.transform()` output of `templateFieldEntrySchema`, not a helper
+ * called by sync. Phase 5 will fold these hand-written types into the Zod
+ * module and delete the legacy generated types.
  */
 
 export type {
@@ -16,7 +21,6 @@ export type {
 import type {
   PluginManifest,
   PostScaffoldStep,
-  ResourceFieldEntry,
 } from "../../../schemas/plugin-manifest.generated";
 
 export interface ScaffoldingFlag {
@@ -35,22 +39,6 @@ export interface ScaffoldingDescriptor {
   command: string;
   flags?: Record<string, ScaffoldingFlag>;
   rules?: ScaffoldingRules;
-}
-
-export type Origin = "user" | "platform" | "static" | "cli";
-
-/**
- * Derives the origin of a resource field value based on its properties.
- * - localOnly: true → "platform" (auto-injected by Databricks Apps platform)
- * - value present → "static" (hardcoded value)
- * - resolve present → "cli" (resolved by CLI during init)
- * - else → "user" (user must provide the value)
- */
-export function computeOrigin(field: ResourceFieldEntry): Origin {
-  if (field.localOnly) return "platform";
-  if (field.value !== undefined) return "static";
-  if (field.resolve !== undefined) return "cli";
-  return "user";
 }
 
 export interface TemplatePlugin extends Omit<PluginManifest, "config"> {

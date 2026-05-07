@@ -2,19 +2,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { Lang, parse, type SgNode } from "@ast-grep/napi";
 import { Command } from "commander";
+import { templateFieldEntrySchema } from "../../../../schemas/manifest";
 import {
   loadManifestFromFile,
   type ResolvedManifest,
   resolveManifestInDir,
 } from "../manifest-resolve";
-import {
-  computeOrigin,
-  type Origin,
-  type PluginManifest,
-  type ResourceFieldEntry,
-  type ScaffoldingDescriptor,
-  type TemplatePlugin,
-  type TemplatePluginsManifest,
+import type {
+  PluginManifest,
+  ScaffoldingDescriptor,
+  TemplatePlugin,
+  TemplatePluginsManifest,
 } from "../manifest-types";
 import { shouldAllowJsManifestForPackage } from "../trusted-js-manifest";
 import {
@@ -38,29 +36,6 @@ function isWithinDirectory(filePath: string, boundary: string): boolean {
     resolvedPath === resolvedBoundary ||
     resolvedPath.startsWith(`${resolvedBoundary}${path.sep}`)
   );
-}
-
-/**
- * Injects computed `origin` onto every resource field in all plugins.
- * Mutates the plugins object in place for efficiency.
- */
-function enrichFieldsWithOrigin(
-  plugins: TemplatePluginsManifest["plugins"],
-): void {
-  for (const plugin of Object.values(plugins)) {
-    for (const group of [
-      plugin.resources.required,
-      plugin.resources.optional,
-    ]) {
-      for (const resource of group) {
-        if (!resource.fields) continue;
-        for (const field of Object.values(resource.fields)) {
-          (field as ResourceFieldEntry & { origin?: Origin }).origin =
-            computeOrigin(field);
-        }
-      }
-    }
-  }
 }
 
 /**
@@ -596,14 +571,33 @@ async function scanPluginsDir(
 
 /**
  * Write (or preview) the template plugins manifest to disk.
+ *
+ * Each resource field is parsed through `templateFieldEntrySchema` so the
+ * `origin` transform fires and produces canonical `origin` values, even
+ * when the input carries a stale `origin`. Parsing per-field (rather than
+ * the whole manifest) keeps the surrounding plugin/resource key order
+ * stable so the synced JSON's diff stays minimal.
  */
 function writeManifest(
   outputPath: string,
   { plugins }: { plugins: TemplatePluginsManifest["plugins"] },
   options: { write?: boolean; silent?: boolean; json?: boolean },
 ) {
-  // Enrich fields with computed origin for v2.0
-  enrichFieldsWithOrigin(plugins);
+  for (const plugin of Object.values(plugins)) {
+    for (const group of [
+      plugin.resources.required,
+      plugin.resources.optional,
+    ]) {
+      for (const resource of group) {
+        if (!resource.fields) continue;
+        for (const fieldName of Object.keys(resource.fields)) {
+          resource.fields[fieldName] = templateFieldEntrySchema.parse(
+            resource.fields[fieldName],
+          );
+        }
+      }
+    }
+  }
 
   const templateManifest: TemplatePluginsManifest = {
     $schema:
@@ -897,9 +891,8 @@ async function runPluginsSync(options: {
   writeManifest(outputPath, { plugins }, options);
 }
 
-/** Exported for testing: path boundary check, AST parsing, trust checks, origin computation. */
+/** Exported for testing: path boundary check, AST parsing, trust checks. */
 export {
-  computeOrigin,
   isWithinDirectory,
   parseImports,
   parsePluginUsages,

@@ -46,7 +46,16 @@ function emit(
 ): Record<string, unknown> {
   // Targeting draft-07 keeps parity with the existing hand-written schemas
   // (which are draft-07). The default in Zod 4 is draft-2020-12.
-  const generated = z.toJSONSchema(schema, { target: "draft-07" });
+  //
+  // `io: "input"` makes Zod emit the pre-transform shape, so transforms
+  // (like the `origin`-emitter on `templateFieldEntrySchema`) produce
+  // valid JSON Schema instead of throwing "Transforms cannot be
+  // represented in JSON Schema". For schemas without transforms, this is
+  // equivalent to the default ("output").
+  const generated = z.toJSONSchema(schema, {
+    target: "draft-07",
+    io: "input",
+  });
   // Inject $id and title at the top level so editor tooling can identify
   // the schema by URL even when fetched out-of-band.
   return {
