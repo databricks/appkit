@@ -2,7 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
 import type { AgentAdapter } from "shared";
-import { createLogger } from "../../logging/logger";
 import type {
   AgentDefinition,
   AgentTool,
@@ -11,6 +10,7 @@ import type {
   ToolkitOptions,
 } from "../../core/agent/types";
 import { isToolkitEntry } from "../../core/agent/types";
+import { createLogger } from "../../logging/logger";
 
 const logger = createLogger("agents:loader");
 

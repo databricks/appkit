@@ -24,7 +24,8 @@
             }
           }
         ]
-      }
+      },
+      "stability": "beta"
     },
     "analytics": {
       "name": "analytics",

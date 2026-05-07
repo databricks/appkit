@@ -11,11 +11,7 @@ import {
   isFunctionTool,
 } from "./tools/function-tool";
 import { isHostedTool } from "./tools/hosted-tools";
-import type {
-  AgentDefinition,
-  AgentTool,
-  ToolkitEntry,
-} from "./types";
+import type { AgentDefinition, AgentTool, ToolkitEntry } from "./types";
 import { isToolkitEntry } from "./types";
 
 export interface RunAgentInput {

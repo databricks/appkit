@@ -1,4 +1,3 @@
-export { AgentsPlugin, agents } from "./agents";
 export { buildToolkitEntries } from "../../core/agent/build-toolkit";
 export {
   agentIdFromMarkdownPath,
@@ -21,3 +20,4 @@ export {
   type ToolkitEntry,
   type ToolkitOptions,
 } from "../../core/agent/types";
+export { AgentsPlugin, agents } from "./agents";

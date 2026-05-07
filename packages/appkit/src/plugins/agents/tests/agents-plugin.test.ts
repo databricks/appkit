@@ -11,12 +11,18 @@ import type {
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { CacheManager } from "../../../cache";
+import { buildToolkitEntries } from "../../../core/agent/build-toolkit";
+import {
+  defineTool,
+  type ToolRegistry,
+} from "../../../core/agent/tools/define-tool";
+import type {
+  AgentsPluginConfig,
+  ToolkitEntry,
+} from "../../../core/agent/types";
+import { isToolkitEntry } from "../../../core/agent/types";
 // Import the class directly so we can construct it without a createApp
 import { AgentsPlugin } from "../agents";
-import { buildToolkitEntries } from "../../../core/agent/build-toolkit";
-import { defineTool, type ToolRegistry } from "../../../core/agent/tools/define-tool";
-import type { AgentsPluginConfig, ToolkitEntry } from "../../../core/agent/types";
-import { isToolkitEntry } from "../../../core/agent/types";
 
 interface FakeContext {
   providers: Array<{ name: string; provider: ToolProvider }>;
