@@ -7,7 +7,6 @@ export function isInternalTelemetryEnabled(opts?: {
 }): boolean {
   if (opts?.disableInternalTelemetry) return false;
   if (process.env.DISABLE_APPKIT_INTERNAL_TELEMETRY === "true") return false;
-  // Honor the cross-tool DO_NOT_TRACK convention (https://consoledonottrack.com).
   if (process.env.DO_NOT_TRACK === "1") return false;
   return true;
 }
