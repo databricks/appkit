@@ -6,7 +6,7 @@ import {
   files,
   genie,
   PolicyDeniedError,
-  server,
+  server, 
   serving,
   WRITE_ACTIONS,
 } from "@databricks/appkit";
