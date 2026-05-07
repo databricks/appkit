@@ -11,5 +11,3 @@ coverage
 .turbo
 
 .databricks
-
-.superset/config.json
