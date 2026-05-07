@@ -1,60 +1,25 @@
 /**
- * Shared types for plugin manifests used across CLI commands.
+ * Thin re-export shim for plugin manifest types used across CLI commands.
  *
- * Phase 4 update: `DiscoveryDescriptor`, `ResourceFieldEntry`,
- * `ResourceRequirement`, `PluginManifest`, and `PostScaffoldStep` are now
- * sourced from the Zod schema module (the canonical contract). The legacy
- * `plugin-manifest.generated.ts` types are stale because the discovery
- * contract reshaped to a discriminated union; re-exporting from there would
- * drop the union and break downstream type checks. CLI-specific extensions
- * (`TemplatePlugin`, `TemplatePluginsManifest`) are still hand-written here
- * — Phase 5 will fold those into the Zod module and delete this shim.
+ * Phase 5: source of truth is the Zod schema module (`../../../schemas/manifest`).
+ * All type aliases and the Standard Schema interface re-export from there. The
+ * legacy `plugin-manifest.generated.ts` is gone; kept this shim only so existing
+ * callers (`sync.ts`, `validate.ts`, `create.ts`, `add-resource.ts`, etc.)
+ * continue importing from the same path without rewrite.
  */
 
+export type { StandardSchemaV1 } from "@standard-schema/spec";
 export type {
   DiscoveryDescriptor,
+  Origin,
   PluginManifest,
   PostScaffoldStep,
   ResourceFieldEntry,
+  ResourceKind,
   ResourceRequirement,
+  ScaffoldingDescriptor,
+  ScaffoldingFlag,
+  ScaffoldingRules,
+  TemplatePlugin,
+  TemplatePluginsManifest,
 } from "../../../schemas/manifest";
-
-import type {
-  PluginManifest,
-  PostScaffoldStep,
-} from "../../../schemas/manifest";
-
-export interface ScaffoldingFlag {
-  description: string;
-  required?: boolean;
-  pattern?: string;
-  default?: string;
-}
-
-export interface ScaffoldingRules {
-  never?: string[];
-  must?: string[];
-}
-
-export interface ScaffoldingDescriptor {
-  command: string;
-  flags?: Record<string, ScaffoldingFlag>;
-  rules?: ScaffoldingRules;
-}
-
-export interface TemplatePlugin extends Omit<PluginManifest, "config"> {
-  package: string;
-  /** When true, this plugin is required by the template and cannot be deselected during CLI init. */
-  requiredByTemplate?: boolean;
-  /** Plugin stability level. Absent or undefined means "ga" (general availability). */
-  stability?: "beta" | "ga";
-  /** Ordered list of post-scaffolding instructions propagated from the plugin manifest. */
-  postScaffold?: PostScaffoldStep[];
-}
-
-export interface TemplatePluginsManifest {
-  $schema: string;
-  version: string;
-  plugins: Record<string, TemplatePlugin>;
-  scaffolding?: ScaffoldingDescriptor;
-}

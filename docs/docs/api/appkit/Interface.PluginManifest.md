@@ -6,7 +6,7 @@ Extends the shared PluginManifest with strict resource types.
 
 ## See
 
- - `packages/shared/src/schemas/plugin-manifest.generated.ts` `PluginManifest` — generated base
+ - `packages/shared/src/schemas/manifest.ts` `pluginManifestSchema` — Zod source of truth
  - SharedPluginManifest — shared re-export with JSONSchema7 config
 
 ## Extends

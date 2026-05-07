@@ -8,7 +8,7 @@ plugin architecture, and React integration.
 | Enumeration | Description |
 | ------ | ------ |
 | [RequestedClaimsPermissionSet](Enumeration.RequestedClaimsPermissionSet.md) | Permission set for Unity Catalog table access |
-| [ResourceType](Enumeration.ResourceType.md) | Resource types from schema $defs.resourceType.enum |
+| [ResourceType](Enumeration.ResourceType.md) | Resource types from resourceTypeSchema.options |
 
 ## Classes
 

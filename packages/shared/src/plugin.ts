@@ -96,11 +96,11 @@ export type PluginConstructor<
 
 /**
  * Manifest declaration for plugins.
- * Extends the generated PluginManifest with a generic name parameter
- * and uses JSONSchema7 for config.schema (the generated ConfigSchema
+ * Extends the schema-derived PluginManifest with a generic name parameter
+ * and uses JSONSchema7 for config.schema (the schema-inferred ConfigSchema
  * is too restrictive for plugin consumers).
  *
- * @see {@link GeneratedPluginManifest} — generated base from plugin-manifest.schema.json
+ * @see {@link GeneratedPluginManifest} — Zod-inferred base from `schemas/manifest`
  * @see `packages/appkit/src/registry/types.ts` `PluginManifest` — strict appkit narrowing (enum types)
  */
 export interface PluginManifest<TName extends string = string>
@@ -129,7 +129,7 @@ export interface PluginManifest<TName extends string = string>
  * `ResourceRequirement` would force every plugin to thread the variant type
  * through `getResourceRequirements()` for no runtime benefit.
  *
- * @see {@link GeneratedResourceRequirement} — schema-derived discriminated union from `schemas/manifest`
+ * @see `packages/shared/src/schemas/manifest.ts` `resourceRequirementSchema` — Zod discriminated union
  * @see `packages/appkit/src/registry/types.ts` `ResourceRequirement` — strict appkit narrowing (enum types)
  */
 export interface ResourceRequirement {

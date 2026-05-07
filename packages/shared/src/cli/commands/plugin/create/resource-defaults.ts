@@ -1,6 +1,7 @@
 /**
  * Resource type and permission defaults for plugin scaffolding.
- * Values are derived from plugin-manifest.schema.json via schema-resources.
+ * Values are sourced from the canonical Zod schemas in `schemas/manifest`,
+ * surfaced through the `schema-resources` module.
  */
 
 import {

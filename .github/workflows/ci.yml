@@ -56,10 +56,11 @@ jobs:
         run: |
           pnpm run generate:types
           if ! git diff --exit-code \
-              packages/shared/src/schemas/plugin-manifest.generated.ts \
               packages/appkit/src/registry/types.generated.ts \
               packages/appkit/src/plugins/ga-exports.generated.ts \
               packages/appkit/src/plugins/beta-exports.generated.ts \
+              docs/static/schemas/plugin-manifest.schema.json \
+              docs/static/schemas/template-plugins.schema.json \
               docs/docs/plugins/analytics.md \
               docs/docs/plugins/files.md \
               docs/docs/plugins/genie.md \
@@ -80,11 +81,7 @@ jobs:
         # `pnpm run sync:template` runs through `packages/shared/bin/appkit.js`
         # which imports the built `packages/shared/dist/cli/index.js`. The
         # lint job doesn't otherwise build, so build just shared's dist
-        # before invoking sync. We invoke tsdown directly rather than
-        # `pnpm --filter shared build:package` because the latter also
-        # re-runs `generate-schema-types.ts`, which writes the raw (unformatted)
-        # version of `plugin-manifest.generated.ts` and trips the biome
-        # check that runs immediately after. ~1s.
+        # before invoking sync.
         run: pnpm --filter shared exec tsdown --config tsdown.config.ts
       - name: Check synced template manifest is up to date
         run: |

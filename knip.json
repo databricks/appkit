@@ -27,6 +27,5 @@
     "docs/**",
     ".github/scripts/**"
   ],
-  "ignoreDependencies": ["json-schema-to-typescript"],
   "ignoreBinaries": ["tarball"]
 }

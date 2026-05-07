@@ -1,10 +1,10 @@
 /**
  * Zod-authoring module for AppKit plugin manifest schemas.
  *
- * Single source of truth for plugin manifest contract. Mirrors the legacy
- * hand-written JSON Schema files (plugin-manifest.schema.json,
- * template-plugins.schema.json) faithfully so byte-equivalence/parity can
- * be asserted before downstream consumers are migrated.
+ * Single source of truth for the plugin manifest contract. JSON Schema
+ * artifacts published at the docs URL are emitted from these schemas via
+ * `tools/generate-json-schema.ts` and live only in `docs/static/schemas/`
+ * (no package-internal copies).
  *
  * - Phase 2: cross-field constraints (cycle/dangling-reference checks,
  *   `<PROFILE>` placeholder, post-scaffold instruction non-empty) are
@@ -948,14 +948,21 @@ export type ConfigSchema = z.infer<typeof configSchemaSchema>;
 export type PostScaffoldStep = z.infer<typeof postScaffoldStepSchema>;
 export type PluginManifest = z.infer<typeof pluginManifestSchema>;
 export type Origin = z.infer<typeof originSchema>;
-export type TemplateFieldEntry = z.infer<typeof templateFieldEntrySchema>;
-export type TemplateResourceRequirement = z.infer<
+// Template-side types use `z.input` so callers can construct a TemplatePlugin
+// from a parsed PluginManifest before the field-level origin transform runs.
+// `writeManifest` parses every field through `templateFieldEntrySchema` at
+// write-time, so the on-disk shape always has origin populated. The runtime
+// invariant: origin is *always* present after sync writes; the type slot
+// stays optional so the in-memory pipeline does not need to fabricate origin
+// before assignment.
+export type TemplateFieldEntry = z.input<typeof templateFieldEntrySchema>;
+export type TemplateResourceRequirement = z.input<
   typeof templateResourceRequirementSchema
 >;
-export type TemplatePlugin = z.infer<typeof templatePluginSchema>;
+export type TemplatePlugin = z.input<typeof templatePluginSchema>;
 export type ScaffoldingFlag = z.infer<typeof scaffoldingFlagSchema>;
 export type ScaffoldingRules = z.infer<typeof scaffoldingRulesSchema>;
 export type ScaffoldingDescriptor = z.infer<typeof scaffoldingDescriptorSchema>;
-export type TemplatePluginsManifest = z.infer<
+export type TemplatePluginsManifest = z.input<
   typeof templatePluginsManifestSchema
 >;
