@@ -21,7 +21,7 @@ describe("schemaToIntrospection", () => {
     const result = schemaToIntrospection(schema);
     const post = result.tables.find((table) => table.name === "post");
 
-    expect(result.schemas).toEqual(["app"]);
+    expect(result.schemas).toEqual(["public"]);
     expect(result.tables.map((table) => table.name)).toEqual(["user", "post"]);
     expect(
       post?.columns.find((column) => column.name === "authorId"),

@@ -106,7 +106,7 @@ describe("adaptDrizzleTable", () => {
             "pgType": "int8",
           },
         ],
-        "schema": "app",
+        "schema": "public",
       }
     `);
     expect(adaptDrizzleTable(schema.post)).toMatchInlineSnapshot(`
@@ -129,7 +129,7 @@ describe("adaptDrizzleTable", () => {
               "column": "id",
               "onDelete": "cascade",
               "onUpdate": "restrict",
-              "schema": "app",
+              "schema": "public",
               "table": "user",
             },
           },
@@ -167,7 +167,7 @@ describe("adaptDrizzleTable", () => {
             "pgType": "int4",
           },
         ],
-        "schema": "app",
+        "schema": "public",
       }
     `);
   });
