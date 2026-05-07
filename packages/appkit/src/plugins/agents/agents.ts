@@ -114,6 +114,7 @@ interface RunState {
     maxConcurrentStreamsPerUser: number;
     maxToolCalls: number;
     maxSubAgentDepth: number;
+    toolCallTimeoutMs: number;
   };
   translator: AgentEventTranslator;
   outboundEvents: EventChannel<ResponseStreamEvent>;
@@ -175,12 +176,17 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     maxConcurrentStreamsPerUser: number;
     maxToolCalls: number;
     maxSubAgentDepth: number;
+    toolCallTimeoutMs: number;
   } {
     const cfg = this.config.limits ?? {};
     return {
       maxConcurrentStreamsPerUser: cfg.maxConcurrentStreamsPerUser ?? 5,
       maxToolCalls: cfg.maxToolCalls ?? 50,
       maxSubAgentDepth: cfg.maxSubAgentDepth ?? 3,
+      // 5 minutes is the floor for cold SQL Warehouse / long Genie /
+      // long Lakebase calls. The previous PluginContext default of 30s
+      // truncated legitimate analytics queries on cold compute.
+      toolCallTimeoutMs: cfg.toolCallTimeoutMs ?? 300_000,
     };
   }
 
@@ -1023,6 +1029,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         entry.localName,
         args,
         runState.signal,
+        runState.limits.toolCallTimeoutMs,
       );
     } else if (entry.source === "function") {
       result = await entry.functionTool.execute(

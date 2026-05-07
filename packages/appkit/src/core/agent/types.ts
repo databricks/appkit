@@ -173,6 +173,19 @@ export interface AgentsPluginConfig extends BasePluginConfig {
      * itself (directly or transitively). Default: `3`.
      */
     maxSubAgentDepth?: number;
+    /**
+     * Per-call timeout for tools dispatched through `PluginContext`
+     * (toolkit-routed tools — analytics SQL warehouse queries, Genie
+     * messages, Lakebase queries). Independent of `maxToolCalls`: the
+     * budget caps how many tools fire per run, this caps how long any
+     * single tool call may run. The signal handed to plugin tool
+     * implementations combines this timeout with the parent stream's
+     * abort signal via `AbortSignal.any`. Function and MCP tools have
+     * their own timeouts in their respective adapters and ignore this
+     * setting. Default: `300_000` (5 minutes) — generous enough for cold
+     * SQL Warehouse round-trips and long Genie conversations.
+     */
+    toolCallTimeoutMs?: number;
   };
 }
 

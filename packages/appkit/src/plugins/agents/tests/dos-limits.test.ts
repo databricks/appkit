@@ -261,6 +261,7 @@ describe("resolvedLimits — default values", () => {
       maxConcurrentStreamsPerUser: 5,
       maxToolCalls: 50,
       maxSubAgentDepth: 3,
+      toolCallTimeoutMs: 300_000,
     });
   });
 
@@ -288,6 +289,7 @@ describe("runSubAgent — depth guard", () => {
       maxToolCalls: number;
       maxSubAgentDepth: number;
       maxConcurrentStreamsPerUser: number;
+      toolCallTimeoutMs: number;
     }> = {},
   ) {
     const abortController = new AbortController();
@@ -302,6 +304,7 @@ describe("runSubAgent — depth guard", () => {
         maxConcurrentStreamsPerUser: overrides.maxConcurrentStreamsPerUser ?? 5,
         maxToolCalls: overrides.maxToolCalls ?? 50,
         maxSubAgentDepth: overrides.maxSubAgentDepth ?? 3,
+        toolCallTimeoutMs: overrides.toolCallTimeoutMs ?? 300_000,
       },
       // The translator/channel are not exercised by the depth guard; stubbed
       // values are sufficient since the guard rejects before any dispatch.

@@ -13,29 +13,31 @@ describe("normalizeToolResult", () => {
     expect(normalizeToolResult("hello")).toBe("hello");
   });
 
-  test("leaves non-string results intact (caller serialises)", () => {
-    const result = normalizeToolResult({ rows: 2, ok: true });
-    expect(result).toEqual({ rows: 2, ok: true });
+  test("JSON-stringifies non-string results so adapters always see strings", () => {
+    expect(normalizeToolResult({ rows: 2, ok: true })).toBe(
+      JSON.stringify({ rows: 2, ok: true }),
+    );
   });
 
   test("returns an empty string input as an empty string (not undefined)", () => {
     expect(normalizeToolResult("")).toBe("");
   });
 
-  test("preserves null without converting to empty string", () => {
-    expect(normalizeToolResult(null)).toBeNull();
+  test('serialises null to its JSON literal `"null"`', () => {
+    // Distinct from `undefined`, which short-circuits to "" so void tools
+    // don't surface as failures. Stringifying null matches what every
+    // wire-boundary consumer (adapters, translator) already does.
+    expect(normalizeToolResult(null)).toBe("null");
   });
 
   test("truncates long strings and appends a marker with the original length", () => {
     const big = "x".repeat(MAX_TOOL_RESULT_CHARS + 1000);
     const result = normalizeToolResult(big);
-    expect(typeof result).toBe("string");
-    const s = result as string;
     // Content portion is bounded to MAX_TOOL_RESULT_CHARS (plus the marker).
-    expect(s.slice(0, MAX_TOOL_RESULT_CHARS)).toBe(
+    expect(result.slice(0, MAX_TOOL_RESULT_CHARS)).toBe(
       "x".repeat(MAX_TOOL_RESULT_CHARS),
     );
-    expect(s).toMatch(
+    expect(result).toMatch(
       new RegExp(
         `\\[Result truncated: ${big.length} chars exceeds ${MAX_TOOL_RESULT_CHARS} limit\\]`,
       ),
@@ -45,8 +47,7 @@ describe("normalizeToolResult", () => {
   test("truncates long serialised objects the same way", () => {
     const big = { blob: "x".repeat(MAX_TOOL_RESULT_CHARS + 10) };
     const result = normalizeToolResult(big);
-    expect(typeof result).toBe("string");
-    expect(result as string).toMatch(/\[Result truncated:/);
+    expect(result).toMatch(/\[Result truncated:/);
   });
 
   test("honours a custom maxChars parameter", () => {

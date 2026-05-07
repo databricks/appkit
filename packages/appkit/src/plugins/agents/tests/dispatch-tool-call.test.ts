@@ -56,6 +56,7 @@ function makeRunState(plugin: AgentsPlugin) {
       maxConcurrentStreamsPerUser: 5,
       maxToolCalls: 50,
       maxSubAgentDepth: 3,
+      toolCallTimeoutMs: 300_000,
     },
     translator: {
       translate: (event: unknown) => [event],
@@ -276,6 +277,72 @@ describe("dispatchToolCall — shared tool-call budget", () => {
       callDispatch(plugin, { runState, toolIndex, name: "noop", args: {} }),
     ).rejects.toThrow(/Tool-call budget exhausted/);
     expect(runState.signal.aborted).toBe(true);
+  });
+});
+
+describe("dispatchToolCall — toolkit timeout plumbing", () => {
+  /**
+   * The 30s default in `PluginContext.executeTool` was too short for cold
+   * SQL Warehouse round-trips and long Genie conversations — analytics tool
+   * calls would die with a stale-looking error. The fix routes
+   * `runState.limits.toolCallTimeoutMs` through to `PluginContext` so the
+   * agents plugin owns the cap and the default (5 minutes) is generous.
+   */
+  test("forwards runState.limits.toolCallTimeoutMs to PluginContext.executeTool", async () => {
+    const plugin = new AgentsPlugin({ dir: false });
+    const { runState } = makeRunState(plugin);
+    runState.limits.toolCallTimeoutMs = 90_000;
+
+    const executeTool = vi.fn().mockResolvedValue("rows");
+    // biome-ignore lint/suspicious/noExplicitAny: stub PluginContext shape
+    (plugin as any).context = { executeTool };
+
+    const toolIndex = new Map<string, unknown>([
+      [
+        "analytics.query",
+        {
+          source: "toolkit",
+          pluginName: "analytics",
+          localName: "query",
+          def: {
+            name: "analytics.query",
+            description: "sql",
+            parameters: { type: "object" },
+          },
+        },
+      ],
+    ]);
+
+    await callDispatch(plugin, {
+      runState,
+      toolIndex,
+      name: "analytics.query",
+      args: { sql: "SELECT 1" },
+    });
+
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    const call = executeTool.mock.calls[0];
+    // (req, pluginName, toolName, args, signal, timeoutMs)
+    expect(call[1]).toBe("analytics");
+    expect(call[2]).toBe("query");
+    expect(call[5]).toBe(90_000);
+  });
+
+  test("resolvedLimits exposes the documented 5-minute default", () => {
+    const plugin = new AgentsPlugin({ dir: false });
+    // biome-ignore lint/suspicious/noExplicitAny: read private getter
+    const limits = (plugin as any).resolvedLimits;
+    expect(limits.toolCallTimeoutMs).toBe(300_000);
+  });
+
+  test("honours agents({ limits: { toolCallTimeoutMs } })", () => {
+    const plugin = new AgentsPlugin({
+      dir: false,
+      limits: { toolCallTimeoutMs: 600_000 },
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: read private
+    const limits = (plugin as any).resolvedLimits;
+    expect(limits.toolCallTimeoutMs).toBe(600_000);
   });
 });
 
