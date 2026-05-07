@@ -159,15 +159,28 @@
             "description": "Lakebase Postgres database for persistent storage",
             "permission": "CAN_CONNECT_AND_CREATE",
             "fields": {
+              "project": {
+                "description": "Full Lakebase Postgres project resource name. Obtain by running `databricks postgres list-projects`, select the desired item from the output array and use its .name value.",
+                "examples": [
+                  "projects/{project-id}"
+                ],
+                "discovery": {
+                  "type": "kind",
+                  "resourceKind": "postgres_project",
+                  "select": "name"
+                },
+                "origin": "user"
+              },
               "branch": {
-                "description": "Full Lakebase Postgres branch resource name. Obtain by running `databricks postgres list-branches projects/{project-id}`, select the desired item from the output array and use its .name value.",
+                "description": "Full Lakebase Postgres branch resource name. Obtain by running `databricks postgres list-branches {project-name}`, select the desired item from the output array and use its .name value. Requires the project resource name.",
                 "examples": [
                   "projects/{project-id}/branches/{branch-id}"
                 ],
                 "discovery": {
                   "type": "kind",
                   "resourceKind": "postgres_branch",
-                  "select": "name"
+                  "select": "name",
+                  "dependsOn": "project"
                 },
                 "origin": "user"
               },

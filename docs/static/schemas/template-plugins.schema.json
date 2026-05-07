@@ -161,6 +161,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -331,6 +332,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -501,6 +503,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -671,6 +674,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -841,6 +845,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -1011,6 +1016,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -1181,6 +1187,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -1351,6 +1358,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -1521,6 +1529,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -1691,6 +1700,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -1861,6 +1871,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -2036,6 +2047,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -2206,6 +2218,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -2385,6 +2398,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -2555,6 +2569,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -2725,6 +2740,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -2895,6 +2911,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -3065,6 +3082,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -3235,6 +3253,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -3405,6 +3424,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -3575,6 +3595,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -3745,6 +3766,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -3915,6 +3937,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -4085,6 +4108,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -4260,6 +4284,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"
@@ -4430,6 +4455,7 @@
                                         "enum": [
                                           "warehouse",
                                           "genie_space",
+                                          "postgres_project",
                                           "postgres_branch",
                                           "postgres_database",
                                           "volume"

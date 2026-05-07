@@ -125,6 +125,7 @@ export const resourceKindSchema = z
   .enum([
     "warehouse",
     "genie_space",
+    "postgres_project",
     "postgres_branch",
     "postgres_database",
     "volume",
@@ -259,10 +260,9 @@ export type ResourceKindCommand = {
  * return flat arrays. Refine in a follow-up if a kind's CLI returns wrapped
  * data.
  *
- * Volume's catalog/schema parent context is NOT modeled here. The
- * `databricks volumes list` command requires a `<catalog>.<schema>` argument
- * that AppKit does not auto-discover; the CLI is expected to prompt the user
- * via a Phase 6 MUST rule before invoking the listing.
+ * Volume's catalog/schema parent context is supplied via the `{catalog}` and
+ * `{schema}` placeholders, prompted from the user via a Phase 6 MUST rule
+ * (the CLI does not auto-discover these — it asks before listing volumes).
  */
 export const RESOURCE_KIND_COMMANDS: Record<
   z.infer<typeof resourceKindSchema>,
@@ -272,11 +272,19 @@ export const RESOURCE_KIND_COMMANDS: Record<
     command: "databricks warehouses list --profile <PROFILE> --output json",
   },
   genie_space: {
-    command: "databricks genie list --profile <PROFILE> --output json",
+    command: "databricks genie list-spaces --profile <PROFILE> --output json",
+  },
+  postgres_project: {
+    command:
+      "databricks postgres list-projects --profile <PROFILE> --output json",
   },
   postgres_branch: {
+    // {project} is a placeholder for the resolved value of the `project`
+    // sibling field (declared via `dependsOn: "project"` on the kind variant).
+    // The Databricks CLI requires the parent project resource name (format
+    // `projects/{project_id}`) as a positional argument.
     command:
-      "databricks postgres list-branches --profile <PROFILE> --output json",
+      "databricks postgres list-branches {project} --profile <PROFILE> --output json",
   },
   postgres_database: {
     // {branch} is a placeholder for the resolved value of the `branch`
@@ -285,11 +293,11 @@ export const RESOURCE_KIND_COMMANDS: Record<
       "databricks postgres list-databases {branch} --profile <PROFILE> --output json",
   },
   volume: {
-    // <catalog>.<schema> parent context must be supplied by the CLI runner —
-    // it is encoded as a Phase 6 MUST rule (prompt the user for catalog and
-    // schema before listing volumes), not as a schema-level placeholder.
+    // {catalog} and {schema} parent context must be supplied by the CLI
+    // runner — they are encoded as a Phase 6 MUST rule (prompt the user for
+    // catalog and schema before listing volumes), not as `dependsOn` siblings.
     command:
-      "databricks volumes list <catalog>.<schema> --profile <PROFILE> --output json",
+      "databricks volumes list {catalog} {schema} --profile <PROFILE> --output json",
   },
 };
 
@@ -491,29 +499,47 @@ export const resourceRequirementSchema = z
 // ── Config schema (recursive) ────────────────────────────────────────────
 
 export const configSchemaPropertySchema: z.ZodType = z.lazy(() =>
-  z.object({
-    type: z.enum(["object", "array", "string", "number", "boolean", "integer"]),
-    description: z.string().optional(),
-    default: z.unknown().optional(),
-    enum: z.array(z.unknown()).optional(),
-    properties: z.record(z.string(), configSchemaPropertySchema).optional(),
-    items: configSchemaPropertySchema.optional(),
-    minimum: z.number().optional(),
-    maximum: z.number().optional(),
-    minLength: z.number().int().min(0).optional(),
-    maxLength: z.number().int().min(0).optional(),
-    required: z.array(z.string()).optional(),
-  }),
+  z
+    .object({
+      type: z.enum([
+        "object",
+        "array",
+        "string",
+        "number",
+        "boolean",
+        "integer",
+      ]),
+      description: z.string().optional(),
+      default: z.unknown().optional(),
+      enum: z.array(z.unknown()).optional(),
+      properties: z.record(z.string(), configSchemaPropertySchema).optional(),
+      items: configSchemaPropertySchema.optional(),
+      minimum: z.number().optional(),
+      maximum: z.number().optional(),
+      minLength: z.number().int().min(0).optional(),
+      maxLength: z.number().int().min(0).optional(),
+      required: z.array(z.string()).optional(),
+      // `additionalProperties` is a standard JSON Schema keyword used by core
+      // plugin manifests (e.g., serving, vector-search, genie) to constrain
+      // dictionary-shaped properties. Allowed on nested property entries as
+      // either a boolean or a sub-schema, mirroring JSON Schema semantics.
+      additionalProperties: z
+        .union([z.boolean(), configSchemaPropertySchema])
+        .optional(),
+    })
+    .strict(),
 );
 
 export const configSchemaSchema: z.ZodType = z.lazy(() =>
-  z.object({
-    type: z.enum(["object", "array", "string", "number", "boolean"]),
-    properties: z.record(z.string(), configSchemaPropertySchema).optional(),
-    items: configSchemaSchema.optional(),
-    required: z.array(z.string()).optional(),
-    additionalProperties: z.boolean().optional(),
-  }),
+  z
+    .object({
+      type: z.enum(["object", "array", "string", "number", "boolean"]),
+      properties: z.record(z.string(), configSchemaPropertySchema).optional(),
+      items: configSchemaSchema.optional(),
+      required: z.array(z.string()).optional(),
+      additionalProperties: z.boolean().optional(),
+    })
+    .strict(),
 );
 
 // ── Post-scaffold step ───────────────────────────────────────────────────
