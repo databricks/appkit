@@ -76,7 +76,14 @@ const MANUAL_DB_SNIPPET = `const base =
   status === "All" ? db.cases : db.cases.where({ status });
 
 const [rows, count] = await Promise.all([
-  base.order({ created_at: "desc" }).limit(50).toArray(),
+  base
+    .include({
+      ai_summaries: true,
+      activity_log: { select: ["log_id", "action", "created_at"] },
+    })
+    .order({ created_at: "desc" })
+    .limit(50)
+    .toArray(),
   base.count(),
 ]);
 
@@ -302,10 +309,23 @@ function EntityComponentsSection() {
   );
 }
 
+async function fetchCasesWithIncludes(status: string, signal?: AbortSignal) {
+  const base =
+    status === STATUS_FILTER_ALL ? db.cases : db.cases.where({ status });
+  return base
+    .include({
+      ai_summaries: true,
+      activity_log: { select: ["log_id", "action", "created_at"] },
+    })
+    .order({ created_at: "desc" })
+    .limit(50)
+    .toArray(signal);
+}
+
+type CaseRow = Awaited<ReturnType<typeof fetchCasesWithIncludes>>[number];
+
 function useCases(status: string, refreshToken: number) {
-  const [data, setData] = useState<Awaited<
-    ReturnType<typeof db.cases.toArray>
-  > | null>(null);
+  const [data, setData] = useState<CaseRow[] | null>(null);
   const [total, setTotal] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -326,7 +346,7 @@ function useCases(status: string, refreshToken: number) {
         const base =
           status === STATUS_FILTER_ALL ? db.cases : db.cases.where({ status });
         const [rows, count] = await Promise.all([
-          base.order({ created_at: "desc" }).limit(50).toArray(ctrl.signal),
+          fetchCasesWithIncludes(status, ctrl.signal),
           base.count(ctrl.signal),
         ]);
         if (!active) return;
@@ -414,6 +434,8 @@ function CaseList({ refreshToken }: { refreshToken: number }) {
               <TableHead>Entity</TableHead>
               <TableHead>Risk</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead>Activity</TableHead>
+              <TableHead>AI summary</TableHead>
               <TableHead>Assigned to</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -422,7 +444,7 @@ function CaseList({ refreshToken }: { refreshToken: number }) {
             {data === null && loading && (
               <TableRow>
                 <TableCell
-                  colSpan={6}
+                  colSpan={8}
                   className="text-center text-muted-foreground py-8"
                 >
                   Loading cases…
@@ -432,7 +454,7 @@ function CaseList({ refreshToken }: { refreshToken: number }) {
             {data !== null && data.length === 0 && !loading && (
               <TableRow>
                 <TableCell
-                  colSpan={6}
+                  colSpan={8}
                   className="text-center text-muted-foreground py-8"
                 >
                   No cases match the current filter.
@@ -453,9 +475,12 @@ function CaseRowItem({
   row,
   onChanged,
 }: {
-  row: Awaited<ReturnType<typeof db.cases.toArray>>[number];
+  row: CaseRow;
   onChanged: () => void;
 }) {
+  const activityLog = row.activity_log ?? [];
+  const aiSummary = row.ai_summaries?.[0];
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -522,6 +547,27 @@ function CaseRowItem({
           </SelectContent>
         </Select>
         {error && <div className="text-xs text-destructive mt-1">{error}</div>}
+      </TableCell>
+      <TableCell className="text-sm">
+        {activityLog.length > 0 ? (
+          <span title={activityLog.map((e) => e.action).join(", ")}>
+            {activityLog.length} event{activityLog.length === 1 ? "" : "s"}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
+      </TableCell>
+      <TableCell className="max-w-[200px]">
+        {aiSummary ? (
+          <span
+            className="text-xs text-muted-foreground line-clamp-2"
+            title={aiSummary.summary}
+          >
+            {aiSummary.summary}
+          </span>
+        ) : (
+          <span className="text-muted-foreground text-sm">—</span>
+        )}
       </TableCell>
       <TableCell className="text-sm">{row.assigned_to ?? "—"}</TableCell>
       <TableCell className="text-right">
