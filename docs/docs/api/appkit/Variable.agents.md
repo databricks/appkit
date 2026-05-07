@@ -4,7 +4,7 @@
 const agents: ToPlugin<typeof AgentsPlugin, AgentsPluginConfig, string> & NamedPluginFactory<string>;
 ```
 
-Plugin factory for the agents plugin. Reads `config/agents/<id>/agent.md` by default,
+Plugin factory for the agents plugin. Reads `config/agents/*.md` by default,
 resolves toolkits/tools from registered plugins, exposes `appkit.agents.*`
 runtime API and mounts `/invocations`.
 
