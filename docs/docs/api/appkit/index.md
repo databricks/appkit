@@ -15,9 +15,11 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | Class | Description |
 | ------ | ------ |
 | [AppKitError](Class.AppKitError.md) | Base error class for all AppKit errors. Provides a consistent structure for error handling across the framework. |
+| [AppKitMcpClient](Class.AppKitMcpClient.md) | Lightweight MCP client for Databricks-hosted MCP servers. |
 | [AuthenticationError](Class.AuthenticationError.md) | Error thrown when authentication fails. Use for missing tokens, invalid credentials, or authorization failures. |
 | [ConfigurationError](Class.ConfigurationError.md) | Error thrown when configuration is missing or invalid. Use for missing environment variables, invalid settings, or setup issues. |
 | [ConnectionError](Class.ConnectionError.md) | Error thrown when a connection or network operation fails. Use for database pool errors, API failures, timeouts, etc. |
+| [DatabricksAdapter](Class.DatabricksAdapter.md) | Adapter that talks directly to Databricks Model Serving `/invocations` endpoint. |
 | [ExecutionError](Class.ExecutionError.md) | Error thrown when an operation execution fails. Use for statement failures, canceled operations, or unexpected states. |
 | [InitializationError](Class.InitializationError.md) | Error thrown when a service or component is not properly initialized. Use when accessing services before they are ready. |
 | [Plugin](Class.Plugin.md) | Base abstract class for creating AppKit plugins. |
@@ -72,6 +74,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [ThreadStore](Interface.ThreadStore.md) | - |
 | [ToolAnnotations](Interface.ToolAnnotations.md) | - |
 | [ToolConfig](Interface.ToolConfig.md) | - |
+| [ToolEntry](Interface.ToolEntry.md) | Single-tool entry for a plugin's internal tool registry. |
 | [ToolkitEntry](Interface.ToolkitEntry.md) | A tool reference produced by a plugin's `.toolkit()` call. The agents plugin recognizes the `__toolkitRef` brand and dispatches tool invocations through `PluginContext.executeTool(req, pluginName, localName, ...)`, preserving OBO (asUser) and telemetry spans. |
 | [ToolkitOptions](Interface.ToolkitOptions.md) | - |
 | [ToolProvider](Interface.ToolProvider.md) | - |
@@ -97,6 +100,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [ResolvedToolEntry](TypeAlias.ResolvedToolEntry.md) | Internal tool-index entry after a tool record has been resolved to a dispatchable form. |
 | [ResourcePermission](TypeAlias.ResourcePermission.md) | Union of all possible permission levels across all resource types. |
 | [ServingFactory](TypeAlias.ServingFactory.md) | Factory function returned by `AppKit.serving`. |
+| [ToolRegistry](TypeAlias.ToolRegistry.md) | - |
 | [ToPlugin](TypeAlias.ToPlugin.md) | Factory function type returned by `toPlugin()`. Accepts optional config and returns a PluginData tuple. |
 
 ## Variables
@@ -118,9 +122,12 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [createAgent](Function.createAgent.md) | Pure factory for agent definitions. Returns the passed-in definition after cycle-detecting the sub-agent graph. Accepts the full `AgentDefinition` shape and is safe to call at module top-level. |
 | [createApp](Function.createApp.md) | Bootstraps AppKit with the provided configuration. |
 | [createLakebasePool](Function.createLakebasePool.md) | Create a Lakebase pool with appkit's logger integration. Telemetry automatically uses appkit's OpenTelemetry configuration via global registry. |
+| [defineTool](Function.defineTool.md) | Defines a single tool entry for a plugin's internal registry. |
+| [executeFromRegistry](Function.executeFromRegistry.md) | Validates tool-call arguments against the entry's schema and invokes its handler. On validation failure, returns an LLM-friendly error string (matching the behavior of `tool()`) rather than throwing, so the model can self-correct on its next turn. |
 | [extractServingEndpoints](Function.extractServingEndpoints.md) | Extract serving endpoint config from a server file by AST-parsing it. Looks for `serving({ endpoints: { alias: { env: "..." }, ... } })` calls and extracts the endpoint alias names and their environment variable mappings. |
 | [findServerFile](Function.findServerFile.md) | Find the server entry file by checking candidate paths in order. |
 | [fromPlugin](Function.fromPlugin.md) | Reference a plugin's tools inside an `AgentDefinition.tools` record without naming the plugin instance. The returned spread-friendly object carries a symbol-keyed marker that the agents plugin resolves against registered `ToolProvider`s at setup time. |
+| [functionToolToDefinition](Function.functionToolToDefinition.md) | - |
 | [generateDatabaseCredential](Function.generateDatabaseCredential.md) | Generate OAuth credentials for Postgres database connection using the proper Postgres API. |
 | [getExecutionContext](Function.getExecutionContext.md) | Get the current execution context. |
 | [getLakebaseOrmConfig](Function.getLakebaseOrmConfig.md) | Get Lakebase connection configuration for ORMs that don't accept pg.Pool directly. |
@@ -137,5 +144,8 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [loadAgentFromFile](Function.loadAgentFromFile.md) | Loads a single markdown agent file and resolves its frontmatter against registered plugin toolkits + ambient tool library. |
 | [loadAgentsFromDir](Function.loadAgentsFromDir.md) | Scans a directory for one subdirectory per agent, each containing `agent.md` (frontmatter + body). Produces an `AgentDefinition` record keyed by agent id (folder name). Throws on frontmatter errors or unresolved references. Returns an empty map if the directory does not exist. |
 | [mcpServer](Function.mcpServer.md) | Factory for declaring a custom MCP server tool. |
+| [parseTextToolCalls](Function.parseTextToolCalls.md) | Parses text-based tool calls from model output. |
+| [resolveHostedTools](Function.resolveHostedTools.md) | - |
 | [runAgent](Function.runAgent.md) | Standalone agent execution without `createApp`. Resolves the adapter, binds inline tools, and drives the adapter's `run()` loop to completion. |
 | [tool](Function.tool.md) | Factory for defining function tools with Zod schemas. |
+| [toolsFromRegistry](Function.toolsFromRegistry.md) | Produces the `AgentToolDefinition[]` a ToolProvider exposes to the LLM, deriving `parameters` JSON Schema from each entry's Zod schema. |

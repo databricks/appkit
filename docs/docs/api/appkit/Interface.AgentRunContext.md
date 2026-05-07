@@ -8,6 +8,8 @@
 executeTool: (name: string, args: unknown) => Promise<unknown>;
 ```
 
+Tool implementations should sanitize failure text — errors become `tool_result.error` and can flow back into the LLM transcript.
+
 #### Parameters
 
 | Parameter | Type |
