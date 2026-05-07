@@ -64,7 +64,7 @@ function enrichFieldsWithOrigin(
 }
 
 /**
- * Validates a parsed JSON object against the plugin-manifest JSON schema.
+ * Validates a parsed JSON object against the plugin-manifest schema.
  * Returns the manifest if valid, or null and logs schema errors.
  */
 function validateManifestWithSchema(
@@ -75,7 +75,7 @@ function validateManifestWithSchema(
   if (result.valid && result.manifest) return result.manifest;
   if (result.errors?.length) {
     console.warn(
-      `Warning: Manifest at ${sourcePath} failed schema validation:\n${formatValidationErrors(result.errors, obj)}`,
+      `Warning: Manifest at ${sourcePath} failed schema validation:\n${formatValidationErrors(result.errors)}`,
     );
   }
   return null;

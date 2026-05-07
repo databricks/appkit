@@ -6,15 +6,16 @@
  * template-plugins.schema.json) faithfully so byte-equivalence/parity can
  * be asserted before downstream consumers are migrated.
  *
- * - Phase 1: this module is sealed; only schemas + inferred types are exported.
- *   Consumers in the CLI keep going through the AJV-based validator until
- *   Phase 2 wires Standard Schema in.
+ * - Phase 2: cross-field constraints (cycle/dangling-reference checks,
+ *   `<PROFILE>` placeholder, post-scaffold instruction non-empty) are now
+ *   refinements co-located with the shape they constrain. Validation is
+ *   driven through the Standard Schema interface from `validate-manifest.ts`.
  * - Phase 3: `templateFieldEntrySchema` will move `origin` from an optional
- *   input slot to a `.transform()` output. For Phase 1, `origin` is allowed
+ *   input slot to a `.transform()` output. For now, `origin` is allowed
  *   on input as an optional enum to keep parity with the existing template
  *   schema's `resourceFieldEntry`.
  * - Phase 4: `discoveryDescriptorSchema` will become a discriminated union.
- *   For Phase 1 it remains in the existing free-form shape.
+ *   For now it remains in the existing free-form shape.
  * - Phase 6: scaffolding rule items get a `maxLength`, and a volume MUST
  *   rule lands in `TEMPLATE_SCAFFOLDING`. Neither happens here.
  */
@@ -101,7 +102,7 @@ export const appPermissionSchema = z
   .enum(["CAN_USE"])
   .describe("Permission for Databricks App resources");
 
-// ── Discovery descriptor (Phase 1: free-form shape) ──────────────────────
+// ── Discovery descriptor (free-form shape until Phase 4) ─────────────────
 
 export const discoveryDescriptorSchema = z
   .object({
@@ -135,6 +136,10 @@ export const discoveryDescriptorSchema = z
       ),
   })
   .strict()
+  .refine((descriptor) => descriptor.cliCommand.includes("<PROFILE>"), {
+    message: "must include <PROFILE> placeholder",
+    path: ["cliCommand"],
+  })
   .describe(
     "Describes how the CLI discovers values for a resource field via a Databricks CLI command.",
   );
@@ -224,6 +229,68 @@ const resourceRequirementBaseShape = {
     ),
 };
 
+/**
+ * Adds the cycle/dangling-reference cross-field check to a resource variant.
+ * Iterates the resource's `fields`, validates each `discovery.dependsOn` target
+ * is a sibling field name, then runs DFS over the dependsOn graph to detect
+ * cycles. Issue paths target either the offending field's `dependsOn` slot or
+ * the resource itself for cycles.
+ */
+function refineResourceDependsOn(
+  resource: { fields?: Record<string, { discovery?: { dependsOn?: string } }> },
+  ctx: z.core.$RefinementCtx,
+): void {
+  if (!resource.fields) return;
+  const fieldNames = new Set(Object.keys(resource.fields));
+
+  // Pass 1: validate dependsOn references and build the dependency graph.
+  const deps = new Map<string, string>();
+  for (const [name, field] of Object.entries(resource.fields)) {
+    const dep = field.discovery?.dependsOn;
+    if (!dep) continue;
+    if (!fieldNames.has(dep)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["fields", name, "discovery", "dependsOn"],
+        message: `references non-existent sibling field '${dep}'`,
+      });
+    }
+    deps.set(name, dep);
+  }
+
+  // Pass 2: detect cycles via DFS. Emit one issue per cycle found.
+  const visited = new Set<string>();
+  const visiting = new Set<string>();
+
+  function dfs(node: string, chain: string[]): string[] | null {
+    if (visiting.has(node)) return [...chain, node];
+    if (visited.has(node)) return null;
+    visiting.add(node);
+    const next = deps.get(node);
+    if (next) {
+      const cycle = dfs(next, [...chain, node]);
+      if (cycle) return cycle;
+    }
+    visiting.delete(node);
+    visited.add(node);
+    return null;
+  }
+
+  for (const node of deps.keys()) {
+    if (visited.has(node)) continue;
+    const cycle = dfs(node, []);
+    if (cycle) {
+      ctx.addIssue({
+        code: "custom",
+        path: [],
+        message: `discovery.dependsOn creates a cycle: ${cycle.join(" → ")}`,
+      });
+      // One cycle error per resource is enough.
+      break;
+    }
+  }
+}
+
 function makeResourceVariant<
   TType extends z.ZodLiteral<string>,
   TPerm extends z.ZodTypeAny,
@@ -236,7 +303,8 @@ function makeResourceVariant<
         "Required permission level. Validated per resource type.",
       ),
     })
-    .strict();
+    .strict()
+    .superRefine(refineResourceDependsOn);
 }
 
 export const resourceRequirementSchema = z
@@ -305,6 +373,7 @@ export const postScaffoldStepSchema = z
   .object({
     instruction: z
       .string()
+      .min(1)
       .describe(
         "Human-readable instruction for the user to follow after scaffolding.",
       ),
@@ -417,14 +486,14 @@ export const originSchema = z
     "How the field value is determined. Computed during sync, not authored by plugin developers.",
   );
 
-// ── Template field entry (Phase 1: origin still input-optional) ──────────
+// ── Template field entry (origin still input-optional until Phase 3) ─────
 
 /**
  * Template field entry: extends the plugin manifest field entry with an
  * optional `origin` field. Phase 3 will move `origin` to a `.transform()`
  * output and remove the input slot. For parity with the existing
- * hand-written template schema, Phase 1 keeps `origin` as an optional input
- * (consumers in Phase 1 still emit it via `enrichFieldsWithOrigin`).
+ * hand-written template schema, `origin` is currently an optional input
+ * (consumers still emit it via `enrichFieldsWithOrigin`).
  */
 export const templateFieldEntrySchema = resourceFieldEntrySchema.extend({
   origin: originSchema.optional(),
@@ -468,7 +537,8 @@ function makeTemplateResourceVariant<
         "Required permission level. Validated per resource type.",
       ),
     })
-    .strict();
+    .strict()
+    .superRefine(refineResourceDependsOn);
 }
 
 export const templateResourceRequirementSchema = z

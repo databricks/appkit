@@ -1,11 +1,8 @@
-import type { ErrorObject } from "ajv";
 import { describe, expect, it } from "vitest";
-import type { PluginManifest } from "./validate-manifest";
 import {
   detectSchemaType,
-  formatSemanticIssues,
   formatValidationErrors,
-  runSemanticValidation,
+  type SemanticIssue,
   validateManifest,
   validateTemplateManifest,
 } from "./validate-manifest";
@@ -237,168 +234,133 @@ describe("validate-manifest", () => {
   });
 
   describe("formatValidationErrors", () => {
-    it("formats a required-property error", () => {
-      const errors: ErrorObject[] = [
+    it("formats a single issue with humanized path", () => {
+      const issues: SemanticIssue[] = [
         {
-          keyword: "required",
-          instancePath: "",
-          schemaPath: "#/required",
-          params: { missingProperty: "name" },
-          message: "must have required property 'name'",
+          level: "error",
+          path: "name",
+          message: "Invalid string: must match pattern",
         },
       ];
-      const output = formatValidationErrors(errors);
-      expect(output).toContain('missing required property "name"');
+      const output = formatValidationErrors(issues);
+      expect(output).toBe("  name: Invalid string: must match pattern");
     });
 
-    it("formats an enum error with actual value", () => {
-      const errors: ErrorObject[] = [
+    it("formats nested array paths with bracket notation", () => {
+      const issues: SemanticIssue[] = [
         {
-          keyword: "enum",
-          instancePath: "/resources/required/0/permission",
-          schemaPath: "#/$defs/secretPermission/enum",
-          params: { allowedValues: ["MANAGE", "READ", "WRITE"] },
-          message: "must be equal to one of the allowed values",
+          level: "error",
+          path: "resources.required[0].permission",
+          message: "Invalid option",
         },
       ];
-      const obj = {
-        resources: {
-          required: [{ permission: "INVALID" }],
-        },
-      };
-      const output = formatValidationErrors(errors, obj);
+      const output = formatValidationErrors(issues);
       expect(output).toContain("resources.required[0].permission");
-      expect(output).toContain('(got "INVALID")');
-      expect(output).toContain("MANAGE, READ, WRITE");
+      expect(output).toContain("Invalid option");
     });
 
-    it("formats a pattern error with actual value", () => {
-      const errors: ErrorObject[] = [
+    it("emits one line per issue", () => {
+      const issues: SemanticIssue[] = [
         {
-          keyword: "pattern",
-          instancePath: "/name",
-          schemaPath: "#/properties/name/pattern",
-          params: { pattern: "^[a-z][a-z0-9-]*$" },
-          message: 'must match pattern "^[a-z][a-z0-9-]*$"',
+          level: "error",
+          path: "name",
+          message: "missing",
+        },
+        {
+          level: "error",
+          path: "displayName",
+          message: "must not be empty",
         },
       ];
-      const obj = { name: "INVALID" };
-      const output = formatValidationErrors(errors, obj);
-      expect(output).toContain("name");
-      expect(output).toContain("does not match expected pattern");
-      expect(output).toContain('(got "INVALID")');
-    });
-
-    it("formats a type error", () => {
-      const errors: ErrorObject[] = [
-        {
-          keyword: "type",
-          instancePath: "/name",
-          schemaPath: "#/properties/name/type",
-          params: { type: "string" },
-          message: "must be string",
-        },
-      ];
-      const output = formatValidationErrors(errors);
-      expect(output).toContain('expected type "string"');
-    });
-
-    it("formats a minLength error", () => {
-      const errors: ErrorObject[] = [
-        {
-          keyword: "minLength",
-          instancePath: "/displayName",
-          schemaPath: "#/properties/displayName/minLength",
-          params: { limit: 1 },
-          message: "must NOT have fewer than 1 characters",
-        },
-      ];
-      const output = formatValidationErrors(errors);
-      expect(output).toContain("must not be empty");
-    });
-
-    it("formats an additionalProperties error", () => {
-      const errors: ErrorObject[] = [
-        {
-          keyword: "additionalProperties",
-          instancePath: "",
-          schemaPath: "#/additionalProperties",
-          params: { additionalProperty: "foo" },
-          message: "must NOT have additional properties",
-        },
-      ];
-      const output = formatValidationErrors(errors);
-      expect(output).toContain('unknown property "foo"');
-    });
-
-    it("collapses anyOf with enum sub-errors", () => {
-      const errors: ErrorObject[] = [
-        {
-          keyword: "enum",
-          instancePath: "/perm",
-          schemaPath: "#/$defs/a/enum",
-          params: { allowedValues: ["A", "B"] },
-          message: "must be equal to one of the allowed values",
-        },
-        {
-          keyword: "enum",
-          instancePath: "/perm",
-          schemaPath: "#/$defs/b/enum",
-          params: { allowedValues: ["C", "D"] },
-          message: "must be equal to one of the allowed values",
-        },
-        {
-          keyword: "anyOf",
-          instancePath: "/perm",
-          schemaPath: "#/anyOf",
-          params: {},
-          message: "must match a schema in anyOf",
-        },
-      ];
-      const obj = { perm: "X" };
-      const output = formatValidationErrors(errors, obj);
-      expect(output).toContain('invalid value (got "X")');
-      expect(output).toContain("A, B, C, D");
+      const output = formatValidationErrors(issues);
       const lines = output.split("\n");
-      expect(lines.length).toBe(2);
+      expect(lines).toHaveLength(2);
     });
 
-    it("skips if-keyword errors", () => {
-      const errors: ErrorObject[] = [
-        {
-          keyword: "if",
-          instancePath: "",
-          schemaPath: "#/allOf/0/if",
-          params: { failingKeyword: "if" },
-          message: 'must match "if" schema',
-        },
-      ];
-      const output = formatValidationErrors(errors);
-      expect(output).toBe("");
-    });
-
-    it("handles root-level errors with empty instancePath", () => {
-      const errors: ErrorObject[] = [
-        {
-          keyword: "required",
-          instancePath: "",
-          schemaPath: "#/required",
-          params: { missingProperty: "name" },
-          message: "must have required property 'name'",
-        },
-      ];
-      const output = formatValidationErrors(errors);
-      expect(output).toContain('missing required property "name"');
+    it("handles empty issue list", () => {
+      expect(formatValidationErrors([])).toBe("");
     });
   });
 
-  describe("semantic validation", () => {
-    it("returns no issues for a valid manifest without discovery", () => {
-      const result = runSemanticValidation(
-        VALID_MANIFEST_WITH_RESOURCE as PluginManifest,
-      );
-      expect(result.errors).toHaveLength(0);
-      expect(result.warnings).toHaveLength(0);
+  describe("validation error contents (semantic equivalence)", () => {
+    it("reports missing required property", () => {
+      const result = validateManifest({ name: "test" });
+      expect(result.valid).toBe(false);
+      const formatted = formatValidationErrors(result.errors ?? []);
+      // Zod reports missing required props as "Invalid input: expected ..."
+      expect(formatted).toMatch(/displayName|description|resources/);
+    });
+
+    it("reports invalid name pattern with the path", () => {
+      const result = validateManifest({
+        ...VALID_MANIFEST,
+        name: "INVALID",
+      });
+      expect(result.valid).toBe(false);
+      const formatted = formatValidationErrors(result.errors ?? []);
+      expect(formatted).toContain("name");
+      expect(formatted).toMatch(/pattern/i);
+    });
+
+    it("reports invalid permission for type with allowed enum hints", () => {
+      const result = validateManifest({
+        ...VALID_MANIFEST,
+        resources: {
+          required: [
+            {
+              type: "sql_warehouse",
+              alias: "Warehouse",
+              resourceKey: "wh",
+              description: "wh",
+              permission: "INVALID_PERM",
+              fields: { id: { env: "TEST_ID" } },
+            },
+          ],
+          optional: [],
+        },
+      });
+      expect(result.valid).toBe(false);
+      const formatted = formatValidationErrors(result.errors ?? []);
+      expect(formatted).toContain("resources.required[0].permission");
+      expect(formatted).toMatch(/CAN_USE/);
+    });
+
+    it("reports unknown property at root", () => {
+      const result = validateManifest({
+        ...VALID_MANIFEST,
+        nonsenseField: "boom",
+      });
+      expect(result.valid).toBe(false);
+      const formatted = formatValidationErrors(result.errors ?? []);
+      expect(formatted).toMatch(/nonsenseField|Unrecognized/);
+    });
+
+    it("reports type mismatch", () => {
+      const result = validateManifest({
+        ...VALID_MANIFEST,
+        name: 42,
+      });
+      expect(result.valid).toBe(false);
+      const formatted = formatValidationErrors(result.errors ?? []);
+      expect(formatted).toContain("name");
+      expect(formatted).toMatch(/expected string|received number/);
+    });
+
+    it("reports empty-string failures from min(1)", () => {
+      const result = validateManifest({
+        ...VALID_MANIFEST,
+        displayName: "",
+      });
+      expect(result.valid).toBe(false);
+      const formatted = formatValidationErrors(result.errors ?? []);
+      expect(formatted).toContain("displayName");
+    });
+  });
+
+  describe("semantic refinements (cycles, dangling refs, <PROFILE>)", () => {
+    it("returns valid for a manifest without discovery", () => {
+      const result = validateManifest(VALID_MANIFEST_WITH_RESOURCE);
+      expect(result.valid).toBe(true);
     });
 
     it("detects dangling dependsOn reference", () => {
@@ -429,12 +391,11 @@ describe("validate-manifest", () => {
           optional: [],
         },
       };
-      const result = runSemanticValidation(
-        manifest as unknown as PluginManifest,
-      );
-      expect(result.errors).toHaveLength(1);
-      expect(result.errors[0].message).toContain("non-existent sibling field");
-      expect(result.errors[0].message).toContain("nonexistent");
+      const result = validateManifest(manifest);
+      expect(result.valid).toBe(false);
+      const messages = (result.errors ?? []).map((e) => e.message).join("\n");
+      expect(messages).toContain("non-existent sibling field");
+      expect(messages).toContain("nonexistent");
     });
 
     it("detects cyclic dependsOn chain", () => {
@@ -471,13 +432,14 @@ describe("validate-manifest", () => {
           optional: [],
         },
       };
-      const result = runSemanticValidation(
-        manifest as unknown as PluginManifest,
-      );
-      const cycleErrors = result.errors.filter((e) =>
+      const result = validateManifest(manifest);
+      expect(result.valid).toBe(false);
+      const cycleErrors = (result.errors ?? []).filter((e) =>
         e.message.includes("cycle"),
       );
       expect(cycleErrors.length).toBeGreaterThan(0);
+      // Cycle path targets the resource, not a specific field.
+      expect(cycleErrors[0].path).toContain("resources.required[0]");
     });
 
     it("detects missing <PROFILE> in cliCommand", () => {
@@ -505,45 +467,21 @@ describe("validate-manifest", () => {
           optional: [],
         },
       };
-      const result = runSemanticValidation(
-        manifest as unknown as PluginManifest,
-      );
-      expect(result.errors).toHaveLength(1);
-      expect(result.errors[0].message).toContain("<PROFILE>");
+      const result = validateManifest(manifest);
+      expect(result.valid).toBe(false);
+      const messages = (result.errors ?? []).map((e) => e.message).join("\n");
+      expect(messages).toContain("<PROFILE>");
     });
 
-    it("warns when discovery is on non-user origin field", () => {
+    it("rejects empty postScaffold instruction", () => {
       const manifest = {
         ...VALID_MANIFEST,
-        resources: {
-          required: [
-            {
-              type: "postgres",
-              alias: "Postgres",
-              resourceKey: "postgres",
-              description: "test",
-              permission: "CAN_CONNECT_AND_CREATE",
-              fields: {
-                host: {
-                  env: "PGHOST",
-                  localOnly: true,
-                  discovery: {
-                    cliCommand: "databricks cmd --profile <PROFILE>",
-                    selectField: ".host",
-                  },
-                },
-              },
-            },
-          ],
-          optional: [],
-        },
+        postScaffold: [{ instruction: "" }],
       };
-      const result = runSemanticValidation(
-        manifest as unknown as PluginManifest,
-      );
-      expect(result.errors).toHaveLength(0);
-      expect(result.warnings).toHaveLength(1);
-      expect(result.warnings[0].message).toContain("platform");
+      const result = validateManifest(manifest);
+      expect(result.valid).toBe(false);
+      const formatted = formatValidationErrors(result.errors ?? []);
+      expect(formatted).toContain("postScaffold[0].instruction");
     });
 
     it("passes for valid manifest with all new fields", () => {
@@ -578,29 +516,8 @@ describe("validate-manifest", () => {
           optional: [],
         },
       };
-      const result = runSemanticValidation(
-        manifest as unknown as PluginManifest,
-      );
-      expect(result.errors).toHaveLength(0);
-      expect(result.warnings).toHaveLength(0);
-    });
-
-    it("formats semantic issues correctly", () => {
-      const issues = [
-        {
-          level: "error" as const,
-          path: "resources.postgres.fields.host",
-          message: "test error",
-        },
-        {
-          level: "warning" as const,
-          path: "postScaffold[0]",
-          message: "test warning",
-        },
-      ];
-      const output = formatSemanticIssues(issues);
-      expect(output).toContain("resources.postgres.fields.host: test error");
-      expect(output).toContain("postScaffold[0]: test warning");
+      const result = validateManifest(manifest);
+      expect(result.valid).toBe(true);
     });
   });
 });

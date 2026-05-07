@@ -7,16 +7,10 @@ import {
   type ResolvedManifest,
   resolveManifestInDir,
 } from "../manifest-resolve";
-import type {
-  PluginManifest,
-  SemanticValidateResult,
-  ValidateResult,
-} from "./validate-manifest";
+import type { ValidateResult } from "./validate-manifest";
 import {
   detectSchemaType,
-  formatSemanticIssues,
   formatValidationErrors,
-  runSemanticValidation,
   validateManifest,
   validateTemplateManifest,
 } from "./validate-manifest";
@@ -128,60 +122,21 @@ async function runPluginValidate(
     }
 
     const schemaType = detectSchemaType(obj);
-    let result: ValidateResult;
-    let semanticResult: SemanticValidateResult | undefined;
-
-    if (schemaType === "template-plugins") {
-      result = validateTemplateManifest(obj);
-    } else {
-      result = validateManifest(obj);
-      if (result.valid && result.manifest) {
-        semanticResult = runSemanticValidation(result.manifest);
-      }
-    }
+    const result: ValidateResult =
+      schemaType === "template-plugins"
+        ? validateTemplateManifest(obj)
+        : validateManifest(obj);
 
     if (result.valid) {
-      const hasSemanticErrors = Boolean(semanticResult?.errors.length);
-      const hasSemanticWarnings = Boolean(semanticResult?.warnings.length);
-
       if (options.json) {
-        const entry: (typeof jsonResults)[number] = {
-          path: relativePath,
-          valid: !hasSemanticErrors,
-        };
-        if (hasSemanticErrors) {
-          entry.errors = formatSemanticIssues(semanticResult!.errors)
-            .split("\n")
-            .filter(Boolean);
-        }
-        if (hasSemanticWarnings) {
-          entry.warnings = formatSemanticIssues(semanticResult!.warnings)
-            .split("\n")
-            .filter(Boolean);
-        }
-        jsonResults.push(entry);
+        jsonResults.push({ path: relativePath, valid: true });
       } else {
-        if (hasSemanticErrors) {
-          console.error(`✗ ${relativePath} (semantic errors)`);
-          console.error(formatSemanticIssues(semanticResult!.errors));
-        } else {
-          console.log(`✓ ${relativePath}`);
-        }
-        if (hasSemanticWarnings) {
-          console.warn("  warnings:");
-          console.warn(formatSemanticIssues(semanticResult!.warnings));
-        }
-      }
-
-      if (hasSemanticErrors) {
-        hasFailure = true;
+        console.log(`✓ ${relativePath}`);
       }
     } else {
       if (options.json) {
         const errors = result.errors?.length
-          ? formatValidationErrors(result.errors, obj)
-              .split("\n")
-              .filter(Boolean)
+          ? formatValidationErrors(result.errors).split("\n").filter(Boolean)
           : [];
         jsonResults.push({
           path: relativePath,
@@ -191,32 +146,10 @@ async function runPluginValidate(
       } else {
         console.error(`✗ ${relativePath}`);
         if (result.errors?.length) {
-          console.error(formatValidationErrors(result.errors, obj));
+          console.error(formatValidationErrors(result.errors));
         }
       }
       hasFailure = true;
-    }
-
-    if (schemaType === "template-plugins" && result.valid) {
-      const templateObj = obj as { plugins?: Record<string, unknown> };
-      if (templateObj.plugins) {
-        for (const [pluginName, plugin] of Object.entries(
-          templateObj.plugins,
-        )) {
-          const pluginSemantic = runSemanticValidation(
-            plugin as PluginManifest,
-          );
-          if (pluginSemantic.errors.length) {
-            console.error(`  ✗ plugin "${pluginName}" (semantic errors)`);
-            console.error(formatSemanticIssues(pluginSemantic.errors));
-            hasFailure = true;
-          }
-          if (pluginSemantic.warnings.length) {
-            console.warn(`  ⚠ plugin "${pluginName}" (warnings)`);
-            console.warn(formatSemanticIssues(pluginSemantic.warnings));
-          }
-        }
-      }
     }
   }
 
