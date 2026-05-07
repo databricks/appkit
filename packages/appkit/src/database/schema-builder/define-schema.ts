@@ -27,7 +27,7 @@ export function defineSchema<T extends Record<string, AppKitTable>>(
   build: (ctx: SchemaBuilderContext) => T,
   options: DefineSchemaOptions = {},
 ): Schema<T> {
-  const schemaName = options.schemaName ?? "app";
+  const schemaName = options.schemaName ?? "public";
   const schemaInstance =
     schemaName === "public" ? { table: pgTable } : pgSchema(schemaName);
 
