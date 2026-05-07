@@ -2,7 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { Lang, parse, type SgNode } from "@ast-grep/napi";
 import { Command } from "commander";
-import { templateFieldEntrySchema } from "../../../../schemas/manifest";
+import {
+  TEMPLATE_SCAFFOLDING,
+  templateFieldEntrySchema,
+} from "../../../../schemas/manifest";
 import {
   loadManifestFromFile,
   type ResolvedManifest,
@@ -10,7 +13,6 @@ import {
 } from "../manifest-resolve";
 import type {
   PluginManifest,
-  ScaffoldingDescriptor,
   TemplatePlugin,
   TemplatePluginsManifest,
 } from "../manifest-types";
@@ -120,40 +122,6 @@ const SERVER_FILE_CANDIDATES = ["server/server.ts", "server/index.ts"];
  * Plugins found here are added to the manifest even if not imported in the server.
  */
 const CONVENTIONAL_LOCAL_PLUGIN_DIRS = ["plugins", "server"];
-
-/**
- * Scaffolding descriptor for the `databricks apps init` command.
- * Included in v2.0 template manifests to guide scaffolding agents.
- */
-const TEMPLATE_SCAFFOLDING: ScaffoldingDescriptor = {
-  command: "databricks apps init",
-  flags: {
-    "--template-dir": {
-      description: "Path to the template directory containing the app scaffold",
-      required: true,
-    },
-    "--config-dir": {
-      description: "Path to the output directory for the initialized app",
-      required: true,
-    },
-    "--profile": {
-      description: "Databricks CLI profile to use for authentication",
-      required: false,
-    },
-  },
-  rules: {
-    never: [
-      "Modify files inside the template directory",
-      "Skip resource configuration prompts",
-      "Hardcode workspace-specific values in template files",
-    ],
-    must: [
-      "Use the template manifest (appkit.plugins.json) as the source of truth for available plugins",
-      "Respect requiredByTemplate flags when presenting plugin selection",
-      "Generate .env files with all required environment variables from selected plugins",
-    ],
-  },
-};
 
 /**
  * Find the server entry file by checking candidate paths in order.

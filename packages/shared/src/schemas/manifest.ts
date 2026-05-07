@@ -21,8 +21,10 @@
  *   carrying the existing free-form fields (with the `<PROFILE>`
  *   refinement). Hierarchical context for volumes (catalog/schema parent
  *   walk) is encoded as a Phase 6 MUST rule, not modeled in the schema.
- * - Phase 6: scaffolding rule items get a `maxLength`, and a volume MUST
- *   rule lands in `TEMPLATE_SCAFFOLDING`. Neither happens here.
+ * - Phase 6: scaffolding rule items carry a `maxLength` (120 chars) so
+ *   `rules.never[]` / `rules.must[]` stay short directives by contract, and
+ *   the canonical `TEMPLATE_SCAFFOLDING` constant lives co-located with the
+ *   scaffolding schemas (sync.ts imports it).
  */
 
 import { z } from "zod";
@@ -843,14 +845,28 @@ export const scaffoldingFlagSchema = z
   .strict()
   .describe("A flag for the scaffolding command.");
 
+/**
+ * Per-item upper bound on scaffolding rule strings. The intent is to enforce
+ * "short directive" by contract — long paragraphs fail validation and force
+ * authors to split prose into discrete actionable items.
+ */
+const SCAFFOLDING_RULE_MAX_LENGTH = 120;
+
+const scaffoldingRuleItemSchema = z
+  .string()
+  .max(
+    SCAFFOLDING_RULE_MAX_LENGTH,
+    `rule item must be ≤ ${SCAFFOLDING_RULE_MAX_LENGTH} chars`,
+  );
+
 export const scaffoldingRulesSchema = z
   .object({
     never: z
-      .array(z.string())
+      .array(scaffoldingRuleItemSchema)
       .optional()
       .describe("Actions the scaffolding agent must never perform."),
     must: z
-      .array(z.string())
+      .array(scaffoldingRuleItemSchema)
       .optional()
       .describe("Actions the scaffolding agent must always perform."),
   })
@@ -874,6 +890,48 @@ export const scaffoldingDescriptorSchema = z
   .describe(
     "Describes the scaffolding command, flags, and rules for project initialization.",
   );
+
+/**
+ * Canonical scaffolding descriptor for the `databricks apps init` command,
+ * embedded in v2.0 template manifests to guide scaffolding agents.
+ *
+ * Co-located with `scaffoldingDescriptorSchema` so any change to the rule set
+ * (or the schema's `maxLength` ceiling) shows up next to its consumer. The
+ * `satisfies` annotation gives compile-time validation that the literal
+ * matches the schema's input shape; if a `must`/`never` entry exceeds the
+ * `maxLength` ceiling at runtime, `scaffoldingDescriptorSchema.parse` would
+ * surface the breach in tests.
+ */
+export const TEMPLATE_SCAFFOLDING = {
+  command: "databricks apps init",
+  flags: {
+    "--template-dir": {
+      description: "Path to the template directory containing the app scaffold",
+      required: true,
+    },
+    "--config-dir": {
+      description: "Path to the output directory for the initialized app",
+      required: true,
+    },
+    "--profile": {
+      description: "Databricks CLI profile to use for authentication",
+      required: false,
+    },
+  },
+  rules: {
+    never: [
+      "Modify files inside the template directory",
+      "Skip resource configuration prompts",
+      "Hardcode workspace-specific values in template files",
+    ],
+    must: [
+      "Use the template manifest (appkit.plugins.json) as the source of truth for available plugins",
+      "Respect requiredByTemplate flags when presenting plugin selection",
+      "Generate .env files with all required environment variables from selected plugins",
+      "When discovering volume resources, prompt the user for catalog and schema before listing volumes.",
+    ],
+  },
+} satisfies z.infer<typeof scaffoldingDescriptorSchema>;
 
 // ── Template plugins manifest (root) ─────────────────────────────────────
 

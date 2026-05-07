@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  scaffoldingDescriptorSchema,
+  TEMPLATE_SCAFFOLDING,
+} from "../../../../schemas/manifest";
+import {
   detectSchemaType,
   formatValidationErrors,
   type SemanticIssue,
@@ -763,6 +767,89 @@ describe("validate-manifest", () => {
       const formatted = formatValidationErrors(result.errors ?? []);
       // Either a missing-discriminator error, or a "type" path issue.
       expect(formatted).toMatch(/type|discriminator/i);
+    });
+  });
+
+  describe("scaffolding rule item maxLength (Phase 6)", () => {
+    function buildTemplateManifestWithRules(rules: {
+      never?: string[];
+      must?: string[];
+    }): unknown {
+      return {
+        $schema:
+          "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
+        version: "2.0",
+        plugins: {},
+        scaffolding: {
+          command: "databricks apps init",
+          rules,
+        },
+      };
+    }
+
+    // 121-char string — one past the boundary.
+    const TOO_LONG = "x".repeat(121);
+    // 120-char string — at the boundary.
+    const AT_MAX = "x".repeat(120);
+
+    it("rejects a never[] item exceeding 120 characters", () => {
+      const result = validateTemplateManifest(
+        buildTemplateManifestWithRules({ never: [TOO_LONG] }),
+      );
+      expect(result.valid).toBe(false);
+      const formatted = formatValidationErrors(result.errors ?? []);
+      expect(formatted).toContain("scaffolding.rules.never[0]");
+      expect(formatted).toMatch(/120/);
+    });
+
+    it("rejects a must[] item exceeding 120 characters", () => {
+      const result = validateTemplateManifest(
+        buildTemplateManifestWithRules({ must: [TOO_LONG] }),
+      );
+      expect(result.valid).toBe(false);
+      const formatted = formatValidationErrors(result.errors ?? []);
+      expect(formatted).toContain("scaffolding.rules.must[0]");
+      expect(formatted).toMatch(/120/);
+    });
+
+    it("accepts rule items at exactly 120 characters", () => {
+      const result = validateTemplateManifest(
+        buildTemplateManifestWithRules({
+          never: [AT_MAX],
+          must: [AT_MAX],
+        }),
+      );
+      expect(result.valid).toBe(true);
+    });
+
+    it("flags only the offending entry in a mixed-length array", () => {
+      const result = validateTemplateManifest(
+        buildTemplateManifestWithRules({
+          must: ["short directive", TOO_LONG, "another short one"],
+        }),
+      );
+      expect(result.valid).toBe(false);
+      const paths = (result.errors ?? []).map((e) => e.path);
+      expect(paths).toContain("scaffolding.rules.must[1]");
+      expect(paths).not.toContain("scaffolding.rules.must[0]");
+      expect(paths).not.toContain("scaffolding.rules.must[2]");
+    });
+
+    it("TEMPLATE_SCAFFOLDING parses against scaffoldingDescriptorSchema", () => {
+      // The exported constant must validate against its own schema, including
+      // the maxLength ceiling on each rule item.
+      const parsed = scaffoldingDescriptorSchema.parse(TEMPLATE_SCAFFOLDING);
+      expect(parsed.command).toBe("databricks apps init");
+      expect(parsed.rules?.must).toBeDefined();
+      expect(parsed.rules?.never).toBeDefined();
+    });
+
+    it("TEMPLATE_SCAFFOLDING.rules.must includes the volume parent-walk MUST directive", () => {
+      // Phase 6: hierarchical context for volumes is encoded as a MUST rule
+      // rather than a schema-level dependency graph.
+      expect(TEMPLATE_SCAFFOLDING.rules.must).toContain(
+        "When discovering volume resources, prompt the user for catalog and schema before listing volumes.",
+      );
     });
   });
 });
