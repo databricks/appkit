@@ -138,7 +138,8 @@
             "fields": {
               "id": {
                 "env": "DATABRICKS_JOB_ID",
-                "description": "Numeric Databricks job ID. Find it in the Jobs UI or via `databricks jobs list`."
+                "description": "Numeric Databricks job ID. Find it in the Jobs UI or via `databricks jobs list`.",
+                "origin": "user"
               }
             }
           }
@@ -266,7 +267,8 @@
             "fields": {
               "name": {
                 "env": "DATABRICKS_SERVING_ENDPOINT_NAME",
-                "description": "Serving endpoint name"
+                "description": "Serving endpoint name",
+                "origin": "user"
               }
             }
           }

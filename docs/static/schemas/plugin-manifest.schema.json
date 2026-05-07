@@ -235,8 +235,7 @@
           "description": "Named resolver prefixed by resource type (e.g., 'postgres:host'). The CLI resolves this value during the init prompt flow."
         },
         "discovery": {
-          "$ref": "#/$defs/discoveryDescriptor",
-          "description": "How the CLI discovers values for this field via a Databricks CLI command."
+          "$ref": "#/$defs/discoveryDescriptor"
         }
       },
       "additionalProperties": false
