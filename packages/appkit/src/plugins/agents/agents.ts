@@ -1129,7 +1129,25 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         },
         runContext,
       ),
-      { signal: runState.signal },
+      {
+        signal: runState.signal,
+        // Forward every sub-agent event into the parent's outbound SSE
+        // stream so the client sees nested tool_call / tool_result events
+        // (UI-action tools like apply_filter / highlight_period rely on
+        // this) and the sub-agent's streaming text as it's generated.
+        //
+        // `metadata` is the one exception: sub-agents have their own
+        // threadId, and forwarding it would overwrite the parent's
+        // thread state on the client and break multi-turn continuity.
+        // Approval-pending events emitted by `dispatchToolCall` already
+        // reach `outboundEvents` directly, so they are not routed here.
+        onEvent: (event) => {
+          if (event.type === "metadata") return;
+          for (const translated of runState.translator.translate(event)) {
+            runState.outboundEvents.push(translated);
+          }
+        },
+      },
     );
   }
 

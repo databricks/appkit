@@ -278,3 +278,48 @@ describe("dispatchToolCall — shared tool-call budget", () => {
     expect(runState.signal.aborted).toBe(true);
   });
 });
+
+describe("runSubAgent — sub-agent event forwarding", () => {
+  /**
+   * The smart-dashboard `query` agent delegates to `dashboard_pilot`, which
+   * emits UI-action `tool_call` events (apply_filter, highlight_period) that
+   * the client reads off the parent's SSE stream. Without forwarding those
+   * inner events, the user asks for a highlight and nothing visible
+   * happens. `metadata` events are NOT forwarded because the sub-agent has
+   * its own threadId and overwriting the parent's would break multi-turn.
+   */
+  test("forwards every sub-agent event into the parent stream except metadata", async () => {
+    const plugin = new AgentsPlugin({ dir: false, agents: {} });
+    const { runState, pushed } = makeRunState(plugin);
+
+    const child = {
+      name: "child",
+      instructions: "test",
+      adapter: {
+        // biome-ignore lint/suspicious/noExplicitAny: stub adapter shape
+        async *run(): any {
+          yield { type: "metadata", data: { threadId: "child-thread" } };
+          yield {
+            type: "tool_call",
+            id: "call-1",
+            name: "highlight_period",
+            arguments: '{"start":"2016-03-01","end":"2016-03-31"}',
+          };
+          yield { type: "tool_result", id: "call-1", output: "highlighted" };
+          yield { type: "message_delta", content: "Done." };
+        },
+      },
+      toolIndex: new Map(),
+      // biome-ignore lint/suspicious/noExplicitAny: minimal stub
+    } as any;
+
+    // biome-ignore lint/suspicious/noExplicitAny: call private
+    await (plugin as any).runSubAgent(runState, child, { input: "go" }, 1);
+
+    const types = pushed.map((e) => (e as { type: string }).type);
+    expect(types).not.toContain("metadata");
+    expect(types).toContain("tool_call");
+    expect(types).toContain("tool_result");
+    expect(types).toContain("message_delta");
+  });
+});
