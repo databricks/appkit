@@ -10,6 +10,7 @@ import {
   jsonb,
   text,
   timestamp,
+  uuid,
 } from "../schema-builder";
 
 describe("defineSchema", () => {
@@ -176,6 +177,46 @@ describe("defineSchema", () => {
         schema.case.$insertSchema.safeParse({ createdAt: new Date() }).success,
       ).toBe(true);
     });
+  });
+
+  test("fk() inherits target pgType for text primary keys", () => {
+    const schema = defineSchema(({ table }) => {
+      const caseCols = {
+        case_id: text().primaryKey(),
+        status: text().notNull(),
+      };
+      const cases = table("cases", caseCols);
+      const activity_log = table("activity_log", {
+        log_id: text().primaryKey(),
+        case_id: fk(caseCols.case_id).notNull(),
+        action: text().notNull(),
+      });
+
+      return { cases, activity_log };
+    });
+
+    expect(schema.activity_log.$columns.case_id.pgKind).toBe("text");
+    expect(schema.activity_log.$relations).toEqual([
+      { fromColumn: "case_id", toTable: "cases", toColumn: "case_id" },
+    ]);
+  });
+
+  test("fk() inherits target pgType for uuid primary keys", () => {
+    const schema = defineSchema(({ table }) => {
+      const orgCols = { id: uuid().primaryKey() };
+      const orgs = table("orgs", orgCols);
+      const members = table("members", {
+        id: uuid().primaryKey(),
+        org_id: fk(orgCols.id).notNull(),
+      });
+
+      return { orgs, members };
+    });
+
+    expect(schema.members.$columns.org_id.pgKind).toBe("uuid");
+    expect(schema.members.$relations).toEqual([
+      { fromColumn: "org_id", toTable: "orgs", toColumn: "id" },
+    ]);
   });
 
   test("private columns are omitted from insert and update schemas", () => {

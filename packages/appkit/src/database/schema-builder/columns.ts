@@ -14,6 +14,7 @@ import { ValidationError } from "../../errors";
 import type {
   AppKitColumn,
   AppKitColumnChain,
+  ColumnKind,
   ColumnMeta,
   FkColumnChain,
   Relation,
@@ -86,6 +87,7 @@ export function id(): AppKitColumnChain {
   return wrap(serial().primaryKey(), {
     serverGenerated: true,
     primaryKey: true,
+    pgKind: "serial",
   });
 }
 
@@ -94,7 +96,7 @@ export function id(): AppKitColumnChain {
  * @returns The wrapped column chain.
  */
 export function text(): AppKitColumnChain {
-  return wrap(pgText());
+  return wrap(pgText(), { pgKind: "text" });
 }
 
 /**
@@ -102,7 +104,7 @@ export function text(): AppKitColumnChain {
  * @returns The wrapped column chain.
  */
 export function integer(): AppKitColumnChain {
-  return wrap(pgInteger());
+  return wrap(pgInteger(), { pgKind: "integer" });
 }
 
 /**
@@ -110,7 +112,7 @@ export function integer(): AppKitColumnChain {
  * @returns The wrapped column chain.
  */
 export function bigint(): AppKitColumnChain {
-  return wrap(pgBigint({ mode: "number" }));
+  return wrap(pgBigint({ mode: "number" }), { pgKind: "bigint" });
 }
 
 /**
@@ -118,7 +120,7 @@ export function bigint(): AppKitColumnChain {
  * @returns The wrapped column chain.
  */
 export function boolean(): AppKitColumnChain {
-  return wrap(pgBoolean());
+  return wrap(pgBoolean(), { pgKind: "boolean" });
 }
 
 /**
@@ -126,7 +128,7 @@ export function boolean(): AppKitColumnChain {
  * @returns The wrapped column chain.
  */
 export function timestamp(): AppKitColumnChain {
-  return wrap(pgTimestamp({ mode: "date" }));
+  return wrap(pgTimestamp({ mode: "date" }), { pgKind: "timestamp" });
 }
 
 /**
@@ -134,7 +136,7 @@ export function timestamp(): AppKitColumnChain {
  * @returns The wrapped column chain.
  */
 export function jsonb(): AppKitColumnChain {
-  return wrap(pgJsonb());
+  return wrap(pgJsonb(), { pgKind: "jsonb" });
 }
 
 /**
@@ -142,7 +144,7 @@ export function jsonb(): AppKitColumnChain {
  * @returns The wrapped column chain.
  */
 export function uuid(): AppKitColumnChain {
-  return wrap(pgUuid());
+  return wrap(pgUuid(), { pgKind: "uuid" });
 }
 
 /**
@@ -151,7 +153,7 @@ export function uuid(): AppKitColumnChain {
  * @returns The wrapped column chain.
  */
 export function varchar(length = 255): AppKitColumnChain {
-  return wrap(pgVarchar({ length }));
+  return wrap(pgVarchar({ length }), { pgKind: "varchar" });
 }
 
 /**
@@ -172,7 +174,33 @@ export function enumColumn(
   }
 
   const enumType = pgEnum(name, values as [string, ...string[]]);
-  return wrap(enumType());
+  return wrap(enumType(), { pgKind: "enum" });
+}
+
+/** Drizzle column constructor matching a `ColumnKind`, used by `fk()`. */
+function buildFkColumn(kind: ColumnKind): unknown {
+  switch (kind) {
+    case "text":
+      return pgText();
+    case "varchar":
+      return pgVarchar({ length: 255 });
+    case "uuid":
+      return pgUuid();
+    case "bigint":
+    case "bigserial":
+      return pgBigint({ mode: "number" });
+    case "boolean":
+      return pgBoolean();
+    case "jsonb":
+      return pgJsonb();
+    case "timestamp":
+      return pgTimestamp({ mode: "date" });
+    case "enum":
+      // Enums always live in the target table; FK column reuses text storage.
+      return pgText();
+    default:
+      return pgInteger();
+  }
 }
 
 /**
@@ -180,9 +208,8 @@ export function enumColumn(
  * resolved at `buildTable()` time, so forward references (e.g. `fk(other.id)`
  * declared before `table("other", ...)`) work.
  *
- * The FK column type is currently fixed to `integer`. If the target is a
- * `bigid()` (`bigserial`) or `uuid()` PK, declare the FK column with the
- * matching type explicitly until per-target type inference is added.
+ * The FK column type mirrors the target's `pgKind` (e.g. `text`, `uuid`,
+ * `bigint`), falling back to `integer` if the target is unstamped.
  *
  * @param target - The target column to reference.
  * @returns A FK column chain. `onDelete`/`onUpdate` return the FK chain so
@@ -190,58 +217,31 @@ export function enumColumn(
  * return the FK chain so `.notNull().onDelete("cascade")` typechecks.
  */
 export function fk(target: AppKitColumn): FkColumnChain {
-  const baseChain = wrap(pgInteger(), {
+  const kind = target.$meta.pgKind ?? "integer";
+  const baseChain = wrap(buildFkColumn(kind), {
+    pgKind: kind,
     // Live target reference; buildTable() resolves to toTable/toColumn after
     // all tables have been built and column names stamped.
     references: { target },
   });
 
-  // Override chain methods to return FkColumnChain at the type level. Runtime
-  // returns the same chain object so the cast is safe.
-  const fkChain: FkColumnChain = Object.assign(baseChain, {
-    notNull: () => {
-      baseChain.notNull();
-      return fkChain;
-    },
-    unique: () => {
-      baseChain.unique();
-      return fkChain;
-    },
-    primaryKey: () => {
-      baseChain.primaryKey();
-      return fkChain;
-    },
-    default<T>(value: T) {
-      baseChain.default(value);
-      return fkChain;
-    },
-    defaultNow: () => {
-      baseChain.defaultNow();
-      return fkChain;
-    },
-    defaultRandom: () => {
-      baseChain.defaultRandom();
-      return fkChain;
-    },
-    private: () => {
-      baseChain.private();
-      return fkChain;
-    },
-    onDelete: (value: NonNullable<Relation["onDelete"]>) => {
+  const fkChain = baseChain as FkColumnChain;
+  Object.assign(fkChain, {
+    onDelete(value: NonNullable<Relation["onDelete"]>) {
       fkChain.$meta.references = {
         ...(fkChain.$meta.references ?? {}),
         onDelete: value,
       };
       return fkChain;
     },
-    onUpdate: (value: NonNullable<Relation["onUpdate"]>) => {
+    onUpdate(value: NonNullable<Relation["onUpdate"]>) {
       fkChain.$meta.references = {
         ...(fkChain.$meta.references ?? {}),
         onUpdate: value,
       };
       return fkChain;
     },
-  }) as FkColumnChain;
+  });
 
   return fkChain;
 }

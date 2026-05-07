@@ -6,6 +6,23 @@ import type { z } from "zod";
 export const APPKIT_TABLE = Symbol.for("appkit.database.table");
 
 /**
+ * Source pg type tag stamped by each column helper. `fk()` reads it from the
+ * target column to mirror the type instead of hardcoding `integer`.
+ */
+export type ColumnKind =
+  | "text"
+  | "varchar"
+  | "uuid"
+  | "integer"
+  | "bigint"
+  | "serial"
+  | "bigserial"
+  | "boolean"
+  | "jsonb"
+  | "timestamp"
+  | "enum";
+
+/**
  * Metadata for an AppKit column. This is used to store the column metadata in the schema.
  */
 export interface ColumnMeta {
@@ -16,6 +33,8 @@ export interface ColumnMeta {
    * Excludes the column from the generated `$insertSchema` and `$updateSchema` (i.e. blocks writes through the validators).
    */
   private?: boolean;
+  /** @internal Source pg type tag — used by `fk()` to mirror target type. */
+  pgKind?: ColumnKind;
   /** @internal */
   tableName?: string;
   /** @internal */
