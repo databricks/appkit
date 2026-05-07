@@ -122,6 +122,7 @@ function fetchConversationPage(
     url: `${basePath}/${encodeURIComponent(alias)}/conversations/${encodeURIComponent(convId)}?${params}`,
     signal: options.signal,
     onMessage: async (message) => {
+      if (options.signal?.aborted) return;
       try {
         const event = JSON.parse(message.data) as GenieStreamEvent;
         switch (event.type) {
@@ -318,6 +319,7 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
         },
         signal: abortController.signal,
         onMessage: async (message) => {
+          if (abortController.signal.aborted) return;
           try {
             processStreamEventRef.current(
               JSON.parse(message.data) as GenieStreamEvent,
@@ -408,6 +410,7 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
         url,
         signal: parentAbortController.signal,
         onMessage: async (message) => {
+          if (parentAbortController.signal.aborted) return;
           try {
             processStreamEventRef.current(
               JSON.parse(message.data) as GenieStreamEvent,
