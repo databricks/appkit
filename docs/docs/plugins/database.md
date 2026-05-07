@@ -53,16 +53,69 @@ the `dist/` build artifacts).
 
 ```ts
 // config/database/schema.ts
-import { defineSchema, id, text, timestamp } from "@databricks/appkit";
+import { defineSchema, fk, id, text, timestamp } from "@databricks/appkit";
 
-export default defineSchema(({ table }) => ({
-  user: table("user", {
+export default defineSchema(({ table }) => {
+  const user = table("user", {
     id: id(),
     email: text().notNull(),
     createdAt: timestamp().defaultNow().notNull(),
-  }),
-}));
+  });
+
+  const post = table("post", {
+    id: id(),
+    authorId: fk(user.id).notNull(),
+    title: text().notNull(),
+  });
+
+  return { user, post };
+});
 ```
+
+`fk(target)` mirrors `target`'s pgType (integer, text, uuid, …) and registers
+both forward and reverse relations on the schema graph. Those relations
+power `.include()` on the typed client.
+
+## Including related entities
+
+Foreign keys declared with `fk(target)` are exposed on both endpoints of the
+relation — the side that holds the column gets a singular include, the side
+being pointed to gets an array.
+
+```ts
+const author = await db.post.include({ user: true }).first();
+author?.user;
+
+const enriched = await db.user
+  .include({ post: { select: ["id", "title"] } })
+  .toArray();
+enriched[0]?.post;
+```
+
+Includes serialize to `?include=` (PostgREST-style) and execute as a single
+SQL query on the server. Use `select` per-relation to project specific
+columns and avoid over-fetching nested rows.
+
+### Custom joins
+
+`.include()` covers schema-declared relations. For ad-hoc joins without an
+FK (cross-schema, polymorphic, conditional), use a custom plugin endpoint
+with `app.database.sql` — a tagged template that parameterizes values and
+returns rows directly:
+
+```ts
+app.route.get("/api/posts/with-counts", async (_req, res) => {
+  const rows = await app.database.sql`
+    SELECT u.id, u.email, COUNT(p.id) AS post_count
+    FROM "user" u
+    LEFT JOIN "post" p ON p.author_id = u.id
+    GROUP BY u.id, u.email
+  `;
+  res.json(rows);
+});
+```
+
+Use `.asUser(req).sql` to scope the query to the forwarded user's OBO pool.
 
 ## Auto-mounted routes
 

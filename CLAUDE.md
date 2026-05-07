@@ -277,7 +277,14 @@ import { database } from '@databricks/appkit/beta';
 
 const app = await createApp({ plugins: [server(), database()] });
 const cases = await app.database.cases.where({ status: 'New' }).limit(50).toArray();
+
+const enriched = await app.database.cases
+  .where({ status: 'New' })
+  .include({ activity_log: { select: ['log_id', 'action'] } })
+  .toArray();
 ```
+
+Relations declared via `fk(target)` in `config/database/schema.ts` are exposed on `.include()` (forward = singular, reverse = array). For ad-hoc joins use `app.database.sql\`...\`` inside a custom plugin route.
 
 CLI: `npx appkit db init | introspect | migration generate <name> | migrate up | rls <entity> <spec> | seed | setup:dev | types generate | verify`.
 
