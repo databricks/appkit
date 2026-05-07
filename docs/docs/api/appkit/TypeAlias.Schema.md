@@ -6,6 +6,7 @@ type Schema<T> = T & {
   $migrations: {
      snapshotHints: unknown;
   };
+  $schemaName: string;
   $tables: Record<string, AppKitTable>;
 };
 ```
@@ -33,6 +34,17 @@ readonly $migrations: {
 ```ts
 snapshotHints: unknown;
 ```
+
+### $schemaName
+
+```ts
+readonly $schemaName: string;
+```
+
+Postgres schema namespace declared via `defineSchema(..., { schemaName })`.
+Consumed by the database plugin (route/postgrest layer) and the
+introspector so downstream code never has to re-configure what the schema
+already knows about itself.
 
 ### $tables
 
