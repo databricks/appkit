@@ -2,22 +2,41 @@ import type { AgentToolDefinition } from "shared";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { isToolProvider, PluginContext } from "../plugin-context";
 
-vi.mock("../../telemetry", () => ({
-  TelemetryManager: {
-    getProvider: () => ({
-      getTracer: () => ({
-        startActiveSpan: (_name: string, fn: (span: any) => any) => {
-          const span = {
-            setStatus: vi.fn(),
-            recordException: vi.fn(),
-            end: vi.fn(),
-          };
-          return fn(span);
-        },
+/**
+ * Holds the most recent mock span instance so tests can assert against
+ * `setStatus` / `recordException` / `end` calls without relying on global
+ * spies. The PluginContext mock below repopulates this on every
+ * `startActiveSpan` call.
+ */
+const lastSpan: {
+  setStatus: ReturnType<typeof vi.fn>;
+  recordException: ReturnType<typeof vi.fn>;
+  end: ReturnType<typeof vi.fn>;
+} = {
+  setStatus: vi.fn(),
+  recordException: vi.fn(),
+  end: vi.fn(),
+};
+
+vi.mock("../../telemetry", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../telemetry")>("../../telemetry");
+  return {
+    ...actual,
+    TelemetryManager: {
+      getProvider: () => ({
+        getTracer: () => ({
+          startActiveSpan: (_name: string, fn: (span: unknown) => unknown) => {
+            lastSpan.setStatus = vi.fn();
+            lastSpan.recordException = vi.fn();
+            lastSpan.end = vi.fn();
+            return fn(lastSpan);
+          },
+        }),
       }),
-    }),
-  },
-}));
+    },
+  };
+});
 
 vi.mock("../../logging/logger", () => ({
   createLogger: () => ({
@@ -164,6 +183,18 @@ describe("PluginContext", () => {
       const after = ctx.getToolProviders();
       expect(after).toHaveLength(1);
     });
+
+    test("duplicate registerToolProvider name overwrites and exposes only the latest", () => {
+      const first = createMockToolProvider();
+      const second = createMockToolProvider();
+
+      ctx.registerToolProvider("analytics", first);
+      ctx.registerToolProvider("analytics", second);
+
+      const providers = ctx.getToolProviders();
+      expect(providers).toHaveLength(1);
+      expect(providers[0].provider).toBe(second);
+    });
   });
 
   describe("executeTool", () => {
@@ -202,6 +233,39 @@ describe("PluginContext", () => {
       await expect(
         ctx.executeTool(mockReq, "analytics", "query", {}),
       ).rejects.toThrow("Query failed");
+    });
+
+    test("marks the span OK on success and ends it", async () => {
+      const { SpanStatusCode } = await import("../../telemetry");
+      const provider = createMockToolProvider();
+      ctx.registerToolProvider("analytics", provider);
+
+      await ctx.executeTool({ headers: {} } as any, "analytics", "query", {});
+
+      expect(lastSpan.setStatus).toHaveBeenCalledWith({
+        code: SpanStatusCode.OK,
+      });
+      expect(lastSpan.recordException).not.toHaveBeenCalled();
+      expect(lastSpan.end).toHaveBeenCalledTimes(1);
+    });
+
+    test("marks the span ERROR with message on failure and records the exception", async () => {
+      const { SpanStatusCode } = await import("../../telemetry");
+      const provider = createMockToolProvider();
+      const failure = new Error("Query failed");
+      (provider.executeAgentTool as any).mockRejectedValue(failure);
+      ctx.registerToolProvider("analytics", provider);
+
+      await expect(
+        ctx.executeTool({ headers: {} } as any, "analytics", "query", {}),
+      ).rejects.toThrow("Query failed");
+
+      expect(lastSpan.setStatus).toHaveBeenCalledWith({
+        code: SpanStatusCode.ERROR,
+        message: "Query failed",
+      });
+      expect(lastSpan.recordException).toHaveBeenCalledWith(failure);
+      expect(lastSpan.end).toHaveBeenCalledTimes(1);
     });
 
     test("passes abort signal to executeAgentTool", async () => {
@@ -260,6 +324,43 @@ describe("PluginContext", () => {
 
     test("emitLifecycle with no registered hooks does nothing", async () => {
       await expect(ctx.emitLifecycle("server:ready")).resolves.toBeUndefined();
+    });
+
+    test("a callback that registers another hook for the same event does not re-enter the loop", async () => {
+      // Snapshot semantics: late-added hooks must not be visited by the
+      // current emit pass, otherwise ECMAScript Set iteration would re-enter
+      // and a self-registering hook would loop indefinitely.
+      const recorded: string[] = [];
+      const second = vi.fn(() => {
+        recorded.push("second");
+      });
+      const first = vi.fn(() => {
+        recorded.push("first");
+        ctx.onLifecycle("setup:complete", second);
+      });
+      ctx.onLifecycle("setup:complete", first);
+
+      await ctx.emitLifecycle("setup:complete");
+
+      expect(recorded).toEqual(["first"]);
+      expect(second).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("registerAsRouteTarget", () => {
+    test("ignores duplicate registration and warns", () => {
+      const first = { addExtension: vi.fn() };
+      const second = { addExtension: vi.fn() };
+
+      ctx.registerAsRouteTarget(first);
+      ctx.registerAsRouteTarget(second);
+
+      const handler = vi.fn();
+      ctx.addRoute("get", "/late", handler);
+
+      // The late route must reach the first target only.
+      expect(first.addExtension).toHaveBeenCalledTimes(1);
+      expect(second.addExtension).not.toHaveBeenCalled();
     });
   });
 
@@ -321,5 +422,16 @@ describe("isToolProvider", () => {
     expect(isToolProvider("string")).toBe(false);
     expect(isToolProvider(42)).toBe(false);
     expect(isToolProvider(undefined)).toBe(false);
+  });
+
+  test("returns false for objects missing asUser", () => {
+    // ToolProvider plugins must also expose user-scoped execution; the
+    // guard ensures executeTool can call asUser without an unsafe cast.
+    expect(
+      isToolProvider({
+        getAgentTools: vi.fn(),
+        executeAgentTool: vi.fn(),
+      }),
+    ).toBe(false);
   });
 });

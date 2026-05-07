@@ -80,6 +80,7 @@ const EXCLUDED_FROM_PROXY = new Set([
   // Lifecycle methods
   "setup",
   "shutdown",
+  "attachContext",
   "injectRoutes",
   "getEndpoints",
   "getSkipBodyParsingPaths",

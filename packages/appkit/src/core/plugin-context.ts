@@ -1,7 +1,7 @@
 import type express from "express";
-import type { BasePlugin, ToolProvider } from "shared";
+import type { BasePlugin, IAppRequest, ToolProvider } from "shared";
 import { createLogger } from "../logging/logger";
-import { TelemetryManager } from "../telemetry";
+import { SpanStatusCode, TelemetryManager } from "../telemetry";
 
 const logger = createLogger("plugin-context");
 
@@ -15,10 +15,14 @@ interface RouteTarget {
   addExtension(fn: (app: express.Application) => void): void;
 }
 
-interface ToolProviderEntry {
-  plugin: BasePlugin & ToolProvider;
-  name: string;
-}
+/**
+ * A tool-provider plugin that also exposes user-scoped execution. Plugins
+ * derived from {@link Plugin} satisfy this implicitly because `asUser` lives
+ * on the base class. {@link isToolProvider} narrows to this shape so
+ * `executeTool` can call `asUser` without an unsafe cast.
+ */
+type ToolProviderPlugin = BasePlugin &
+  ToolProvider & { asUser: (req: IAppRequest) => ToolProvider };
 
 type LifecycleEvent = "setup:complete" | "server:ready" | "shutdown";
 
@@ -38,7 +42,7 @@ type LifecycleEvent = "setup:complete" | "server:ready" | "shutdown";
 export class PluginContext {
   private routeBuffer: BufferedRoute[] = [];
   private routeTarget: RouteTarget | null = null;
-  private toolProviders = new Map<string, ToolProviderEntry>();
+  private toolProviders = new Map<string, ToolProviderPlugin>();
   private plugins = new Map<string, BasePlugin>();
   private lifecycleHooks = new Map<
     LifecycleEvent,
@@ -81,8 +85,19 @@ export class PluginContext {
   /**
    * Called by the server plugin to opt in as the route target.
    * Flushes all buffered routes via the server's `addExtension`.
+   *
+   * Only the first caller wins — subsequent calls are ignored with a warning.
+   * In practice only the server plugin registers, but a misconfigured app
+   * (two server plugins, or duplicate AppKit setup in tests) would otherwise
+   * silently drop the first target's later extensions.
    */
   registerAsRouteTarget(target: RouteTarget): void {
+    if (this.routeTarget) {
+      logger.warn(
+        "registerAsRouteTarget called more than once; ignoring duplicate registration",
+      );
+      return;
+    }
     this.routeTarget = target;
 
     for (const route of this.routeBuffer) {
@@ -98,9 +113,19 @@ export class PluginContext {
   /**
    * Register a plugin that implements the ToolProvider interface.
    * Called by AppKit core after constructing each plugin.
+   *
+   * Plugin names should be unique (they are derived from `manifest.name`).
+   * A duplicate registration overwrites the previous entry and emits a
+   * warning so the misconfiguration is visible in startup logs.
    */
-  registerToolProvider(name: string, plugin: BasePlugin & ToolProvider): void {
-    this.toolProviders.set(name, { plugin, name });
+  registerToolProvider(name: string, plugin: ToolProviderPlugin): void {
+    if (this.toolProviders.has(name)) {
+      logger.warn(
+        'Tool provider "%s" registered more than once; the previous registration is being overwritten',
+        name,
+      );
+    }
+    this.toolProviders.set(name, plugin);
   }
 
   /**
@@ -114,9 +139,10 @@ export class PluginContext {
   /**
    * Returns all registered plugin instances keyed by name.
    * Used by the server plugin for route injection, client config,
-   * and shutdown coordination.
+   * and shutdown coordination. The returned map is read-only at the
+   * type level — callers must not mutate the live registry.
    */
-  getPlugins(): Map<string, BasePlugin> {
+  getPlugins(): ReadonlyMap<string, BasePlugin> {
     return this.plugins;
   }
 
@@ -125,9 +151,9 @@ export class PluginContext {
    * Always returns the current set — not a frozen snapshot.
    */
   getToolProviders(): Array<{ name: string; provider: ToolProvider }> {
-    return Array.from(this.toolProviders.values()).map((entry) => ({
-      name: entry.name,
-      provider: entry.plugin,
+    return Array.from(this.toolProviders.entries()).map(([name, provider]) => ({
+      name,
+      provider,
     }));
   }
 
@@ -147,8 +173,8 @@ export class PluginContext {
     args: unknown,
     signal?: AbortSignal,
   ): Promise<unknown> {
-    const entry = this.toolProviders.get(pluginName);
-    if (!entry) {
+    const provider = this.toolProviders.get(pluginName);
+    if (!provider) {
       throw new Error(
         `PluginContext: unknown plugin "${pluginName}". Available: ${Array.from(this.toolProviders.keys()).join(", ")}`,
       );
@@ -165,17 +191,17 @@ export class PluginContext {
         : timeoutSignal;
 
       try {
-        const userPlugin = (entry.plugin as any).asUser(req);
-        const result = await (userPlugin as ToolProvider).executeAgentTool(
+        const userScoped = provider.asUser(req);
+        const result = await userScoped.executeAgentTool(
           toolName,
           args,
           combinedSignal,
         );
-        span.setStatus({ code: 0 });
+        span.setStatus({ code: SpanStatusCode.OK });
         return result;
       } catch (error) {
         span.setStatus({
-          code: 2,
+          code: SpanStatusCode.ERROR,
           message:
             error instanceof Error ? error.message : "Tool execution failed",
         });
@@ -223,7 +249,10 @@ export class PluginContext {
       );
     }
 
-    for (const fn of hooks) {
+    // Snapshot before iterating so a callback that registers a new hook for
+    // the same event does not mutate the loop. ECMAScript Set iteration would
+    // otherwise visit late-added entries, risking unexpected re-entry.
+    for (const fn of [...hooks]) {
       try {
         await fn();
       } catch (error) {
@@ -271,17 +300,20 @@ export class PluginContext {
 }
 
 /**
- * Type guard: checks whether a plugin implements the ToolProvider interface.
+ * Type guard: checks whether a plugin implements the ToolProvider interface
+ * and exposes the user-scoped `asUser` helper that the {@link Plugin} base
+ * class provides. Narrowing to {@link ToolProviderPlugin} lets `executeTool`
+ * call `asUser` without an unsafe cast.
  */
-export function isToolProvider(
-  plugin: unknown,
-): plugin is BasePlugin & ToolProvider {
+export function isToolProvider(plugin: unknown): plugin is ToolProviderPlugin {
   return (
     typeof plugin === "object" &&
     plugin !== null &&
     "getAgentTools" in plugin &&
     typeof (plugin as ToolProvider).getAgentTools === "function" &&
     "executeAgentTool" in plugin &&
-    typeof (plugin as ToolProvider).executeAgentTool === "function"
+    typeof (plugin as ToolProvider).executeAgentTool === "function" &&
+    "asUser" in plugin &&
+    typeof (plugin as { asUser?: unknown }).asUser === "function"
   );
 }
