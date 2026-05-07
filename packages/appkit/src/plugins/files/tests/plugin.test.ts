@@ -205,6 +205,62 @@ describe("FilesPlugin", () => {
     });
   });
 
+  describe("getAgentTools / executeAgentTool", () => {
+    test("produces independent tool entries per volume", () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const tools = plugin.getAgentTools();
+      const names = tools.map((t) => t.name);
+
+      expect(names).toContain("uploads.list");
+      expect(names).toContain("uploads.read");
+      expect(names).toContain("uploads.exists");
+      expect(names).toContain("uploads.metadata");
+      expect(names).toContain("uploads.upload");
+      expect(names).toContain("uploads.delete");
+
+      expect(names).toContain("exports.list");
+      expect(names).toContain("exports.read");
+      expect(names).toContain("exports.delete");
+
+      expect(tools).toHaveLength(12);
+    });
+
+    test("dispatches to the correct volume API based on the tool name", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const asyncIterable = (items: { path: string }[]) => ({
+        [Symbol.asyncIterator]: async function* () {
+          for (const item of items) yield item;
+        },
+      });
+      mockClient.files.listDirectoryContents.mockReturnValueOnce(
+        asyncIterable([{ path: "uploads-file" }]),
+      );
+      mockClient.files.listDirectoryContents.mockReturnValueOnce(
+        asyncIterable([{ path: "exports-file" }]),
+      );
+
+      const uploadsResult = (await plugin.executeAgentTool(
+        "uploads.list",
+        {},
+      )) as { path: string }[];
+      const exportsResult = (await plugin.executeAgentTool(
+        "exports.list",
+        {},
+      )) as { path: string }[];
+
+      expect(uploadsResult[0].path).toBe("uploads-file");
+      expect(exportsResult[0].path).toBe("exports-file");
+    });
+
+    test("returns LLM-friendly error string for invalid tool args", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const result = await plugin.executeAgentTool("uploads.read", {});
+      expect(typeof result).toBe("string");
+      expect(result).toContain("Invalid arguments for uploads.read");
+      expect(result).toContain("path");
+    });
+  });
+
   describe("exports()", () => {
     test("returns a callable function with a .volume alias", () => {
       const plugin = new FilesPlugin(VOLUMES_CONFIG);

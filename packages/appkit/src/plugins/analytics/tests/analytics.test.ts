@@ -605,4 +605,22 @@ describe("Analytics Plugin", () => {
       });
     });
   });
+
+  describe("toolkit()", () => {
+    test("produces ToolkitEntry records keyed by the plugin name", () => {
+      const plugin = new AnalyticsPlugin({ name: "analytics" });
+      const entries = plugin.toolkit();
+      expect(Object.keys(entries)).toContain("analytics.query");
+      const entry = entries["analytics.query"];
+      expect(entry.__toolkitRef).toBe(true);
+      expect(entry.pluginName).toBe("analytics");
+      expect(entry.localName).toBe("query");
+    });
+
+    test("respects prefix and only options", () => {
+      const plugin = new AnalyticsPlugin({ name: "analytics" });
+      const entries = plugin.toolkit({ prefix: "", only: ["query"] });
+      expect(Object.keys(entries)).toEqual(["query"]);
+    });
+  });
 });

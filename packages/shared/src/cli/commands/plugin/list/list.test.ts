@@ -119,6 +119,49 @@ describe("list", () => {
         /Failed to parse manifest file/,
       );
     });
+
+    it("defaults stability to ga when absent", () => {
+      const tmp = makeTempDir("list-stability-default");
+      tempDirs.push(tmp);
+      const manifestPath = path.join(tmp, "appkit.plugins.json");
+      fs.writeFileSync(
+        manifestPath,
+        JSON.stringify(TEMPLATE_MANIFEST_JSON, null, 2),
+      );
+
+      const rows = listFromManifestFile(manifestPath);
+      for (const row of rows) {
+        expect(row.stability).toBe("ga");
+      }
+    });
+
+    it("reads stability field from template manifest", () => {
+      const tmp = makeTempDir("list-stability-read");
+      tempDirs.push(tmp);
+      const manifest = {
+        ...TEMPLATE_MANIFEST_JSON,
+        version: "1.1",
+        plugins: {
+          ...TEMPLATE_MANIFEST_JSON.plugins,
+          beta: {
+            name: "beta-plugin",
+            displayName: "Beta Plugin",
+            package: "@databricks/appkit",
+            stability: "beta",
+            resources: { required: [], optional: [] },
+          },
+        },
+      };
+      const manifestPath = path.join(tmp, "appkit.plugins.json");
+      fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+
+      const rows = listFromManifestFile(manifestPath);
+      const betaRow = rows.find((r) => r.name === "beta-plugin");
+      const gaRow = rows.find((r) => r.name === "server");
+
+      expect(betaRow?.stability).toBe("beta");
+      expect(gaRow?.stability).toBe("ga");
+    });
   });
 
   describe("listFromDirectory", () => {
@@ -170,6 +213,42 @@ describe("list", () => {
       const rows = await listFromDirectory(tmp, path.dirname(tmp));
       expect(rows).toHaveLength(1);
       expect(rows[0].name).toBe("my-feature");
+    });
+
+    it("reads stability from manifest in directory scan", async () => {
+      const tmp = makeTempDir("list-dir-stability");
+      tempDirs.push(tmp);
+      const pluginDir = path.join(tmp, "beta-plugin");
+      fs.mkdirSync(pluginDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(pluginDir, "manifest.json"),
+        JSON.stringify({
+          ...PLUGIN_MANIFEST_JSON,
+          name: "beta-feature",
+          stability: "beta",
+        }),
+      );
+
+      const rows = await listFromDirectory(tmp, path.dirname(tmp));
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0].stability).toBe("beta");
+    });
+
+    it("defaults stability to ga in directory scan when absent", async () => {
+      const tmp = makeTempDir("list-dir-stability-default");
+      tempDirs.push(tmp);
+      const pluginDir = path.join(tmp, "ga-plugin");
+      fs.mkdirSync(pluginDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(pluginDir, "manifest.json"),
+        JSON.stringify(PLUGIN_MANIFEST_JSON),
+      );
+
+      const rows = await listFromDirectory(tmp, path.dirname(tmp));
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0].stability).toBe("ga");
     });
 
     it("does not load JS-only manifests by default", async () => {

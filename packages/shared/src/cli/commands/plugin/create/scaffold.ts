@@ -52,6 +52,7 @@ function buildManifest(answers: CreateAnswers): Record<string, unknown> {
     description: answers.description,
     resources: { required, optional },
   };
+  if (answers.stability) manifest.stability = answers.stability;
   if (answers.author) manifest.author = answers.author;
   manifest.version = answers.version || "0.1.0";
   if (answers.license) manifest.license = answers.license;

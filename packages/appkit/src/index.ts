@@ -54,15 +54,6 @@ export {
   type ToPlugin,
   toPlugin,
 } from "./plugin";
-export {
-  analytics,
-  files,
-  genie,
-  jobs,
-  lakebase,
-  server,
-  serving,
-} from "./plugins";
 // Files plugin types (for custom policy authoring)
 export type {
   FileAction,
@@ -75,6 +66,7 @@ export {
   READ_ACTIONS,
   WRITE_ACTIONS,
 } from "./plugins/files/policy";
+export * from "./plugins/ga-exports.generated";
 export type {
   IJobsConfig,
   JobAPI,

@@ -1,8 +1,10 @@
 import { type Span, SpanStatusCode } from "@opentelemetry/api";
 import type { TelemetryConfig } from "shared";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import * as executionContext from "../../context/execution-context";
 import { TelemetryInterceptor } from "../../plugin/interceptors/telemetry";
 import type { InterceptorContext } from "../../plugin/interceptors/types";
+import * as pluginModule from "../../plugin/plugin";
 import type { ITelemetry } from "../types";
 
 describe("TelemetryInterceptor", () => {
@@ -36,6 +38,8 @@ describe("TelemetryInterceptor", () => {
       metadata: new Map(),
       userKey: "test",
     };
+
+    vi.spyOn(executionContext, "getCurrentUserId").mockReturnValue("test-user");
   });
 
   test("should execute function and set span status to OK on success", async () => {
@@ -130,5 +134,67 @@ describe("TelemetryInterceptor", () => {
 
     // Verify end was called despite the error
     expect(mockSpan.end).toHaveBeenCalledTimes(1);
+  });
+
+  test("should set execution context as 'service' when not in user context", async () => {
+    vi.spyOn(executionContext, "isInUserContext").mockReturnValue(false);
+    vi.spyOn(executionContext, "getCurrentUserId").mockReturnValue("sp-123");
+    const interceptor = new TelemetryInterceptor(mockTelemetry);
+    const fn = vi.fn().mockResolvedValue("result");
+
+    await interceptor.intercept(fn, context);
+
+    expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+      "execution.context",
+      "service",
+    );
+    expect(mockSpan.setAttribute).toHaveBeenCalledWith("caller.id", "sp-123");
+  });
+
+  test("should set execution context as 'user' when in user context", async () => {
+    vi.spyOn(executionContext, "isInUserContext").mockReturnValue(true);
+    vi.spyOn(executionContext, "getCurrentUserId").mockReturnValue("user-123");
+    const interceptor = new TelemetryInterceptor(mockTelemetry);
+    const fn = vi.fn().mockResolvedValue("result");
+
+    await interceptor.intercept(fn, context);
+
+    expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+      "execution.context",
+      "user",
+    );
+    expect(mockSpan.setAttribute).toHaveBeenCalledWith("caller.id", "user-123");
+  });
+
+  test("should set execution.obo_dev_fallback when in dev OBO fallback", async () => {
+    vi.spyOn(executionContext, "isInUserContext").mockReturnValue(false);
+    vi.spyOn(pluginModule, "isDevOboFallback").mockReturnValue(true);
+    const interceptor = new TelemetryInterceptor(mockTelemetry);
+    const fn = vi.fn().mockResolvedValue("result");
+
+    await interceptor.intercept(fn, context);
+
+    expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+      "execution.context",
+      "service",
+    );
+    expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+      "execution.obo_dev_fallback",
+      true,
+    );
+  });
+
+  test("should not set execution.obo_dev_fallback when not in dev fallback", async () => {
+    vi.spyOn(executionContext, "isInUserContext").mockReturnValue(false);
+    vi.spyOn(pluginModule, "isDevOboFallback").mockReturnValue(false);
+    const interceptor = new TelemetryInterceptor(mockTelemetry);
+    const fn = vi.fn().mockResolvedValue("result");
+
+    await interceptor.intercept(fn, context);
+
+    expect(mockSpan.setAttribute).not.toHaveBeenCalledWith(
+      "execution.obo_dev_fallback",
+      expect.anything(),
+    );
   });
 });

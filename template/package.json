@@ -32,9 +32,9 @@
   "license": "Unlicensed",
   "description": "{{.appDescription}}",
   "dependencies": {
-    "@databricks/appkit": "0.27.1",
-    "@databricks/appkit-ui": "0.27.1",
-    "@databricks/sdk-experimental": "0.14.2",
+    "@databricks/appkit": "0.31.0",
+    "@databricks/appkit-ui": "0.31.0",
+    "@databricks/sdk-experimental": "0.17.0",
     "clsx": "2.1.1",
     "embla-carousel-react": "8.6.0",
     "lucide-react": "0.546.0",

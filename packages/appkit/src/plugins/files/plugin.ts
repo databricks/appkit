@@ -2,14 +2,32 @@ import { STATUS_CODES } from "node:http";
 import { Readable } from "node:stream";
 import { ApiError } from "@databricks/sdk-experimental";
 import type express from "express";
-import type { IAppRouter, PluginExecutionSettings } from "shared";
+import type {
+  AgentToolDefinition,
+  IAppRouter,
+  PluginExecutionSettings,
+  ToolProvider,
+} from "shared";
+import { z } from "zod";
 import {
   contentTypeFromPath,
   FilesConnector,
   isSafeInlineContentType,
   validateCustomContentTypes,
 } from "../../connectors/files";
-import { getCurrentUserId, getWorkspaceClient } from "../../context";
+import {
+  getCurrentUserId,
+  getExecutionContext,
+  getWorkspaceClient,
+} from "../../context";
+import { isUserContext } from "../../context/user-context";
+import { buildToolkitEntries } from "../../core/agent/build-toolkit";
+import {
+  defineTool,
+  executeFromRegistry,
+  type ToolRegistry,
+  toolsFromRegistry,
+} from "../../core/agent/tools/define-tool";
 import { AuthenticationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
@@ -31,7 +49,6 @@ import {
   policy,
 } from "./policy";
 import type {
-  DownloadResponse,
   FilesExport,
   IFilesConfig,
   VolumeAPI,
@@ -41,7 +58,7 @@ import type {
 
 const logger = createLogger("files");
 
-export class FilesPlugin extends Plugin {
+export class FilesPlugin extends Plugin implements ToolProvider {
   name = "files";
 
   /** Plugin manifest declaring metadata and resource requirements. */
@@ -52,6 +69,7 @@ export class FilesPlugin extends Plugin {
   private volumeConnectors: Record<string, FilesConnector> = {};
   private volumeConfigs: Record<string, VolumeConfig> = {};
   private volumeKeys: string[] = [];
+  private tools: ToolRegistry = {};
 
   /**
    * Scans `process.env` for `DATABRICKS_VOLUME_*` keys and merges them with
@@ -224,11 +242,11 @@ export class FilesPlugin extends Plugin {
         telemetry: config.telemetry,
         customContentTypes: mergedConfig.customContentTypes,
       });
-    }
 
-    // Warn at startup for volumes without an explicit policy
-    for (const key of this.volumeKeys) {
-      if (!volumes[key].policy) {
+      Object.assign(this.tools, this._defineVolumeTools(key));
+
+      // Warn at startup for volumes without an explicit policy
+      if (!volumeCfg.policy) {
         logger.warn(
           'Volume "%s" has no explicit policy — defaulting to publicRead(). ' +
             "Set a policy in files({ volumes: { %s: { policy: ... } } }) to silence this warning.",
@@ -1019,6 +1037,91 @@ export class FilesPlugin extends Plugin {
     };
   }
 
+  /**
+   * Builds the agent-tool registry entries for a single volume. One set of
+   * tools per configured volume, keyed by `${volumeKey}.${method}`.
+   *
+   * Each handler resolves the caller's identity from the current execution
+   * context (OBO user when the agent run is wrapped in `asUser(req)`, service
+   * principal otherwise in local dev) and dispatches through
+   * `createVolumeAPI(volumeKey, user)` so the volume's policy is enforced
+   * uniformly for agent and HTTP callers.
+   */
+  private _defineVolumeTools(volumeKey: string): ToolRegistry {
+    const buildUser = (): FilePolicyUser => {
+      const ctx = getExecutionContext();
+      return isUserContext(ctx)
+        ? { id: ctx.userId }
+        : { id: ctx.serviceUserId, isServicePrincipal: true };
+    };
+    const api = () => this.createVolumeAPI(volumeKey, buildUser());
+    return {
+      [`${volumeKey}.list`]: defineTool({
+        description: `List files and directories in the "${volumeKey}" volume`,
+        schema: z.object({
+          path: z
+            .string()
+            .optional()
+            .describe("Directory path to list (optional, defaults to root)"),
+        }),
+        annotations: { readOnly: true, requiresUserContext: true },
+        autoInheritable: true,
+        handler: (args) => api().list(args.path),
+      }),
+      [`${volumeKey}.read`]: defineTool({
+        description: `Read a text file from the "${volumeKey}" volume`,
+        schema: z.object({
+          path: z.string().describe("File path to read"),
+        }),
+        annotations: { readOnly: true, requiresUserContext: true },
+        autoInheritable: true,
+        handler: (args) => api().read(args.path),
+      }),
+      [`${volumeKey}.exists`]: defineTool({
+        description: `Check if a file or directory exists in the "${volumeKey}" volume`,
+        schema: z.object({
+          path: z.string().describe("Path to check"),
+        }),
+        annotations: { readOnly: true, requiresUserContext: true },
+        autoInheritable: true,
+        handler: (args) => api().exists(args.path),
+      }),
+      [`${volumeKey}.metadata`]: defineTool({
+        description: `Get metadata (size, type, last modified) for a file in the "${volumeKey}" volume`,
+        schema: z.object({
+          path: z.string().describe("File path"),
+        }),
+        annotations: { readOnly: true, requiresUserContext: true },
+        autoInheritable: true,
+        handler: (args) => api().metadata(args.path),
+      }),
+      [`${volumeKey}.upload`]: defineTool({
+        description: `Upload a text file to the "${volumeKey}" volume`,
+        schema: z.object({
+          path: z.string().describe("Destination file path"),
+          contents: z.string().describe("File contents as a string"),
+          overwrite: z
+            .boolean()
+            .optional()
+            .describe("Whether to overwrite existing file"),
+        }),
+        annotations: { destructive: true, requiresUserContext: true },
+        handler: (args) =>
+          api().upload(args.path, args.contents, {
+            overwrite: args.overwrite,
+          }),
+      }),
+      [`${volumeKey}.delete`]: defineTool({
+        description: `Delete a file from the "${volumeKey}" volume`,
+        schema: z.object({
+          path: z.string().describe("File path to delete"),
+        }),
+        annotations: { destructive: true, requiresUserContext: true },
+        handler: (args) => api().delete(args.path),
+      }),
+    };
+  }
+
   private inflightWrites = 0;
 
   private trackWrite<T>(fn: () => Promise<T>): Promise<T> {
@@ -1045,6 +1148,22 @@ export class FilesPlugin extends Plugin {
       );
     }
     this.streamManager.abortAll();
+  }
+
+  getAgentTools(): AgentToolDefinition[] {
+    return toolsFromRegistry(this.tools);
+  }
+
+  async executeAgentTool(
+    name: string,
+    args: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    return executeFromRegistry(this.tools, name, args, signal);
+  }
+
+  toolkit(opts?: import("../../core/agent/types").ToolkitOptions) {
+    return buildToolkitEntries(this.name, this.tools, opts);
   }
 
   /**

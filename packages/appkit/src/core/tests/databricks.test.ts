@@ -127,11 +127,11 @@ class DeferredTestPlugin implements BasePlugin {
   name = "deferredTest";
   setupCalled = false;
   injectedConfig: any;
-  injectedPlugins: any;
+  injectedContext: any;
 
   constructor(config: any) {
     this.injectedConfig = config;
-    this.injectedPlugins = config.plugins;
+    this.injectedContext = config.context;
   }
 
   async setup() {
@@ -148,7 +148,7 @@ class DeferredTestPlugin implements BasePlugin {
     return {
       setupCalled: this.setupCalled,
       injectedConfig: this.injectedConfig,
-      injectedPlugins: this.injectedPlugins,
+      injectedContext: this.injectedContext,
     };
   }
 }
@@ -294,7 +294,7 @@ describe("AppKit", () => {
       expect(setupOrder).toEqual(["core", "normal", "deferred"]);
     });
 
-    test("should provide plugin instances to deferred plugins", async () => {
+    test("should provide PluginContext to deferred plugins", async () => {
       const pluginData = [
         { plugin: CoreTestPlugin, config: {}, name: "coreTest" },
         { plugin: DeferredTestPlugin, config: {}, name: "deferredTest" },
@@ -302,10 +302,9 @@ describe("AppKit", () => {
 
       const instance = (await createApp({ plugins: pluginData })) as any;
 
-      // Deferred plugins receive plugin instances (not SDKs) for internal use
-      expect(instance.deferredTest.injectedPlugins).toBeDefined();
-      expect(instance.deferredTest.injectedPlugins.coreTest).toBeInstanceOf(
-        CoreTestPlugin,
+      expect(instance.deferredTest.injectedContext).toBeDefined();
+      expect(instance.deferredTest.injectedContext.hasPlugin("coreTest")).toBe(
+        true,
       );
     });
 

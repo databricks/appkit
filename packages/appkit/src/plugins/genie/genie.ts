@@ -1,8 +1,21 @@
 import { randomUUID } from "node:crypto";
 import type express from "express";
-import type { IAppRouter, StreamExecutionSettings } from "shared";
+import type {
+  AgentToolDefinition,
+  IAppRouter,
+  StreamExecutionSettings,
+  ToolProvider,
+} from "shared";
+import { z } from "zod";
 import { GenieConnector } from "../../connectors";
 import { getWorkspaceClient } from "../../context";
+import { buildToolkitEntries } from "../../core/agent/build-toolkit";
+import {
+  defineTool,
+  executeFromRegistry,
+  type ToolRegistry,
+  toolsFromRegistry,
+} from "../../core/agent/tools/define-tool";
 import { createLogger } from "../../logging";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
@@ -17,7 +30,7 @@ import type {
 
 const logger = createLogger("genie");
 
-export class GeniePlugin extends Plugin {
+export class GeniePlugin extends Plugin implements ToolProvider {
   static manifest = manifest as PluginManifest<"genie">;
 
   protected static description =
@@ -25,6 +38,7 @@ export class GeniePlugin extends Plugin {
   protected declare config: IGenieConfig;
 
   private readonly genieConnector: GenieConnector;
+  private tools: ToolRegistry = {};
 
   constructor(config: IGenieConfig) {
     super(config);
@@ -36,6 +50,54 @@ export class GeniePlugin extends Plugin {
       timeout: this.config.timeout,
       maxMessages: 200,
     });
+
+    for (const alias of Object.keys(this.config.spaces ?? {})) {
+      Object.assign(this.tools, this._defineSpaceTools(alias));
+    }
+  }
+
+  /**
+   * Builds the registry entries for a single Genie space alias.
+   * One set of tools per configured space, keyed by `${alias}.${method}`.
+   */
+  private _defineSpaceTools(alias: string): ToolRegistry {
+    return {
+      [`${alias}.sendMessage`]: defineTool({
+        description: `Send a natural language question to the Genie space "${alias}" and get data analysis results`,
+        schema: z.object({
+          content: z.string().describe("The natural language question to ask"),
+          conversationId: z
+            .string()
+            .optional()
+            .describe(
+              "Optional conversation ID to continue an existing conversation",
+            ),
+        }),
+        annotations: { requiresUserContext: true },
+        handler: async (args) => {
+          const events: GenieStreamEvent[] = [];
+          for await (const event of this.sendMessage(
+            alias,
+            args.content,
+            args.conversationId,
+          )) {
+            events.push(event);
+          }
+          return events;
+        },
+      }),
+      [`${alias}.getConversation`]: defineTool({
+        description: `Retrieve the conversation history from the Genie space "${alias}"`,
+        schema: z.object({
+          conversationId: z
+            .string()
+            .describe("The conversation ID to retrieve"),
+        }),
+        annotations: { readOnly: true, requiresUserContext: true },
+        autoInheritable: true,
+        handler: (args) => this.getConversation(alias, args.conversationId),
+      }),
+    };
   }
 
   private defaultSpaces(): Record<string, string> {
@@ -285,6 +347,22 @@ export class GeniePlugin extends Plugin {
 
   async shutdown(): Promise<void> {
     this.streamManager.abortAll();
+  }
+
+  getAgentTools(): AgentToolDefinition[] {
+    return toolsFromRegistry(this.tools);
+  }
+
+  async executeAgentTool(
+    name: string,
+    args: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    return executeFromRegistry(this.tools, name, args, signal);
+  }
+
+  toolkit(opts?: import("../../core/agent/types").ToolkitOptions) {
+    return buildToolkitEntries(this.name, this.tools, opts);
   }
 
   exports() {
