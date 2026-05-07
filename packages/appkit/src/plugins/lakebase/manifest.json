@@ -17,9 +17,9 @@
             "description": "Full Lakebase Postgres branch resource name. Obtain by running `databricks postgres list-branches projects/{project-id}`, select the desired item from the output array and use its .name value.",
             "examples": ["projects/{project-id}/branches/{branch-id}"],
             "discovery": {
-              "cliCommand": "databricks postgres list-branches --profile <PROFILE> --output json",
-              "selectField": ".name",
-              "displayField": ".name"
+              "type": "kind",
+              "resourceKind": "postgres_branch",
+              "select": "name"
             }
           },
           "database": {
@@ -28,9 +28,9 @@
               "projects/{project-id}/branches/{branch-id}/databases/{database-id}"
             ],
             "discovery": {
-              "cliCommand": "databricks postgres list-databases {branch} --profile <PROFILE> --output json",
-              "selectField": ".name",
-              "displayField": ".name",
+              "type": "kind",
+              "resourceKind": "postgres_database",
+              "select": "name",
               "dependsOn": "branch"
             }
           },

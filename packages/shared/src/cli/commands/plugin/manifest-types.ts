@@ -1,13 +1,14 @@
 /**
  * Shared types for plugin manifests used across CLI commands.
- * Base types (ResourceFieldEntry, ResourceRequirement, PluginManifest) are
- * generated from plugin-manifest.schema.json — only CLI-specific extensions
- * (TemplatePlugin, TemplatePluginsManifest) are hand-written here.
  *
- * Origin computation moved to `schemas/manifest.ts` in Phase 3 — origin is
- * now a `.transform()` output of `templateFieldEntrySchema`, not a helper
- * called by sync. Phase 5 will fold these hand-written types into the Zod
- * module and delete the legacy generated types.
+ * Phase 4 update: `DiscoveryDescriptor`, `ResourceFieldEntry`,
+ * `ResourceRequirement`, `PluginManifest`, and `PostScaffoldStep` are now
+ * sourced from the Zod schema module (the canonical contract). The legacy
+ * `plugin-manifest.generated.ts` types are stale because the discovery
+ * contract reshaped to a discriminated union; re-exporting from there would
+ * drop the union and break downstream type checks. CLI-specific extensions
+ * (`TemplatePlugin`, `TemplatePluginsManifest`) are still hand-written here
+ * — Phase 5 will fold those into the Zod module and delete this shim.
  */
 
 export type {
@@ -16,12 +17,12 @@ export type {
   PostScaffoldStep,
   ResourceFieldEntry,
   ResourceRequirement,
-} from "../../../schemas/plugin-manifest.generated";
+} from "../../../schemas/manifest";
 
 import type {
   PluginManifest,
   PostScaffoldStep,
-} from "../../../schemas/plugin-manifest.generated";
+} from "../../../schemas/manifest";
 
 export interface ScaffoldingFlag {
   description: string;

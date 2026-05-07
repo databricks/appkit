@@ -99,8 +99,11 @@ function buildEntry(
     }
   }
 
-  const entry: ResourceRequirement = {
-    type: type as ResourceRequirement["type"],
+  // Constructed dynamically from a string `type` and string `permission`;
+  // the per-type permission tightness from the discriminated union is
+  // recovered at runtime by `validateManifest` before the entry is written.
+  const entry = {
+    type,
     alias,
     resourceKey: opts.resourceKey ?? resourceKeyFromType(type),
     description:
@@ -109,7 +112,7 @@ function buildEntry(
     permission:
       opts.permission ?? DEFAULT_PERMISSION_BY_TYPE[type] ?? "CAN_VIEW",
     fields,
-  };
+  } as ResourceRequirement;
 
   return { entry, isRequired };
 }
@@ -163,14 +166,16 @@ async function runInteractive(opts: AddResourceOptions): Promise<void> {
   }
 
   const alias = humanizeResourceType(spec.type);
-  const entry: ResourceRequirement = {
-    type: spec.type as ResourceRequirement["type"],
+  // See note on the non-interactive variant in `buildEntry` — the entry is
+  // assembled from prompt strings and validated by Zod at write time.
+  const entry = {
+    type: spec.type,
     alias,
     resourceKey: spec.resourceKey,
     description: spec.description || `Required for ${alias} functionality.`,
     permission: spec.permission,
     fields: spec.fields,
-  };
+  } as ResourceRequirement;
 
   if (spec.required) {
     manifest.resources.required.push(entry);

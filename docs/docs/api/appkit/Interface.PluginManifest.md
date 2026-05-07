@@ -27,8 +27,6 @@ Extends the shared PluginManifest with strict resource types.
 optional author: string;
 ```
 
-Author name or organization
-
 #### Inherited from
 
 ```ts
@@ -62,8 +60,6 @@ schema: JSONSchema7;
 description: string;
 ```
 
-Brief description of what the plugin does
-
 #### Inherited from
 
 ```ts
@@ -77,8 +73,6 @@ Omit.description
 ```ts
 displayName: string;
 ```
-
-Human-readable display name for UI and CLI
 
 #### Inherited from
 
@@ -94,8 +88,6 @@ Omit.displayName
 optional hidden: boolean;
 ```
 
-When true, this plugin is excluded from the template plugins manifest (appkit.plugins.json) during sync.
-
 #### Inherited from
 
 ```ts
@@ -110,8 +102,6 @@ Omit.hidden
 optional keywords: string[];
 ```
 
-Keywords for plugin discovery
-
 #### Inherited from
 
 ```ts
@@ -125,8 +115,6 @@ Omit.keywords
 ```ts
 optional license: string;
 ```
-
-SPDX license identifier
 
 #### Inherited from
 
@@ -158,8 +146,6 @@ Omit.name
 optional onSetupMessage: string;
 ```
 
-Message displayed to the user after project initialization. Use this to inform about manual setup steps (e.g. environment variables, resource provisioning).
-
 #### Inherited from
 
 ```ts
@@ -171,10 +157,23 @@ Omit.onSetupMessage
 ### postScaffold?
 
 ```ts
-optional postScaffold: PostScaffoldStep[];
+optional postScaffold: {
+  instruction: string;
+  required?: boolean;
+}[];
 ```
 
-Ordered list of post-scaffolding instructions shown to the user after project initialization. Array position determines display order.
+#### instruction
+
+```ts
+instruction: string;
+```
+
+#### required?
+
+```ts
+optional required: boolean;
+```
 
 #### Inherited from
 
@@ -189,8 +188,6 @@ Omit.postScaffold
 ```ts
 optional repository: string;
 ```
-
-URL to the plugin's source repository
 
 #### Inherited from
 
@@ -235,8 +232,6 @@ Resources that must be available for the plugin to function
 optional stability: "beta" | "ga";
 ```
 
-Plugin stability level. Beta plugins may have breaking API changes between minor releases but are on a path to GA. GA (general availability) plugins follow semver strictly.
-
 #### Inherited from
 
 ```ts
@@ -250,8 +245,6 @@ Omit.stability
 ```ts
 optional version: string;
 ```
-
-Plugin version (semver format)
 
 #### Inherited from
 

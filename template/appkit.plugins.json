@@ -20,9 +20,8 @@
                 "env": "DATABRICKS_WAREHOUSE_ID",
                 "description": "SQL Warehouse ID",
                 "discovery": {
-                  "cliCommand": "databricks warehouses list --profile <PROFILE> --output json",
-                  "selectField": ".id",
-                  "displayField": ".name"
+                  "type": "kind",
+                  "resourceKind": "warehouse"
                 },
                 "origin": "user"
               }
@@ -60,9 +59,9 @@
                 "env": "DATABRICKS_VOLUME_FILES",
                 "description": "Volume path for file storage (e.g. /Volumes/catalog/schema/volume_name)",
                 "discovery": {
-                  "cliCommand": "databricks volumes list <CATALOG>.<SCHEMA> --profile <PROFILE> --output json",
-                  "selectField": ".full_name",
-                  "displayField": ".name"
+                  "type": "kind",
+                  "resourceKind": "volume",
+                  "select": "full_name"
                 },
                 "origin": "user"
               }
@@ -100,9 +99,8 @@
                 "env": "DATABRICKS_GENIE_SPACE_ID",
                 "description": "Default Genie Space ID",
                 "discovery": {
-                  "cliCommand": "databricks genie list --profile <PROFILE> --output json",
-                  "selectField": ".id",
-                  "displayField": ".name"
+                  "type": "kind",
+                  "resourceKind": "genie_space"
                 },
                 "origin": "user"
               }
@@ -167,9 +165,9 @@
                   "projects/{project-id}/branches/{branch-id}"
                 ],
                 "discovery": {
-                  "cliCommand": "databricks postgres list-branches --profile <PROFILE> --output json",
-                  "selectField": ".name",
-                  "displayField": ".name"
+                  "type": "kind",
+                  "resourceKind": "postgres_branch",
+                  "select": "name"
                 },
                 "origin": "user"
               },
@@ -179,9 +177,9 @@
                   "projects/{project-id}/branches/{branch-id}/databases/{database-id}"
                 ],
                 "discovery": {
-                  "cliCommand": "databricks postgres list-databases {branch} --profile <PROFILE> --output json",
-                  "selectField": ".name",
-                  "displayField": ".name",
+                  "type": "kind",
+                  "resourceKind": "postgres_database",
+                  "select": "name",
                   "dependsOn": "branch"
                 },
                 "origin": "user"

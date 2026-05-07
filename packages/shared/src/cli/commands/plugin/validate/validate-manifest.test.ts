@@ -379,6 +379,7 @@ describe("validate-manifest", () => {
                   env: "BRANCH",
                   description: "Branch name",
                   discovery: {
+                    type: "cli",
                     cliCommand:
                       "databricks postgres list-branches --profile <PROFILE>",
                     selectField: ".name",
@@ -413,6 +414,7 @@ describe("validate-manifest", () => {
                 a: {
                   env: "A",
                   discovery: {
+                    type: "cli",
                     cliCommand: "databricks cmd --profile <PROFILE>",
                     selectField: ".id",
                     dependsOn: "b",
@@ -421,6 +423,7 @@ describe("validate-manifest", () => {
                 b: {
                   env: "B",
                   discovery: {
+                    type: "cli",
                     cliCommand: "databricks cmd --profile <PROFILE>",
                     selectField: ".id",
                     dependsOn: "a",
@@ -442,7 +445,49 @@ describe("validate-manifest", () => {
       expect(cycleErrors[0].path).toContain("resources.required[0]");
     });
 
-    it("detects missing <PROFILE> in cliCommand", () => {
+    it("detects cyclic dependsOn chain across kind variants", () => {
+      const manifest = {
+        ...VALID_MANIFEST,
+        resources: {
+          required: [
+            {
+              type: "postgres",
+              alias: "Postgres",
+              resourceKey: "postgres",
+              description: "test",
+              permission: "CAN_CONNECT_AND_CREATE",
+              fields: {
+                branch: {
+                  env: "BRANCH",
+                  discovery: {
+                    type: "kind",
+                    resourceKind: "postgres_branch",
+                    dependsOn: "database",
+                  },
+                },
+                database: {
+                  env: "DATABASE",
+                  discovery: {
+                    type: "kind",
+                    resourceKind: "postgres_database",
+                    dependsOn: "branch",
+                  },
+                },
+              },
+            },
+          ],
+          optional: [],
+        },
+      };
+      const result = validateManifest(manifest);
+      expect(result.valid).toBe(false);
+      const cycleErrors = (result.errors ?? []).filter((e) =>
+        e.message.includes("cycle"),
+      );
+      expect(cycleErrors.length).toBeGreaterThan(0);
+    });
+
+    it("detects missing <PROFILE> in cli variant cliCommand", () => {
       const manifest = {
         ...VALID_MANIFEST,
         resources: {
@@ -457,6 +502,7 @@ describe("validate-manifest", () => {
                 id: {
                   env: "WAREHOUSE_ID",
                   discovery: {
+                    type: "cli",
                     cliCommand: "databricks warehouses list --output json",
                     selectField: ".id",
                   },
@@ -504,6 +550,7 @@ describe("validate-manifest", () => {
                   env: "WAREHOUSE_ID",
                   description: "Warehouse ID",
                   discovery: {
+                    type: "cli",
                     cliCommand:
                       "databricks warehouses list --profile <PROFILE> --output json",
                     selectField: ".id",
@@ -518,6 +565,204 @@ describe("validate-manifest", () => {
       };
       const result = validateManifest(manifest);
       expect(result.valid).toBe(true);
+    });
+  });
+
+  describe("discovery descriptor (discriminated union)", () => {
+    function buildManifestWithDiscovery(
+      type: string,
+      permission: string,
+      discovery: unknown,
+    ): unknown {
+      return {
+        ...VALID_MANIFEST,
+        resources: {
+          required: [
+            {
+              type,
+              alias: "Test Resource",
+              resourceKey: "test",
+              description: "test",
+              permission,
+              fields: {
+                id: {
+                  env: "TEST_ID",
+                  discovery,
+                },
+              },
+            },
+          ],
+          optional: [],
+        },
+      };
+    }
+
+    it("accepts a manifest with no discovery descriptor (v1.0 fixture)", () => {
+      // No `discovery` field on the resource field — minimal v1.0-shaped manifest.
+      const result = validateManifest({
+        ...VALID_MANIFEST,
+        resources: {
+          required: [
+            {
+              type: "sql_warehouse",
+              alias: "SQL Warehouse",
+              resourceKey: "sql-warehouse",
+              description: "Required for queries",
+              permission: "CAN_USE",
+              fields: {
+                id: {
+                  env: "DATABRICKS_WAREHOUSE_ID",
+                  description: "SQL Warehouse ID",
+                },
+              },
+            },
+          ],
+          optional: [],
+        },
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it("accepts kind variant for warehouse", () => {
+      const result = validateManifest(
+        buildManifestWithDiscovery("sql_warehouse", "CAN_USE", {
+          type: "kind",
+          resourceKind: "warehouse",
+        }),
+      );
+      expect(result.valid).toBe(true);
+    });
+
+    it("accepts kind variant for genie_space", () => {
+      const result = validateManifest(
+        buildManifestWithDiscovery("genie_space", "CAN_RUN", {
+          type: "kind",
+          resourceKind: "genie_space",
+        }),
+      );
+      expect(result.valid).toBe(true);
+    });
+
+    it("accepts kind variant for postgres_branch", () => {
+      const result = validateManifest(
+        buildManifestWithDiscovery("postgres", "CAN_CONNECT_AND_CREATE", {
+          type: "kind",
+          resourceKind: "postgres_branch",
+        }),
+      );
+      expect(result.valid).toBe(true);
+    });
+
+    it("accepts kind variant for postgres_database with dependsOn", () => {
+      const manifest = {
+        ...VALID_MANIFEST,
+        resources: {
+          required: [
+            {
+              type: "postgres",
+              alias: "Postgres",
+              resourceKey: "postgres",
+              description: "test",
+              permission: "CAN_CONNECT_AND_CREATE",
+              fields: {
+                branch: {
+                  env: "BRANCH",
+                  discovery: {
+                    type: "kind",
+                    resourceKind: "postgres_branch",
+                  },
+                },
+                database: {
+                  env: "DATABASE",
+                  discovery: {
+                    type: "kind",
+                    resourceKind: "postgres_database",
+                    dependsOn: "branch",
+                  },
+                },
+              },
+            },
+          ],
+          optional: [],
+        },
+      };
+      const result = validateManifest(manifest);
+      expect(result.valid).toBe(true);
+    });
+
+    it("accepts kind variant for volume with custom select", () => {
+      const result = validateManifest(
+        buildManifestWithDiscovery("volume", "READ_VOLUME", {
+          type: "kind",
+          resourceKind: "volume",
+          select: "full_name",
+        }),
+      );
+      expect(result.valid).toBe(true);
+    });
+
+    it("rejects kind variant with unrecognized resourceKind", () => {
+      const result = validateManifest(
+        buildManifestWithDiscovery("sql_warehouse", "CAN_USE", {
+          type: "kind",
+          resourceKind: "unknown_kind",
+        }),
+      );
+      expect(result.valid).toBe(false);
+      const formatted = formatValidationErrors(result.errors ?? []);
+      expect(formatted).toContain("resourceKind");
+    });
+
+    it("accepts cli variant with <PROFILE>", () => {
+      const result = validateManifest(
+        buildManifestWithDiscovery("sql_warehouse", "CAN_USE", {
+          type: "cli",
+          cliCommand:
+            "databricks warehouses list --profile <PROFILE> --output json",
+          selectField: ".id",
+          displayField: ".name",
+        }),
+      );
+      expect(result.valid).toBe(true);
+    });
+
+    it("rejects cli variant missing cliCommand", () => {
+      const result = validateManifest(
+        buildManifestWithDiscovery("sql_warehouse", "CAN_USE", {
+          type: "cli",
+          selectField: ".id",
+        }),
+      );
+      expect(result.valid).toBe(false);
+      const formatted = formatValidationErrors(result.errors ?? []);
+      expect(formatted).toContain("cliCommand");
+    });
+
+    it("rejects cli variant missing selectField", () => {
+      const result = validateManifest(
+        buildManifestWithDiscovery("sql_warehouse", "CAN_USE", {
+          type: "cli",
+          cliCommand:
+            "databricks warehouses list --profile <PROFILE> --output json",
+        }),
+      );
+      expect(result.valid).toBe(false);
+      const formatted = formatValidationErrors(result.errors ?? []);
+      expect(formatted).toContain("selectField");
+    });
+
+    it("rejects discovery descriptor missing type discriminator", () => {
+      const result = validateManifest(
+        buildManifestWithDiscovery("sql_warehouse", "CAN_USE", {
+          cliCommand:
+            "databricks warehouses list --profile <PROFILE> --output json",
+          selectField: ".id",
+        }),
+      );
+      expect(result.valid).toBe(false);
+      const formatted = formatValidationErrors(result.errors ?? []);
+      // Either a missing-discriminator error, or a "type" path issue.
+      expect(formatted).toMatch(/type|discriminator/i);
     });
   });
 });

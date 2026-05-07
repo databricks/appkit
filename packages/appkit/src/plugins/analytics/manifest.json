@@ -16,9 +16,8 @@
             "env": "DATABRICKS_WAREHOUSE_ID",
             "description": "SQL Warehouse ID",
             "discovery": {
-              "cliCommand": "databricks warehouses list --profile <PROFILE> --output json",
-              "selectField": ".id",
-              "displayField": ".name"
+              "type": "kind",
+              "resourceKind": "warehouse"
             }
           }
         }

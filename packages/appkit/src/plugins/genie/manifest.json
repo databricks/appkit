@@ -16,9 +16,8 @@
             "env": "DATABRICKS_GENIE_SPACE_ID",
             "description": "Default Genie Space ID",
             "discovery": {
-              "cliCommand": "databricks genie list --profile <PROFILE> --output json",
-              "selectField": ".id",
-              "displayField": ".name"
+              "type": "kind",
+              "resourceKind": "genie_space"
             }
           }
         }

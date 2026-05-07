@@ -16,9 +16,9 @@
             "env": "DATABRICKS_VOLUME_FILES",
             "description": "Volume path for file storage (e.g. /Volumes/catalog/schema/volume_name)",
             "discovery": {
-              "cliCommand": "databricks volumes list <CATALOG>.<SCHEMA> --profile <PROFILE> --output json",
-              "selectField": ".full_name",
-              "displayField": ".name"
+              "type": "kind",
+              "resourceKind": "volume",
+              "select": "full_name"
             }
           }
         }

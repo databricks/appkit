@@ -14,8 +14,13 @@
  *   from `localOnly`/`value`/`resolve`. The input slot is still allowed so
  *   re-parsing previously-synced template manifests does not fail, but the
  *   transform always overwrites it — drift-by-construction for hand-edits.
- * - Phase 4: `discoveryDescriptorSchema` will become a discriminated union.
- *   For now it remains in the existing free-form shape.
+ * - Phase 4: `discoveryDescriptorSchema` is a discriminated union over a
+ *   `type` literal. The `kind` variant references one of five well-known
+ *   `resourceKind` values for which AppKit owns the CLI command map (see
+ *   `RESOURCE_KIND_COMMANDS` below). The `cli` variant is the escape hatch
+ *   carrying the existing free-form fields (with the `<PROFILE>`
+ *   refinement). Hierarchical context for volumes (catalog/schema parent
+ *   walk) is encoded as a Phase 6 MUST rule, not modeled in the schema.
  * - Phase 6: scaffolding rule items get a `maxLength`, and a volume MUST
  *   rule lands in `TEMPLATE_SCAFFOLDING`. Neither happens here.
  */
@@ -102,10 +107,77 @@ export const appPermissionSchema = z
   .enum(["CAN_USE"])
   .describe("Permission for Databricks App resources");
 
-// ── Discovery descriptor (free-form shape until Phase 4) ─────────────────
+// ── Discovery descriptor (discriminated union) ───────────────────────────
 
-export const discoveryDescriptorSchema = z
+/**
+ * Well-known Databricks resource kinds for which AppKit owns the CLI
+ * command map. Plugins reference one of these via the `kind` variant of the
+ * discovery descriptor; everything else falls back to the free-form `cli`
+ * variant.
+ *
+ * Kept narrow on purpose: each entry costs an addition to
+ * `RESOURCE_KIND_COMMANDS` below, which is the single source of truth for
+ * how that kind is enumerated.
+ */
+export const resourceKindSchema = z
+  .enum([
+    "warehouse",
+    "genie_space",
+    "postgres_branch",
+    "postgres_database",
+    "volume",
+  ])
+  .describe(
+    "Well-known Databricks resource kind whose listing command is owned by AppKit (see RESOURCE_KIND_COMMANDS).",
+  );
+
+export const kindDiscoveryDescriptorSchema = z
   .object({
+    type: z
+      .literal("kind")
+      .describe(
+        "Discriminator: 'kind' uses the AppKit-owned command map for the named resourceKind.",
+      ),
+    resourceKind: resourceKindSchema.describe(
+      "Reference to a well-known Databricks resource kind. AppKit owns the CLI command, response shape, and unwrap rules.",
+    ),
+    select: z
+      .string()
+      .optional()
+      .describe(
+        "Field name in the parsed CLI response used as the selected value (e.g., 'id'). Defaults to the kind's natural identifier when omitted.",
+      ),
+    display: z
+      .string()
+      .optional()
+      .describe(
+        "Field name in the parsed CLI response shown to the user in selection UI. Defaults to `select` if omitted.",
+      ),
+    dependsOn: z
+      .string()
+      .optional()
+      .describe(
+        "Name of a sibling field within the same resource that must be resolved first. Used to express ordering dependencies between resource fields.",
+      ),
+    shortcut: z
+      .string()
+      .optional()
+      .describe(
+        "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+      ),
+  })
+  .strict()
+  .describe(
+    "Discovery via a well-known resource kind. AppKit owns the CLI command and unwrap rules for the named kind.",
+  );
+
+export const cliDiscoveryDescriptorSchema = z
+  .object({
+    type: z
+      .literal("cli")
+      .describe(
+        "Discriminator: 'cli' uses a free-form Databricks CLI command supplied by the plugin.",
+      ),
     cliCommand: z
       .string()
       .describe(
@@ -141,8 +213,83 @@ export const discoveryDescriptorSchema = z
     path: ["cliCommand"],
   })
   .describe(
-    "Describes how the CLI discovers values for a resource field via a Databricks CLI command.",
+    "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits.",
   );
+
+export const discoveryDescriptorSchema = z
+  .discriminatedUnion("type", [
+    kindDiscoveryDescriptorSchema,
+    cliDiscoveryDescriptorSchema,
+  ])
+  .describe(
+    "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command.",
+  );
+
+// ── Resource kind → CLI command map ──────────────────────────────────────
+
+/**
+ * Descriptor for how a well-known resource kind is listed via the
+ * Databricks CLI.
+ *
+ * - `command` is the CLI invocation template. It carries two kinds of
+ *   placeholders:
+ *     - `<PROFILE>` — substituted with the user's CLI profile by the runner.
+ *     - `{<fieldName>}` — substituted with the resolved value of the named
+ *       sibling field (used for `dependsOn` chains).
+ * - `unwrap`, when set, is the JSON path into the response wrapper (e.g.,
+ *   `"warehouses"` for `{ warehouses: [...] }`). Omitted when the response
+ *   is already a flat array.
+ */
+export type ResourceKindCommand = {
+  command: string;
+  unwrap?: string;
+};
+
+/**
+ * Single source of truth for AppKit-owned discovery commands.
+ *
+ * To add a new resource kind: extend `resourceKindSchema` and add an entry
+ * here. Plugins reference the kind via `discovery: { type: "kind",
+ * resourceKind: "..." }` and inherit the command + response shape.
+ *
+ * `unwrap` defaults are unset: the existing core plugin manifests use simple
+ * jq paths (`.id`, `.name`, `.full_name`), implying the listed CLI commands
+ * return flat arrays. Refine in a follow-up if a kind's CLI returns wrapped
+ * data.
+ *
+ * Volume's catalog/schema parent context is NOT modeled here. The
+ * `databricks volumes list` command requires a `<catalog>.<schema>` argument
+ * that AppKit does not auto-discover; the CLI is expected to prompt the user
+ * via a Phase 6 MUST rule before invoking the listing.
+ */
+export const RESOURCE_KIND_COMMANDS: Record<
+  z.infer<typeof resourceKindSchema>,
+  ResourceKindCommand
+> = {
+  warehouse: {
+    command: "databricks warehouses list --profile <PROFILE> --output json",
+  },
+  genie_space: {
+    command: "databricks genie list --profile <PROFILE> --output json",
+  },
+  postgres_branch: {
+    command:
+      "databricks postgres list-branches --profile <PROFILE> --output json",
+  },
+  postgres_database: {
+    // {branch} is a placeholder for the resolved value of the `branch`
+    // sibling field (declared via `dependsOn: "branch"` on the kind variant).
+    command:
+      "databricks postgres list-databases {branch} --profile <PROFILE> --output json",
+  },
+  volume: {
+    // <catalog>.<schema> parent context must be supplied by the CLI runner —
+    // it is encoded as a Phase 6 MUST rule (prompt the user for catalog and
+    // schema before listing volumes), not as a schema-level placeholder.
+    command:
+      "databricks volumes list <catalog>.<schema> --profile <PROFILE> --output json",
+  },
+};
 
 // ── Resource field entry (plugin manifest variant) ───────────────────────
 
@@ -786,6 +933,13 @@ export type PostgresPermission = z.infer<typeof postgresPermissionSchema>;
 export type GenieSpacePermission = z.infer<typeof genieSpacePermissionSchema>;
 export type ExperimentPermission = z.infer<typeof experimentPermissionSchema>;
 export type AppPermission = z.infer<typeof appPermissionSchema>;
+export type ResourceKind = z.infer<typeof resourceKindSchema>;
+export type KindDiscoveryDescriptor = z.infer<
+  typeof kindDiscoveryDescriptorSchema
+>;
+export type CliDiscoveryDescriptor = z.infer<
+  typeof cliDiscoveryDescriptorSchema
+>;
 export type DiscoveryDescriptor = z.infer<typeof discoveryDescriptorSchema>;
 export type ResourceFieldEntry = z.infer<typeof resourceFieldEntrySchema>;
 export type ResourceRequirement = z.infer<typeof resourceRequirementSchema>;

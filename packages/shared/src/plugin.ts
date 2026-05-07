@@ -3,12 +3,14 @@ import type { JSONSchema7 } from "json-schema";
 import type {
   DiscoveryDescriptor,
   PluginManifest as GeneratedPluginManifest,
-  ResourceRequirement as GeneratedResourceRequirement,
   PostScaffoldStep,
   ResourceFieldEntry,
-} from "./schemas/plugin-manifest.generated";
+} from "./schemas/manifest";
 
-// Re-export generated types as the shared canonical definitions.
+// Re-export the canonical schema-derived types as the shared definitions.
+// Phase 4: sourced from `./schemas/manifest` (the Zod canonical) instead of
+// the legacy generated file, which has a stale `DiscoveryDescriptor` shape
+// (free-form vs. discriminated union after the Phase 4 reshape).
 export type { ResourceFieldEntry, DiscoveryDescriptor, PostScaffoldStep };
 
 /** Base plugin interface. */
@@ -121,10 +123,21 @@ export interface PluginManifest<TName extends string = string>
  * - `fields` is made required (schema has it optional, but registry always populates it)
  * - `required` boolean tracks whether the resource is mandatory at runtime
  *
- * @see {@link GeneratedResourceRequirement} — generated base from plugin-manifest.schema.json
+ * Defined as a flat structural shape rather than narrowing the schema-derived
+ * discriminated union. Per-type permission tightness is enforced by the
+ * Zod parse at validation time; expressing it in the consumer-facing
+ * `ResourceRequirement` would force every plugin to thread the variant type
+ * through `getResourceRequirements()` for no runtime benefit.
+ *
+ * @see {@link GeneratedResourceRequirement} — schema-derived discriminated union from `schemas/manifest`
  * @see `packages/appkit/src/registry/types.ts` `ResourceRequirement` — strict appkit narrowing (enum types)
  */
-export interface ResourceRequirement extends GeneratedResourceRequirement {
+export interface ResourceRequirement {
+  type: string;
+  alias: string;
+  resourceKey: string;
+  description: string;
+  permission: string;
   fields: Record<string, ResourceFieldEntry>;
   required: boolean;
 }
