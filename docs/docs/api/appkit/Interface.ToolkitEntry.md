@@ -30,7 +30,7 @@ optional autoInheritable: boolean;
 ```
 
 Whether this tool is eligible for `autoInheritTools` spreading. Mirrors
-ToolEntry.autoInheritable from the source registry so the agents
+[ToolEntry.autoInheritable](Interface.ToolEntry.md#autoinheritable) from the source registry so the agents
 plugin can filter auto-inherited tools without re-walking the provider's
 internal registry.
 

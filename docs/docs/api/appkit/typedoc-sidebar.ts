@@ -28,6 +28,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Class.AppKitMcpClient",
+          label: "AppKitMcpClient"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Class.AuthenticationError",
           label: "AuthenticationError"
         },
@@ -40,6 +45,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Class.ConnectionError",
           label: "ConnectionError"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Class.DatabricksAdapter",
+          label: "DatabricksAdapter"
         },
         {
           type: "doc",
@@ -294,6 +304,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.ToolEntry",
+          label: "ToolEntry"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.ToolkitEntry",
           label: "ToolkitEntry"
         },
@@ -400,6 +415,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.ToolRegistry",
+          label: "ToolRegistry"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.ToPlugin",
           label: "ToPlugin"
         }
@@ -467,6 +487,16 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.defineTool",
+          label: "defineTool"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.executeFromRegistry",
+          label: "executeFromRegistry"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.extractServingEndpoints",
           label: "extractServingEndpoints"
         },
@@ -479,6 +509,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.fromPlugin",
           label: "fromPlugin"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.functionToolToDefinition",
+          label: "functionToolToDefinition"
         },
         {
           type: "doc",
@@ -562,6 +597,16 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.parseTextToolCalls",
+          label: "parseTextToolCalls"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.resolveHostedTools",
+          label: "resolveHostedTools"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.runAgent",
           label: "runAgent"
         },
@@ -569,6 +614,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.tool",
           label: "tool"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.toolsFromRegistry",
+          label: "toolsFromRegistry"
         }
       ]
     }
