@@ -51,6 +51,67 @@
         "optional": []
       }
     },
+    "database": {
+      "name": "database",
+      "displayName": "Database",
+      "description": "Lakebase Postgres pool + schema declaration via defineSchema. CRUD/OBO/RLS surface ships incrementally in subsequent stack layers; this layer provides the pool, schema convention loader, and column metadata.",
+      "package": "@databricks/appkit",
+      "resources": {
+        "required": [
+          {
+            "type": "postgres",
+            "alias": "Application Database",
+            "resourceKey": "database",
+            "description": "Lakebase Postgres instance for application data. Schema lives at config/database/schema.ts.",
+            "permission": "CAN_CONNECT_AND_CREATE",
+            "fields": {
+              "branch": {
+                "description": "Full Lakebase Postgres branch resource name.",
+                "examples": [
+                  "projects/{project-id}/branches/{branch-id}"
+                ]
+              },
+              "database": {
+                "description": "Full Lakebase Postgres database resource name."
+              },
+              "host": {
+                "env": "PGHOST",
+                "localOnly": true,
+                "resolve": "postgres:host",
+                "description": "Postgres host for local development."
+              },
+              "databaseName": {
+                "env": "PGDATABASE",
+                "localOnly": true,
+                "resolve": "postgres:databaseName",
+                "description": "Postgres database name for local development."
+              },
+              "endpointPath": {
+                "env": "LAKEBASE_ENDPOINT",
+                "bundleIgnore": true,
+                "resolve": "postgres:endpointPath",
+                "description": "Lakebase endpoint resource name."
+              },
+              "port": {
+                "env": "PGPORT",
+                "localOnly": true,
+                "value": "5432",
+                "description": "Postgres port."
+              },
+              "sslmode": {
+                "env": "PGSSLMODE",
+                "localOnly": true,
+                "value": "require",
+                "description": "Postgres SSL mode."
+              }
+            }
+          }
+        ],
+        "optional": []
+      },
+      "onSetupMessage": "Database plugin installed. Configure your schema in config/database/schema.ts via defineSchema(). The plugin currently exposes pool access (appkit.database.getPool()); CRUD, OBO, and RLS surfaces ship in subsequent stack layers.",
+      "stability": "beta"
+    },
     "files": {
       "name": "files",
       "displayName": "Files Plugin",
