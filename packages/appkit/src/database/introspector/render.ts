@@ -124,11 +124,23 @@ function renderScalarColumn(column: IntrospectedColumn): string {
 }
 
 function renderDefault(expression: string): string {
-  if (expression === "now()") return ".defaultNow()";
-  if (expression.startsWith("'") && expression.includes("'::")) {
-    const literal = expression.slice(1, expression.indexOf("'::"));
+  const trimmed = expression.trim();
+  if (trimmed === "now()" || /^current_timestamp\b/i.test(trimmed)) {
+    return ".defaultNow()";
+  }
+  const booleanLiteral = /^(true|false)(::\w+)?$/i.exec(trimmed);
+  if (booleanLiteral) {
+    return `.default(${booleanLiteral[1].toLowerCase()})`;
+  }
+  if (trimmed.startsWith("'") && trimmed.includes("'::")) {
+    const literal = trimmed.slice(1, trimmed.indexOf("'::"));
     return `.default(${JSON.stringify(literal)})`;
   }
+  if (/^-?\d+(\.\d+)?(::\w+)?$/.test(trimmed)) {
+    const numeric = trimmed.replace(/::\w+$/, "");
+    return `.default(${numeric})`;
+  }
+  if (/^null$/i.test(trimmed)) return "";
   return ` /* TODO: default ${safeComment(expression)} */`;
 }
 

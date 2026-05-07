@@ -211,6 +211,86 @@ describe("renderSchema", () => {
     expect(out).toContain("bigid,");
   });
 
+  test("renders bare literal defaults (boolean, numeric, null) without TODO", () => {
+    const out = renderSchema({
+      schemas: ["public"],
+      tables: [
+        {
+          schema: "public",
+          name: "cases",
+          policies: [],
+          columns: [
+            {
+              name: "case_id",
+              pgType: "text",
+              nullable: false,
+              hasDefault: false,
+              isPrimaryKey: true,
+            },
+            {
+              name: "is_historical",
+              pgType: "bool",
+              nullable: false,
+              hasDefault: true,
+              defaultExpression: "false",
+            },
+            {
+              name: "is_locked",
+              pgType: "bool",
+              nullable: false,
+              hasDefault: true,
+              defaultExpression: "TRUE::boolean",
+            },
+            {
+              name: "alert_count",
+              pgType: "int4",
+              nullable: false,
+              hasDefault: true,
+              defaultExpression: "0",
+            },
+            {
+              name: "ttl_seconds",
+              pgType: "int4",
+              nullable: false,
+              hasDefault: true,
+              defaultExpression: "30::integer",
+            },
+            {
+              name: "score",
+              pgType: "int4",
+              nullable: false,
+              hasDefault: true,
+              defaultExpression: "-1",
+            },
+            {
+              name: "deleted_at",
+              pgType: "timestamp",
+              nullable: true,
+              hasDefault: true,
+              defaultExpression: "NULL",
+            },
+            {
+              name: "created_at",
+              pgType: "timestamp",
+              nullable: false,
+              hasDefault: true,
+              defaultExpression: "CURRENT_TIMESTAMP",
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(out).toContain("is_historical: boolean().notNull().default(false)");
+    expect(out).toContain("is_locked: boolean().notNull().default(true)");
+    expect(out).toContain("alert_count: integer().notNull().default(0)");
+    expect(out).toContain("ttl_seconds: integer().notNull().default(30)");
+    expect(out).toContain("score: integer().notNull().default(-1)");
+    expect(out).toContain("deleted_at: timestamp(),");
+    expect(out).toContain("created_at: timestamp().notNull().defaultNow()");
+    expect(out).not.toContain("/* TODO: default");
+  });
+
   test("keeps self-references compileable with a TODO column", () => {
     const out = renderSchema({
       schemas: ["app"],
