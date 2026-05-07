@@ -219,6 +219,37 @@ describe("POST /chat — per-user concurrent-stream limit", () => {
 
     expect(res.status).toHaveBeenCalledWith(429);
   });
+
+  test("/invocations also honours maxConcurrentStreamsPerUser (no bypass)", async () => {
+    // Regression for the agentic review finding: /invocations skipped the
+    // rate-limit gate that /chat enforces, letting clients bypass the cap.
+    const plugin = seedPlugin();
+    for (let i = 0; i < 5; i++) {
+      // biome-ignore lint/suspicious/noExplicitAny: seeding
+      (plugin as any).activeStreams.set(`s${i}`, {
+        controller: new AbortController(),
+        userId: "alice",
+      });
+    }
+
+    const { res, setHeader, json } = mockRes();
+    await (
+      plugin as unknown as {
+        _handleInvocations: (
+          r: express.Request,
+          w: express.Response,
+        ) => Promise<void>;
+      }
+    )._handleInvocations(mockReq({ input: "hi" }, "alice"), res);
+
+    expect(res.status).toHaveBeenCalledWith(429);
+    expect(setHeader).toHaveBeenCalledWith("Retry-After", "5");
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.stringMatching(/Too many concurrent streams/),
+      }),
+    );
+  });
 });
 
 describe("resolvedLimits — default values", () => {
@@ -247,25 +278,61 @@ describe("resolvedLimits — default values", () => {
 });
 
 describe("runSubAgent — depth guard", () => {
+  /**
+   * Builds a minimal `RunState` matching the shape carried by `_streamAgent`
+   * so we can drive `runSubAgent` directly against the depth guard.
+   */
+  function makeRunState(
+    plugin: AgentsPlugin,
+    overrides: Partial<{
+      maxToolCalls: number;
+      maxSubAgentDepth: number;
+      maxConcurrentStreamsPerUser: number;
+    }> = {},
+  ) {
+    const abortController = new AbortController();
+    return {
+      req: mockReq({}, "alice"),
+      userId: "alice",
+      requestId: "test-stream",
+      abortController,
+      signal: abortController.signal,
+      approvalPolicy: { requireForDestructive: true, timeoutMs: 60_000 },
+      limits: {
+        maxConcurrentStreamsPerUser: overrides.maxConcurrentStreamsPerUser ?? 5,
+        maxToolCalls: overrides.maxToolCalls ?? 50,
+        maxSubAgentDepth: overrides.maxSubAgentDepth ?? 3,
+      },
+      // The translator/channel are not exercised by the depth guard; stubbed
+      // values are sufficient since the guard rejects before any dispatch.
+      translator: {
+        translate: () => [],
+      },
+      outboundEvents: {
+        push: vi.fn(),
+      },
+      toolCallsUsed: { count: 0 },
+    };
+  }
+
   test("rejects when depth exceeds the configured maximum", async () => {
     const plugin = new AgentsPlugin({
       dir: false,
       limits: { maxSubAgentDepth: 2 },
     });
-    // biome-ignore lint/suspicious/noExplicitAny: call private method directly
+    const runState = makeRunState(plugin, { maxSubAgentDepth: 2 });
     await expect(
+      // biome-ignore lint/suspicious/noExplicitAny: call private method directly
       (plugin as any).runSubAgent(
-        mockReq({}, "alice"),
+        runState,
         { name: "child", toolIndex: new Map() },
         {},
-        new AbortController().signal,
         3, // exceeds limit 2
       ),
     ).rejects.toThrow(/Sub-agent depth exceeded \(limit 2\)/);
   });
 
   test("accepts at the boundary (depth === limit)", async () => {
-    // Use a stub adapter so we don't need a real model.
     const plugin = new AgentsPlugin({
       dir: false,
       limits: { maxSubAgentDepth: 3 },
@@ -286,12 +353,12 @@ describe("runSubAgent — depth guard", () => {
       toolIndex: new Map(),
     };
 
+    const runState = makeRunState(plugin, { maxSubAgentDepth: 3 });
     // biome-ignore lint/suspicious/noExplicitAny: call private
     const result = await (plugin as any).runSubAgent(
-      mockReq({}, "alice"),
+      runState,
       child,
       { input: "test" },
-      new AbortController().signal,
       3, // at the limit, not over
     );
     expect(result).toBe("hello from depth-3");

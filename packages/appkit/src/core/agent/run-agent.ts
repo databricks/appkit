@@ -5,6 +5,7 @@ import type {
   AgentToolDefinition,
   Message,
 } from "shared";
+import { consumeAdapterStream } from "./consume-adapter-stream";
 import {
   type FunctionTool,
   functionToolToDefinition,
@@ -78,7 +79,6 @@ export async function runAgent(
   };
 
   const events: AgentEvent[] = [];
-  let text = "";
 
   const stream = adapter.run(
     {
@@ -90,15 +90,15 @@ export async function runAgent(
     { executeTool, signal },
   );
 
-  for await (const event of stream) {
-    if (signal?.aborted) break;
-    events.push(event);
-    if (event.type === "message_delta") {
-      text += event.content;
-    } else if (event.type === "message") {
-      text = event.content;
-    }
-  }
+  // Shared accumulation rule (deltas append, `message` replaces). The
+  // `events` array is filled via the `onEvent` side effect so callers that
+  // inspect the raw stream still get the full record.
+  const text = await consumeAdapterStream(stream, {
+    signal,
+    onEvent: (event) => {
+      events.push(event);
+    },
+  });
 
   return { text, events };
 }

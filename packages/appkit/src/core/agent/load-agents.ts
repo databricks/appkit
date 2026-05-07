@@ -1,4 +1,5 @@
-import fs from "node:fs";
+import type { Dirent } from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import yaml from "js-yaml";
 import type { AgentAdapter } from "shared";
@@ -103,7 +104,7 @@ export async function loadAgentFromFile(
   filePath: string,
   ctx: LoadContext,
 ): Promise<AgentDefinition> {
-  const raw = fs.readFileSync(filePath, "utf-8");
+  const raw = await fs.readFile(filePath, "utf-8");
   const name = agentIdFromMarkdownPath(filePath);
   const { data } = parseFrontmatter(raw, filePath);
   if (Array.isArray(data?.agents) && data.agents.length > 0) {
@@ -138,11 +139,15 @@ export async function loadAgentsFromDir(
   dir: string,
   ctx: LoadContext,
 ): Promise<LoadResult> {
-  if (!fs.existsSync(dir)) {
-    return { defs: {}, defaultAgent: null };
+  let entries: Dirent[];
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return { defs: {}, defaultAgent: null };
+    }
+    throw err;
   }
-
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
   const orphanMd = entries
     .filter((e) => e.isFile() && e.name.endsWith(".md"))
     .map((e) => e.name)
@@ -174,12 +179,17 @@ export async function loadAgentsFromDir(
   // Pass 1: build every agent's definition; collect sub-agent refs.
   for (const id of agentIds) {
     const agentPath = path.join(dir, id, "agent.md");
-    if (!fs.existsSync(agentPath)) {
-      throw new Error(
-        `Agents subdirectory '${path.join(dir, id)}' must contain agent.md.`,
-      );
+    let raw: string;
+    try {
+      raw = await fs.readFile(agentPath, "utf-8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new Error(
+          `Agents subdirectory '${path.join(dir, id)}' must contain agent.md.`,
+        );
+      }
+      throw err;
     }
-    const raw = fs.readFileSync(agentPath, "utf-8");
     defs[id] = buildDefinition(id, raw, agentPath, ctx);
     const { data } = parseFrontmatter(raw, agentPath);
     if (data?.agents !== undefined) {

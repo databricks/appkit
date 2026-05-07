@@ -67,3 +67,7 @@ export const approvalRequestSchema = z.object({
   approvalId: z.string().min(1, "approvalId is required"),
   decision: z.enum(["approve", "deny"]),
 });
+
+export const cancelRequestSchema = z.object({
+  streamId: z.string().min(1, "streamId is required"),
+});

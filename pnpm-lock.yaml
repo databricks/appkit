@@ -309,7 +309,7 @@ importers:
         specifier: 7.2.0
         version: 7.2.0
       js-yaml:
-        specifier: ^4.1.1
+        specifier: 4.1.1
         version: 4.1.1
       obug:
         specifier: 2.1.1

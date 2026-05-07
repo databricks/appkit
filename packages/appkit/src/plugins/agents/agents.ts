@@ -12,10 +12,13 @@ import type {
   PluginPhase,
   ResponseStreamEvent,
   Thread,
+  ToolAnnotations,
   ToolProvider,
 } from "shared";
 import { AppKitMcpClient, buildMcpHostPolicy } from "../../connectors/mcp";
+import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
 import { loadAgentsFromDir } from "../../core/agent/load-agents";
+import { normalizeToolResult } from "../../core/agent/normalize-result";
 import {
   buildBaseSystemPrompt,
   composeSystemPrompt,
@@ -44,6 +47,7 @@ import { AgentEventTranslator } from "./event-translator";
 import manifest from "./manifest.json";
 import {
   approvalRequestSchema,
+  cancelRequestSchema,
   chatRequestSchema,
   invocationsRequestSchema,
 } from "./schemas";
@@ -61,6 +65,60 @@ const DEFAULT_AGENTS_DIR = "./config/agents";
  */
 interface AgentSource {
   origin: "file" | "code";
+}
+
+/**
+ * Decide whether a tool call must traverse the approval gate. Honours both
+ * the modern `effect` field (mutating values: write / update / destructive)
+ * and the legacy `destructive: true` boolean. The contract is documented on
+ * `ToolAnnotations.effect` in shared/agent.ts.
+ *
+ * Without this, a tool authored only with `effect: "destructive"` (the
+ * preferred API) bypassed the gate entirely.
+ */
+function requiresApproval(annotations: ToolAnnotations | undefined): boolean {
+  if (!annotations) return false;
+  if (annotations.destructive === true) return true;
+  switch (annotations.effect) {
+    case "write":
+    case "update":
+    case "destructive":
+      return true;
+    case "read":
+    case undefined:
+      return false;
+    default: {
+      const _exhaustive: never = annotations.effect;
+      return false;
+    }
+  }
+}
+
+/**
+ * Per-stream state shared between the top-level `executeTool` and any
+ * `runSubAgent` calls below it. Carrying the budget counter, abort signal,
+ * approval policy, and event-channel through one object is what lets the
+ * sub-agent path enforce the same limits and approval gate as the parent.
+ *
+ * Without this shared state the sub-agent path silently bypassed both the
+ * tool-call budget and the destructive-tool approval gate.
+ */
+interface RunState {
+  req: express.Request;
+  userId: string;
+  requestId: string;
+  abortController: AbortController;
+  signal: AbortSignal;
+  approvalPolicy: { requireForDestructive: boolean; timeoutMs: number };
+  limits: {
+    maxConcurrentStreamsPerUser: number;
+    maxToolCalls: number;
+    maxSubAgentDepth: number;
+  };
+  translator: AgentEventTranslator;
+  outboundEvents: EventChannel<ResponseStreamEvent>;
+  /** Boxed mutable counter shared across parent + all sub-agent dispatches. */
+  toolCallsUsed: { count: number };
 }
 
 export class AgentsPlugin extends Plugin implements ToolProvider {
@@ -136,26 +194,38 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   }
 
   async setup() {
-    await this.loadAgents();
+    const { agents, defaultAgentName } = await this.buildAgentRegistry();
+    this.agents = agents;
+    this.defaultAgentName = defaultAgentName;
     this.mountInvocationsRoute();
     this.printRegistry();
   }
 
   /**
    * Reload agents from the configured directory, preserving code-defined
-   * agents. Swaps the registry atomically at the end.
+   * agents. Builds a fresh registry first and only swaps on success — if
+   * `loadAgents` throws (malformed markdown, missing tool reference) the
+   * existing live registry stays in place and serving requests keep working.
    */
   async reload(): Promise<void> {
-    this.agents.clear();
-    this.defaultAgentName = null;
+    const next = await this.buildAgentRegistry();
     if (this.mcpClient) {
       await this.mcpClient.close();
       this.mcpClient = null;
     }
-    await this.loadAgents();
+    this.agents = next.agents;
+    this.defaultAgentName = next.defaultAgentName;
   }
 
-  private async loadAgents() {
+  /**
+   * Builds the agent registry into a fresh `Map` without touching live state.
+   * Called by both `setup` and `reload`; the latter only swaps the live
+   * registry once this resolves successfully (atomic reload).
+   */
+  private async buildAgentRegistry(): Promise<{
+    agents: Map<string, RegisteredAgent>;
+    defaultAgentName: string | null;
+  }> {
     const { defs: fileDefs, defaultAgent: fileDefault } =
       await this.loadFileDefinitions();
 
@@ -179,19 +249,22 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       merged[name] = { def, src: { origin: "code" } };
     }
 
+    const agents = new Map<string, RegisteredAgent>();
+    let defaultAgentName: string | null = null;
+
     if (Object.keys(merged).length === 0) {
       logger.info(
         "No agents registered (no files in %s, no code-defined agents)",
         this.resolvedAgentsDir() ?? "<disabled>",
       );
-      return;
+      return { agents, defaultAgentName };
     }
 
     for (const [name, { def, src }] of Object.entries(merged)) {
       try {
         const registered = await this.buildRegisteredAgent(name, def, src);
-        this.agents.set(name, registered);
-        if (!this.defaultAgentName) this.defaultAgentName = name;
+        agents.set(name, registered);
+        if (!defaultAgentName) defaultAgentName = name;
       } catch (err) {
         throw new Error(
           `Failed to register agent '${name}' (${src.origin}): ${
@@ -203,15 +276,17 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     }
 
     if (this.config.defaultAgent) {
-      if (!this.agents.has(this.config.defaultAgent)) {
+      if (!agents.has(this.config.defaultAgent)) {
         throw new Error(
-          `defaultAgent '${this.config.defaultAgent}' is not registered. Available: ${Array.from(this.agents.keys()).join(", ")}`,
+          `defaultAgent '${this.config.defaultAgent}' is not registered. Available: ${Array.from(agents.keys()).join(", ")}`,
         );
       }
-      this.defaultAgentName = this.config.defaultAgent;
-    } else if (fileDefault && this.agents.has(fileDefault)) {
-      this.defaultAgentName = fileDefault;
+      defaultAgentName = this.config.defaultAgent;
+    } else if (fileDefault && agents.has(fileDefault)) {
+      defaultAgentName = fileDefault;
     }
+
+    return { agents, defaultAgentName };
   }
 
   private resolvedAgentsDir(): string | null {
@@ -677,6 +752,18 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       return;
     }
     const userId = this.resolveUserId(req);
+
+    // Match the rate-limit gate on /chat. Without this, a client can bypass
+    // `limits.maxConcurrentStreamsPerUser` by hitting /invocations instead.
+    const limits = this.resolvedLimits;
+    if (this.countUserStreams(userId) >= limits.maxConcurrentStreamsPerUser) {
+      res.setHeader("Retry-After", "5");
+      res.status(429).json({
+        error: `Too many concurrent streams for this user (limit ${limits.maxConcurrentStreamsPerUser}). Wait for an existing stream to complete before starting another.`,
+      });
+      return;
+    }
+
     const thread = await this.threadStore.create(userId);
 
     if (typeof input === "string") {
@@ -723,108 +810,26 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     const limits = this.resolvedLimits;
     const outboundEvents = new EventChannel<ResponseStreamEvent>();
     const translator = new AgentEventTranslator();
-    // Per-run tool-call budget (shared across the top-level adapter and any
-    // sub-agents it delegates to). Counted pre-dispatch so a prompt-injected
-    // agent cannot drain the budget silently via denied calls.
-    let toolCallsUsed = 0;
 
-    const executeTool = async (
-      name: string,
-      args: unknown,
-    ): Promise<unknown> => {
-      if (toolCallsUsed >= limits.maxToolCalls) {
-        abortController.abort(
-          new Error(
-            `Tool-call budget exhausted (limit ${limits.maxToolCalls}).`,
-          ),
-        );
-        throw new Error(
-          `Tool-call budget exhausted (limit ${limits.maxToolCalls}). Raise agents({ limits: { maxToolCalls } }) or review the agent's tool-selection logic.`,
-        );
-      }
-      toolCallsUsed++;
-
-      const entry = registered.toolIndex.get(name);
-      if (!entry) throw new Error(`Unknown tool: ${name}`);
-
-      if (
-        approvalPolicy.requireForDestructive &&
-        entry.def.annotations?.destructive === true
-      ) {
-        const approvalId = randomUUID();
-        for (const ev of translator.translate({
-          type: "approval_pending",
-          approvalId,
-          streamId: requestId,
-          toolName: name,
-          args,
-          annotations: entry.def.annotations,
-        })) {
-          outboundEvents.push(ev);
-        }
-        const decision = await this.approvalGate.wait({
-          approvalId,
-          streamId: requestId,
-          userId,
-          timeoutMs: approvalPolicy.timeoutMs,
-        });
-        if (decision === "deny") {
-          return `Tool execution denied by user approval gate (tool: ${name}).`;
-        }
-      }
-
-      let result: unknown;
-      if (entry.source === "toolkit") {
-        if (!this.context) {
-          throw new Error(
-            "Plugin tool execution requires PluginContext; this should never happen through createApp",
-          );
-        }
-        result = await this.context.executeTool(
-          req,
-          entry.pluginName,
-          entry.localName,
-          args,
-          signal,
-        );
-      } else if (entry.source === "function") {
-        result = await entry.functionTool.execute(
-          args as Record<string, unknown>,
-        );
-      } else if (entry.source === "mcp") {
-        if (!this.mcpClient) throw new Error("MCP client not connected");
-        const oboToken = req.headers["x-forwarded-access-token"];
-        const mcpAuth =
-          typeof oboToken === "string"
-            ? { Authorization: `Bearer ${oboToken}` }
-            : undefined;
-        result = await this.mcpClient.callTool(
-          entry.mcpToolName,
-          args,
-          mcpAuth,
-        );
-      } else if (entry.source === "subagent") {
-        const childAgent = this.agents.get(entry.agentName);
-        if (!childAgent)
-          throw new Error(`Sub-agent not found: ${entry.agentName}`);
-        result = await this.runSubAgent(req, childAgent, args, signal, 1);
-      }
-
-      // A `void` / `undefined` return is a legitimate tool outcome (e.g., a
-      // "send notification" side-effecting tool). Return an empty string so
-      // the LLM sees a successful-but-empty result rather than a bogus
-      // "execution failed" error.
-      if (result === undefined) {
-        return "";
-      }
-      const MAX = 50_000;
-      const serialized =
-        typeof result === "string" ? result : JSON.stringify(result);
-      if (serialized.length > MAX) {
-        return `${serialized.slice(0, MAX)}\n\n[Result truncated: ${serialized.length} chars exceeds ${MAX} limit]`;
-      }
-      return result;
+    // Per-run state shared with any sub-agents this run invokes. The boxed
+    // tool-call counter, approval policy, and outbound event channel must
+    // travel through the sub-agent path so it enforces the same budget and
+    // approval gate as the top-level executeTool.
+    const runState: RunState = {
+      req,
+      userId,
+      requestId,
+      abortController,
+      signal,
+      approvalPolicy,
+      limits,
+      translator,
+      outboundEvents,
+      toolCallsUsed: { count: 0 },
     };
+
+    const executeTool = (name: string, args: unknown): Promise<unknown> =>
+      this.dispatchToolCall(runState, registered.toolIndex, name, args, 0);
 
     // Drive the adapter and the approval-event side-channel concurrently.
     // Outbound events from both sources flow through `outboundEvents`; the
@@ -874,26 +879,17 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
           { executeTool, signal },
         );
 
-        // Accumulate assistant output from BOTH streaming and non-streaming
-        // adapters. Delta-based adapters (Databricks, Vercel AI) emit
-        // `message_delta` chunks that we concatenate; adapters that yield a
-        // single final assistant message (e.g. LangChain's `on_chain_end`
-        // path) emit a `message` event whose content replaces whatever
-        // deltas already arrived. Without the `message` branch, multi-turn
-        // LangChain conversations silently dropped the assistant turn from
-        // thread history.
-        let fullContent = "";
-        for await (const event of stream) {
-          if (signal.aborted) break;
-          if (event.type === "message_delta") {
-            fullContent += event.content;
-          } else if (event.type === "message") {
-            fullContent = event.content;
-          }
-          for (const translated of translator.translate(event)) {
-            outboundEvents.push(translated);
-          }
-        }
+        // The accumulation rule (deltas append, `message` replaces) is shared
+        // with `runAgent` and `runSubAgent`; see `consumeAdapterStream` for
+        // the rationale.
+        const fullContent = await consumeAdapterStream(stream, {
+          signal,
+          onEvent: (event) => {
+            for (const translated of translator.translate(event)) {
+              outboundEvents.push(translated);
+            }
+          },
+        });
 
         if (fullContent) {
           await this.threadStore.addMessage(thread.id, userId, {
@@ -956,6 +952,101 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   }
 
   /**
+   * Dispatch a single tool call from either the top-level adapter or a
+   * sub-agent. Centralising this in one method is what makes the budget
+   * counter, approval gate, and abort signal observe sub-agent activity:
+   * `runSubAgent` reuses the same `runState` and so increments the same
+   * counter and emits approval events through the same channel.
+   *
+   * `depth` is the current sub-agent recursion depth (0 at the top level).
+   * It is forwarded to `runSubAgent` when the dispatched entry is itself a
+   * sub-agent, so depth limits remain enforced.
+   */
+  private async dispatchToolCall(
+    runState: RunState,
+    toolIndex: Map<string, ResolvedToolEntry>,
+    name: string,
+    args: unknown,
+    depth: number,
+  ): Promise<unknown> {
+    if (runState.toolCallsUsed.count >= runState.limits.maxToolCalls) {
+      runState.abortController.abort(
+        new Error(
+          `Tool-call budget exhausted (limit ${runState.limits.maxToolCalls}).`,
+        ),
+      );
+      throw new Error(
+        `Tool-call budget exhausted (limit ${runState.limits.maxToolCalls}). Raise agents({ limits: { maxToolCalls } }) or review the agent's tool-selection logic.`,
+      );
+    }
+    runState.toolCallsUsed.count++;
+
+    const entry = toolIndex.get(name);
+    if (!entry) throw new Error(`Unknown tool: ${name}`);
+
+    if (
+      runState.approvalPolicy.requireForDestructive &&
+      requiresApproval(entry.def.annotations)
+    ) {
+      const approvalId = randomUUID();
+      for (const ev of runState.translator.translate({
+        type: "approval_pending",
+        approvalId,
+        streamId: runState.requestId,
+        toolName: name,
+        args,
+        annotations: entry.def.annotations,
+      })) {
+        runState.outboundEvents.push(ev);
+      }
+      const decision = await this.approvalGate.wait({
+        approvalId,
+        streamId: runState.requestId,
+        userId: runState.userId,
+        timeoutMs: runState.approvalPolicy.timeoutMs,
+      });
+      if (decision === "deny") {
+        return `Tool execution denied by user approval gate (tool: ${name}).`;
+      }
+    }
+
+    let result: unknown;
+    if (entry.source === "toolkit") {
+      if (!this.context) {
+        throw new Error(
+          "Plugin tool execution requires PluginContext; this should never happen through createApp",
+        );
+      }
+      result = await this.context.executeTool(
+        runState.req,
+        entry.pluginName,
+        entry.localName,
+        args,
+        runState.signal,
+      );
+    } else if (entry.source === "function") {
+      result = await entry.functionTool.execute(
+        args as Record<string, unknown>,
+      );
+    } else if (entry.source === "mcp") {
+      if (!this.mcpClient) throw new Error("MCP client not connected");
+      const oboToken = runState.req.headers["x-forwarded-access-token"];
+      const mcpAuth =
+        typeof oboToken === "string"
+          ? { Authorization: `Bearer ${oboToken}` }
+          : undefined;
+      result = await this.mcpClient.callTool(entry.mcpToolName, args, mcpAuth);
+    } else if (entry.source === "subagent") {
+      const childAgent = this.agents.get(entry.agentName);
+      if (!childAgent)
+        throw new Error(`Sub-agent not found: ${entry.agentName}`);
+      result = await this.runSubAgent(runState, childAgent, args, depth + 1);
+    }
+
+    return normalizeToolResult(result);
+  }
+
+  /**
    * Runs a sub-agent in response to an `agent-<key>` tool call. Returns the
    * concatenated text output to hand back to the parent adapter as the tool
    * result.
@@ -964,18 +1055,20 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
    * outer `_streamAgent` calls `runSubAgent(..., 1)`) and increments on
    * each nested `runSubAgent` call. Depths exceeding
    * `limits.maxSubAgentDepth` are rejected before any adapter work.
+   *
+   * Sub-agent tool calls run through `dispatchToolCall` with the same
+   * `runState` as the parent — the budget counter and approval gate are
+   * therefore enforced for every nested call, not only at the top level.
    */
   private async runSubAgent(
-    req: express.Request,
+    runState: RunState,
     child: RegisteredAgent,
     args: unknown,
-    signal: AbortSignal,
     depth: number,
   ): Promise<string> {
-    const limits = this.resolvedLimits;
-    if (depth > limits.maxSubAgentDepth) {
+    if (depth > runState.limits.maxSubAgentDepth) {
       throw new Error(
-        `Sub-agent depth exceeded (limit ${limits.maxSubAgentDepth}). ` +
+        `Sub-agent depth exceeded (limit ${runState.limits.maxSubAgentDepth}). ` +
           `Raise agents({ limits: { maxSubAgentDepth } }) or break the delegation cycle.`,
       );
     }
@@ -988,42 +1081,13 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         : JSON.stringify(args);
     const childTools = Array.from(child.toolIndex.values()).map((e) => e.def);
 
-    const childExecute = async (
-      name: string,
-      childArgs: unknown,
-    ): Promise<unknown> => {
-      const entry = child.toolIndex.get(name);
-      if (!entry) throw new Error(`Unknown tool in sub-agent: ${name}`);
-      if (entry.source === "toolkit" && this.context) {
-        return this.context.executeTool(
-          req,
-          entry.pluginName,
-          entry.localName,
-          childArgs,
-          signal,
-        );
-      }
-      if (entry.source === "function") {
-        return entry.functionTool.execute(childArgs as Record<string, unknown>);
-      }
-      if (entry.source === "subagent") {
-        const grandchild = this.agents.get(entry.agentName);
-        if (!grandchild)
-          throw new Error(`Sub-agent not found: ${entry.agentName}`);
-        return this.runSubAgent(req, grandchild, childArgs, signal, depth + 1);
-      }
-      if (entry.source === "mcp" && this.mcpClient) {
-        const oboToken = req.headers["x-forwarded-access-token"];
-        const mcpAuth =
-          typeof oboToken === "string"
-            ? { Authorization: `Bearer ${oboToken}` }
-            : undefined;
-        return this.mcpClient.callTool(entry.mcpToolName, childArgs, mcpAuth);
-      }
-      throw new Error(`Unsupported sub-agent tool source: ${entry.source}`);
-    };
+    const childExecute = (name: string, childArgs: unknown): Promise<unknown> =>
+      this.dispatchToolCall(runState, child.toolIndex, name, childArgs, depth);
 
-    const runContext: AgentRunContext = { executeTool: childExecute, signal };
+    const runContext: AgentRunContext = {
+      executeTool: childExecute,
+      signal: runState.signal,
+    };
 
     const pluginNames = this.context
       ? this.context
@@ -1055,25 +1119,30 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       },
     ];
 
-    let output = "";
-    const events: AgentEvent[] = [];
-    for await (const event of child.adapter.run(
-      { messages, tools: childTools, threadId: randomUUID(), signal },
-      runContext,
-    )) {
-      events.push(event);
-      if (event.type === "message_delta") output += event.content;
-      else if (event.type === "message") output = event.content;
-    }
-    return output;
+    return consumeAdapterStream(
+      child.adapter.run(
+        {
+          messages,
+          tools: childTools,
+          threadId: randomUUID(),
+          signal: runState.signal,
+        },
+        runContext,
+      ),
+      { signal: runState.signal },
+    );
   }
 
   private async _handleCancel(req: express.Request, res: express.Response) {
-    const { streamId } = req.body as { streamId?: string };
-    if (!streamId) {
-      res.status(400).json({ error: "streamId is required" });
+    const parsed = cancelRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "Invalid request",
+        details: parsed.error.flatten().fieldErrors,
+      });
       return;
     }
+    const { streamId } = parsed.data;
     const entry = this.activeStreams.get(streamId);
     if (!entry) {
       // Stream is unknown or already completed — idempotent no-op.
