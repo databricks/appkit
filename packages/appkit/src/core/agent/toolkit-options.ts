@@ -21,11 +21,15 @@ export function applyToolkitOptions(
   pluginName: string,
   opts: ToolkitOptions = {},
 ): string | null {
+  // `only`/`except` take precedence: filter first, then derive the key.
   if (opts.only && !opts.only.includes(localName)) return null;
   if (opts.except?.includes(localName)) return null;
 
-  const rename = opts.rename ?? {};
-  if (Object.hasOwn(rename, localName)) return rename[localName];
+  // `rename` accepts string overrides; explicit `undefined` (e.g. from a
+  // ternary that didn't fire) and empty strings fall through to the prefix
+  // path so we never produce a tool keyed literally `"undefined"` or `""`.
+  const renamed = opts.rename?.[localName];
+  if (typeof renamed === "string" && renamed.length > 0) return renamed;
 
   const prefix = opts.prefix ?? `${pluginName}.`;
   return `${prefix}${localName}`;

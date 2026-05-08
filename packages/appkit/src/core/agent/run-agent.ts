@@ -9,6 +9,7 @@ import type {
   ToolProvider,
 } from "shared";
 import { consumeAdapterStream } from "./consume-adapter-stream";
+import { createPluginsProxy } from "./plugins-map";
 import { resolveToolkitFromProvider } from "./toolkit-resolver";
 import {
   type FunctionTool,
@@ -52,23 +53,55 @@ export interface RunAgentResult {
  * inline tools, and drives the adapter's `run()` loop to completion.
  *
  * Limitations vs. running through the agents() plugin:
- * - No OBO: there is no HTTP request, so plugin tools run as the service
- *   principal (when they work at all).
- * - Hosted tools (MCP) are not supported — they require a live MCP client
- *   that only exists inside the agents plugin.
- * - Sub-agents (`agents: { ... }` on the def) are executed as nested
- *   `runAgent` calls with no shared thread state.
- * - Plugin tools (used inside the function form via
+ * - **No OBO and no approval gate** — there is no HTTP request, so plugin
+ *   tools run as the service principal. The agents-plugin approval gate
+ *   that prompts for human confirmation on `effect: "write" | "update" |
+ *   "destructive"` tools is also absent. LLM-controlled tool arguments
+ *   flow straight through to the SP. Treat standalone runAgent as a
+ *   trusted-prompt environment (CI, batch eval, internal scripts) — not
+ *   as an exposed user-facing surface.
+ * - **Hosted tools (MCP) are not supported** — they require a live MCP
+ *   client that only exists inside the agents plugin's lifecycle.
+ *   `runAgent` rejects them at index-build time with a clear error.
+ * - **Sub-agents** (`agents: { ... }` on the def) are executed as nested
+ *   `runAgent` calls with no shared thread state. Plugin instances ARE
+ *   shared across the recursion (same cache as the parent).
+ * - **Plugin tools** (used inside the function form via
  *   `plugins.<name>.toolkit(...)`) require passing `plugins: [...]` via
- *   `RunAgentInput`.
+ *   `RunAgentInput`. Each plugin in that array is constructed once,
+ *   `attachContext({})` and `await setup()` are called eagerly, and the
+ *   resulting instance is shared across the top-level run and all
+ *   sub-agent recursions. Plugins whose `setup()` requires runtime that
+ *   only `createApp` provides (e.g. `WorkspaceClient`, `ServiceContext`,
+ *   `PluginContext`) throw at standalone-init time with a clear "use
+ *   createApp instead" message — not mid-stream.
  */
 export async function runAgent(
   def: AgentDefinition,
   input: RunAgentInput,
 ): Promise<RunAgentResult> {
+  // Single shared cache for the whole call graph: parent + every nested
+  // sub-agent dispatch share constructed plugin instances. Without this,
+  // each nested `runAgent` would build its own cache, re-instantiate every
+  // plugin, and silently diverge in-instance state between parent and child
+  // (e.g. query result caches, connection pools).
+  const providerCache = new Map<string, ToolProvider>();
+  await initStandalonePlugins(input.plugins ?? [], providerCache);
+  return runAgentInternal(def, input, providerCache);
+}
+
+async function runAgentInternal(
+  def: AgentDefinition,
+  input: RunAgentInput,
+  providerCache: Map<string, ToolProvider>,
+): Promise<RunAgentResult> {
   const adapter = await resolveAdapter(def);
   const messages = normalizeMessages(input.messages, def.instructions);
-  const toolIndex = buildStandaloneToolIndex(def, input.plugins ?? []);
+  const toolIndex = buildStandaloneToolIndex(
+    def,
+    input.plugins ?? [],
+    providerCache,
+  );
   const tools = Array.from(toolIndex.values()).map((e) => e.def);
 
   const signal = input.signal;
@@ -97,7 +130,13 @@ export async function runAgent(
         signal,
         plugins: input.plugins,
       };
-      const res = await runAgent(entry.agentDef, subInput);
+      // Reuse the same `providerCache` so sub-agent plugin tools dispatch
+      // through the same instances the parent constructed.
+      const res = await runAgentInternal(
+        entry.agentDef,
+        subInput,
+        providerCache,
+      );
       return res.text;
     }
     throw new Error(
@@ -129,6 +168,73 @@ export async function runAgent(
   });
 
   return { text, events };
+}
+
+/**
+ * Eagerly construct every plugin in `input.plugins`, run the standard
+ * AppKit lifecycle (`attachContext({})` + `await setup()`), and populate
+ * `cache`. Failures here surface BEFORE any adapter work — mid-stream
+ * `getWorkspaceClient is not initialised`-style errors become a clear
+ * startup failure naming the plugin and pointing the user at `createApp`.
+ *
+ * Plugins that don't need runtime context (no overridden `setup`, or one
+ * that doesn't dereference `createApp`-only state) initialise cleanly and
+ * standalone runAgent works as documented. Plugins like analytics/files
+ * that depend on `WorkspaceClient` will throw the underlying error wrapped
+ * with the migration hint.
+ */
+async function initStandalonePlugins(
+  plugins: PluginData<PluginConstructor, unknown, string>[],
+  cache: Map<string, ToolProvider>,
+): Promise<void> {
+  for (const data of plugins) {
+    if (cache.has(data.name)) continue;
+    const instance = new data.plugin({
+      ...(data.config ?? {}),
+      name: data.name,
+    });
+    if (!isStandaloneToolProvider(instance)) {
+      throw new Error(
+        `runAgent: plugin '${data.name}' is not a ToolProvider ` +
+          "(missing getAgentTools/executeAgentTool). Only ToolProvider plugins " +
+          "are supported in standalone runAgent.",
+      );
+    }
+    if (
+      typeof (instance as { attachContext?: unknown }).attachContext ===
+      "function"
+    ) {
+      try {
+        (
+          instance as { attachContext: (deps: Record<string, unknown>) => void }
+        ).attachContext({});
+      } catch (err) {
+        throw new Error(
+          `runAgent: plugin '${data.name}' attachContext() failed in ` +
+            "standalone mode. This plugin probably depends on createApp's " +
+            "runtime (WorkspaceClient, ServiceContext, PluginContext). Run " +
+            "via createApp({ plugins: [..., agents(...)] }) instead. " +
+            `Cause: ${err instanceof Error ? err.message : String(err)}`,
+          { cause: err instanceof Error ? err : undefined },
+        );
+      }
+    }
+    if (typeof (instance as { setup?: unknown }).setup === "function") {
+      try {
+        await (instance as { setup: () => Promise<void> | void }).setup();
+      } catch (err) {
+        throw new Error(
+          `runAgent: plugin '${data.name}' setup() failed in standalone ` +
+            "mode. This plugin probably depends on createApp's runtime " +
+            "(WorkspaceClient, ServiceContext, PluginContext). Run via " +
+            "createApp({ plugins: [..., agents(...)] }) instead. " +
+            `Cause: ${err instanceof Error ? err.message : String(err)}`,
+          { cause: err instanceof Error ? err : undefined },
+        );
+      }
+    }
+    cache.set(data.name, instance);
+  }
 }
 
 async function resolveAdapter(def: AgentDefinition): Promise<AgentAdapter> {
@@ -194,15 +300,16 @@ type StandaloneEntry =
 /**
  * Resolves `def.tools` (object or function form) and `def.agents`
  * (sub-agents) into a flat dispatch index. The function form is invoked
- * once per call against a {@link Plugins} map built lazily from
- * `input.plugins`; missing references throw with an `Available: …` listing.
+ * once per call against a {@link Plugins} map drawn from the shared
+ * `providerCache` populated by {@link initStandalonePlugins}. Missing
+ * references throw a named "not registered" error via the proxy.
  */
 function buildStandaloneToolIndex(
   def: AgentDefinition,
   plugins: PluginData<PluginConstructor, unknown, string>[],
+  providerCache: Map<string, ToolProvider>,
 ): Map<string, StandaloneEntry> {
   const index = new Map<string, StandaloneEntry>();
-  const providerCache = new Map<string, ToolProvider>();
   const tools = resolveDefTools(def, plugins, providerCache);
 
   for (const [key, tool] of Object.entries(tools)) {
@@ -238,9 +345,9 @@ function buildStandaloneToolIndex(
 
 /**
  * Resolves `def.tools` to a plain record. The function form is invoked
- * with a typed {@link Plugins} map built lazily over `plugins`; each
- * `plugins.foo.toolkit(opts)` call constructs the underlying provider
- * (cached) on first access.
+ * with a typed {@link Plugins} map drawn from the pre-populated
+ * `providerCache`; each `plugins.foo.toolkit(opts)` lookup hits the cache
+ * directly (no construction at toolkit-call time).
  */
 function resolveDefTools(
   def: AgentDefinition,
@@ -266,9 +373,11 @@ function resolveDefTools(
 
 /**
  * Builds the typed {@link Plugins} map passed to the function form of
- * `def.tools` in standalone mode. Plugin instances are constructed lazily
- * (only when the user actually calls `plugins.foo.toolkit(...)`) and
- * cached so the same instance is reused for dispatch downstream.
+ * `def.tools` in standalone mode. Reads pre-constructed instances from
+ * `providerCache` (populated eagerly by {@link initStandalonePlugins})
+ * and wraps the result in a Proxy so unknown plugin names produce a
+ * named "not registered, Available: ..." error instead of bubbling up a
+ * generic `TypeError: Cannot read properties of undefined`.
  */
 function buildStandalonePluginsMap(
   plugins: PluginData<PluginConstructor, unknown, string>[],
@@ -276,18 +385,13 @@ function buildStandalonePluginsMap(
 ): Plugins {
   const out: Record<string, PluginToolkitProvider> = {};
   for (const data of plugins) {
+    const provider = providerCache.get(data.name);
+    if (!provider) continue; // initStandalonePlugins should have set this
     out[data.name] = {
-      toolkit: (opts) => {
-        const provider = resolveStandaloneProvider(
-          data.name,
-          plugins,
-          providerCache,
-        );
-        return resolveToolkitFromProvider(data.name, provider, opts);
-      },
+      toolkit: (opts) => resolveToolkitFromProvider(data.name, provider, opts),
     };
   }
-  return out as Plugins;
+  return createPluginsProxy(out, "runAgent: tools(plugins)");
 }
 
 function classifyTool(
@@ -335,11 +439,12 @@ function providerCacheLookup(
 ): ToolProvider {
   const cached = cache.get(pluginName);
   if (cached) return cached;
+  const available = Array.from(cache.keys()).join(", ") || "(none)";
   throw new Error(
-    `runAgent: tool refers to plugin '${pluginName}' but its instance was ` +
-      "not initialised by tools(plugins). This usually means the function " +
-      "form returned a stale ToolkitEntry without going through " +
-      "plugins[...].toolkit().",
+    `runAgent: tool refers to plugin '${pluginName}', but no instance was ` +
+      "initialised for that name. Add it to RunAgentInput.plugins, or — if " +
+      "this came from a hand-rolled ToolkitEntry — go through " +
+      `plugins[name].toolkit() instead. Available: ${available}.`,
   );
 }
 
@@ -359,37 +464,4 @@ function isStandaloneToolProvider(value: unknown): value is ToolProvider {
     typeof obj.getAgentTools === "function" &&
     typeof obj.executeAgentTool === "function"
   );
-}
-
-function resolveStandaloneProvider(
-  pluginName: string,
-  plugins: PluginData<PluginConstructor, unknown, string>[],
-  cache: Map<string, ToolProvider>,
-): ToolProvider {
-  const cached = cache.get(pluginName);
-  if (cached) return cached;
-
-  const match = plugins.find((p) => p.name === pluginName);
-  if (!match) {
-    const available = plugins.map((p) => p.name).join(", ") || "(none)";
-    throw new Error(
-      `runAgent: agent tools(plugins) referenced plugin '${pluginName}', ` +
-        "but that plugin is missing from RunAgentInput.plugins. " +
-        `Available: ${available}.`,
-    );
-  }
-
-  const instance = new match.plugin({
-    ...(match.config ?? {}),
-    name: pluginName,
-  });
-  if (!isStandaloneToolProvider(instance)) {
-    throw new Error(
-      `runAgent: plugin '${pluginName}' is not a ToolProvider ` +
-        "(missing getAgentTools/executeAgentTool). Only ToolProvider plugins " +
-        "are supported in standalone runAgent.",
-    );
-  }
-  cache.set(pluginName, instance);
-  return instance;
 }

@@ -20,6 +20,7 @@ import { getWorkspaceClient } from "../../context";
 import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
 import { loadAgentsFromDir } from "../../core/agent/load-agents";
 import { normalizeToolResult } from "../../core/agent/normalize-result";
+import { createPluginsProxy } from "../../core/agent/plugins-map";
 import {
   buildBaseSystemPrompt,
   composeSystemPrompt,
@@ -563,10 +564,17 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
    * (so user code can call typed instance methods including `.toolkit()`);
    * plugins missing `.toolkit()` get a synthesized fallback that walks
    * `getAgentTools()` via `resolveToolkitFromProvider`.
+   *
+   * Wrapped in {@link createPluginsProxy} so that accessing an unknown
+   * plugin name throws a named "not registered, Available: ..." error
+   * instead of bubbling up a generic `Cannot read properties of undefined`
+   * from the agent's `tools(plugins)` callback.
    */
   private buildPluginsMap(): Plugins {
     const out: Record<string, PluginToolkitProvider> = {};
-    if (!this.context) return out as Plugins;
+    if (!this.context) {
+      return createPluginsProxy(out, `Agent '${this.name}': tools(plugins)`);
+    }
     for (const { name, provider } of this.context.getToolProviders()) {
       const direct = (provider as { toolkit?: unknown }).toolkit;
       if (typeof direct === "function") {
@@ -577,7 +585,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         };
       }
     }
-    return out as Plugins;
+    return createPluginsProxy(out, `Agent '${this.name}': tools(plugins)`);
   }
 
   private async applyAutoInherit(

@@ -272,4 +272,166 @@ describe("runAgent", () => {
     await runAgent(def, { messages: "hi" });
     expect(toolsFn).toHaveBeenCalledTimes(1);
   });
+
+  test("function-form names the missing plugin in the error (proxy)", async () => {
+    // Regression: previously `plugins.absent` was undefined, and accessing
+    // `.toolkit()` on it produced a generic "Cannot read properties of
+    // undefined" — no plugin name, no list of available names. The proxy
+    // now throws a clear "not registered. Available: ..." error.
+    const adapter: AgentAdapter = {
+      async *run(_input, _context) {
+        yield { type: "message_delta", content: "" };
+      },
+    };
+    const def = createAgent({
+      instructions: "x",
+      model: adapter,
+      tools(plugins) {
+        return { ...plugins.absent.toolkit() };
+      },
+    });
+    await expect(runAgent(def, { messages: "hi" })).rejects.toThrow(/'absent'/);
+    await expect(runAgent(def, { messages: "hi" })).rejects.toThrow(
+      /not registered/,
+    );
+    await expect(runAgent(def, { messages: "hi" })).rejects.toThrow(
+      /Available/,
+    );
+  });
+
+  test("plugin setup() failure surfaces at runAgent entry, not mid-stream", async () => {
+    // Regression: previously plugins were constructed lazily during the
+    // function form's toolkit() call, and setup() was never invoked. That
+    // pushed any setup-time failure (e.g. `getWorkspaceClient is not
+    // initialised`) into mid-conversation tool dispatches with confusing
+    // stack traces. The fix: eagerly attachContext + setup at runAgent
+    // entry; failures wrap with a "use createApp instead" hint.
+    class BadSetupPlugin {
+      static manifest = { name: "bad" };
+      static DEFAULT_CONFIG = {};
+      name = "bad";
+      constructor(public config: unknown) {}
+      async setup() {
+        throw new Error("WorkspaceClient not initialised");
+      }
+      injectRoutes() {}
+      getEndpoints() {
+        return {};
+      }
+      getAgentTools() {
+        return [];
+      }
+      async executeAgentTool() {
+        return null;
+      }
+    }
+    const adapter: AgentAdapter = {
+      async *run(_input, _context) {
+        // Should never reach the adapter.
+        yield { type: "message_delta", content: "this should not run" };
+      },
+    };
+    const def = createAgent({
+      instructions: "x",
+      model: adapter,
+      tools(plugins) {
+        return { ...plugins.bad.toolkit() };
+      },
+    });
+    const pluginData: PluginData<PluginConstructor, unknown, string> = {
+      plugin: BadSetupPlugin as unknown as PluginConstructor,
+      config: {},
+      name: "bad",
+    };
+
+    await expect(
+      runAgent(def, { messages: "hi", plugins: [pluginData] }),
+    ).rejects.toThrow(/setup\(\) failed in standalone mode/);
+    await expect(
+      runAgent(def, { messages: "hi", plugins: [pluginData] }),
+    ).rejects.toThrow(/createApp/);
+  });
+
+  test("sub-agent recursion shares the same plugin instance with the parent", async () => {
+    // Regression: providerCache used to be per-call inside
+    // buildStandaloneToolIndex, so each nested runAgent constructed fresh
+    // plugin instances and parent/child diverged in-instance state.
+    let constructorCount = 0;
+    class StatefulPlugin {
+      static manifest = { name: "stateful" };
+      static DEFAULT_CONFIG = {};
+      name = "stateful";
+      readonly id = ++constructorCount;
+      constructor(public config: unknown) {}
+      async setup() {}
+      injectRoutes() {}
+      getEndpoints() {
+        return {};
+      }
+      getAgentTools() {
+        return [
+          {
+            name: "whoami",
+            description: "return instance id",
+            parameters: { type: "object", properties: {} },
+          },
+        ];
+      }
+      async executeAgentTool() {
+        return String(this.id);
+      }
+    }
+
+    const childAdapter: AgentAdapter = {
+      async *run(_input, context) {
+        const id = await context.executeTool("stateful.whoami", {});
+        yield { type: "message_delta", content: `child-id=${id}` };
+      },
+    };
+    const parentAdapter: AgentAdapter = {
+      async *run(_input, context) {
+        const myId = await context.executeTool("stateful.whoami", {});
+        const childOut = await context.executeTool("agent-child", {
+          input: "go",
+        });
+        yield {
+          type: "message_delta",
+          content: `parent-id=${myId};${childOut}`,
+        };
+      },
+    };
+
+    const child = createAgent({
+      instructions: "child",
+      model: childAdapter,
+      tools(plugins) {
+        return { ...plugins.stateful.toolkit() };
+      },
+    });
+    const parent = createAgent({
+      instructions: "parent",
+      model: parentAdapter,
+      agents: { child },
+      tools(plugins) {
+        return { ...plugins.stateful.toolkit() };
+      },
+    });
+
+    const pluginData: PluginData<PluginConstructor, unknown, string> = {
+      plugin: StatefulPlugin as unknown as PluginConstructor,
+      config: {},
+      name: "stateful",
+    };
+
+    constructorCount = 0;
+    const result = await runAgent(parent, {
+      messages: "go",
+      plugins: [pluginData],
+    });
+
+    // Plugin constructed exactly once across parent + child.
+    expect(constructorCount).toBe(1);
+    // Both parent and child reported the same instance id.
+    expect(result.text).toBe("parent-id=1;child-id=1");
+  });
 });
