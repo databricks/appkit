@@ -144,6 +144,25 @@ export type AgentEvent =
       toolName: string;
       args: unknown;
       annotations?: ToolAnnotations;
+    }
+  | {
+      /**
+       * Emitted by the agents plugin (not adapters) when the agent invokes a
+       * client-registered UI tool. The browser is expected to dispatch the
+       * call against its in-memory tool registry and POST the outcome to
+       * `/chat/client-tool-result` with `{ streamId, callId, result | error }`.
+       * The agent loop pauses on a deferred-promise gate until the result
+       * arrives or the configured timeout elapses (auto-error).
+       *
+       * Carries the same `streamId`/`callId` keying as the approval flow, so
+       * cross-user / cross-stream submissions are rejected by the gate.
+       */
+      type: "client_tool_call";
+      callId: string;
+      streamId: string;
+      toolName: string;
+      args: unknown;
+      annotations?: ToolAnnotations;
     };
 
 // ---------------------------------------------------------------------------
@@ -255,6 +274,23 @@ export interface AppKitApprovalPendingEvent {
   sequence_number: number;
 }
 
+/**
+ * Emitted when the agent invokes a client-registered UI tool. The browser
+ * dispatches the call against its in-memory registry and POSTs the outcome
+ * to `/chat/client-tool-result` with `{ streamId, callId, result | error }`.
+ * Mirrors the approval-pending shape so SSE consumers can reuse their
+ * stream/callId handling.
+ */
+export interface AppKitClientToolCallEvent {
+  type: "appkit.client_tool_call";
+  call_id: string;
+  stream_id: string;
+  tool_name: string;
+  args: unknown;
+  annotations?: ToolAnnotations;
+  sequence_number: number;
+}
+
 export type ResponseStreamEvent =
   | ResponseOutputItemAddedEvent
   | ResponseOutputItemDoneEvent
@@ -264,7 +300,8 @@ export type ResponseStreamEvent =
   | ResponseFailedEvent
   | AppKitThinkingEvent
   | AppKitMetadataEvent
-  | AppKitApprovalPendingEvent;
+  | AppKitApprovalPendingEvent
+  | AppKitClientToolCallEvent;
 
 // ---------------------------------------------------------------------------
 // Adapter contract

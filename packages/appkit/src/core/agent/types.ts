@@ -299,6 +299,16 @@ export type ResolvedToolEntry =
       source: "subagent";
       agentName: string;
       def: AgentToolDefinition;
+    }
+  | {
+      /**
+       * UI tool registered by the browser for the duration of a single chat
+       * request. Carried in the per-request tool index, never in the
+       * registered agent's index. Dispatch round-trips to the browser via
+       * the `client_tool_call` SSE event + `POST /chat/client-tool-result`.
+       */
+      source: "client";
+      def: AgentToolDefinition;
     };
 
 export interface RegisteredAgent {

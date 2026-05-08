@@ -25,6 +25,7 @@ import { Route as DataVisualizationRouteRouteImport } from './routes/data-visual
 import { Route as ChartInferenceRouteRouteImport } from './routes/chart-inference.route'
 import { Route as ArrowAnalyticsRouteRouteImport } from './routes/arrow-analytics.route'
 import { Route as AnalyticsRouteRouteImport } from './routes/analytics.route'
+import { Route as AgentUiPocRouteRouteImport } from './routes/agent-ui-poc.route'
 import { Route as AgentRouteRouteImport } from './routes/agent.route'
 import { Route as IndexRouteImport } from './routes/index'
 
@@ -108,6 +109,11 @@ const AnalyticsRouteRoute = AnalyticsRouteRouteImport.update({
   path: '/analytics',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AgentUiPocRouteRoute = AgentUiPocRouteRouteImport.update({
+  id: '/agent-ui-poc',
+  path: '/agent-ui-poc',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AgentRouteRoute = AgentRouteRouteImport.update({
   id: '/agent',
   path: '/agent',
@@ -122,6 +128,7 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/agent': typeof AgentRouteRoute
+  '/agent-ui-poc': typeof AgentUiPocRouteRoute
   '/analytics': typeof AnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/chart-inference': typeof ChartInferenceRouteRoute
@@ -142,6 +149,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/agent': typeof AgentRouteRoute
+  '/agent-ui-poc': typeof AgentUiPocRouteRoute
   '/analytics': typeof AnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/chart-inference': typeof ChartInferenceRouteRoute
@@ -163,6 +171,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/agent': typeof AgentRouteRoute
+  '/agent-ui-poc': typeof AgentUiPocRouteRoute
   '/analytics': typeof AnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/chart-inference': typeof ChartInferenceRouteRoute
@@ -185,6 +194,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/agent'
+    | '/agent-ui-poc'
     | '/analytics'
     | '/arrow-analytics'
     | '/chart-inference'
@@ -205,6 +215,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/agent'
+    | '/agent-ui-poc'
     | '/analytics'
     | '/arrow-analytics'
     | '/chart-inference'
@@ -225,6 +236,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/agent'
+    | '/agent-ui-poc'
     | '/analytics'
     | '/arrow-analytics'
     | '/chart-inference'
@@ -246,6 +258,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgentRouteRoute: typeof AgentRouteRoute
+  AgentUiPocRouteRoute: typeof AgentUiPocRouteRoute
   AnalyticsRouteRoute: typeof AnalyticsRouteRoute
   ArrowAnalyticsRouteRoute: typeof ArrowAnalyticsRouteRoute
   ChartInferenceRouteRoute: typeof ChartInferenceRouteRoute
@@ -378,6 +391,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AnalyticsRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/agent-ui-poc': {
+      id: '/agent-ui-poc'
+      path: '/agent-ui-poc'
+      fullPath: '/agent-ui-poc'
+      preLoaderRoute: typeof AgentUiPocRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/agent': {
       id: '/agent'
       path: '/agent'
@@ -398,6 +418,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentRouteRoute: AgentRouteRoute,
+  AgentUiPocRouteRoute: AgentUiPocRouteRoute,
   AnalyticsRouteRoute: AnalyticsRouteRoute,
   ArrowAnalyticsRouteRoute: ArrowAnalyticsRouteRoute,
   ChartInferenceRouteRoute: ChartInferenceRouteRoute,

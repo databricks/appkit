@@ -71,6 +71,18 @@ export class AgentEventTranslator {
             sequence_number: this.seqNum++,
           },
         ];
+      case "client_tool_call":
+        return [
+          {
+            type: "appkit.client_tool_call",
+            call_id: event.callId,
+            stream_id: event.streamId,
+            tool_name: event.toolName,
+            args: event.args,
+            annotations: event.annotations,
+            sequence_number: this.seqNum++,
+          },
+        ];
       case "status":
         return this.handleStatus(event.status, event.error);
     }

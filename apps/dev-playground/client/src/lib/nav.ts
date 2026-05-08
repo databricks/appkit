@@ -99,6 +99,13 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         icon: BotIcon,
       },
       {
+        to: "/agent-ui-poc",
+        label: "Agent + UI Tools",
+        description:
+          "Round-trip PoC: the agent calls counter tools registered from this page (UI as a tool).",
+        icon: BotIcon,
+      },
+      {
         to: "/genie",
         label: "Genie",
         description:

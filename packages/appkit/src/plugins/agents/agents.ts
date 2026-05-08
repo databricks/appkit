@@ -44,10 +44,37 @@ import type {
   RegisteredAgent,
   ResolvedToolEntry,
 } from "../../core/agent/types";
+
+/**
+ * Reject client-tool catalogs that would shadow the agent's static tools or
+ * collide with each other. Returning a string surfaces a 400 to the client
+ * synchronously rather than a half-streamed SSE error mid-conversation.
+ *
+ * Collision detection is one-shot at chat-handler entry; the catalog is
+ * frozen for the lifetime of the request and cannot drift mid-stream.
+ */
+function validateClientToolCatalog(
+  uiTools: AgentToolDefinition[],
+  staticIndex: Map<string, ResolvedToolEntry>,
+): string | null {
+  const seen = new Set<string>();
+  for (const def of uiTools) {
+    if (seen.has(def.name)) {
+      return `Duplicate uiTools entry: '${def.name}' appears more than once in the catalog`;
+    }
+    seen.add(def.name);
+    if (staticIndex.has(def.name)) {
+      return `uiTools entry '${def.name}' collides with an agent-registered tool of the same name`;
+    }
+  }
+  return null;
+}
+
 import { isToolkitEntry } from "../../core/agent/types";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
+import { ClientToolGate } from "./client-tool-gate";
 import { agentStreamDefaults } from "./defaults";
 import { EventChannel } from "./event-channel";
 import { AgentEventTranslator } from "./event-translator";
@@ -56,6 +83,7 @@ import {
   approvalRequestSchema,
   cancelRequestSchema,
   chatRequestSchema,
+  clientToolResultSchema,
   invocationsRequestSchema,
 } from "./schemas";
 import { InMemoryThreadStore } from "./thread-store";
@@ -127,6 +155,14 @@ interface RunState {
   outboundEvents: EventChannel<ResponseStreamEvent>;
   /** Boxed mutable counter shared across parent + all sub-agent dispatches. */
   toolCallsUsed: { count: number };
+  /**
+   * Per-request client-tool catalog. Empty `Map` when the chat request did
+   * not include `uiTools`. Lookup is by tool name (matches the LLM-visible
+   * name carried in the tool definition). Sub-agents inherit this catalog
+   * via the same `runState` so a UI tool spread to a sub-agent dispatcher
+   * still round-trips to the same browser tab.
+   */
+  clientTools: Map<string, AgentToolDefinition>;
 }
 
 export class AgentsPlugin extends Plugin implements ToolProvider {
@@ -151,6 +187,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
   private mcpClient: AppKitMcpClient | null = null;
   private threadStore;
   private approvalGate = new ToolApprovalGate();
+  private clientToolGate = new ClientToolGate();
 
   constructor(config: AgentsPluginConfig) {
     super(config);
@@ -798,6 +835,12 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       handler: async (req, res) => this._handleApprove(req, res),
     });
     this.route(router, {
+      name: "clientToolResult",
+      method: "post",
+      path: "/client-tool-result",
+      handler: async (req, res) => this._handleClientToolResult(req, res),
+    });
+    this.route(router, {
       name: "threads",
       method: "get",
       path: "/threads",
@@ -844,7 +887,12 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       });
       return;
     }
-    const { message, threadId, agent: agentName } = parsed.data;
+    const {
+      message,
+      threadId,
+      agent: agentName,
+      uiTools: rawUiTools,
+    } = parsed.data;
 
     const registered = this.resolveAgent(agentName);
     if (!registered) {
@@ -853,6 +901,20 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
           ? `Agent "${agentName}" not found`
           : "No agent registered",
       });
+      return;
+    }
+
+    // Validate the client tool catalog before allocating a thread or stream.
+    // Catalog issues (collisions with the agent's static tools, duplicates
+    // within the catalog itself) must surface as a synchronous 400 instead
+    // of a half-streamed SSE error — clients have no good UI for the latter.
+    const uiToolEntries = (rawUiTools ?? []) as AgentToolDefinition[];
+    const catalogError = validateClientToolCatalog(
+      uiToolEntries,
+      registered.toolIndex,
+    );
+    if (catalogError) {
+      res.status(400).json({ error: catalogError });
       return;
     }
 
@@ -898,7 +960,14 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       res.status(500).json({ error: "Thread operation failed" });
       return;
     }
-    return this._streamAgent(req, res, registered, thread, userId);
+    return this._streamAgent(
+      req,
+      res,
+      registered,
+      thread,
+      userId,
+      uiToolEntries,
+    );
   }
 
   /**
@@ -1025,13 +1094,27 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     registered: RegisteredAgent,
     thread: Thread,
     userId: string,
+    uiTools: AgentToolDefinition[] = [],
   ): Promise<void> {
     const abortController = new AbortController();
     const signal = abortController.signal;
     const requestId = randomUUID();
     this.trackStream(requestId, userId, abortController);
 
-    const tools = Array.from(registered.toolIndex.values()).map((e) => e.def);
+    // Per-request tool index: clones the registered agent's static index and
+    // augments it with the browser-supplied UI tools. Mutating
+    // `registered.toolIndex` directly would leak request-scoped tools into
+    // every subsequent run of the same agent (it's shared across users).
+    const requestToolIndex = new Map<string, ResolvedToolEntry>(
+      registered.toolIndex,
+    );
+    const clientTools = new Map<string, AgentToolDefinition>();
+    for (const def of uiTools) {
+      requestToolIndex.set(def.name, { source: "client", def });
+      clientTools.set(def.name, def);
+    }
+
+    const tools = Array.from(requestToolIndex.values()).map((e) => e.def);
     const approvalPolicy = this.resolvedApprovalPolicy;
     const limits = this.resolvedLimits;
     const outboundEvents = new EventChannel<ResponseStreamEvent>();
@@ -1052,10 +1135,11 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       translator,
       outboundEvents,
       toolCallsUsed: { count: 0 },
+      clientTools,
     };
 
     const executeTool = (name: string, args: unknown): Promise<unknown> =>
-      this.dispatchToolCall(runState, registered.toolIndex, name, args, 0);
+      this.dispatchToolCall(runState, requestToolIndex, name, args, 0);
 
     // Drive the adapter and the approval-event side-channel concurrently.
     // Outbound events from both sources flow through `outboundEvents`; the
@@ -1137,8 +1221,10 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         return;
       } finally {
         // Any pending approval gates for this stream are auto-denied so the
-        // adapter can unwind if it was still waiting.
+        // adapter can unwind if it was still waiting. Same applies to any
+        // client-tool gates the browser hadn't yet responded to.
         this.approvalGate.abortStream(requestId);
+        this.clientToolGate.abortStream(requestId);
         this.untrackStream(requestId);
         // Stateless agents (e.g. autocomplete) don't persist history; drop
         // the thread so `InMemoryThreadStore` doesn't accumulate one record
@@ -1431,6 +1517,35 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       if (!childAgent)
         throw new Error(`Sub-agent not found: ${entry.agentName}`);
       result = await this.runSubAgent(runState, childAgent, args, depth + 1);
+    } else if (entry.source === "client") {
+      // Round-trip to the browser: emit `client_tool_call`, await the
+      // ClientToolGate, and unwrap the structured outcome back into the
+      // adapter's tool-result channel. Errors (timeout, abort, browser-
+      // reported failure) become string returns to the LLM rather than
+      // thrown exceptions, matching how `executeTool`'s contract documents
+      // failure (sanitised text → `tool_result.error`).
+      const callId = randomUUID();
+      for (const ev of runState.translator.translate({
+        type: "client_tool_call",
+        callId,
+        streamId: runState.requestId,
+        toolName: name,
+        args,
+        annotations: entry.def.annotations,
+      })) {
+        runState.outboundEvents.push(ev);
+      }
+      const outcome = await this.clientToolGate.wait({
+        callId,
+        streamId: runState.requestId,
+        userId: runState.userId,
+        toolName: name,
+        timeoutMs: runState.limits.toolCallTimeoutMs,
+      });
+      if (outcome.kind === "error") {
+        return `Client tool '${name}' failed: ${outcome.error}`;
+      }
+      result = outcome.result;
     }
 
     return normalizeToolResult(result);
@@ -1607,6 +1722,55 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     res.json({ decision });
   }
 
+  private async _handleClientToolResult(
+    req: express.Request,
+    res: express.Response,
+  ) {
+    const parsed = clientToolResultSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "Invalid request",
+        details: parsed.error.flatten().fieldErrors,
+      });
+      return;
+    }
+    const { streamId, callId, result, error } = parsed.data;
+
+    const streamEntry = this.activeStreams.get(streamId);
+    if (!streamEntry) {
+      // Same shape as the approval handler: the stream is gone (cancelled,
+      // timed out, completed). The waiter, if any, has already been
+      // aborted, so the result is irrelevant.
+      res.status(404).json({ error: "Stream not found or already completed" });
+      return;
+    }
+
+    const userId = this.resolveUserId(req);
+    if (streamEntry.userId !== userId) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+
+    const outcome =
+      typeof error === "string"
+        ? ({ kind: "error", error } as const)
+        : ({ kind: "ok", result } as const);
+
+    const submitted = this.clientToolGate.submit({ callId, userId, outcome });
+    if (!submitted.ok) {
+      if (submitted.reason === "forbidden") {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+      res
+        .status(404)
+        .json({ error: "Client tool call not found or already settled" });
+      return;
+    }
+
+    res.json({ ok: true });
+  }
+
   private async _handleListThreads(
     req: express.Request,
     res: express.Response,
@@ -1666,6 +1830,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
   async shutdown(): Promise<void> {
     this.approvalGate.abortAll();
+    this.clientToolGate.abortAll();
     if (this.mcpClient) {
       await this.mcpClient.close();
       this.mcpClient = null;
