@@ -314,8 +314,8 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    * Returns the plugin's tools as a keyed record of `ToolkitEntry` markers.
    * Called by the agents plugin (via `resolveToolkitFromProvider`) to spread
    * a filtered, renamed view of the plugin's tools into an agent's tool
-   * index. Most callers should go through `fromPlugin(analytics, opts)` at
-   * module scope instead of reaching for this directly.
+   * index. Inside the function form of `AgentDefinition.tools`, callers
+   * reach this method via `plugins.analytics.toolkit(opts)`.
    */
   toolkit(opts?: import("../../core/agent/types").ToolkitOptions) {
     return buildToolkitEntries(this.name, this.tools, opts);
@@ -339,3 +339,9 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
  * @internal
  */
 export const analytics = toPlugin(AnalyticsPlugin);
+
+declare module "../../core/agent/types" {
+  interface RegisteredPlugins {
+    analytics: AnalyticsPlugin;
+  }
+}

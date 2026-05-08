@@ -377,3 +377,9 @@ export class GeniePlugin extends Plugin implements ToolProvider {
  * @internal
  */
 export const genie = toPlugin(GeniePlugin);
+
+declare module "../../core/agent/types" {
+  interface RegisteredPlugins {
+    genie: GeniePlugin;
+  }
+}

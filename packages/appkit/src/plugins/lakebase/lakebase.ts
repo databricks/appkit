@@ -225,3 +225,9 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
  * @internal
  */
 export const lakebase = toPlugin(LakebasePlugin);
+
+declare module "../../core/agent/types" {
+  interface RegisteredPlugins {
+    lakebase: LakebasePlugin;
+  }
+}

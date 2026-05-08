@@ -11,11 +11,9 @@ import type {
 import { describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { createAgent } from "../create-agent";
-import { fromPlugin } from "../from-plugin";
 import { runAgent } from "../run-agent";
 import { mcpServer } from "../tools/hosted-tools";
 import { tool } from "../tools/tool";
-import type { ToolkitEntry } from "../types";
 
 function scriptedAdapter(events: AgentEvent[]): AgentAdapter {
   return {
@@ -90,7 +88,7 @@ describe("runAgent", () => {
     expect(weatherFn).toHaveBeenCalledWith({ city: "NYC" });
   });
 
-  test("resolves fromPlugin markers against RunAgentInput.plugins", async () => {
+  test("function-form tools(plugins) resolves toolkit() against RunAgentInput.plugins", async () => {
     const pingExec = vi.fn(async () => "pong");
     class FakePlugin implements ToolProvider {
       static manifest = { name: "ping" };
@@ -114,16 +112,6 @@ describe("runAgent", () => {
       executeAgentTool = pingExec;
     }
 
-    const factory = () => ({
-      plugin: FakePlugin as unknown as PluginConstructor,
-      config: {},
-      name: "ping" as const,
-    });
-    Object.defineProperty(factory, "pluginName", {
-      value: "ping",
-      enumerable: true,
-    });
-
     let capturedCtx: AgentRunContext | null = null;
     const adapter: AgentAdapter = {
       async *run(_input, context) {
@@ -135,16 +123,16 @@ describe("runAgent", () => {
     const def = createAgent({
       instructions: "x",
       model: adapter,
-      tools: {
-        ...fromPlugin(factory as unknown as { readonly pluginName: string }),
+      tools(plugins) {
+        return { ...plugins.ping.toolkit() };
       },
     });
 
-    const pluginData = factory() as PluginData<
-      PluginConstructor,
-      unknown,
-      string
-    >;
+    const pluginData: PluginData<PluginConstructor, unknown, string> = {
+      plugin: FakePlugin as unknown as PluginConstructor,
+      config: {},
+      name: "ping",
+    };
 
     await runAgent(def, { messages: "hi", plugins: [pluginData] });
     expect(capturedCtx).not.toBeNull();
@@ -154,13 +142,7 @@ describe("runAgent", () => {
     expect(pingExec).toHaveBeenCalled();
   });
 
-  test("throws with guidance when fromPlugin marker has no matching plugin", async () => {
-    const factory = () => ({ name: "absent" as const });
-    Object.defineProperty(factory, "pluginName", {
-      value: "absent",
-      enumerable: true,
-    });
-
+  test("function-form throws with guidance when a referenced plugin is missing", async () => {
     const adapter: AgentAdapter = {
       async *run(_input, _context) {
         yield { type: "message_delta", content: "" };
@@ -170,55 +152,18 @@ describe("runAgent", () => {
     const def = createAgent({
       instructions: "x",
       model: adapter,
-      tools: {
-        ...fromPlugin(factory as unknown as { readonly pluginName: string }),
+      tools(plugins) {
+        return { ...plugins.absent.toolkit() };
       },
     });
 
-    await expect(runAgent(def, { messages: "hi" })).rejects.toThrow(/absent/);
+    // No plugins passed → plugins.absent is undefined → toolkit() call throws.
     await expect(runAgent(def, { messages: "hi" })).rejects.toThrow(
-      /Available:/,
+      /tools\(plugins\) callback threw/,
     );
   });
 
-  test("throws a clear error when a ToolkitEntry is invoked", async () => {
-    const toolkitEntry: ToolkitEntry = {
-      __toolkitRef: true,
-      pluginName: "analytics",
-      localName: "query",
-      def: {
-        name: "analytics.query",
-        description: "SQL",
-        parameters: { type: "object", properties: {} },
-      },
-    };
-
-    let capturedCtx: AgentRunContext | null = null;
-    const adapter: AgentAdapter = {
-      async *run(_input, context) {
-        capturedCtx = context;
-        yield { type: "message_delta", content: "" };
-      },
-    };
-
-    const def = createAgent({
-      instructions: "x",
-      model: adapter,
-      tools: { "analytics.query": toolkitEntry },
-    });
-
-    await runAgent(def, { messages: "hi" });
-    expect(capturedCtx).not.toBeNull();
-    await expect(
-      // biome-ignore lint/style/noNonNullAssertion: asserted above
-      capturedCtx!.executeTool("analytics.query", {}),
-    ).rejects.toThrow(/only usable via createApp/);
-  });
-
-  test("rejects fromPlugin against a plugin lacking ToolProvider methods", async () => {
-    // Pre-condition for #305 review finding #7: a plain plugin (no
-    // getAgentTools / executeAgentTool) referenced via fromPlugin must
-    // surface a clear error at standalone resolution, not at dispatch.
+  test("function-form rejects a plugin lacking ToolProvider methods", async () => {
     class NotAToolProvider {
       static manifest = { name: "noop" };
       static DEFAULT_CONFIG = {};
@@ -231,20 +176,8 @@ describe("runAgent", () => {
       }
     }
 
-    const factory = () => ({
-      plugin: NotAToolProvider as unknown as PluginConstructor,
-      config: {},
-      name: "noop" as const,
-    });
-    Object.defineProperty(factory, "pluginName", {
-      value: "noop",
-      enumerable: true,
-    });
-
     const adapter: AgentAdapter = {
-      async *run(_input, context) {
-        // Force resolution by attempting a dispatch.
-        await context.executeTool("noop.anything", {}).catch(() => undefined);
+      async *run(_input, _context) {
         yield { type: "message_delta", content: "" };
       },
     };
@@ -252,16 +185,16 @@ describe("runAgent", () => {
     const def = createAgent({
       instructions: "x",
       model: adapter,
-      tools: {
-        ...fromPlugin(factory as unknown as { readonly pluginName: string }),
+      tools(plugins) {
+        return { ...plugins.noop.toolkit() };
       },
     });
 
-    const pluginData = factory() as PluginData<
-      PluginConstructor,
-      unknown,
-      string
-    >;
+    const pluginData: PluginData<PluginConstructor, unknown, string> = {
+      plugin: NotAToolProvider as unknown as PluginConstructor,
+      config: {},
+      name: "noop",
+    };
 
     await expect(
       runAgent(def, { messages: "hi", plugins: [pluginData] }),
@@ -322,5 +255,21 @@ describe("runAgent", () => {
       await // biome-ignore lint/style/noNonNullAssertion: asserted above
       capturedCtx!.executeTool("agent-helper", { input: "say hi" });
     expect(result).toBe("child says hi");
+  });
+
+  test("function-form invoked exactly once per runAgent call", async () => {
+    const toolsFn = vi.fn(() => ({}));
+    const adapter: AgentAdapter = {
+      async *run(_input, _context) {
+        yield { type: "message_delta", content: "" };
+      },
+    };
+    const def = createAgent({
+      instructions: "x",
+      model: adapter,
+      tools: toolsFn,
+    });
+    await runAgent(def, { messages: "hi" });
+    expect(toolsFn).toHaveBeenCalledTimes(1);
   });
 });

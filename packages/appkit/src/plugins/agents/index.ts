@@ -3,13 +3,6 @@
 // already imported via `./plugins/agents` continue to resolve unchanged.
 export { buildToolkitEntries } from "../../core/agent/build-toolkit";
 export {
-  FROM_PLUGIN_MARKER,
-  type FromPluginMarker,
-  type FromPluginSpread,
-  fromPlugin,
-  isFromPluginMarker,
-} from "../../core/agent/from-plugin";
-export {
   agentIdFromMarkdownPath,
   type LoadContext,
   type LoadResult,
@@ -22,11 +15,15 @@ export {
   type AgentsPluginConfig,
   type AgentTool,
   type AgentTools,
+  type AgentToolsFn,
   type AutoInheritToolsConfig,
   type BaseSystemPromptOption,
   isToolkitEntry,
+  type Plugins,
+  type PluginToolkitProvider,
   type PromptContext,
   type RegisteredAgent,
+  type RegisteredPlugins,
   type ResolvedToolEntry,
   type ToolkitEntry,
   type ToolkitOptions,

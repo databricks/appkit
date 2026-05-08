@@ -6,7 +6,6 @@ import type {
   ToolAnnotations,
 } from "shared";
 import type { McpHostPolicyConfig } from "../../connectors/mcp";
-import type { FromPluginMarker } from "./from-plugin";
 import type { FunctionTool } from "./tools/function-tool";
 import type { HostedTool } from "./tools/hosted-tools";
 
@@ -50,6 +49,66 @@ export interface ToolkitOptions {
 }
 
 /**
+ * Minimum shape every entry in the {@link Plugins} map must expose. Core
+ * plugins (analytics, files, genie, lakebase) implement this directly via
+ * their `.toolkit()` method. The agents plugin and standalone `runAgent`
+ * synthesize this shape for any registered plugin that doesn't implement
+ * `.toolkit()` directly (falling back to `getAgentTools()` walking).
+ */
+export interface PluginToolkitProvider {
+  toolkit(opts?: ToolkitOptions): Record<string, ToolkitEntry>;
+}
+
+/**
+ * Module-augmentation interface. Core plugins extend this from their
+ * declaration site so the function form of `AgentDefinition.tools`
+ * autocompletes both available plugin keys and the methods on each
+ * plugin (notably `.toolkit()`).
+ *
+ * Third-party plugins may extend this interface to participate in the
+ * typed surface:
+ *
+ * ```ts
+ * declare module "@databricks/appkit" {
+ *   interface RegisteredPlugins {
+ *     myPlugin: MyPlugin;
+ *   }
+ * }
+ * ```
+ *
+ * Plugins not registered here still work at runtime (they appear under
+ * the index-signature fallback as {@link PluginToolkitProvider}), they
+ * just don't get keyed autocomplete.
+ */
+// biome-ignore lint/suspicious/noEmptyInterface: intentional augmentation seed
+export interface RegisteredPlugins {}
+
+/**
+ * Plugin map passed to the function form of {@link AgentDefinition.tools}.
+ * Known names (extended via {@link RegisteredPlugins}) keep their concrete
+ * plugin class type; unknown names fall back to {@link PluginToolkitProvider}.
+ *
+ * @example
+ * ```ts
+ * const support = createAgent({
+ *   instructions: "...",
+ *   tools(plugins) {
+ *     return {
+ *       get_weather: tool({ ... }),
+ *       ...plugins.analytics.toolkit(),
+ *       ...plugins.files.toolkit({ only: ["uploads.read"] }),
+ *     };
+ *   },
+ * });
+ * ```
+ */
+export type Plugins = {
+  readonly [K in keyof RegisteredPlugins]: RegisteredPlugins[K];
+} & {
+  readonly [key: string]: PluginToolkitProvider;
+};
+
+/**
  * Context passed to `baseSystemPrompt` callbacks.
  */
 export interface PromptContext {
@@ -65,13 +124,20 @@ export type BaseSystemPromptOption =
 
 /**
  * Per-agent tool record. String keys map to inline tools, toolkit entries,
- * hosted tools, etc. Symbol keys hold `FromPluginMarker` references produced
- * by `fromPlugin(factory)` spreads — these are resolved at
- * `AgentsPlugin.setup()` time against registered `ToolProvider` plugins.
+ * hosted tools, etc.
  */
-export type AgentTools = { [key: string]: AgentTool } & {
-  [key: symbol]: FromPluginMarker;
-};
+export type AgentTools = Record<string, AgentTool>;
+
+/**
+ * Function form of `AgentDefinition.tools`. Receives the typed
+ * {@link Plugins} map and returns a tool record. Invoked exactly once at
+ * setup (or once per `runAgent` call in standalone mode); the result is
+ * cached as the agent's resolved tool record.
+ *
+ * Use the function form when an agent needs tools from registered plugins.
+ * The bare object form is fine when an agent only uses inline tools.
+ */
+export type AgentToolsFn = (plugins: Plugins) => AgentTools;
 
 export interface AgentDefinition {
   /** Filled in from the enclosing key when used in `agents: { foo: def }`. */
@@ -84,8 +150,18 @@ export interface AgentDefinition {
    * falls back to the plugin's `defaultModel`.
    */
   model?: AgentAdapter | Promise<AgentAdapter> | string;
-  /** Per-agent tool record. Key is the LLM-visible tool-call name. */
-  tools?: AgentTools;
+  /**
+   * Per-agent tool record. Key is the LLM-visible tool-call name.
+   *
+   * Accepts either a plain record (for agents that only use inline tools)
+   * or a function `(plugins) => Record<string, AgentTool>` that receives
+   * the typed {@link Plugins} map and returns a tool record (for agents
+   * that pull tools from registered plugins).
+   *
+   * The function is invoked once at agent setup; the result is cached.
+   * Don't put per-request logic in there.
+   */
+  tools?: AgentTools | AgentToolsFn;
   /** Sub-agents, exposed as `agent-<key>` tools on this agent. */
   agents?: Record<string, AgentDefinition>;
   /** Override the plugin's baseSystemPrompt for this agent only. */
@@ -108,7 +184,8 @@ export interface AgentDefinition {
  * with no explicit `tools:` declaration receive every registered ToolProvider
  * plugin tool whose author marked `autoInheritable: true`. Tools without that
  * flag — destructive, state-mutating, or privilege-sensitive — never spread
- * automatically and must be wired via `tools:`, `toolkits:`, or `fromPlugin`.
+ * automatically and must be wired via `tools:` (object or function form) or
+ * markdown `toolkits:`.
  *
  * Defaults are `false` for both origins (safe-by-default): developers must
  * consciously opt an origin in to any auto-inherit behaviour.

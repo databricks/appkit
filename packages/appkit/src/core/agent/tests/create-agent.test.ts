@@ -28,7 +28,12 @@ describe("createAgent", () => {
       tools: { get_weather },
     });
 
-    expect(def.tools?.get_weather).toBe(get_weather);
+    // The object form preserves identity; we narrow with typeof to satisfy
+    // the dual ToolRecord | AgentToolsFn shape.
+    expect(typeof def.tools).toBe("object");
+    if (typeof def.tools === "object") {
+      expect(def.tools.get_weather).toBe(get_weather);
+    }
   });
 
   test("accepts sub-agents in a keyed record", () => {

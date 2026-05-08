@@ -18,7 +18,6 @@ import type {
 import { AppKitMcpClient, buildMcpHostPolicy } from "../../connectors/mcp";
 import { getWorkspaceClient } from "../../context";
 import { consumeAdapterStream } from "../../core/agent/consume-adapter-stream";
-import { isFromPluginMarker } from "../../core/agent/from-plugin";
 import { loadAgentsFromDir } from "../../core/agent/load-agents";
 import { normalizeToolResult } from "../../core/agent/normalize-result";
 import {
@@ -35,7 +34,10 @@ import {
 import type {
   AgentDefinition,
   AgentsPluginConfig,
+  AgentTools,
   BaseSystemPromptOption,
+  Plugins,
+  PluginToolkitProvider,
   PromptContext,
   RegisteredAgent,
   ResolvedToolEntry,
@@ -411,17 +413,16 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     src: AgentSource,
   ): Promise<Map<string, ResolvedToolEntry>> {
     const index = new Map<string, ResolvedToolEntry>();
-    const toolsRecord = def.tools ?? {};
-    const hasExplicitTools =
-      def.tools !== undefined &&
-      (Object.keys(toolsRecord).length > 0 ||
-        Object.getOwnPropertySymbols(toolsRecord).length > 0);
+    const hasDeclaredTools = def.tools !== undefined;
+    const toolsRecord = this.resolveDefTools(agentName, def);
     const hasExplicitSubAgents =
       def.agents && Object.keys(def.agents).length > 0;
 
     const inheritDefaults = normalizeAutoInherit(this.config.autoInheritTools);
+    // Declaring `tools` (object or function, even an empty record) opts out
+    // of auto-inherit. Same rule for both forms — see plan decision (E1/I1).
     const shouldInherit =
-      !hasExplicitTools &&
+      !hasDeclaredTools &&
       !hasExplicitSubAgents &&
       (src.origin === "file" ? inheritDefaults.file : inheritDefaults.code);
 
@@ -454,11 +455,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       });
     }
 
-    // 2. fromPlugin markers — resolve against registered ToolProviders first so
-    //    explicit string-keyed tools can still overwrite on the same key.
-    this.resolveFromPluginMarkers(agentName, toolsRecord, index);
-
-    // 3. Explicit tools (toolkit entries, function tools, hosted tools)
+    // 2. Explicit tools (toolkit entries, function tools, hosted tools)
     const hostedToCollect: import("../../core/agent/tools/hosted-tools").HostedTool[] =
       [];
     for (const [key, tool] of Object.entries(toolsRecord)) {
@@ -493,6 +490,56 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     }
 
     return index;
+  }
+
+  /**
+   * Resolves an `AgentDefinition.tools` field to a plain tool record. The
+   * function form is invoked exactly once at agent setup with the typed
+   * {@link Plugins} map; the result replaces the function reference for the
+   * remainder of the registered agent's lifetime.
+   *
+   * Plain object form is returned as-is; an undefined `tools` returns an
+   * empty record. The function form is wrapped in a try/catch so a thrown
+   * callback fails registration with a useful message instead of leaking
+   * the raw stack.
+   */
+  private resolveDefTools(agentName: string, def: AgentDefinition): AgentTools {
+    if (typeof def.tools !== "function") {
+      return def.tools ?? {};
+    }
+    try {
+      return def.tools(this.buildPluginsMap());
+    } catch (err) {
+      throw new Error(
+        `Agent '${agentName}': tools(plugins) callback threw: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        { cause: err instanceof Error ? err : undefined },
+      );
+    }
+  }
+
+  /**
+   * Builds the typed {@link Plugins} map passed to the function form of
+   * `AgentDefinition.tools`. Each entry exposes the plugin instance directly
+   * (so user code can call typed instance methods including `.toolkit()`);
+   * plugins missing `.toolkit()` get a synthesized fallback that walks
+   * `getAgentTools()` via `resolveToolkitFromProvider`.
+   */
+  private buildPluginsMap(): Plugins {
+    const out: Record<string, PluginToolkitProvider> = {};
+    if (!this.context) return out as Plugins;
+    for (const { name, provider } of this.context.getToolProviders()) {
+      const direct = (provider as { toolkit?: unknown }).toolkit;
+      if (typeof direct === "function") {
+        out[name] = provider as unknown as PluginToolkitProvider;
+      } else {
+        out[name] = {
+          toolkit: (opts) => resolveToolkitFromProvider(name, provider, opts),
+        };
+      }
+    }
+    return out as Plugins;
   }
 
   private async applyAutoInherit(
@@ -550,51 +597,6 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         ),
         summary,
       );
-    }
-  }
-
-  /**
-   * Walks the symbol-keyed `fromPlugin` markers in an agent's `tools` record
-   * and resolves each one against a registered `ToolProvider`. Throws with a
-   * helpful `Available: …` listing if a referenced plugin isn't registered.
-   */
-  private resolveFromPluginMarkers(
-    agentName: string,
-    toolsRecord: Record<string | symbol, unknown>,
-    index: Map<string, ResolvedToolEntry>,
-  ): void {
-    const symbolKeys = Object.getOwnPropertySymbols(toolsRecord);
-    if (symbolKeys.length === 0) return;
-
-    const providers = this.context?.getToolProviders() ?? [];
-
-    for (const sym of symbolKeys) {
-      const marker = (toolsRecord as Record<symbol, unknown>)[sym];
-      if (!isFromPluginMarker(marker)) continue;
-
-      const providerEntry = providers.find((p) => p.name === marker.pluginName);
-      if (!providerEntry) {
-        const available = providers.map((p) => p.name).join(", ") || "(none)";
-        throw new Error(
-          `Agent '${agentName}' references plugin '${marker.pluginName}' via ` +
-            `fromPlugin(), but that plugin is not registered in createApp. ` +
-            `Available: ${available}.`,
-        );
-      }
-
-      const entries = resolveToolkitFromProvider(
-        marker.pluginName,
-        providerEntry.provider,
-        marker.opts,
-      );
-      for (const [key, entry] of Object.entries(entries)) {
-        index.set(key, {
-          source: "toolkit",
-          pluginName: entry.pluginName,
-          localName: entry.localName,
-          def: { ...entry.def, name: key },
-        });
-      }
     }
   }
 

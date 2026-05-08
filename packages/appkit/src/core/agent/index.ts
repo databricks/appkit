@@ -9,13 +9,6 @@ export { buildToolkitEntries } from "./build-toolkit";
 export { consumeAdapterStream } from "./consume-adapter-stream";
 export { createAgent } from "./create-agent";
 export {
-  FROM_PLUGIN_MARKER,
-  type FromPluginMarker,
-  type FromPluginSpread,
-  fromPlugin,
-  isFromPluginMarker,
-} from "./from-plugin";
-export {
   agentIdFromMarkdownPath,
   type LoadContext,
   type LoadResult,
@@ -52,11 +45,15 @@ export {
   type AgentsPluginConfig,
   type AgentTool,
   type AgentTools,
+  type AgentToolsFn,
   type AutoInheritToolsConfig,
   type BaseSystemPromptOption,
   isToolkitEntry,
+  type Plugins,
+  type PluginToolkitProvider,
   type PromptContext,
   type RegisteredAgent,
+  type RegisteredPlugins,
   type ResolvedToolEntry,
   type ToolkitEntry,
   type ToolkitOptions,

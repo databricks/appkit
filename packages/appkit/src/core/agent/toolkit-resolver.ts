@@ -26,7 +26,7 @@ type MaybeToolkitProvider = ToolProvider & {
  *
  * This helper is the single source of truth for "turn a provider into a
  * toolkit entry record" and is used by `AgentsPlugin.buildToolIndex`
- * (both the `fromPlugin` resolution pass and auto-inherit) and by the
+ * (the `tools(plugins)` resolution pass and auto-inherit) and by the
  * standalone `runAgent` executor.
  */
 export function resolveToolkitFromProvider(

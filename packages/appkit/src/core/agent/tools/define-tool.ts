@@ -20,7 +20,8 @@ export interface ToolEntry<S extends z.ZodType = z.ZodType> {
    * consider it safe enough to appear in every agent's tool record without an
    * explicit `tools:` declaration. Destructive or privilege-sensitive tools
    * should leave this unset so that they only reach agents that wire them
-   * explicitly (via `tools:`, `toolkits:`, or `fromPlugin({ only: [...] })`).
+   * explicitly (via `tools:` object/function form, markdown `toolkits:`, or
+   * `plugins.<name>.toolkit({ only: [...] })`).
    */
   autoInheritable?: boolean;
   handler: (

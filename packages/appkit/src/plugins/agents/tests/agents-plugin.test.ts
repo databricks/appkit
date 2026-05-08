@@ -12,7 +12,6 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { CacheManager } from "../../../cache";
 import { buildToolkitEntries } from "../../../core/agent/build-toolkit";
-import { fromPlugin } from "../../../core/agent/from-plugin";
 import {
   defineTool,
   type ToolRegistry,
@@ -25,12 +24,6 @@ import type {
 import { isToolkitEntry } from "../../../core/agent/types";
 // Import the class directly so we can construct it without a createApp
 import { AgentsPlugin } from "../agents";
-
-function namedFactory(name: string) {
-  const f = () => ({ name });
-  Object.defineProperty(f, "pluginName", { value: name, enumerable: true });
-  return f as typeof f & { readonly pluginName: string };
-}
 
 interface FakeContext {
   providers: Array<{ name: string; provider: ToolProvider }>;
@@ -379,8 +372,8 @@ describe("AgentsPlugin", () => {
     expect(isToolkitEntry(null)).toBe(false);
   });
 
-  describe("fromPlugin markers", () => {
-    test("spreading fromPlugin registers all tools from the referenced plugin", async () => {
+  describe("function-form tools(plugins)", () => {
+    test("function form spreads tools from plugins.<name>.toolkit()", async () => {
       const registry: ToolRegistry = {
         query: defineTool({
           description: "q",
@@ -402,7 +395,9 @@ describe("AgentsPlugin", () => {
             support: {
               instructions: "...",
               model: stubAdapter(),
-              tools: { ...fromPlugin(namedFactory("analytics")) },
+              tools(plugins) {
+                return { ...plugins.analytics.toolkit() };
+              },
             },
           },
         },
@@ -417,7 +412,7 @@ describe("AgentsPlugin", () => {
       expect(agent?.toolIndex.has("analytics.query")).toBe(true);
     });
 
-    test("mixed inline + fromPlugin tools coexist", async () => {
+    test("mixed inline tools + plugin toolkit() coexist in the function form", async () => {
       const registry: ToolRegistry = {
         query: defineTool({
           description: "q",
@@ -439,14 +434,16 @@ describe("AgentsPlugin", () => {
             support: {
               instructions: "...",
               model: stubAdapter(),
-              tools: {
-                ...fromPlugin(namedFactory("analytics")),
-                get_weather: tool({
-                  name: "get_weather",
-                  description: "Weather",
-                  schema: z.object({ city: z.string() }),
-                  execute: async ({ city }) => `Sunny in ${city}`,
-                }),
+              tools(plugins) {
+                return {
+                  ...plugins.analytics.toolkit(),
+                  get_weather: tool({
+                    name: "get_weather",
+                    description: "Weather",
+                    schema: z.object({ city: z.string() }),
+                    execute: async ({ city }) => `Sunny in ${city}`,
+                  }),
+                };
               },
             },
           },
@@ -463,14 +460,8 @@ describe("AgentsPlugin", () => {
       expect(agent?.toolIndex.has("get_weather")).toBe(true);
     });
 
-    test("missing plugin throws at setup with Available: listing", async () => {
-      const ctx = fakeContext([
-        {
-          name: "files",
-          provider: makeToolProvider("files", {}),
-        },
-      ]);
-
+    test("function-form callback that throws fails registration with a clear message", async () => {
+      const ctx = fakeContext([]);
       const plugin = instantiate(
         {
           dir: false,
@@ -478,18 +469,22 @@ describe("AgentsPlugin", () => {
             support: {
               instructions: "...",
               model: stubAdapter(),
-              tools: { ...fromPlugin(namedFactory("analytics")) },
+              tools(plugins) {
+                // Calling .toolkit() on a missing plugin throws because
+                // plugins.analytics is undefined under the index signature.
+                return { ...plugins.analytics.toolkit() };
+              },
             },
           },
         },
         ctx,
       );
-      await expect(plugin.setup()).rejects.toThrow(/analytics/);
-      await expect(plugin.setup()).rejects.toThrow(/Available:/);
-      await expect(plugin.setup()).rejects.toThrow(/files/);
+      await expect(plugin.setup()).rejects.toThrow(
+        /tools\(plugins\) callback threw/,
+      );
     });
 
-    test("symbol-only tools record disables auto-inherit", async () => {
+    test("function form opts out of auto-inherit even when other plugins are autoInheritable", async () => {
       const analyticsReg: ToolRegistry = {
         query: defineTool({
           description: "q",
@@ -501,6 +496,7 @@ describe("AgentsPlugin", () => {
         list: defineTool({
           description: "l",
           schema: z.object({}),
+          autoInheritable: true,
           handler: () => [],
         }),
       };
@@ -523,7 +519,9 @@ describe("AgentsPlugin", () => {
             support: {
               instructions: "...",
               model: stubAdapter(),
-              tools: { ...fromPlugin(namedFactory("analytics")) },
+              tools(plugins) {
+                return { ...plugins.analytics.toolkit() };
+              },
             },
           },
         },
@@ -537,10 +535,53 @@ describe("AgentsPlugin", () => {
       const agent = api.get("support");
       const toolNames = Array.from(agent?.toolIndex.keys() ?? []);
       expect(toolNames.some((n) => n.startsWith("analytics."))).toBe(true);
+      // files is autoInheritable but the function form opted us out
       expect(toolNames.some((n) => n.startsWith("files."))).toBe(false);
     });
 
-    test("falls back to getAgentTools() for providers without toolkit()", async () => {
+    test("empty function-form record still opts out of auto-inherit", async () => {
+      const filesReg: ToolRegistry = {
+        list: defineTool({
+          description: "l",
+          schema: z.object({}),
+          autoInheritable: true,
+          handler: () => [],
+        }),
+      };
+      const ctx = fakeContext([
+        {
+          name: "files",
+          provider: makeToolProvider("files", filesReg),
+        },
+      ]);
+
+      const plugin = instantiate(
+        {
+          dir: false,
+          autoInheritTools: { code: true },
+          agents: {
+            support: {
+              instructions: "...",
+              model: stubAdapter(),
+              tools(_plugins) {
+                return {};
+              },
+            },
+          },
+        },
+        ctx,
+      );
+      await plugin.setup();
+
+      const api = plugin.exports() as {
+        get: (name: string) => { toolIndex: Map<string, unknown> } | null;
+      };
+      const agent = api.get("support");
+      // Nothing inherited even though files.list is autoInheritable.
+      expect(agent?.toolIndex.size).toBe(0);
+    });
+
+    test("function form falls back to getAgentTools() for providers without toolkit()", async () => {
       // Provider lacks .toolkit() — only getAgentTools/executeAgentTool.
       const bareProvider: ToolProvider = {
         getAgentTools: () => [
@@ -561,7 +602,9 @@ describe("AgentsPlugin", () => {
             support: {
               instructions: "...",
               model: stubAdapter(),
-              tools: { ...fromPlugin(namedFactory("bare")) },
+              tools(plugins) {
+                return { ...plugins.bare.toolkit() };
+              },
             },
           },
         },
@@ -574,6 +617,26 @@ describe("AgentsPlugin", () => {
       };
       const agent = api.get("support");
       expect(agent?.toolIndex.has("bare.ping")).toBe(true);
+    });
+
+    test("function form runs exactly once at setup", async () => {
+      const ctx = fakeContext([]);
+      const toolsFn = vi.fn(() => ({}));
+      const plugin = instantiate(
+        {
+          dir: false,
+          agents: {
+            support: {
+              instructions: "...",
+              model: stubAdapter(),
+              tools: toolsFn,
+            },
+          },
+        },
+        ctx,
+      );
+      await plugin.setup();
+      expect(toolsFn).toHaveBeenCalledTimes(1);
     });
   });
 });

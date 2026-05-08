@@ -21,7 +21,6 @@
     "packages/appkit/src/plugins/agents/**",
     "packages/appkit/src/core/agent/index.ts",
     "packages/appkit/src/core/agent/tools/index.ts",
-    "packages/appkit/src/core/agent/from-plugin.ts",
     "packages/appkit/src/core/agent/load-agents.ts",
     "packages/appkit/src/connectors/mcp/index.ts",
     "template/**",
