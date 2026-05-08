@@ -23,7 +23,6 @@ export {
   type PluginToolkitProvider,
   type PromptContext,
   type RegisteredAgent,
-  type RegisteredPlugins,
   type ResolvedToolEntry,
   type ToolkitEntry,
   type ToolkitOptions,

@@ -60,44 +60,14 @@ export interface PluginToolkitProvider {
 }
 
 /**
- * Registry of plugin names that participate in keyed autocomplete inside
- * the function form of `AgentDefinition.tools`. Each entry is typed as the
- * minimal {@link PluginToolkitProvider} shape — the only surface guaranteed
- * available inside `tools(plugins)`. Other plugin instance methods are
- * intentionally hidden; `tools(plugins)` is for tool composition, not for
- * reaching into a plugin's runtime API.
- *
- * Core AppKit plugins are listed here directly (no per-plugin module
- * augmentation needed). Third-party plugins can opt into autocomplete by
- * augmenting this interface from user code:
- *
- * ```ts
- * declare module "@databricks/appkit/beta" {
- *   interface RegisteredPlugins {
- *     myPlugin: PluginToolkitProvider;
- *   }
- * }
- * ```
- *
- * Augmentation is purely a discoverability win — unknown plugin names
- * still resolve at runtime via the index-signature fallback in
- * {@link Plugins}.
- */
-export interface RegisteredPlugins {
-  analytics: PluginToolkitProvider;
-  files: PluginToolkitProvider;
-  genie: PluginToolkitProvider;
-  lakebase: PluginToolkitProvider;
-}
-
-/**
  * Plugin map passed to the function form of {@link AgentDefinition.tools}.
  * Each entry exposes a `.toolkit(opts?)` method that returns a record of
  * {@link ToolkitEntry} markers ready to be spread into a tool record.
  *
- * Plugins not declared in {@link RegisteredPlugins} still work at runtime
- * via the index-signature fallback; they just don't appear in keyed
- * autocomplete.
+ * AppKit does not statically know which plugins the surrounding
+ * `createApp` will register, so this is a plain string-keyed record.
+ * Refer to plugins by the name used in `createApp({ plugins: [...] })`;
+ * unknown names resolve to `undefined` at runtime.
  *
  * @example
  * ```ts
@@ -113,11 +83,7 @@ export interface RegisteredPlugins {
  * });
  * ```
  */
-export type Plugins = {
-  readonly [K in keyof RegisteredPlugins]: RegisteredPlugins[K];
-} & {
-  readonly [key: string]: PluginToolkitProvider;
-};
+export type Plugins = Record<string, PluginToolkitProvider>;
 
 /**
  * Context passed to `baseSystemPrompt` callbacks.

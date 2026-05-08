@@ -60,7 +60,6 @@ export type {
   PluginToolkitProvider,
   PromptContext,
   RegisteredAgent,
-  RegisteredPlugins,
   ResolvedToolEntry,
   ToolkitEntry,
   ToolkitOptions,
