@@ -3,6 +3,7 @@
   "name": "agents",
   "displayName": "Agents Plugin",
   "stability": "beta",
+  "hidden": true,
   "description": "AI agents driven by markdown configs or code, with auto-tool-discovery from registered plugins",
   "resources": {
     "required": [],

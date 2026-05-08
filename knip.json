@@ -18,7 +18,7 @@
     "packages/appkit/src/plugins/vector-search/**",
     "packages/appkit/src/plugin/index.ts",
     "packages/appkit/src/plugin/to-plugin.ts",
-    "packages/appkit/src/plugins/agents/index.ts",
+    "packages/appkit/src/plugins/agents/**",
     "template/**",
     "tools/**",
     "docs/**",
