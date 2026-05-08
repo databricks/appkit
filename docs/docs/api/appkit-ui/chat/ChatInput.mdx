@@ -1,0 +1,37 @@
+# ChatInput
+
+Render-prop component that owns the input string, debounces submit, handles `Enter` / `Shift+Enter` / IME composition, and forwards an `isStreaming` flag for stop-button toggles. Wire `onSubmit`, `status`, and `stop` from `useChat` / `Conversation`; the render prop returns a `submit` callback you can attach to either a form `onSubmit` or a button `onClick`.
+
+
+## ChatInput
+
+Render-prop component that owns the input string, debounces submit,
+handles `Enter` / `Shift+Enter` / IME composition, and forwards an
+`isStreaming` flag for stop-button toggles. Wire `onSubmit`, `status`,
+and `stop` from `useChat` / `Conversation`; the render prop returns a
+`submit` callback you can attach to either a form `onSubmit` or a
+button `onClick`.
+
+
+**Source:** [`packages/appkit-ui/src/react/chat/headless/chat-input.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/chat/headless/chat-input.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `onSubmit` | `(message?: (Omit<TMessage, "id" \| "role"> & { id?: TMessage["id"] \| undefined; role?: TMessage["role"] \| undefined; } & { text?: undefined; files?: undefined; messageId?: string \| undefined; }) \| { ...; } \| { ...; } \| undefined, options?: ChatRequestOptions \| undefined) => Promise<...>` | ✓ | - | Pass `sendMessage` straight through from `useChat` / `Conversation`. |
+| `status` | `enum` | ✓ | - | Pass `status` from the chat helpers — drives `isStreaming`. |
+| `stop` | `() => void` | ✓ | - | Pass `stop` from the chat helpers — exposed back to the render prop. |
+| `children` | `(props: ChatInputRenderProps) => ReactNode` | ✓ | - | Render prop receiving the input state and submit/stop handlers. |
+
+
+
+### Usage
+
+```tsx
+import { ChatInput } from '@databricks/appkit-ui';
+
+<ChatInput /* props */ />
+```
+
