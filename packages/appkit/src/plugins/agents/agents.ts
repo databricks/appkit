@@ -139,6 +139,13 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     string,
     { controller: AbortController; userId: string }
   >();
+  /**
+   * Per-user stream count, kept in sync with `activeStreams` so the
+   * concurrent-stream rate limit check is O(1) instead of O(n) over every
+   * active stream on every request. Mutated only via {@link trackStream}
+   * and {@link untrackStream}.
+   */
+  private userStreamCounts = new Map<string, number>();
   private mcpClient: AppKitMcpClient | null = null;
   private threadStore;
   private approvalGate = new ToolApprovalGate();
@@ -195,13 +202,44 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     };
   }
 
-  /** Count active streams owned by a given user. */
+  /** Count active streams owned by a given user. O(1). */
   private countUserStreams(userId: string): number {
-    let n = 0;
-    for (const entry of this.activeStreams.values()) {
-      if (entry.userId === userId) n++;
+    return this.userStreamCounts.get(userId) ?? 0;
+  }
+
+  /**
+   * Register a stream for `userId` and bump the per-user counter. Paired
+   * with {@link untrackStream}; the two helpers are the only writers to
+   * `activeStreams` + `userStreamCounts`, so the counter cannot drift from
+   * the map.
+   */
+  private trackStream(
+    requestId: string,
+    userId: string,
+    controller: AbortController,
+  ): void {
+    this.activeStreams.set(requestId, { controller, userId });
+    this.userStreamCounts.set(
+      userId,
+      (this.userStreamCounts.get(userId) ?? 0) + 1,
+    );
+  }
+
+  /**
+   * Remove a stream from the active map and decrement the per-user
+   * counter. Idempotent — calling twice for the same `requestId` is a
+   * no-op (the second call sees no entry and returns early).
+   */
+  private untrackStream(requestId: string): void {
+    const entry = this.activeStreams.get(requestId);
+    if (!entry) return;
+    this.activeStreams.delete(requestId);
+    const next = (this.userStreamCounts.get(entry.userId) ?? 1) - 1;
+    if (next <= 0) {
+      this.userStreamCounts.delete(entry.userId);
+    } else {
+      this.userStreamCounts.set(entry.userId, next);
     }
-    return n;
   }
 
   async setup() {
@@ -875,7 +913,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     const abortController = new AbortController();
     const signal = abortController.signal;
     const requestId = randomUUID();
-    this.activeStreams.set(requestId, { controller: abortController, userId });
+    this.trackStream(requestId, userId, abortController);
 
     const tools = Array.from(registered.toolIndex.values()).map((e) => e.def);
     const approvalPolicy = this.resolvedApprovalPolicy;
@@ -985,7 +1023,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         // Any pending approval gates for this stream are auto-denied so the
         // adapter can unwind if it was still waiting.
         this.approvalGate.abortStream(requestId);
-        this.activeStreams.delete(requestId);
+        this.untrackStream(requestId);
         // Stateless agents (e.g. autocomplete) don't persist history; drop
         // the thread so `InMemoryThreadStore` doesn't accumulate one record
         // per request. Swallow delete errors — the stream has already
@@ -1246,7 +1284,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       return;
     }
     entry.controller.abort("Cancelled by user");
-    this.activeStreams.delete(streamId);
+    this.untrackStream(streamId);
     this.approvalGate.abortStream(streamId);
     res.json({ cancelled: true });
   }

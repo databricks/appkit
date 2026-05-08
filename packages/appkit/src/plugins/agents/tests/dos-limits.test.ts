@@ -149,10 +149,7 @@ describe("POST /chat — per-user concurrent-stream limit", () => {
     const plugin = seedPlugin();
     for (let i = 0; i < 5; i++) {
       // biome-ignore lint/suspicious/noExplicitAny: seeding
-      (plugin as any).activeStreams.set(`s${i}`, {
-        controller: new AbortController(),
-        userId: "alice",
-      });
+      (plugin as any).trackStream(`s${i}`, "alice", new AbortController());
     }
 
     const { res, setHeader, json } = mockRes();
@@ -175,10 +172,7 @@ describe("POST /chat — per-user concurrent-stream limit", () => {
     const plugin = seedPlugin();
     for (let i = 0; i < 5; i++) {
       // biome-ignore lint/suspicious/noExplicitAny: seeding
-      (plugin as any).activeStreams.set(`s${i}`, {
-        controller: new AbortController(),
-        userId: "alice",
-      });
+      (plugin as any).trackStream(`s${i}`, "alice", new AbortController());
     }
 
     // Carol's request must not see a 429 even though alice is at-limit.
@@ -204,10 +198,7 @@ describe("POST /chat — per-user concurrent-stream limit", () => {
     });
     for (let i = 0; i < 2; i++) {
       // biome-ignore lint/suspicious/noExplicitAny: seeding
-      (plugin as any).activeStreams.set(`s${i}`, {
-        controller: new AbortController(),
-        userId: "alice",
-      });
+      (plugin as any).trackStream(`s${i}`, "alice", new AbortController());
     }
 
     const { res } = mockRes();
@@ -220,16 +211,48 @@ describe("POST /chat — per-user concurrent-stream limit", () => {
     expect(res.status).toHaveBeenCalledWith(429);
   });
 
+  test("trackStream/untrackStream keep userStreamCounts in sync with activeStreams (O(1) counter)", async () => {
+    // Regression for the agentic review finding: countUserStreams() used
+    // to walk every active stream on every chat request (O(n) over total
+    // concurrent streams). The new path keeps a per-user counter that
+    // must mirror the underlying map across track/untrack and across
+    // multiple users.
+    const plugin = seedPlugin();
+    // biome-ignore lint/suspicious/noExplicitAny: private state probe
+    const t = plugin as any;
+
+    expect(t.countUserStreams("alice")).toBe(0);
+
+    t.trackStream("s1", "alice", new AbortController());
+    t.trackStream("s2", "alice", new AbortController());
+    t.trackStream("s3", "bob", new AbortController());
+
+    expect(t.countUserStreams("alice")).toBe(2);
+    expect(t.countUserStreams("bob")).toBe(1);
+    expect(t.activeStreams.size).toBe(3);
+
+    t.untrackStream("s1");
+    expect(t.countUserStreams("alice")).toBe(1);
+    expect(t.activeStreams.has("s1")).toBe(false);
+
+    // Untrack the last stream for a user → counter map drops the key
+    // entirely (avoids unbounded growth across many distinct users).
+    t.untrackStream("s3");
+    expect(t.countUserStreams("bob")).toBe(0);
+    expect(t.userStreamCounts.has("bob")).toBe(false);
+
+    // Idempotent — untracking a missing stream is a no-op.
+    t.untrackStream("s1");
+    expect(t.countUserStreams("alice")).toBe(1);
+  });
+
   test("/invocations also honours maxConcurrentStreamsPerUser (no bypass)", async () => {
     // Regression for the agentic review finding: /invocations skipped the
     // rate-limit gate that /chat enforces, letting clients bypass the cap.
     const plugin = seedPlugin();
     for (let i = 0; i < 5; i++) {
       // biome-ignore lint/suspicious/noExplicitAny: seeding
-      (plugin as any).activeStreams.set(`s${i}`, {
-        controller: new AbortController(),
-        userId: "alice",
-      });
+      (plugin as any).trackStream(`s${i}`, "alice", new AbortController());
     }
 
     const { res, setHeader, json } = mockRes();
