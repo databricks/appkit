@@ -10,7 +10,7 @@ import {
   serving,
   WRITE_ACTIONS,
 } from "@databricks/appkit";
-import { agents, createAgent, fromPlugin, tool } from "@databricks/appkit/beta";
+import { agents, createAgent, tool } from "@databricks/appkit/beta";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import { z } from "zod";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
@@ -48,20 +48,22 @@ const adminOnly: FilePolicy = (action, _resource, user) => {
   return true;
 };
 
-// Code-defined demo agent showing the fromPlugin() API alongside the
-// markdown-driven agents in config/agents/.
+// Code-defined demo agent showing the tools(plugins) function form
+// alongside the markdown-driven agents in config/agents/.
 const helper = createAgent({
   instructions:
     "You are a demo helper. Use analytics tools to answer data questions, " +
     "or get_weather for light small-talk.",
-  tools: {
-    ...fromPlugin(analytics),
-    get_weather: tool({
-      name: "get_weather",
-      description: "Get the current weather for a city",
-      schema: z.object({ city: z.string().describe("City name") }),
-      execute: async ({ city }) => `The weather in ${city} is sunny, 22°C`,
-    }),
+  tools(plugins) {
+    return {
+      ...plugins.analytics.toolkit(),
+      get_weather: tool({
+        name: "get_weather",
+        description: "Get the current weather for a city",
+        schema: z.object({ city: z.string().describe("City name") }),
+        execute: async ({ city }) => `The weather in ${city} is sunny, 22°C`,
+      }),
+    };
   },
 });
 
@@ -282,8 +284,8 @@ const sql_analyst = createAgent({
     "If the user asks about dates outside 2016, say the dataset only covers 2016.",
     "Available columns: tpep_pickup_datetime, tpep_dropoff_datetime, trip_distance, fare_amount, pickup_zip, dropoff_zip.",
   ].join(" "),
-  tools: {
-    ...fromPlugin(analytics),
+  tools(plugins) {
+    return { ...plugins.analytics.toolkit() };
   },
 });
 
