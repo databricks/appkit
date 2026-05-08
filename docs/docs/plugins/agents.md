@@ -64,18 +64,25 @@ Requests land at `POST /invocations` with an OpenAI Responses-compatible body. E
 ```md
 ---
 endpoint: databricks-claude-sonnet-4-5
-toolkits:
-  - analytics                             # all analytics.* tools
-  - files: [uploads.read, uploads.list]   # only these files tools
-  - genie: { except: [getConversation] }  # everything but getConversation
-tools: [get_weather]                      # ambient tool declared in code
+tools:
+  - plugin:analytics                              # all analytics.* tools
+  - plugin:files: [uploads.read, uploads.list]    # only these files tools
+  - plugin:genie: { except: [getConversation] }   # everything but getConversation
+  - get_weather                                   # ambient tool declared in code
 default: true
 ---
 
 You are a read-only data analyst.
 ```
 
-When any `toolkits:` or `tools:` is declared the auto-inherit default is turned off — the agent sees exactly the listed tools. Ambient tools (`tools: [get_weather]`) are looked up in the `agents({ tools: { ... } })` config.
+The unified `tools:` list mixes plugin references and ambient tools, mirroring the TS function form `tools(plugins) => ({ ...plugins.analytics.toolkit(), ...plugins.files.toolkit({ only: [...] }), get_weather: tool({...}) })`. Each entry is one of:
+
+- **`plugin:<name>`** — pull every tool from the named plugin.
+- **`plugin:<name>: [tool1, tool2]`** — only the listed tools (sugar for `{ only: [...] }`).
+- **`plugin:<name>: { ...ToolkitOptions }`** — full `prefix` / `only` / `except` / `rename` options.
+- **`<key>`** (no prefix) — ambient tool name resolved against the `agents({ tools: { ... } })` config.
+
+When any `tools:` is declared the auto-inherit default is turned off — the agent sees exactly the listed tools.
 
 ## Level 3: code-defined agents
 

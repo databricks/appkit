@@ -46,8 +46,21 @@ export interface LoadResult {
 interface Frontmatter {
   endpoint?: string;
   model?: string;
-  toolkits?: ToolkitSpec[];
-  tools?: string[];
+  /**
+   * Unified tool list. Each entry is one of:
+   *
+   * - **`plugin:<name>`** (string) — pull every tool from the named plugin.
+   * - **`plugin:<name>: [tool1, tool2]`** — pull only the listed tools
+   *   (shorthand for `{ only: [...] }`).
+   * - **`plugin:<name>: { ...ToolkitOptions }`** — pass full
+   *   `prefix` / `only` / `except` / `rename` options.
+   * - **`<key>`** (string, no `plugin:` prefix) — ambient tool name
+   *   resolved against the `agents({ tools: { ... } })` config.
+   *
+   * Mirrors the TS function form `tools(plugins) { ... }` where plugin
+   * tools and inline tools live in the same record.
+   */
+  tools?: ToolEntry[];
   /**
    * Other agent ids to expose as sub-agents. Each becomes an `agent-<id>`
    * tool at runtime. Resolution happens at directory-load time in
@@ -62,7 +75,16 @@ interface Frontmatter {
   ephemeral?: boolean;
 }
 
-type ToolkitSpec = string | { [pluginName: string]: ToolkitOptions | string[] };
+/**
+ * Each item in {@link Frontmatter.tools}. Strings are either ambient tool
+ * names (no prefix) or bare plugin references (`plugin:NAME`). Objects are
+ * single-key mappings whose key is `plugin:NAME` and whose value is either
+ * an array of local tool names (sugar for `{ only: [...] }`) or a full
+ * `ToolkitOptions` record.
+ */
+type ToolEntry = string | { [key: string]: ToolkitOptions | string[] };
+
+const PLUGIN_PREFIX = "plugin:";
 
 /**
  * Derives the logical agent id from a markdown path. When the file is named
@@ -82,7 +104,6 @@ export function agentIdFromMarkdownPath(filePath: string): string {
 const ALLOWED_KEYS = new Set([
   "endpoint",
   "model",
-  "toolkits",
   "tools",
   "agents",
   "maxSteps",
@@ -91,6 +112,13 @@ const ALLOWED_KEYS = new Set([
   "baseSystemPrompt",
   "ephemeral",
 ]);
+
+/**
+ * Legacy frontmatter keys that PR-stack v2/5 moved into the unified
+ * `tools:` list. Kept around so we can throw a focused migration error
+ * instead of a generic "unknown key" warning when users hit them.
+ */
+const LEGACY_KEYS = new Set(["toolkits"]);
 
 /**
  * Loads a single markdown agent file and resolves its frontmatter against
@@ -296,6 +324,17 @@ export function parseFrontmatter(
   }
   const data = parsed as Record<string, unknown>;
   for (const key of Object.keys(data)) {
+    if (LEGACY_KEYS.has(key)) {
+      const src = sourcePath ? ` (${sourcePath})` : "";
+      throw new Error(
+        `Frontmatter key '${key}' is no longer supported${src}. ` +
+          "Move plugin references into the unified 'tools:' list using " +
+          "the 'plugin:NAME' prefix. For example, replace " +
+          "`toolkits:\\n  - files: [a, b]` with " +
+          "`tools:\\n  - plugin:files: [a, b]`. " +
+          "See docs/plugins/agents.md for the full migration.",
+      );
+    }
     if (!ALLOWED_KEYS.has(key)) {
       logger.warn(
         "Ignoring unknown frontmatter key '%s' in %s",
@@ -345,73 +384,125 @@ function resolveFrontmatterTools(
   const out: Record<string, AgentTool> = {};
   const pluginIdx = ctx.plugins ?? new Map<string, ToolkitProvider>();
 
-  for (const spec of fm.toolkits ?? []) {
-    const [pluginName, opts] = parseToolkitSpec(spec, filePath, agentName);
-    const provider = pluginIdx.get(pluginName);
-    if (!provider) {
-      throw new Error(
-        `Agent '${agentName}' (${filePath}) references toolkit '${pluginName}', but plugin '${pluginName}' is not registered. Available: ${
+  for (const entry of fm.tools ?? []) {
+    const parsed = parseToolEntry(entry, filePath, agentName);
+    if (parsed.kind === "plugin") {
+      const provider = pluginIdx.get(parsed.pluginName);
+      if (!provider) {
+        const available =
           pluginIdx.size > 0
             ? Array.from(pluginIdx.keys()).join(", ")
-            : "<none>"
-        }`,
-      );
-    }
-    const entries = provider.toolkit(opts) as Record<string, unknown>;
-    for (const [key, entry] of Object.entries(entries)) {
-      if (!isToolkitEntry(entry)) {
+            : "<none>";
         throw new Error(
-          `Plugin '${pluginName}'.toolkit() returned a value at key '${key}' that is not a ToolkitEntry`,
+          `Agent '${agentName}' (${filePath}) references 'plugin:${parsed.pluginName}', but plugin '${parsed.pluginName}' is not registered. Available: ${available}`,
         );
       }
-      out[key] = entry as ToolkitEntry;
+      const entries = provider.toolkit(parsed.opts) as Record<string, unknown>;
+      for (const [key, value] of Object.entries(entries)) {
+        if (!isToolkitEntry(value)) {
+          throw new Error(
+            `Plugin '${parsed.pluginName}'.toolkit() returned a value at key '${key}' that is not a ToolkitEntry`,
+          );
+        }
+        out[key] = value as ToolkitEntry;
+      }
+    } else {
+      const tool = ctx.availableTools?.[parsed.toolName];
+      if (!tool) {
+        const available = ctx.availableTools
+          ? Object.keys(ctx.availableTools).join(", ")
+          : "<none>";
+        throw new Error(
+          `Agent '${agentName}' (${filePath}) references ambient tool '${parsed.toolName}', which is not in the agents() plugin's tools field. Available: ${available}. ` +
+            "If you meant to reference a plugin, use the 'plugin:NAME' prefix.",
+        );
+      }
+      out[parsed.toolName] = tool;
     }
-  }
-
-  for (const key of fm.tools ?? []) {
-    const tool = ctx.availableTools?.[key];
-    if (!tool) {
-      const available = ctx.availableTools
-        ? Object.keys(ctx.availableTools).join(", ")
-        : "<none>";
-      throw new Error(
-        `Agent '${agentName}' (${filePath}) references tool '${key}', which is not in the agents() plugin's tools field. Available: ${available}`,
-      );
-    }
-    out[key] = tool;
   }
 
   return out;
 }
 
-function parseToolkitSpec(
-  spec: ToolkitSpec,
+type ParsedToolEntry =
+  | { kind: "plugin"; pluginName: string; opts: ToolkitOptions | undefined }
+  | { kind: "ambient"; toolName: string };
+
+/**
+ * Classify one item in the `tools:` frontmatter list into either a plugin
+ * reference (with optional ToolkitOptions) or an ambient tool lookup.
+ *
+ * Strings starting with `plugin:` are bare plugin references. Strings
+ * without the prefix are ambient tool names. Object entries are
+ * single-key mappings keyed by `plugin:NAME`; the value is either an
+ * array (sugar for `{ only: [...] }`) or a full `ToolkitOptions` record.
+ */
+function parseToolEntry(
+  entry: ToolEntry,
   filePath: string,
   agentName: string,
-): [string, ToolkitOptions | undefined] {
-  if (typeof spec === "string") {
-    return [spec, undefined];
+): ParsedToolEntry {
+  if (typeof entry === "string") {
+    if (entry.startsWith(PLUGIN_PREFIX)) {
+      const pluginName = entry.slice(PLUGIN_PREFIX.length);
+      if (pluginName.length === 0) {
+        throw new Error(
+          `Agent '${agentName}' (${filePath}) has an empty plugin name in 'plugin:'.`,
+        );
+      }
+      return { kind: "plugin", pluginName, opts: undefined };
+    }
+    if (entry.length === 0) {
+      throw new Error(
+        `Agent '${agentName}' (${filePath}) has an empty string in 'tools:'.`,
+      );
+    }
+    return { kind: "ambient", toolName: entry };
   }
-  if (typeof spec !== "object" || spec === null) {
+  if (typeof entry !== "object" || entry === null) {
     throw new Error(
-      `Agent '${agentName}' (${filePath}) has invalid toolkit entry: ${JSON.stringify(spec)}`,
+      `Agent '${agentName}' (${filePath}) has invalid 'tools:' entry: ${JSON.stringify(entry)}`,
     );
   }
-  const keys = Object.keys(spec);
+  const keys = Object.keys(entry);
   if (keys.length !== 1) {
     throw new Error(
-      `Agent '${agentName}' (${filePath}) toolkit entry must have exactly one key, got: ${keys.join(", ")}`,
+      `Agent '${agentName}' (${filePath}) 'tools:' object entry must have exactly one key, got: ${keys.join(", ")}`,
     );
   }
-  const pluginName = keys[0];
-  const value = spec[pluginName];
+  const key = keys[0];
+  // Bare `- plugin:` (no name after the colon) parses as a mapping with the
+  // key `"plugin"`. Catch that as a friendly error rather than dumping it
+  // through the generic "expected key 'plugin:NAME'" branch.
+  if (key === "plugin") {
+    throw new Error(
+      `Agent '${agentName}' (${filePath}) has an empty plugin name in 'plugin:'.`,
+    );
+  }
+  if (!key.startsWith(PLUGIN_PREFIX)) {
+    throw new Error(
+      `Agent '${agentName}' (${filePath}) 'tools:' object entries are reserved for plugin references; expected key 'plugin:NAME', got '${key}'. ` +
+        "Use a bare string for ambient tools (e.g. `- get_weather`).",
+    );
+  }
+  const pluginName = key.slice(PLUGIN_PREFIX.length);
+  if (pluginName.length === 0) {
+    throw new Error(
+      `Agent '${agentName}' (${filePath}) has an empty plugin name in 'plugin:'.`,
+    );
+  }
+  const value = entry[key];
   if (Array.isArray(value)) {
-    return [pluginName, { only: value }];
+    return { kind: "plugin", pluginName, opts: { only: value } };
   }
   if (typeof value === "object" && value !== null) {
-    return [pluginName, value as ToolkitOptions];
+    return {
+      kind: "plugin",
+      pluginName,
+      opts: value as ToolkitOptions,
+    };
   }
   throw new Error(
-    `Agent '${agentName}' (${filePath}) toolkit '${pluginName}' options must be an array of tool names or an options object`,
+    `Agent '${agentName}' (${filePath}) 'plugin:${pluginName}' options must be an array of tool names or a ToolkitOptions object.`,
   );
 }

@@ -3,6 +3,8 @@ endpoint: databricks-claude-sonnet-4-5
 agents:
   - sql_analyst
   - dashboard_pilot
+tools:
+  - plugin:files: [files.read, files.list, files.metadata]
 ---
 
 You are the dispatcher for the Smart Dashboard — NYC taxi analytics

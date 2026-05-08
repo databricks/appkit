@@ -317,7 +317,7 @@ describe("AgentsPlugin", () => {
     writeMarkdownAgent(
       tmpDir,
       "analyst",
-      "---\ntoolkits: [analytics]\n---\nAnalyst.",
+      "---\ntools:\n  - plugin:analytics\n---\nAnalyst.",
     );
 
     const plugin = instantiate(
