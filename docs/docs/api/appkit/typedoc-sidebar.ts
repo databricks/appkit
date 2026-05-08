@@ -441,6 +441,11 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
+          id: "api/appkit/Variable.agents",
+          label: "agents"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Variable.READ_ACTIONS",
           label: "READ_ACTIONS"
         },
