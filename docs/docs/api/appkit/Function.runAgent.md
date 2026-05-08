@@ -14,8 +14,9 @@ Limitations vs. running through the agents() plugin:
   that only exists inside the agents plugin.
 - Sub-agents (`agents: { ... }` on the def) are executed as nested
   `runAgent` calls with no shared thread state.
-- Plugin tools (`fromPlugin` markers or `ToolkitEntry` spreads) require
-  passing `plugins: [...]` via `RunAgentInput`.
+- Plugin tools (used inside the function form via
+  `plugins.<name>.toolkit(...)`) require passing `plugins: [...]` via
+  `RunAgentInput`.
 
 ## Parameters
 

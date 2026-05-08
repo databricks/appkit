@@ -91,7 +91,17 @@ Filled in from the enclosing key when used in `agents: { foo: def }`.
 ### tools?
 
 ```ts
-optional tools: AgentTools;
+optional tools: 
+  | AgentTools
+  | AgentToolsFn;
 ```
 
 Per-agent tool record. Key is the LLM-visible tool-call name.
+
+Accepts either a plain record (for agents that only use inline tools)
+or a function `(plugins) => Record<string, AgentTool>` that receives
+the typed [Plugins](TypeAlias.Plugins.md) map and returns a tool record (for agents
+that pull tools from registered plugins).
+
+The function is invoked once at agent setup; the result is cached.
+Don't put per-request logic in there.

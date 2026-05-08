@@ -164,11 +164,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Interface.FromPluginMarker",
-          label: "FromPluginMarker"
-        },
-        {
-          type: "doc",
           id: "api/appkit/Interface.FunctionTool",
           label: "FunctionTool"
         },
@@ -219,6 +214,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.PluginToolkitProvider",
+          label: "PluginToolkitProvider"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.PromptContext",
           label: "PromptContext"
         },
@@ -226,6 +226,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.RegisteredAgent",
           label: "RegisteredAgent"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.RegisteredPlugins",
+          label: "RegisteredPlugins"
         },
         {
           type: "doc",
@@ -350,6 +355,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.AgentToolsFn",
+          label: "AgentToolsFn"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.BaseSystemPromptOption",
           label: "BaseSystemPromptOption"
         },
@@ -400,6 +410,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.Plugins",
+          label: "Plugins"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.ResolvedToolEntry",
           label: "ResolvedToolEntry"
         },
@@ -429,11 +444,6 @@ const typedocSidebar: SidebarsConfig = {
       type: "category",
       label: "Variables",
       items: [
-        {
-          type: "doc",
-          id: "api/appkit/Variable.agents",
-          label: "agents"
-        },
         {
           type: "doc",
           id: "api/appkit/Variable.READ_ACTIONS",
@@ -507,11 +517,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Function.fromPlugin",
-          label: "fromPlugin"
-        },
-        {
-          type: "doc",
           id: "api/appkit/Function.functionToolToDefinition",
           label: "functionToolToDefinition"
         },
@@ -554,11 +559,6 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.getWorkspaceClient",
           label: "getWorkspaceClient"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Function.isFromPluginMarker",
-          label: "isFromPluginMarker"
         },
         {
           type: "doc",

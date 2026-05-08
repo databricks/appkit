@@ -39,14 +39,13 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [AgentRunContext](Interface.AgentRunContext.md) | - |
 | [AgentsPluginConfig](Interface.AgentsPluginConfig.md) | Base configuration interface for AppKit plugins |
 | [AgentToolDefinition](Interface.AgentToolDefinition.md) | - |
-| [AutoInheritToolsConfig](Interface.AutoInheritToolsConfig.md) | Auto-inherit configuration. When enabled for a given agent origin, agents with no explicit `tools:` declaration receive every registered ToolProvider plugin tool whose author marked `autoInheritable: true`. Tools without that flag — destructive, state-mutating, or privilege-sensitive — never spread automatically and must be wired via `tools:`, `toolkits:`, or `fromPlugin`. |
+| [AutoInheritToolsConfig](Interface.AutoInheritToolsConfig.md) | Auto-inherit configuration. When enabled for a given agent origin, agents with no explicit `tools:` declaration receive every registered ToolProvider plugin tool whose author marked `autoInheritable: true`. Tools without that flag — destructive, state-mutating, or privilege-sensitive — never spread automatically and must be wired via `tools:` (object or function form) or markdown `toolkits:`. |
 | [BasePluginConfig](Interface.BasePluginConfig.md) | Base configuration interface for AppKit plugins |
 | [CacheConfig](Interface.CacheConfig.md) | Configuration for the CacheInterceptor. Controls TTL, size limits, storage backend, and probabilistic cleanup. |
 | [DatabaseCredential](Interface.DatabaseCredential.md) | Database credentials with OAuth token for Postgres connection |
 | [EndpointConfig](Interface.EndpointConfig.md) | - |
 | [FilePolicyUser](Interface.FilePolicyUser.md) | Minimal user identity passed to the policy function. |
 | [FileResource](Interface.FileResource.md) | Describes the file or directory being acted upon. |
-| [FromPluginMarker](Interface.FromPluginMarker.md) | A lazy reference to a plugin's tools, produced by [fromPlugin](Function.fromPlugin.md) and resolved to concrete `ToolkitEntry`s at `AgentsPlugin.setup()` time. |
 | [FunctionTool](Interface.FunctionTool.md) | - |
 | [GenerateDatabaseCredentialRequest](Interface.GenerateDatabaseCredentialRequest.md) | Request parameters for generating database OAuth credentials |
 | [IJobsConfig](Interface.IJobsConfig.md) | Configuration for the Jobs plugin. |
@@ -57,8 +56,10 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [LakebasePoolConfig](Interface.LakebasePoolConfig.md) | Configuration for creating a Lakebase connection pool |
 | [Message](Interface.Message.md) | - |
 | [PluginManifest](Interface.PluginManifest.md) | Plugin manifest that declares metadata and resource requirements. Attached to plugin classes as a static property. Extends the shared PluginManifest with strict resource types. |
+| [PluginToolkitProvider](Interface.PluginToolkitProvider.md) | Minimum shape every entry in the [Plugins](TypeAlias.Plugins.md) map must expose. Core plugins (analytics, files, genie, lakebase) implement this directly via their `.toolkit()` method. The agents plugin and standalone `runAgent` synthesize this shape for any registered plugin that doesn't implement `.toolkit()` directly (falling back to `getAgentTools()` walking). |
 | [PromptContext](Interface.PromptContext.md) | Context passed to `baseSystemPrompt` callbacks. |
 | [RegisteredAgent](Interface.RegisteredAgent.md) | - |
+| [RegisteredPlugins](Interface.RegisteredPlugins.md) | Module-augmentation interface. Core plugins extend this from their declaration site so the function form of `AgentDefinition.tools` autocompletes both available plugin keys and the methods on each plugin (notably `.toolkit()`). |
 | [RequestedClaims](Interface.RequestedClaims.md) | Optional claims for fine-grained Unity Catalog table permissions When specified, the returned token will be scoped to only the requested tables |
 | [RequestedResource](Interface.RequestedResource.md) | Resource to request permissions for in Unity Catalog |
 | [ResourceEntry](Interface.ResourceEntry.md) | Internal representation of a resource in the registry. Extends ResourceRequirement with resolution state and plugin ownership. |
@@ -86,7 +87,8 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | ------ | ------ |
 | [AgentEvent](TypeAlias.AgentEvent.md) | - |
 | [AgentTool](TypeAlias.AgentTool.md) | Any tool an agent can invoke: inline function tools (`tool()`), hosted MCP tools (`mcpServer()` / raw hosted), or toolkit references from plugins (`analytics().toolkit()`). |
-| [AgentTools](TypeAlias.AgentTools.md) | Per-agent tool record. String keys map to inline tools, toolkit entries, hosted tools, etc. Symbol keys hold `FromPluginMarker` references produced by `fromPlugin(factory)` spreads — these are resolved at `AgentsPlugin.setup()` time against registered `ToolProvider` plugins. |
+| [AgentTools](TypeAlias.AgentTools.md) | Per-agent tool record. String keys map to inline tools, toolkit entries, hosted tools, etc. |
+| [AgentToolsFn](TypeAlias.AgentToolsFn.md) | Function form of `AgentDefinition.tools`. Receives the typed [Plugins](TypeAlias.Plugins.md) map and returns a tool record. Invoked exactly once at setup (or once per `runAgent` call in standalone mode); the result is cached as the agent's resolved tool record. |
 | [BaseSystemPromptOption](TypeAlias.BaseSystemPromptOption.md) | - |
 | [ConfigSchema](TypeAlias.ConfigSchema.md) | Configuration schema definition for plugin config. Re-exported from the standard JSON Schema Draft 7 types. |
 | [ExecutionResult](TypeAlias.ExecutionResult.md) | Discriminated union for plugin execution results. |
@@ -97,6 +99,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [JobHandle](TypeAlias.JobHandle.md) | Job handle returned by `appkit.jobs("etl")`. Supports OBO access via `.asUser(req)`. |
 | [JobsExport](TypeAlias.JobsExport.md) | Public API shape of the jobs plugin. Callable to select a job by key. |
 | [PluginData](TypeAlias.PluginData.md) | Tuple of plugin class, config, and name. Created by `toPlugin()` and passed to `createApp()`. |
+| [Plugins](TypeAlias.Plugins.md) | Plugin map passed to the function form of [AgentDefinition.tools](Interface.AgentDefinition.md#tools). Known names (extended via [RegisteredPlugins](Interface.RegisteredPlugins.md)) keep their concrete plugin class type; unknown names fall back to [PluginToolkitProvider](Interface.PluginToolkitProvider.md). |
 | [ResolvedToolEntry](TypeAlias.ResolvedToolEntry.md) | Internal tool-index entry after a tool record has been resolved to a dispatchable form. |
 | [ResourcePermission](TypeAlias.ResourcePermission.md) | Union of all possible permission levels across all resource types. |
 | [ServingFactory](TypeAlias.ServingFactory.md) | Factory function returned by `AppKit.serving`. |
@@ -107,7 +110,6 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 
 | Variable | Description |
 | ------ | ------ |
-| [agents](Variable.agents.md) | Plugin factory for the agents plugin. Reads `config/agents/*.md` by default, resolves toolkits/tools from registered plugins, exposes `appkit.agents.*` runtime API and mounts `/invocations`. |
 | [READ\_ACTIONS](Variable.READ_ACTIONS.md) | Actions that only read data. |
 | [sql](Variable.sql.md) | SQL helper namespace |
 | [WRITE\_ACTIONS](Variable.WRITE_ACTIONS.md) | Actions that mutate data. |
@@ -126,7 +128,6 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [executeFromRegistry](Function.executeFromRegistry.md) | Validates tool-call arguments against the entry's schema and invokes its handler. On validation failure, returns an LLM-friendly error string (matching the behavior of `tool()`) rather than throwing, so the model can self-correct on its next turn. |
 | [extractServingEndpoints](Function.extractServingEndpoints.md) | Extract serving endpoint config from a server file by AST-parsing it. Looks for `serving({ endpoints: { alias: { env: "..." }, ... } })` calls and extracts the endpoint alias names and their environment variable mappings. |
 | [findServerFile](Function.findServerFile.md) | Find the server entry file by checking candidate paths in order. |
-| [fromPlugin](Function.fromPlugin.md) | Reference a plugin's tools inside an `AgentDefinition.tools` record without naming the plugin instance. The returned spread-friendly object carries a symbol-keyed marker that the agents plugin resolves against registered `ToolProvider`s at setup time. |
 | [functionToolToDefinition](Function.functionToolToDefinition.md) | - |
 | [generateDatabaseCredential](Function.generateDatabaseCredential.md) | Generate OAuth credentials for Postgres database connection using the proper Postgres API. |
 | [getExecutionContext](Function.getExecutionContext.md) | Get the current execution context. |
@@ -136,7 +137,6 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [getResourceRequirements](Function.getResourceRequirements.md) | Gets the resource requirements from a plugin's manifest. |
 | [getUsernameWithApiLookup](Function.getUsernameWithApiLookup.md) | Resolves the PostgreSQL username for a Lakebase connection. |
 | [getWorkspaceClient](Function.getWorkspaceClient.md) | Get workspace client from config or SDK default auth chain |
-| [isFromPluginMarker](Function.isFromPluginMarker.md) | Type guard for [FromPluginMarker](Interface.FromPluginMarker.md). |
 | [isFunctionTool](Function.isFunctionTool.md) | - |
 | [isHostedTool](Function.isHostedTool.md) | - |
 | [isSQLTypeMarker](Function.isSQLTypeMarker.md) | Type guard to check if a value is a SQL type marker |

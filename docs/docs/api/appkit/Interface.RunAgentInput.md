@@ -18,11 +18,11 @@ Seed messages for the run. Either a single user string or a full message list.
 optional plugins: PluginData<PluginConstructor, unknown, string>[];
 ```
 
-Optional plugin list used to resolve `fromPlugin` markers in `def.tools`.
-Required when the def contains any `...fromPlugin(factory)` spreads;
-ignored otherwise. `runAgent` constructs a fresh instance per plugin
-and dispatches tool calls against it as the service principal (no
-OBO — there is no HTTP request in standalone mode).
+Optional plugin list. Required when `def.tools` is the function form
+`(plugins) => Record<string, AgentTool>` and the function dereferences
+any plugins. `runAgent` constructs a fresh instance per plugin and
+dispatches tool calls against it as the service principal (no OBO —
+there is no HTTP request in standalone mode).
 
 ***
 

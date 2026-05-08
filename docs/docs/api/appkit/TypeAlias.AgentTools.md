@@ -1,14 +1,8 @@
 # Type Alias: AgentTools
 
 ```ts
-type AgentTools = {
-[key: string]: AgentTool;
-} & {
-[key: symbol]: FromPluginMarker;
-};
+type AgentTools = Record<string, AgentTool>;
 ```
 
 Per-agent tool record. String keys map to inline tools, toolkit entries,
-hosted tools, etc. Symbol keys hold `FromPluginMarker` references produced
-by `fromPlugin(factory)` spreads — these are resolved at
-`AgentsPlugin.setup()` time against registered `ToolProvider` plugins.
+hosted tools, etc.
