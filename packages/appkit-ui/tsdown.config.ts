@@ -23,6 +23,11 @@ export default defineConfig([
         to: "dist",
         rename: "styles.css",
       },
+      {
+        from: "src/react/styles/chat-theme.css",
+        to: "dist",
+        rename: "chat-theme.css",
+      },
     ],
     clean: false,
     hash: false,

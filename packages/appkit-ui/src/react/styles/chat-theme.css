@@ -1,0 +1,294 @@
+/*
+ * Chat-scoped theme tokens.
+ *
+ * Mirrors the palette + semantic tokens from Databricks design system 
+ * so that `<ChatApp>` (and its slot overrides) render with the branded
+ * look without leaking those overrides into the rest of the host app.
+ *
+ * The boundary is the element carrying `data-appkit-chat`; child
+ * Tailwind utilities like `bg-primary`, `bg-action-primary-background-hover`,
+ * and `border-neutral-300` resolve against the variables defined here.
+ */
+
+/*
+ * Register the action-* color tokens as Tailwind theme entries so
+ * utilities like `bg-action-primary-background-hover` exist globally.
+ * Outside the chat boundary they resolve to neutral fallbacks.
+ */
+@theme inline {
+  --color-action-default-background-hover: var(
+    --action-default-background-hover
+  );
+  --color-action-default-background-press: var(
+    --action-default-background-press
+  );
+  --color-action-primary-background-hover: var(
+    --action-primary-background-hover
+  );
+  --color-action-primary-background-press: var(
+    --action-primary-background-press
+  );
+  --color-action-tertiary-background-hover: var(
+    --action-tertiary-background-hover
+  );
+  --color-action-tertiary-background-press: var(
+    --action-tertiary-background-press
+  );
+  --color-action-danger-primary-background-hover: var(
+    --action-danger-primary-background-hover
+  );
+  --color-action-danger-primary-background-press: var(
+    --action-danger-primary-background-press
+  );
+}
+
+:root {
+  --action-default-background-hover: color-mix(
+    in oklch,
+    var(--accent) 50%,
+    transparent
+  );
+  --action-default-background-press: color-mix(
+    in oklch,
+    var(--accent) 100%,
+    transparent
+  );
+  --action-primary-background-hover: color-mix(
+    in oklch,
+    var(--primary) 90%,
+    black
+  );
+  --action-primary-background-press: color-mix(
+    in oklch,
+    var(--primary) 80%,
+    black
+  );
+  --action-tertiary-background-hover: color-mix(
+    in oklch,
+    var(--primary) 8%,
+    transparent
+  );
+  --action-tertiary-background-press: color-mix(
+    in oklch,
+    var(--primary) 16%,
+    transparent
+  );
+  --action-danger-primary-background-hover: color-mix(
+    in oklch,
+    var(--destructive) 90%,
+    black
+  );
+  --action-danger-primary-background-press: color-mix(
+    in oklch,
+    var(--destructive) 80%,
+    black
+  );
+}
+
+[data-appkit-chat] {
+  /* DuBois palette */
+  --color-blue-300: #bae1fc;
+  --color-blue-400: #4ba3d6;
+  --color-blue-500: #2e86c1;
+  --color-blue-600: #2272b4;
+  --color-blue-700: #0e538b;
+  --color-blue-800: #04355d;
+
+  --color-grey-050: #f6f7f9;
+  --color-grey-100: #e8ecf0;
+  --color-grey-200: #d1dce5;
+  --color-grey-300: #bdcdd9;
+  --color-grey-400: #8d9fad;
+  --color-grey-500: #5f7281;
+  --color-grey-600: #44535f;
+  --color-grey-700: #1f272d;
+  --color-grey-800: #11171c;
+
+  --color-neutral-050: #f7f7f7;
+  --color-neutral-100: #ebebeb;
+  --color-neutral-200: #d8d8d8;
+  --color-neutral-300: #cbcbcb;
+  --color-neutral-350: #a2a2a2;
+  --color-neutral-400: #939393;
+  --color-neutral-500: #6f6f6f;
+  --color-neutral-600: #525252;
+  --color-neutral-650: #424242;
+  --color-neutral-700: #262626;
+  --color-neutral-800: #161616;
+
+  --color-red-300: #fbd0d8;
+  --color-red-400: #f06e87;
+  --color-red-500: #e83a5f;
+  --color-red-600: #c82d4c;
+  --color-red-700: #9e1d38;
+  --color-red-800: #630316;
+
+  --color-green-400: #59c47a;
+  --color-green-500: #3ca45e;
+  --color-green-600: #277c43;
+  --color-green-700: #1a5c30;
+
+  --color-yellow-500: #dc6222;
+  --color-yellow-600: #be501e;
+  --color-yellow-700: #8f3c14;
+
+  /* Core surfaces */
+  --background: #ffffff;
+  --foreground: var(--color-grey-800);
+  --card: #ffffff;
+  --card-foreground: var(--color-grey-800);
+  --popover: #ffffff;
+  --popover-foreground: var(--color-grey-800);
+
+  /* Primary action */
+  --primary: var(--color-blue-600);
+  --primary-foreground: #ffffff;
+
+  /* Secondary surface */
+  --secondary: var(--color-grey-050);
+  --secondary-foreground: var(--color-grey-800);
+
+  --muted: var(--color-grey-050);
+  --muted-foreground: var(--color-neutral-600);
+
+  --accent: var(--color-grey-050);
+  --accent-foreground: var(--color-grey-800);
+
+  --destructive: var(--color-red-600);
+  --destructive-foreground: #ffffff;
+
+  --warning: var(--color-yellow-600);
+  --success: var(--color-green-600);
+
+  --border: var(--color-grey-100);
+  --input: var(--color-grey-100);
+  --ring: #2272b4;
+
+  /* Action token overrides */
+  --action-default-background-hover: rgba(34, 114, 180, 0.08);
+  --action-default-background-press: rgba(34, 114, 180, 0.16);
+  --action-primary-background-hover: var(--color-blue-700);
+  --action-primary-background-press: var(--color-blue-800);
+  --action-tertiary-background-hover: rgba(34, 114, 180, 0.08);
+  --action-tertiary-background-press: rgba(34, 114, 180, 0.16);
+  --action-danger-primary-background-hover: var(--color-red-700);
+  --action-danger-primary-background-press: var(--color-red-800);
+
+  /* Alert / validation tinted borders and backgrounds */
+  --border-danger: #fbd0d8;
+  --border-warning: #f8d4a5;
+  --border-success: #a3d9b6;
+  --background-danger: #fff5f7;
+  --background-warning: #fff9eb;
+  --background-success: #f0faf4;
+
+  /*
+   * Status-badge tint pairs derived from semantic tokens. Lets host
+   * apps rebrand `--primary`/`--success`/`--warning`/`--destructive`
+   * and have tool-call badges follow without further overrides.
+   */
+  --badge-info-bg: color-mix(in oklch, var(--primary) 12%, transparent);
+  --badge-info-fg: var(--primary);
+  --badge-success-bg: color-mix(in oklch, var(--success) 14%, transparent);
+  --badge-success-fg: var(--color-green-700);
+  --badge-error-bg: color-mix(in oklch, var(--destructive) 12%, transparent);
+  --badge-error-fg: var(--destructive);
+  --badge-warning-bg: color-mix(in oklch, var(--warning) 16%, transparent);
+  --badge-warning-fg: var(--color-yellow-700);
+
+  /*
+   * Border radius (DuBois is tighter than Tailwind defaults).
+   * Tailwind v4 emits `.rounded-lg { border-radius: var(--radius-lg); }`
+   * so overriding the variables here scopes the change.
+   */
+  --radius: 0.25rem;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /*
+   * Font sizes (DuBois 11/12/13/18/22/32 ladder).
+   * Tailwind v4 emits `.text-base { font-size: var(--text-base); ... }`
+   * so overriding these CSS variables retunes the utilities in scope.
+   */
+  --text-xs: 0.6875rem; /* 11px */
+  --text-sm: 0.75rem; /* 12px */
+  --text-base: 0.8125rem; /* 13px — DuBois base */
+  --text-base--line-height: 20px;
+  --text-lg: 1.125rem; /* 18px */
+  --text-xl: 1.375rem; /* 22px */
+  --text-2xl: 2rem; /* 32px */
+
+  /*
+   * Font stacks. Overriding `--font-sans` / `--font-mono` retunes the
+   * Tailwind `font-sans` / `font-mono` utilities within the chat
+   * boundary; the explicit `font-family` below sets the base font for
+   * any descendant text that doesn't carry a utility.
+   */
+  --font-standard:
+    -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial,
+    Noto Sans, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol,
+    Noto Color Emoji, sans-serif;
+  --font-standard-mono:
+    Menlo, Monaco, Consolas, "Ubuntu Mono", "Source Code Pro", monospace, Menlo,
+    Monaco, "Courier New", monospace;
+  --font-sans: var(--font-standard);
+  --font-mono: var(--font-standard-mono);
+
+  font-family: var(--font-standard), sans-serif;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.dark [data-appkit-chat],
+[data-appkit-chat].dark {
+  --background: var(--color-grey-800);
+  --foreground: var(--color-grey-100);
+  --card: #1a2530;
+  --card-foreground: var(--color-grey-100);
+  --popover: #1a2530;
+  --popover-foreground: var(--color-grey-100);
+
+  --primary: var(--color-blue-500);
+  --primary-foreground: #ffffff;
+
+  --secondary: #283035;
+  --secondary-foreground: #e8ecf0;
+
+  --muted: #2a3a45;
+  --muted-foreground: #bdcdd9;
+
+  --accent: #2a3a45;
+  --accent-foreground: #e8ecf0;
+
+  --destructive: #e65677;
+
+  --border: #2a3a45;
+  --input: #2a3a45;
+  --ring: #4ba3d6;
+
+  --warning: #dc6222;
+  --success: #3ca45e;
+
+  --action-default-background-hover: rgba(138, 202, 255, 0.08);
+  --action-default-background-press: rgba(138, 202, 255, 0.16);
+  --action-primary-background-hover: #4ba3d6;
+  --action-primary-background-press: #bae1fc;
+  --action-tertiary-background-hover: rgba(143, 205, 255, 0.08);
+  --action-tertiary-background-press: rgba(143, 205, 255, 0.16);
+  --action-danger-primary-background-hover: #f06e87;
+  --action-danger-primary-background-press: #fbd0d8;
+
+  /* Alert / validation tints (dark) */
+  --border-danger: rgba(232, 58, 95, 0.3);
+  --border-warning: rgba(220, 98, 34, 0.3);
+  --border-success: rgba(60, 164, 94, 0.3);
+  --background-danger: rgba(232, 58, 95, 0.08);
+  --background-warning: rgba(220, 98, 34, 0.08);
+  --background-success: rgba(60, 164, 94, 0.08);
+
+  /* Status-badge foregrounds need lighter shades on dark surfaces. */
+  --badge-success-fg: var(--color-green-400);
+  --badge-warning-fg: var(--color-yellow-500);
+}

@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "./chat-theme.css";
 @source "./react";
 
 :root {

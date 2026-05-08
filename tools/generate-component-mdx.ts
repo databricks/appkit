@@ -602,6 +602,10 @@ function main() {
     // Exclude non-component files from chat directory.
     // Hooks (use-*.ts), the transport class, lib utilities, and barrel
     // files are documented in the hand-written `chat/index.md` overview.
+    // Within `chat/app/`, only `chat-app.tsx` is publicly exposed; the
+    // sibling sub-components are package-private slot pieces.
+    // The `chat/db-icons/` directory contains internal DuBois icon
+    // components that are not part of the public API surface.
     if (info.category === "chat") {
       const basename = path.basename(filePath);
       if (
@@ -610,6 +614,21 @@ function main() {
         basename.startsWith("use-") ||
         basename === "responses-api-transport.ts"
       ) {
+        return false;
+      }
+      if (filePath.includes(`${PATH_PATTERNS.CHAT_DIR}db-icons/`)) {
+        return false;
+      }
+      if (
+        filePath.includes(`${PATH_PATTERNS.CHAT_DIR}app/`) &&
+        basename !== "chat-app.tsx"
+      ) {
+        return false;
+      }
+      // `chat-app.tsx` re-exports type aliases (`ApprovalEntry`,
+      // `ChatComposerProps`, …) that react-docgen-typescript picks up as
+      // pseudo-components. Only the `ChatApp` component itself is public.
+      if (basename === "chat-app.tsx" && displayName !== "ChatApp") {
         return false;
       }
     }
