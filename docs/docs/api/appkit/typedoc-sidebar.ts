@@ -229,11 +229,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Interface.RegisteredPlugins",
-          label: "RegisteredPlugins"
-        },
-        {
-          type: "doc",
           id: "api/appkit/Interface.RequestedClaims",
           label: "RequestedClaims"
         },
