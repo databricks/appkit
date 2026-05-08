@@ -13,6 +13,7 @@ import { z } from "zod";
 import { createAgent } from "../create-agent";
 import { fromPlugin } from "../from-plugin";
 import { runAgent } from "../run-agent";
+import { mcpServer } from "../tools/hosted-tools";
 import { tool } from "../tools/tool";
 import type { ToolkitEntry } from "../types";
 
@@ -212,5 +213,114 @@ describe("runAgent", () => {
       // biome-ignore lint/style/noNonNullAssertion: asserted above
       capturedCtx!.executeTool("analytics.query", {}),
     ).rejects.toThrow(/only usable via createApp/);
+  });
+
+  test("rejects fromPlugin against a plugin lacking ToolProvider methods", async () => {
+    // Pre-condition for #305 review finding #7: a plain plugin (no
+    // getAgentTools / executeAgentTool) referenced via fromPlugin must
+    // surface a clear error at standalone resolution, not at dispatch.
+    class NotAToolProvider {
+      static manifest = { name: "noop" };
+      static DEFAULT_CONFIG = {};
+      name = "noop";
+      constructor(public config: unknown) {}
+      async setup() {}
+      injectRoutes() {}
+      getEndpoints() {
+        return {};
+      }
+    }
+
+    const factory = () => ({
+      plugin: NotAToolProvider as unknown as PluginConstructor,
+      config: {},
+      name: "noop" as const,
+    });
+    Object.defineProperty(factory, "pluginName", {
+      value: "noop",
+      enumerable: true,
+    });
+
+    const adapter: AgentAdapter = {
+      async *run(_input, context) {
+        // Force resolution by attempting a dispatch.
+        await context.executeTool("noop.anything", {}).catch(() => undefined);
+        yield { type: "message_delta", content: "" };
+      },
+    };
+
+    const def = createAgent({
+      instructions: "x",
+      model: adapter,
+      tools: {
+        ...fromPlugin(factory as unknown as { readonly pluginName: string }),
+      },
+    });
+
+    const pluginData = factory() as PluginData<
+      PluginConstructor,
+      unknown,
+      string
+    >;
+
+    await expect(
+      runAgent(def, { messages: "hi", plugins: [pluginData] }),
+    ).rejects.toThrow(/not a ToolProvider/);
+  });
+
+  test("rejects hosted/MCP tools at index-build time, not at dispatch", async () => {
+    // Pre-condition for #305 review finding #3: a hosted tool slipped into
+    // an agent def used with standalone runAgent must surface a clear error
+    // before the adapter sees the tool list — not later when the model
+    // emits a function_call mid-conversation.
+    const def = createAgent({
+      instructions: "x",
+      // biome-ignore lint/suspicious/noExplicitAny: stub adapter — we never reach it
+      model: { async *run() {} } as any,
+      tools: {
+        analytics: mcpServer("analytics-mcp", "https://example.com/mcp"),
+      },
+    });
+
+    await expect(runAgent(def, { messages: "hi" })).rejects.toThrow(
+      /hosted tool .* only supported via createApp/,
+    );
+  });
+
+  test("recursively executes sub-agents declared on def.agents", async () => {
+    // Pre-condition for #305 review finding #8: parent's `agent-<key>` tool
+    // call should kick a nested runAgent that returns the child's text
+    // output as the tool result.
+    const childAdapter: AgentAdapter = {
+      async *run(_input, _context) {
+        yield { type: "message_delta", content: "child says hi" };
+      },
+    };
+
+    let capturedCtx: AgentRunContext | null = null;
+    const parentAdapter: AgentAdapter = {
+      async *run(_input, context) {
+        capturedCtx = context;
+        yield { type: "message_delta", content: "" };
+      },
+    };
+
+    const parent = createAgent({
+      instructions: "parent",
+      model: parentAdapter,
+      agents: {
+        helper: createAgent({
+          instructions: "child",
+          model: childAdapter,
+        }),
+      },
+    });
+
+    await runAgent(parent, { messages: "go" });
+    expect(capturedCtx).not.toBeNull();
+    const result =
+      await // biome-ignore lint/style/noNonNullAssertion: asserted above
+      capturedCtx!.executeTool("agent-helper", { input: "say hi" });
+    expect(result).toBe("child says hi");
   });
 });

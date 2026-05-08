@@ -272,14 +272,14 @@ function classifyTool(key: string, tool: AgentTool): StandaloneEntry {
     };
   }
   if (isHostedTool(tool)) {
-    return {
-      kind: "hosted",
-      def: {
-        name: key,
-        description: `Hosted tool: ${tool.type}`,
-        parameters: { type: "object", properties: {} },
-      },
-    };
+    // Hosted tools (e.g. MCP `mcpServer(...)`) need a live MCP client that
+    // only exists inside the agents plugin's lifecycle. In standalone
+    // `runAgent` they would have errored at dispatch time with a confusing
+    // mid-conversation failure; reject them up front so misconfiguration
+    // surfaces before the adapter sees the tool list.
+    throw new Error(
+      `runAgent: tool "${key}" is a hosted tool (type="${tool.type}") which is only supported via createApp({ plugins: [..., agents(...)] }). Standalone runAgent has no MCP client.`,
+    );
   }
   throw new Error(`runAgent: unrecognized tool shape at key "${key}"`);
 }
@@ -309,6 +309,24 @@ function toolkitEntryToStandalone(
   };
 }
 
+/**
+ * Lightweight `ToolProvider` shape check used by standalone `runAgent`.
+ *
+ * Distinct from `core/plugin-context.isToolProvider` which also requires
+ * `asUser` (request-scoped, only meaningful when running inside `createApp`
+ * with a live HTTP context). Standalone plugins are constructed without a
+ * `WorkspaceClient` and have no request to scope to, so checking only the
+ * two `ToolProvider` methods is the right narrowing here.
+ */
+function isStandaloneToolProvider(value: unknown): value is ToolProvider {
+  if (typeof value !== "object" || value === null) return false;
+  const obj = value as Record<string, unknown>;
+  return (
+    typeof obj.getAgentTools === "function" &&
+    typeof obj.executeAgentTool === "function"
+  );
+}
+
 function resolveStandaloneProvider(
   pluginName: string,
   plugins: PluginData<PluginConstructor, unknown, string>[],
@@ -331,19 +349,13 @@ function resolveStandaloneProvider(
     ...(match.config ?? {}),
     name: pluginName,
   });
-  const provider = instance as unknown as ToolProvider;
-  if (
-    typeof (provider as { getAgentTools?: unknown }).getAgentTools !==
-      "function" ||
-    typeof (provider as { executeAgentTool?: unknown }).executeAgentTool !==
-      "function"
-  ) {
+  if (!isStandaloneToolProvider(instance)) {
     throw new Error(
       `runAgent: plugin '${pluginName}' is not a ToolProvider ` +
         "(missing getAgentTools/executeAgentTool). Only ToolProvider plugins " +
         "are supported via fromPlugin() in runAgent.",
     );
   }
-  cache.set(pluginName, provider);
-  return provider;
+  cache.set(pluginName, instance);
+  return instance;
 }

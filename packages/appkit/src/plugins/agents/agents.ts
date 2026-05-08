@@ -763,22 +763,34 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       return;
     }
 
-    let thread = threadId ? await this.threadStore.get(threadId, userId) : null;
-    if (threadId && !thread) {
-      res.status(404).json({ error: `Thread ${threadId} not found` });
+    // ThreadStore can throw on backing-storage failures (DB unreachable,
+    // permission errors, transient I/O). Without a try/catch the
+    // `async` Express handler bubbles the rejection without a response and
+    // the client connection hangs until the proxy times out. Surface the
+    // failure as a 500 so the SSE client falls back instead of waiting.
+    let thread: Thread;
+    try {
+      const existing = threadId
+        ? await this.threadStore.get(threadId, userId)
+        : null;
+      if (threadId && !existing) {
+        res.status(404).json({ error: `Thread ${threadId} not found` });
+        return;
+      }
+      thread = existing ?? (await this.threadStore.create(userId));
+
+      const userMessage: Message = {
+        id: randomUUID(),
+        role: "user",
+        content: message,
+        createdAt: new Date(),
+      };
+      await this.threadStore.addMessage(thread.id, userId, userMessage);
+    } catch (err) {
+      logger.error("threadStore failed in /chat: %O", err);
+      res.status(500).json({ error: "Thread operation failed" });
       return;
     }
-    if (!thread) {
-      thread = await this.threadStore.create(userId);
-    }
-
-    const userMessage: Message = {
-      id: randomUUID(),
-      role: "user",
-      content: message,
-      createdAt: new Date(),
-    };
-    await this.threadStore.addMessage(thread.id, userId, userMessage);
     return this._streamAgent(req, res, registered, thread, userId);
   }
 
@@ -813,30 +825,39 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       return;
     }
 
-    const thread = await this.threadStore.create(userId);
+    // Same rationale as `_handleChat`: surface threadStore failures as a
+    // 500 instead of letting the async handler hang the client connection.
+    let thread: Thread;
+    try {
+      thread = await this.threadStore.create(userId);
 
-    if (typeof input === "string") {
-      await this.threadStore.addMessage(thread.id, userId, {
-        id: randomUUID(),
-        role: "user",
-        content: input,
-        createdAt: new Date(),
-      });
-    } else {
-      for (const item of input) {
-        const role = (item.role ?? "user") as Message["role"];
-        const content =
-          typeof item.content === "string"
-            ? item.content
-            : JSON.stringify(item.content ?? "");
-        if (!content) continue;
+      if (typeof input === "string") {
         await this.threadStore.addMessage(thread.id, userId, {
           id: randomUUID(),
-          role,
-          content,
+          role: "user",
+          content: input,
           createdAt: new Date(),
         });
+      } else {
+        for (const item of input) {
+          const role = (item.role ?? "user") as Message["role"];
+          const content =
+            typeof item.content === "string"
+              ? item.content
+              : JSON.stringify(item.content ?? "");
+          if (!content) continue;
+          await this.threadStore.addMessage(thread.id, userId, {
+            id: randomUUID(),
+            role,
+            content,
+            createdAt: new Date(),
+          });
+        }
       }
+    } catch (err) {
+      logger.error("threadStore failed in /invocations: %O", err);
+      res.status(500).json({ error: "Thread operation failed" });
+      return;
     }
 
     return this._streamAgent(req, res, registered, thread, userId);

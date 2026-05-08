@@ -1,4 +1,5 @@
 import type { ToolProvider } from "shared";
+import { applyToolkitOptions } from "./toolkit-options";
 import type { ToolkitEntry, ToolkitOptions } from "./types";
 
 /**
@@ -38,18 +39,10 @@ export function resolveToolkitFromProvider(
     return withToolkit.toolkit(opts);
   }
 
-  const only = opts?.only ? new Set(opts.only) : null;
-  const except = opts?.except ? new Set(opts.except) : null;
-  const rename = opts?.rename ?? {};
-  const prefix = opts?.prefix ?? `${pluginName}.`;
-
   const out: Record<string, ToolkitEntry> = {};
   for (const tool of provider.getAgentTools()) {
-    if (only && !only.has(tool.name)) continue;
-    if (except?.has(tool.name)) continue;
-
-    const keyAfterPrefix = `${prefix}${tool.name}`;
-    const key = rename[tool.name] ?? keyAfterPrefix;
+    const key = applyToolkitOptions(tool.name, pluginName, opts);
+    if (key === null) continue;
 
     out[key] = {
       __toolkitRef: true,
