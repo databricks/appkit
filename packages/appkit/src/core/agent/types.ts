@@ -60,33 +60,44 @@ export interface PluginToolkitProvider {
 }
 
 /**
- * Module-augmentation interface. Core plugins extend this from their
- * declaration site so the function form of `AgentDefinition.tools`
- * autocompletes both available plugin keys and the methods on each
- * plugin (notably `.toolkit()`).
+ * Registry of plugin names that participate in keyed autocomplete inside
+ * the function form of `AgentDefinition.tools`. Each entry is typed as the
+ * minimal {@link PluginToolkitProvider} shape — the only surface guaranteed
+ * available inside `tools(plugins)`. Other plugin instance methods are
+ * intentionally hidden; `tools(plugins)` is for tool composition, not for
+ * reaching into a plugin's runtime API.
  *
- * Third-party plugins may extend this interface to participate in the
- * typed surface:
+ * Core AppKit plugins are listed here directly (no per-plugin module
+ * augmentation needed). Third-party plugins can opt into autocomplete by
+ * augmenting this interface from user code:
  *
  * ```ts
- * declare module "@databricks/appkit" {
+ * declare module "@databricks/appkit/beta" {
  *   interface RegisteredPlugins {
- *     myPlugin: MyPlugin;
+ *     myPlugin: PluginToolkitProvider;
  *   }
  * }
  * ```
  *
- * Plugins not registered here still work at runtime (they appear under
- * the index-signature fallback as {@link PluginToolkitProvider}), they
- * just don't get keyed autocomplete.
+ * Augmentation is purely a discoverability win — unknown plugin names
+ * still resolve at runtime via the index-signature fallback in
+ * {@link Plugins}.
  */
-// biome-ignore lint/suspicious/noEmptyInterface: intentional augmentation seed
-export interface RegisteredPlugins {}
+export interface RegisteredPlugins {
+  analytics: PluginToolkitProvider;
+  files: PluginToolkitProvider;
+  genie: PluginToolkitProvider;
+  lakebase: PluginToolkitProvider;
+}
 
 /**
  * Plugin map passed to the function form of {@link AgentDefinition.tools}.
- * Known names (extended via {@link RegisteredPlugins}) keep their concrete
- * plugin class type; unknown names fall back to {@link PluginToolkitProvider}.
+ * Each entry exposes a `.toolkit(opts?)` method that returns a record of
+ * {@link ToolkitEntry} markers ready to be spread into a tool record.
+ *
+ * Plugins not declared in {@link RegisteredPlugins} still work at runtime
+ * via the index-signature fallback; they just don't appear in keyed
+ * autocomplete.
  *
  * @example
  * ```ts

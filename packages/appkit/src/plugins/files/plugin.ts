@@ -1225,9 +1225,3 @@ export class FilesPlugin extends Plugin implements ToolProvider {
  * @internal
  */
 export const files = Object.assign(toPlugin(FilesPlugin), { policy });
-
-declare module "../../core/agent/types" {
-  interface RegisteredPlugins {
-    files: FilesPlugin;
-  }
-}

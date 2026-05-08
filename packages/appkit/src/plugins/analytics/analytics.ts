@@ -339,9 +339,3 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
  * @internal
  */
 export const analytics = toPlugin(AnalyticsPlugin);
-
-declare module "../../core/agent/types" {
-  interface RegisteredPlugins {
-    analytics: AnalyticsPlugin;
-  }
-}
