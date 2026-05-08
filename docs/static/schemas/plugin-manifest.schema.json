@@ -147,7 +147,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -162,13 +162,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -310,7 +310,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -325,13 +325,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -473,7 +473,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -488,13 +488,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -636,7 +636,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -651,13 +651,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -799,7 +799,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -814,13 +814,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -962,7 +962,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -977,13 +977,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -1125,7 +1125,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -1140,13 +1140,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -1288,7 +1288,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -1303,13 +1303,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -1451,7 +1451,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -1466,13 +1466,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -1614,7 +1614,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -1629,13 +1629,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -1777,7 +1777,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -1792,13 +1792,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -1940,7 +1940,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -1955,13 +1955,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -2103,7 +2103,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -2118,13 +2118,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -2275,7 +2275,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -2290,13 +2290,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -2438,7 +2438,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -2453,13 +2453,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -2601,7 +2601,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -2616,13 +2616,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -2764,7 +2764,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -2779,13 +2779,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -2927,7 +2927,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -2942,13 +2942,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -3090,7 +3090,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -3105,13 +3105,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -3253,7 +3253,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -3268,13 +3268,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -3416,7 +3416,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -3431,13 +3431,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -3579,7 +3579,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -3594,13 +3594,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -3742,7 +3742,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -3757,13 +3757,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -3905,7 +3905,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -3920,13 +3920,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -4068,7 +4068,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -4083,13 +4083,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
@@ -4231,7 +4231,7 @@
                                 },
                                 "cliCommand": {
                                   "type": "string",
-                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE> placeholder."
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
                                 },
                                 "selectField": {
                                   "type": "string",
@@ -4246,13 +4246,13 @@
                                   "type": "string"
                                 },
                                 "shortcut": {
-                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
                                   "type": "string"
                                 }
                               },
                               "required": ["type", "cliCommand", "selectField"],
                               "additionalProperties": false,
-                              "description": "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits."
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
                             }
                           ],
                           "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."

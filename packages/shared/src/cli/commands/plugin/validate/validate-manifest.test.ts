@@ -768,6 +768,38 @@ describe("validate-manifest", () => {
       // Either a missing-discriminator error, or a "type" path issue.
       expect(formatted).toMatch(/type|discriminator/i);
     });
+
+    it("rejects cli variant with shell metacharacters in cliCommand", () => {
+      const result = validateManifest(
+        buildManifestWithDiscovery("sql_warehouse", "CAN_USE", {
+          type: "cli",
+          cliCommand:
+            "databricks warehouses list --profile <PROFILE> --output json; rm -rf /",
+          selectField: ".id",
+        }),
+      );
+      expect(result.valid).toBe(false);
+      const formatted = formatValidationErrors(result.errors ?? []);
+      expect(formatted).toContain("cliCommand");
+      expect(formatted).toMatch(/shell metacharacters/i);
+    });
+
+    it("rejects cli variant with shell metacharacters in shortcut", () => {
+      const result = validateManifest(
+        buildManifestWithDiscovery("sql_warehouse", "CAN_USE", {
+          type: "cli",
+          cliCommand:
+            "databricks warehouses list --profile <PROFILE> --output json",
+          selectField: ".id",
+          shortcut:
+            "databricks warehouses get <ID> --profile <PROFILE> | tail -n1",
+        }),
+      );
+      expect(result.valid).toBe(false);
+      const formatted = formatValidationErrors(result.errors ?? []);
+      expect(formatted).toContain("shortcut");
+      expect(formatted).toMatch(/shell metacharacters/i);
+    });
   });
 
   describe("scaffolding rule item maxLength (Phase 6)", () => {

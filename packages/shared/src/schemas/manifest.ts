@@ -174,6 +174,16 @@ export const kindDiscoveryDescriptorSchema = z
     "Discovery via a well-known resource kind. AppKit owns the CLI command and unwrap rules for the named kind.",
   );
 
+/**
+ * Shell metacharacters rejected on free-form CLI command strings. Catches the
+ * common foot-guns (statement separators, pipes, redirects via shell, command
+ * substitution, newlines). Not a security boundary on its own — executors must
+ * always pass these via argv, never shell-exec the string. Angle brackets are
+ * permitted because `<PROFILE>` (and future `<…>` placeholders) are part of
+ * the command-template convention.
+ */
+const SHELL_METACHAR_RE = /[;|&`$\n\r]/;
+
 export const cliDiscoveryDescriptorSchema = z
   .object({
     type: z
@@ -184,7 +194,7 @@ export const cliDiscoveryDescriptorSchema = z
     cliCommand: z
       .string()
       .describe(
-        "Databricks CLI command that lists resources. Must include <PROFILE> placeholder.",
+        "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map.",
       ),
     selectField: z
       .string()
@@ -207,7 +217,7 @@ export const cliDiscoveryDescriptorSchema = z
       .string()
       .optional()
       .describe(
-        "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+        "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
       ),
   })
   .strict()
@@ -215,8 +225,22 @@ export const cliDiscoveryDescriptorSchema = z
     message: "must include <PROFILE> placeholder",
     path: ["cliCommand"],
   })
+  .refine((descriptor) => !SHELL_METACHAR_RE.test(descriptor.cliCommand), {
+    message:
+      "must not contain shell metacharacters (;|&`$ or newlines); use the `kind` variant for typed Databricks resources",
+    path: ["cliCommand"],
+  })
+  .refine(
+    (descriptor) =>
+      descriptor.shortcut === undefined ||
+      !SHELL_METACHAR_RE.test(descriptor.shortcut),
+    {
+      message: "must not contain shell metacharacters (;|&`$ or newlines)",
+      path: ["shortcut"],
+    },
+  )
   .describe(
-    "Discovery via a free-form Databricks CLI command. Used when no well-known resourceKind fits.",
+    "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions.",
   );
 
 export const discoveryDescriptorSchema = z
