@@ -9,25 +9,26 @@ import { ServiceContext } from "../service-context";
 
 // ── Mock @databricks/sdk-experimental ──────────────────────────────
 
-const { mockMe, mockApiRequest, MockWorkspaceClient } = vi.hoisted(() => {
-  const mockMe = vi.fn();
-  const mockApiRequest = vi.fn();
+const { mockMe, mockApiRequest, MockWorkspaceClient, MockConfigError } =
+  vi.hoisted(() => {
+    const mockMe = vi.fn();
+    const mockApiRequest = vi.fn();
 
-  const MockWorkspaceClient = vi.fn().mockImplementation(() => ({
-    currentUser: { me: mockMe },
-    apiClient: { request: mockApiRequest },
-  }));
+    const MockWorkspaceClient = vi.fn().mockImplementation(() => ({
+      currentUser: { me: mockMe },
+      apiClient: { request: mockApiRequest },
+    }));
 
-  return { mockMe, mockApiRequest, MockWorkspaceClient };
-});
+    class MockConfigError extends Error {
+      baseMessage: string;
+      constructor(message: string) {
+        super(message);
+        this.baseMessage = message;
+      }
+    }
 
-class MockConfigError extends Error {
-  baseMessage: string;
-  constructor(message: string) {
-    super(message);
-    this.baseMessage = message;
-  }
-}
+    return { mockMe, mockApiRequest, MockWorkspaceClient, MockConfigError };
+  });
 
 vi.mock("@databricks/sdk-experimental", () => ({
   WorkspaceClient: MockWorkspaceClient,
