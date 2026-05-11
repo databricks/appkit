@@ -252,6 +252,217 @@ describe("DatabricksAdapter", () => {
     expect(mockAuthenticate).toHaveBeenCalledTimes(2);
   });
 
+  describe("Vertex/Gemini thought_signature pass-through", () => {
+    // Vertex AI's OpenAI-compatible surface attaches `thought_signature`
+    // on every function call emitted by Gemini 2.x models. The next
+    // request must echo it back verbatim on the assistant message's
+    // tool_calls or Vertex 400s with
+    // `INVALID_ARGUMENT: function call X is missing a thought_signature`.
+
+    function toolCallDeltaWithSig(opts: {
+      index: number;
+      id?: string;
+      name?: string;
+      args: string;
+      /** When provided, attached at the top level of the tool_call delta. */
+      sigTopLevel?: string;
+      /** When provided, attached inside `function`. */
+      sigNested?: string;
+    }): string {
+      return sseChunk(
+        JSON.stringify({
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  {
+                    index: opts.index,
+                    ...(opts.id && { id: opts.id }),
+                    ...(opts.name && { type: "function" }),
+                    function: {
+                      ...(opts.name && { name: opts.name }),
+                      arguments: opts.args,
+                      ...(opts.sigNested && {
+                        thought_signature: opts.sigNested,
+                      }),
+                    },
+                    ...(opts.sigTopLevel && {
+                      thought_signature: opts.sigTopLevel,
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      );
+    }
+
+    async function runUntilSecondRequest(chunks: string[]) {
+      const executeTool = vi.fn().mockResolvedValue({ ok: true });
+      let callCount = 0;
+      globalThis.fetch = vi.fn().mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          return Promise.resolve({
+            ok: true,
+            body: createReadableStream(chunks),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          body: createReadableStream([textDelta("done"), sseChunk("[DONE]")]),
+        });
+      });
+
+      const adapter = createAdapter();
+      for await (const _ of adapter.run(
+        {
+          messages: createTestMessages(),
+          tools: createTestTools(),
+          threadId: "t1",
+        },
+        { executeTool },
+      )) {
+        // drain
+      }
+      // biome-ignore lint/suspicious/noExplicitAny: vi.fn mock typing
+      const [, secondInit] = (globalThis.fetch as any).mock.calls[1];
+      return JSON.parse(secondInit.body);
+    }
+
+    test("captures top-level thought_signature from stream and echoes on next request", async () => {
+      const body = await runUntilSecondRequest([
+        toolCallDeltaWithSig({
+          index: 0,
+          id: "call_1",
+          name: "analytics__query",
+          args: '{"query":"SELECT 1"}',
+          sigTopLevel: "sig-top-level-abc123",
+        }),
+        sseChunk("[DONE]"),
+      ]);
+      expect(body.messages[1].tool_calls[0]).toEqual({
+        id: "call_1",
+        type: "function",
+        function: {
+          name: "analytics__query",
+          arguments: '{"query":"SELECT 1"}',
+        },
+        thought_signature: "sig-top-level-abc123",
+      });
+    });
+
+    test("captures nested function.thought_signature and echoes at top level", async () => {
+      // Vertex's OpenAI-compat proxy occasionally places the signature
+      // inside `function` rather than at the call's top level. Either
+      // location should round-trip correctly; on the outgoing side we
+      // canonicalise to top-level because that's where Vertex's docs
+      // place it for the chat-completions surface.
+      const body = await runUntilSecondRequest([
+        toolCallDeltaWithSig({
+          index: 0,
+          id: "call_1",
+          name: "analytics__query",
+          args: '{"query":"SELECT 1"}',
+          sigNested: "sig-nested-xyz",
+        }),
+        sseChunk("[DONE]"),
+      ]);
+      expect(body.messages[1].tool_calls[0]).toEqual({
+        id: "call_1",
+        type: "function",
+        function: {
+          name: "analytics__query",
+          arguments: '{"query":"SELECT 1"}',
+        },
+        thought_signature: "sig-nested-xyz",
+      });
+    });
+
+    test("does NOT emit thought_signature when the model didn't send one", async () => {
+      // Non-Gemini endpoints (Claude, OpenAI, Llama) don't carry the
+      // field. Adapter must not invent one — that would break stricter
+      // models' tool_call shape validators on Databricks.
+      const body = await runUntilSecondRequest([
+        toolCallDeltaWithSig({
+          index: 0,
+          id: "call_1",
+          name: "analytics__query",
+          args: '{"query":"SELECT 1"}',
+        }),
+        sseChunk("[DONE]"),
+      ]);
+      expect(body.messages[1].tool_calls[0]).not.toHaveProperty(
+        "thought_signature",
+      );
+    });
+
+    test("buildMessages echoes persisted thoughtSignature on resumed threads", async () => {
+      // On thread resumption, the ToolCall.thoughtSignature stored in
+      // ThreadStore must reach the wire as `thought_signature` — without
+      // it, the very first request of the new turn fails Vertex's
+      // signature check before any tool call even fires.
+      globalThis.fetch = mockFetch([textDelta("ok"), sseChunk("[DONE]")]);
+
+      const adapter = createAdapter();
+      const threadMessages: Message[] = [
+        { id: "1", role: "user", content: "First", createdAt: new Date() },
+        {
+          id: "2",
+          role: "assistant",
+          content: "",
+          createdAt: new Date(),
+          toolCalls: [
+            {
+              id: "call_1",
+              name: "analytics.query",
+              args: { query: "SELECT 1" },
+              thoughtSignature: "persisted-sig-456",
+            },
+          ],
+        },
+        {
+          id: "3",
+          role: "tool",
+          content: '{"rows":[]}',
+          createdAt: new Date(),
+          toolCallId: "call_1",
+        },
+        {
+          id: "4",
+          role: "user",
+          content: "Now what?",
+          createdAt: new Date(),
+        },
+      ];
+
+      for await (const _ of adapter.run(
+        {
+          messages: threadMessages,
+          tools: createTestTools(),
+          threadId: "t1",
+        },
+        { executeTool: vi.fn() },
+      )) {
+        // drain
+      }
+
+      // biome-ignore lint/suspicious/noExplicitAny: vi.fn mock typing
+      const [, init] = (globalThis.fetch as any).mock.calls[0];
+      const body = JSON.parse(init.body);
+      expect(body.messages[1].tool_calls[0]).toEqual({
+        id: "call_1",
+        type: "function",
+        function: {
+          name: "analytics__query",
+          arguments: JSON.stringify({ query: "SELECT 1" }),
+        },
+        thought_signature: "persisted-sig-456",
+      });
+    });
+  });
+
   test("text-parsed tool calls use wire names on follow-up requests", async () => {
     const executeTool = vi.fn().mockResolvedValue({ ok: true });
     let callCount = 0;

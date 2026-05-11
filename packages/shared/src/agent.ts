@@ -76,6 +76,16 @@ export interface ToolCall {
   id: string;
   name: string;
   args: unknown;
+  /**
+   * Vendor-opaque "thought signature" blob attached by Vertex AI / Gemini
+   * 2.x models to every function call they emit. Resumed threads must
+   * echo this back verbatim on the next request or Vertex rejects with
+   * `INVALID_ARGUMENT: function call X is missing a thought_signature`.
+   * Stored here so adapters can preserve it across persistence
+   * boundaries. Non-Gemini endpoints leave this undefined.
+   * See https://docs.cloud.google.com/vertex-ai/generative-ai/docs/thought-signatures
+   */
+  thoughtSignature?: string;
 }
 
 export interface Thread {

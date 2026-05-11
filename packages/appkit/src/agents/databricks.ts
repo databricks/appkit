@@ -159,6 +159,21 @@ interface OpenAIToolCall {
   id: string;
   type: "function";
   function: { name: string; arguments: string };
+  /**
+   * Opaque vendor blob the request must echo back verbatim on the next turn.
+   *
+   * Vertex AI's OpenAI-compatible surface for Gemini 2.x models (Flash,
+   * Flash-Lite, Pro) attaches this on every function call the model emits.
+   * If the subsequent assistant-with-tool_calls message in the conversation
+   * history doesn't carry the same `thought_signature` back, Vertex rejects
+   * with `INVALID_ARGUMENT: function call X is missing a thought_signature`.
+   * See: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/thought-signatures
+   *
+   * Non-Gemini endpoints (Claude on Databricks, OpenAI-compat external
+   * models, etc.) leave this undefined; the serializer just omits the key
+   * for them.
+   */
+  thought_signature?: string;
 }
 
 interface OpenAITool {
@@ -174,7 +189,13 @@ interface DeltaToolCall {
   index: number;
   id?: string;
   type?: string;
-  function?: { name?: string; arguments?: string };
+  function?: { name?: string; arguments?: string; thought_signature?: string };
+  /**
+   * See {@link OpenAIToolCall.thought_signature}. Vertex's OpenAI-compat
+   * proxy has been observed to surface this either at the top level of
+   * the tool_call delta or nested inside `function`; capture from either.
+   */
+  thought_signature?: string;
 }
 
 /**
@@ -499,7 +520,12 @@ export class DatabricksAdapter implements AgentAdapter {
     let fullText = "";
     const toolCallAccumulator = new Map<
       number,
-      { id: string; name: string; arguments: string }
+      {
+        id: string;
+        name: string;
+        arguments: string;
+        thoughtSignature?: string;
+      }
     >();
 
     try {
@@ -563,6 +589,11 @@ export class DatabricksAdapter implements AgentAdapter {
 
           for (const tc of toolCallsRaw) {
             if (!isStreamingDeltaToolCall(tc)) continue;
+            // Vertex's OpenAI-compat proxy has been observed to attach
+            // `thought_signature` either at the top level of the tool_call
+            // delta or nested inside `function`. Capture from either —
+            // whichever location wins, we'll echo it back on the next turn.
+            const sig = tc.thought_signature ?? tc.function?.thought_signature;
             const existing = toolCallAccumulator.get(tc.index);
             if (existing) {
               if (tc.function?.arguments) {
@@ -573,6 +604,9 @@ export class DatabricksAdapter implements AgentAdapter {
                   this.maxToolArgumentsChars,
                 );
                 existing.arguments += tc.function.arguments;
+              }
+              if (sig && !existing.thoughtSignature) {
+                existing.thoughtSignature = sig;
               }
             } else {
               const initial = tc.function?.arguments ?? "";
@@ -585,6 +619,7 @@ export class DatabricksAdapter implements AgentAdapter {
                 id: tc.id ?? `call_${tc.index}`,
                 name: tc.function?.name ?? "",
                 arguments: initial,
+                ...(sig ? { thoughtSignature: sig } : {}),
               });
             }
           }
@@ -615,6 +650,9 @@ export class DatabricksAdapter implements AgentAdapter {
       id: tc.id,
       type: "function" as const,
       function: { name: tc.name, arguments: tc.arguments || "{}" },
+      ...(tc.thoughtSignature
+        ? { thought_signature: tc.thoughtSignature }
+        : {}),
     }));
 
     return { text: fullText, toolCalls };
@@ -694,6 +732,12 @@ export class DatabricksAdapter implements AgentAdapter {
                 ? tc.args
                 : JSON.stringify(tc.args ?? {}),
           },
+          // Echo back Gemini/Vertex's thought_signature when the persisted
+          // call came from a Gemini turn. Required on resumed threads so
+          // the next request validates against Vertex's signature check.
+          ...(tc.thoughtSignature
+            ? { thought_signature: tc.thoughtSignature }
+            : {}),
         }));
       }
 
