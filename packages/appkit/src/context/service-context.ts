@@ -1,5 +1,6 @@
 import {
   type ClientOptions,
+  ConfigError,
   type sql,
   WorkspaceClient,
 } from "@databricks/sdk-experimental";
@@ -158,25 +159,42 @@ export class ServiceContext {
     options?: { warehouseId?: boolean },
     client?: WorkspaceClient,
   ): Promise<ServiceContextState> {
-    const wsClient = client ?? new WorkspaceClient({}, getClientOptions());
+    try {
+      const wsClient = client ?? new WorkspaceClient({}, getClientOptions());
 
-    const warehouseId = options?.warehouseId
-      ? ServiceContext.getWarehouseId(wsClient)
-      : undefined;
+      const [resolvedWorkspaceId, currentUser, resolvedWarehouseId] =
+        await Promise.all([
+          ServiceContext.getWorkspaceId(wsClient),
+          wsClient.currentUser.me(),
+          options?.warehouseId
+            ? ServiceContext.getWarehouseId(wsClient)
+            : Promise.resolve(undefined as string | undefined),
+        ]);
 
-    const workspaceId = ServiceContext.getWorkspaceId(wsClient);
-    const currentUser = await wsClient.currentUser.me();
+      if (!currentUser.id) {
+        throw ConfigurationError.resourceNotFound("Service user ID");
+      }
 
-    if (!currentUser.id) {
-      throw ConfigurationError.resourceNotFound("Service user ID");
+      const warehouseId =
+        options?.warehouseId && resolvedWarehouseId !== undefined
+          ? Promise.resolve(resolvedWarehouseId)
+          : undefined;
+
+      return {
+        client: wsClient,
+        serviceUserId: currentUser.id,
+        warehouseId,
+        workspaceId: Promise.resolve(resolvedWorkspaceId),
+      };
+    } catch (e) {
+      if (e instanceof ConfigError) {
+        throw ConfigurationError.databricksAuthenticationSetupFailed(
+          e.baseMessage,
+          { cause: e },
+        );
+      }
+      throw e;
     }
-
-    return {
-      client: wsClient,
-      serviceUserId: currentUser.id,
-      warehouseId,
-      workspaceId,
-    };
   }
 
   private static async getWorkspaceId(

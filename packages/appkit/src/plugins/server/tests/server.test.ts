@@ -1,4 +1,6 @@
+import type { BasePlugin } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { PluginContext } from "../../../core/plugin-context";
 
 // Use vi.hoisted for mocks that need to be available before module loading
 const {
@@ -6,6 +8,7 @@ const {
   mockExpressApp,
   mockRemoteTunnelControllerMiddleware,
   mockRemoteTunnelControllerInstance,
+  mockGetPort,
 } = vi.hoisted(() => {
   const httpServer = {
     close: vi.fn((cb: any) => cb?.()),
@@ -36,11 +39,29 @@ const {
     isActive: vi.fn().mockReturnValue(false),
   };
 
+  const mockGetPort = vi.fn(
+    async (opts?: { port?: number | Iterable<number>; host?: string }) => {
+      if (opts?.port == null) return 8000;
+      if (typeof opts.port === "number") return opts.port;
+      for (const p of opts.port) return p;
+      return 8000;
+    },
+  );
+
   return {
     mockHttpServer: httpServer,
     mockExpressApp: expressApp,
     mockRemoteTunnelControllerMiddleware: remoteTunnelControllerMiddleware,
     mockRemoteTunnelControllerInstance: remoteTunnelControllerInstance,
+    mockGetPort,
+  };
+});
+
+vi.mock("get-port", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("get-port")>();
+  return {
+    ...actual,
+    default: mockGetPort,
   };
 });
 
@@ -171,6 +192,14 @@ import { RemoteTunnelController } from "../remote-tunnel/remote-tunnel-controlle
 import { StaticServer } from "../static-server";
 import { ViteDevServer } from "../vite-dev-server";
 
+function createContextWithPlugins(plugins: Record<string, any>): PluginContext {
+  const ctx = new PluginContext();
+  for (const [name, instance] of Object.entries(plugins)) {
+    ctx.registerPlugin(name, instance as BasePlugin);
+  }
+  return ctx;
+}
+
 describe("ServerPlugin", () => {
   let originalEnv: NodeJS.ProcessEnv;
 
@@ -204,8 +233,8 @@ describe("ServerPlugin", () => {
       expect(config.host).toBe("127.0.0.1");
     });
 
-    test("should throw when autoStart is passed", () => {
-      expect(() => new ServerPlugin({ autoStart: false } as any)).toThrow(
+    test("should throw when autoStart is passed in config", () => {
+      expect(() => new ServerPlugin({ autoStart: true } as any)).toThrow(
         "server({ autoStart }) has been removed",
       );
     });
@@ -224,7 +253,7 @@ describe("ServerPlugin", () => {
   });
 
   describe("setup", () => {
-    test("should be a no-op (server start is orchestrated by createApp)", async () => {
+    test("should not start the server (createApp drives the start)", async () => {
       const plugin = new ServerPlugin({});
       const startSpy = vi.spyOn(plugin, "start").mockResolvedValue({} as any);
 
@@ -244,6 +273,100 @@ describe("ServerPlugin", () => {
         3000,
         expect.any(String),
         expect.any(Function),
+      );
+    });
+
+    test("uses get-port portNumbers in development when default preferred", async () => {
+      process.env.NODE_ENV = "development";
+      mockGetPort.mockResolvedValueOnce(8123);
+      const plugin = new ServerPlugin({});
+
+      await plugin.start();
+
+      expect(mockGetPort).toHaveBeenCalledWith(
+        expect.objectContaining({
+          host: ServerPlugin.DEFAULT_CONFIG.host,
+        }),
+      );
+      const opts = mockGetPort.mock.calls[0][0] as {
+        port: Iterable<number>;
+      };
+      expect([...opts.port].slice(0, 2)).toEqual([
+        ServerPlugin.DEFAULT_CONFIG.port,
+        ServerPlugin.DEFAULT_CONFIG.port + 1,
+      ]);
+      expect(mockExpressApp.listen).toHaveBeenCalledWith(
+        8123,
+        expect.any(String),
+        expect.any(Function),
+      );
+    });
+
+    test("uses get-port portNumbers in development when explicit port preferred", async () => {
+      process.env.NODE_ENV = "development";
+      mockGetPort.mockResolvedValueOnce(9123);
+      const plugin = new ServerPlugin({ port: 4000 });
+
+      await plugin.start();
+
+      expect(mockGetPort).toHaveBeenCalledWith(
+        expect.objectContaining({
+          host: ServerPlugin.DEFAULT_CONFIG.host,
+        }),
+      );
+      const opts = mockGetPort.mock.calls[0][0] as {
+        port: Iterable<number>;
+      };
+      expect([...opts.port].slice(0, 2)).toEqual([4000, 4001]);
+      expect(mockExpressApp.listen).toHaveBeenCalledWith(
+        9123,
+        expect.any(String),
+        expect.any(Function),
+      );
+    });
+
+    test("does not use get-port outside development", async () => {
+      process.env.NODE_ENV = "production";
+      mockGetPort.mockClear();
+      const plugin = new ServerPlugin({ port: 3000 });
+
+      await plugin.start();
+
+      expect(mockGetPort).not.toHaveBeenCalled();
+      expect(mockExpressApp.listen).toHaveBeenCalledWith(
+        3000,
+        expect.any(String),
+        expect.any(Function),
+      );
+    });
+
+    test("logs info when dev preferred port was busy and another was picked", async () => {
+      process.env.NODE_ENV = "development";
+      mockLoggerInfo.mockClear();
+      mockGetPort.mockResolvedValueOnce(8123);
+      const plugin = new ServerPlugin({});
+
+      await plugin.start();
+
+      expect(mockLoggerInfo).toHaveBeenCalledWith(
+        "Port %d was busy, picking %d",
+        ServerPlugin.DEFAULT_CONFIG.port,
+        8123,
+      );
+    });
+
+    test("does not log busy info when dev preferred port was free", async () => {
+      process.env.NODE_ENV = "development";
+      mockLoggerInfo.mockClear();
+      mockGetPort.mockResolvedValueOnce(ServerPlugin.DEFAULT_CONFIG.port);
+      const plugin = new ServerPlugin({});
+
+      await plugin.start();
+
+      expect(mockLoggerInfo).not.toHaveBeenCalledWith(
+        "Port %d was busy, picking %d",
+        expect.any(Number),
+        expect.any(Number),
       );
     });
 
@@ -322,7 +445,7 @@ describe("ServerPlugin", () => {
       process.env.NODE_ENV = "production";
 
       const injectRoutes = vi.fn();
-      const plugins: any = {
+      const testPlugins: any = {
         "test-plugin": {
           name: "test-plugin",
           injectRoutes,
@@ -330,7 +453,9 @@ describe("ServerPlugin", () => {
         },
       };
 
-      const plugin = new ServerPlugin({ plugins });
+      const plugin = new ServerPlugin({
+        context: createContextWithPlugins(testPlugins),
+      } as any);
       await plugin.start();
 
       const routerFn = (express as any).Router as ReturnType<typeof vi.fn>;
@@ -368,7 +493,9 @@ describe("ServerPlugin", () => {
         },
       };
 
-      const plugin = new ServerPlugin({ plugins });
+      const plugin = new ServerPlugin({
+        context: createContextWithPlugins(plugins),
+      } as any);
       await plugin.start();
 
       expect(plugins["plugin-a"].clientConfig).toHaveBeenCalled();
@@ -395,7 +522,9 @@ describe("ServerPlugin", () => {
         },
       };
 
-      const plugin = new ServerPlugin({ plugins });
+      const plugin = new ServerPlugin({
+        context: createContextWithPlugins(plugins),
+      } as any);
       await plugin.start();
 
       expect(plugins["plugin-null"].clientConfig).toHaveBeenCalled();
@@ -426,7 +555,9 @@ describe("ServerPlugin", () => {
         },
       };
 
-      const plugin = new ServerPlugin({ plugins });
+      const plugin = new ServerPlugin({
+        context: createContextWithPlugins(plugins),
+      } as any);
       await expect(plugin.start()).resolves.toBeDefined();
       expect(mockLoggerError).toHaveBeenCalledWith(
         "Plugin '%s' clientConfig() failed, skipping its config: %O",
@@ -478,15 +609,6 @@ describe("ServerPlugin", () => {
       await plugin.start();
 
       expect(extensionFn).toHaveBeenCalled();
-    });
-  });
-
-  describe("exports().start() trap", () => {
-    test("should throw migration error when start() is called via exports", () => {
-      const plugin = new ServerPlugin({});
-      const exported = plugin.exports();
-
-      expect(() => exported.start()).toThrow("server.start() has been removed");
     });
   });
 
@@ -581,19 +703,19 @@ describe("ServerPlugin", () => {
         .mockImplementation(((_code?: number) => undefined) as any);
 
       const plugin = new ServerPlugin({
-        plugins: {
+        context: createContextWithPlugins({
           ok: {
             name: "ok",
             abortActiveOperations: vi.fn(),
-          } as any,
+          },
           bad: {
             name: "bad",
             abortActiveOperations: vi.fn(() => {
               throw new Error("boom");
             }),
-          } as any,
-        },
-      });
+          },
+        }),
+      } as any);
 
       // pretend started
       (plugin as any).server = mockHttpServer;

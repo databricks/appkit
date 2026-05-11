@@ -286,9 +286,12 @@ describe("Serving Plugin", () => {
 
       expect(res.setHeader).toHaveBeenCalledWith(
         "Content-Type",
-        "text/event-stream",
+        "text/event-stream; charset=utf-8",
       );
-      expect(res.setHeader).toHaveBeenCalledWith("Cache-Control", "no-cache");
+      expect(res.setHeader).toHaveBeenCalledWith(
+        "Cache-Control",
+        "no-cache, no-transform",
+      );
       expect(mockStream).toHaveBeenCalledWith(
         expect.anything(),
         "test-endpoint",

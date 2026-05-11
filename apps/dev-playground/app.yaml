@@ -5,6 +5,8 @@ env:
     valueFrom: genie-space
   - name: DATABRICKS_SERVING_ENDPOINT_NAME
     valueFrom: serving-endpoint
+  - name: DATABRICKS_JOB_ID
+    valueFrom: job
   # Files plugin manifest declares a static DATABRICKS_VOLUME_FILES
   # requirement; keep it bound so appkit's runtime validation passes
   # even though the policy harness below uses its own keys.

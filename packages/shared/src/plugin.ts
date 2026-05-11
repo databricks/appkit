@@ -26,6 +26,15 @@ export interface BasePlugin {
   exports?(): unknown;
 
   clientConfig?(): Record<string, unknown>;
+
+  /**
+   * Binds runtime dependencies (telemetry, cache, plugin context) after the
+   * plugin has been constructed. Called by the AppKit core before `setup()`.
+   */
+  attachContext?(deps: {
+    context?: unknown;
+    telemetryConfig?: TelemetryOptions;
+  }): void;
 }
 
 /** Base configuration interface for AppKit plugins */

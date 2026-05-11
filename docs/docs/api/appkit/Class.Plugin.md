@@ -136,6 +136,14 @@ protected config: TConfig;
 
 ***
 
+### context?
+
+```ts
+protected optional context: PluginContext;
+```
+
+***
+
 ### devFileReader
 
 ```ts
@@ -241,6 +249,42 @@ A proxied plugin instance that executes as the user
 
 AuthenticationError if user token is not available in request headers (production only).
   In development mode (`NODE_ENV=development`), skips user impersonation instead of throwing.
+
+***
+
+### attachContext()
+
+```ts
+attachContext(deps: {
+  context?: unknown;
+  telemetryConfig?: TelemetryOptions;
+}): void;
+```
+
+Binds runtime dependencies (telemetry provider, cache, plugin context) to
+this plugin. Called by `AppKit._createApp` after construction and before
+`setup()`. Idempotent: safe to call if the constructor already bound them
+eagerly. Kept separate so factories can eagerly construct plugin instances
+without running this before `TelemetryManager.initialize()` /
+`CacheManager.getInstance()` have run.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `deps` | \{ `context?`: `unknown`; `telemetryConfig?`: `TelemetryOptions`; \} |
+| `deps.context?` | `unknown` |
+| `deps.telemetryConfig?` | `TelemetryOptions` |
+
+#### Returns
+
+`void`
+
+#### Implementation of
+
+```ts
+BasePlugin.attachContext
+```
 
 ***
 
