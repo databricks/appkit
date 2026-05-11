@@ -86,6 +86,50 @@ describe("tool()", () => {
     expect(t.description).toBe("my_tool");
     expect(t.parameters).toBeDefined();
   });
+
+  test("name is optional — agents plugin overrides it with the record key", () => {
+    // Regression: PR #306 reviewer hit a runtime crash because the
+    // template wrote `tool({ description, schema, execute })` (no name)
+    // and the FunctionTool shape guard rejected the result. The agent
+    // runtime always overrides `name` with the record key in
+    // `tools: { my_tool: tool({...}) }`, so requiring it here was
+    // mis-shaping a valid input.
+    const t = tool({
+      description: "Returns the current server time",
+      schema: z.object({}),
+      execute: () => "2026-05-11T00:00:00Z",
+    });
+
+    expect(t.type).toBe("function");
+    expect(t.name).toBeUndefined();
+    expect(t.description).toBe("Returns the current server time");
+  });
+
+  test("execute may return non-string shapes; downstream normalises", async () => {
+    // Regression: `execute` was typed `Promise<string> | string` but the
+    // template's tools naturally return objects. The runtime serialises
+    // via `normalizeToolResult`; tighten typing to `unknown` and verify
+    // the value flows through.
+    const t = tool({
+      name: "now",
+      schema: z.object({}),
+      execute: () => ({ now: "2026-05-11T00:00:00Z" }),
+    });
+    const result = (await t.execute({})) as { now: string };
+    expect(result).toEqual({ now: "2026-05-11T00:00:00Z" });
+  });
+
+  test("zod-error message uses a generic label when name is omitted", async () => {
+    const t = tool({
+      description: "needs a city",
+      schema: z.object({ city: z.string() }),
+      execute: () => "ok",
+    });
+    const result = await t.execute({});
+    expect(typeof result).toBe("string");
+    expect(result).toContain("Invalid arguments for tool");
+    expect(result).toContain("city");
+  });
 });
 
 describe("formatZodError", () => {

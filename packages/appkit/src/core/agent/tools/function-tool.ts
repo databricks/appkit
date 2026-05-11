@@ -2,7 +2,14 @@ import type { AgentToolDefinition, ToolAnnotations } from "shared";
 
 export interface FunctionTool {
   type: "function";
-  name: string;
+  /**
+   * Optional. When this tool is placed in a keyed record
+   * (`tools: { my_tool: ... }` or the function form), the agents plugin
+   * overrides this with the record key at index-build time. Only set it
+   * explicitly when constructing a `FunctionTool` outside any
+   * keyed-record context.
+   */
+  name?: string;
   description?: string | null;
   parameters?: Record<string, unknown> | null;
   strict?: boolean | null;
@@ -16,25 +23,34 @@ export interface FunctionTool {
    * tool indexes.
    */
   annotations?: ToolAnnotations;
-  execute: (args: Record<string, unknown>) => Promise<string> | string;
+  /**
+   * Returns any shape; downstream `normalizeToolResult` serializes to a
+   * string before handing the value to the LLM.
+   */
+  execute: (args: Record<string, unknown>) => unknown | Promise<unknown>;
 }
 
 export function isFunctionTool(value: unknown): value is FunctionTool {
   if (typeof value !== "object" || value === null) return false;
   const obj = value as Record<string, unknown>;
-  return (
-    obj.type === "function" &&
-    typeof obj.name === "string" &&
-    typeof obj.execute === "function"
-  );
+  // `name` is intentionally not required: the agents plugin overrides it
+  // with the record key (`tools: { my_tool: tool({...}) }` -> "my_tool")
+  // so requiring it on the FunctionTool shape rejects perfectly-valid
+  // `tool({ description, schema, execute })` calls that omit the name.
+  return obj.type === "function" && typeof obj.execute === "function";
 }
 
 export function functionToolToDefinition(
   tool: FunctionTool,
 ): AgentToolDefinition {
+  // `name` is guaranteed to be overridden downstream by the record key
+  // when the tool is registered through `AgentDefinition.tools`. Falling
+  // back to an empty string here keeps the type honest without
+  // surfacing a sentinel that could leak into a non-record context.
+  const name = tool.name ?? "";
   return {
-    name: tool.name,
-    description: tool.description ?? tool.name,
+    name,
+    description: tool.description ?? name,
     parameters: (tool.parameters as AgentToolDefinition["parameters"]) ?? {
       type: "object",
       properties: {},

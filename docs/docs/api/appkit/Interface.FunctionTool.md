@@ -28,8 +28,11 @@ optional description: string | null;
 ### execute()
 
 ```ts
-execute: (args: Record<string, unknown>) => string | Promise<string>;
+execute: (args: Record<string, unknown>) => unknown;
 ```
+
+Returns any shape; downstream `normalizeToolResult` serializes to a
+string before handing the value to the LLM.
 
 #### Parameters
 
@@ -39,15 +42,21 @@ execute: (args: Record<string, unknown>) => string | Promise<string>;
 
 #### Returns
 
-`string` \| `Promise`\<`string`\>
+`unknown`
 
 ***
 
-### name
+### name?
 
 ```ts
-name: string;
+optional name: string;
 ```
+
+Optional. When this tool is placed in a keyed record
+(`tools: { my_tool: ... }` or the function form), the agents plugin
+overrides this with the record key at index-build time. Only set it
+explicitly when constructing a `FunctionTool` outside any
+keyed-record context.
 
 ***
 

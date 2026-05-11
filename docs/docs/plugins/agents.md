@@ -54,8 +54,9 @@ On startup the plugin:
 1. Discovers `./config/agents/assistant/agent.md` and registers agent id `assistant`.
 2. Parses the YAML frontmatter and markdown body as the agent's `instructions`.
 3. Resolves the adapter from `endpoint` (or falls back to `DATABRICKS_AGENT_ENDPOINT`).
-4. Auto-inherits every registered ToolProvider plugin's tools (`analytics.*`, `files.*`, …).
-5. Mounts the agent at the default name (`assistant`).
+4. Mounts the agent at the default name (`assistant`).
+
+The agent starts with **no tools**. Tools are opt-in — declare them in frontmatter (Level 2 below) or opt into auto-inherit explicitly with `agents({ autoInheritTools: { file: true } })`. See "Auto-inherit posture" further down for what that costs and why it's off by default.
 
 Requests land at `POST /invocations` with an OpenAI Responses-compatible body. Every tool call runs through `asUser(req)` so SQL executes as the requesting user, file access respects Unity Catalog ACLs, and telemetry spans are created automatically.
 
@@ -87,30 +88,23 @@ When any `tools:` is declared the auto-inherit default is turned off — the age
 ## Level 3: code-defined agents
 
 ```ts
-import {
-  agents,
-  analytics,
-  createAgent,
-  createApp,
-  files,
-  fromPlugin,
-  server,
-  tool,
-} from "@databricks/appkit";
+import { agents, analytics, createApp, files, server } from "@databricks/appkit";
+import { createAgent, tool } from "@databricks/appkit/beta";
 import { z } from "zod";
 
 const support = createAgent({
   instructions: "You help customers with data and files.",
-  model: "databricks-claude-sonnet-4-5",                  // string sugar
-  tools: {
-    ...fromPlugin(analytics),                             // all analytics tools
-    ...fromPlugin(files, { only: ["uploads.read"] }),     // filtered subset
-    get_weather: tool({
-      name: "get_weather",
-      description: "Weather",
-      schema: z.object({ city: z.string() }),
-      execute: async ({ city }) => `Sunny in ${city}`,
-    }),
+  model: "databricks-claude-sonnet-4-5",                      // string sugar
+  tools(plugins) {
+    return {
+      ...plugins.analytics.toolkit(),                          // all analytics tools
+      ...plugins.files.toolkit({ only: ["uploads.read"] }),    // filtered subset
+      get_weather: tool({
+        description: "Weather",
+        schema: z.object({ city: z.string() }),
+        execute: async ({ city }) => `Sunny in ${city}`,
+      }),
+    };
   },
 });
 
@@ -119,13 +113,15 @@ await createApp({
 });
 ```
 
-Code-defined agents start with no tools by default. `fromPlugin(factory)` is the primary way to pull in a plugin's tools — it returns a spread-friendly marker that the agents plugin resolves against registered `ToolProvider`s at setup time. No intermediate variable, no duplicate `plugins: [analyticsP, filesP, ...]` dance: you write the factory reference once inside `fromPlugin` and again in `plugins: [...]`.
+Code-defined agents start with no tools by default. The function form `tools(plugins) => Record<string, AgentTool>` is the primary way to pull in plugin tools: each plugin registered in `createApp({ plugins: [...] })` shows up on the `plugins` parameter, and you call `.toolkit(opts?)` on it to get a spread-friendly record. The runtime invokes the function once at agent setup and caches the result — every plugin is mentioned exactly once (in `createApp`), with no held variables or marker imports.
+
+Inline `tool({...})` calls live in the same record. `name` is optional — the agents plugin overrides it with the record key (`get_weather` above).
 
 The asymmetry (file: auto-inherit, code: strict) matches the personas: prompt authors want zero ceremony, engineers want no surprises.
 
 ### Scoping tools in code
 
-`fromPlugin(factory, opts?)` accepts the same `ToolkitOptions` as markdown frontmatter:
+`plugins.<name>.toolkit(opts?)` accepts the same `ToolkitOptions` as markdown frontmatter:
 
 | Option | Example | Meaning |
 |---|---|---|
@@ -134,7 +130,7 @@ The asymmetry (file: auto-inherit, code: strict) matches the personas: prompt au
 | `prefix` | `{ prefix: "" }` | Drop the `${pluginName}.` prefix |
 | `rename` | `{ rename: { query: "q" } }` | Remap specific local names |
 
-For plugins that don't expose a `.toolkit()` method (e.g., third-party `ToolProvider` plugins authored with plain `toPlugin`), `fromPlugin` falls back to walking `getAgentTools()` and synthesizing namespaced keys (`${pluginName}.${localName}`). The fallback respects `only` / `except` / `rename` / `prefix` the same way.
+For plugins that don't expose a `.toolkit()` method (e.g., third-party `ToolProvider` plugins authored with plain `toPlugin`), the runtime falls back to walking `getAgentTools()` and synthesizing namespaced keys (`${pluginName}.${localName}`). The fallback respects `only` / `except` / `rename` / `prefix` the same way.
 
 If a referenced plugin is not registered in `createApp({ plugins })`, the agents plugin throws at setup with an `Available: …` listing so you can fix the wiring before the first request.
 
@@ -190,15 +186,18 @@ for (const ticket of tickets) {
 }
 ```
 
-`runAgent` drives the adapter without `createApp` or HTTP. Inline `tool()` calls work standalone as shown above. To use plugin tools in standalone mode, pass the plugin factories through `RunAgentInput.plugins` — `runAgent` will resolve any `fromPlugin` markers in the def against that list:
+`runAgent` drives the adapter without `createApp` or HTTP. Inline `tool()` calls work standalone as shown above. To use plugin tools in standalone mode, pass the plugin factories through `RunAgentInput.plugins` and reach into them via the `tools(plugins)` function form:
 
 ```ts
-import { analytics, createAgent, fromPlugin, runAgent } from "@databricks/appkit";
+import { analytics } from "@databricks/appkit";
+import { createAgent, runAgent } from "@databricks/appkit/beta";
 
 const classifier = createAgent({
   instructions: "Classify tickets. Use analytics.query for historical data.",
   model: "databricks-claude-sonnet-4-5",
-  tools: { ...fromPlugin(analytics) },
+  tools(plugins) {
+    return { ...plugins.analytics.toolkit() };
+  },
 });
 
 const result = await runAgent(classifier, {
@@ -207,7 +206,9 @@ const result = await runAgent(classifier, {
 });
 ```
 
-Hosted tools (MCP) are still `agents()`-only since they require the live MCP client. Plugin tool dispatch in standalone mode runs as the service principal (no OBO) since there is no HTTP request.
+`runAgent` eagerly constructs each plugin in `RunAgentInput.plugins`, runs the standard `attachContext({})` + `await setup()` lifecycle, and shares the instances across the top-level run and every sub-agent dispatch. Plugins whose `setup()` requires `createApp`-only runtime (e.g. `WorkspaceClient`, `ServiceContext`) throw at standalone-init with a clear "use createApp instead" message rather than mid-stream.
+
+Hosted tools (MCP) are still `agents()`-only since they require the live MCP client. Plugin tool dispatch in standalone mode runs as the service principal (no OBO) and **bypasses the agents-plugin approval gate** — treat standalone runAgent as a trusted-prompt environment (CI, batch eval, internal scripts), not as an exposed user-facing surface.
 
 ## Configuration reference
 

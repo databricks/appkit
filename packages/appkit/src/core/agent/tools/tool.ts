@@ -4,7 +4,15 @@ import type { FunctionTool } from "./function-tool";
 import { toToolJSONSchema } from "./json-schema";
 
 export interface ToolConfig<S extends z.ZodType> {
-  name: string;
+  /**
+   * Optional. When the tool is placed in a keyed record (the standard
+   * `tools: { my_tool: tool({...}) }` form, or the function form
+   * `tools(plugins) => ({ my_tool: tool({...}) })`), the agents plugin
+   * overrides the tool's LLM-visible name with the record key. Set
+   * `name` explicitly only if you're constructing a `FunctionTool`
+   * outside any keyed-record context — otherwise the record key wins.
+   */
+  name?: string;
   description?: string;
   schema: S;
   /**
@@ -16,7 +24,15 @@ export interface ToolConfig<S extends z.ZodType> {
    * added this field.
    */
   annotations?: ToolAnnotations;
-  execute: (args: z.infer<S>) => Promise<string> | string;
+  /**
+   * Returning a non-string value is fine: the agent runtime serializes
+   * the result via `normalizeToolResult` before handing it to the LLM
+   * (strings pass through; `null` becomes `"null"`; everything else gets
+   * `JSON.stringify`'d; `undefined` becomes `""`). Return whatever shape
+   * is most natural for your tool — typically an object — and let the
+   * runtime handle the wire format.
+   */
+  execute: (args: z.infer<S>) => unknown | Promise<unknown>;
 }
 
 /**
@@ -34,16 +50,23 @@ export function tool<S extends z.ZodType>(config: ToolConfig<S>): FunctionTool {
     unknown
   >;
 
+  // `name` is only used for the zod-validation error message and the
+  // FunctionTool's `name` field; the agents plugin overrides the latter
+  // with the record key (`tools: { my_tool: ... }` -> "my_tool") at
+  // index-build time. Fall back to a generic label so errors are still
+  // legible when `name` is omitted.
+  const labelForErrors = config.name ?? "tool";
+
   return {
     type: "function",
-    name: config.name,
+    ...(config.name !== undefined ? { name: config.name } : {}),
     description: config.description ?? config.name,
     parameters,
     ...(config.annotations ? { annotations: config.annotations } : {}),
     execute: async (args: Record<string, unknown>) => {
       const parsed = config.schema.safeParse(args);
       if (!parsed.success) {
-        return formatZodError(parsed.error, config.name);
+        return formatZodError(parsed.error, labelForErrors);
       }
       return config.execute(parsed.data as z.infer<S>);
     },

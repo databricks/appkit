@@ -34,8 +34,15 @@ optional description: string;
 ### execute()
 
 ```ts
-execute: (args: output<S>) => string | Promise<string>;
+execute: (args: output<S>) => unknown;
 ```
+
+Returning a non-string value is fine: the agent runtime serializes
+the result via `normalizeToolResult` before handing it to the LLM
+(strings pass through; `null` becomes `"null"`; everything else gets
+`JSON.stringify`'d; `undefined` becomes `""`). Return whatever shape
+is most natural for your tool — typically an object — and let the
+runtime handle the wire format.
 
 #### Parameters
 
@@ -45,15 +52,22 @@ execute: (args: output<S>) => string | Promise<string>;
 
 #### Returns
 
-`string` \| `Promise`\<`string`\>
+`unknown`
 
 ***
 
-### name
+### name?
 
 ```ts
-name: string;
+optional name: string;
 ```
+
+Optional. When the tool is placed in a keyed record (the standard
+`tools: { my_tool: tool({...}) }` form, or the function form
+`tools(plugins) => ({ my_tool: tool({...}) })`), the agents plugin
+overrides the tool's LLM-visible name with the record key. Set
+`name` explicitly only if you're constructing a `FunctionTool`
+outside any keyed-record context — otherwise the record key wins.
 
 ***
 
