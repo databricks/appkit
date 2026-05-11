@@ -534,6 +534,29 @@ describe("validate-manifest", () => {
       expect(formatted).toContain("postScaffold[0].instruction");
     });
 
+    it("rejects postScaffold instruction over 200 chars", () => {
+      const tooLong = "a".repeat(201);
+      const manifest = {
+        ...VALID_MANIFEST,
+        postScaffold: [{ instruction: tooLong }],
+      };
+      const result = validateManifest(manifest);
+      expect(result.valid).toBe(false);
+      const formatted = formatValidationErrors(result.errors ?? []);
+      expect(formatted).toContain("postScaffold[0].instruction");
+      expect(formatted).toContain("≤ 200 chars");
+    });
+
+    it("accepts postScaffold instruction at exactly 200 chars", () => {
+      const atMax = "a".repeat(200);
+      const manifest = {
+        ...VALID_MANIFEST,
+        postScaffold: [{ instruction: atMax }],
+      };
+      const result = validateManifest(manifest);
+      expect(result.valid).toBe(true);
+    });
+
     it("passes for valid manifest with all new fields", () => {
       const manifest = {
         ...VALID_MANIFEST,

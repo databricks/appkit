@@ -573,6 +573,7 @@ export const postScaffoldStepSchema = z
     instruction: z
       .string()
       .min(1)
+      .max(200, "instruction must be ≤ 200 chars")
       .describe(
         "Human-readable instruction for the user to follow after scaffolding.",
       ),

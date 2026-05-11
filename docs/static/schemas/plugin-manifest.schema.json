@@ -4348,6 +4348,7 @@
           "instruction": {
             "type": "string",
             "minLength": 1,
+            "maxLength": 200,
             "description": "Human-readable instruction for the user to follow after scaffolding."
           },
           "required": {
