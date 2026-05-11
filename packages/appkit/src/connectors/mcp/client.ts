@@ -105,6 +105,16 @@ interface McpToolCallResult {
   isError?: boolean;
 }
 
+/**
+ * Per-endpoint outcome of {@link AppKitMcpClient.connectAll}. Callers (the
+ * agents plugin in particular) use the split to warn at startup when some
+ * MCP servers are unreachable without aborting boot for the rest.
+ */
+export interface McpConnectAllResult {
+  connected: string[];
+  failed: Array<{ name: string; error: Error }>;
+}
+
 interface McpServerConnection {
   config: McpEndpointConfig;
   resolvedUrl: string;
@@ -146,19 +156,39 @@ export class AppKitMcpClient {
     private options: { dnsLookup?: DnsLookup; fetchImpl?: typeof fetch } = {},
   ) {}
 
-  async connectAll(endpoints: McpEndpointConfig[]): Promise<void> {
+  /**
+   * Connects every endpoint in parallel and returns a structured summary so
+   * callers can distinguish "all connected" from "some failed".
+   *
+   * Returning the result instead of throwing is deliberate: one
+   * misconfigured MCP server should not take down the entire agents plugin
+   * at boot, and the agents plugin uses the summary to warn at startup with
+   * the failed-endpoint names. Errors are also logged here so a caller
+   * that ignores the return still gets per-endpoint diagnostics.
+   *
+   * @returns `connected` lists the endpoint names that initialised
+   *   successfully; `failed` carries `{ name, error }` for the rest.
+   */
+  async connectAll(
+    endpoints: McpEndpointConfig[],
+  ): Promise<McpConnectAllResult> {
     const results = await Promise.allSettled(
       endpoints.map((ep) => this.connect(ep)),
     );
+    const out: McpConnectAllResult = { connected: [], failed: [] };
     for (let i = 0; i < results.length; i++) {
-      if (results[i].status === "rejected") {
-        logger.error(
-          "Failed to connect MCP server %s: %O",
-          endpoints[i].name,
-          (results[i] as PromiseRejectedResult).reason,
-        );
+      const r = results[i];
+      const name = endpoints[i].name;
+      if (r.status === "fulfilled") {
+        out.connected.push(name);
+      } else {
+        const error =
+          r.reason instanceof Error ? r.reason : new Error(String(r.reason));
+        logger.error("Failed to connect MCP server %s: %O", name, error);
+        out.failed.push({ name, error });
       }
     }
+    return out;
   }
 
   private resolveUrl(endpoint: McpEndpointConfig): string {

@@ -182,7 +182,15 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
         effect: readOnly ? "read" : "destructive",
         idempotent: false,
       },
-      execute: async (args) => {
+      execute: async (args, signal) => {
+        // Matches the files plugin pattern: the pg connection API
+        // doesn't accept AbortSignal in its current shape, so deeper
+        // mid-call cancellation needs a separate plumbing pass on the
+        // connector. This entry check still catches the common case —
+        // a tool dispatched after the user already cancelled the
+        // stream — and unwinds cleanly instead of running to
+        // completion against the SQL warehouse.
+        signal?.throwIfAborted();
         if (readOnly) {
           assertReadOnlySql(args.text);
           return this.runReadOnlyStatement(args.text, args.values);

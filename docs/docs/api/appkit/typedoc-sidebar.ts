@@ -204,6 +204,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.McpConnectAllResult",
+          label: "McpConnectAllResult"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.Message",
           label: "Message"
         },

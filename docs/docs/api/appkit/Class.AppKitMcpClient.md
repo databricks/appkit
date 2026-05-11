@@ -128,8 +128,17 @@ connect(endpoint: McpEndpointConfig): Promise<void>;
 ### connectAll()
 
 ```ts
-connectAll(endpoints: McpEndpointConfig[]): Promise<void>;
+connectAll(endpoints: McpEndpointConfig[]): Promise<McpConnectAllResult>;
 ```
+
+Connects every endpoint in parallel and returns a structured summary so
+callers can distinguish "all connected" from "some failed".
+
+Returning the result instead of throwing is deliberate: one
+misconfigured MCP server should not take down the entire agents plugin
+at boot, and the agents plugin uses the summary to warn at startup with
+the failed-endpoint names. Errors are also logged here so a caller
+that ignores the return still gets per-endpoint diagnostics.
 
 #### Parameters
 
@@ -139,7 +148,10 @@ connectAll(endpoints: McpEndpointConfig[]): Promise<void>;
 
 #### Returns
 
-`Promise`\<`void`\>
+`Promise`\<[`McpConnectAllResult`](Interface.McpConnectAllResult.md)\>
+
+`connected` lists the endpoint names that initialised
+  successfully; `failed` carries `{ name, error }` for the rest.
 
 ***
 

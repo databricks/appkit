@@ -189,7 +189,7 @@ describe("AgentsPlugin", () => {
     const fakeClient = {
       close: closeSpy,
       callTool: vi.fn(),
-      connectAll: vi.fn(),
+      connectAll: vi.fn(async () => ({ connected: [], failed: [] })),
       getAllToolDefinitions: () => [],
     };
     // biome-ignore lint/suspicious/noExplicitAny: seeding private mcpClient

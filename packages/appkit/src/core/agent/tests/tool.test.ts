@@ -28,6 +28,7 @@ describe("tool()", () => {
   test("execute receives typed args on valid input", async () => {
     const echo = tool({
       name: "echo",
+      description: "Echoes the input message back to the caller.",
       schema: z.object({ message: z.string() }),
       execute: async ({ message }) => {
         const _typed: string = message;
@@ -42,6 +43,7 @@ describe("tool()", () => {
   test("returns formatted error string (does not throw) when args are invalid", async () => {
     const weather = tool({
       name: "get_weather",
+      description: "Get weather for a city.",
       schema: z.object({ city: z.string() }),
       execute: async ({ city }) => `Sunny in ${city}`,
     });
@@ -55,6 +57,7 @@ describe("tool()", () => {
   test("joins multiple validation errors with '; '", async () => {
     const t = tool({
       name: "multi",
+      description: "Multi-arg tool used to exercise multi-issue zod errors.",
       schema: z.object({ a: z.string(), b: z.number() }),
       execute: async () => "ok",
     });
@@ -68,6 +71,7 @@ describe("tool()", () => {
   test("optional fields validate when absent", async () => {
     const t = tool({
       name: "opt",
+      description: "Returns the note when provided, '(no note)' otherwise.",
       schema: z.object({ note: z.string().optional() }),
       execute: async ({ note }) => note ?? "(no note)",
     });
@@ -76,14 +80,21 @@ describe("tool()", () => {
     expect(await t.execute({ note: "hello" })).toBe("hello");
   });
 
-  test("description falls back to the tool name when omitted", () => {
+  test("description is required and passes through verbatim", () => {
+    // Earlier versions allowed `description` to be omitted and silently
+    // fell back to `config.name`. That surfaced cryptic identifiers like
+    // "get_weather" as the description; the LLM then either skipped the
+    // tool or called it speculatively. The field is now mandatory at the
+    // type level — TS catches the omission at authoring time instead of
+    // pushing the cost of a confused agent into production.
     const t = tool({
       name: "my_tool",
+      description: "Returns the string 'ok' verbatim.",
       schema: z.object({}),
       execute: async () => "ok",
     });
 
-    expect(t.description).toBe("my_tool");
+    expect(t.description).toBe("Returns the string 'ok' verbatim.");
     expect(t.parameters).toBeDefined();
   });
 
@@ -112,6 +123,7 @@ describe("tool()", () => {
     // the value flows through.
     const t = tool({
       name: "now",
+      description: "Returns the current timestamp as an ISO 8601 string.",
       schema: z.object({}),
       execute: () => ({ now: "2026-05-11T00:00:00Z" }),
     });

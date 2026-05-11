@@ -23,11 +23,23 @@ added this field.
 
 ***
 
-### description?
+### description
 
 ```ts
-optional description: string;
+description: string;
 ```
+
+What the tool does, what it expects, and when the LLM should call it.
+The model reads this verbatim when deciding whether to invoke the tool,
+so write it for an LLM, not for a human reader of your code: spell out
+the inputs, the return shape, and any pre-conditions or side effects.
+
+Required. Earlier versions silently fell back to the tool's name when
+omitted, which surfaced cryptic identifiers like `"get_weather"` as the
+description — the model then had no signal about expected use and
+either skipped the tool or called it speculatively. Making this
+mandatory at the type level forces a real description at authoring
+time instead of debugging a confused agent later.
 
 ***
 

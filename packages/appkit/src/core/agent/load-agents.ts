@@ -24,7 +24,12 @@ export interface LoadContext {
   defaultModel?: AgentAdapter | Promise<AgentAdapter> | string;
   /** Ambient tool library referenced by frontmatter `tools: [key1, key2]`. */
   availableTools?: Record<string, AgentTool>;
-  /** Registered plugin toolkits referenced by frontmatter `toolkits: [...]`. */
+  /**
+   * Registered plugin toolkits referenced by `plugin:NAME` entries in the
+   * unified `tools:` frontmatter list. Keyed by plugin name; each value
+   * exposes the same `toolkit(opts?)` surface as the `plugins` argument to
+   * `tools(plugins) => Record<...>` in the code form.
+   */
   plugins?: Map<string, ToolkitProvider>;
   /**
    * Code-defined agents contributed by `agents({ agents: { ... } })`. The
@@ -60,7 +65,7 @@ interface Frontmatter {
    * Mirrors the TS function form `tools(plugins) { ... }` where plugin
    * tools and inline tools live in the same record.
    */
-  tools?: ToolEntry[];
+  tools?: FrontmatterToolEntry[];
   /**
    * Other agent ids to expose as sub-agents. Each becomes an `agent-<id>`
    * tool at runtime. Resolution happens at directory-load time in
@@ -81,8 +86,15 @@ interface Frontmatter {
  * single-key mappings whose key is `plugin:NAME` and whose value is either
  * an array of local tool names (sugar for `{ only: [...] }`) or a full
  * `ToolkitOptions` record.
+ *
+ * Named `FrontmatterToolEntry` to avoid colliding with the exported
+ * `ToolEntry` from `tools/define-tool.ts` — that is the plugin-author API
+ * surface (`defineTool({ ... }) : ToolEntry`); this is the frontmatter
+ * parse type. They are unrelated and live in different layers.
  */
-type ToolEntry = string | { [key: string]: ToolkitOptions | string[] };
+type FrontmatterToolEntry =
+  | string
+  | { [key: string]: ToolkitOptions | string[] };
 
 const PLUGIN_PREFIX = "plugin:";
 
@@ -438,7 +450,7 @@ type ParsedToolEntry =
  * array (sugar for `{ only: [...] }`) or a full `ToolkitOptions` record.
  */
 function parseToolEntry(
-  entry: ToolEntry,
+  entry: FrontmatterToolEntry,
   filePath: string,
   agentName: string,
 ): ParsedToolEntry {

@@ -406,7 +406,9 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
   /**
    * Builds the map of plugin-name → toolkit that the markdown loader consults
-   * when resolving `toolkits:` frontmatter entries.
+   * when resolving `plugin:NAME` entries in the unified `tools:` frontmatter
+   * list (and, equivalently, that the code form passes as the `plugins`
+   * argument to `tools(plugins) => Record<...>`).
    */
   private pluginProviderIndex(): Map<
     string,
@@ -724,7 +726,20 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     }
 
     const endpoints = resolveHostedTools(hostedTools);
-    await this.mcpClient.connectAll(endpoints);
+    const result = await this.mcpClient.connectAll(endpoints);
+    if (result.failed.length > 0) {
+      // Per-endpoint errors are already logged inside `connectAll`; this
+      // aggregate warning makes the partial-success state visible at the
+      // agent-registration boundary so operators see "agent X registered
+      // without N hosted-tool endpoints" alongside the connect-time
+      // errors, instead of just an opaque list of MCP failures.
+      logger.warn(
+        "MCP: %s of %s endpoints failed to connect (%s). Agents that reference these endpoints will boot without their hosted tools.",
+        result.failed.length,
+        endpoints.length,
+        result.failed.map((f) => f.name).join(", "),
+      );
+    }
 
     for (const def of this.mcpClient.getAllToolDefinitions()) {
       index.set(def.name, {

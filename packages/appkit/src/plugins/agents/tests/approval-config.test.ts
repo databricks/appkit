@@ -31,8 +31,7 @@ beforeEach(() => {
       fn(),
     ),
     generateKey: vi.fn(() => "test-key"),
-    // biome-ignore lint/suspicious/noExplicitAny: test mock
-  })) as any;
+  })) as unknown as typeof CacheManager.getInstanceSync;
 });
 
 describe("AgentsPlugin.resolvedApprovalPolicy.timeoutMs", () => {

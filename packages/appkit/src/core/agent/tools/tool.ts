@@ -13,7 +13,20 @@ export interface ToolConfig<S extends z.ZodType> {
    * outside any keyed-record context — otherwise the record key wins.
    */
   name?: string;
-  description?: string;
+  /**
+   * What the tool does, what it expects, and when the LLM should call it.
+   * The model reads this verbatim when deciding whether to invoke the tool,
+   * so write it for an LLM, not for a human reader of your code: spell out
+   * the inputs, the return shape, and any pre-conditions or side effects.
+   *
+   * Required. Earlier versions silently fell back to the tool's name when
+   * omitted, which surfaced cryptic identifiers like `"get_weather"` as the
+   * description — the model then had no signal about expected use and
+   * either skipped the tool or called it speculatively. Making this
+   * mandatory at the type level forces a real description at authoring
+   * time instead of debugging a confused agent later.
+   */
+  description: string;
   schema: S;
   /**
    * Behavioural hints forwarded to the resolved tool definition. Prefer
@@ -60,7 +73,7 @@ export function tool<S extends z.ZodType>(config: ToolConfig<S>): FunctionTool {
   return {
     type: "function",
     ...(config.name !== undefined ? { name: config.name } : {}),
-    description: config.description ?? config.name,
+    description: config.description,
     parameters,
     ...(config.annotations ? { annotations: config.annotations } : {}),
     execute: async (args: Record<string, unknown>) => {
