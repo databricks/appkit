@@ -48,6 +48,12 @@ vi.mock("../../../connectors/lakebase", () => ({
     }),
     end: vi.fn(),
   })),
+  createLakebasePoolManager: vi.fn(() => ({
+    getPool: vi.fn(),
+    hasPool: vi.fn(() => false),
+    closeAll: vi.fn(async () => {}),
+    size: 0,
+  })),
   getLakebaseOrmConfig: vi.fn(() => ({})),
   getLakebasePgConfig: vi.fn(() => ({})),
   getUsernameWithApiLookup: vi.fn(async () => "test-user"),
