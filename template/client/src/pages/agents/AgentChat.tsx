@@ -7,6 +7,7 @@ import {
   CardContent,
   Input,
   useAgentChat,
+  usePluginClientConfig,
 } from '@databricks/appkit-ui/react';
 
 interface Message {
@@ -16,7 +17,13 @@ interface Message {
   toolName?: string;
 }
 
-interface AgentInfo {
+/**
+ * Shape of the agents plugin's `clientConfig()` payload — exposed by
+ * the agents plugin at server startup and inlined into the boot HTML
+ * via `<script id="__appkit__">`. Read with `usePluginClientConfig` so
+ * the page doesn't need a separate `GET /api/agents/info` round-trip.
+ */
+interface AgentsClientConfig {
   agents: string[];
   defaultAgent: string | null;
 }
@@ -24,17 +31,24 @@ interface AgentInfo {
 /**
  * Minimal chat surface for the `agents` plugin.
  *
- * - Lists registered agents from `GET /api/agents/info` and lets the user
- *   pick one (markdown `assistant` from `config/agents/assistant/agent.md`
- *   and code-defined `helper` from `server/agents/helper.ts`).
+ * - Reads the registered agent list from `usePluginClientConfig('agents')`
+ *   (boot-time, no extra fetch) and lets the user pick one (markdown
+ *   `assistant` from `config/agents/assistant/agent.md` and code-defined
+ *   `helper` from `server/agents/helper.ts`).
  * - Sends turns via `useAgentChat()` (POSTs `/api/agents/chat` and
  *   consumes the Responses-API SSE stream the agents plugin emits).
  * - Renders streaming assistant text incrementally and surfaces tool
  *   calls as separate inline rows.
  */
 export function AgentChat() {
-  const [agents, setAgents] = useState<string[]>([]);
-  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
+  // Agent registry comes from the agents plugin's `clientConfig()` payload
+  // (boot-time, no fetch). `defaultAgent` is null only when the agents
+  // plugin loaded with no registered agents.
+  const { agents, defaultAgent } =
+    usePluginClientConfig<AgentsClientConfig>('agents');
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(
+    defaultAgent ?? agents[0] ?? null,
+  );
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [pendingAssistantId, setPendingAssistantId] = useState<string | null>(
@@ -67,23 +81,6 @@ export function AgentChat() {
     agent: selectedAgent ?? '',
     onEvent: handleEvent,
   });
-
-  useEffect(() => {
-    fetch('/api/agents/info')
-      .then((res) => {
-        if (!res.ok) throw new Error(`agents info failed: ${res.statusText}`);
-        return res.json() as Promise<AgentInfo>;
-      })
-      .then((info) => {
-        setAgents(info.agents);
-        setSelectedAgent(info.defaultAgent ?? info.agents[0] ?? null);
-      })
-      .catch(() => {
-        // Hook surfaces request-time errors via `error`; this catch only
-        // matters for the initial agents-list fetch, which is fine to
-        // silently leave empty.
-      });
-  }, []);
 
   // Mirror the streaming `content` into the pending assistant message so
   // existing tool-call rows interleave correctly with deltas.
@@ -199,7 +196,9 @@ export function AgentChat() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder={
-              selectedAgent ? `Message ${selectedAgent}…` : 'Loading agents…'
+              selectedAgent
+                ? `Message ${selectedAgent}…`
+                : 'No agents registered'
             }
             disabled={!selectedAgent || isStreaming}
           />
