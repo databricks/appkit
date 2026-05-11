@@ -18,34 +18,41 @@ For a deeper understanding of the plugin structure, read on.
 
 ## Basic plugin example
 
-Extend the [`Plugin`](../api/appkit/Class.Plugin.md) class and export with `toPlugin()`:
+Author the manifest as JSON, import it, and attach it to a [`Plugin`](../api/appkit/Class.Plugin.md) subclass via `static manifest`. Export with `toPlugin()`:
+
+```json
+// my-plugin/manifest.json
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "name": "my-plugin",
+  "displayName": "My Plugin",
+  "description": "A custom plugin",
+  "resources": {
+    "required": [
+      {
+        "type": "secret",
+        "alias": "apiKey",
+        "resourceKey": "api-key",
+        "description": "API key for external service",
+        "permission": "READ",
+        "fields": {
+          "scope": { "env": "MY_SECRET_SCOPE", "description": "Secret scope" },
+          "key": { "env": "MY_API_KEY", "description": "Secret key name" }
+        }
+      }
+    ],
+    "optional": []
+  }
+}
+```
 
 ```typescript
+// my-plugin/index.ts
 import { Plugin, toPlugin, type PluginManifest } from "@databricks/appkit";
-import type express from "express";
+import manifest from "./manifest.json";
 
 class MyPlugin extends Plugin {
-  static manifest = {
-    name: "myPlugin",
-    displayName: "My Plugin",
-    description: "A custom plugin",
-    resources: {
-      required: [
-        {
-          type: "secret",
-          alias: "apiKey",
-          resourceKey: "apiKey",
-          description: "API key for external service",
-          permission: "READ",
-          fields: {
-            scope: { env: "MY_SECRET_SCOPE", description: "Secret scope" },
-            key: { env: "MY_API_KEY", description: "Secret key name" }
-          }
-        }
-      ],
-      optional: []
-    }
-  } satisfies PluginManifest<"myPlugin">;
+  static manifest = manifest as PluginManifest<"my-plugin">;
 
   async setup() {
     // Initialize your plugin
@@ -68,6 +75,8 @@ class MyPlugin extends Plugin {
 
 export const myPlugin = toPlugin(MyPlugin);
 ```
+
+JSON is the canonical authoring surface — it is what `appkit plugin sync` reads when aggregating manifests for templates. For the full v2.0 manifest contract (resources, discovery descriptors, scaffolding rules), see [Plugin manifest](./manifest.md).
 
 ## Config-dependent resources
 
