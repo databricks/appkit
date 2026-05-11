@@ -1146,10 +1146,22 @@ describe("Genie Plugin", () => {
             timeout: 5000,
             spaces: { wanderbricks: process.env.DATABRICKS_GENIE_SPACE_ID },
           }),
-      ).toThrow(/"wanderbricks".*undefined/i);
+      ).toThrow(/"wanderbricks".*missing/i);
     });
 
-    test("should list all undefined aliases in the construction error", () => {
+    test("should throw at construction when an alias maps to an empty string", () => {
+      // `process.env.X ?? ""` is a common pattern; treat it the same as
+      // an undefined value rather than letting an empty ID hit the API.
+      expect(
+        () =>
+          new GeniePlugin({
+            timeout: 5000,
+            spaces: { wanderbricks: "" },
+          }),
+      ).toThrow(/"wanderbricks".*missing/i);
+    });
+
+    test("should list all missing aliases in the construction error", () => {
       delete process.env.DATABRICKS_GENIE_SPACE_ID;
 
       expect(
