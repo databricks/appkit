@@ -9,6 +9,7 @@ import type {
   PluginExecutionSettings,
   PluginPhase,
   RouteConfig,
+  ServiceLocator,
   StreamExecuteHandler,
   StreamExecutionSettings,
 } from "shared";
@@ -218,15 +219,19 @@ export abstract class Plugin<
       | PluginContext
       | undefined;
 
-    // Eagerly bind telemetry + cache if the core services have already been
-    // initialized (normal createApp path, or tests that mock CacheManager).
-    // If they haven't, we leave these undefined and rely on `attachContext`
-    // being called later — this lets factories eagerly construct plugin
-    // instances at module top-level before `createApp` has run.
-    this.tryAttachContext();
+    // Eager bind for plugins instantiated outside `_createApp` (mostly
+    // unit tests that mock `CacheManager` and call `new MyPlugin()`
+    // directly). Production goes through `_createApp` → `attachContext`,
+    // which overrides whatever is captured here.
+    this._tryEagerBindServices();
   }
 
-  private tryAttachContext(): void {
+  /**
+   * Test-fallback for plugins instantiated outside `_createApp`. Removable
+   * once tests migrate to explicit `attachContext` setup.
+   * @internal
+   */
+  private _tryEagerBindServices(): void {
     try {
       this.cache = CacheManager.getInstanceSync();
     } catch {
@@ -240,22 +245,22 @@ export abstract class Plugin<
   }
 
   /**
-   * Binds runtime dependencies (telemetry provider, cache, plugin context) to
-   * this plugin. Called by `AppKit._createApp` after construction and before
-   * `setup()`. Idempotent: safe to call if the constructor already bound them
-   * eagerly. Kept separate so factories can eagerly construct plugin instances
-   * without running this before `TelemetryManager.initialize()` /
-   * `CacheManager.getInstance()` have run.
+   * Binds runtime dependencies (cache, telemetry, plugin context). Called
+   * by `_createApp` after construction and before `setup()`. Plugin authors
+   * that need a service the base class doesn't surface as a property can
+   * reach for `deps.services?.get<MyService>("my-service")`.
    */
   attachContext(
     deps: {
       context?: unknown;
+      services?: ServiceLocator;
       telemetryConfig?: BasePluginConfig["telemetry"];
     } = {},
   ): void {
-    if (!this.cache) {
-      this.cache = CacheManager.getInstanceSync();
-    }
+    this.cache =
+      deps.services?.get<CacheManager>("cache") ??
+      this.cache ??
+      CacheManager.getInstanceSync();
     this.telemetry = TelemetryManager.getProvider(
       this.name,
       deps.telemetryConfig ?? this.config.telemetry,
@@ -698,10 +703,12 @@ export abstract class Plugin<
   }
 
   private _checkIfGenerator(
-    result: any,
-  ): result is AsyncGenerator<any, void, unknown> {
+    result: unknown,
+  ): result is AsyncGenerator<unknown, void, unknown> {
     return (
-      result && typeof result === "object" && Symbol.asyncIterator in result
+      typeof result === "object" &&
+      result !== null &&
+      Symbol.asyncIterator in result
     );
   }
 }

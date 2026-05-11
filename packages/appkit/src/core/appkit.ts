@@ -7,31 +7,34 @@ import type {
   PluginConstructor,
   PluginData,
   PluginMap,
+  ServiceLocator,
 } from "shared";
 import { version as productVersion } from "../../package.json";
-import { CacheManager } from "../cache";
 import { ServiceContext } from "../context";
 import {
   isInternalTelemetryEnabled,
   TelemetryReporter,
 } from "../internal-telemetry";
-import { createLogger } from "../logging/logger";
 import { ResourceRegistry, ResourceType } from "../registry";
 import type { TelemetryConfig } from "../telemetry";
-import { TelemetryManager } from "../telemetry";
+import { composeCoreFactories } from "./bootstrap-factories";
 import { isToolProvider, PluginContext } from "./plugin-context";
-
-const logger = createLogger("appkit");
+import { CoreServiceRegistry } from "./service-registry";
 
 export class AppKit<TPlugins extends InputPluginMap> {
   #pluginInstances: Record<string, BasePlugin> = {};
   #setupPromises: Promise<void>[] = [];
   #context: PluginContext;
+  #registry: CoreServiceRegistry;
 
-  private constructor(config: { plugins: TPlugins }) {
+  private constructor(
+    config: { plugins: TPlugins },
+    registry: CoreServiceRegistry,
+  ) {
     const { plugins, ...globalConfig } = config;
 
     this.#context = new PluginContext();
+    this.#registry = registry;
 
     const pluginEntries = Object.entries(plugins);
 
@@ -87,8 +90,14 @@ export class AppKit<TPlugins extends InputPluginMap> {
     const pluginInstance = new Plugin(baseConfig);
 
     if (typeof pluginInstance.attachContext === "function") {
+      // Pass a typed service locator instead of concrete service classes,
+      // so this file stays decoupled from the core service implementations.
+      const services: ServiceLocator = {
+        get: <T>(serviceName: string) => this.#registry.get<T>(serviceName),
+      };
       pluginInstance.attachContext({
         context: this.#context,
+        services,
         telemetryConfig: baseConfig.telemetry,
       });
     }
@@ -199,56 +208,61 @@ export class AppKit<TPlugins extends InputPluginMap> {
       disableInternalTelemetry?: boolean;
     } = {},
   ): Promise<PluginMap<T>> {
-    // Initialize core services
-    TelemetryManager.initialize(config?.telemetry);
-    await CacheManager.getInstance(config?.cache);
-
-    const rawPlugins = config.plugins as T;
-
-    // Collect manifest resources via registry
-    const registry = new ResourceRegistry();
-    registry.collectResources(rawPlugins);
-
-    // Derive ServiceContext needs from what manifests declared
-    const needsWarehouse = registry
-      .getRequired()
-      .some((r) => r.type === ResourceType.SQL_WAREHOUSE);
-    await ServiceContext.initialize(
-      { warehouseId: needsWarehouse },
-      config?.client,
+    const registry = await CoreServiceRegistry.boot(
+      composeCoreFactories({
+        telemetry: config?.telemetry,
+        cache: config?.cache,
+      }),
     );
 
-    // Validate env vars
-    registry.enforceValidation();
+    try {
+      const rawPlugins = config.plugins as T;
 
-    const preparedPlugins = AppKit.preparePlugins(rawPlugins);
-    const mergedConfig = {
-      plugins: preparedPlugins,
-    };
+      const resourceRegistry = new ResourceRegistry();
+      resourceRegistry.collectResources(rawPlugins);
 
-    const instance = new AppKit(mergedConfig);
+      const needsWarehouse = resourceRegistry
+        .getRequired()
+        .some((r) => r.type === ResourceType.SQL_WAREHOUSE);
+      await ServiceContext.initialize(
+        { warehouseId: needsWarehouse },
+        config?.client,
+      );
 
-    await Promise.all(instance.#setupPromises);
-    await instance.#context.emitLifecycle("setup:complete");
+      resourceRegistry.enforceValidation();
 
-    const handle = instance as unknown as PluginMap<T>;
+      const preparedPlugins = AppKit.preparePlugins(rawPlugins);
+      const mergedConfig = {
+        plugins: preparedPlugins,
+      };
 
-    if (config.onPluginsReady) {
-      logger.debug("Running onPluginsReady hook");
-      await config.onPluginsReady(handle);
-      logger.debug("onPluginsReady hook completed");
+      const instance = new AppKit(mergedConfig, registry);
+
+      await Promise.all(instance.#setupPromises);
+      await instance.#context.emitLifecycle("setup:complete");
+
+      const handle = instance as unknown as PluginMap<T>;
+
+      if (config.onPluginsReady) {
+        await config.onPluginsReady(handle);
+      }
+
+      if (isInternalTelemetryEnabled(config)) {
+        AppKit.bootstrapInternalTelemetry();
+      }
+
+      const serverPlugin = instance.#pluginInstances.server;
+      if (serverPlugin && typeof (serverPlugin as any).start === "function") {
+        await (serverPlugin as any).start({
+          shutdownCoreServices: () => registry.shutdown(),
+        });
+      }
+
+      return handle;
+    } catch (error) {
+      await registry.shutdown();
+      throw error;
     }
-
-    if (isInternalTelemetryEnabled(config)) {
-      AppKit.bootstrapInternalTelemetry();
-    }
-
-    const serverPlugin = instance.#pluginInstances.server;
-    if (serverPlugin && typeof (serverPlugin as any).start === "function") {
-      await (serverPlugin as any).start();
-    }
-
-    return handle;
   }
 
   private static bootstrapInternalTelemetry(): void {

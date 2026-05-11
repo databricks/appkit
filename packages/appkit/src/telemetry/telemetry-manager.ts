@@ -22,6 +22,7 @@ import {
   ATTR_SERVICE_VERSION,
 } from "@opentelemetry/semantic-conventions";
 import type { TelemetryOptions } from "shared";
+import type { CoreServiceFactory } from "@/core/service-registry";
 import { createLogger } from "../logging/logger";
 import { TelemetryProvider } from "./telemetry-provider";
 import { AppKitSampler } from "./trace-sampler";
@@ -95,11 +96,32 @@ export class TelemetryManager {
       });
 
       this.sdk.start();
-      this.registerShutdown();
       logger.debug("Initialized successfully");
     } catch (error) {
       logger.error("Failed to initialize: %O", error);
     }
+  }
+
+  /** True once the underlying NodeSDK has started. */
+  isActive(): boolean {
+    return this.sdk !== undefined;
+  }
+
+  static factory(
+    config?: TelemetryConfig,
+  ): CoreServiceFactory<TelemetryManager> {
+    return {
+      name: "telemetry",
+      async boot() {
+        TelemetryManager.initialize(config);
+        const instance = TelemetryManager.getInstance();
+        if (!instance.isActive()) return null;
+        return {
+          instance,
+          shutdown: () => instance.shutdown(),
+        };
+      },
+    };
   }
 
   /**
@@ -158,15 +180,12 @@ export class TelemetryManager {
     ];
   }
 
-  private registerShutdown() {
-    const shutdownFn = async () => {
-      await TelemetryManager.getInstance().shutdown();
-    };
-    process.once("SIGTERM", shutdownFn);
-    process.once("SIGINT", shutdownFn);
-  }
-
-  private async shutdown(): Promise<void> {
+  /**
+   * Drains pending spans/metrics/logs and shuts down the NodeSDK.
+   * Idempotent.
+   * @internal
+   */
+  async shutdown(): Promise<void> {
     if (!this.sdk) {
       return;
     }

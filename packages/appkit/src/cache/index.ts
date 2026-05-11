@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { ApiError, WorkspaceClient } from "@databricks/sdk-experimental";
 import type { CacheConfig, CacheStorage } from "shared";
+import type { CoreServiceFactory } from "@/core/service-registry";
 import { createLakebasePool } from "../connectors/lakebase";
 import { AppKitError, ExecutionError, InitializationError } from "../errors";
 import { createLogger } from "../logging/logger";
@@ -108,6 +109,31 @@ export class CacheManager {
     }
 
     return CacheManager.initPromise;
+  }
+
+  static factory(config?: CacheConfig): CoreServiceFactory<CacheManager> {
+    return {
+      name: "cache",
+      async boot() {
+        const mgr = await CacheManager.getInstance(config);
+        return {
+          instance: mgr,
+          shutdown: () => mgr.shutdown(),
+        };
+      },
+    };
+  }
+
+  /**
+   * Closes storage, clears in-flight requests, and resets the singleton
+   * so a fresh `getInstance()` rebuilds from scratch (test isolation).
+   * @internal
+   */
+  async shutdown(): Promise<void> {
+    await this.close();
+    this.inFlightRequests.clear();
+    CacheManager.instance = null;
+    CacheManager.initPromise = null;
   }
 
   /**

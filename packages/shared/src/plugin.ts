@@ -9,6 +9,14 @@ import type {
 // Re-export generated types as the shared canonical definitions.
 export type { ResourceFieldEntry };
 
+/**
+ * Typed service locator passed to {@link BasePlugin.attachContext}.
+ * Returns `null` when the service is not registered.
+ */
+export interface ServiceLocator {
+  get<T>(name: string): T | null;
+}
+
 /** Base plugin interface. */
 export interface BasePlugin {
   name: string;
@@ -28,11 +36,12 @@ export interface BasePlugin {
   clientConfig?(): Record<string, unknown>;
 
   /**
-   * Binds runtime dependencies (telemetry, cache, plugin context) after the
-   * plugin has been constructed. Called by the AppKit core before `setup()`.
+   * Binds runtime dependencies after construction. Called before `setup()`.
+   * Plugins fetch services via `services.get<MyService>("my-service")`.
    */
   attachContext?(deps: {
     context?: unknown;
+    services?: ServiceLocator;
     telemetryConfig?: TelemetryOptions;
   }): void;
 }
