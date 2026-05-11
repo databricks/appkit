@@ -306,9 +306,9 @@ describe("ServiceContext", () => {
       delete process.env.DATABRICKS_WORKSPACE_ID;
       mockApiRequest.mockResolvedValue({});
 
-      const state = await ServiceContext.initialize();
-
-      await expect(state.workspaceId).rejects.toThrow(ConfigurationError);
+      await expect(ServiceContext.initialize()).rejects.toThrow(
+        ConfigurationError,
+      );
     });
   });
 
@@ -381,9 +381,9 @@ describe("ServiceContext", () => {
         return Promise.resolve({ "x-databricks-org-id": "ws-dev" });
       });
 
-      const state = await ServiceContext.initialize({ warehouseId: true });
-
-      await expect(state.warehouseId).rejects.toThrow(ConfigurationError);
+      await expect(
+        ServiceContext.initialize({ warehouseId: true }),
+      ).rejects.toThrow(ConfigurationError);
     });
 
     test("should throw in dev mode when all warehouses are deleted", async () => {
@@ -402,9 +402,9 @@ describe("ServiceContext", () => {
         return Promise.resolve({ "x-databricks-org-id": "ws-dev" });
       });
 
-      const state = await ServiceContext.initialize({ warehouseId: true });
-
-      await expect(state.warehouseId).rejects.toThrow(ConfigurationError);
+      await expect(
+        ServiceContext.initialize({ warehouseId: true }),
+      ).rejects.toThrow(ConfigurationError);
     });
 
     test("should throw in dev mode when best warehouse has no id", async () => {
@@ -420,21 +420,21 @@ describe("ServiceContext", () => {
         return Promise.resolve({ "x-databricks-org-id": "ws-dev" });
       });
 
-      const state = await ServiceContext.initialize({ warehouseId: true });
-
-      await expect(state.warehouseId).rejects.toThrow(ConfigurationError);
+      await expect(
+        ServiceContext.initialize({ warehouseId: true }),
+      ).rejects.toThrow(ConfigurationError);
     });
 
     test("should throw in production when DATABRICKS_WAREHOUSE_ID is not set", async () => {
       delete process.env.DATABRICKS_WAREHOUSE_ID;
       process.env.NODE_ENV = "production";
 
-      const state = await ServiceContext.initialize({ warehouseId: true });
-
-      await expect(state.warehouseId).rejects.toThrow(ConfigurationError);
-      await expect(state.warehouseId).rejects.toThrow(
-        /DATABRICKS_WAREHOUSE_ID/,
-      );
+      await expect(
+        ServiceContext.initialize({ warehouseId: true }),
+      ).rejects.toThrow(ConfigurationError);
+      await expect(
+        ServiceContext.initialize({ warehouseId: true }),
+      ).rejects.toThrow(/DATABRICKS_WAREHOUSE_ID/);
     });
   });
 
