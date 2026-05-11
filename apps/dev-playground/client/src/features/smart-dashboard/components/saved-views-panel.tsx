@@ -67,14 +67,26 @@ export function SavedViewsPanel({
     load();
   }, [load, refreshToken]);
 
+  const toggle = () => setOpen((v) => !v);
+
   return (
     <div className="rounded-xl border border-border bg-card shadow-sm">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-4 py-3 text-left"
-      >
-        <div className="flex items-center gap-2">
+      {/*
+        Header row is a flex container rather than a single big button so
+        the refresh action can sit beside the collapse toggle without
+        being nested inside it (`<button>` inside `<button>` is invalid
+        HTML and trips React's hydration warning). The title area and the
+        chevron each open/close the panel; refresh is its own button and
+        no longer needs `e.stopPropagation`.
+      */}
+      <div className="w-full flex items-center justify-between px-4 py-3">
+        <button
+          type="button"
+          onClick={toggle}
+          className="flex items-center gap-2 text-left flex-1 min-w-0"
+          aria-expanded={open}
+          aria-label={open ? "Collapse saved views" : "Expand saved views"}
+        >
           <BookmarkIcon className="h-4 w-4 text-primary" />
           <span className="text-sm font-semibold text-foreground">
             Saved views
@@ -82,7 +94,7 @@ export function SavedViewsPanel({
           <span className="text-xs text-muted-foreground">
             {views.length > 0 ? `(${views.length})` : ""}
           </span>
-        </div>
+        </button>
         <div className="flex items-center gap-2">
           {loading && (
             <Loader2Icon className="h-3.5 w-3.5 text-muted-foreground animate-spin" />
@@ -90,23 +102,28 @@ export function SavedViewsPanel({
           {!loading && (
             <button
               type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                load();
-              }}
+              onClick={load}
               className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
               aria-label="Refresh saved views"
             >
               <RefreshCwIcon className="h-3.5 w-3.5" />
             </button>
           )}
-          {open ? (
-            <ChevronUpIcon className="h-4 w-4 text-muted-foreground" />
-          ) : (
-            <ChevronDownIcon className="h-4 w-4 text-muted-foreground" />
-          )}
+          <button
+            type="button"
+            onClick={toggle}
+            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            aria-label={open ? "Collapse saved views" : "Expand saved views"}
+            aria-expanded={open}
+          >
+            {open ? (
+              <ChevronUpIcon className="h-4 w-4" />
+            ) : (
+              <ChevronDownIcon className="h-4 w-4" />
+            )}
+          </button>
         </div>
-      </button>
+      </div>
 
       {open && (
         <div className="px-4 pb-4">
