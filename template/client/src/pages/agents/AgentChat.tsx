@@ -33,9 +33,18 @@ interface AgentsClientConfig {
  *
  * - Reads the registered agent list from `usePluginClientConfig('agents')`
  *   (boot-time, no extra fetch) and lets the user pick one. The template
- *   ships with a single code-defined `helper` agent (`server/agents/helper.ts`);
- *   drop a `config/agents/<id>/agent.md` to add markdown-defined agents
- *   and they appear here automatically.
+ *   ships with two starter agents that demonstrate the two authoring
+ *   forms side by side:
+ *
+ *     * `helper` (code, `server/agents/helper.ts`) — uses `tool()` to
+ *       expose `current_time` and `count_words`; demonstrates the
+ *       imperative form for agents whose value is in what they *do*.
+ *     * `planner` (markdown, `config/agents/planner/agent.md`) — pure
+ *       prose, no tools; demonstrates the declarative form for agents
+ *       whose value is in *how they think*.
+ *
+ *   Drop additional `config/agents/<id>/agent.md` files or wire more
+ *   `createAgent({...})` exports in `server/server.ts` to grow either side.
  * - Sends turns via `useAgentChat()` (POSTs `/api/agents/chat` and
  *   consumes the Responses-API SSE stream the agents plugin emits).
  * - Renders streaming assistant text incrementally and surfaces tool
@@ -123,11 +132,12 @@ export function AgentChat() {
         <div>
           <h2 className="text-2xl font-bold text-foreground">Agents</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Chat with a registered agent. Code-defined agents live in
-            <code className="mx-1">server/agents/</code> and are wired in
-            <code className="mx-1">server/server.ts</code>; drop a
-            <code className="mx-1">config/agents/&lt;id&gt;/agent.md</code>
-            to add a markdown-defined agent (it'll show up here on the next boot).
+            Two starter agents demo both authoring forms:
+            <code className="mx-1">helper</code> (code, with tools) lives in
+            <code className="mx-1">server/agents/helper.ts</code>, and
+            <code className="mx-1">planner</code> (markdown, prose-only) lives in
+            <code className="mx-1">config/agents/planner/agent.md</code>.
+            Add agents by editing either folder — they appear here on next boot.
           </p>
         </div>
         {agents.length > 0 && (
@@ -159,7 +169,9 @@ export function AgentChat() {
           {messages.length === 0 && (
             <p className="text-sm text-muted-foreground text-center mt-8">
               Start the conversation. Try asking <code>helper</code> "what
-              time is it?" or "count the words in: the quick brown fox".
+              time is it?" or "count the words in: the quick brown fox", or
+              switch to <code>planner</code> and ask it to help you break down
+              a feature you're building.
             </p>
           )}
           {messages.map((m) => {

@@ -10,8 +10,10 @@ import { z } from 'zod';
  * volumes, no external APIs) so this template demos the tool-calling
  * round-trip even when no other plugin is selected at scaffold time.
  *
- * Drop a sibling `config/agents/<id>/agent.md` to add a markdown-defined
- * agent — the agents plugin merges code-defined and markdown-defined
+ * The companion markdown agent at `config/agents/planner/agent.md`
+ * shows the declarative form: pure-prose specialists whose entire
+ * value is the system prompt — no tools, no compilation, one file
+ * to edit. The agents plugin merges code-defined and markdown-defined
  * agents at boot, with code winning on key collision.
  */
 export const helper = createAgent({
