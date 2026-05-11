@@ -22,6 +22,8 @@ export interface CreateAnswers {
   name: string;
   displayName: string;
   description: string;
+  /** Only set when non-GA. Absent = "ga" (default). */
+  stability?: "beta";
   resources: SelectedResource[];
   author?: string;
   version: string;

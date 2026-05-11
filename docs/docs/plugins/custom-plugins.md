@@ -130,7 +130,7 @@ This pattern allows:
 - **Shared services**:
   - **Cache management**: Access the cache service via `this.cache`. See [`CacheConfig`](../api/appkit/Interface.CacheConfig.md) for configuration.
   - **Telemetry**: Instrument your plugin with traces and metrics via `this.telemetry`. See [`ITelemetry`](../api/appkit/Interface.ITelemetry.md).
-- **Execution interceptors**: Use `execute()` and `executeStream()` with [`StreamExecutionSettings`](../api/appkit/Interface.StreamExecutionSettings.md)
+- **Execution interceptors**: Use `execute()` and `executeStream()` with [`StreamExecutionSettings`](../api/appkit/Interface.StreamExecutionSettings.md) for automatic caching, retry, timeout, and [telemetry span attributes](./execution-context.md#telemetry-span-attributes) (`execution.context`, `caller.id`)
 
 **Consuming your plugin programmatically**
 

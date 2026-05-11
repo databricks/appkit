@@ -24,8 +24,8 @@ jobs:
       docs: ${{ steps.filter.outputs.docs }}
       appkit: ${{ steps.filter.outputs.appkit }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         id: filter
         with:
           filters: |
@@ -42,11 +42,11 @@ jobs:
       labels: linux-ubuntu-latest
 
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Setup JFrog npm
         uses: ./.github/actions/setup-jfrog-npm
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24
           cache: 'pnpm'
@@ -55,11 +55,48 @@ jobs:
       - name: Check generated types are up to date
         run: |
           pnpm run generate:types
-          if ! git diff --exit-code packages/shared/src/schemas/plugin-manifest.generated.ts packages/appkit/src/registry/types.generated.ts; then
-            echo "❌ Error: Generated types are out of sync with plugin-manifest.schema.json."
+          if ! git diff --exit-code \
+              packages/shared/src/schemas/plugin-manifest.generated.ts \
+              packages/appkit/src/registry/types.generated.ts \
+              packages/appkit/src/plugins/ga-exports.generated.ts \
+              packages/appkit/src/plugins/beta-exports.generated.ts \
+              docs/docs/plugins/analytics.md \
+              docs/docs/plugins/files.md \
+              docs/docs/plugins/genie.md \
+              docs/docs/plugins/jobs.md \
+              docs/docs/plugins/lakebase.md \
+              docs/docs/plugins/model-serving.md \
+              docs/docs/plugins/server.md \
+              docs/docs/plugins/vector-search.md; then
+            echo "❌ Error: Generated files are out of sync with their source manifests/schemas."
             echo ""
             echo "To fix this:"
             echo "  1. Run: pnpm run generate:types"
+            echo "  2. Review and commit the changes"
+            echo ""
+            exit 1
+          fi
+      - name: Build shared package dist (for sync:template CLI)
+        # `pnpm run sync:template` runs through `packages/shared/bin/appkit.js`
+        # which imports the built `packages/shared/dist/cli/index.js`. The
+        # lint job doesn't otherwise build, so build just shared's dist
+        # before invoking sync. We invoke tsdown directly rather than
+        # `pnpm --filter shared build:package` because the latter also
+        # re-runs `generate-schema-types.ts`, which writes the raw (unformatted)
+        # version of `plugin-manifest.generated.ts` and trips the biome
+        # check that runs immediately after. ~1s.
+        run: pnpm --filter shared exec tsdown --config tsdown.config.ts
+      - name: Check synced template manifest is up to date
+        run: |
+          pnpm run sync:template
+          if ! git diff --exit-code template/appkit.plugins.json; then
+            echo "❌ Error: template/appkit.plugins.json is out of sync with packages/appkit/src/plugins/<name>/manifest.json."
+            echo ""
+            echo "This usually happens when a plugin manifest's stability, resources, or display fields"
+            echo "are edited without running the sync step that regenerates the template manifest."
+            echo ""
+            echo "To fix this:"
+            echo "  1. Run: pnpm run sync:template"
             echo "  2. Review and commit the changes"
             echo ""
             exit 1
@@ -84,11 +121,11 @@ jobs:
       labels: linux-ubuntu-latest
 
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Setup JFrog npm
         uses: ./.github/actions/setup-jfrog-npm
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24
           cache: 'pnpm'
@@ -106,11 +143,11 @@ jobs:
       labels: linux-ubuntu-latest
 
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Setup JFrog npm
         uses: ./.github/actions/setup-jfrog-npm
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24
           cache: 'pnpm'
@@ -136,11 +173,11 @@ jobs:
       labels: linux-ubuntu-latest
 
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Setup JFrog npm
         uses: ./.github/actions/setup-jfrog-npm
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24
           cache: 'pnpm'
@@ -173,7 +210,7 @@ jobs:
         run: zip -r ../pr-template.zip . -x 'node_modules/*'
 
       - name: Upload artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: appkit-template-${{ steps.version.outputs.version }}
           path: pr-template.zip
@@ -187,11 +224,11 @@ jobs:
       labels: linux-ubuntu-latest
 
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Setup JFrog npm
         uses: ./.github/actions/setup-jfrog-npm
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24
           cache: 'pnpm'
@@ -216,4 +253,40 @@ jobs:
             echo ""
             exit 1
           fi
+
+  devhub-validation:
+    name: DevHub Build Validation
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docs == 'true'
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup JFrog npm
+        uses: ./.github/actions/setup-jfrog-npm
+
+      - name: Clone DevHub
+        run: git clone --depth 1 https://github.com/databricks/devhub.git /tmp/devhub
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+
+      - name: Install DevHub dependencies
+        working-directory: /tmp/devhub
+        run: npm install
+
+      - name: Sync AppKit docs from PR branch
+        working-directory: /tmp/devhub
+        env:
+          APPKIT_REMOTE: ${{ github.event.pull_request.head.repo.clone_url || format('https://github.com/{0}.git', github.repository) }}
+          APPKIT_BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: node scripts/sync-appkit-docs.mjs --force
+
+      - name: Build DevHub
+        working-directory: /tmp/devhub
+        run: npm run build
 

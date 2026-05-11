@@ -124,8 +124,28 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.IJobsConfig",
+          label: "IJobsConfig"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.ITelemetry",
           label: "ITelemetry"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.JobAPI",
+          label: "JobAPI"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.JobConfig",
+          label: "JobConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.JobsConnectorConfig",
+          label: "JobsConnectorConfig"
         },
         {
           type: "doc",
@@ -217,6 +237,16 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.IAppRouter",
           label: "IAppRouter"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.JobHandle",
+          label: "JobHandle"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.JobsExport",
+          label: "JobsExport"
         },
         {
           type: "doc",

@@ -23,6 +23,9 @@ import { ServingPage } from './pages/serving/ServingPage';
 {{- if .plugins.vectorSearch}}
 import { VectorSearchPage } from './pages/vector-search/VectorSearchPage';
 {{- end}}
+{{- if .plugins.jobs}}
+import { JobsPage } from './pages/jobs/JobsPage';
+{{- end}}
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
@@ -70,6 +73,11 @@ function Layout() {
             Vector Search
           </NavLink>
 {{- end}}
+{{- if .plugins.jobs}}
+          <NavLink to="/jobs" className={navLinkClass}>
+            Jobs
+          </NavLink>
+{{- end}}
         </nav>
       </header>
 
@@ -102,6 +110,9 @@ const router = createBrowserRouter([
 {{- end}}
 {{- if .plugins.vectorSearch}}
       { path: '/vector-search', element: <VectorSearchPage /> },
+{{- end}}
+{{- if .plugins.jobs}}
+      { path: '/jobs', element: <JobsPage /> },
 {{- end}}
     ],
   },

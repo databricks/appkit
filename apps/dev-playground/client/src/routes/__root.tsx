@@ -112,6 +112,14 @@ function RootComponent() {
                     Policy Matrix
                   </Button>
                 </Link>
+                <Link to="/jobs" className="no-underline">
+                  <Button
+                    variant="ghost"
+                    className="text-foreground hover:text-secondary-foreground"
+                  >
+                    Jobs
+                  </Button>
+                </Link>
                 <Link to="/serving" className="no-underline">
                   <Button
                     variant="ghost"
