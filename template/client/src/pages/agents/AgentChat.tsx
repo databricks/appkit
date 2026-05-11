@@ -31,34 +31,31 @@ interface AgentsClientConfig {
 /**
  * Minimal chat surface for the `agents` plugin.
  *
- * - Reads the registered agent list from `usePluginClientConfig('agents')`
- *   (boot-time, no extra fetch) and lets the user pick one. The template
- *   ships with two starter agents that demonstrate the two authoring
- *   forms side by side:
+ * The template ships a single coordinator agent and uses the agents
+ * plugin's sub-agent feature to compose two authoring forms behind it:
  *
- *     * `helper` (code, `server/agents/helper.ts`) — uses `tool()` to
- *       expose `current_time` and `count_words`; demonstrates the
- *       imperative form for agents whose value is in what they *do*.
- *     * `planner` (markdown, `config/agents/planner/agent.md`) — pure
- *       prose, no tools; demonstrates the declarative form for agents
- *       whose value is in *how they think*.
+ *   - `planner` (markdown, `config/agents/planner/agent.md`) is the
+ *     user-facing chat: pure prose, no tools, opinionated planning
+ *     prompt. Declares `agents: [helper]` in its frontmatter so it
+ *     can delegate computational actions.
+ *   - `helper` (code, `server/agents/helper.ts`) holds the tools
+ *     (`current_time`, `count_words`). It's reachable from planner as
+ *     the `agent-helper` tool; planner calls it when the user
+ *     explicitly asks for a side-effecty action.
  *
- *   Drop additional `config/agents/<id>/agent.md` files or wire more
- *   `createAgent({...})` exports in `server/server.ts` to grow either side.
- * - Sends turns via `useAgentChat()` (POSTs `/api/agents/chat` and
- *   consumes the Responses-API SSE stream the agents plugin emits).
- * - Renders streaming assistant text incrementally and surfaces tool
- *   calls as separate inline rows.
+ * The page renders one chat against the default agent (planner). To
+ * show a picker, drop in more registered top-level agents and add a
+ * tab list reading from `agents` below. Today's two-agents-one-tab
+ * shape is deliberate: it demonstrates the dual-form composition
+ * pattern without confusing scaffolded users with redundant tabs.
  */
 export function AgentChat() {
   // Agent registry comes from the agents plugin's `clientConfig()` payload
-  // (boot-time, no fetch). `defaultAgent` is null only when the agents
-  // plugin loaded with no registered agents.
+  // (boot-time, no fetch). `defaultAgent` is null only when no agents are
+  // registered; both `planner` and `helper` are registered here.
   const { agents, defaultAgent } =
     usePluginClientConfig<AgentsClientConfig>('agents');
-  const [selectedAgent, setSelectedAgent] = useState<string | null>(
-    defaultAgent ?? agents[0] ?? null,
-  );
+  const activeAgent = defaultAgent ?? agents[0] ?? null;
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [pendingAssistantId, setPendingAssistantId] = useState<string | null>(
@@ -66,9 +63,9 @@ export function AgentChat() {
   );
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  // Surface tool-call events as inline messages. `content` from the hook
-  // is the streaming text body, mirrored into the pending assistant row
-  // by the effect below.
+  // Surface tool-call events as inline messages. Sub-agent delegations
+  // show up here as `agent-helper` tool calls — same wire shape as a
+  // function tool, so the same row renders both.
   const handleEvent = (event: AgentChatEvent) => {
     if (
       event.type === 'response.output_item.added' &&
@@ -87,13 +84,13 @@ export function AgentChat() {
     }
   };
 
-  const { content, isStreaming, error, send, reset } = useAgentChat({
-    agent: selectedAgent ?? '',
+  const { content, isStreaming, error, send } = useAgentChat({
+    agent: activeAgent ?? '',
     onEvent: handleEvent,
   });
 
   // Mirror the streaming `content` into the pending assistant message so
-  // existing tool-call rows interleave correctly with deltas.
+  // tool-call rows interleave correctly with deltas.
   useEffect(() => {
     if (!pendingAssistantId) return;
     setMessages((prev) =>
@@ -110,7 +107,7 @@ export function AgentChat() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const message = input.trim();
-    if (!message || isStreaming || !selectedAgent) return;
+    if (!message || isStreaming || !activeAgent) return;
 
     setInput('');
 
@@ -128,37 +125,18 @@ export function AgentChat() {
 
   return (
     <div className="space-y-6 w-full max-w-4xl mx-auto">
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-foreground">Agents</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Two starter agents demo both authoring forms:
-            <code className="mx-1">helper</code> (code, with tools) lives in
-            <code className="mx-1">server/agents/helper.ts</code>, and
-            <code className="mx-1">planner</code> (markdown, prose-only) lives in
-            <code className="mx-1">config/agents/planner/agent.md</code>.
-            Add agents by editing either folder — they appear here on next boot.
-          </p>
-        </div>
-        {agents.length > 0 && (
-          <div className="flex gap-2">
-            {agents.map((name) => (
-              <Button
-                key={name}
-                variant={selectedAgent === name ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => {
-                  setSelectedAgent(name);
-                  setMessages([]);
-                  setPendingAssistantId(null);
-                  reset();
-                }}
-              >
-                {name}
-              </Button>
-            ))}
-          </div>
-        )}
+      <div>
+        <h2 className="text-2xl font-bold text-foreground">Chat</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          You're talking to <code className="mx-1">planner</code>, a
+          markdown agent at
+          <code className="mx-1">config/agents/planner/agent.md</code>.
+          For computational actions it delegates to its sub-agent
+          <code className="mx-1">helper</code> (code-defined at
+          <code className="mx-1">server/agents/helper.ts</code>), which
+          surfaces as an
+          <code className="mx-1">agent-helper</code> tool call.
+        </p>
       </div>
 
       <Card className="h-[600px] flex flex-col">
@@ -168,10 +146,10 @@ export function AgentChat() {
         >
           {messages.length === 0 && (
             <p className="text-sm text-muted-foreground text-center mt-8">
-              Start the conversation. Try asking <code>helper</code> "what
-              time is it?" or "count the words in: the quick brown fox", or
-              switch to <code>planner</code> and ask it to help you break down
-              a feature you're building.
+              Try "help me plan a feature" for a planning conversation,
+              or "what time is it?" / "count the words in: the quick
+              brown fox" to watch planner delegate to{' '}
+              <code>agent-helper</code>.
             </p>
           )}
           {messages.map((m) => {
@@ -211,15 +189,15 @@ export function AgentChat() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder={
-              selectedAgent
-                ? `Message ${selectedAgent}…`
+              activeAgent
+                ? `Message ${activeAgent}…`
                 : 'No agents registered'
             }
-            disabled={!selectedAgent || isStreaming}
+            disabled={!activeAgent || isStreaming}
           />
           <Button
             type="submit"
-            disabled={!input.trim() || !selectedAgent || isStreaming}
+            disabled={!input.trim() || !activeAgent || isStreaming}
           >
             {isStreaming ? 'Sending…' : 'Send'}
           </Button>

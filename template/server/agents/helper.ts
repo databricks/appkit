@@ -3,18 +3,28 @@ import { createAgent, tool } from '@databricks/appkit/beta';
 import { z } from 'zod';
 
 /**
- * Code-defined agent: showcases the imperative `createAgent({...})` form
- * with inline `tool({...})` definitions.
+ * Code-defined helper agent: holds the tools. Shipped as a sub-agent of
+ * the user-facing `planner` markdown agent (which references it via
+ * `agents: [helper]` in its frontmatter) rather than a chat-tab on its
+ * own. When the user asks planner for a computational action — "what
+ * time is it?", "count the words in this string" — planner calls the
+ * `agent-helper` tool, the agents plugin routes the sub-agent
+ * invocation here, and the answer flows back into the planner thread.
  *
- * Tools here are intentionally dependency-free (no SQL warehouse, no
- * volumes, no external APIs) so this template demos the tool-calling
- * round-trip even when no other plugin is selected at scaffold time.
+ * Two reasons to keep this code-defined instead of folding it into the
+ * markdown:
  *
- * The companion markdown agent at `config/agents/planner/agent.md`
- * shows the declarative form: pure-prose specialists whose entire
- * value is the system prompt — no tools, no compilation, one file
- * to edit. The agents plugin merges code-defined and markdown-defined
- * agents at boot, with code winning on key collision.
+ *   1. `tool({...})` calls live in TypeScript so the Zod schema, the
+ *      `execute` callback, and the return type all type-check together.
+ *      Markdown frontmatter is for prompt-driven specialists; code is
+ *      for behaviour-driven workers.
+ *   2. The dual-form composition (markdown coordinator + code worker)
+ *      is the canonical agents-plugin pattern; this template wires it
+ *      end to end so a scaffolded app has a working example to copy.
+ *
+ * Tools are intentionally dependency-free (no SQL warehouse, no
+ * volumes, no external APIs) so the round-trip works on a bare
+ * scaffold regardless of which other plugins were selected.
  */
 export const helper = createAgent({
   name: 'helper',
