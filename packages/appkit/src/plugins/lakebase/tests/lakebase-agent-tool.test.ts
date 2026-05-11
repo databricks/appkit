@@ -81,8 +81,7 @@ describe("LakebasePlugin — agent tool opt-in", () => {
     expect(defs).toHaveLength(1);
     expect(defs[0].name).toBe("query");
     expect(defs[0].annotations).toEqual({
-      readOnly: true,
-      destructive: false,
+      effect: "read",
       idempotent: false,
     });
   });
@@ -93,8 +92,7 @@ describe("LakebasePlugin — agent tool opt-in", () => {
     });
     const defs = plugin.getAgentTools();
     expect(defs[0].annotations).toEqual({
-      readOnly: false,
-      destructive: true,
+      effect: "destructive",
       idempotent: false,
     });
   });

@@ -84,7 +84,22 @@ falls back to the plugin's `defaultModel`.
 optional name: string;
 ```
 
-Filled in from the enclosing key when used in `agents: { foo: def }`.
+Stable identifier for the agent. **Optional and informational** —
+when the definition is registered via `agents: { foo: def }` (code) or
+lives at `config/agents/<id>/agent.md` (markdown), the **registry key
+always wins** and `name` is ignored. The agent will be reachable as
+`foo` (or `<id>`) regardless of what this field contains.
+
+Set `name` when:
+  - Running standalone via `runAgent({ agent: def })`, where there is
+    no enclosing key. The runtime uses it for the agent's slot in
+    error messages and OTel spans.
+  - Building a definition that may be passed to either form and you
+    want a consistent fallback label.
+
+Setting `name` to a value that differs from the registry key is
+harmless but confusing — prefer keeping them aligned or omitting `name`
+entirely.
 
 ***
 

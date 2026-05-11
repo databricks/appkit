@@ -172,16 +172,44 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     }
   }
 
-  /** Effective approval policy with defaults applied. */
+  /**
+   * Effective approval policy with defaults applied. Memoised so the
+   * `timeoutMs` validation warning fires at most once per plugin instance —
+   * `resolvedApprovalPolicy` gets hit on every chat stream and a noisy
+   * misconfig would otherwise spam the logs.
+   *
+   * `timeoutMs` is clamped to a 1s floor so a misconfigured value (`0`,
+   * negative, or `NaN`) can't degrade into immediate auto-denial of every
+   * mutating tool call.
+   */
+  private cachedApprovalPolicy: {
+    requireForDestructive: boolean;
+    timeoutMs: number;
+  } | null = null;
+
   private get resolvedApprovalPolicy(): {
     requireForDestructive: boolean;
     timeoutMs: number;
   } {
+    if (this.cachedApprovalPolicy) return this.cachedApprovalPolicy;
     const cfg = this.config.approval ?? {};
-    return {
+    const APPROVAL_TIMEOUT_FLOOR_MS = 1_000;
+    const APPROVAL_TIMEOUT_DEFAULT_MS = 60_000;
+    let timeoutMs = cfg.timeoutMs ?? APPROVAL_TIMEOUT_DEFAULT_MS;
+    if (!Number.isFinite(timeoutMs) || timeoutMs < APPROVAL_TIMEOUT_FLOOR_MS) {
+      logger.warn(
+        "approval.timeoutMs=%s is below the %sms floor; using default %sms instead. Mutating tool calls would otherwise auto-deny before any UI could respond.",
+        cfg.timeoutMs,
+        APPROVAL_TIMEOUT_FLOOR_MS,
+        APPROVAL_TIMEOUT_DEFAULT_MS,
+      );
+      timeoutMs = APPROVAL_TIMEOUT_DEFAULT_MS;
+    }
+    this.cachedApprovalPolicy = {
       requireForDestructive: cfg.requireForDestructive ?? true,
-      timeoutMs: cfg.timeoutMs ?? 60_000,
+      timeoutMs,
     };
+    return this.cachedApprovalPolicy;
   }
 
   /** Effective DoS limits with defaults applied. */

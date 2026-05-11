@@ -18,16 +18,17 @@ import type { LakebasePoolConfig } from "../../connectors/lakebase";
  *    PostgreSQL server rejects writes that slip past the classifier (e.g., a
  *    `SELECT` over a function with side effects).
  *
- * When `readOnly: false`, the tool is annotated `destructive: true` and the
- * agents plugin will require human approval for every invocation (see
+ * When `readOnly: false`, the tool is annotated `effect: "destructive"` and
+ * the agents plugin will require human approval for every invocation (see
  * `AgentsPluginConfig.approval`).
  */
 export interface LakebaseExposeAsAgentTool {
   /**
    * Enforce read-only execution. Defaults to `true`. Set to `false` to allow
    * destructive statements — highly discouraged outside of tightly controlled
-   * single-user deployments. Combined with the `destructive: true` annotation,
-   * the agents plugin will require explicit human approval for each call.
+   * single-user deployments. Combined with the `effect: "destructive"`
+   * annotation, the agents plugin will require explicit human approval for
+   * each call.
    */
   readOnly?: boolean;
 }

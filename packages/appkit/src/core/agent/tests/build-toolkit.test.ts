@@ -8,12 +8,12 @@ const registry: ToolRegistry = {
   query: defineTool({
     description: "Run a query",
     schema: z.object({ sql: z.string() }),
-    handler: () => "ok",
+    execute: () => "ok",
   }),
   history: defineTool({
     description: "Get query history",
     schema: z.object({}),
-    handler: () => [],
+    execute: () => [],
   }),
 };
 
@@ -79,18 +79,18 @@ describe("buildToolkitEntries", () => {
         description: "safe read",
         schema: z.object({}),
         autoInheritable: true,
-        handler: () => "ok",
+        execute: () => "ok",
       }),
       writeIt: defineTool({
         description: "unsafe write",
         schema: z.object({}),
         autoInheritable: false,
-        handler: () => "ok",
+        execute: () => "ok",
       }),
       unmarked: defineTool({
         description: "default: not auto-inheritable",
         schema: z.object({}),
-        handler: () => "ok",
+        execute: () => "ok",
       }),
     };
     const entries = buildToolkitEntries("p", mixed);

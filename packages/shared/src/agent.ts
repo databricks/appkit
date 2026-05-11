@@ -121,10 +121,12 @@ export type AgentEvent =
   | { type: "metadata"; data: Record<string, unknown> }
   | {
       /**
-       * Emitted by the agents plugin (not adapters) when a tool call annotated
-       * `destructive: true` is awaiting human approval. Clients should render
-       * an approval prompt and POST to `/chat/approve` with the matching
-       * `approvalId` and a `decision` of `approve` or `deny`.
+       * Emitted by the agents plugin (not adapters) when a mutating tool call
+       * is awaiting human approval — fires for tools annotated with
+       * `effect: "write" | "update" | "destructive"` (preferred) or the
+       * legacy `destructive: true` boolean. Clients should render an approval
+       * prompt and POST to `/chat/approve` with the matching `approvalId` and
+       * a `decision` of `approve` or `deny`.
        */
       type: "approval_pending";
       approvalId: string;
@@ -225,8 +227,10 @@ export interface AppKitMetadataEvent {
 }
 
 /**
- * Emitted when a destructive tool call is awaiting human approval. The client
- * should render an approval UI and POST the decision to `/chat/approve` with
+ * Emitted when a mutating tool call is awaiting human approval. Fires for
+ * tools annotated with `effect: "write" | "update" | "destructive"`
+ * (preferred) or the legacy `destructive: true` boolean. The client should
+ * render an approval UI and POST the decision to `/chat/approve` with
  * `{ streamId, approvalId, decision: "approve" | "deny" }`. If no decision
  * arrives before the server-side timeout, the call is auto-denied and the
  * agent receives a denial string as the tool output.

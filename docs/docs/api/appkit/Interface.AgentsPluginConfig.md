@@ -33,11 +33,13 @@ optional approval: {
 };
 ```
 
-Human-in-the-loop approval gate for destructive tool calls. When enabled
+Human-in-the-loop approval gate for mutating tool calls. When enabled
 (the default), the agents plugin emits an `appkit.approval_pending` SSE
-event before executing any tool annotated `destructive: true` and waits
-for a `POST /chat/approve` decision from the same user who initiated the
-stream. A missing decision after `timeoutMs` auto-denies the call.
+event before executing any tool whose annotation flags it as mutating —
+`effect: "write" | "update" | "destructive"` (preferred) or the legacy
+`destructive: true` boolean — and waits for a `POST /chat/approve`
+decision from the same user who initiated the stream. A missing decision
+after `timeoutMs` auto-denies the call.
 
 #### requireForDestructive?
 
@@ -45,7 +47,9 @@ stream. A missing decision after `timeoutMs` auto-denies the call.
 optional requireForDestructive: boolean;
 ```
 
-Require human approval for tools annotated `destructive: true`. Default: `true`.
+Require human approval for tools that mutate state. Triggered by
+`effect: "write" | "update" | "destructive"` (preferred) or the legacy
+`destructive: true` boolean. Default: `true`.
 
 #### timeoutMs?
 

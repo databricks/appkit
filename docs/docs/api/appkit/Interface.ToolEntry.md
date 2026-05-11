@@ -46,11 +46,20 @@ description: string;
 
 ***
 
-### handler()
+### execute()
 
 ```ts
-handler: (args: output<S>, signal?: AbortSignal) => unknown;
+execute: (args: output<S>, signal?: AbortSignal) => unknown;
 ```
+
+Callback the agents plugin invokes after Zod validation succeeds.
+
+Named `execute` to match the public `tool({ execute })` form — both the
+agent-author surface and the plugin-author surface now spell their
+callback the same way. `args` is the inferred Zod output (so `T extends
+z.ZodType` flows through and `args` is fully typed). `signal` is the
+per-run AbortSignal: forward it to any awaited I/O so cancellation
+actually unwinds the call (analytics and lakebase both do this).
 
 #### Parameters
 

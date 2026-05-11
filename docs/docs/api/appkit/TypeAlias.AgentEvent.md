@@ -262,7 +262,9 @@ toolName: string;
 type: "approval_pending";
 ```
 
-Emitted by the agents plugin (not adapters) when a tool call annotated
-`destructive: true` is awaiting human approval. Clients should render
-an approval prompt and POST to `/chat/approve` with the matching
-`approvalId` and a `decision` of `approve` or `deny`.
+Emitted by the agents plugin (not adapters) when a mutating tool call
+is awaiting human approval — fires for tools annotated with
+`effect: "write" | "update" | "destructive"` (preferred) or the
+legacy `destructive: true` boolean. Clients should render an approval
+prompt and POST to `/chat/approve` with the matching `approvalId` and
+a `decision` of `approve` or `deny`.

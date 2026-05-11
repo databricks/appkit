@@ -1064,36 +1064,48 @@ export class FilesPlugin extends Plugin implements ToolProvider {
             .optional()
             .describe("Directory path to list (optional, defaults to root)"),
         }),
-        annotations: { readOnly: true, requiresUserContext: true },
+        annotations: { effect: "read", requiresUserContext: true },
         autoInheritable: true,
-        handler: (args) => api().list(args.path),
+        execute: (args, signal) => {
+          signal?.throwIfAborted();
+          return api().list(args.path);
+        },
       }),
       [`${volumeKey}.read`]: defineTool({
         description: `Read a text file from the "${volumeKey}" volume`,
         schema: z.object({
           path: z.string().describe("File path to read"),
         }),
-        annotations: { readOnly: true, requiresUserContext: true },
+        annotations: { effect: "read", requiresUserContext: true },
         autoInheritable: true,
-        handler: (args) => api().read(args.path),
+        execute: (args, signal) => {
+          signal?.throwIfAborted();
+          return api().read(args.path);
+        },
       }),
       [`${volumeKey}.exists`]: defineTool({
         description: `Check if a file or directory exists in the "${volumeKey}" volume`,
         schema: z.object({
           path: z.string().describe("Path to check"),
         }),
-        annotations: { readOnly: true, requiresUserContext: true },
+        annotations: { effect: "read", requiresUserContext: true },
         autoInheritable: true,
-        handler: (args) => api().exists(args.path),
+        execute: (args, signal) => {
+          signal?.throwIfAborted();
+          return api().exists(args.path);
+        },
       }),
       [`${volumeKey}.metadata`]: defineTool({
         description: `Get metadata (size, type, last modified) for a file in the "${volumeKey}" volume`,
         schema: z.object({
           path: z.string().describe("File path"),
         }),
-        annotations: { readOnly: true, requiresUserContext: true },
+        annotations: { effect: "read", requiresUserContext: true },
         autoInheritable: true,
-        handler: (args) => api().metadata(args.path),
+        execute: (args, signal) => {
+          signal?.throwIfAborted();
+          return api().metadata(args.path);
+        },
       }),
       [`${volumeKey}.upload`]: defineTool({
         description: `Upload a text file to the "${volumeKey}" volume`,
@@ -1105,19 +1117,24 @@ export class FilesPlugin extends Plugin implements ToolProvider {
             .optional()
             .describe("Whether to overwrite existing file"),
         }),
-        annotations: { destructive: true, requiresUserContext: true },
-        handler: (args) =>
-          api().upload(args.path, args.contents, {
+        annotations: { effect: "destructive", requiresUserContext: true },
+        execute: (args, signal) => {
+          signal?.throwIfAborted();
+          return api().upload(args.path, args.contents, {
             overwrite: args.overwrite,
-          }),
+          });
+        },
       }),
       [`${volumeKey}.delete`]: defineTool({
         description: `Delete a file from the "${volumeKey}" volume`,
         schema: z.object({
           path: z.string().describe("File path to delete"),
         }),
-        annotations: { destructive: true, requiresUserContext: true },
-        handler: (args) => api().delete(args.path),
+        annotations: { effect: "destructive", requiresUserContext: true },
+        execute: (args, signal) => {
+          signal?.throwIfAborted();
+          return api().delete(args.path);
+        },
       }),
     };
   }

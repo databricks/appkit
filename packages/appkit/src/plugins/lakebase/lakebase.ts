@@ -179,11 +179,10 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
           .describe("Parameter values corresponding to placeholders"),
       }),
       annotations: {
-        readOnly,
-        destructive: !readOnly,
+        effect: readOnly ? "read" : "destructive",
         idempotent: false,
       },
-      handler: async (args) => {
+      execute: async (args) => {
         if (readOnly) {
           assertReadOnlySql(args.text);
           return this.runReadOnlyStatement(args.text, args.values);

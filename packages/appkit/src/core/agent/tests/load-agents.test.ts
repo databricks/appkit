@@ -182,7 +182,7 @@ describe("loadAgentsFromDir", () => {
       query: defineTool({
         description: "q",
         schema: z.object({ sql: z.string() }),
-        handler: () => "ok",
+        execute: () => "ok",
       }),
     };
     const plugins = new Map<
@@ -225,17 +225,17 @@ describe("loadAgentsFromDir", () => {
       list: defineTool({
         description: "l",
         schema: z.object({}),
-        handler: () => [],
+        execute: () => [],
       }),
       read: defineTool({
         description: "r",
         schema: z.object({ path: z.string() }),
-        handler: () => "x",
+        execute: () => "x",
       }),
       delete: defineTool({
         description: "d",
         schema: z.object({ path: z.string() }),
-        handler: () => undefined,
+        execute: () => undefined,
       }),
     };
     const plugins = new Map<
@@ -267,7 +267,7 @@ describe("loadAgentsFromDir", () => {
       query: defineTool({
         description: "q",
         schema: z.object({ sql: z.string() }),
-        handler: () => "ok",
+        execute: () => "ok",
       }),
     };
     const plugins = new Map<

@@ -283,9 +283,9 @@ agents({ autoInheritTools: { file: true, code: true } });
 defineTool({
   description: "safe read",
   schema: z.object({ ... }),
-  annotations: { readOnly: true, requiresUserContext: true },
+  annotations: { effect: "read", requiresUserContext: true },
   autoInheritable: true, // explicit consent that this tool may auto-spread
-  handler: ...,
+  execute: (args, signal) => ...,
 });
 ```
 
@@ -293,7 +293,7 @@ The AppKit core plugins ship with the following `autoInheritable` markings:
 
 | Tool | `autoInheritable` | Rationale |
 |---|---|---|
-| `analytics.query` | yes | OBO-scoped, `readOnly: true` enforced at runtime |
+| `analytics.query` | yes | OBO-scoped, read-only SQL enforced at runtime via the classifier |
 | `files.list` / `files.read` / `files.exists` / `files.metadata` | yes | OBO-scoped read operations |
 | `files.upload` / `files.delete` | no | Mutating — wire explicitly |
 | `genie.getConversation` | yes | Read-only history |
@@ -333,13 +333,13 @@ lakebase({
 });
 ```
 
-With `readOnly: true` (default), the same SQL classifier as `analytics.query` applies, and the accepted statement is additionally wrapped in `BEGIN READ ONLY; … ROLLBACK;` so the Postgres server rejects any write that slips past the classifier (e.g., a `SELECT` over a side-effecting function). The tool annotations are `{ readOnly: true, destructive: false }`.
+With `readOnly: true` (default), the same SQL classifier as `analytics.query` applies, and the accepted statement is additionally wrapped in `BEGIN READ ONLY; … ROLLBACK;` so the Postgres server rejects any write that slips past the classifier (e.g., a `SELECT` over a side-effecting function). The tool annotation is `{ effect: "read" }`.
 
-With `readOnly: false`, the tool accepts arbitrary SQL and is annotated `{ readOnly: false, destructive: true }`. The `destructive` annotation triggers the human-in-the-loop approval gate (below) on every invocation.
+With `readOnly: false`, the tool accepts arbitrary SQL and is annotated `{ effect: "destructive" }`. The `destructive` effect triggers the human-in-the-loop approval gate (below) on every invocation.
 
-### Human-in-the-loop approval for destructive tools
+### Human-in-the-loop approval for mutating tools
 
-Any tool annotated `destructive: true` requires explicit user approval before execution. Secure by default: set `approval.requireForDestructive: false` only for fully autonomous back-office agents running in single-user contexts.
+Any tool annotated with a mutating effect — `effect: "write" | "update" | "destructive"` (preferred) or the legacy `destructive: true` boolean — requires explicit user approval before execution. Secure by default: set `approval.requireForDestructive: false` only for fully autonomous back-office agents running in single-user contexts.
 
 Flow:
 
