@@ -1,3 +1,4 @@
+import { createContextKey, context as otelContext } from "@opentelemetry/api";
 import type express from "express";
 import type {
   BasePlugin,
@@ -19,6 +20,7 @@ import {
   ServiceContext,
   type UserContext,
 } from "../context";
+import type { PluginContext } from "../core/plugin-context";
 import { AppKitError, AuthenticationError } from "../errors";
 import { createLogger } from "../logging/logger";
 import { StreamManager } from "../stream";
@@ -40,6 +42,20 @@ import type {
 } from "./interceptors/types";
 
 const logger = createLogger("plugin");
+
+/**
+ * OTel context key for marking OBO dev mode fallback.
+ * Set when asUser() is called in development mode without a user token.
+ */
+const DEV_OBO_FALLBACK_KEY = createContextKey("appkit.devOboFallback");
+
+/**
+ * Returns true if the current execution is an OBO dev mode fallback
+ * (asUser() was called but fell back to service principal due to missing token).
+ */
+export function isDevOboFallback(): boolean {
+  return otelContext.active().getValue(DEV_OBO_FALLBACK_KEY) === true;
+}
 
 /**
  * Narrow an unknown thrown value to an Error that carries a numeric
@@ -64,6 +80,7 @@ const EXCLUDED_FROM_PROXY = new Set([
   // Lifecycle methods
   "setup",
   "shutdown",
+  "attachContext",
   "injectRoutes",
   "getEndpoints",
   "getSkipBodyParsingPaths",
@@ -163,11 +180,12 @@ export abstract class Plugin<
 > implements BasePlugin
 {
   protected isReady = false;
-  protected cache: CacheManager;
+  protected cache!: CacheManager;
   protected app: AppManager;
   protected devFileReader: DevFileReader;
   protected streamManager: StreamManager;
-  protected telemetry: ITelemetry;
+  protected telemetry!: ITelemetry;
+  protected context?: PluginContext;
 
   /** Registered endpoints for this plugin */
   private registeredEndpoints: PluginEndpointMap = {};
@@ -193,12 +211,58 @@ export abstract class Plugin<
       config.name ??
       (this.constructor as { manifest?: { name: string } }).manifest?.name ??
       "plugin";
-    this.telemetry = TelemetryManager.getProvider(this.name, config.telemetry);
     this.streamManager = new StreamManager();
-    this.cache = CacheManager.getInstanceSync();
     this.app = new AppManager();
     this.devFileReader = DevFileReader.getInstance();
+    this.context = (config as Record<string, unknown>).context as
+      | PluginContext
+      | undefined;
 
+    // Eagerly bind telemetry + cache if the core services have already been
+    // initialized (normal createApp path, or tests that mock CacheManager).
+    // If they haven't, we leave these undefined and rely on `attachContext`
+    // being called later — this lets factories eagerly construct plugin
+    // instances at module top-level before `createApp` has run.
+    this.tryAttachContext();
+  }
+
+  private tryAttachContext(): void {
+    try {
+      this.cache = CacheManager.getInstanceSync();
+    } catch {
+      return;
+    }
+    this.telemetry = TelemetryManager.getProvider(
+      this.name,
+      this.config.telemetry,
+    );
+    this.isReady = true;
+  }
+
+  /**
+   * Binds runtime dependencies (telemetry provider, cache, plugin context) to
+   * this plugin. Called by `AppKit._createApp` after construction and before
+   * `setup()`. Idempotent: safe to call if the constructor already bound them
+   * eagerly. Kept separate so factories can eagerly construct plugin instances
+   * without running this before `TelemetryManager.initialize()` /
+   * `CacheManager.getInstance()` have run.
+   */
+  attachContext(
+    deps: {
+      context?: unknown;
+      telemetryConfig?: BasePluginConfig["telemetry"];
+    } = {},
+  ): void {
+    if (!this.cache) {
+      this.cache = CacheManager.getInstanceSync();
+    }
+    this.telemetry = TelemetryManager.getProvider(
+      this.name,
+      deps.telemetryConfig ?? this.config.telemetry,
+    );
+    if (deps.context !== undefined) {
+      this.context = deps.context as PluginContext;
+    }
     this.isReady = true;
   }
 
@@ -338,7 +402,23 @@ export abstract class Plugin<
         "asUser() called without user token in development mode. Skipping user impersonation.",
       );
 
-      return this;
+      // Return a proxy that marks execution as OBO dev fallback via OTel context,
+      // so telemetry spans can distinguish intended OBO calls from regular SP calls
+      return new Proxy(this, {
+        get: (target, prop, receiver) => {
+          const value = Reflect.get(target, prop, receiver);
+          if (typeof value !== "function") return value;
+          if (typeof prop === "string" && EXCLUDED_FROM_PROXY.has(prop))
+            return value;
+
+          return (...args: unknown[]) => {
+            const ctx = otelContext
+              .active()
+              .setValue(DEV_OBO_FALLBACK_KEY, true);
+            return otelContext.with(ctx, () => value.apply(target, args));
+          };
+        },
+      }) as this;
     }
 
     if (!token) {
@@ -409,6 +489,9 @@ export abstract class Plugin<
     const effectiveUserKey = userKey ?? getCurrentUserId();
 
     const self = this;
+    // capture the active OTel context (HTTP span) before entering the async generator,
+    // where it would otherwise be lost across the async boundary
+    const parentOtelContext = otelContext.active();
 
     // wrapper function to ensure it returns a generator
     const asyncWrapperFn = async function* (streamSignal?: AbortSignal) {
@@ -428,11 +511,14 @@ export abstract class Plugin<
         return result;
       };
 
-      // execute the function with interceptors
-      const result = await self._executeWithInterceptors(
-        wrappedFn as (signal?: AbortSignal) => Promise<T>,
-        interceptors,
-        context,
+      // execute the function with interceptors, restoring the parent OTel context
+      // so telemetry spans are linked as children of the HTTP request span
+      const result = await otelContext.with(parentOtelContext, () =>
+        self._executeWithInterceptors(
+          wrappedFn as (signal?: AbortSignal) => Promise<T>,
+          interceptors,
+          context,
+        ),
       );
 
       // check if result is a generator
@@ -443,8 +529,16 @@ export abstract class Plugin<
       }
     };
 
-    // stream the result to the client
-    await this.streamManager.stream(res, asyncWrapperFn, streamConfig);
+    // stream the result to the client. The effective user key is forwarded
+    // to the stream manager so that reconnections to existing streamIds are
+    // bound to the original creator (prevents cross-user stream takeover via
+    // guessed/leaked IDs).
+    await this.streamManager.stream(
+      res,
+      asyncWrapperFn,
+      streamConfig,
+      effectiveUserKey,
+    );
   }
 
   /**

@@ -174,16 +174,13 @@ describe("Analytics Plugin", () => {
 
       expect(mockRes.setHeader).toHaveBeenCalledWith(
         "Content-Type",
-        "text/event-stream",
+        "text/event-stream; charset=utf-8",
       );
       expect(mockRes.setHeader).toHaveBeenCalledWith(
         "Cache-Control",
-        "no-cache",
+        "no-cache, no-transform",
       );
-      expect(mockRes.setHeader).toHaveBeenCalledWith(
-        "Connection",
-        "keep-alive",
-      );
+      expect(mockRes.setHeader).toHaveBeenCalledWith("X-Accel-Buffering", "no");
 
       expect(mockRes.write).toHaveBeenCalledWith("event: result\n");
       expect(mockRes.write).toHaveBeenCalledWith(
@@ -245,7 +242,7 @@ describe("Analytics Plugin", () => {
 
       expect(mockRes.setHeader).toHaveBeenCalledWith(
         "Content-Type",
-        "text/event-stream",
+        "text/event-stream; charset=utf-8",
       );
 
       expect(mockRes.write).toHaveBeenCalledWith("event: result\n");
@@ -606,6 +603,24 @@ describe("Analytics Plugin", () => {
       expect(mockRes.json).toHaveBeenCalledWith({
         error: "Query not found",
       });
+    });
+  });
+
+  describe("toolkit()", () => {
+    test("produces ToolkitEntry records keyed by the plugin name", () => {
+      const plugin = new AnalyticsPlugin({ name: "analytics" });
+      const entries = plugin.toolkit();
+      expect(Object.keys(entries)).toContain("analytics.query");
+      const entry = entries["analytics.query"];
+      expect(entry.__toolkitRef).toBe(true);
+      expect(entry.pluginName).toBe("analytics");
+      expect(entry.localName).toBe("query");
+    });
+
+    test("respects prefix and only options", () => {
+      const plugin = new AnalyticsPlugin({ name: "analytics" });
+      const entries = plugin.toolkit({ prefix: "", only: ["query"] });
+      expect(Object.keys(entries)).toEqual(["query"]);
     });
   });
 });

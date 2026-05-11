@@ -1,6 +1,6 @@
 {
   "$schema": "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
-  "version": "1.0",
+  "version": "1.1",
   "plugins": {
     "analytics": {
       "name": "analytics",
