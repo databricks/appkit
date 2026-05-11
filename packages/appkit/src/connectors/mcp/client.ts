@@ -34,6 +34,52 @@ import type { McpEndpointConfig } from "./types";
 
 const logger = createLogger("connector:mcp");
 
+/**
+ * Hard cap on the size of a single MCP response body, including SSE
+ * frames bundled into one HTTP response. MCP `initialize` / `tools/list`
+ * / `tools/call` responses are JSON-RPC payloads — single-digit kilobytes
+ * in normal use. A response anywhere near this size signals either a
+ * misbehaving server or an attempt to exhaust client memory; we'd rather
+ * fail loudly than allocate unbounded buffers from a remote.
+ */
+const MCP_RESPONSE_BODY_LIMIT_BYTES = 1024 * 1024;
+
+/**
+ * Read a fetch Response body into a string with a hard size cap. Aborts
+ * and throws if the cumulative bytes read cross {@link
+ * MCP_RESPONSE_BODY_LIMIT_BYTES}, so a remote server cannot keep
+ * streaming data past the limit. Returns the empty string when the
+ * response has no readable body.
+ */
+async function readResponseTextCapped(
+  response: Response,
+  maxBytes: number,
+  contextLabel: string,
+): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let total = 0;
+  let out = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        throw new Error(
+          `MCP ${contextLabel}: response body exceeded ${maxBytes} bytes — refusing to allocate unbounded buffer from a remote server.`,
+        );
+      }
+      out += decoder.decode(value, { stream: true });
+    }
+    out += decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+  return out;
+}
+
 interface JsonRpcRequest {
   jsonrpc: "2.0";
   id: number;
@@ -261,18 +307,22 @@ export class AppKitMcpClient {
     );
     const result = rpcResult.result as McpToolCallResult;
 
+    // `text` is optional on `McpToolCallResult.content[]` per the MCP
+    // spec; filtering only on `type === "text"` lets `c.text` be
+    // `undefined`, which `Array.join` would render as the literal
+    // string `"undefined"` and ship to the agent. Narrow on both
+    // fields so the joined string only contains real text.
+    const textContent = (result.content ?? []).filter(
+      (c): c is { type: "text"; text: string } =>
+        c.type === "text" && typeof c.text === "string",
+    );
+
     if (result.isError) {
-      const errText = (result.content ?? [])
-        .filter((c) => c.type === "text")
-        .map((c) => c.text)
-        .join("\n");
+      const errText = textContent.map((c) => c.text).join("\n");
       throw new Error(errText || "MCP tool call failed");
     }
 
-    return (result.content ?? [])
-      .filter((c) => c.type === "text")
-      .map((c) => c.text)
-      .join("\n");
+    return textContent.map((c) => c.text).join("\n");
   }
 
   async close(): Promise<void> {
@@ -334,11 +384,20 @@ export class AppKitMcpClient {
     }
 
     const contentType = response.headers.get("content-type") ?? "";
+    // Always read the body via the capped helper so a misconfigured or
+    // malicious server can't exhaust client memory by streaming an
+    // unbounded payload. Applies to both SSE (`response.text()` would
+    // have buffered the whole stream) and plain JSON (`response.json()`
+    // does the same internally).
+    const bodyText = await readResponseTextCapped(
+      response,
+      MCP_RESPONSE_BODY_LIMIT_BYTES,
+      method,
+    );
     let json: JsonRpcResponse;
 
     if (contentType.includes("text/event-stream")) {
-      const text = await response.text();
-      const lastData = text
+      const lastData = bodyText
         .split("\n")
         .filter((line) => line.startsWith("data: "))
         .map((line) => line.slice(6))
@@ -348,7 +407,10 @@ export class AppKitMcpClient {
       }
       json = JSON.parse(lastData) as JsonRpcResponse;
     } else {
-      json = (await response.json()) as JsonRpcResponse;
+      if (bodyText.length === 0) {
+        throw new Error(`MCP response for ${method} had an empty body`);
+      }
+      json = JSON.parse(bodyText) as JsonRpcResponse;
     }
 
     if (json.error) {
@@ -380,12 +442,36 @@ export class AppKitMcpClient {
     }
 
     const fetchImpl = this.options.fetchImpl ?? fetch;
-    await fetchImpl(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ jsonrpc: "2.0", method }),
-      signal: AbortSignal.timeout(30_000),
-    });
+    // MCP notifications are fire-and-forget per spec — we don't throw on
+    // failure. But silently swallowing 4xx/5xx hides server-side
+    // rejections that would otherwise look like a successful connect()
+    // followed by mysterious tool-call failures. Surface the bad status
+    // via the logger so the dev sees it without breaking the protocol
+    // contract.
+    try {
+      const response = await fetchImpl(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ jsonrpc: "2.0", method }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!response.ok) {
+        logger.warn(
+          "MCP notification %s to %s returned %d %s — the server may have rejected the request, but per MCP spec notifications are fire-and-forget and the connection is considered established.",
+          method,
+          url,
+          response.status,
+          response.statusText,
+        );
+      }
+    } catch (err) {
+      logger.warn(
+        "MCP notification %s to %s failed before a response was received: %O",
+        method,
+        url,
+        err,
+      );
+    }
   }
 
   /**

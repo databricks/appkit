@@ -400,3 +400,182 @@ describe("AppKitMcpClient — caller abort signal composition", () => {
     expect(error.name).toBe("AbortError");
   });
 });
+
+describe("AppKitMcpClient — callTool result hardening", () => {
+  let authSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    authSpy = vi.fn(workspaceAuth);
+  });
+
+  async function connectAndCall(
+    callResult: unknown,
+  ): Promise<{ result: string }> {
+    const connectResponders = [
+      () =>
+        jsonResponse(
+          { jsonrpc: "2.0", id: 1, result: {} },
+          { "mcp-session-id": "sess-1" },
+        ),
+      () => jsonResponse({ jsonrpc: "2.0", result: null }),
+      () =>
+        jsonResponse({
+          jsonrpc: "2.0",
+          id: 3,
+          result: { tools: [{ name: "tool" }] },
+        }),
+    ];
+    const callResponder = () =>
+      jsonResponse({ jsonrpc: "2.0", id: 4, result: callResult });
+
+    const { fetchImpl } = recordingFetch([...connectResponders, callResponder]);
+    const client = new AppKitMcpClient(WORKSPACE, authSpy, workspacePolicy, {
+      fetchImpl,
+      dnsLookup: publicDnsLookup,
+    });
+    await client.connect({
+      name: "srv",
+      url: `${WORKSPACE}/api/2.0/mcp/genie/abc`,
+    });
+    const result = await client.callTool("mcp.srv.tool", {}, undefined);
+    return { result };
+  }
+
+  test("filters content entries whose text is undefined (regression: 'undefined' literal in joined output)", async () => {
+    // McpToolCallResult.content[i].text is optional. Previously the
+    // filter only checked `type === "text"`, so an entry like
+    // { type: "text" } (text undefined) flowed through, and
+    // `Array.join('\n')` emitted the literal string "undefined".
+    const { result } = await connectAndCall({
+      content: [
+        { type: "text", text: "first line" },
+        { type: "text" },
+        { type: "text", text: "second line" },
+        { type: "image", data: "..." },
+      ],
+    });
+    expect(result).toBe("first line\nsecond line");
+    expect(result).not.toContain("undefined");
+  });
+
+  test("filters undefined text on the error path too", async () => {
+    await expect(
+      connectAndCall({
+        isError: true,
+        content: [{ type: "text" }, { type: "text", text: "boom" }],
+      }),
+    ).rejects.toThrow(/^boom$/);
+  });
+
+  test("error with no text content falls back to a generic message", async () => {
+    await expect(
+      connectAndCall({
+        isError: true,
+        content: [{ type: "text" }, { type: "image", data: "..." }],
+      }),
+    ).rejects.toThrow(/MCP tool call failed/);
+  });
+});
+
+describe("AppKitMcpClient — response body size cap", () => {
+  let authSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    authSpy = vi.fn(workspaceAuth);
+  });
+
+  test("rejects an unbounded response body (1 MB cap)", async () => {
+    // Mimic a server streaming forever: each `read()` returns another
+    // 64 KB chunk. The capped reader must abort once it crosses the
+    // 1 MB limit rather than buffer indefinitely.
+    const oversizedBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const chunk = new Uint8Array(64 * 1024).fill(0x41); // 'A'
+        let pushed = 0;
+        const maxChunks = 32; // 32 * 64KiB = 2 MiB, well above the 1 MiB cap
+        const id = setInterval(() => {
+          controller.enqueue(chunk);
+          pushed++;
+          if (pushed >= maxChunks) {
+            clearInterval(id);
+            controller.close();
+          }
+        }, 0);
+      },
+    });
+    const oversizedResponse = new Response(oversizedBody, {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+
+    const connectResponders = [
+      () =>
+        jsonResponse(
+          { jsonrpc: "2.0", id: 1, result: {} },
+          { "mcp-session-id": "sess-1" },
+        ),
+      () => jsonResponse({ jsonrpc: "2.0", result: null }),
+      () => oversizedResponse,
+    ];
+    const { fetchImpl } = recordingFetch(connectResponders);
+    const client = new AppKitMcpClient(WORKSPACE, authSpy, workspacePolicy, {
+      fetchImpl,
+      dnsLookup: publicDnsLookup,
+    });
+
+    await expect(
+      client.connect({
+        name: "evil",
+        url: `${WORKSPACE}/api/2.0/mcp/genie/abc`,
+      }),
+    ).rejects.toThrow(/exceeded 1048576 bytes/);
+  });
+});
+
+describe("AppKitMcpClient — sendNotification HTTP error surfacing", () => {
+  let authSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    authSpy = vi.fn(workspaceAuth);
+  });
+
+  test("connect succeeds even when notifications/initialized returns 4xx (fire-and-forget per spec)", async () => {
+    // The MCP spec says notifications are fire-and-forget. We must not
+    // throw, and connect() must return normally; the regression we're
+    // guarding is that the failure shouldn't silently appear as a clean
+    // connect from the dev's perspective (the warning log surfaces it).
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { fetchImpl } = recordingFetch([
+        () =>
+          jsonResponse(
+            { jsonrpc: "2.0", id: 1, result: {} },
+            { "mcp-session-id": "sess-1" },
+          ),
+        () =>
+          new Response("bad request", {
+            status: 400,
+            statusText: "Bad Request",
+          }),
+        () =>
+          jsonResponse({
+            jsonrpc: "2.0",
+            id: 3,
+            result: { tools: [{ name: "tool" }] },
+          }),
+      ]);
+      const client = new AppKitMcpClient(WORKSPACE, authSpy, workspacePolicy, {
+        fetchImpl,
+        dnsLookup: publicDnsLookup,
+      });
+      await expect(
+        client.connect({
+          name: "srv",
+          url: `${WORKSPACE}/api/2.0/mcp/genie/abc`,
+        }),
+      ).resolves.not.toThrow();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+});

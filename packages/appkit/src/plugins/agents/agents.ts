@@ -259,10 +259,21 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
    */
   async reload(): Promise<void> {
     const next = await this.buildAgentRegistry();
-    if (this.mcpClient) {
-      await this.mcpClient.close();
-      this.mcpClient = null;
-    }
+    // Deliberately NOT closing the existing mcpClient here. Tool
+    // dispatch in `dispatchToolCall` reads `this.mcpClient` at call
+    // time; closing it mid-stream throws "MCP client is closed" from
+    // the next sendRpc and kills the in-flight conversation. The
+    // client owns only short-lived `fetch` handles (no keep-alive
+    // sockets) and the connections map persists in the live instance,
+    // so dropping `this.mcpClient` would also strand in-flight tool
+    // calls that resolved the field a moment earlier. Leave the live
+    // client in place; `buildAgentRegistry` -> `connectHostedTools`
+    // adds any new endpoints to the same instance, and stale
+    // connections from a removed config become unreachable through
+    // the new agent tool indexes (small memory cost, no correctness
+    // hazard). The shutdown path still closes — that's process
+    // teardown, where in-flight streams have already been aborted via
+    // `abortActiveOperations`.
     this.agents = next.agents;
     this.defaultAgentName = next.defaultAgentName;
   }
