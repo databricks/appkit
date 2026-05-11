@@ -14,10 +14,10 @@ import {
 import { buildToolkitEntries } from "../../core/agent/build-toolkit";
 import {
   defineTool,
-  executeFromRegistry,
   toolsFromRegistry,
 } from "../../core/agent/tools/define-tool";
 import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
+import { formatZodError } from "../../core/agent/tools/tool";
 import { AuthenticationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
@@ -202,9 +202,16 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
 
     const pluginConfig = this.config;
 
-    // Return a proxy that intercepts pool-related methods and exports
+    // Return a proxy that intercepts pool-related methods and exports.
+    // The `pool` intercept is critical for agent tools: executeAgentTool
+    // calls this.runReadOnlyStatement() which accesses this.pool.connect().
+    // When `this` is the proxy, the get trap routes to the user pool.
     return new Proxy(this, {
       get(target, prop, receiver) {
+        if (prop === "pool") {
+          return userPool;
+        }
+
         if (prop === "query") {
           return <T extends QueryResultRow = any>(
             text: string,
@@ -314,8 +321,8 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
     const readOnly = opt.readOnly !== false;
     return defineTool({
       description: readOnly
-        ? "Execute a read-only SQL query against the Lakebase PostgreSQL database. Only SELECT, WITH, SHOW, EXPLAIN, and DESCRIBE statements are accepted. Use $1, $2, etc. as placeholders and pass values separately. Runs as the application's service principal."
-        : "Execute a parameterized SQL statement against the Lakebase PostgreSQL database. Use $1, $2, etc. as placeholders and pass values separately. Runs as the application's service principal. This tool can modify data; every invocation requires explicit human approval.",
+        ? "Execute a read-only SQL query against the Lakebase PostgreSQL database. Only SELECT, WITH, SHOW, EXPLAIN, and DESCRIBE statements are accepted. Use $1, $2, etc. as placeholders and pass values separately."
+        : "Execute a parameterized SQL statement against the Lakebase PostgreSQL database. Use $1, $2, etc. as placeholders and pass values separately. This tool can modify data; every invocation requires explicit human approval.",
       schema: z.object({
         text: z
           .string()
@@ -331,6 +338,7 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
         readOnly,
         destructive: !readOnly,
         idempotent: false,
+        requiresUserContext: true,
       },
       handler: async (args) => {
         if (readOnly) {
@@ -347,12 +355,37 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
     return toolsFromRegistry(this.tools);
   }
 
+  /**
+   * Executes a registered agent tool by name.
+   *
+   * This method intentionally inlines the tool dispatch instead of
+   * delegating to `executeFromRegistry`, so that `this.query()` and
+   * `this.runReadOnlyStatement()` resolve through the Proxy returned
+   * by `asUser(req)`. The Proxy intercepts `query` and `pool` to
+   * route SQL to the per-user connection pool, enabling OBO execution
+   * for agent tools.
+   */
   async executeAgentTool(
     name: string,
     args: unknown,
-    signal?: AbortSignal,
+    _signal?: AbortSignal,
   ): Promise<unknown> {
-    return executeFromRegistry(this.tools, name, args, signal);
+    const entry = this.tools[name];
+    if (!entry) {
+      throw new Error(`Unknown tool: ${name}`);
+    }
+    const parsed = entry.schema.safeParse(args);
+    if (!parsed.success) {
+      return formatZodError(parsed.error, name);
+    }
+
+    const { text, values } = parsed.data;
+    if (entry.annotations?.readOnly) {
+      assertReadOnlySql(text);
+      return this.runReadOnlyStatement(text, values);
+    }
+    const result = await this.query(text, values);
+    return result.rows;
   }
 
   toolkit(opts?: import("../../core/agent/types").ToolkitOptions) {

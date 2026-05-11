@@ -90,6 +90,7 @@ describe("LakebasePlugin — agent tool opt-in", () => {
       readOnly: true,
       destructive: false,
       idempotent: false,
+      requiresUserContext: true,
     });
   });
 
@@ -102,6 +103,7 @@ describe("LakebasePlugin — agent tool opt-in", () => {
       readOnly: false,
       destructive: true,
       idempotent: false,
+      requiresUserContext: true,
     });
   });
 });
@@ -228,5 +230,111 @@ describe("LakebasePlugin — destructive mode", () => {
       "UPDATE t SET x=1 WHERE id=$1",
       [42],
     );
+  });
+});
+
+describe("LakebasePlugin — OBO agent tool execution", () => {
+  // Tracks calls made to the user pool (vs SP pool) so we can assert
+  // that the proxy correctly routes agent tool SQL to the OBO pool.
+  const userPoolQueries: Array<{ text: string; values?: unknown[] }> = [];
+  const userClientQueries: Array<{ text: string; values?: unknown[] }> = [];
+  const userClientReleases: number[] = [];
+
+  const fakeReq = {
+    header: (name: string) => {
+      const headers: Record<string, string> = {
+        "x-forwarded-access-token": "user-token-123",
+        "x-forwarded-email": "alice@example.com",
+      };
+      return headers[name];
+    },
+  } as unknown as import("express").Request;
+
+  function makeUserPool() {
+    return {
+      query: vi.fn(async (text: string, values?: unknown[]) => {
+        userPoolQueries.push({ text, values });
+        return { rows: [{ from: "user-pool" }] };
+      }),
+      connect: vi.fn(async () => ({
+        query: vi.fn(async (text: string, values?: unknown[]) => {
+          userClientQueries.push({ text, values });
+          return { rows: [{ from: "user-pool-client" }] };
+        }),
+        release: vi.fn(() => {
+          userClientReleases.push(userClientReleases.length + 1);
+        }),
+      })),
+      end: vi.fn(),
+    };
+  }
+
+  beforeEach(async () => {
+    userPoolQueries.length = 0;
+    userClientQueries.length = 0;
+    userClientReleases.length = 0;
+    clientQueries.length = 0;
+
+    const { createLakebasePoolManager } = await import(
+      "../../../connectors/lakebase"
+    );
+    vi.mocked(createLakebasePoolManager).mockReturnValue({
+      getPool: vi.fn(() => makeUserPool() as unknown as Pool),
+      hasPool: vi.fn(() => false),
+      closeAll: vi.fn(async () => {}),
+      get size() {
+        return 1;
+      },
+    });
+  });
+
+  test("read-only query via OBO uses user pool, not SP pool", async () => {
+    const plugin = makePlugin({ exposeAsAgentTool: {} });
+    await plugin.setup();
+
+    const result = await plugin
+      .asUser(fakeReq)
+      .executeAgentTool("query", { text: "SELECT 1" });
+
+    expect(result).toEqual([{ from: "user-pool-client" }]);
+    expect(userClientQueries.map((c) => c.text)).toEqual([
+      "BEGIN READ ONLY",
+      "SELECT 1",
+      "ROLLBACK",
+    ]);
+    // SP pool should NOT have been touched
+    expect(clientQueries).toHaveLength(0);
+  });
+
+  test("destructive query via OBO uses user pool", async () => {
+    const plugin = makePlugin({ exposeAsAgentTool: { readOnly: false } });
+    await plugin.setup();
+
+    const result = await plugin.asUser(fakeReq).executeAgentTool("query", {
+      text: "UPDATE t SET x=1",
+      values: [42],
+    });
+
+    expect(result).toEqual([{ from: "user-pool" }]);
+    expect(userPoolQueries).toEqual([
+      { text: "UPDATE t SET x=1", values: [42] },
+    ]);
+    // SP pool should NOT have been touched
+    expect(clientQueries).toHaveLength(0);
+  });
+
+  test("read-only policy still enforced via OBO", async () => {
+    const plugin = makePlugin({ exposeAsAgentTool: {} });
+    await plugin.setup();
+
+    await expect(
+      plugin.asUser(fakeReq).executeAgentTool("query", {
+        text: "DROP TABLE users",
+      }),
+    ).rejects.toThrow(/read-only policy violation/i);
+
+    // No pool should have been touched
+    expect(userClientQueries).toHaveLength(0);
+    expect(clientQueries).toHaveLength(0);
   });
 });
