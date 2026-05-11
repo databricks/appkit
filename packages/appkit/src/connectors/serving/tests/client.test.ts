@@ -1,3 +1,4 @@
+import { Context } from "@databricks/sdk-experimental";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { invoke, stream } from "../client";
 
@@ -109,6 +110,24 @@ describe("Serving Connector", () => {
           raw: true,
           payload: expect.objectContaining({ stream: true }),
         }),
+        undefined,
+      );
+    });
+
+    test("passes SDK Context when AbortSignal is provided", async () => {
+      const client = createMockClient();
+      client.apiClient.request.mockResolvedValue({
+        contents: new ReadableStream(),
+      });
+
+      const controller = new AbortController();
+      await stream(client, "my-endpoint", { messages: [] }, controller.signal);
+
+      expect(client.apiClient.request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: "/serving-endpoints/my-endpoint/invocations",
+        }),
+        expect.any(Context),
       );
     });
 

@@ -1,6 +1,11 @@
 import type { TelemetryConfig } from "shared";
+import {
+  getCurrentUserId,
+  isInUserContext,
+} from "../../context/execution-context";
 import type { ITelemetry, Span } from "../../telemetry";
 import { SpanStatusCode } from "../../telemetry";
+import { isDevOboFallback } from "../plugin";
 import type { ExecutionInterceptor, InterceptorContext } from "./types";
 
 export class TelemetryInterceptor implements ExecutionInterceptor {
@@ -45,6 +50,15 @@ export class TelemetryInterceptor implements ExecutionInterceptor {
         }
 
         try {
+          span.setAttribute(
+            "execution.context",
+            isInUserContext() ? "user" : "service",
+          );
+          span.setAttribute("caller.id", getCurrentUserId());
+          if (isDevOboFallback()) {
+            span.setAttribute("execution.obo_dev_fallback", true);
+          }
+
           const result = await fn();
           if (!isAborted) {
             span.setStatus({ code: SpanStatusCode.OK });

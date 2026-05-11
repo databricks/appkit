@@ -1,10 +1,19 @@
 import type { Pool, QueryResult, QueryResultRow } from "pg";
+import type { AgentToolDefinition, ToolProvider } from "shared";
+import { z } from "zod";
 import {
   createLakebasePool,
   getLakebaseOrmConfig,
   getLakebasePgConfig,
   getUsernameWithApiLookup,
 } from "../../connectors/lakebase";
+import { buildToolkitEntries } from "../../core/agent/build-toolkit";
+import {
+  defineTool,
+  executeFromRegistry,
+  toolsFromRegistry,
+} from "../../core/agent/tools/define-tool";
+import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
@@ -30,17 +39,12 @@ const logger = createLogger("lakebase");
  * const result = await AppKit.lakebase.query("SELECT * FROM users WHERE id = $1", [userId]);
  * ```
  */
-class LakebasePlugin extends Plugin {
+export class LakebasePlugin extends Plugin implements ToolProvider {
   /** Plugin manifest declaring metadata and resource requirements */
   static manifest = manifest as PluginManifest<"lakebase">;
 
   protected declare config: ILakebaseConfig;
   private pool: Pool | null = null;
-
-  constructor(config: ILakebaseConfig) {
-    super(config);
-    this.config = config;
-  }
 
   /**
    * Initializes the Lakebase connection pool.
@@ -80,6 +84,39 @@ class LakebasePlugin extends Plugin {
   }
 
   /**
+   * Execute a single statement inside a `BEGIN READ ONLY … ROLLBACK`
+   * transaction on a dedicated client.
+   *
+   * The three commands MUST share a connection — a naive
+   * `pool.query("BEGIN READ ONLY; <stmt>; ROLLBACK")` batch cannot accept
+   * parameter values (PostgreSQL's Extended Query protocol rejects multi-
+   * statement prepared queries), which would silently break every
+   * parameterized query the agent tool issues.
+   *
+   * Returns the raw `rows` array for the user's statement. Side effects the
+   * statement may attempt (writes, writable-function side effects) are
+   * rejected by PostgreSQL under the read-only transaction posture.
+   */
+  private async runReadOnlyStatement(
+    text: string,
+    values?: unknown[],
+  ): Promise<unknown[]> {
+    // biome-ignore lint/style/noNonNullAssertion: pool is guaranteed non-null after setup()
+    const client = await this.pool!.connect();
+    try {
+      await client.query("BEGIN READ ONLY");
+      const result = await client.query(text, values);
+      return result.rows;
+    } finally {
+      try {
+        await client.query("ROLLBACK");
+      } finally {
+        client.release();
+      }
+    }
+  }
+
+  /**
    * Gracefully drains and closes the connection pool.
    * Called automatically by AppKit during shutdown.
    */
@@ -102,6 +139,77 @@ class LakebasePlugin extends Plugin {
    * - `getOrmConfig()` — Returns a config object compatible with Drizzle, TypeORM, Sequelize, etc.
    * - `getPgConfig()` — Returns a `pg.PoolConfig` object for manual pool construction
    */
+
+  /**
+   * Agent tool registry. Empty by default — the Lakebase plugin does NOT
+   * expose its SQL connection to LLM agents unless the developer explicitly
+   * opts in via `config.exposeAsAgentTool`. See {@link buildQueryTool}.
+   */
+  private tools: Record<string, ReturnType<typeof this.buildQueryTool>> = {};
+
+  constructor(config: ILakebaseConfig) {
+    super(config);
+    this.config = config;
+    if (config.exposeAsAgentTool) {
+      this.tools = { query: this.buildQueryTool(config.exposeAsAgentTool) };
+      logger.warn(
+        "Lakebase agent tool is enabled (readOnly=%s). Every agent with access to this plugin can execute SQL against the Lakebase database as the service principal.",
+        config.exposeAsAgentTool.readOnly !== false,
+      );
+    }
+  }
+
+  private buildQueryTool(
+    opt: NonNullable<ILakebaseConfig["exposeAsAgentTool"]>,
+  ) {
+    const readOnly = opt.readOnly !== false;
+    return defineTool({
+      description: readOnly
+        ? "Execute a read-only SQL query against the Lakebase PostgreSQL database. Only SELECT, WITH, SHOW, EXPLAIN, and DESCRIBE statements are accepted. Use $1, $2, etc. as placeholders and pass values separately. Runs as the application's service principal."
+        : "Execute a parameterized SQL statement against the Lakebase PostgreSQL database. Use $1, $2, etc. as placeholders and pass values separately. Runs as the application's service principal. This tool can modify data; every invocation requires explicit human approval.",
+      schema: z.object({
+        text: z
+          .string()
+          .describe(
+            "SQL statement with $1, $2, ... placeholders for parameters",
+          ),
+        values: z
+          .array(z.unknown())
+          .optional()
+          .describe("Parameter values corresponding to placeholders"),
+      }),
+      annotations: {
+        readOnly,
+        destructive: !readOnly,
+        idempotent: false,
+      },
+      handler: async (args) => {
+        if (readOnly) {
+          assertReadOnlySql(args.text);
+          return this.runReadOnlyStatement(args.text, args.values);
+        }
+        const result = await this.query(args.text, args.values);
+        return result.rows;
+      },
+    });
+  }
+
+  getAgentTools(): AgentToolDefinition[] {
+    return toolsFromRegistry(this.tools);
+  }
+
+  async executeAgentTool(
+    name: string,
+    args: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    return executeFromRegistry(this.tools, name, args, signal);
+  }
+
+  toolkit(opts?: import("../../core/agent/types").ToolkitOptions) {
+    return buildToolkitEntries(this.name, this.tools, opts);
+  }
+
   exports() {
     return {
       // biome-ignore lint/style/noNonNullAssertion: pool is guaranteed non-null after setup(), which AppKit always awaits before exposing the plugin API

@@ -1,0 +1,83 @@
+name: PR Metadata Verification
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-title:
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+
+    name: Conventional Commit Title
+    steps:
+      - name: Validate PR title
+        uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            test
+            ci
+            refactor
+            perf
+            chore
+            revert
+            style
+            build
+
+  detect-breaking:
+    name: Detect Breaking Commits
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Find breaking-change markers
+        id: scan
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        # Node 24 strips TS type annotations natively, so no tsx/transpile step needed.
+        run: node tools/detect-breaking-commits.ts
+
+      - name: Upsert sticky PR comment
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          FOUND: ${{ steps.scan.outputs.found }}
+          BREAKING_LIST: ${{ steps.scan.outputs.list }}
+          ALLOWED: ${{ contains(github.event.pull_request.labels.*.name, 'allow-breaking-change') }}
+        with:
+          script: |
+            const upsert = require('./.github/scripts/upsert-breaking-change-comment.cjs');
+            await upsert({ github, context });
+
+      - name: Fail unless explicitly allowed
+        if: steps.scan.outputs.found == 'true' && !contains(github.event.pull_request.labels.*.name, 'allow-breaking-change')
+        run: |
+          echo "::error::Breaking-change commits detected in tracked packages. Add the 'allow-breaking-change' label to bypass, or rewrite the offending commits."
+          exit 1

@@ -222,6 +222,38 @@ describe("scaffold", () => {
     });
   });
 
+  describe("stability field", () => {
+    it("omits stability from manifest when undefined (defaults to ga)", () => {
+      const tmp = makeTempDir();
+      tempDirs.push(tmp);
+      const targetDir = path.join(tmp, "test");
+
+      scaffoldPlugin(targetDir, BASE_ANSWERS, { isolated: false });
+
+      const manifest = JSON.parse(
+        fs.readFileSync(path.join(targetDir, "manifest.json"), "utf-8"),
+      );
+      expect(manifest.stability).toBeUndefined();
+    });
+
+    it('includes stability: "beta" when set', () => {
+      const tmp = makeTempDir();
+      tempDirs.push(tmp);
+      const targetDir = path.join(tmp, "test");
+
+      scaffoldPlugin(
+        targetDir,
+        { ...BASE_ANSWERS, stability: "beta" },
+        { isolated: false },
+      );
+
+      const manifest = JSON.parse(
+        fs.readFileSync(path.join(targetDir, "manifest.json"), "utf-8"),
+      );
+      expect(manifest.stability).toBe("beta");
+    });
+  });
+
   describe("rollback on failure", () => {
     it("cleans up written files when a write fails partway through", () => {
       const tmp = makeTempDir();
