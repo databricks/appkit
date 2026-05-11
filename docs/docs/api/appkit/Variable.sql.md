@@ -2,9 +2,14 @@
 
 ```ts
 const sql: {
+  bigint: SQLNumberMarker;
   binary: SQLBinaryMarker;
   boolean: SQLBooleanMarker;
   date: SQLDateMarker;
+  decimal: SQLNumberMarker;
+  double: SQLNumberMarker;
+  float: SQLNumberMarker;
+  int: SQLNumberMarker;
   number: SQLNumberMarker;
   string: SQLStringMarker;
   timestamp: SQLTimestampMarker;
@@ -14,6 +19,26 @@ const sql: {
 SQL helper namespace
 
 ## Type Declaration
+
+### bigint()
+
+```ts
+bigint(value: string | number | bigint): SQLNumberMarker;
+```
+
+Creates a `BIGINT` (64-bit signed integer) parameter. Accepts JS
+`bigint` so callers can round-trip values outside `Number.MAX_SAFE_INTEGER`
+without precision loss.
+
+#### Parameters
+
+| Parameter | Type | Description |
+| ------ | ------ | ------ |
+| `value` | `string` \| `number` \| `bigint` | Integer number, bigint, or integer-shaped string |
+
+#### Returns
+
+`SQLNumberMarker`
 
 ### binary()
 
@@ -134,14 +159,34 @@ const params = { startDate: sql.date("2024-01-01") };
 params = { startDate: "2024-01-01" }
 ```
 
-### number()
+### decimal()
 
 ```ts
-number(value: string | number): SQLNumberMarker;
+decimal(value: string | number): SQLNumberMarker;
 ```
 
-Creates a NUMERIC type parameter
-Accepts numbers or numeric strings
+Creates a `NUMERIC` (fixed-point DECIMAL) parameter. Use when you need
+exact decimal arithmetic (currency, percentages) — pass values as
+strings to avoid JS-number precision loss.
+
+#### Parameters
+
+| Parameter | Type | Description |
+| ------ | ------ | ------ |
+| `value` | `string` \| `number` | Number or numeric string (strings preferred for precision) |
+
+#### Returns
+
+`SQLNumberMarker`
+
+### double()
+
+```ts
+double(value: string | number): SQLNumberMarker;
+```
+
+Creates a `DOUBLE` (double-precision) parameter. Same precision as a JS
+`number`, so `sql.double(value)` is exact for any JS number.
 
 #### Parameters
 
@@ -153,18 +198,79 @@ Accepts numbers or numeric strings
 
 `SQLNumberMarker`
 
-Marker object for NUMERIC type parameter
+### float()
 
-#### Examples
-
-```typescript
-const params = { userId: sql.number(123) };
-params = { userId: "123" }
+```ts
+float(value: string | number): SQLNumberMarker;
 ```
 
+Creates a `FLOAT` (single-precision) parameter.
+
+#### Parameters
+
+| Parameter | Type | Description |
+| ------ | ------ | ------ |
+| `value` | `string` \| `number` | Number or numeric string |
+
+#### Returns
+
+`SQLNumberMarker`
+
+### int()
+
+```ts
+int(value: string | number): SQLNumberMarker;
+```
+
+Creates an `INT` (32-bit signed integer) parameter. Use when the column
+or context requires `INT` specifically (e.g. legacy schemas, or to make
+the wire type explicit).
+
+#### Parameters
+
+| Parameter | Type | Description |
+| ------ | ------ | ------ |
+| `value` | `string` \| `number` | Integer number or integer-shaped string |
+
+#### Returns
+
+`SQLNumberMarker`
+
+### number()
+
+```ts
+number(value: string | number): SQLNumberMarker;
+```
+
+Creates a numeric type parameter. The wire SQL type is inferred from the
+value so the parameter binds correctly in any context, including `LIMIT`
+and `OFFSET` (which require integer types):
+
+- JS integer (`10`) → `BIGINT`
+- JS non-integer (`3.14`) → `DOUBLE`
+- numeric string (`"123.45"`) → `NUMERIC` (preserves caller's precision intent)
+
+Reach for `sql.int()`, `sql.bigint()`, `sql.float()`, `sql.double()`, or
+`sql.decimal()` if you need to override the inferred type.
+
+#### Parameters
+
+| Parameter | Type | Description |
+| ------ | ------ | ------ |
+| `value` | `string` \| `number` | Number or numeric string |
+
+#### Returns
+
+`SQLNumberMarker`
+
+Marker for a numeric SQL parameter
+
+#### Example
+
 ```typescript
-const params = { userId: sql.number("123") };
-params = { userId: "123" }
+const params = { userId: sql.number(123) };       // BIGINT, value "123"
+const params = { ratio: sql.number(0.5) };        // DOUBLE, value "0.5"
+const params = { amount: sql.number("123.45") };  // NUMERIC, value "123.45"
 ```
 
 ### string()
