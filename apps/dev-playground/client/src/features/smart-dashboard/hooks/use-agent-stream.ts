@@ -1,35 +1,15 @@
-import { useCallback, useRef, useState } from "react";
+import { type AgentChatEvent, useAgentChat } from "@databricks/appkit-ui/react";
+import { useCallback, useMemo, useRef } from "react";
 import { beginStreamRun, recordStreamEvent } from "./use-stream-inspector";
 
-export interface SSEEvent {
-  type: string;
-  delta?: string;
-  item_id?: string;
-  item?: {
-    type?: string;
-    id?: string;
-    call_id?: string;
-    name?: string;
-    arguments?: string;
-    output?: string;
-    status?: string;
-  };
-  content?: string;
-  data?: Record<string, unknown>;
-  error?: string;
-  sequence_number?: number;
-  output_index?: number;
-  // appkit.approval_pending payload
-  approval_id?: string;
-  stream_id?: string;
-  tool_name?: string;
-  args?: unknown;
-  annotations?: {
-    readOnly?: boolean;
-    destructive?: boolean;
-    idempotent?: boolean;
-  };
-}
+/**
+ * Backwards-compatible alias for the SSE event shape that the rest of
+ * the smart-dashboard code (stream inspector, chat section, action
+ * dispatcher) already knows about. Identical to {@link AgentChatEvent}
+ * from `@databricks/appkit-ui/react` — keeping the name in this module
+ * means downstream callers don't need to be touched.
+ */
+export type SSEEvent = AgentChatEvent;
 
 interface UseAgentStreamOptions {
   agentName: string;
@@ -54,105 +34,90 @@ interface UseAgentStreamReturn {
   reset: () => void;
 }
 
+/**
+ * Smart-Dashboard wrapper around `useAgentChat` from
+ * `@databricks/appkit-ui/react`. The shared hook owns the fetch + SSE
+ * parsing + state plumbing; this wrapper adds two playground-specific
+ * concerns:
+ *
+ *   1. **`contextPrefix`** on `send()` — the dashboard injects active
+ *      filters / highlights into the user message so the agent always
+ *      sees the UI state. The shared hook stays narrow and lets us
+ *      compose the message here.
+ *   2. **Stream inspector wiring** — every send opens a `StreamRecord`
+ *      via {@link beginStreamRun} and forwards every event to
+ *      {@link recordStreamEvent} so the inspector drawer can render a
+ *      human-legible timeline. None of that belongs in the shared hook.
+ *
+ * Aside from those two layers this hook is a re-export: the SSE parsing
+ * code that used to live here moved into `useAgentChat`, and the API
+ * surface is preserved so existing callers (`smart-dashboard.route`,
+ * `agent-sidebar`) keep working.
+ */
 export function useAgentStream({
   agentName,
   onEvent,
 }: UseAgentStreamOptions): UseAgentStreamReturn {
-  const [content, setContent] = useState("");
-  const [events, setEvents] = useState<SSEEvent[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [threadId, setThreadId] = useState<string | null>(null);
-  const contentRef = useRef("");
+  // `runId` is captured at `send()` time so every event of the same run
+  // lands in the same StreamRecord. Stored as a ref to avoid re-mounting
+  // the chat hook every time the inspector dispatches.
+  const runIdRef = useRef<string | null>(null);
   const onEventRef = useRef(onEvent);
   onEventRef.current = onEvent;
 
-  const reset = useCallback(() => {
-    setContent("");
-    setEvents([]);
-    contentRef.current = "";
+  const handleEvent = useCallback((event: AgentChatEvent) => {
+    if (runIdRef.current) {
+      recordStreamEvent(runIdRef.current, event);
+    }
+    onEventRef.current?.(event);
   }, []);
+
+  const {
+    content: chatContent,
+    events,
+    isStreaming,
+    threadId,
+    error,
+    send: chatSend,
+    reset,
+  } = useAgentChat({ agent: agentName, onEvent: handleEvent });
 
   const send = useCallback(
     async (message: string, opts?: SendOptions) => {
-      setIsLoading(true);
-      setContent("");
-      setEvents([]);
-      contentRef.current = "";
-
+      runIdRef.current = beginStreamRun(
+        `${agentName}: ${message.slice(0, 80)}`,
+      );
       const wire = opts?.contextPrefix
         ? `${opts.contextPrefix}${message}`
         : message;
-
-      const runId = beginStreamRun(`${agentName}: ${message.slice(0, 80)}`);
-
       try {
-        const res = await fetch("/api/agents/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            message: wire,
-            agent: agentName,
-            ...(threadId && { threadId }),
-          }),
-        });
-
-        if (!res.ok) {
-          const errText = await res.text();
-          try {
-            const err = JSON.parse(errText);
-            setContent(`Error: ${err.error}`);
-          } catch {
-            setContent(`Error: Server returned ${res.status}`);
-          }
-          return;
-        }
-
-        const reader = res.body?.getReader();
-        if (!reader) return;
-
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            const data = line.slice(6).trim();
-            if (!data || data === "[DONE]") continue;
-            try {
-              const event: SSEEvent = JSON.parse(data);
-              if (!event.type) continue;
-              setEvents((prev) => [...prev, event]);
-              recordStreamEvent(runId, event);
-              onEventRef.current?.(event);
-
-              if (event.type === "appkit.metadata" && event.data?.threadId) {
-                setThreadId(event.data.threadId as string);
-              }
-              if (event.type === "response.output_text.delta" && event.delta) {
-                contentRef.current += event.delta;
-                setContent(contentRef.current);
-              }
-            } catch {
-              /* skip malformed events */
-            }
-          }
-        }
-      } catch (err) {
-        setContent(
-          `Error: ${err instanceof Error ? err.message : "Unknown error"}`,
-        );
+        await chatSend(wire);
       } finally {
-        setIsLoading(false);
+        runIdRef.current = null;
       }
     },
-    [agentName, threadId],
+    [agentName, chatSend],
   );
 
-  return { content, events, isLoading, threadId, send, reset };
+  // Surface fetch-level failures in the displayed content so the
+  // dashboard's assistant message turns into a visible error row,
+  // mirroring the prior hook's UX (it wrote "Error: ..." into the
+  // streamed content on `!res.ok`). `useAgentChat` exposes the error
+  // via a dedicated `error` field; we project it into `content` only
+  // when the stream actually failed, otherwise pass `chat.content`
+  // through verbatim.
+  const content = useMemo(() => {
+    if (error) return `Error: ${error}`;
+    return chatContent;
+  }, [error, chatContent]);
+
+  return {
+    content,
+    events,
+    // `isLoading` is the legacy name; the shared hook uses `isStreaming`.
+    isLoading: isStreaming,
+    threadId,
+    send,
+    reset,
+  };
 }
