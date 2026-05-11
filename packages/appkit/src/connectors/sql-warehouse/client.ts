@@ -25,6 +25,31 @@ import { executeStatementDefaults } from "./defaults";
 
 const logger = createLogger("connectors:sql-warehouse");
 
+/**
+ * Sleep for `ms`, resolving early if `signal` aborts. Caller must
+ * re-check `signal.aborted` afterwards to surface a typed cancel error.
+ * @internal
+ */
+function sleepWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const handle = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(handle);
+      resolve();
+    };
+    if (signal?.aborted) {
+      clearTimeout(handle);
+      resolve();
+      return;
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 interface SQLWarehouseConfig {
   timeout?: number;
   telemetry?: TelemetryOptions;
@@ -81,6 +106,293 @@ export class SQLWarehouseConnector {
     return this._arrowProcessor;
   }
 
+  /**
+   * Submit a statement and return the raw initial response. Caller polls
+   * via {@link pollStatement} on `RUNNING`/`PENDING`. Split from polling
+   * so durable executors can checkpoint the warehouse-side statement ID
+   * and re-attach after a crash without re-running the SQL.
+   */
+  async submitStatement(
+    workspaceClient: WorkspaceClient,
+    input: sql.ExecuteStatementRequest,
+    signal?: AbortSignal,
+  ): Promise<sql.StatementResponse> {
+    if (signal?.aborted) {
+      throw ExecutionError.canceled();
+    }
+    if (!input.statement) {
+      throw ValidationError.missingField("statement");
+    }
+    if (!input.warehouse_id) {
+      throw ValidationError.missingField("warehouse_id");
+    }
+
+    const body: sql.ExecuteStatementRequest = {
+      statement: input.statement,
+      parameters: input.parameters,
+      warehouse_id: input.warehouse_id,
+      catalog: input.catalog,
+      schema: input.schema,
+      wait_timeout: input.wait_timeout || executeStatementDefaults.wait_timeout,
+      disposition: input.disposition || executeStatementDefaults.disposition,
+      format: input.format || executeStatementDefaults.format,
+      byte_limit: input.byte_limit,
+      row_limit: input.row_limit,
+      on_wait_timeout:
+        input.on_wait_timeout || executeStatementDefaults.on_wait_timeout,
+    };
+
+    return this.telemetry.startActiveSpan(
+      "sql.submit",
+      {
+        kind: SpanKind.CLIENT,
+        attributes: {
+          "db.system": "databricks",
+          "db.warehouse_id": body.warehouse_id || "",
+          "db.catalog": body.catalog ?? "",
+          "db.schema": body.schema ?? "",
+          "db.statement": body.statement?.substring(0, 500) || "",
+          "db.has_parameters": !!body.parameters,
+        },
+      },
+      async (span: Span) => {
+        try {
+          const response =
+            await workspaceClient.statementExecution.executeStatement(
+              body,
+              this._createContext(signal),
+            );
+          if (!response) {
+            throw ConnectionError.apiFailure("SQL Warehouse");
+          }
+          if (response.statement_id) {
+            span.setAttribute("db.statement_id", response.statement_id);
+          }
+          if (response.status?.state) {
+            span.setAttribute("db.status", response.status.state);
+          }
+          span.setStatus({ code: SpanStatusCode.OK });
+          return response;
+        } catch (error) {
+          span.recordException(error as Error);
+          span.setStatus({
+            code: SpanStatusCode.ERROR,
+            message: error instanceof Error ? error.message : String(error),
+          });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+      { name: this.name, includePrefix: true },
+    );
+  }
+
+  /** Single status read for a known statement ID. Used to re-attach after a crash. */
+  async getStatement(
+    workspaceClient: WorkspaceClient,
+    statementId: string,
+    signal?: AbortSignal,
+  ): Promise<sql.StatementResponse> {
+    if (signal?.aborted) {
+      throw ExecutionError.canceled();
+    }
+    const response = await workspaceClient.statementExecution.getStatement(
+      { statement_id: statementId },
+      this._createContext(signal),
+    );
+    if (!response) {
+      throw ConnectionError.apiFailure("SQL Warehouse");
+    }
+    return response;
+  }
+
+  /**
+   * Block until the statement reaches a terminal state, then transform.
+   * Public so durable callers can re-attach to a persisted statement ID.
+   */
+  async pollStatement(
+    workspaceClient: WorkspaceClient,
+    statementId: string,
+    signal?: AbortSignal,
+    timeout = this.config.timeout ?? executeStatementDefaults.timeout,
+  ): Promise<ReturnType<SQLWarehouseConnector["transformResult"]>> {
+    return this.telemetry.startActiveSpan(
+      "sql.poll",
+      {
+        attributes: {
+          "db.statement_id": statementId,
+          "db.polling.timeout": timeout,
+        },
+      },
+      async (span: Span) => {
+        try {
+          const startTime = Date.now();
+          // 250 ms first poll → doubles → 5 s cap. Short start avoids
+          // burning a full second on near-instant queries.
+          let delay = 250;
+          const maxDelayBetweenPolls = 5000;
+          let pollCount = 0;
+
+          while (true) {
+            pollCount++;
+            span.setAttribute("db.polling.current_attempt", pollCount);
+
+            const elapsedTime = Date.now() - startTime;
+            if (elapsedTime > timeout) {
+              const error = ExecutionError.statementFailed(
+                `Polling timeout exceeded after ${timeout}ms (elapsed: ${elapsedTime}ms)`,
+              );
+              span.recordException(error);
+              span.setStatus({ code: SpanStatusCode.ERROR });
+              throw error;
+            }
+
+            if (signal?.aborted) {
+              const error = ExecutionError.canceled();
+              span.recordException(error);
+              span.setStatus({ code: SpanStatusCode.ERROR });
+              throw error;
+            }
+
+            span.addEvent("polling.attempt", {
+              "poll.attempt": pollCount,
+              "poll.delay_ms": delay,
+              "poll.elapsed_ms": elapsedTime,
+            });
+
+            const response =
+              await workspaceClient.statementExecution.getStatement(
+                { statement_id: statementId },
+                this._createContext(signal),
+              );
+            if (!response) {
+              throw ConnectionError.apiFailure("SQL Warehouse");
+            }
+
+            const status = response.status;
+            span.addEvent("polling.status_check", {
+              "db.status": status?.state,
+              "poll.attempt": pollCount,
+            });
+
+            switch (status?.state) {
+              case "PENDING":
+              case "RUNNING":
+                break;
+              case "SUCCEEDED":
+                span.setAttribute("db.polling.attempts", pollCount);
+                span.setAttribute("db.polling.total_duration_ms", elapsedTime);
+                span.addEvent("polling.completed", {
+                  "poll.attempts": pollCount,
+                  "poll.duration_ms": elapsedTime,
+                });
+                span.setStatus({ code: SpanStatusCode.OK });
+                return this.transformResult(response);
+              case "FAILED":
+                throw ExecutionError.statementFailed(status.error?.message);
+              case "CANCELED":
+                throw ExecutionError.canceled();
+              case "CLOSED":
+                throw ExecutionError.resultsClosed();
+              default:
+                throw ExecutionError.unknownState(
+                  String(status?.state ?? "unknown"),
+                );
+            }
+
+            // ±25% jitter de-syncs concurrent pollers (e.g. post-restart
+            // reconnect storms). Signal-aware so cancels wake immediately.
+            const jitterMs = Math.floor(delay * (Math.random() - 0.5) * 0.5);
+            const sleepMs = Math.max(0, delay + jitterMs);
+            await sleepWithSignal(sleepMs, signal);
+            if (signal?.aborted) {
+              const error = ExecutionError.canceled();
+              span.recordException(error);
+              span.setStatus({ code: SpanStatusCode.ERROR });
+              throw error;
+            }
+            delay = Math.min(delay * 2, maxDelayBetweenPolls);
+          }
+        } catch (error) {
+          span.recordException(error as Error);
+          span.setStatus({
+            code: SpanStatusCode.ERROR,
+            message: error instanceof Error ? error.message : String(error),
+          });
+
+          // Logging happens once at the orchestrator (executeStatement / durable handler).
+          if (error instanceof AppKitError) {
+            throw error;
+          }
+          throw ExecutionError.statementFailed(
+            error instanceof Error ? error.message : String(error),
+          );
+        } finally {
+          span.end();
+        }
+      },
+      { name: this.name, includePrefix: true },
+    );
+  }
+
+  /**
+   * Standard result transform: ARROW_STREAM → minimal job handle (fetch
+   * chunks via {@link getArrowData}); JSON with rows → positional
+   * `data_array` projected into name-keyed `data` (parsing JSON-looking
+   * STRING values); otherwise pass-through. Public so durable handlers
+   * can shape a {@link getStatement} response without re-polling.
+   */
+  transformResult(response: sql.StatementResponse) {
+    if (response.manifest?.format === "ARROW_STREAM") {
+      return this._toArrowJobHandle(response);
+    }
+
+    if (!response.result?.data_array || !response.manifest?.schema?.columns) {
+      return response;
+    }
+
+    const columns = response.manifest.schema.columns;
+    const transformedData = response.result.data_array.map((row) => {
+      const obj: Record<string, unknown> = {};
+      row.forEach((value, index) => {
+        const column = columns[index];
+        const columnName = column?.name || `column_${index}`;
+
+        if (
+          column?.type_name === "STRING" &&
+          typeof value === "string" &&
+          value &&
+          (value[0] === "{" || value[0] === "[")
+        ) {
+          try {
+            obj[columnName] = JSON.parse(value);
+          } catch {
+            obj[columnName] = value;
+          }
+        } else {
+          obj[columnName] = value;
+        }
+      });
+      return obj;
+    });
+
+    const { data_array: _data_array, ...restResult } = response.result;
+    return {
+      ...response,
+      result: {
+        ...restResult,
+        data: transformedData,
+      },
+    };
+  }
+
+  /**
+   * Submit + (optionally poll) + transform — non-durable happy path.
+   * Most callers want this; durable executors should call
+   * {@link submitStatement} and {@link pollStatement} separately so they
+   * can checkpoint the warehouse-side statement ID between the two.
+   */
   async executeStatement(
     workspaceClient: WorkspaceClient,
     input: sql.ExecuteStatementRequest,
@@ -89,7 +401,6 @@ export class SQLWarehouseConnector {
     const startTime = Date.now();
     let success = false;
 
-    // if signal is aborted, throw an error
     if (signal?.aborted) {
       throw ExecutionError.canceled();
     }
@@ -113,7 +424,6 @@ export class SQLWarehouseConnector {
 
         if (signal) {
           abortHandler = () => {
-            // abort span if not recording
             if (!span.isRecording()) return;
             isAborted = true;
             span.setAttribute("cancelled", true);
@@ -127,53 +437,14 @@ export class SQLWarehouseConnector {
         }
 
         try {
-          // validate required fields
-          if (!input.statement) {
-            throw ValidationError.missingField("statement");
-          }
-
-          if (!input.warehouse_id) {
-            throw ValidationError.missingField("warehouse_id");
-          }
-
-          const body: sql.ExecuteStatementRequest = {
-            statement: input.statement,
-            parameters: input.parameters,
-            warehouse_id: input.warehouse_id,
-            catalog: input.catalog,
-            schema: input.schema,
-            wait_timeout:
-              input.wait_timeout || executeStatementDefaults.wait_timeout,
-            disposition:
-              input.disposition || executeStatementDefaults.disposition,
-            format: input.format || executeStatementDefaults.format,
-            byte_limit: input.byte_limit,
-            row_limit: input.row_limit,
-            on_wait_timeout:
-              input.on_wait_timeout || executeStatementDefaults.on_wait_timeout,
-          };
-
-          span.addEvent("statement.submitting", {
-            "db.warehouse_id": input.warehouse_id,
-          });
-
-          const response =
-            await workspaceClient.statementExecution.executeStatement(
-              body,
-              this._createContext(signal),
-            );
-
-          if (!response) {
-            throw ConnectionError.apiFailure("SQL Warehouse");
-          }
+          const response = await this.submitStatement(
+            workspaceClient,
+            input,
+            signal,
+          );
           const status = response.status;
           const statementId = response.statement_id as string;
-
           span.setAttribute("db.statement_id", statementId);
-          span.addEvent("statement.submitted", {
-            "db.statement_id": response.statement_id,
-            "db.status": status?.state,
-          });
 
           let result:
             | sql.StatementResponse
@@ -182,18 +453,14 @@ export class SQLWarehouseConnector {
           switch (status?.state) {
             case "RUNNING":
             case "PENDING":
-              span.addEvent("statement.polling_started", {
-                "db.status": response.status?.state,
-              });
-              result = await this._pollForStatementResult(
+              result = await this.pollStatement(
                 workspaceClient,
                 statementId,
-                this.config.timeout,
                 signal,
               );
               break;
             case "SUCCEEDED":
-              result = this._transformDataArray(response);
+              result = this.transformResult(response);
               break;
             case "FAILED":
               throw ExecutionError.statementFailed(status.error?.message);
@@ -223,13 +490,11 @@ export class SQLWarehouseConnector {
           });
 
           success = true;
-          // only set success status if not aborted
           if (!isAborted) {
             span.setStatus({ code: SpanStatusCode.OK });
           }
           return result;
         } catch (error) {
-          // only record error if not already handled by abort
           if (!isAborted) {
             span.recordException(error as Error);
             span.setStatus({
@@ -250,14 +515,12 @@ export class SQLWarehouseConnector {
             error instanceof Error ? error.message : String(error),
           );
         } finally {
-          // remove abort handler
           if (abortHandler && signal) {
             signal.removeEventListener("abort", abortHandler);
           }
 
           const duration = Date.now() - startTime;
 
-          // end span if not already ended by abort handler
           if (!isAborted) {
             span.end();
           }
@@ -278,174 +541,11 @@ export class SQLWarehouseConnector {
     );
   }
 
-  private async _pollForStatementResult(
-    workspaceClient: WorkspaceClient,
-    statementId: string,
-    timeout = executeStatementDefaults.timeout,
-    signal?: AbortSignal,
-  ) {
-    return this.telemetry.startActiveSpan(
-      "sql.poll",
-      {
-        attributes: {
-          "db.statement_id": statementId,
-          "db.polling.timeout": timeout,
-        },
-      },
-      async (span: Span) => {
-        try {
-          const startTime = Date.now();
-          let delay = 1000;
-          const maxDelayBetweenPolls = 5000; // max 5 seconds between polls
-          let pollCount = 0;
-
-          while (true) {
-            pollCount++;
-            span.setAttribute("db.polling.current_attempt", pollCount);
-
-            // check if timeout exceeded
-            const elapsedTime = Date.now() - startTime;
-            if (elapsedTime > timeout) {
-              const error = ExecutionError.statementFailed(
-                `Polling timeout exceeded after ${timeout}ms (elapsed: ${elapsedTime}ms)`,
-              );
-              span.recordException(error);
-              span.setStatus({ code: SpanStatusCode.ERROR });
-              throw error;
-            }
-
-            if (signal?.aborted) {
-              const error = ExecutionError.canceled();
-              span.recordException(error);
-              span.setStatus({ code: SpanStatusCode.ERROR });
-              throw error;
-            }
-
-            span.addEvent("polling.attempt", {
-              "poll.attempt": pollCount,
-              "poll.delay_ms": delay,
-              "poll.elapsed_ms": elapsedTime,
-            });
-
-            const response =
-              await workspaceClient.statementExecution.getStatement(
-                {
-                  statement_id: statementId,
-                },
-                this._createContext(signal),
-              );
-            if (!response) {
-              throw ConnectionError.apiFailure("SQL Warehouse");
-            }
-
-            const status = response.status;
-
-            span.addEvent("polling.status_check", {
-              "db.status": status?.state,
-              "poll.attempt": pollCount,
-            });
-
-            switch (status?.state) {
-              case "PENDING":
-              case "RUNNING":
-                // continue polling
-                break;
-              case "SUCCEEDED":
-                span.setAttribute("db.polling.attempts", pollCount);
-                span.setAttribute("db.polling.total_duration_ms", elapsedTime);
-                span.addEvent("polling.completed", {
-                  "poll.attempts": pollCount,
-                  "poll.duration_ms": elapsedTime,
-                });
-                span.setStatus({ code: SpanStatusCode.OK });
-                return this._transformDataArray(response);
-              case "FAILED":
-                throw ExecutionError.statementFailed(status.error?.message);
-              case "CANCELED":
-                throw ExecutionError.canceled();
-              case "CLOSED":
-                throw ExecutionError.resultsClosed();
-              default:
-                throw ExecutionError.unknownState(
-                  String(status?.state ?? "unknown"),
-                );
-            }
-
-            // continue polling after delay
-            await new Promise((resolve) => setTimeout(resolve, delay));
-            delay = Math.min(delay * 2, maxDelayBetweenPolls);
-          }
-        } catch (error) {
-          span.recordException(error as Error);
-          span.setStatus({
-            code: SpanStatusCode.ERROR,
-            message: error instanceof Error ? error.message : String(error),
-          });
-
-          // error logging is handled by executeStatement's catch block (gated on isAborted)
-          if (error instanceof AppKitError) {
-            throw error;
-          }
-          throw ExecutionError.statementFailed(
-            error instanceof Error ? error.message : String(error),
-          );
-        } finally {
-          span.end();
-        }
-      },
-      { name: this.name, includePrefix: true },
-    );
-  }
-
-  private _transformDataArray(response: sql.StatementResponse) {
-    if (response.manifest?.format === "ARROW_STREAM") {
-      return this.updateWithArrowStatus(response);
-    }
-
-    if (!response.result?.data_array || !response.manifest?.schema?.columns) {
-      return response;
-    }
-
-    const columns = response.manifest.schema.columns;
-
-    const transformedData = response.result.data_array.map((row) => {
-      const obj: Record<string, unknown> = {};
-      row.forEach((value, index) => {
-        const column = columns[index];
-        const columnName = column?.name || `column_${index}`;
-
-        // attempt to parse JSON strings for string columns
-        if (
-          column?.type_name === "STRING" &&
-          typeof value === "string" &&
-          value &&
-          (value[0] === "{" || value[0] === "[")
-        ) {
-          try {
-            obj[columnName] = JSON.parse(value);
-          } catch {
-            // if parsing fails, keep as string
-            obj[columnName] = value;
-          }
-        } else {
-          obj[columnName] = value;
-        }
-      });
-      return obj;
-    });
-
-    // remove data_array
-    const { data_array: _data_array, ...restResult } = response.result;
-    return {
-      ...response,
-      result: {
-        ...restResult,
-        data: transformedData,
-      },
-    };
-  }
-
-  private updateWithArrowStatus(response: sql.StatementResponse): {
+  /**
+   * Minimal handle the frontend uses to fetch the Arrow buffer via
+   * `/arrow-result/:jobId`. Drops manifest + external_links by design.
+   */
+  private _toArrowJobHandle(response: sql.StatementResponse): {
     result: { statement_id: string; status: sql.StatementStatus };
   } {
     return {
