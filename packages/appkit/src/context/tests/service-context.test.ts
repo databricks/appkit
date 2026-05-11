@@ -21,8 +21,17 @@ const { mockMe, mockApiRequest, MockWorkspaceClient } = vi.hoisted(() => {
   return { mockMe, mockApiRequest, MockWorkspaceClient };
 });
 
+class MockConfigError extends Error {
+  baseMessage: string;
+  constructor(message: string) {
+    super(message);
+    this.baseMessage = message;
+  }
+}
+
 vi.mock("@databricks/sdk-experimental", () => ({
   WorkspaceClient: MockWorkspaceClient,
+  ConfigError: MockConfigError,
 }));
 
 // ── Helpers ────────────────────────────────────────────────────────
