@@ -163,6 +163,14 @@ jobs:
           APPKIT_E2E_TEST: 'true'
           DATABRICKS_WAREHOUSE_ID: e2e-mock
           DATABRICKS_WORKSPACE_ID: e2e-mock
+          # The playground's `helper` agent has no explicit `model:` and
+          # falls back to this env var via DatabricksAdapter.fromModelServing.
+          # CI never reaches a real serving endpoint (APPKIT_E2E_TEST swaps
+          # in the mock WorkspaceClient), but the agents plugin still
+          # resolves the adapter at setup() time, so a missing value throws
+          # at boot and fails the webServer health check before the test
+          # runs.
+          DATABRICKS_SERVING_ENDPOINT_NAME: e2e-mock
 
   pr-template-artifact:
     name: PR Template Artifact

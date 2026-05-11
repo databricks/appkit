@@ -32,9 +32,10 @@ interface AgentsClientConfig {
  * Minimal chat surface for the `agents` plugin.
  *
  * - Reads the registered agent list from `usePluginClientConfig('agents')`
- *   (boot-time, no extra fetch) and lets the user pick one (markdown
- *   `assistant` from `config/agents/assistant/agent.md` and code-defined
- *   `helper` from `server/agents/helper.ts`).
+ *   (boot-time, no extra fetch) and lets the user pick one. The template
+ *   ships with a single code-defined `helper` agent (`server/agents/helper.ts`);
+ *   drop a `config/agents/<id>/agent.md` to add markdown-defined agents
+ *   and they appear here automatically.
  * - Sends turns via `useAgentChat()` (POSTs `/api/agents/chat` and
  *   consumes the Responses-API SSE stream the agents plugin emits).
  * - Renders streaming assistant text incrementally and surfaces tool
@@ -122,9 +123,11 @@ export function AgentChat() {
         <div>
           <h2 className="text-2xl font-bold text-foreground">Agents</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Chat with a registered agent. Markdown agents come from
-            <code className="mx-1">config/agents/</code>; code-defined
-            agents are wired in <code className="mx-1">server/server.ts</code>.
+            Chat with a registered agent. Code-defined agents live in
+            <code className="mx-1">server/agents/</code> and are wired in
+            <code className="mx-1">server/server.ts</code>; drop a
+            <code className="mx-1">config/agents/&lt;id&gt;/agent.md</code>
+            to add a markdown-defined agent (it'll show up here on the next boot).
           </p>
         </div>
         {agents.length > 0 && (

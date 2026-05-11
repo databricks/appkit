@@ -370,6 +370,10 @@ createApp({
       // `query` (markdown dispatcher) + `sql_analyst` + `dashboard_pilot`
       // wire the /smart-dashboard route. `insights` and `anomaly` are
       // ephemeral markdown agents auto-fired by the route's AgentSidebar.
+      // `helper` is the conversational default for the bare `/agent` route
+      // (the markdown agents are dispatchers or ephemeral and don't make
+      // sense as the user-facing landing agent).
+      defaultAgent: "helper",
     }),
     // TODO: re-enable once vector-search is exported from @databricks/appkit
     // vectorSearch({

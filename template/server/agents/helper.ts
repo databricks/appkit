@@ -10,8 +10,9 @@ import { z } from 'zod';
  * volumes, no external APIs) so this template demos the tool-calling
  * round-trip even when no other plugin is selected at scaffold time.
  *
- * The companion markdown agent at `config/agents/assistant/agent.md`
- * shows the declarative form for prose-only agents.
+ * Drop a sibling `config/agents/<id>/agent.md` to add a markdown-defined
+ * agent — the agents plugin merges code-defined and markdown-defined
+ * agents at boot, with code winning on key collision.
  */
 export const helper = createAgent({
   name: 'helper',
