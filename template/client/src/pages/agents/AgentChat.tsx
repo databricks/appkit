@@ -1,10 +1,12 @@
 {{if .plugins.agents -}}
 import { useEffect, useRef, useState } from 'react';
 import {
+  type AgentChatEvent,
   Button,
   Card,
   CardContent,
   Input,
+  useAgentChat,
 } from '@databricks/appkit-ui/react';
 
 interface Message {
@@ -25,23 +27,46 @@ interface AgentInfo {
  * - Lists registered agents from `GET /api/agents/info` and lets the user
  *   pick one (markdown `assistant` from `config/agents/assistant/agent.md`
  *   and code-defined `helper` from `server/agents/helper.ts`).
- * - Sends turns to `POST /api/agents/chat` and consumes the SSE stream
- *   the agents plugin emits (Responses-API shape).
+ * - Sends turns via `useAgentChat()` (POSTs `/api/agents/chat` and
+ *   consumes the Responses-API SSE stream the agents plugin emits).
  * - Renders streaming assistant text incrementally and surfaces tool
  *   calls as separate inline rows.
- *
- * Replace this with `<GenieChat>`-style components when AppKit ships a
- * first-class agent chat primitive in `@databricks/appkit-ui/react`.
  */
 export function AgentChat() {
   const [agents, setAgents] = useState<string[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
-  const [threadId, setThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
-  const [streaming, setStreaming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [pendingAssistantId, setPendingAssistantId] = useState<string | null>(
+    null,
+  );
   const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Surface tool-call events as inline messages. `content` from the hook
+  // is the streaming text body, mirrored into the pending assistant row
+  // by the effect below.
+  const handleEvent = (event: AgentChatEvent) => {
+    if (
+      event.type === 'response.output_item.added' &&
+      event.item?.type === 'function_call' &&
+      event.item.name
+    ) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `t-${Date.now()}-${Math.random()}`,
+          role: 'tool',
+          toolName: event.item?.name,
+          content: event.item?.arguments ?? '',
+        },
+      ]);
+    }
+  };
+
+  const { content, isStreaming, error, send, reset } = useAgentChat({
+    agent: selectedAgent ?? '',
+    onEvent: handleEvent,
+  });
 
   useEffect(() => {
     fetch('/api/agents/info')
@@ -53,121 +78,46 @@ export function AgentChat() {
         setAgents(info.agents);
         setSelectedAgent(info.defaultAgent ?? info.agents[0] ?? null);
       })
-      .catch((err) =>
-        setError(err instanceof Error ? err.message : 'Failed to load agents'),
-      );
+      .catch(() => {
+        // Hook surfaces request-time errors via `error`; this catch only
+        // matters for the initial agents-list fetch, which is fine to
+        // silently leave empty.
+      });
   }, []);
+
+  // Mirror the streaming `content` into the pending assistant message so
+  // existing tool-call rows interleave correctly with deltas.
+  useEffect(() => {
+    if (!pendingAssistantId) return;
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === pendingAssistantId ? { ...m, content } : m,
+      ),
+    );
+  }, [content, pendingAssistantId]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, []);
 
-  const send = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const message = input.trim();
-    if (!message || streaming || !selectedAgent) return;
+    if (!message || isStreaming || !selectedAgent) return;
 
-    setError(null);
     setInput('');
-    setStreaming(true);
 
-    const userMsg: Message = {
-      id: `u-${Date.now()}`,
-      role: 'user',
-      content: message,
-    };
     const assistantId = `a-${Date.now()}`;
     setMessages((prev) => [
       ...prev,
-      userMsg,
+      { id: `u-${Date.now()}`, role: 'user', content: message },
       { id: assistantId, role: 'assistant', content: '' },
     ]);
+    setPendingAssistantId(assistantId);
 
-    try {
-      const res = await fetch('/api/agents/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message,
-          agent: selectedAgent,
-          threadId: threadId ?? undefined,
-        }),
-      });
-      if (!res.ok || !res.body) {
-        throw new Error(`chat failed: ${res.status} ${res.statusText}`);
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-
-        // SSE events are blank-line separated. Drain whole events from buf.
-        let idx;
-        while ((idx = buf.indexOf('\n\n')) !== -1) {
-          const raw = buf.slice(0, idx);
-          buf = buf.slice(idx + 2);
-          const dataLine = raw
-            .split('\n')
-            .find((l) => l.startsWith('data:'));
-          if (!dataLine) continue;
-          const json = dataLine.slice(5).trim();
-          if (!json) continue;
-          try {
-            handleEvent(JSON.parse(json), assistantId);
-          } catch {
-            // Ignore malformed payloads; the SSE stream will recover.
-          }
-        }
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Chat error');
-    } finally {
-      setStreaming(false);
-    }
+    await send(message);
+    setPendingAssistantId(null);
   };
-
-  function handleEvent(ev: unknown, assistantId: string) {
-    if (!ev || typeof ev !== 'object') return;
-    const e = ev as Record<string, unknown>;
-
-    if (e.type === 'appkit.metadata') {
-      const data = e.data as { threadId?: string } | undefined;
-      if (data?.threadId) setThreadId(data.threadId);
-      return;
-    }
-
-    if (e.type === 'response.output_text.delta') {
-      const delta = (e.delta as string | undefined) ?? '';
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantId ? { ...m, content: m.content + delta } : m,
-        ),
-      );
-      return;
-    }
-
-    if (e.type === 'response.output_item.added') {
-      const item = e.item as
-        | { type: string; name?: string; arguments?: string }
-        | undefined;
-      if (item?.type === 'function_call' && item.name) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `t-${Date.now()}-${Math.random()}`,
-            role: 'tool',
-            toolName: item.name,
-            content: item.arguments ?? '',
-          },
-        ]);
-      }
-    }
-  }
 
   return (
     <div className="space-y-6 w-full max-w-4xl mx-auto">
@@ -189,8 +139,9 @@ export function AgentChat() {
                 size="sm"
                 onClick={() => {
                   setSelectedAgent(name);
-                  setThreadId(null);
                   setMessages([]);
+                  setPendingAssistantId(null);
+                  reset();
                 }}
               >
                 {name}
@@ -201,7 +152,10 @@ export function AgentChat() {
       </div>
 
       <Card className="h-[600px] flex flex-col">
-        <CardContent className="flex-1 overflow-y-auto p-4 space-y-3" ref={scrollRef}>
+        <CardContent
+          className="flex-1 overflow-y-auto p-4 space-y-3"
+          ref={scrollRef}
+        >
           {messages.length === 0 && (
             <p className="text-sm text-muted-foreground text-center mt-8">
               Start the conversation. Try asking <code>helper</code> "what
@@ -233,36 +187,32 @@ export function AgentChat() {
                   {m.role}
                 </div>
                 <div className="whitespace-pre-wrap text-sm">
-                  {m.content || (streaming ? '…' : '')}
+                  {m.content || (isStreaming ? '…' : '')}
                 </div>
               </div>
             );
           })}
         </CardContent>
 
-        <form onSubmit={send} className="p-3 border-t flex gap-2">
+        <form onSubmit={handleSubmit} className="p-3 border-t flex gap-2">
           <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder={
-              selectedAgent
-                ? `Message ${selectedAgent}…`
-                : 'Loading agents…'
+              selectedAgent ? `Message ${selectedAgent}…` : 'Loading agents…'
             }
-            disabled={!selectedAgent || streaming}
+            disabled={!selectedAgent || isStreaming}
           />
           <Button
             type="submit"
-            disabled={!input.trim() || !selectedAgent || streaming}
+            disabled={!input.trim() || !selectedAgent || isStreaming}
           >
-            {streaming ? 'Sending…' : 'Send'}
+            {isStreaming ? 'Sending…' : 'Send'}
           </Button>
         </form>
       </Card>
 
-      {error && (
-        <div className="text-sm text-destructive">Error: {error}</div>
-      )}
+      {error && <div className="text-sm text-destructive">Error: {error}</div>}
     </div>
   );
 }
