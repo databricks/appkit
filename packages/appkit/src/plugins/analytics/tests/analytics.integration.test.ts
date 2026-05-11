@@ -105,7 +105,9 @@ describe("Analytics Plugin Integration", () => {
       );
 
       expect(response.status).toBe(200);
-      expect(response.headers.get("Content-Type")).toBe("text/event-stream");
+      expect(response.headers.get("Content-Type")).toBe(
+        "text/event-stream; charset=utf-8",
+      );
 
       const sseData = await parseSSEResponse(response);
       expect(sseData.eventType).toBe("result");

@@ -151,6 +151,35 @@ Create a human-readable string representation
 
 ***
 
+### databricksAuthenticationSetupFailed()
+
+```ts
+static databricksAuthenticationSetupFailed(detail: string, options?: {
+  cause?: Error;
+}): ConfigurationError;
+```
+
+Databricks CLI / token auth failed while creating the workspace client.
+
+By default the message is short; key lines use **picocolors** when the
+terminal supports it (also respects `NO_COLOR`). `console.error` won’t show
+stacks or `{ code, context, … }`. Set `APPKIT_VERBOSE_AUTH_ERRORS=1` for full
+`cause`, stack, and the raw SDK message (verbose appendix is unstyled).
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `detail` | `string` |
+| `options?` | \{ `cause?`: `Error`; \} |
+| `options.cause?` | `Error` |
+
+#### Returns
+
+`ConfigurationError`
+
+***
+
 ### invalidConnection()
 
 ```ts

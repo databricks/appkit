@@ -1,7 +1,45 @@
-import type { serving, WorkspaceClient } from "@databricks/sdk-experimental";
+import type {
+  CancellationToken,
+  serving,
+  WorkspaceClient,
+} from "@databricks/sdk-experimental";
+import { Context } from "@databricks/sdk-experimental";
 import { createLogger } from "../../logging/logger";
 
 const logger = createLogger("connectors:serving");
+
+/**
+ * Bridges {@link AbortSignal} to the SDK's {@link CancellationToken} so
+ * `apiClient.request` can abort the outbound HTTP request (and stop pulling
+ * the SSE body) when the agent run is cancelled.
+ */
+function cancellationTokenFromAbortSignal(
+  signal: AbortSignal,
+): CancellationToken {
+  const listeners = new Set<() => void>();
+  const fire = () => {
+    for (const cb of listeners) {
+      try {
+        cb();
+      } catch {
+        // ignore listener failures — abort must stay best-effort
+      }
+    }
+  };
+  signal.addEventListener("abort", fire, { passive: true });
+
+  return {
+    get isCancellationRequested() {
+      return signal.aborted;
+    },
+    onCancellationRequested(callback: (e?: unknown) => unknown) {
+      listeners.add(callback as () => void);
+      if (signal.aborted) {
+        void callback();
+      }
+    },
+  };
+}
 
 /**
  * Invokes a serving endpoint using the SDK's high-level query API.
@@ -35,21 +73,31 @@ export async function stream(
   client: WorkspaceClient,
   endpointName: string,
   body: Record<string, unknown>,
+  signal?: AbortSignal,
 ): Promise<ReadableStream<Uint8Array>> {
   const { stream: _stream, ...cleanBody } = body;
 
   logger.debug("Streaming from endpoint %s", endpointName);
 
-  const response = (await client.apiClient.request({
-    path: `/serving-endpoints/${encodeURIComponent(endpointName)}/invocations`,
-    method: "POST",
-    headers: new Headers({
-      "Content-Type": "application/json",
-      Accept: "text/event-stream",
-    }),
-    payload: { ...cleanBody, stream: true },
-    raw: true,
-  })) as { contents: ReadableStream<Uint8Array> };
+  const context = signal
+    ? new Context({
+        cancellationToken: cancellationTokenFromAbortSignal(signal),
+      })
+    : undefined;
+
+  const response = (await client.apiClient.request(
+    {
+      path: `/serving-endpoints/${encodeURIComponent(endpointName)}/invocations`,
+      method: "POST",
+      headers: new Headers({
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+      }),
+      payload: { ...cleanBody, stream: true },
+      raw: true,
+    },
+    context,
+  )) as { contents: ReadableStream<Uint8Array> };
 
   if (!response.contents) {
     throw new Error("Response body is null — streaming not supported");

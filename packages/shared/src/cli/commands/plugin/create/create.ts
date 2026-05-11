@@ -333,6 +333,23 @@ async function runInteractive(): Promise<void> {
       process.exit(0);
     }
 
+    const stability = await select<"ga" | "beta">({
+      message: "Plugin stability level",
+      options: [
+        { value: "ga", label: "GA", hint: "API follows semver" },
+        {
+          value: "beta",
+          label: "Beta",
+          hint: "Heading to GA, API may change",
+        },
+      ],
+      initialValue: "ga" as "ga" | "beta",
+    });
+    if (isCancel(stability)) {
+      cancel("Cancelled.");
+      process.exit(0);
+    }
+
     const resourceTypes = await multiselect({
       message: "Which Databricks resources does this plugin need?",
       options: RESOURCE_TYPE_OPTIONS.map((o) => ({
@@ -369,6 +386,7 @@ async function runInteractive(): Promise<void> {
       name: (name as string).trim(),
       displayName: (displayName as string).trim(),
       description: (description as string).trim(),
+      stability: stability === "ga" ? undefined : stability,
       resources,
       version: DEFAULT_VERSION,
     };

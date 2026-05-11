@@ -84,6 +84,15 @@ async function loadPluginEntry(
       ...(manifest.onSetupMessage && {
         onSetupMessage: manifest.onSetupMessage,
       }),
+      // Narrowing on `!== "ga"` removes "ga"; the truthy check
+      // removes `undefined`. What's left is the non-GA tier set,
+      // which TypeScript already knows is assignable to TemplatePlugin's
+      // `stability` field — so no cast is needed and adding a future
+      // tier (e.g. "alpha") flows through type-correctly.
+      ...(manifest.stability &&
+        manifest.stability !== "ga" && {
+          stability: manifest.stability,
+        }),
     },
   ];
 }
@@ -413,6 +422,10 @@ async function scanForPlugins(
         ...(manifest.onSetupMessage && {
           onSetupMessage: manifest.onSetupMessage,
         }),
+        ...(manifest.stability &&
+          manifest.stability !== "ga" && {
+            stability: manifest.stability,
+          }),
       } satisfies TemplatePlugin;
     }
   }
@@ -525,7 +538,7 @@ function writeManifest(
   const templateManifest: TemplatePluginsManifest = {
     $schema:
       "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
-    version: "1.0",
+    version: "1.1",
     plugins,
   };
 
@@ -752,6 +765,17 @@ async function runPluginsSync(options: {
     }
   }
 
+  // Step 6b: Strip requiredByTemplate for non-GA plugins
+  for (const plugin of Object.values(plugins)) {
+    if (
+      plugin.requiredByTemplate &&
+      plugin.stability &&
+      plugin.stability !== "ga"
+    ) {
+      plugin.requiredByTemplate = undefined;
+    }
+  }
+
   if (!options.silent && !options.json) {
     console.log(`\nFound ${pluginCount} plugin(s):`);
     for (const [name, manifest] of Object.entries(plugins)) {
@@ -763,6 +787,39 @@ async function runPluginsSync(options: {
       console.log(
         `  ${manifest.requiredByTemplate ? "●" : "○"} ${manifest.displayName} (${name}) from ${manifest.package}${resourceInfo}${mandatoryTag}`,
       );
+    }
+  }
+
+  // Step 7: Detect orphaned resources from removed plugins
+  if (!options.silent && fs.existsSync(outputPath)) {
+    try {
+      const oldRaw = fs.readFileSync(outputPath, "utf-8");
+      const oldManifest = JSON.parse(oldRaw) as TemplatePluginsManifest;
+      const oldNames = new Set(Object.keys(oldManifest.plugins ?? {}));
+      const newNames = new Set(Object.keys(plugins));
+      for (const name of oldNames) {
+        if (newNames.has(name)) continue;
+        const oldPlugin = oldManifest.plugins?.[name];
+        if (!oldPlugin || typeof oldPlugin !== "object") continue;
+        const envVars: string[] = [];
+        for (const res of [
+          ...(oldPlugin.resources?.required ?? []),
+          ...(oldPlugin.resources?.optional ?? []),
+        ]) {
+          if (res?.fields) {
+            for (const field of Object.values(res.fields)) {
+              if (field?.env) envVars.push(field.env);
+            }
+          }
+        }
+        const envInfo =
+          envVars.length > 0
+            ? ` The following resource env vars may be orphaned: ${envVars.join(", ")}`
+            : "";
+        console.warn(`Warning: Plugin "${name}" was removed.${envInfo}`);
+      }
+    } catch {
+      // Ignore parse errors on existing manifest
     }
   }
 

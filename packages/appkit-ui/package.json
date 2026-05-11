@@ -1,7 +1,7 @@
 {
   "name": "@databricks/appkit-ui",
   "type": "module",
-  "version": "0.27.0",
+  "version": "0.32.0",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -27,9 +27,17 @@
       "development": "./src/js/index.ts",
       "default": "./dist/js/index.js"
     },
+    "./js/beta": {
+      "development": "./src/js/beta.ts",
+      "default": "./dist/js/beta.js"
+    },
     "./react": {
       "development": "./src/react/index.ts",
       "default": "./dist/react/index.js"
+    },
+    "./react/beta": {
+      "development": "./src/react/beta.ts",
+      "default": "./dist/react/beta.js"
     },
     "./package.json": "./package.json",
     "./styles.css": {
@@ -111,7 +119,9 @@
   "publishConfig": {
     "exports": {
       "./js": "./dist/js/index.js",
+      "./js/beta": "./dist/js/beta.js",
       "./react": "./dist/react/index.js",
+      "./react/beta": "./dist/react/beta.js",
       "./package.json": "./package.json",
       "./styles.css": "./dist/styles.css"
     }
