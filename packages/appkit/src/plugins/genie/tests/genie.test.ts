@@ -1133,37 +1133,36 @@ describe("Genie Plugin", () => {
       });
     });
 
-    test("should 404 when an alias maps to undefined (e.g. unset process.env.X)", async () => {
+    test("should throw at construction when an alias maps to undefined (e.g. unset process.env.X)", () => {
       // The IGenieConfig.spaces type accepts `string | undefined` so callers
-      // can pass process.env values directly. Resolution still falls through
-      // to "Unknown space alias", same as a missing key.
+      // can pass process.env values directly without a TS hoist-and-narrow,
+      // but a missing env var is a code error — fail fast at construction
+      // with a clear message rather than letting it surface as a 404 later.
       delete process.env.DATABRICKS_GENIE_SPACE_ID;
 
-      const plugin = new GeniePlugin({
-        timeout: 5000,
-        spaces: { wanderbricks: process.env.DATABRICKS_GENIE_SPACE_ID },
-      });
-      const { router, getHandler } = createMockRouter();
+      expect(
+        () =>
+          new GeniePlugin({
+            timeout: 5000,
+            spaces: { wanderbricks: process.env.DATABRICKS_GENIE_SPACE_ID },
+          }),
+      ).toThrow(/"wanderbricks".*undefined/i);
+    });
 
-      plugin.injectRoutes(router);
+    test("should list all undefined aliases in the construction error", () => {
+      delete process.env.DATABRICKS_GENIE_SPACE_ID;
 
-      const handler = getHandler("POST", "/:alias/messages");
-      const mockReq = createMockRequest({
-        params: { alias: "wanderbricks" },
-        body: { content: "test question" },
-        headers: {
-          "x-forwarded-access-token": "user-token",
-          "x-forwarded-user": "user-1",
-        },
-      });
-      const mockRes = createMockResponse();
-
-      await handler(mockReq, mockRes);
-
-      expect(mockRes.status).toHaveBeenCalledWith(404);
-      expect(mockRes.json).toHaveBeenCalledWith({
-        error: "Unknown space alias: wanderbricks",
-      });
+      expect(
+        () =>
+          new GeniePlugin({
+            timeout: 5000,
+            spaces: {
+              foo: undefined,
+              bar: "valid-id",
+              baz: undefined,
+            },
+          }),
+      ).toThrow(/"foo".*"baz"/);
     });
   });
 

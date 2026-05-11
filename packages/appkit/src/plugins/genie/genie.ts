@@ -51,7 +51,24 @@ export class GeniePlugin extends Plugin implements ToolProvider {
       maxMessages: 200,
     });
 
-    for (const alias of Object.keys(this.config.spaces ?? {})) {
+    const spaces = this.config.spaces ?? {};
+    const undefinedAliases = Object.entries(spaces)
+      .filter(([, id]) => id === undefined)
+      .map(([alias]) => alias);
+    if (undefinedAliases.length > 0) {
+      const plural = undefinedAliases.length > 1;
+      throw new Error(
+        `GeniePlugin: space ${plural ? "aliases" : "alias"} ${undefinedAliases
+          .map((a) => `"${a}"`)
+          .join(
+            ", ",
+          )} ${plural ? "were" : "was"} configured with an undefined Genie Space ID. ` +
+          "This usually means an environment variable used to populate the config is unset. " +
+          "Set the env var, or remove the alias from the config.",
+      );
+    }
+
+    for (const alias of Object.keys(spaces)) {
       Object.assign(this.tools, this._defineSpaceTools(alias));
     }
   }
