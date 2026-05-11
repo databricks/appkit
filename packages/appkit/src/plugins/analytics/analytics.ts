@@ -24,6 +24,7 @@ import type { PluginManifest } from "../../registry";
 import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import { QueryProcessor } from "./query";
+import { normalizeAnalyticsFormat } from "./types";
 import type {
   AnalyticsQueryResponse,
   IAnalyticsConfig,
@@ -128,7 +129,9 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     res: express.Response,
   ): Promise<void> {
     const { query_key } = req.params;
-    const { parameters, format = "JSON_ARRAY" } = req.body as IAnalyticsQueryRequest;
+    const { parameters, format: rawFormat = "JSON_ARRAY" } =
+      req.body as IAnalyticsQueryRequest;
+    const format = normalizeAnalyticsFormat(rawFormat);
 
     // Request-scoped logging with WideEvent tracking
     logger.debug(req, "Executing query: %s (format=%s)", query_key, format);
