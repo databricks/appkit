@@ -39,7 +39,11 @@ import { randomUUID } from "node:crypto";
 interface InlineArrowStashOptions {
   /** Entries older than this are dropped on the next gc tick. */
   ttlMs?: number;
-  /** Soft cap on total bytes held. Oldest entries are evicted to fit. */
+  /**
+   * Hard cap on total bytes held. `put()` rejects (returns `null`) once
+   * the cap would be exceeded; entries already in the stash are not
+   * evicted to fit new ones.
+   */
   maxBytes?: number;
   /** Test seam: override the synthetic-id generator. */
   idGenerator?: () => string;
