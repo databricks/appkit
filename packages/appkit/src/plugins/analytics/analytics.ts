@@ -261,15 +261,17 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
 
     const hashedQuery = this.queryProcessor.hashQuery(query);
 
-    // ARROW_STREAM may resolve to EXTERNAL_LINKS, which returns pre-signed URLs
-    // that typically expire ~15 minutes after issue. Cap the cache TTL well
-    // under that for ARROW_STREAM so we never hand out dead URLs from cache,
-    // while still benefiting from caching INLINE attachment responses (and
-    // EXTERNAL_LINKS responses inside their valid window).
-    const cacheTtl =
-      format === "ARROW_STREAM"
-        ? Math.min(queryDefaults.cache?.ttl ?? 600, 600)
-        : queryDefaults.cache?.ttl;
+    // ARROW_STREAM responses reference ephemeral resources that cannot be
+    // safely replayed from cache:
+    // - EXTERNAL_LINKS pre-signed URLs expire ~15 min after issue, and
+    //   the warehouse rotates them per execution.
+    // - INLINE responses point at a synthetic `inline-<uuid>` job id
+    //   backed by `InlineArrowStash`, which drains on the first
+    //   /arrow-result fetch. A cache hit would replay an id whose bytes
+    //   are already gone and reliably 410 the client.
+    // So we bypass cache for ARROW_STREAM and let every request execute
+    // a fresh statement. JSON_ARRAY responses still cache normally.
+    const cacheTtl = format === "ARROW_STREAM" ? 0 : queryDefaults.cache?.ttl;
     const cacheConfig = {
       ...queryDefaults.cache,
       ttl: cacheTtl,
@@ -361,6 +363,12 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       // server-side, emit a synthetic statement id. The client fetches via
       // /arrow-result so multi-MiB Arrow blobs never traverse SSE.
       if (result?.attachment) {
+        // If the client has already disconnected, the SSE write would be
+        // dropped anyway — skip the decode + stash so the bytes do not
+        // linger in memory until TTL eviction.
+        if (signal?.aborted) {
+          throw ExecutionError.canceled();
+        }
         const decoded = Buffer.from(result.attachment, "base64");
         const inlineId = this.inlineArrowStash.put(
           stashUserKey,
@@ -370,12 +378,23 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
             decoded.byteLength,
           ),
         );
-        return makeArrowMessage(inlineId, { status: result.status });
+        if (inlineId === null) {
+          // Stash is full — every id we have already handed out must
+          // stay valid, so the stash refuses new entries rather than
+          // evicting in-flight ones. Fall back to EXTERNAL_LINKS for
+          // this request so the client still gets its result.
+          logger.warn(
+            "Inline Arrow stash full, falling back to EXTERNAL_LINKS for the current query",
+          );
+        } else {
+          return makeArrowMessage(inlineId, { status: result.status });
+        }
+      } else {
+        return makeResultMessage(result?.data, {
+          status: result?.status,
+          statement_id: result?.statement_id,
+        });
       }
-      return makeResultMessage(result?.data, {
-        status: result?.status,
-        statement_id: result?.statement_id,
-      });
     } catch (err: unknown) {
       // If the request was aborted, do not retry — the signal is dead and
       // a second statement would be billed but never read.

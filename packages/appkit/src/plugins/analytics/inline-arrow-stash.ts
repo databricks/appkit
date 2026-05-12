@@ -22,8 +22,19 @@ import { randomUUID } from "node:crypto";
  * - **Per-user keyed**: `take()` only returns bytes if the requesting
  *   user matches the user that originally put them. Defense in depth on
  *   top of unguessable ids.
- * - **Memory bounded**: total stashed bytes are capped. `put()` evicts
- *   the oldest entries first when the cap would be exceeded.
+ * - **Memory bounded with rejection**: total stashed bytes are capped.
+ *   When `put()` cannot fit a payload without exceeding the cap it
+ *   returns `null` rather than evicting older entries — every issued id
+ *   stays valid until it is drained, expires, or the process exits.
+ *   Callers are expected to fall back to a different delivery path (e.g.
+ *   EXTERNAL_LINKS) when `put()` rejects.
+ *
+ * Caveat (multi-replica deployments): this stash is process-local. A
+ * subsequent `GET /arrow-result/inline-*` that lands on a different
+ * replica than the one that stashed the bytes will 410. Deployments
+ * that run more than one replica need sticky sessions (route both
+ * requests in the same logical session to the same replica) or a
+ * shared external store, neither of which is in scope here.
  */
 interface InlineArrowStashOptions {
   /** Entries older than this are dropped on the next gc tick. */
@@ -58,15 +69,28 @@ export class InlineArrowStash {
     this.now = opts.now ?? Date.now;
   }
 
-  /** Stash a payload and return its synthetic job id. */
-  put(userId: string, bytes: Uint8Array): string {
+  /**
+   * Stash a payload and return its synthetic job id, or `null` when the
+   * stash cannot accept it without evicting older entries. The caller is
+   * expected to fall back to an out-of-band delivery path (e.g.
+   * EXTERNAL_LINKS) when the return value is `null`.
+   *
+   * Single payloads that exceed `maxBytes` outright throw so the caller
+   * sees the misconfiguration loudly instead of degrading silently every
+   * time.
+   */
+  put(userId: string, bytes: Uint8Array): string | null {
     if (bytes.length > this.maxBytes) {
       throw new Error(
         `Inline Arrow payload (${bytes.length} bytes) exceeds stash maxBytes (${this.maxBytes})`,
       );
     }
     this.gc();
-    this.evictUntilFits(bytes.length);
+    if (this.totalBytes + bytes.length > this.maxBytes) {
+      // Refuse rather than evicting: every id we have already issued must
+      // remain valid until naturally drained or expired.
+      return null;
+    }
     const id = `inline-${this.idGenerator()}`;
     const now = this.now();
     this.entries.set(id, {
@@ -114,16 +138,6 @@ export class InlineArrowStash {
         this.entries.delete(id);
         this.totalBytes -= entry.bytes.length;
       }
-    }
-  }
-
-  private evictUntilFits(incoming: number): void {
-    if (this.totalBytes + incoming <= this.maxBytes) return;
-    // Insertion order in a Map mirrors FIFO, so the first key is the oldest.
-    for (const [id, entry] of this.entries) {
-      if (this.totalBytes + incoming <= this.maxBytes) return;
-      this.entries.delete(id);
-      this.totalBytes -= entry.bytes.length;
     }
   }
 }

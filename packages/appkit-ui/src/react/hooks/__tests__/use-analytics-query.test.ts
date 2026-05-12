@@ -131,6 +131,26 @@ describe("useAnalyticsQuery", () => {
     expect(mockFetchArrow).not.toHaveBeenCalled();
   });
 
+  test("normalizes an empty result message (no data field) to []", async () => {
+    // The wire schema makes `data` optional — empty result sets may omit
+    // it. The hook must surface that as an explicit empty array rather
+    // than `undefined`, so callers can rely on `data` being either null
+    // (no message yet) or a value of the inferred result type.
+    const { result } = renderHook(() =>
+      useAnalyticsQuery("q", null, { format: "JSON_ARRAY" }),
+    );
+
+    await lastConnectArgs.onMessage({
+      data: JSON.stringify({ type: "result" }),
+    });
+
+    await waitFor(() => {
+      expect(result.current.data).toEqual([]);
+    });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.error).toBeNull();
+  });
+
   test("still handles type:result rows for JSON_ARRAY", async () => {
     const { result } = renderHook(() =>
       useAnalyticsQuery("q", null, { format: "JSON_ARRAY" }),

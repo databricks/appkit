@@ -54,7 +54,7 @@ describe("InlineArrowStash", () => {
     expect(stash.take(id2, "user-1")).toBeUndefined();
   });
 
-  test("put evicts oldest entries to fit when maxBytes is exceeded", () => {
+  test("put returns null when adding the payload would exceed maxBytes, leaving existing entries intact", () => {
     let seq = 0;
     const stash = new InlineArrowStash({
       maxBytes: 200,
@@ -62,17 +62,21 @@ describe("InlineArrowStash", () => {
     });
     const a = stash.put("user-1", bytes(80));
     const b = stash.put("user-1", bytes(80));
+    expect(a).not.toBeNull();
+    expect(b).not.toBeNull();
     expect(stash.size()).toBe(160);
 
-    // This 80-byte entry pushes total to 240; evicts `a` first.
+    // This third 80-byte entry would push total to 240 (>200). It must
+    // be rejected, and both prior entries must survive — every id we have
+    // already handed out stays valid until drained or expired.
     const c = stash.put("user-1", bytes(80));
+    expect(c).toBeNull();
     expect(stash.size()).toBe(160);
-    expect(stash.take(a, "user-1")).toBeUndefined();
-    expect(stash.take(b, "user-1")).toBeDefined();
-    expect(stash.take(c, "user-1")).toBeDefined();
+    expect(stash.take(a as string, "user-1")).toBeDefined();
+    expect(stash.take(b as string, "user-1")).toBeDefined();
   });
 
-  test("put rejects a single payload larger than maxBytes", () => {
+  test("put throws for a single payload larger than maxBytes (caller misconfiguration)", () => {
     const stash = new InlineArrowStash({ maxBytes: 100 });
     expect(() => stash.put("user-1", bytes(200))).toThrow(
       /exceeds stash maxBytes/,

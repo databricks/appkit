@@ -131,10 +131,13 @@ export function useAnalyticsQuery<
           const validated = AnalyticsSseMessage.safeParse(rawParsed);
           const msg = validated.success ? validated.data : null;
 
-          // success - JSON format
+          // success - JSON format. The wire schema makes `data` optional
+          // (e.g. an empty result set may omit it), so normalize the
+          // missing case to an explicit empty array rather than letting
+          // `undefined` bleed into the hook's `T | null` state.
           if (msg?.type === "result") {
             setLoading(false);
-            setData(msg.data as ResultType);
+            setData((msg.data ?? []) as ResultType);
             return;
           }
 
