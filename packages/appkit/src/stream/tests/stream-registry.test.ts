@@ -374,7 +374,7 @@ describe("StreamRegistry", () => {
       expect(dataCall).toBeDefined();
 
       const payload = JSON.parse(
-        (dataCall![0] as string).replace("data: ", "").trim(),
+        (dataCall?.[0] as string).replace("data: ", "").trim(),
       );
       expect(payload).toEqual({
         error: "Stream evicted",

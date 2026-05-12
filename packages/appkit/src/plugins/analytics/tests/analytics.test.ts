@@ -1020,7 +1020,7 @@ describe("Analytics Plugin", () => {
       // synthetic id; a subsequent /arrow-result fetch will drain them.
       const idMatch = payload?.match(/"statement_id":"(inline-[^"]+)"/);
       expect(idMatch).not.toBeNull();
-      const inlineId = idMatch![1];
+      const inlineId = idMatch?.[1];
       const stashed = (plugin as any).inlineArrowStash.take(inlineId, "global");
       expect(stashed).toBeDefined();
       expect(Array.from(stashed)).toEqual(Array.from(arrowBytes));
