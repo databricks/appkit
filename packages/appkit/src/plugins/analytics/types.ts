@@ -21,7 +21,7 @@ export type AnalyticsFormat =
   | "ARROW";
 
 /** Canonical (post-normalization) analytics format values. */
-export type CanonicalAnalyticsFormat = "JSON_ARRAY" | "ARROW_STREAM";
+type CanonicalAnalyticsFormat = "JSON_ARRAY" | "ARROW_STREAM";
 
 /**
  * Map a (possibly legacy) AnalyticsFormat to its canonical form.

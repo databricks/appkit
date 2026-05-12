@@ -24,12 +24,12 @@ import type { PluginManifest } from "../../registry";
 import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import { QueryProcessor } from "./query";
-import { normalizeAnalyticsFormat } from "./types";
 import type {
   AnalyticsQueryResponse,
   IAnalyticsConfig,
   IAnalyticsQueryRequest,
 } from "./types";
+import { normalizeAnalyticsFormat } from "./types";
 
 const logger = createLogger("analytics");
 

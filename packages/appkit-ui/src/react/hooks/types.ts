@@ -44,7 +44,9 @@ export interface TypedArrowTable<
 // ============================================================================
 
 /** Options for configuring an analytics SSE query */
-export interface UseAnalyticsQueryOptions<F extends AnalyticsFormat = "JSON_ARRAY"> {
+export interface UseAnalyticsQueryOptions<
+  F extends AnalyticsFormat = "JSON_ARRAY",
+> {
   /** Response format - "JSON_ARRAY" returns typed arrays, "ARROW_STREAM" returns TypedArrowTable */
   format?: F;
 
@@ -128,11 +130,9 @@ export type InferRowType<K> = K extends AugmentedRegistry<QueryRegistry>
  * - JSON format: Returns the typed array from QueryRegistry
  * - ARROW format: Returns TypedArrowTable with row type preserved
  */
-export type InferResultByFormat<
-  T,
-  K,
-  F extends AnalyticsFormat,
-> = F extends "ARROW_STREAM" | "ARROW"
+export type InferResultByFormat<T, K, F extends AnalyticsFormat> = F extends
+  | "ARROW_STREAM"
+  | "ARROW"
   ? TypedArrowTable<InferRowType<K>>
   : InferResult<T, K>;
 
