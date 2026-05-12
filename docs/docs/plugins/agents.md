@@ -24,6 +24,7 @@ For the non-streaming path against a custom endpoint, use the `serving` plugin's
 
 ```ts
 import { agents, analytics, createApp, files, server } from "@databricks/appkit";
+import { agents } from "@databricks/appkit/beta";
 
 await createApp({
   plugins: [server(), analytics(), files(), agents()],
@@ -35,8 +36,6 @@ That alone gives you a live HTTP server with `POST /invocations` wired to a mark
 ## Level 1: drop a markdown agent package
 
 Each agent lives in its own directory with a fixed entry file `agent.md`. A reserved top-level folder named `skills` is ignored until per-agent skills ship (you can add other asset folders beside `agent.md` under each agent id).
-
-**Migrating from flat files:** move `assistant.md` → `assistant/agent.md` (same for every stem). Top-level `*.md` files in `config/agents` are rejected at startup so upgrades are not silently ignored.
 
 ```
 my-app/
@@ -96,8 +95,8 @@ When any `tools:` is declared the auto-inherit default is turned off — the age
 ## Level 3: code-defined agents
 
 ```ts
-import { agents, analytics, createApp, files, server } from "@databricks/appkit";
-import { createAgent, tool } from "@databricks/appkit/beta";
+import { analytics, createApp, files, server } from "@databricks/appkit";
+import { agents, createAgent, tool } from "@databricks/appkit/beta";
 import { z } from "zod";
 
 const support = createAgent({
@@ -414,8 +413,7 @@ appkit.agents.getThreads(userId);   // list user's threads
 |---|---|---|
 | `endpoint` | string | Model serving endpoint name. Shortcut for `model`. |
 | `model` | string | Same as `endpoint`; either works. |
-| `toolkits` | array of string or `{ name: options }` | Spread plugin toolkits. Supports `only`, `except`, `rename`, `prefix`. |
-| `tools` | array of string | Keys into `agents({ tools: {...} })`. |
+| `tools` | array | Unified tool list. Entries are `plugin:<name>` / `plugin:<name>: [t1, t2]` / `plugin:<name>: { only, except, rename, prefix }` for plugin tools, or a bare `<key>` resolved against `agents({ tools: {...} })` for ambient tools. See "Level 2: scope tools in frontmatter" above for examples. |
 | `default` | boolean | First agent id (sorted order) with `default: true` becomes the default agent. |
 | `maxSteps` | number | Adapter max-step hint. |
 | `maxTokens` | number | Adapter max-token hint. |

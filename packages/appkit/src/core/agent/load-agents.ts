@@ -126,13 +126,6 @@ const ALLOWED_KEYS = new Set([
 ]);
 
 /**
- * Legacy frontmatter keys that PR-stack v2/5 moved into the unified
- * `tools:` list. Kept around so we can throw a focused migration error
- * instead of a generic "unknown key" warning when users hit them.
- */
-const LEGACY_KEYS = new Set(["toolkits"]);
-
-/**
  * Loads a single markdown agent file and resolves its frontmatter against
  * registered plugin toolkits + ambient tool library.
  *
@@ -336,17 +329,6 @@ export function parseFrontmatter(
   }
   const data = parsed as Record<string, unknown>;
   for (const key of Object.keys(data)) {
-    if (LEGACY_KEYS.has(key)) {
-      const src = sourcePath ? ` (${sourcePath})` : "";
-      throw new Error(
-        `Frontmatter key '${key}' is no longer supported${src}. ` +
-          "Move plugin references into the unified 'tools:' list using " +
-          "the 'plugin:NAME' prefix. For example, replace " +
-          "`toolkits:\\n  - files: [a, b]` with " +
-          "`tools:\\n  - plugin:files: [a, b]`. " +
-          "See docs/plugins/agents.md for the full migration.",
-      );
-    }
     if (!ALLOWED_KEYS.has(key)) {
       logger.warn(
         "Ignoring unknown frontmatter key '%s' in %s",

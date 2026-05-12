@@ -74,15 +74,6 @@ describe("parseFrontmatter", () => {
     ]);
   });
 
-  test("rejects legacy 'toolkits:' key with migration error", () => {
-    expect(() =>
-      parseFrontmatter("---\ntoolkits:\n  - analytics\n---\nbody"),
-    ).toThrow(/'toolkits' is no longer supported/);
-    expect(() =>
-      parseFrontmatter("---\ntoolkits:\n  - analytics\n---\nbody"),
-    ).toThrow(/plugin:NAME/);
-  });
-
   test("returns null data when no frontmatter", () => {
     const { data, content } = parseFrontmatter("No frontmatter here");
     expect(data).toBeNull();
