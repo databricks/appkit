@@ -252,9 +252,9 @@ describe("DatabricksAdapter", () => {
     expect(mockAuthenticate).toHaveBeenCalledTimes(2);
   });
 
-  describe("Vertex/Gemini thought_signature pass-through", () => {
-    // Vertex AI's OpenAI-compatible surface attaches `thought_signature`
-    // on every function call emitted by Gemini 2.x models. The next
+  describe("Vertex/Gemini thoughtSignature pass-through", () => {
+    // Vertex AI's OpenAI-compatible surface attaches `thoughtSignature`
+    // on every function call emitted by Gemini 2.x/3.x models. The next
     // request must echo it back verbatim on the assistant message's
     // tool_calls or Vertex 400s with
     // `INVALID_ARGUMENT: function call X is missing a thought_signature`.
@@ -264,10 +264,12 @@ describe("DatabricksAdapter", () => {
       id?: string;
       name?: string;
       args: string;
-      /** When provided, attached at the top level of the tool_call delta. */
-      sigTopLevel?: string;
-      /** When provided, attached inside `function`. */
-      sigNested?: string;
+      /**
+       * Vertex's on-the-wire spelling for Gemini 2.x/3.x function-calling
+       * responses (camelCase, top-level on the tool_call). Verified
+       * against `gemini-3.1-flash-lite-preview`.
+       */
+      sig?: string;
     }): string {
       return sseChunk(
         JSON.stringify({
@@ -282,13 +284,8 @@ describe("DatabricksAdapter", () => {
                     function: {
                       ...(opts.name && { name: opts.name }),
                       arguments: opts.args,
-                      ...(opts.sigNested && {
-                        thought_signature: opts.sigNested,
-                      }),
                     },
-                    ...(opts.sigTopLevel && {
-                      thought_signature: opts.sigTopLevel,
-                    }),
+                    ...(opts.sig && { thoughtSignature: opts.sig }),
                   },
                 ],
               },
@@ -326,19 +323,22 @@ describe("DatabricksAdapter", () => {
       )) {
         // drain
       }
-      // biome-ignore lint/suspicious/noExplicitAny: vi.fn mock typing
       const [, secondInit] = (globalThis.fetch as any).mock.calls[1];
       return JSON.parse(secondInit.body);
     }
 
-    test("captures top-level thought_signature from stream and echoes on next request", async () => {
+    test("captures camelCase thoughtSignature from delta and echoes it on outbound", async () => {
+      // Real Vertex/Gemini wire shape, confirmed against
+      // `gemini-3.1-flash-lite-preview`. The outbound request carries
+      // back the same `thoughtSignature` Vertex sent, which is what the
+      // proxy validates against on the next turn.
       const body = await runUntilSecondRequest([
         toolCallDeltaWithSig({
           index: 0,
           id: "call_1",
           name: "analytics__query",
           args: '{"query":"SELECT 1"}',
-          sigTopLevel: "sig-top-level-abc123",
+          sig: "sig-camel-abc123",
         }),
         sseChunk("[DONE]"),
       ]);
@@ -349,38 +349,11 @@ describe("DatabricksAdapter", () => {
           name: "analytics__query",
           arguments: '{"query":"SELECT 1"}',
         },
-        thought_signature: "sig-top-level-abc123",
+        thoughtSignature: "sig-camel-abc123",
       });
     });
 
-    test("captures nested function.thought_signature and echoes at top level", async () => {
-      // Vertex's OpenAI-compat proxy occasionally places the signature
-      // inside `function` rather than at the call's top level. Either
-      // location should round-trip correctly; on the outgoing side we
-      // canonicalise to top-level because that's where Vertex's docs
-      // place it for the chat-completions surface.
-      const body = await runUntilSecondRequest([
-        toolCallDeltaWithSig({
-          index: 0,
-          id: "call_1",
-          name: "analytics__query",
-          args: '{"query":"SELECT 1"}',
-          sigNested: "sig-nested-xyz",
-        }),
-        sseChunk("[DONE]"),
-      ]);
-      expect(body.messages[1].tool_calls[0]).toEqual({
-        id: "call_1",
-        type: "function",
-        function: {
-          name: "analytics__query",
-          arguments: '{"query":"SELECT 1"}',
-        },
-        thought_signature: "sig-nested-xyz",
-      });
-    });
-
-    test("does NOT emit thought_signature when the model didn't send one", async () => {
+    test("does NOT emit thoughtSignature when the model didn't send one", async () => {
       // Non-Gemini endpoints (Claude, OpenAI, Llama) don't carry the
       // field. Adapter must not invent one — that would break stricter
       // models' tool_call shape validators on Databricks.
@@ -393,16 +366,16 @@ describe("DatabricksAdapter", () => {
         }),
         sseChunk("[DONE]"),
       ]);
-      expect(body.messages[1].tool_calls[0]).not.toHaveProperty(
-        "thought_signature",
-      );
+      const tc = body.messages[1].tool_calls[0];
+      expect(tc).not.toHaveProperty("thoughtSignature");
+      expect(tc).not.toHaveProperty("thought_signature");
     });
 
     test("buildMessages echoes persisted thoughtSignature on resumed threads", async () => {
       // On thread resumption, the ToolCall.thoughtSignature stored in
-      // ThreadStore must reach the wire as `thought_signature` — without
-      // it, the very first request of the new turn fails Vertex's
-      // signature check before any tool call even fires.
+      // ThreadStore must reach the wire so the very first request of
+      // the new turn passes Vertex's signature check before any tool
+      // call even fires.
       globalThis.fetch = mockFetch([textDelta("ok"), sseChunk("[DONE]")]);
 
       const adapter = createAdapter();
@@ -448,7 +421,6 @@ describe("DatabricksAdapter", () => {
         // drain
       }
 
-      // biome-ignore lint/suspicious/noExplicitAny: vi.fn mock typing
       const [, init] = (globalThis.fetch as any).mock.calls[0];
       const body = JSON.parse(init.body);
       expect(body.messages[1].tool_calls[0]).toEqual({
@@ -458,7 +430,7 @@ describe("DatabricksAdapter", () => {
           name: "analytics__query",
           arguments: JSON.stringify({ query: "SELECT 1" }),
         },
-        thought_signature: "persisted-sig-456",
+        thoughtSignature: "persisted-sig-456",
       });
     });
   });
