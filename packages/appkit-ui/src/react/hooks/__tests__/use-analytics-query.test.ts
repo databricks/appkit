@@ -30,43 +30,70 @@ describe("useAnalyticsQuery", () => {
     lastConnectArgs = null;
   });
 
-  test("decodes arrow_inline base64 attachment via ArrowClient.processArrowBuffer", async () => {
+  test("fetches an arrow message (warehouse statement id) via /arrow-result", async () => {
     const fakeTable = { numRows: 1, schema: { fields: [] } };
+    const fakeBytes = new Uint8Array([1, 2, 3]);
+    mockFetchArrow.mockResolvedValueOnce(fakeBytes);
     mockProcessArrowBuffer.mockResolvedValueOnce(fakeTable);
-
-    // 'AQID' decodes to bytes [1, 2, 3].
-    const base64 = "AQID";
 
     const { result } = renderHook(() =>
       useAnalyticsQuery("q", null, { format: "ARROW_STREAM" }),
     );
 
-    // Drive the SSE onMessage handler with an arrow_inline payload.
     await lastConnectArgs.onMessage({
-      data: JSON.stringify({ type: "arrow_inline", attachment: base64 }),
+      data: JSON.stringify({ type: "arrow", statement_id: "stmt-warehouse-1" }),
     });
 
     await waitFor(() => {
       expect(result.current.data).toBe(fakeTable);
     });
 
-    expect(mockProcessArrowBuffer).toHaveBeenCalledTimes(1);
-    const passedBuffer = mockProcessArrowBuffer.mock.calls[0][0] as Uint8Array;
-    expect(passedBuffer).toBeInstanceOf(Uint8Array);
-    expect(Array.from(passedBuffer)).toEqual([1, 2, 3]);
-    // Inline path must NOT trigger a network fetch.
-    expect(mockFetchArrow).not.toHaveBeenCalled();
+    expect(mockFetchArrow).toHaveBeenCalledTimes(1);
+    expect(mockFetchArrow).toHaveBeenCalledWith(
+      "/api/analytics/arrow-result/stmt-warehouse-1",
+    );
+    expect(mockProcessArrowBuffer).toHaveBeenCalledWith(fakeBytes);
   });
 
-  test("surfaces an error when arrow_inline decode fails", async () => {
-    mockProcessArrowBuffer.mockRejectedValueOnce(new Error("bad ipc"));
+  test("fetches an arrow message with synthetic inline- id through the same /arrow-result path", async () => {
+    // The client must treat inline and external-links responses uniformly —
+    // it never decodes base64 locally. The /arrow-result route on the
+    // server is the only place that knows which path the bytes came from.
+    const fakeTable = { numRows: 1, schema: { fields: [] } };
+    const fakeBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    mockFetchArrow.mockResolvedValueOnce(fakeBytes);
+    mockProcessArrowBuffer.mockResolvedValueOnce(fakeTable);
 
     const { result } = renderHook(() =>
       useAnalyticsQuery("q", null, { format: "ARROW_STREAM" }),
     );
 
     await lastConnectArgs.onMessage({
-      data: JSON.stringify({ type: "arrow_inline", attachment: "AQID" }),
+      data: JSON.stringify({
+        type: "arrow",
+        statement_id: "inline-abc-xyz",
+      }),
+    });
+
+    await waitFor(() => {
+      expect(result.current.data).toBe(fakeTable);
+    });
+
+    expect(mockFetchArrow).toHaveBeenCalledTimes(1);
+    expect(mockFetchArrow).toHaveBeenCalledWith(
+      "/api/analytics/arrow-result/inline-abc-xyz",
+    );
+  });
+
+  test("surfaces an error when the arrow fetch fails", async () => {
+    mockFetchArrow.mockRejectedValueOnce(new Error("network"));
+
+    const { result } = renderHook(() =>
+      useAnalyticsQuery("q", null, { format: "ARROW_STREAM" }),
+    );
+
+    await lastConnectArgs.onMessage({
+      data: JSON.stringify({ type: "arrow", statement_id: "stmt-1" }),
     });
 
     await waitFor(() => {
@@ -77,50 +104,31 @@ describe("useAnalyticsQuery", () => {
     expect(result.current.loading).toBe(false);
   });
 
-  test("rejects arrow_inline with missing/empty/non-string attachment without crashing atob", async () => {
-    const cases: Array<unknown> = [undefined, null, "", 123, { foo: "bar" }];
-
-    for (const attachment of cases) {
-      mockProcessArrowBuffer.mockClear();
-      const { result, unmount } = renderHook(() =>
-        useAnalyticsQuery("q", null, { format: "ARROW_STREAM" }),
-      );
-
-      await lastConnectArgs.onMessage({
-        data: JSON.stringify({ type: "arrow_inline", attachment }),
-      });
-
-      await waitFor(() => {
-        expect(result.current.error).toBe(
-          "Unable to load data, please try again",
-        );
-      });
-      // Critically: must NOT call processArrowBuffer (or atob) on the bad input.
-      expect(mockProcessArrowBuffer).not.toHaveBeenCalled();
-
-      unmount();
-    }
-  });
-
-  test("rejects oversized arrow_inline attachment without allocating a huge buffer", async () => {
-    // Base64 string that would decode to ~9 MiB (>8 MiB cap). The hook
-    // should reject before calling decodeBase64 / processArrowBuffer.
-    const oversized = "A".repeat(13 * 1024 * 1024);
-
+  test("rejects the retired arrow_inline message type as schema-invalid", async () => {
+    // arrow_inline was the prior wire shape. The discriminated union no
+    // longer accepts it, so it falls through to the generic error/code
+    // branch — but critically, it must NEVER trigger ArrowClient calls.
     const { result } = renderHook(() =>
       useAnalyticsQuery("q", null, { format: "ARROW_STREAM" }),
     );
 
     await lastConnectArgs.onMessage({
-      data: JSON.stringify({ type: "arrow_inline", attachment: oversized }),
+      data: JSON.stringify({ type: "arrow_inline", attachment: "AQID" }),
     });
 
+    // Whatever the hook surfaces (error or noop), it must not have tried to
+    // decode the payload locally.
     await waitFor(() => {
-      expect(result.current.error).toBe(
-        "Unable to load data, please try again",
-      );
+      // Either an error is set or loading completed without data — both are
+      // acceptable, but processArrowBuffer must never run on a base64 input.
+      expect(
+        result.current.loading ||
+          result.current.error ||
+          result.current.data === null,
+      ).toBeTruthy();
     });
     expect(mockProcessArrowBuffer).not.toHaveBeenCalled();
+    expect(mockFetchArrow).not.toHaveBeenCalled();
   });
 
   test("still handles type:result rows for JSON_ARRAY", async () => {
@@ -139,5 +147,6 @@ describe("useAnalyticsQuery", () => {
       expect(result.current.data).toEqual([{ id: 1 }, { id: 2 }]);
     });
     expect(mockProcessArrowBuffer).not.toHaveBeenCalled();
+    expect(mockFetchArrow).not.toHaveBeenCalled();
   });
 });

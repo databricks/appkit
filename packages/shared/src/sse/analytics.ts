@@ -7,12 +7,18 @@ import { z } from "zod";
  * server (`AnalyticsPlugin._handleQueryRoute`) and the client
  * (`useAnalyticsQuery`). Both sides validate with the same schema:
  *
- * - Server uses the typed builders (`makeResultMessage`, `makeArrowMessage`,
- *   `makeArrowInlineMessage`) to construct messages with compile-time
- *   guarantees that all required fields are present.
+ * - Server uses the typed builders (`makeResultMessage`, `makeArrowMessage`)
+ *   to construct messages with compile-time guarantees that all required
+ *   fields are present.
  * - Client calls `AnalyticsSseMessage.parse(JSON.parse(event.data))` to fail
  *   loudly on a malformed payload instead of silently treating an undefined
  *   field as data.
+ *
+ * Arrow payloads — inline or external-links — never traverse the SSE control
+ * channel; both flow through `/api/analytics/arrow-result/:jobId` and are
+ * differentiated by an `inline-` prefix on the job id (see
+ * `InlineArrowStash`). The wire shape from the client's perspective is
+ * therefore uniform: an `arrow` message carries an id, the client fetches.
  *
  * Adding a new message variant requires a schema update here, which keeps
  * server and client in lockstep.
@@ -30,10 +36,13 @@ export const AnalyticsResultMessage = z.object({
 export type AnalyticsResultMessage = z.infer<typeof AnalyticsResultMessage>;
 
 /**
- * ARROW_STREAM result delivered via /arrow-result/:jobId — used for
- * EXTERNAL_LINKS responses (statement_id from the warehouse) and, if PR #320
- * lands, also for INLINE responses (synthetic `inline-` prefixed id from
- * the server-side stash).
+ * ARROW_STREAM result delivered via /arrow-result/:jobId. The id is either:
+ * - the warehouse-issued `statement_id` for EXTERNAL_LINKS responses, or
+ * - a synthetic `inline-<uuid>` id pointing at the server-side
+ *   `InlineArrowStash` for INLINE responses.
+ *
+ * Both shapes are fetched the same way; the prefix tells the route handler
+ * which path to take.
  */
 export const AnalyticsArrowMessage = z.object({
   type: z.literal("arrow"),
@@ -42,26 +51,10 @@ export const AnalyticsArrowMessage = z.object({
 });
 export type AnalyticsArrowMessage = z.infer<typeof AnalyticsArrowMessage>;
 
-/**
- * ARROW_STREAM + INLINE result with the base64-encoded Arrow IPC bytes
- * embedded in the SSE message. The client decodes locally via
- * `ArrowClient.processArrowBuffer`.
- *
- * Note: this variant goes away if the proposal in PR #320 lands.
- */
-export const AnalyticsArrowInlineMessage = z.object({
-  type: z.literal("arrow_inline"),
-  attachment: z.string().min(1),
-});
-export type AnalyticsArrowInlineMessage = z.infer<
-  typeof AnalyticsArrowInlineMessage
->;
-
 /** Discriminated union of every message the analytics SSE stream may emit. */
 export const AnalyticsSseMessage = z.discriminatedUnion("type", [
   AnalyticsResultMessage,
   AnalyticsArrowMessage,
-  AnalyticsArrowInlineMessage,
 ]);
 export type AnalyticsSseMessage = z.infer<typeof AnalyticsSseMessage>;
 
@@ -83,10 +76,4 @@ export function makeArrowMessage(
   extras: { status?: unknown } = {},
 ): AnalyticsArrowMessage {
   return { type: "arrow", statement_id, ...extras };
-}
-
-export function makeArrowInlineMessage(
-  attachment: string,
-): AnalyticsArrowInlineMessage {
-  return { type: "arrow_inline", attachment };
 }

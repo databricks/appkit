@@ -1,7 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
   AnalyticsSseMessage,
-  makeArrowInlineMessage,
   makeArrowMessage,
   makeResultMessage,
 } from "./analytics";
@@ -19,12 +18,24 @@ describe("AnalyticsSseMessage schema", () => {
     expect(() => AnalyticsSseMessage.parse({ type: "result" })).not.toThrow();
   });
 
-  test("accepts an arrow message with statement_id", () => {
+  test("accepts an arrow message with warehouse statement_id", () => {
     const parsed = AnalyticsSseMessage.parse({
       type: "arrow",
       statement_id: "stmt-1",
     });
     expect(parsed.type).toBe("arrow");
+  });
+
+  test("accepts an arrow message with synthetic inline- id", () => {
+    // Inline Arrow payloads are stashed server-side and surfaced through the
+    // same `arrow` message variant — the `inline-` prefix tells the
+    // /arrow-result handler to drain the stash instead of hitting the
+    // warehouse. The schema must accept both id shapes transparently.
+    const parsed = AnalyticsSseMessage.parse({
+      type: "arrow",
+      statement_id: "inline-abc-123",
+    });
+    expect(parsed.statement_id).toBe("inline-abc-123");
   });
 
   test("rejects an arrow message with empty statement_id", () => {
@@ -37,23 +48,12 @@ describe("AnalyticsSseMessage schema", () => {
     expect(() => AnalyticsSseMessage.parse({ type: "arrow" })).toThrow();
   });
 
-  test("accepts an arrow_inline message with non-empty attachment", () => {
-    const parsed = AnalyticsSseMessage.parse({
-      type: "arrow_inline",
-      attachment: "AQID",
-    });
-    expect(parsed.type).toBe("arrow_inline");
-  });
-
-  test("rejects an arrow_inline message with empty attachment", () => {
+  test("rejects the retired arrow_inline message type", () => {
+    // arrow_inline was the prior wire shape (base64 payload on the SSE
+    // channel). The current protocol routes all Arrow payloads through
+    // /arrow-result; the type must no longer parse.
     expect(() =>
-      AnalyticsSseMessage.parse({ type: "arrow_inline", attachment: "" }),
-    ).toThrow();
-  });
-
-  test("rejects an arrow_inline message with non-string attachment", () => {
-    expect(() =>
-      AnalyticsSseMessage.parse({ type: "arrow_inline", attachment: 123 }),
+      AnalyticsSseMessage.parse({ type: "arrow_inline", attachment: "AQID" }),
     ).toThrow();
   });
 
@@ -64,7 +64,7 @@ describe("AnalyticsSseMessage schema", () => {
   });
 
   test("safeParse returns success: false for malformed payloads", () => {
-    const r = AnalyticsSseMessage.safeParse({ type: "arrow_inline" });
+    const r = AnalyticsSseMessage.safeParse({ type: "arrow" });
     expect(r.success).toBe(false);
   });
 });
@@ -80,8 +80,8 @@ describe("typed builders", () => {
     expect(() => AnalyticsSseMessage.parse(msg)).not.toThrow();
   });
 
-  test("makeArrowInlineMessage roundtrips through the schema", () => {
-    const msg = makeArrowInlineMessage("AQID");
+  test("makeArrowMessage accepts synthetic inline- ids", () => {
+    const msg = makeArrowMessage("inline-some-uuid");
     expect(() => AnalyticsSseMessage.parse(msg)).not.toThrow();
   });
 });

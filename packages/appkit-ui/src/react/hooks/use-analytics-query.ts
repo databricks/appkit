@@ -24,29 +24,6 @@ function getArrowStreamUrl(id: string) {
 }
 
 /**
- * Client-side defensive cap on inline Arrow IPC attachments (8 MiB decoded).
- * Mirrors the server's MAX_INLINE_ATTACHMENT_BYTES so a misconfigured proxy
- * (or a future server bug) can't push us into allocating an unbounded
- * Uint8Array and hanging the browser.
- *
- * REMOVE THIS GUARD if PR #320 (stash + serve via /arrow-result) lands —
- * that proposal eliminates the arrow_inline SSE path entirely, so bulk
- * bytes flow over HTTP where the browser handles backpressure natively
- * and Content-Length is exposed up-front.
- */
-const MAX_INLINE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
-
-/** Decode a base64 string into a Uint8Array suitable for Arrow IPC parsing. */
-function decodeBase64(b64: string): Uint8Array {
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
-/**
  * Subscribe to an analytics query over SSE and returns its latest result.
  * Integration hook between client and analytics plugin.
  *
@@ -161,7 +138,11 @@ export function useAnalyticsQuery<
             return;
           }
 
-          // success - Arrow format (external links: fetch from server)
+          // success - Arrow format. Both INLINE (server-stashed,
+          // statement_id prefixed with "inline-") and EXTERNAL_LINKS
+          // (warehouse statement_id) flow through this single branch — the
+          // /arrow-result route dispatches based on the id prefix so the
+          // client doesn't need to know which path the bytes came from.
           if (msg?.type === "arrow") {
             try {
               const arrowData = await ArrowClient.fetchArrow(
@@ -175,39 +156,6 @@ export function useAnalyticsQuery<
             } catch (error) {
               console.error(
                 "[useAnalyticsQuery] Failed to fetch Arrow data",
-                error,
-              );
-              setLoading(false);
-              setError("Unable to load data, please try again");
-              return;
-            }
-          }
-
-          // success - Arrow format (inline: decode base64 IPC payload locally)
-          if (msg?.type === "arrow_inline") {
-            // Schema already enforced non-empty string; just check size.
-            // base64 length L decodes to ~L*3/4 bytes; reject before
-            // allocating a multi-MiB Uint8Array.
-            const decodedSize = Math.ceil((msg.attachment.length * 3) / 4);
-            if (decodedSize > MAX_INLINE_ATTACHMENT_BYTES) {
-              console.error(
-                "[useAnalyticsQuery] arrow_inline attachment exceeds %d bytes (got %d)",
-                MAX_INLINE_ATTACHMENT_BYTES,
-                decodedSize,
-              );
-              setLoading(false);
-              setError("Unable to load data, please try again");
-              return;
-            }
-            try {
-              const buffer = decodeBase64(msg.attachment);
-              const table = await ArrowClient.processArrowBuffer(buffer);
-              setLoading(false);
-              setData(table as ResultType);
-              return;
-            } catch (error) {
-              console.error(
-                "[useAnalyticsQuery] Failed to decode inline Arrow data",
                 error,
               );
               setLoading(false);

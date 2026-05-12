@@ -27,17 +27,16 @@ import { executeStatementDefaults } from "./defaults";
 const logger = createLogger("connectors:sql-warehouse");
 
 /**
- * Maximum size for inline Arrow IPC attachments (8 MiB decoded).
- * Aligned with `streamDefaults.maxEventSize` so anything that would exceed
- * the SSE event cap fails here with a clear error rather than a confusing
- * "Buffer size exceeded" downstream. Larger results should use
- * `disposition: "EXTERNAL_LINKS"`, which the analytics fallback handles.
+ * Maximum size for inline Arrow IPC attachments (25 MiB decoded — the
+ * Databricks Statement Execution API hard cap on INLINE responses).
  *
- * RAISE TO 25 MiB (Databricks API hard cap on INLINE) if PR #320 (stash +
- * serve via /arrow-result) lands — that proposal moves bulk bytes off SSE
- * onto HTTP, so the SSE event-size constraint no longer applies here.
+ * Bulk Arrow payloads no longer traverse SSE — the analytics route stashes
+ * them via `InlineArrowStash` and the client fetches over HTTP — so this
+ * cap is bounded by the upstream API rather than our event-size budget.
+ * Larger results still fall through to `disposition: "EXTERNAL_LINKS"`,
+ * handled by the analytics format-fallback.
  */
-const MAX_INLINE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const MAX_INLINE_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 interface SQLWarehouseConfig {
   timeout?: number;

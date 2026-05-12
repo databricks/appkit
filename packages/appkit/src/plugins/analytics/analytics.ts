@@ -4,7 +4,6 @@ import {
   type AgentToolDefinition,
   type AnalyticsSseMessage,
   type IAppRouter,
-  makeArrowInlineMessage,
   makeArrowMessage,
   makeResultMessage,
   type PluginExecuteConfig,
@@ -27,6 +26,7 @@ import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import { queryDefaults } from "./defaults";
+import { InlineArrowStash } from "./inline-arrow-stash";
 import manifest from "./manifest.json";
 import { QueryProcessor } from "./query";
 import {
@@ -49,6 +49,17 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
   // analytics services
   private SQLClient: SQLWarehouseConnector;
   private queryProcessor: QueryProcessor;
+
+  /**
+   * Server-side stash for inline Arrow IPC payloads.
+   *
+   * INLINE ARROW_STREAM responses do not ride the SSE control channel —
+   * the route puts the decoded bytes here and emits an `arrow` SSE
+   * message with a synthetic `inline-<uuid>` id, and the client fetches
+   * the bytes through the existing `/arrow-result/:jobId` endpoint with
+   * a real binary content-type.
+   */
+  protected inlineArrowStash: InlineArrowStash = new InlineArrowStash();
 
   constructor(config: IAnalyticsConfig) {
     super(config);
@@ -87,23 +98,59 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
 
   /**
    * Handle Arrow data download requests.
-   * When called via asUser(req), uses the user's Databricks credentials.
+   *
+   * Two id shapes are supported:
+   * - `inline-<uuid>`: bytes were stashed server-side by the query route.
+   *   Drain the stash, serve directly with the canonical Arrow content
+   *   type. No warehouse round-trip.
+   * - any other id: a warehouse-issued statement id. Fetch the Arrow
+   *   stream from the warehouse via the SDK; serve the bytes.
+   *
+   * When called via asUser(req), uses the user's Databricks credentials
+   * for the warehouse path. The inline path is user-scoped at the stash
+   * layer instead.
    */
   async _handleArrowRoute(
     req: express.Request,
     res: express.Response,
   ): Promise<void> {
+    const { jobId } = req.params;
+    const event = logger.event(req);
+    event?.setComponent("analytics", "getArrowData").setContext("analytics", {
+      job_id: jobId,
+      plugin: this.name,
+    });
+
+    if (jobId.startsWith("inline-")) {
+      const userKey = this._stashUserKey(req);
+      const bytes = this.inlineArrowStash.take(jobId, userKey);
+      if (!bytes) {
+        // Already drained, expired, or never belonged to this user. 410
+        // distinguishes this from "warehouse statement id not found" (404)
+        // so the client can surface a useful error.
+        logger.debug("Inline Arrow stash miss for jobId=%s", jobId);
+        res.status(410).json({
+          error: "Inline Arrow result expired or unknown",
+          plugin: this.name,
+        });
+        return;
+      }
+      logger.debug(
+        "Serving inline Arrow buffer: %d bytes for jobId=%s",
+        bytes.length,
+        jobId,
+      );
+      res.setHeader("Content-Type", "application/vnd.apache.arrow.stream");
+      res.setHeader("Content-Length", bytes.length.toString());
+      // Inline payloads are single-use and short-lived; no public caching.
+      res.setHeader("Cache-Control", "no-store");
+      res.send(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+      return;
+    }
+
     try {
-      const { jobId } = req.params;
       const workspaceClient = getWorkspaceClient();
-
       logger.debug("Processing Arrow job request for jobId=%s", jobId);
-
-      const event = logger.event(req);
-      event?.setComponent("analytics", "getArrowData").setContext("analytics", {
-        job_id: jobId,
-        plugin: this.name,
-      });
 
       const result = await this.getArrowData(workspaceClient, jobId);
 
@@ -123,6 +170,28 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         error: error instanceof Error ? error.message : "Arrow job not found",
         plugin: this.name,
       });
+    }
+  }
+
+  /**
+   * Stash key used at put-time (in `_handleQueryRoute`) and take-time
+   * (in `_handleArrowRoute`). Centralized so the two sides cannot drift.
+   *
+   * Returns the user id when an `x-forwarded-user` header is present,
+   * otherwise `"global"` for service-principal contexts (no user header).
+   * Both queries from the same request resolve to the same key, so the
+   * subsequent /arrow-result fetch reliably hits the entry stashed
+   * during the SSE query.
+   *
+   * `resolveUserId` throws when no header is present — catch and degrade
+   * to "global" rather than letting that failure mode bubble through the
+   * route handler.
+   */
+  protected _stashUserKey(req: express.Request): string {
+    try {
+      return this.resolveUserId(req) || "global";
+    } catch {
+      return "global";
     }
   }
 
@@ -184,6 +253,11 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     // get execution context - user-scoped if .obo.sql, otherwise service principal
     const executor = isAsUser ? this.asUser(req) : this;
     const executorKey = isAsUser ? this.resolveUserId(req) : "global";
+    // Stash key is always per-request user (never "global"), independent
+    // of the executor's cache scope. Inline Arrow payloads are single-use
+    // and short-lived — there is no benefit to sharing them across users,
+    // and per-user scoping is defense in depth on top of unguessable ids.
+    const stashUserKey = this._stashUserKey(req);
 
     const hashedQuery = this.queryProcessor.hashQuery(query);
 
@@ -231,6 +305,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
           query,
           processedParams,
           format,
+          stashUserKey,
           signal,
         );
       },
@@ -245,6 +320,10 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    * - JSON_ARRAY: always uses INLINE disposition, no fallback.
    * - ARROW_STREAM: tries INLINE first, falls back to EXTERNAL_LINKS.
    *   This handles warehouses that only support one disposition.
+   *
+   * INLINE attachments are decoded once and put on the plugin's
+   * `inlineArrowStash`; the SSE message carries the synthetic stash id so
+   * the client fetches the bytes out-of-band via `/arrow-result/<id>`.
    */
   private async _executeWithFormatFallback(
     executor: AnalyticsPlugin,
@@ -253,6 +332,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       | Record<string, SQLTypeMarker | null | undefined>
       | undefined,
     requestedFormat: AnalyticsFormat,
+    stashUserKey: string,
     signal?: AbortSignal,
   ): Promise<AnalyticsSseMessage> {
     if (requestedFormat === "JSON_ARRAY") {
@@ -276,12 +356,21 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         { disposition: "INLINE", format: "ARROW_STREAM" },
         signal,
       );
-      // INLINE responses with an Arrow IPC attachment are forwarded as base64
-      // for the client to decode into an Arrow Table. Anything else (rare:
-      // data_array under ARROW_STREAM, or an empty result) falls back to the
-      // generic "result" payload.
+      // INLINE responses with an Arrow IPC attachment go through the
+      // stash-and-serve path: decode the base64 once, hold the bytes
+      // server-side, emit a synthetic statement id. The client fetches via
+      // /arrow-result so multi-MiB Arrow blobs never traverse SSE.
       if (result?.attachment) {
-        return makeArrowInlineMessage(result.attachment);
+        const decoded = Buffer.from(result.attachment, "base64");
+        const inlineId = this.inlineArrowStash.put(
+          stashUserKey,
+          new Uint8Array(
+            decoded.buffer,
+            decoded.byteOffset,
+            decoded.byteLength,
+          ),
+        );
+        return makeArrowMessage(inlineId, { status: result.status });
       }
       return makeResultMessage(result?.data, {
         status: result?.status,

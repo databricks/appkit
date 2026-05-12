@@ -18,12 +18,11 @@ export async function connectSSE<Payload = unknown>(
     lastEventId: initialLastEventId = null,
     retryDelay = 2000,
     maxRetries = 3,
-    // 12 MiB — matches the server's stream `maxEventSize`. Sized to
-    // receive inline Arrow IPC attachments from ARROW_STREAM analytics
-    // responses: the connector caps decoded payloads at 8 MiB, which
-    // inflates to ~10.6 MiB once base64-encoded and wrapped in JSON + SSE
-    // framing. Most events are well under 1 MiB in practice.
-    maxBufferSize = 12 * 1024 * 1024,
+    // 1 MiB — matches the server's `streamDefaults.maxEventSize`. SSE
+    // carries only short JSON control messages; bulk Arrow payloads flow
+    // over plain HTTP via `/api/analytics/arrow-result/:jobId`, so this
+    // buffer never needs to hold multi-MiB attachments.
+    maxBufferSize = 1 * 1024 * 1024,
     timeout = 300000, // 5 minutes
     onError,
   } = options;

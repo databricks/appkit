@@ -106,6 +106,87 @@ describe("Analytics Plugin", () => {
       );
     });
 
+    test("/arrow-result/inline-* drains the stash and serves bytes as application/vnd.apache.arrow.stream", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+      plugin.injectRoutes(router);
+
+      const arrowBytes = new Uint8Array([0xff, 0xfe, 0xfd, 0xfc]);
+      const id = (plugin as any).inlineArrowStash.put("global", arrowBytes);
+      expect(id.startsWith("inline-")).toBe(true);
+
+      const handler = getHandler("GET", "/arrow-result/:jobId");
+      const mockReq = createMockRequest({ params: { jobId: id } });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.setHeader).toHaveBeenCalledWith(
+        "Content-Type",
+        "application/vnd.apache.arrow.stream",
+      );
+      expect(mockRes.setHeader).toHaveBeenCalledWith(
+        "Content-Length",
+        String(arrowBytes.length),
+      );
+      expect(mockRes.setHeader).toHaveBeenCalledWith(
+        "Cache-Control",
+        "no-store",
+      );
+      expect(mockRes.send).toHaveBeenCalledTimes(1);
+      const sentBuf = (mockRes.send as any).mock.calls[0][0] as Buffer;
+      expect(Buffer.isBuffer(sentBuf)).toBe(true);
+      expect(Array.from(sentBuf)).toEqual(Array.from(arrowBytes));
+
+      // Drain-on-read: a second fetch must return 410, not the bytes again.
+      const secondRes = createMockResponse();
+      await handler(mockReq, secondRes);
+      expect(secondRes.status).toHaveBeenCalledWith(410);
+    });
+
+    test("/arrow-result/inline-* returns 410 when the stash entry never existed", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("GET", "/arrow-result/:jobId");
+      const mockReq = createMockRequest({
+        params: { jobId: "inline-does-not-exist" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(410);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringMatching(/expired or unknown/),
+        }),
+      );
+    });
+
+    test("/arrow-result/inline-* returns 410 when the stash entry belongs to a different user", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+      plugin.injectRoutes(router);
+
+      // Stash entry keyed to user-a, but the request resolves to "global"
+      // (no x-forwarded-user header) — keys differ, take must return
+      // nothing, and the entry stays put (single-user view).
+      const bytes = new Uint8Array([1, 2, 3]);
+      const id = (plugin as any).inlineArrowStash.put("user-a", bytes);
+
+      const handler = getHandler("GET", "/arrow-result/:jobId");
+      const mockReq = createMockRequest({ params: { jobId: id } });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(410);
+      // The entry must still be there for the real owner.
+      expect((plugin as any).inlineArrowStash.take(id, "user-a")).toBeDefined();
+    });
+
     test("/query/:query_key should return 400 when query_key is missing", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
@@ -889,7 +970,7 @@ describe("Analytics Plugin", () => {
       }
     });
 
-    test("/query/:query_key emits arrow_inline SSE event when ARROW_STREAM INLINE returns an attachment", async () => {
+    test("/query/:query_key stashes ARROW_STREAM INLINE bytes and emits an arrow message with a synthetic inline- id", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -898,7 +979,9 @@ describe("Analytics Plugin", () => {
         isAsUser: false,
       });
 
-      const fakeAttachment = "BASE64_ARROW_IPC_BYTES";
+      // Real base64 so the route can decode it via Buffer.from(..., "base64").
+      const arrowBytes = new Uint8Array([1, 2, 3, 4, 5]);
+      const fakeAttachment = Buffer.from(arrowBytes).toString("base64");
       const executeMock = vi.fn().mockResolvedValue({
         result: { attachment: fakeAttachment, row_count: 1 },
       });
@@ -921,14 +1004,26 @@ describe("Analytics Plugin", () => {
         disposition: "INLINE",
         format: "ARROW_STREAM",
       });
-      // SSE payload should use the new arrow_inline message type.
+      // SSE payload: unified `arrow` message with an inline- prefixed id.
+      // The base64 attachment must NOT appear on the SSE channel.
       const writeCalls = (mockRes.write as any).mock.calls.map(
         (c: any[]) => c[0] as string,
       );
       const payload = writeCalls.find((s: string) => s.startsWith("data: "));
       expect(payload).toBeDefined();
-      expect(payload).toContain('"type":"arrow_inline"');
-      expect(payload).toContain(`"attachment":"${fakeAttachment}"`);
+      expect(payload).toContain('"type":"arrow"');
+      expect(payload).toMatch(/"statement_id":"inline-[^"]+"/);
+      expect(payload).not.toContain("arrow_inline");
+      expect(payload).not.toContain(fakeAttachment);
+
+      // The decoded bytes should be in the stash, keyed by the same
+      // synthetic id; a subsequent /arrow-result fetch will drain them.
+      const idMatch = payload?.match(/"statement_id":"(inline-[^"]+)"/);
+      expect(idMatch).not.toBeNull();
+      const inlineId = idMatch![1];
+      const stashed = (plugin as any).inlineArrowStash.take(inlineId, "global");
+      expect(stashed).toBeDefined();
+      expect(Array.from(stashed)).toEqual(Array.from(arrowBytes));
     });
 
     test("/query/:query_key rejects unknown format values with 400", async () => {
