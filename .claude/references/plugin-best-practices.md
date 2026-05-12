@@ -22,7 +22,7 @@ Reference guide for building AppKit plugins. Every guideline is prefixed with a 
 
 **MUST** use the correct permission enum per resource type (e.g. `CAN_USE` for `sql_warehouse`, `WRITE_VOLUME` for `volume`). The schema validates this with `allOf`/`if-then` rules.
 
-**SHOULD** add `fields` with `env` entries so that `appkit plugin sync` and `appkit init` can auto-generate `.env` templates and `app.yaml` resource blocks.
+**SHOULD** add `fields` with `env` entries so that `appkit plugin sync` and `databricks apps init` can auto-generate `.env` templates and `app.yaml` resource blocks.
 
 **SHOULD** set `hidden: true` on infrastructure plugins (like `server`) that should not appear in the template manifest.
 
