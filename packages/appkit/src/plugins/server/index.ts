@@ -113,6 +113,13 @@ export class ServerPlugin extends Plugin {
     this.serverApplication.use(requestMetricsMiddleware);
     this.serverApplication.use(
       express.json({
+        // Express's stock 100kb default is too tight for modern apps —
+        // agent chat payloads and any base64-encoded upload (e.g. the
+        // dev playground's smart-dashboard "save view" screenshot at
+        // ~105KB) blow past it instantly. Raise to 1mb by default and
+        // let consumers tune via `server({ bodyLimit })` if they need
+        // more headroom.
+        limit: this.config.bodyLimit ?? "1mb",
         type: (req) => {
           // Skip JSON parsing for routes that declared skipBodyParsing
           // (e.g. file uploads where the raw body must flow through).
