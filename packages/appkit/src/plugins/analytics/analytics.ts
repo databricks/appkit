@@ -36,6 +36,7 @@ import type {
   IAnalyticsConfig,
   IAnalyticsQueryRequest,
 } from "./types";
+import { normalizeAnalyticsFormat } from "./types";
 
 const logger = createLogger("analytics");
 
