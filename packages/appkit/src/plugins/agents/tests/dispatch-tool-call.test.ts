@@ -355,6 +355,34 @@ describe("runSubAgent — sub-agent event forwarding", () => {
    * happens. `metadata` events are NOT forwarded because the sub-agent has
    * its own threadId and overwriting the parent's would break multi-turn.
    */
+  test("rejects when depth exceeds limits.maxSubAgentDepth before invoking the child", async () => {
+    // Backstop for the runtime cycle case: even without an explicit
+    // cycle, two agents delegating to each other will eventually exceed
+    // the depth limit and we want a clear error, not an unbounded stack.
+    const plugin = new AgentsPlugin({
+      dir: false,
+      agents: {},
+      limits: { maxSubAgentDepth: 2 },
+    });
+    const { runState } = makeRunState(plugin);
+    runState.limits.maxSubAgentDepth = 2;
+
+    const childRun = vi.fn();
+    const child = {
+      name: "child",
+      instructions: "test",
+      adapter: { run: childRun },
+      toolIndex: new Map(),
+      // biome-ignore lint/suspicious/noExplicitAny: minimal stub
+    } as any;
+
+    await expect(
+      // biome-ignore lint/suspicious/noExplicitAny: call private
+      (plugin as any).runSubAgent(runState, child, { input: "go" }, 3),
+    ).rejects.toThrow(/Sub-agent depth exceeded \(limit 2\)/);
+    expect(childRun).not.toHaveBeenCalled();
+  });
+
   test("forwards every sub-agent event into the parent stream except metadata", async () => {
     const plugin = new AgentsPlugin({ dir: false, agents: {} });
     const { runState, pushed } = makeRunState(plugin);

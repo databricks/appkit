@@ -51,6 +51,44 @@ const MCP_RESPONSE_BODY_LIMIT_BYTES = 1024 * 1024;
  * streaming data past the limit. Returns the empty string when the
  * response has no readable body.
  */
+/**
+ * Empty-object fallback used when an MCP server ships a missing or
+ * malformed `inputSchema`. Matches the shape downstream adapters expect
+ * for a function tool that takes no arguments.
+ */
+const EMPTY_TOOL_PARAMETERS: AgentToolDefinition["parameters"] = {
+  type: "object",
+  properties: {},
+};
+
+/**
+ * Coerce a remote MCP server's reported `inputSchema` into the
+ * JSONSchema7 shape AppKit's adapters expect for a function tool's
+ * `parameters`. The MCP wire type is `Record<string, unknown>`, so a
+ * misbehaving (or malicious) server could ship arbitrary JSON. We accept
+ * only the standard `{ type: "object", properties: {...} }` shape and
+ * fall back to an empty-parameters schema otherwise — the tool still
+ * registers, it just can't accept arguments.
+ */
+function coerceToolParameters(
+  inputSchema: Record<string, unknown> | undefined,
+): AgentToolDefinition["parameters"] {
+  if (!inputSchema || typeof inputSchema !== "object") {
+    return EMPTY_TOOL_PARAMETERS;
+  }
+  const { type, properties } = inputSchema;
+  if (type !== "object") return EMPTY_TOOL_PARAMETERS;
+  if (
+    properties !== undefined &&
+    (typeof properties !== "object" ||
+      properties === null ||
+      Array.isArray(properties))
+  ) {
+    return EMPTY_TOOL_PARAMETERS;
+  }
+  return inputSchema as AgentToolDefinition["parameters"];
+}
+
 async function readResponseTextCapped(
   response: Response,
   maxBytes: number,
@@ -277,11 +315,7 @@ export class AppKitMcpClient {
         defs.push({
           name: `mcp.${serverName}.${toolName}`,
           description: schema.description ?? toolName,
-          parameters:
-            (schema.inputSchema as AgentToolDefinition["parameters"]) ?? {
-              type: "object",
-              properties: {},
-            },
+          parameters: coerceToolParameters(schema.inputSchema),
         });
       }
     }

@@ -100,9 +100,11 @@ export function AgentChat() {
     );
   }, [content, pendingAssistantId]);
 
+  // Auto-scroll to bottom when messages or the streaming assistant
+  // content change — keeps the newest line in view during a long reply.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, []);
+  }, [messages, content]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

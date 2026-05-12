@@ -263,7 +263,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     const entry = this.activeStreams.get(requestId);
     if (!entry) return;
     this.activeStreams.delete(requestId);
-    const next = (this.userStreamCounts.get(entry.userId) ?? 1) - 1;
+    const next = (this.userStreamCounts.get(entry.userId) ?? 0) - 1;
     if (next <= 0) {
       this.userStreamCounts.delete(entry.userId);
     } else {
@@ -1198,6 +1198,16 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         runState.limits.toolCallTimeoutMs,
       );
     } else if (entry.source === "function") {
+      // Function tools declare their parameters as a JSON-object schema,
+      // so adapters always serialize `args` as an object. A non-object
+      // value here means the upstream model emitted malformed tool-call
+      // JSON; surface a clear error rather than silently passing through
+      // a wrong-shape value the tool will then choke on.
+      if (typeof args !== "object" || args === null || Array.isArray(args)) {
+        throw new Error(
+          `Function tool '${name}' received non-object arguments (got ${args === null ? "null" : Array.isArray(args) ? "array" : typeof args}); expected a JSON object.`,
+        );
+      }
       result = await entry.functionTool.execute(
         args as Record<string, unknown>,
       );

@@ -58,10 +58,7 @@ export interface ToolConfig<S extends z.ZodType> {
  *   can self-correct on its next turn.
  */
 export function tool<S extends z.ZodType>(config: ToolConfig<S>): FunctionTool {
-  const parameters = toToolJSONSchema(config.schema) as unknown as Record<
-    string,
-    unknown
-  >;
+  const parameters = toToolJSONSchema(config.schema);
 
   // `name` is only used for the zod-validation error message and the
   // FunctionTool's `name` field; the agents plugin overrides the latter
