@@ -1,7 +1,32 @@
 {
   "$schema": "https://databricks.github.io/appkit/schemas/template-plugins.schema.json",
-  "version": "1.0",
+  "version": "1.1",
   "plugins": {
+    "agents": {
+      "name": "agents",
+      "displayName": "Agents Plugin",
+      "description": "AI agents driven by markdown configs or code, with auto-tool-discovery from registered plugins",
+      "package": "@databricks/appkit",
+      "resources": {
+        "required": [],
+        "optional": [
+          {
+            "type": "serving_endpoint",
+            "alias": "Default LLM for agents",
+            "resourceKey": "agents-serving-endpoint",
+            "description": "Default streaming-capable LLM endpoint for agents that don't pin their own model",
+            "permission": "CAN_QUERY",
+            "fields": {
+              "name": {
+                "env": "DATABRICKS_SERVING_ENDPOINT_NAME",
+                "description": "Default LLM serving endpoint name"
+              }
+            }
+          }
+        ]
+      },
+      "stability": "beta"
+    },
     "analytics": {
       "name": "analytics",
       "displayName": "Analytics Plugin",

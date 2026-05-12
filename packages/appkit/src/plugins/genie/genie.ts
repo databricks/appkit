@@ -1,8 +1,21 @@
 import { randomUUID } from "node:crypto";
 import type express from "express";
-import type { IAppRouter, StreamExecutionSettings } from "shared";
+import type {
+  AgentToolDefinition,
+  IAppRouter,
+  StreamExecutionSettings,
+  ToolProvider,
+} from "shared";
+import { z } from "zod";
 import { GenieConnector } from "../../connectors";
 import { getWorkspaceClient } from "../../context";
+import { buildToolkitEntries } from "../../core/agent/build-toolkit";
+import {
+  defineTool,
+  executeFromRegistry,
+  type ToolRegistry,
+  toolsFromRegistry,
+} from "../../core/agent/tools/define-tool";
 import { createLogger } from "../../logging";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
@@ -17,7 +30,7 @@ import type {
 
 const logger = createLogger("genie");
 
-export class GeniePlugin extends Plugin {
+export class GeniePlugin extends Plugin implements ToolProvider {
   static manifest = manifest as PluginManifest<"genie">;
 
   protected static description =
@@ -25,6 +38,7 @@ export class GeniePlugin extends Plugin {
   protected declare config: IGenieConfig;
 
   private readonly genieConnector: GenieConnector;
+  private tools: ToolRegistry = {};
 
   constructor(config: IGenieConfig) {
     super(config);
@@ -36,9 +50,76 @@ export class GeniePlugin extends Plugin {
       timeout: this.config.timeout,
       maxMessages: 200,
     });
+
+    const spaces = this.config.spaces ?? {};
+    const missingAliases = Object.entries(spaces)
+      .filter(([, id]) => !id)
+      .map(([alias]) => alias);
+    if (missingAliases.length > 0) {
+      const plural = missingAliases.length > 1;
+      throw new Error(
+        `GeniePlugin: space ${plural ? "aliases" : "alias"} ${missingAliases
+          .map((a) => `"${a}"`)
+          .join(
+            ", ",
+          )} ${plural ? "were" : "was"} configured with a missing Genie Space ID. ` +
+          "This usually means an environment variable used to populate the config is unset. " +
+          "Set the env var, or remove the alias from the config.",
+      );
+    }
+
+    for (const alias of Object.keys(spaces)) {
+      Object.assign(this.tools, this._defineSpaceTools(alias));
+    }
   }
 
-  private defaultSpaces(): Record<string, string> {
+  /**
+   * Builds the registry entries for a single Genie space alias.
+   * One set of tools per configured space, keyed by `${alias}.${method}`.
+   */
+  private _defineSpaceTools(alias: string): ToolRegistry {
+    return {
+      [`${alias}.sendMessage`]: defineTool({
+        description: `Send a natural language question to the Genie space "${alias}" and get data analysis results`,
+        schema: z.object({
+          content: z.string().describe("The natural language question to ask"),
+          conversationId: z
+            .string()
+            .optional()
+            .describe(
+              "Optional conversation ID to continue an existing conversation",
+            ),
+        }),
+        annotations: { effect: "read", requiresUserContext: true },
+        execute: async (args, signal) => {
+          const events: GenieStreamEvent[] = [];
+          for await (const event of this.sendMessage(
+            alias,
+            args.content,
+            args.conversationId,
+            { signal },
+          )) {
+            events.push(event);
+          }
+          return events;
+        },
+      }),
+      [`${alias}.getConversation`]: defineTool({
+        description: `Retrieve the conversation history from the Genie space "${alias}"`,
+        schema: z.object({
+          conversationId: z
+            .string()
+            .describe("The conversation ID to retrieve"),
+        }),
+        annotations: { effect: "read", requiresUserContext: true },
+        autoInheritable: true,
+        execute: (args, signal) =>
+          this.getConversation(alias, args.conversationId, signal),
+      }),
+    };
+  }
+
+  private defaultSpaces(): Record<string, string | undefined> {
     const spaceId = process.env.DATABRICKS_GENIE_SPACE_ID;
     return spaceId ? { default: spaceId } : {};
   }
@@ -242,7 +323,13 @@ export class GeniePlugin extends Plugin {
   async getConversation(
     alias: string,
     conversationId: string,
+    signal?: AbortSignal,
   ): Promise<GenieConversationHistoryResponse> {
+    // Honour an already-cancelled stream before paying any I/O cost. The
+    // underlying connector's pagination loop is signal-agnostic today, so
+    // this catches the common case (tool dispatched after the user
+    // cancelled) without a deeper connector change.
+    signal?.throwIfAborted();
     const spaceId = this.resolveSpaceId(alias);
 
     if (!spaceId) {
@@ -266,8 +353,9 @@ export class GeniePlugin extends Plugin {
     alias: string,
     content: string,
     conversationId?: string,
-    options?: { timeout?: number },
+    options?: { timeout?: number; signal?: AbortSignal },
   ): AsyncGenerator<GenieStreamEvent> {
+    options?.signal?.throwIfAborted();
     const spaceId = this.resolveSpaceId(alias);
     if (!spaceId) {
       throw new Error(`Unknown space alias: ${alias}`);
@@ -279,12 +367,28 @@ export class GeniePlugin extends Plugin {
       spaceId,
       content,
       conversationId,
-      { timeout },
+      { timeout, signal: options?.signal },
     );
   }
 
   async shutdown(): Promise<void> {
     this.streamManager.abortAll();
+  }
+
+  getAgentTools(): AgentToolDefinition[] {
+    return toolsFromRegistry(this.tools);
+  }
+
+  async executeAgentTool(
+    name: string,
+    args: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    return executeFromRegistry(this.tools, name, args, signal);
+  }
+
+  toolkit(opts?: import("../../core/agent/types").ToolkitOptions) {
+    return buildToolkitEntries(this.name, this.tools, opts);
   }
 
   exports() {

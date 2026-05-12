@@ -1,13 +1,23 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type express from "express";
 import type {
+  AgentToolDefinition,
   IAppRouter,
   PluginExecuteConfig,
   SQLTypeMarker,
   StreamExecutionSettings,
+  ToolProvider,
 } from "shared";
+import { z } from "zod";
 import { SQLWarehouseConnector } from "../../connectors";
 import { getWarehouseId, getWorkspaceClient } from "../../context";
+import { buildToolkitEntries } from "../../core/agent/build-toolkit";
+import {
+  defineTool,
+  executeFromRegistry,
+  toolsFromRegistry,
+} from "../../core/agent/tools/define-tool";
+import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
@@ -19,10 +29,11 @@ import type {
   IAnalyticsConfig,
   IAnalyticsQueryRequest,
 } from "./types";
+import { normalizeAnalyticsFormat } from "./types";
 
 const logger = createLogger("analytics");
 
-export class AnalyticsPlugin extends Plugin {
+export class AnalyticsPlugin extends Plugin implements ToolProvider {
   /** Plugin manifest declaring metadata and resource requirements */
   static manifest = manifest as PluginManifest<"analytics">;
 
@@ -45,7 +56,10 @@ export class AnalyticsPlugin extends Plugin {
   }
 
   injectRoutes(router: IAppRouter) {
-    // Service principal endpoints
+    // Arrow data downloads always run as service principal and bypass the
+    // interceptor chain (execute/executeStream). The original query execution
+    // handles OBO via executeStream(); this endpoint fetches pre-computed
+    // results by job ID.
     this.route(router, {
       name: "arrow",
       method: "get",
@@ -115,7 +129,9 @@ export class AnalyticsPlugin extends Plugin {
     res: express.Response,
   ): Promise<void> {
     const { query_key } = req.params;
-    const { parameters, format = "JSON" } = req.body as IAnalyticsQueryRequest;
+    const { parameters, format: rawFormat = "JSON_ARRAY" } =
+      req.body as IAnalyticsQueryRequest;
+    const format = normalizeAnalyticsFormat(rawFormat);
 
     // Request-scoped logging with WideEvent tracking
     logger.debug(req, "Executing query: %s (format=%s)", query_key, format);
@@ -151,7 +167,7 @@ export class AnalyticsPlugin extends Plugin {
     const executorKey = isAsUser ? this.resolveUserId(req) : "global";
 
     const queryParameters =
-      format === "ARROW"
+      format === "ARROW_STREAM"
         ? {
             formatParameters: {
               disposition: "EXTERNAL_LINKS",
@@ -260,6 +276,52 @@ export class AnalyticsPlugin extends Plugin {
 
   async shutdown(): Promise<void> {
     this.streamManager.abortAll();
+  }
+
+  private tools = {
+    query: defineTool({
+      description:
+        "Execute a read-only SQL query against the Databricks SQL warehouse. Only SELECT, WITH, SHOW, EXPLAIN, and DESCRIBE statements are accepted; writes are rejected. Returns the query results as JSON.",
+      schema: z.object({
+        query: z
+          .string()
+          .describe(
+            "The SQL query to execute. Must be a SELECT, WITH, SHOW, EXPLAIN, or DESCRIBE statement.",
+          ),
+      }),
+      annotations: {
+        effect: "read",
+        requiresUserContext: true,
+      },
+      autoInheritable: true,
+      execute: (args, signal) => {
+        assertReadOnlySql(args.query);
+        return this.query(args.query, undefined, undefined, signal);
+      },
+    }),
+  };
+
+  getAgentTools(): AgentToolDefinition[] {
+    return toolsFromRegistry(this.tools);
+  }
+
+  async executeAgentTool(
+    name: string,
+    args: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    return executeFromRegistry(this.tools, name, args, signal);
+  }
+
+  /**
+   * Returns the plugin's tools as a keyed record of `ToolkitEntry` markers.
+   * Called by the agents plugin (via `resolveToolkitFromProvider`) to spread
+   * a filtered, renamed view of the plugin's tools into an agent's tool
+   * index. Inside the function form of `AgentDefinition.tools`, callers
+   * reach this method via `plugins.analytics.toolkit(opts)`.
+   */
+  toolkit(opts?: import("../../core/agent/types").ToolkitOptions) {
+    return buildToolkitEntries(this.name, this.tools, opts);
   }
 
   /**

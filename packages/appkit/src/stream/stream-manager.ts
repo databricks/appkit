@@ -34,6 +34,7 @@ export class StreamManager {
     res: IAppResponse,
     handler: (signal: AbortSignal) => AsyncGenerator<any, void, unknown>,
     options?: StreamConfig,
+    ownerKey?: string,
   ): Promise<void> {
     const { streamId } = options || {};
 
@@ -48,14 +49,27 @@ export class StreamManager {
     // handle reconnection
     if (streamId && StreamValidator.validateStreamId(streamId)) {
       const existingStream = this.streamRegistry.get(streamId);
-      // if stream exists, attach to it
       if (existingStream) {
+        // Enforce per-user binding: the stream's owner key must match the
+        // requesting caller's owner key. This prevents cross-user stream
+        // takeover via guessed/leaked stream IDs (the SSE registry was
+        // previously a global lookup with no authorization step).
+        if (existingStream.ownerKey !== ownerKey) {
+          this.sseWriter.writeError(
+            res,
+            randomUUID(),
+            "Stream not found or access denied",
+            SSEErrorCode.STREAM_FORBIDDEN,
+          );
+          res.end();
+          return;
+        }
         return this._attachToExistingStream(res, existingStream, options);
       }
     }
 
     // if stream does not exist, create a new one
-    return this._createNewStream(res, handler, options);
+    return this._createNewStream(res, handler, options, ownerKey);
   }
 
   // abort all active operations
@@ -151,6 +165,7 @@ export class StreamManager {
     res: IAppResponse,
     handler: (signal: AbortSignal) => AsyncGenerator<any, void, unknown>,
     options?: StreamConfig,
+    ownerKey?: string,
   ): Promise<void> {
     const streamId = options?.streamId ?? randomUUID();
 
@@ -185,6 +200,7 @@ export class StreamManager {
     // create stream entry
     const streamEntry: StreamEntry = {
       streamId,
+      ownerKey,
       generator: handler(combinedSignal),
       eventBuffer,
       clients: new Set([res]),

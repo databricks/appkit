@@ -92,6 +92,7 @@ export function createLakebasePool(
         kind: SpanKind.CLIENT,
         attributes: {
           "db.system": "lakebase",
+          "db.user": poolConfig.user ?? "unknown",
           "db.statement": sql ? sql.substring(0, 500) : "unknown",
         },
       },

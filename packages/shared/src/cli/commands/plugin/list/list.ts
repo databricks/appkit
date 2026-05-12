@@ -16,6 +16,7 @@ export interface PluginRow {
   name: string;
   displayName: string;
   package: string;
+  stability: "beta" | "ga";
   required: number;
   optional: number;
 }
@@ -36,6 +37,7 @@ export function listFromManifestFile(manifestPath: string): PluginRow[] {
         name: string;
         displayName: string;
         package: string;
+        stability?: "beta" | "ga";
         resources: { required: unknown[]; optional: unknown[] };
       }
     >;
@@ -52,6 +54,7 @@ export function listFromManifestFile(manifestPath: string): PluginRow[] {
     name: p.name,
     displayName: p.displayName ?? p.name,
     package: p.package ?? "",
+    stability: p.stability ?? "ga",
     required: Array.isArray(p.resources?.required)
       ? p.resources.required.length
       : 0,
@@ -103,10 +106,14 @@ async function collectPluginsRecursive(
           const packagePath = relPath.startsWith(".")
             ? relPath
             : `./${relPath}`;
+          const rawManifest = manifest as typeof manifest & {
+            stability?: "beta" | "ga";
+          };
           rows.push({
             name: manifest.name,
             displayName: manifest.displayName ?? manifest.name,
             package: packagePath,
+            stability: rawManifest.stability ?? "ga",
             required: Array.isArray(manifest.resources?.required)
               ? manifest.resources.required.length
               : 0,
@@ -153,9 +160,11 @@ function printTable(rows: PluginRow[]): void {
   const maxName = Math.max(4, ...rows.map((r) => r.name.length));
   const maxDisplay = Math.max(10, ...rows.map((r) => r.displayName.length));
   const maxPkg = Math.max(7, ...rows.map((r) => r.package.length));
+  const maxStab = Math.max(9, ...rows.map((r) => r.stability.length));
   const header = [
     "NAME".padEnd(maxName),
     "DISPLAY NAME".padEnd(maxDisplay),
+    "STABILITY".padEnd(maxStab),
     "PACKAGE / PATH".padEnd(maxPkg),
     "REQ",
     "OPT",
@@ -167,6 +176,7 @@ function printTable(rows: PluginRow[]): void {
       [
         r.name.padEnd(maxName),
         r.displayName.padEnd(maxDisplay),
+        r.stability.padEnd(maxStab),
         r.package.padEnd(maxPkg),
         String(r.required).padStart(3),
         String(r.optional).padStart(3),

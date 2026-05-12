@@ -1,10 +1,12 @@
-import { Button, Card } from "@databricks/appkit-ui/react";
+import { Badge, Card } from "@databricks/appkit-ui/react";
 import {
   createFileRoute,
+  Link,
   retainSearchParams,
-  useNavigate,
 } from "@tanstack/react-router";
+import { ArrowRightIcon, SparklesIcon } from "lucide-react";
 import { ThemeSelector } from "@/components/theme-selector";
+import { ALL_NAV_ITEMS, NAV_GROUPS, type NavItem } from "@/lib/nav";
 
 export const Route = createFileRoute("/")({
   component: IndexRoute,
@@ -13,255 +15,120 @@ export const Route = createFileRoute("/")({
   },
 });
 
+/**
+ * Landing page for the dev playground. Renders a hero and the canonical
+ * demo catalog grouped by category (Data / AI / Platform).
+ *
+ * The catalog itself lives in `@/lib/nav.ts` and is shared with the nav
+ * dropdown in `__root.tsx`, so adding a new demo is a one-line change that
+ * updates both surfaces at once.
+ */
 function IndexRoute() {
-  const navigate = useNavigate();
-
   return (
     <div className="min-h-screen bg-background">
-      <div className="absolute top-4 right-4">
+      <div className="absolute top-4 right-4 z-10">
         <ThemeSelector />
       </div>
-      <div className="max-w-6xl mx-auto px-6 py-20">
-        <div className="text-center mb-16">
-          <h1 className="text-5xl font-bold text-foreground mb-4">
-            AppKit Playground
-          </h1>
-          <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-            Explore the capabilities of the AppKit with interactive examples and
-            demos
-          </p>
+
+      <Hero demoCount={ALL_NAV_ITEMS.length} />
+
+      <div className="max-w-6xl mx-auto px-6 pb-20">
+        <div className="space-y-14">
+          {NAV_GROUPS.map((group) => (
+            <section key={group.id} aria-labelledby={`group-${group.id}`}>
+              <div className="mb-5">
+                <h2
+                  id={`group-${group.id}`}
+                  className="text-2xl font-semibold tracking-tight text-foreground"
+                >
+                  {group.label}
+                </h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {group.tagline}
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {group.items.map((item) => (
+                  <DemoCard key={item.to} item={item} />
+                ))}
+              </div>
+            </section>
+          ))}
         </div>
 
-        <div className="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto mb-16">
-          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
-            <div className="flex flex-col h-full">
-              <h3 className="text-2xl font-semibold text-foreground mb-3">
-                Analytics Dashboard
-              </h3>
-              <p className="text-muted-foreground mb-6 flex-grow">
-                Explore real-time analytics with query execution, data
-                visualization, and interactive components using the Design
-                System.
-              </p>
-              <Button
-                onClick={() => navigate({ to: "/analytics" })}
-                className="w-full"
-              >
-                Explore real-time analytics
-              </Button>
-            </div>
-          </Card>
-
-          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
-            <div className="flex flex-col h-full">
-              <h3 className="text-2xl font-semibold text-foreground mb-3">
-                Arrow Analytics Dashboard
-              </h3>
-              <p className="text-muted-foreground mb-6 flex-grow">
-                Explore real-time analytics with query execution, data
-                visualization, and interactive components using Apache Arrow
-                streaming.
-              </p>
-              <Button
-                onClick={() => navigate({ to: "/arrow-analytics" })}
-                className="w-full"
-              >
-                Explore real-time analytics
-              </Button>
-            </div>
-          </Card>
-
-          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
-            <div className="flex flex-col h-full">
-              <h3 className="text-2xl font-semibold text-foreground mb-3">
-                Stream Reconnection
-              </h3>
-              <p className="text-muted-foreground mb-6 flex-grow">
-                Explore Server-Sent Events (SSE) stream reconnection with
-                automatic Last-Event-ID tracking and resilient connection
-                handling.
-              </p>
-              <Button
-                onClick={() => navigate({ to: "/reconnect" })}
-                className="w-full"
-              >
-                View Reconnect Demo
-              </Button>
-            </div>
-          </Card>
-
-          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
-            <div className="flex flex-col h-full">
-              <h3 className="text-2xl font-semibold text-foreground mb-3">
-                Data Visualization
-              </h3>
-              <p className="text-muted-foreground mb-6 flex-grow">
-                Explore powerful and customizable chart components from the Apps
-                SDK.
-              </p>
-              <Button
-                onClick={() => navigate({ to: "/data-visualization" })}
-                className="w-full"
-              >
-                Explore data visualization
-              </Button>
-            </div>
-          </Card>
-
-          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
-            <div className="flex flex-col h-full">
-              <h3 className="text-2xl font-semibold text-foreground mb-3">
-                Telemetry
-              </h3>
-              <p className="text-muted-foreground mb-6 flex-grow">
-                Explore OpenTelemetry-compatible tracing and metrics examples
-                with interactive demos showcasing custom observability patterns.
-              </p>
-              <Button
-                onClick={() => navigate({ to: "/telemetry" })}
-                className="w-full"
-              >
-                Try Telemetry Examples
-              </Button>
-            </div>
-          </Card>
-
-          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
-            <div className="flex flex-col h-full">
-              <h3 className="text-2xl font-semibold text-foreground mb-3">
-                File Browser
-              </h3>
-              <p className="text-muted-foreground mb-6 flex-grow">
-                Browse, preview, and download files from Databricks Volumes
-                using the Files plugin and Unity Catalog Files API.
-              </p>
-              <Button
-                onClick={() => navigate({ to: "/files" })}
-                className="w-full"
-              >
-                Browse Files
-              </Button>
-            </div>
-          </Card>
-
-          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
-            <div className="flex flex-col h-full">
-              <h3 className="text-2xl font-semibold text-foreground mb-3">
-                SQL Helpers
-              </h3>
-              <p className="text-muted-foreground mb-6 flex-grow">
-                Type-safe parameter helpers for Databricks SQL queries. Test
-                each helper interactively and see the generated parameter
-                objects.
-              </p>
-              <Button
-                onClick={() => navigate({ to: "/sql-helpers" })}
-                className="w-full"
-              >
-                Try SQL Helpers
-              </Button>
-            </div>
-          </Card>
-
-          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
-            <div className="flex flex-col h-full">
-              <h3 className="text-2xl font-semibold text-foreground mb-3">
-                Type-Safe SQL
-              </h3>
-              <p className="text-muted-foreground mb-6 flex-grow">
-                Generate TypeScript types from SQL files at build time. Full
-                IntelliSense for query names, parameters, and results.
-              </p>
-              <Button
-                onClick={() => navigate({ to: "/type-safety" })}
-                className="w-full"
-              >
-                Explore Type Safety
-              </Button>
-            </div>
-          </Card>
-
-          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
-            <div className="flex flex-col h-full">
-              <h3 className="text-2xl font-semibold text-foreground mb-3">
-                Genie Chat
-              </h3>
-              <p className="text-muted-foreground mb-6 flex-grow">
-                Ask natural language questions about your data using AI/BI
-                Genie. Features SSE streaming, markdown rendering, and
-                conversation persistence.
-              </p>
-              <Button
-                onClick={() => navigate({ to: "/genie" })}
-                className="w-full"
-              >
-                Try Genie Chat
-              </Button>
-            </div>
-          </Card>
-
-          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
-            <div className="flex flex-col h-full">
-              <h3 className="text-2xl font-semibold text-foreground mb-3">
-                Lakebase Examples
-              </h3>
-              <p className="text-muted-foreground mb-6 flex-grow">
-                Four approaches to PostgreSQL database integration with
-                Databricks Lakebase: Raw driver, Drizzle ORM, TypeORM, and
-                Sequelize with OAuth token refresh.
-              </p>
-              <Button
-                onClick={() => navigate({ to: "/lakebase" })}
-                className="w-full"
-              >
-                Explore Lakebase Integration
-              </Button>
-            </div>
-          </Card>
-
-          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
-            <div className="flex flex-col h-full">
-              <h3 className="text-2xl font-semibold text-foreground mb-3">
-                Lakeflow Jobs
-              </h3>
-              <p className="text-muted-foreground mb-6 flex-grow">
-                Trigger and monitor Databricks Lakeflow Jobs. View run history,
-                stream live status updates, and cancel in-flight runs.
-              </p>
-              <Button
-                onClick={() => navigate({ to: "/jobs" })}
-                className="w-full"
-              >
-                Manage Jobs
-              </Button>
-            </div>
-          </Card>
-
-          <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
-            <div className="flex flex-col h-full">
-              <h3 className="text-2xl font-semibold text-foreground mb-3">
-                Model Serving
-              </h3>
-              <p className="text-muted-foreground mb-6 flex-grow">
-                Chat with a Databricks Model Serving endpoint using streaming
-                completions with real-time SSE responses.
-              </p>
-              <Button
-                onClick={() => navigate({ to: "/serving" })}
-                className="w-full"
-              >
-                Try Model Serving
-              </Button>
-            </div>
-          </Card>
-        </div>
-
-        <div className="text-center pt-12 border-t border-border">
-          <p className="text-sm text-muted-foreground">
-            built by databricks using appkit
-          </p>
-        </div>
+        <footer className="mt-20 pt-8 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
+          <span>Built by Databricks with AppKit.</span>
+          <span className="tabular-nums">
+            {ALL_NAV_ITEMS.length} demos · {NAV_GROUPS.length} categories
+          </span>
+        </footer>
       </div>
     </div>
+  );
+}
+
+function Hero({ demoCount }: { demoCount: number }) {
+  return (
+    <div className="relative overflow-hidden">
+      {/*
+        Soft radial wash behind the hero. Two layered gradients (primary +
+        accent) at ~10% opacity give depth without the "AI slop" look of a
+        full-saturation banner. `pointer-events-none` keeps the theme selector
+        above clickable.
+      */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-70"
+        style={{
+          backgroundImage:
+            "radial-gradient(ellipse 80% 50% at 50% 0%, hsl(var(--primary) / 0.08), transparent 60%), radial-gradient(ellipse 60% 40% at 80% 20%, hsl(var(--accent) / 0.06), transparent 60%)",
+        }}
+      />
+      <div className="relative max-w-6xl mx-auto px-6 pt-24 pb-16 text-center">
+        <Badge
+          variant="outline"
+          className="mb-6 gap-1.5 px-3 py-1 text-xs font-medium"
+        >
+          <SparklesIcon className="h-3 w-3" />
+          {demoCount} interactive demos
+        </Badge>
+        <h1 className="text-5xl sm:text-6xl font-bold tracking-tight text-foreground mb-5">
+          AppKit Playground
+        </h1>
+        <p className="text-lg sm:text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed">
+          A living catalog of what AppKit can do — data, agents, and platform
+          primitives, each wired up as a single-click demo you can poke at,
+          copy, or break.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function DemoCard({ item }: { item: NavItem }) {
+  const Icon = item.icon;
+  return (
+    <Link
+      to={item.to}
+      className="no-underline text-inherit group block"
+      aria-label={`Open ${item.label} demo`}
+    >
+      <Card className="h-full p-5 transition-all duration-200 border hover:border-primary/30 hover:shadow-md">
+        <div className="flex items-start gap-3 mb-3">
+          <div className="shrink-0 rounded-lg bg-muted p-2 text-foreground group-hover:bg-primary/10 group-hover:text-primary transition-colors">
+            <Icon className="h-5 w-5" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="font-semibold text-foreground tracking-tight leading-tight">
+              {item.label}
+            </h3>
+          </div>
+          <ArrowRightIcon className="h-4 w-4 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+        </div>
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          {item.description}
+        </p>
+      </Card>
+    </Link>
   );
 }

@@ -3,8 +3,10 @@ import type { Server as HTTPServer } from "node:http";
 import path from "node:path";
 import dotenv from "dotenv";
 import express from "express";
+import getPort, { portNumbers } from "get-port";
 import type { PluginClientConfigs, PluginPhase } from "shared";
 import { ServerError } from "../../errors";
+import { TelemetryReporter } from "../../internal-telemetry";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
@@ -20,6 +22,9 @@ import { ViteDevServer } from "./vite-dev-server";
 dotenv.config({ path: path.resolve(process.cwd(), "./.env") });
 
 const logger = createLogger("server");
+
+/** Dev-only: try `requested` then consecutive ports (see `get-port` `portNumbers`). */
+const devListenPortSpan = 100;
 
 /**
  * Server plugin for the AppKit.
@@ -41,6 +46,7 @@ const logger = createLogger("server");
  *   },
  * });
  * ```
+ *
  */
 export class ServerPlugin extends Plugin {
   public static DEFAULT_CONFIG = {
@@ -54,12 +60,15 @@ export class ServerPlugin extends Plugin {
   private server: HTTPServer | null;
   private viteDevServer?: ViteDevServer;
   private remoteTunnelController?: RemoteTunnelController;
+  /** Bound listen port after optional dev-time resolution. */
+  private resolvedListenPort?: number;
   protected declare config: ServerConfig;
   private serverExtensions: ((app: express.Application) => void)[] = [];
   private rawBodyPaths: Set<string> = new Set();
   static phase: PluginPhase = "deferred";
 
   constructor(config: ServerConfig) {
+    super(config);
     if ("autoStart" in config) {
       throw new ServerError(
         "server({ autoStart }) has been removed. " +
@@ -67,17 +76,22 @@ export class ServerPlugin extends Plugin {
           "Run `npx appkit codemod on-plugins-ready --write` to auto-migrate.",
       );
     }
-    super(config);
     this.config = config;
     this.serverApplication = express();
     this.server = null;
     this.serverExtensions = [];
+  }
+
+  attachContext(deps: Parameters<Plugin["attachContext"]>[0] = {}): void {
+    super.attachContext(deps);
     this.telemetry.registerInstrumentations([
       instrumentations.http,
       instrumentations.express,
     ]);
+    this.context?.registerAsRouteTarget(this);
   }
 
+  /** Setup the server plugin. */
   async setup() {}
 
   /** Get the server configuration. */
@@ -96,8 +110,16 @@ export class ServerPlugin extends Plugin {
    * @returns The express application.
    */
   async start(): Promise<express.Application> {
+    this.serverApplication.use(requestMetricsMiddleware);
     this.serverApplication.use(
       express.json({
+        // Express's stock 100kb default is too tight for modern apps —
+        // agent chat payloads and any base64-encoded upload (e.g. the
+        // dev playground's smart-dashboard "save view" screenshot at
+        // ~105KB) blow past it instantly. Raise to 1mb by default and
+        // let consumers tune via `server({ bodyLimit })` if they need
+        // more headroom.
+        limit: this.config.bodyLimit ?? "1mb",
         type: (req) => {
           // Skip JSON parsing for routes that declared skipBodyParsing
           // (e.g. file uploads where the raw body must flow through).
@@ -125,8 +147,10 @@ export class ServerPlugin extends Plugin {
 
     await this.setupFrontend(endpoints, pluginConfigs);
 
+    const listenPort = await this.resolveListenPort();
+
     const server = this.serverApplication.listen(
-      this.config.port ?? ServerPlugin.DEFAULT_CONFIG.port,
+      listenPort,
       this.config.host ?? ServerPlugin.DEFAULT_CONFIG.host,
       () => this.logStartupInfo(),
     );
@@ -177,6 +201,16 @@ export class ServerPlugin extends Plugin {
   }
 
   /**
+   * Register a server extension from another plugin during setup.
+   * Unlike extend(), this is designed for internal plugin-to-plugin
+   * coordination where extensions are registered before the server starts
+   * listening — typically called by PluginContext when flushing buffered routes.
+   */
+  addExtension(fn: (app: express.Application) => void) {
+    this.serverExtensions.push(fn);
+  }
+
+  /**
    * Setup the routes with the plugins.
    *
    * This method goes through all the plugins and injects the routes into the server application.
@@ -190,14 +224,15 @@ export class ServerPlugin extends Plugin {
     const endpoints: PluginEndpoints = {};
     const pluginConfigs: PluginClientConfigs = {};
 
-    if (!this.config.plugins) return { endpoints, pluginConfigs };
+    const plugins = this.context?.getPlugins();
+    if (!plugins || plugins.size === 0) return { endpoints, pluginConfigs };
 
     this.serverApplication.get("/health", (_, res) => {
       res.status(200).json({ status: "ok" });
     });
     this.registerEndpoint("health", "/health");
 
-    for (const plugin of Object.values(this.config.plugins)) {
+    for (const plugin of plugins.values()) {
       if (EXCLUDED_PLUGINS.includes(plugin.name)) continue;
 
       if (plugin?.injectRoutes && typeof plugin.injectRoutes === "function") {
@@ -306,10 +341,39 @@ export class ServerPlugin extends Plugin {
     return undefined;
   }
 
+  /**
+   * In development, prefers {@link ServerConfig.port} / env / default (8000), then
+   * scans upward using `get-port`'s `portNumbers()` on the listen host until one binds.
+   * In non-development, uses config / env / default only (no fallback).
+   */
+  private async resolveListenPort(): Promise<number> {
+    const requested = this.config.port ?? ServerPlugin.DEFAULT_CONFIG.port;
+
+    if (process.env.NODE_ENV !== "development") {
+      this.resolvedListenPort = requested;
+      return requested;
+    }
+
+    const host = this.config.host ?? ServerPlugin.DEFAULT_CONFIG.host;
+    const upper = Math.min(requested + devListenPortSpan - 1, 65_535);
+    const port = await getPort({
+      host,
+      port: portNumbers(requested, upper),
+    });
+    this.resolvedListenPort = port;
+    if (port !== requested) {
+      logger.info("Port %d was busy, picking %d", requested, port);
+    }
+    return port;
+  }
+
   private logStartupInfo() {
     const isDev = process.env.NODE_ENV === "development";
     const hasExplicitStaticPath = this.config.staticPath !== undefined;
-    const port = this.config.port ?? ServerPlugin.DEFAULT_CONFIG.port;
+    const port =
+      this.resolvedListenPort ??
+      this.config.port ??
+      ServerPlugin.DEFAULT_CONFIG.port;
     const host = this.config.host ?? ServerPlugin.DEFAULT_CONFIG.host;
 
     logger.info("Server running on http://%s:%d", host, port);
@@ -345,9 +409,12 @@ export class ServerPlugin extends Plugin {
       this.remoteTunnelController.cleanup();
     }
 
+    TelemetryReporter.getInstance()?.stop();
+
     // 1. abort active operations from plugins
-    if (this.config.plugins) {
-      for (const plugin of Object.values(this.config.plugins)) {
+    const shutdownPlugins = this.context?.getPlugins();
+    if (shutdownPlugins) {
+      for (const plugin of shutdownPlugins.values()) {
         if (plugin.abortActiveOperations) {
           try {
             plugin.abortActiveOperations();
@@ -413,6 +480,30 @@ export class ServerPlugin extends Plugin {
 }
 
 const EXCLUDED_PLUGINS: string[] = [ServerPlugin.manifest.name];
+
+/** @internal Exported for unit tests. */
+export function requestMetricsMiddleware(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction,
+) {
+  const startMs = Date.now();
+  res.on("finish", () => {
+    const reporter = TelemetryReporter.getInstance();
+    if (!reporter) return;
+    const routePath = (req.route as { path?: string } | undefined)?.path;
+    if (!routePath) return;
+    const baseUrl = req.baseUrl ?? "";
+    const template = `${baseUrl}${routePath}`;
+    reporter.recordRequest(
+      req.method,
+      template,
+      res.statusCode,
+      Date.now() - startMs,
+    );
+  });
+  next();
+}
 
 /**
  * @internal

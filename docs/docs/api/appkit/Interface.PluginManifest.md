@@ -213,6 +213,22 @@ Resources that must be available for the plugin to function
 
 ***
 
+### stability?
+
+```ts
+optional stability: "beta" | "ga";
+```
+
+Plugin stability level. Beta plugins may have breaking API changes between minor releases but are on a path to GA. GA (general availability) plugins follow semver strictly.
+
+#### Inherited from
+
+```ts
+Omit.stability
+```
+
+***
+
 ### version?
 
 ```ts

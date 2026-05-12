@@ -4,7 +4,12 @@ export default defineConfig([
   {
     publint: true,
     name: "@databricks/appkit-ui",
-    entry: ["src/js/index.ts", "src/react/index.ts"],
+    entry: [
+      "src/js/index.ts",
+      "src/js/beta.ts",
+      "src/react/index.ts",
+      "src/react/beta.ts",
+    ],
     outDir: "dist",
     platform: "browser",
     minify: false,
