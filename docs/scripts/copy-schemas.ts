@@ -2,7 +2,7 @@
  * Copies JSON schemas from packages to docs/static for hosting.
  *
  * Schemas are served at:
- * https://www.databricks.com/devhub/docs/appkit/v0/schemas/{schema-name}.json
+ * https://databricks.github.io/appkit/schemas/{schema-name}.json
  */
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
