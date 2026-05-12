@@ -162,6 +162,13 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
           "Resilient SSE streams: automatic Last-Event-ID tracking and reconnection.",
         icon: RadioIcon,
       },
+      {
+        to: "/durable-task",
+        label: "Durable Task",
+        description:
+          "Crash-safe long-running tasks with typed SSE streaming and resume.",
+        icon: ZapIcon,
+      },
     ],
   },
 ];

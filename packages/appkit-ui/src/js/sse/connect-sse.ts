@@ -109,6 +109,7 @@ export async function connectSSE<Payload = unknown>(
         onMessage({
           id: lastEventId ?? "",
           data: message.data,
+          event: message.event,
         });
       }
     }
@@ -138,7 +139,13 @@ export async function connectSSE<Payload = unknown>(
 }
 
 /**
- * Parses a raw SSE event chunk into a message
+ * Parses a raw SSE event chunk into a message.
+ *
+ * Recognised fields per the SSE spec: `id:`, `event:`, `data:`. Lines
+ * starting with `:` are comments (e.g. wire-level keep-alives) and
+ * carry no event payload — chunks containing only comments yield
+ * `null`.
+ *
  * @param chunk - Raw SSE event block
  * @returns Parsed message or null when no data lines are present
  * @private
@@ -148,6 +155,7 @@ function parseSSEEvent(chunk: string): SSEMessage | null {
   const lines = normalized.split("\n");
 
   let id: string | undefined;
+  let event: string | undefined;
   const dataLines: string[] = [];
 
   for (const rawLine of lines) {
@@ -158,6 +166,8 @@ function parseSSEEvent(chunk: string): SSEMessage | null {
 
     if (line.startsWith("id:")) {
       id = line.slice(3).trimStart();
+    } else if (line.startsWith("event:")) {
+      event = line.slice(6).trimStart();
     } else if (line.startsWith("data:")) {
       dataLines.push(line.slice(5).trimStart());
     }
@@ -167,6 +177,7 @@ function parseSSEEvent(chunk: string): SSEMessage | null {
 
   return {
     id: id ?? "",
+    event: event ?? "",
     data: dataLines.join("\n"),
   };
 }

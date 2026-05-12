@@ -4,6 +4,13 @@ export type SSEMessage = {
   id: string;
   /** Raw data payload */
   data: string;
+  /**
+   * SSE `event:` field name when present (e.g. "tick", "completed").
+   * Empty string for unnamed/default events. Frames produced by the
+   * AppKit task bridge always carry an `event` name; consumers of
+   * generic SSE may leave this unset.
+   */
+  event: string;
 };
 
 /** Options for opening a resilient SSE connection */

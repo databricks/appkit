@@ -14,6 +14,7 @@ import {
 import { agents, createAgent, tool } from "@databricks/appkit/beta";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import { z } from "zod";
+import { durableTaskExample } from "./durable-task-example-plugin";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
@@ -338,9 +339,32 @@ const usersOnly: FilePolicy = (_action, _resource, user) => {
 };
 
 createApp({
+  // Tight timings for the durable-task demo: after `simulateCrash`,
+  // recovery only runs once the row is stale. Production defaults
+  // (~30s) make the crash demo feel broken; here we keep the threshold
+  // just above the heartbeat period so the worker recovers within a
+  // few seconds.
+  //
+  // Engine rule: heartbeat_interval_ms must be < stale_threshold_ms / 3
+  // (avoids marking healthy tasks stale between heartbeats).
+  //
+  // `enableTestMode` opts into `simulateCrash` — required by the
+  // durable-task demo to exercise the recovery path. Production apps
+  // must leave this off (AppKit defaults it to `false`).
+  task: {
+    engine: {
+      staleThresholdMs: 5000,
+      recoveryIntervalMs: 1000,
+      enableTestMode: true,
+    },
+    executor: {
+      heartbeatIntervalMs: 1500,
+    },
+  },
   plugins: [
     server(),
     reconnect(),
+    durableTaskExample(),
     telemetryExamples(),
     analytics({}),
     genie({
