@@ -1,90 +1,9 @@
-import fs from "node:fs";
 import path from "node:path";
 import type * as Preset from "@docusaurus/preset-classic";
 import type { Config } from "@docusaurus/types";
 import type { PluginOptions } from "@signalwire/docusaurus-plugin-llms-txt/public";
 import { themes as prismThemes } from "prism-react-renderer";
 import webpack from "webpack";
-
-const DEVHUB_BASE = "https://www.databricks.com/devhub/docs/appkit/v0";
-
-/**
- * Post-build plugin that replaces all generated HTML pages with redirect pages
- * pointing to the DevHub documentation site. This allows GitHub Pages to serve
- * redirects for all existing URLs while still generating llms.txt and .md files
- * for npm packaging.
- *
- * Static files (schemas, llms.txt, .md) are left untouched.
- */
-function redirectToDevHubPlugin() {
-  function generateRedirectHtml(targetUrl: string): string {
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>Redirecting&hellip;</title>
-  <link rel="canonical" href="${targetUrl}" />
-  <meta http-equiv="refresh" content="0; url=${targetUrl}" />
-</head>
-<body>
-  <p>This page has moved. Redirecting to <a href="${targetUrl}">${targetUrl}</a>&hellip;</p>
-</body>
-</html>`;
-  }
-
-  return {
-    name: "redirect-to-devhub",
-    async postBuild({
-      outDir,
-      routesPaths,
-      baseUrl,
-    }: {
-      outDir: string;
-      routesPaths: string[];
-      baseUrl: string;
-    }) {
-      const baseUrlWithoutTrailingSlash = baseUrl.replace(/\/$/, "");
-
-      for (const routePath of routesPaths) {
-        // Strip baseUrl prefix (/appkit/) to get the relative path within outDir
-        const relativePath = routePath.startsWith(baseUrlWithoutTrailingSlash)
-          ? routePath.slice(baseUrlWithoutTrailingSlash.length)
-          : routePath;
-
-        // Map old /appkit/docs/{path} → devhub /devhub/docs/appkit/v0/{path}
-        // The /docs/ prefix is stripped because devhub flattens it
-        const pathWithoutDocs = relativePath.replace(/^\/docs\/?/, "/");
-        const devhubUrl = `${DEVHUB_BASE}${pathWithoutDocs || "/"}`;
-
-        const htmlPath = path.join(outDir, relativePath || "", "index.html");
-        if (fs.existsSync(htmlPath)) {
-          fs.writeFileSync(htmlPath, generateRedirectHtml(devhubUrl));
-        }
-      }
-
-      // Catch-all 404.html for paths not matching a generated route
-      const notFoundHtml = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>Redirecting&hellip;</title>
-  <script>
-    (function() {
-      var path = window.location.pathname.replace(/^\\/appkit\\/?/, '/');
-      path = path.replace(/^\\/docs\\/?/, '/');
-      var target = "${DEVHUB_BASE}" + path + window.location.search + window.location.hash;
-      window.location.replace(target);
-    })();
-  </script>
-</head>
-<body>
-  <p>Redirecting to <a href="${DEVHUB_BASE}/">AppKit Documentation</a>&hellip;</p>
-</body>
-</html>`;
-      fs.writeFileSync(path.join(outDir, "404.html"), notFoundHtml);
-    },
-  };
-}
 
 function appKitAliasPlugin() {
   return {
@@ -277,7 +196,6 @@ const config: Config = {
         },
       } satisfies PluginOptions,
     ],
-    redirectToDevHubPlugin,
   ],
 
   themeConfig: {
