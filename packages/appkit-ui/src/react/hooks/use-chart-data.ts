@@ -51,9 +51,10 @@ function resolveFormat(
   format: DataFormat,
   parameters?: Record<string, unknown>,
 ): "JSON_ARRAY" | "ARROW_STREAM" {
-  // Explicit format selection
-  if (format === "json_array") return "JSON_ARRAY";
-  if (format === "arrow_stream") return "ARROW_STREAM";
+  // Explicit format selection (legacy "json"/"arrow" accepted for back-compat
+  // with appkit-ui < 0.33.0 — see DataFormat in ../charts/types.ts).
+  if (format === "json_array" || format === "json") return "JSON_ARRAY";
+  if (format === "arrow_stream" || format === "arrow") return "ARROW_STREAM";
 
   // Auto-selection heuristics
   if (format === "auto") {

@@ -4,8 +4,22 @@ import type { Table } from "apache-arrow";
 // Data Format Types
 // ============================================================================
 
-/** Supported data formats for analytics queries */
-export type DataFormat = "json_array" | "arrow_stream" | "auto";
+/**
+ * Supported data formats for analytics queries.
+ *
+ * "json" and "arrow" are legacy aliases kept for backwards compatibility
+ * with appkit-ui < 0.33.0 — safe to remove once no consumer is on a
+ * pre-0.33.0 version. resolveFormat() normalizes them to their canonical
+ * equivalents before any downstream code reads the value.
+ */
+export type DataFormat =
+  | "json_array"
+  | "arrow_stream"
+  | "auto"
+  /** @deprecated Use "json_array". Safe to remove once no consumer is on appkit-ui < 0.33.0. */
+  | "json"
+  /** @deprecated Use "arrow_stream". Safe to remove once no consumer is on appkit-ui < 0.33.0. */
+  | "arrow";
 
 /** Chart orientation */
 export type Orientation = "vertical" | "horizontal";

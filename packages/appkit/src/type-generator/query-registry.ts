@@ -431,6 +431,16 @@ export async function generateQueriesFromDescribe(
       `Describing ${total} ${total === 1 ? "query" : "queries"} (0/${total})`,
     );
 
+    // Some serverless warehouses reject JSON_ARRAY+INLINE for DESCRIBE — and
+    // they signal the rejection two different ways: either as a thrown error,
+    // or as a `status.state === "FAILED"` response. Both paths funnel through
+    // this matcher so we can retry with ARROW_STREAM+INLINE consistently.
+    const looksLikeFormatRejection = (msg: string): boolean =>
+      msg.includes("JSON_ARRAY") &&
+      (msg.includes("not supported") ||
+        msg.includes("INVALID_PARAMETER_VALUE") ||
+        msg.includes("NOT_IMPLEMENTED"));
+
     const describeOne = async ({
       index,
       queryName,
@@ -454,14 +464,9 @@ export async function generateQueriesFromDescribe(
         })) as DatabricksStatementExecutionResponse;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        const looksLikeFormatRejection =
-          msg.includes("JSON_ARRAY") &&
-          (msg.includes("not supported") ||
-            msg.includes("INVALID_PARAMETER_VALUE") ||
-            msg.includes("NOT_IMPLEMENTED"));
-        if (looksLikeFormatRejection) {
+        if (looksLikeFormatRejection(msg)) {
           logger.debug(
-            "Warehouse rejected JSON_ARRAY+INLINE for %s, retrying with ARROW_STREAM+INLINE",
+            "Warehouse rejected JSON_ARRAY+INLINE for %s (thrown), retrying with ARROW_STREAM+INLINE",
             queryName,
           );
           result = (await client.statementExecution.executeStatement({
@@ -473,6 +478,25 @@ export async function generateQueriesFromDescribe(
         } else {
           throw err;
         }
+      }
+
+      // Some warehouses surface the format rejection as `status.state ===
+      // "FAILED"` instead of throwing. Detect that shape and retry with
+      // ARROW_STREAM before we degrade the type to `unknown`.
+      if (
+        result.status.state === "FAILED" &&
+        looksLikeFormatRejection(result.status.error?.message ?? "")
+      ) {
+        logger.debug(
+          "Warehouse rejected JSON_ARRAY+INLINE for %s (state=FAILED), retrying with ARROW_STREAM+INLINE",
+          queryName,
+        );
+        result = (await client.statementExecution.executeStatement({
+          statement: `DESCRIBE QUERY ${cleanedSql}`,
+          warehouse_id: warehouseId,
+          format: "ARROW_STREAM",
+          disposition: "INLINE",
+        })) as DatabricksStatementExecutionResponse;
       }
 
       completed++;

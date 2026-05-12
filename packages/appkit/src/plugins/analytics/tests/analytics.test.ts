@@ -941,9 +941,12 @@ describe("Analytics Plugin", () => {
       plugin.injectRoutes(router);
 
       const handler = getHandler("POST", "/query/:query_key");
+      // "CSV" is genuinely unsupported. The legacy spellings "JSON" / "ARROW"
+      // are *accepted* by the route (normalized to JSON_ARRAY / ARROW_STREAM
+      // for back-compat with appkit < 0.33.0), so they must not be used here.
       const mockReq = createMockRequest({
         params: { query_key: "test_query" },
-        body: { parameters: {}, format: "JSON" },
+        body: { parameters: {}, format: "CSV" },
       });
       const mockRes = createMockResponse();
 

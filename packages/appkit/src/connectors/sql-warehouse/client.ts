@@ -447,7 +447,14 @@ export class SQLWarehouseConnector {
       // Empty result with a known schema: synthesize a zero-row Arrow IPC
       // attachment so the client always receives an Arrow Table for
       // ARROW_STREAM, regardless of whether the warehouse returned data.
-      if (!result?.data_array && response.manifest?.schema?.columns) {
+      // Note: an empty array (`data_array: []`) is truthy, so length-check
+      // explicitly — otherwise zero-row responses fall through to the JSON
+      // row transform below and return `[]` JSON rows instead of an Arrow
+      // table.
+      const hasNoRows =
+        !result?.data_array ||
+        (Array.isArray(result.data_array) && result.data_array.length === 0);
+      if (hasNoRows && response.manifest?.schema?.columns) {
         const synthesized = buildEmptyArrowIPCBase64(
           response.manifest.schema.columns,
         );
