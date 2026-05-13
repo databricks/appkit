@@ -185,6 +185,35 @@ describe("QueryProcessor", () => {
     // rejected with INVALID_LIMIT_LIKE_EXPRESSION.DATA_TYPE. These tests
     // pin INT inference so sql.number(req.query.n) works against the
     // warehouse without explicit casting.
+    //
+    // These tests are MOCKED — they assert the wire-type string the
+    // helper emits, not warehouse round-trip behaviour. To re-validate
+    // that the mocked assertions still match production Spark semantics:
+    //
+    //   1. Pick any RUNNING SQL Warehouse you can reach
+    //      (`databricks warehouses list -p <profile>` and grep for RUNNING).
+    //   2. POST /api/2.0/sql/statements with the helper's wire-type strings
+    //      directly, using the same VALUES-based query so no table is
+    //      required:
+    //
+    //      databricks api post /api/2.0/sql/statements --json '{
+    //        "statement": "SELECT x FROM (VALUES (1),(2),(3),(4),(5)) AS t(x) ORDER BY x LIMIT :n OFFSET :m",
+    //        "warehouse_id": "<id>",
+    //        "wait_timeout": "30s",
+    //        "parameters": [
+    //          {"name": "n", "value": "2", "type": "INT"},
+    //          {"name": "m", "value": "1", "type": "INT"}
+    //        ]
+    //      }'
+    //
+    //   3. Expect: `status.state == "SUCCEEDED"`, `result.row_count == 2`.
+    //   4. Swap both parameter `type` values to `"BIGINT"` and re-run.
+    //      Expect: `status.state == "FAILED"`, error message
+    //      `[INVALID_LIMIT_LIKE_EXPRESSION.DATA_TYPE] ... must be integer
+    //      type, but got "BIGINT". SQLSTATE: 42K0E`.
+    //
+    //   If (3) fails or (4) starts succeeding, Spark's LIMIT type contract
+    //   has changed and the INT-by-default inference should be re-evaluated.
     test("sql.number(integer) binds as INT for LIMIT/OFFSET", () => {
       const query = "SELECT * FROM events LIMIT :n OFFSET :m";
       const parameters = {
