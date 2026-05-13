@@ -54,12 +54,18 @@ Close and remove a specific pool.
 ### getPool()
 
 ```ts
-getPool(key: string, perPoolConfig: Partial<LakebasePoolConfig>): Pool;
+getPool(
+   key: string, 
+   perPoolConfig: Partial<LakebasePoolConfig>, 
+   tokenFingerprint?: string): Pool;
 ```
 
 Get an existing pool or create a new one for the given key.
 When creating, merges `perPoolConfig` with the base config passed to the factory.
-On subsequent calls with the same key, `perPoolConfig` is ignored and the cached pool is returned.
+
+If `tokenFingerprint` is provided and differs from the cached pool's
+fingerprint, the stale pool is closed and a fresh one is created with
+the new config (including the updated `workspaceClient`).
 
 #### Parameters
 
@@ -67,6 +73,7 @@ On subsequent calls with the same key, `perPoolConfig` is ignored and the cached
 | ------ | ------ |
 | `key` | `string` |
 | `perPoolConfig` | `Partial`\<[`LakebasePoolConfig`](Interface.LakebasePoolConfig.md)\> |
+| `tokenFingerprint?` | `string` |
 
 #### Returns
 

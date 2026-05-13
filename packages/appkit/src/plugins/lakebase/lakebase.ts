@@ -96,10 +96,11 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
       // Lakebase OAuth roles use email as the postgres role when available
       const userKey = ctx.userEmail ?? ctx.userId;
       const isNew = !oboManager.hasPool(userKey);
-      const pool = oboManager.getPool(userKey, {
-        workspaceClient: ctx.client,
-        user: userKey,
-      });
+      const pool = oboManager.getPool(
+        userKey,
+        { workspaceClient: ctx.client, user: userKey },
+        ctx.tokenFingerprint,
+      );
       if (isNew) {
         logger.debug("Created OBO pool for user (total: %d)", oboManager.size);
       }

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   type ClientOptions,
   ConfigError,
@@ -138,11 +139,17 @@ export class ServiceContext {
       getClientOptions(),
     );
 
+    const tokenFingerprint = createHash("sha256")
+      .update(token)
+      .digest("hex")
+      .slice(0, 16);
+
     return {
       client: userClient,
       userId,
       userName,
       userEmail,
+      tokenFingerprint,
       warehouseId: serviceCtx.warehouseId,
       workspaceId: serviceCtx.workspaceId,
       isUserContext: true,

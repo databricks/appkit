@@ -15,9 +15,16 @@ export interface LakebasePoolManager {
   /**
    * Get an existing pool or create a new one for the given key.
    * When creating, merges `perPoolConfig` with the base config passed to the factory.
-   * On subsequent calls with the same key, `perPoolConfig` is ignored and the cached pool is returned.
+   *
+   * If `tokenFingerprint` is provided and differs from the cached pool's
+   * fingerprint, the stale pool is closed and a fresh one is created with
+   * the new config (including the updated `workspaceClient`).
    */
-  getPool(key: string, perPoolConfig: Partial<LakebasePoolConfig>): Pool;
+  getPool(
+    key: string,
+    perPoolConfig: Partial<LakebasePoolConfig>,
+    tokenFingerprint?: string,
+  ): Pool;
 
   /** Check whether a pool exists for the given key. */
   hasPool(key: string): boolean;
@@ -56,57 +63,78 @@ export interface LakebasePoolManager {
 export function createLakebasePoolManager(
   baseConfig?: Partial<LakebasePoolConfig>,
 ): LakebasePoolManager {
-  const pools = new Map<string, Pool>();
+  interface PoolEntry {
+    pool: Pool;
+    tokenFingerprint?: string;
+  }
+
+  const entries = new Map<string, PoolEntry>();
 
   // Periodically remove empty Pool objects from the Map.
   // pg.Pool's idleTimeoutMillis closes idle connections automatically;
   // this just cleans up the Map entries once all connections are gone.
   const cleanupTimer = setInterval(() => {
-    for (const [key, pool] of pools) {
-      if (pool.totalCount === 0) {
-        pool.end().catch(() => {});
-        pools.delete(key);
+    for (const [key, entry] of entries) {
+      if (entry.pool.totalCount === 0) {
+        entry.pool.end().catch(() => {});
+        entries.delete(key);
       }
     }
   }, CLEANUP_INTERVAL_MS);
   cleanupTimer.unref();
 
   return {
-    getPool(key: string, perPoolConfig: Partial<LakebasePoolConfig>): Pool {
-      const existing = pools.get(key);
-      if (existing) return existing;
+    getPool(
+      key: string,
+      perPoolConfig: Partial<LakebasePoolConfig>,
+      tokenFingerprint?: string,
+    ): Pool {
+      const existing = entries.get(key);
+
+      if (existing) {
+        // When the caller provides a fingerprint that differs from the
+        // cached one, the underlying OBO token has rotated. The pool's
+        // password callback holds a stale WorkspaceClient (authType: "pat",
+        // static token) that will fail once the Lakebase Postgres token
+        // needs refreshing. Drain the old pool and create a fresh one.
+        const stale =
+          tokenFingerprint &&
+          existing.tokenFingerprint &&
+          tokenFingerprint !== existing.tokenFingerprint;
+
+        if (!stale) return existing.pool;
+
+        existing.pool.end().catch(() => {});
+      }
 
       // Safe without locking: createLakebasePool is synchronous and Node.js
       // is single-threaded, so no preemption between get() and set().
-      // Each pool's password callback handles OAuth token refresh
-      // independently via its WorkspaceClient — the initial token is only
-      // used to bootstrap the refresh chain.
       const pool = createLakebasePool({ ...baseConfig, ...perPoolConfig });
-      pools.set(key, pool);
+      entries.set(key, { pool, tokenFingerprint });
       return pool;
     },
 
     hasPool(key: string): boolean {
-      return pools.has(key);
+      return entries.has(key);
     },
 
     async closePool(key: string): Promise<void> {
-      const pool = pools.get(key);
-      if (pool) {
-        await pool.end();
-        pools.delete(key);
+      const entry = entries.get(key);
+      if (entry) {
+        await entry.pool.end();
+        entries.delete(key);
       }
     },
 
     async closeAll(): Promise<void> {
       clearInterval(cleanupTimer);
-      const endPromises = [...pools.values()].map((p) => p.end());
+      const endPromises = [...entries.values()].map((e) => e.pool.end());
       await Promise.all(endPromises);
-      pools.clear();
+      entries.clear();
     },
 
     get size() {
-      return pools.size;
+      return entries.size;
     },
   };
 }

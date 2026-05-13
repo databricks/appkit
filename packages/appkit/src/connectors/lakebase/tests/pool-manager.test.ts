@@ -107,4 +107,33 @@ describe("createLakebasePoolManager", () => {
     expect(second).not.toBe(first);
     expect(manager.size).toBe(1);
   });
+
+  test("returns cached pool when tokenFingerprint matches", () => {
+    const manager = createLakebasePoolManager();
+    const pool1 = manager.getPool("user-a", { user: "user-a" }, "fp-aaa");
+    const pool2 = manager.getPool("user-a", { user: "user-a" }, "fp-aaa");
+
+    expect(pool1).toBe(pool2);
+    expect(mockPools).toHaveLength(1);
+  });
+
+  test("rebuilds pool when tokenFingerprint changes", () => {
+    const manager = createLakebasePoolManager();
+    const pool1 = manager.getPool("user-a", { user: "user-a" }, "fp-aaa");
+    const pool2 = manager.getPool("user-a", { user: "user-a" }, "fp-bbb");
+
+    expect(pool2).not.toBe(pool1);
+    expect(pool1.end).toHaveBeenCalled();
+    expect(mockPools).toHaveLength(2);
+    expect(manager.size).toBe(1);
+  });
+
+  test("returns cached pool when no tokenFingerprint is provided", () => {
+    const manager = createLakebasePoolManager();
+    const pool1 = manager.getPool("user-a", { user: "user-a" });
+    const pool2 = manager.getPool("user-a", { user: "user-a" });
+
+    expect(pool1).toBe(pool2);
+    expect(mockPools).toHaveLength(1);
+  });
 });
