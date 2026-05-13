@@ -34,6 +34,17 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.34.0](https://github.com/databricks/appkit/compare/v0.33.0...v0.34.0) (2026-05-13)
+
+* add name field to genie manifest for non-interactive --set support ([#384](https://github.com/databricks/appkit/issues/384)) ([7adcec0](https://github.com/databricks/appkit/commit/7adcec03768e2e5168564f69617c9189c9ae1522))
+
+### appkit
+
+* **appkit:** infer numeric SQL type for sql.number(), add typed variants ([#323](https://github.com/databricks/appkit/issues/323)) ([f65be0e](https://github.com/databricks/appkit/commit/f65be0ec8d930d21e7d71c06f975a5b4fe6b8e55))
+
+
 ## [0.33.0](https://github.com/databricks/appkit/compare/v0.32.0...v0.33.0) (2026-05-12)
 
 ### appkit
