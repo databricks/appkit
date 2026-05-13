@@ -43,14 +43,21 @@ Use `:paramName` placeholders and optionally annotate parameter types using SQL 
 ```sql
 -- @param startDate DATE
 -- @param endDate DATE
--- @param limit NUMERIC
+-- @param limit BIGINT
 SELECT ...
 WHERE usage_date BETWEEN :startDate AND :endDate
 LIMIT :limit
 ```
 
+`LIMIT` / `OFFSET` require an integer-typed binding (`INT` or `BIGINT`).
+Annotate accordingly, or use `sql.number()` (auto-infers `BIGINT` for integer
+inputs) / `sql.bigint()` / `sql.int()` at the call site.
+
 **Supported `-- @param` types** (case-insensitive):
-- `STRING`, `NUMERIC`, `BOOLEAN`, `DATE`, `TIMESTAMP`, `BINARY`
+- `STRING`, `BOOLEAN`, `DATE`, `TIMESTAMP`, `BINARY`
+- `INT`, `BIGINT`, `TINYINT`, `SMALLINT` — bind via `sql.int()` / `sql.bigint()`
+- `FLOAT`, `DOUBLE` — bind via `sql.float()` / `sql.double()`
+- `NUMERIC`, `DECIMAL` — bind via `sql.numeric()` (pass strings for precision)
 
 ## Server-injected parameters
 

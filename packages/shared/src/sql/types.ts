@@ -13,7 +13,7 @@ export interface SQLStringMarker {
  * - `NUMERIC` — fixed-point DECIMAL columns (preserves precision)
  *
  * Created by `sql.number()` (auto-inferred), or by typed variants
- * `sql.int()`, `sql.bigint()`, `sql.float()`, `sql.double()`, `sql.decimal()`.
+ * `sql.int()`, `sql.bigint()`, `sql.float()`, `sql.double()`, `sql.numeric()`.
  */
 export interface SQLNumberMarker {
   __sql_type: "INT" | "BIGINT" | "FLOAT" | "DOUBLE" | "NUMERIC";

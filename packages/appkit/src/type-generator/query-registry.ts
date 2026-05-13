@@ -194,7 +194,7 @@ function generateUnknownResultQuery(sql: string, queryName: string): string {
 export function extractParameterTypes(sql: string): Record<string, string> {
   const paramTypes: Record<string, string> = {};
   const regex =
-    /--\s*@param\s+(\w+)\s+(STRING|NUMERIC|BOOLEAN|DATE|TIMESTAMP|BINARY)/gi;
+    /--\s*@param\s+(\w+)\s+(STRING|NUMERIC|DECIMAL|BIGINT|TINYINT|SMALLINT|INT|FLOAT|DOUBLE|BOOLEAN|DATE|TIMESTAMP|BINARY)/gi;
   const matches = sql.matchAll(regex);
   for (const match of matches) {
     const [, paramName, paramType] = match;
@@ -207,7 +207,15 @@ export function extractParameterTypes(sql: string): Record<string, string> {
 export function defaultForType(sqlType: string | undefined): string {
   switch (sqlType?.toUpperCase()) {
     case "NUMERIC":
+    case "DECIMAL":
+    case "BIGINT":
+    case "TINYINT":
+    case "SMALLINT":
+    case "INT":
       return "0";
+    case "FLOAT":
+    case "DOUBLE":
+      return "0.0";
     case "STRING":
       return "''";
     case "BOOLEAN":

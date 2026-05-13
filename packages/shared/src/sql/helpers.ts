@@ -8,12 +8,57 @@ import type {
   SQLTypeMarker,
 } from "./types";
 
+// Strict numeric-literal regex used by string-input paths. Rejects empty
+// strings, whitespace, hex/octal/binary, `NaN`, `Infinity`, and other forms
+// that JS `Number()` would silently coerce.
+const NUMERIC_LITERAL_RE = /^-?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
+const INTEGER_LITERAL_RE = /^-?\d+$/;
+
+// 32-bit signed INT range
+const INT_MIN = -(2n ** 31n);
+const INT_MAX = 2n ** 31n - 1n;
+// 64-bit signed BIGINT range
+const BIGINT_MIN = -(2n ** 63n);
+const BIGINT_MAX = 2n ** 63n - 1n;
+
+function ensureFiniteNumber(value: number, fnName: string): void {
+  if (!Number.isFinite(value)) {
+    throw new Error(`${fnName}() expects a finite number, got: ${value}`);
+  }
+}
+
+function ensureSafeInteger(value: number, fnName: string): void {
+  if (!Number.isSafeInteger(value)) {
+    throw new Error(
+      `${fnName}() received an integer outside Number.MAX_SAFE_INTEGER ` +
+        `(${value}); JS numbers cannot represent it exactly. ` +
+        `Pass a bigint (sql.bigint(BigInt("..."))) or an integer-shaped string instead.`,
+    );
+  }
+}
+
+function ensureInBigIntRange(
+  parsed: bigint,
+  min: bigint,
+  max: bigint,
+  typeName: string,
+  fnName: string,
+  hint: string,
+): void {
+  if (parsed < min || parsed > max) {
+    throw new Error(
+      `${fnName}() value ${parsed} is outside ${typeName} range [${min}, ${max}]. ${hint}`,
+    );
+  }
+}
+
 function coerceNumericLike(value: number | string, fnName: string): string {
   if (typeof value === "number") {
+    ensureFiniteNumber(value, fnName);
     return value.toString();
   }
   if (typeof value === "string") {
-    if (value === "" || Number.isNaN(Number(value))) {
+    if (!NUMERIC_LITERAL_RE.test(value)) {
       throw new Error(
         `${fnName}() expects number or numeric string, got: ${value === "" ? "empty string" : value}`,
       );
@@ -27,15 +72,19 @@ function coerceNumericLike(value: number | string, fnName: string): string {
 
 function coerceIntegerLike(value: number | string, fnName: string): string {
   if (typeof value === "number") {
+    ensureFiniteNumber(value, fnName);
     if (!Number.isInteger(value)) {
       throw new Error(
         `${fnName}() expects an integer, got non-integer number: ${value}`,
       );
     }
-    return value.toString();
+    ensureSafeInteger(value, fnName);
+    // BigInt(value).toString() emits canonical decimal-integer text;
+    // Number.prototype.toString emits exponent notation for values like 1e21.
+    return BigInt(value).toString();
   }
   if (typeof value === "string") {
-    if (value === "" || !/^-?\d+$/.test(value)) {
+    if (!INTEGER_LITERAL_RE.test(value)) {
       throw new Error(
         `${fnName}() expects integer number or integer-shaped string, got: ${value === "" ? "empty string" : value}`,
       );
@@ -154,47 +203,53 @@ export const sql = {
    *
    * - JS integer (`10`) → `BIGINT`
    * - JS non-integer (`3.14`) → `DOUBLE`
-   * - numeric string (`"123.45"`) → `NUMERIC` (preserves caller's precision intent)
+   * - integer-shaped string (`"10"`) → `BIGINT` (common HTTP-input case;
+   *   works with `LIMIT :n` / `OFFSET :m`)
+   * - decimal-shaped string (`"123.45"`) → `NUMERIC` (preserves precision)
    *
-   * Reach for `sql.int()`, `sql.bigint()`, `sql.float()`, `sql.double()`, or
-   * `sql.decimal()` if you need to override the inferred type.
+   * Throws on `NaN`, `Infinity`, JS integers outside `Number.MAX_SAFE_INTEGER`,
+   * or non-numeric strings. Reach for `sql.int()`, `sql.bigint()`,
+   * `sql.float()`, `sql.double()`, or `sql.numeric()` if you need to override
+   * the inferred type.
    *
    * @param value - Number or numeric string
    * @returns Marker for a numeric SQL parameter
    * @example
    * ```typescript
-   * const params = { userId: sql.number(123) };       // BIGINT, value "123"
-   * const params = { ratio: sql.number(0.5) };        // DOUBLE, value "0.5"
-   * const params = { amount: sql.number("123.45") };  // NUMERIC, value "123.45"
+   * sql.number(123);        // { __sql_type: "BIGINT", value: "123" }
+   * sql.number(0.5);        // { __sql_type: "DOUBLE", value: "0.5" }
+   * sql.number("10");       // { __sql_type: "BIGINT", value: "10" }
+   * sql.number("123.45");   // { __sql_type: "NUMERIC", value: "123.45" }
    * ```
    */
   number(value: number | string): SQLNumberMarker {
-    let numValue: string = "";
-    let inferredType: SQLNumberMarker["__sql_type"] = "NUMERIC";
-
     if (typeof value === "number") {
-      numValue = value.toString();
-      inferredType = Number.isInteger(value) ? "BIGINT" : "DOUBLE";
-    } else if (typeof value === "string") {
-      if (value === "" || Number.isNaN(Number(value))) {
+      ensureFiniteNumber(value, "sql.number");
+      if (Number.isInteger(value)) {
+        ensureSafeInteger(value, "sql.number");
+        return { __sql_type: "BIGINT", value: BigInt(value).toString() };
+      }
+      return { __sql_type: "DOUBLE", value: value.toString() };
+    }
+    if (typeof value === "string") {
+      if (!NUMERIC_LITERAL_RE.test(value)) {
         throw new Error(
           `sql.number() expects number or numeric string, got: ${value === "" ? "empty string" : value}`,
         );
       }
-      numValue = value;
-      // Strings stay NUMERIC: the caller chose to pass a string, so honour
-      // their precision intent rather than coercing through JS number.
-      inferredType = "NUMERIC";
-    } else {
-      throw new Error(
-        `sql.number() expects number or numeric string, got: ${typeof value}`,
-      );
+      // Integer-shaped strings: emit BIGINT so HTTP-input callers
+      // (`req.query.n` is always a string) work with LIMIT/OFFSET without
+      // having to reach for `sql.bigint("10")` explicitly.
+      if (INTEGER_LITERAL_RE.test(value)) {
+        return { __sql_type: "BIGINT", value };
+      }
+      // Non-integer strings stay NUMERIC: the caller chose to pass a string,
+      // honour their precision intent rather than coercing through JS number.
+      return { __sql_type: "NUMERIC", value };
     }
-
-    return {
-      __sql_type: inferredType,
-      value: numValue,
-    };
+    throw new Error(
+      `sql.number() expects number or numeric string, got: ${typeof value}`,
+    );
   },
 
   /**
@@ -202,38 +257,87 @@ export const sql = {
    * or context requires `INT` specifically (e.g. legacy schemas, or to make
    * the wire type explicit).
    *
+   * Rejects non-integers, values outside `Number.MAX_SAFE_INTEGER` (for
+   * number inputs), and values outside the signed 32-bit range
+   * `[-2^31, 2^31 - 1]`.
+   *
    * @param value - Integer number or integer-shaped string
+   * @returns Marker pinned to `INT`
+   * @example
+   * ```typescript
+   * sql.int(42);     // { __sql_type: "INT", value: "42" }
+   * sql.int("42");   // { __sql_type: "INT", value: "42" }
+   * ```
    */
-  int(value: number | string): SQLNumberMarker {
-    return {
-      __sql_type: "INT",
-      value: coerceIntegerLike(value, "sql.int"),
-    };
+  int(value: number | string): SQLNumberMarker & { __sql_type: "INT" } {
+    const stringValue = coerceIntegerLike(value, "sql.int");
+    ensureInBigIntRange(
+      BigInt(stringValue),
+      INT_MIN,
+      INT_MAX,
+      "INT (32-bit signed)",
+      "sql.int",
+      "Use sql.bigint() for 64-bit values.",
+    );
+    return { __sql_type: "INT", value: stringValue };
   },
 
   /**
    * Creates a `BIGINT` (64-bit signed integer) parameter. Accepts JS
    * `bigint` so callers can round-trip values outside `Number.MAX_SAFE_INTEGER`
-   * without precision loss.
+   * without precision loss; for `number` inputs, requires
+   * `Number.isSafeInteger(value)`.
+   *
+   * Rejects values outside the signed 64-bit range `[-2^63, 2^63 - 1]`.
    *
    * @param value - Integer number, bigint, or integer-shaped string
+   * @returns Marker pinned to `BIGINT`
+   * @example
+   * ```typescript
+   * sql.bigint(42);                     // { __sql_type: "BIGINT", value: "42" }
+   * sql.bigint(9007199254740993n);      // { __sql_type: "BIGINT", value: "9007199254740993" }
+   * sql.bigint("9007199254740993");     // { __sql_type: "BIGINT", value: "9007199254740993" }
+   * ```
    */
-  bigint(value: number | bigint | string): SQLNumberMarker {
+  bigint(
+    value: number | bigint | string,
+  ): SQLNumberMarker & { __sql_type: "BIGINT" } {
     if (typeof value === "bigint") {
+      ensureInBigIntRange(
+        value,
+        BIGINT_MIN,
+        BIGINT_MAX,
+        "BIGINT (64-bit signed)",
+        "sql.bigint",
+        "Use sql.numeric() with a string for arbitrary-precision integers.",
+      );
       return { __sql_type: "BIGINT", value: value.toString() };
     }
-    return {
-      __sql_type: "BIGINT",
-      value: coerceIntegerLike(value, "sql.bigint"),
-    };
+    const stringValue = coerceIntegerLike(value, "sql.bigint");
+    ensureInBigIntRange(
+      BigInt(stringValue),
+      BIGINT_MIN,
+      BIGINT_MAX,
+      "BIGINT (64-bit signed)",
+      "sql.bigint",
+      "Use sql.numeric() with a string for arbitrary-precision integers.",
+    );
+    return { __sql_type: "BIGINT", value: stringValue };
   },
 
   /**
-   * Creates a `FLOAT` (single-precision) parameter.
+   * Creates a `FLOAT` (single-precision, 32-bit) parameter. Note that JS
+   * numbers are 64-bit doubles, so values may be rounded to fit FLOAT
+   * precision at bind time.
    *
    * @param value - Number or numeric string
+   * @returns Marker pinned to `FLOAT`
+   * @example
+   * ```typescript
+   * sql.float(3.14);   // { __sql_type: "FLOAT", value: "3.14" }
+   * ```
    */
-  float(value: number | string): SQLNumberMarker {
+  float(value: number | string): SQLNumberMarker & { __sql_type: "FLOAT" } {
     return {
       __sql_type: "FLOAT",
       value: coerceNumericLike(value, "sql.float"),
@@ -241,12 +345,17 @@ export const sql = {
   },
 
   /**
-   * Creates a `DOUBLE` (double-precision) parameter. Same precision as a JS
-   * `number`, so `sql.double(value)` is exact for any JS number.
+   * Creates a `DOUBLE` (double-precision, 64-bit) parameter. Same precision
+   * as a JS `number`, so `sql.double(value)` is exact for any JS number.
    *
    * @param value - Number or numeric string
+   * @returns Marker pinned to `DOUBLE`
+   * @example
+   * ```typescript
+   * sql.double(3.14);   // { __sql_type: "DOUBLE", value: "3.14" }
+   * ```
    */
-  double(value: number | string): SQLNumberMarker {
+  double(value: number | string): SQLNumberMarker & { __sql_type: "DOUBLE" } {
     return {
       __sql_type: "DOUBLE",
       value: coerceNumericLike(value, "sql.double"),
@@ -258,12 +367,20 @@ export const sql = {
    * exact decimal arithmetic (currency, percentages) — pass values as
    * strings to avoid JS-number precision loss.
    *
+   * Note: passing a JS `number` is accepted but lossy for many values
+   * (e.g. `0.1 + 0.2` → `"0.30000000000000004"`). Prefer strings.
+   *
    * @param value - Number or numeric string (strings preferred for precision)
+   * @returns Marker pinned to `NUMERIC`
+   * @example
+   * ```typescript
+   * sql.numeric("12345.6789");   // { __sql_type: "NUMERIC", value: "12345.6789" }
+   * ```
    */
-  decimal(value: number | string): SQLNumberMarker {
+  numeric(value: number | string): SQLNumberMarker & { __sql_type: "NUMERIC" } {
     return {
       __sql_type: "NUMERIC",
-      value: coerceNumericLike(value, "sql.decimal"),
+      value: coerceNumericLike(value, "sql.numeric"),
     };
   },
 

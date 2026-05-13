@@ -171,10 +171,56 @@ describe("QueryProcessor", () => {
 
       const result = await processor.processQueryParams(query, parameters);
 
+      // Integer-shaped strings infer BIGINT (matches LIMIT/OFFSET pattern)
       expect(result.workspaceId).toEqual({
-        __sql_type: "NUMERIC",
+        __sql_type: "BIGINT",
         value: "9876543210",
       });
+    });
+  });
+
+  describe("LIMIT / OFFSET bindings (regression for #323)", () => {
+    test("sql.number(integer) binds as BIGINT for LIMIT/OFFSET", () => {
+      const query = "SELECT * FROM events LIMIT :n OFFSET :m";
+      const parameters = {
+        n: sql.number(10),
+        m: sql.number(20),
+      };
+
+      const result = processor.convertToSQLParameters(query, parameters);
+
+      expect(result.parameters).toEqual([
+        { name: "n", value: "10", type: "BIGINT" },
+        { name: "m", value: "20", type: "BIGINT" },
+      ]);
+    });
+
+    test("sql.number(integer-shaped string) binds as BIGINT for LIMIT/OFFSET", () => {
+      // Express/URLSearchParams return strings — this is the common
+      // handler pattern: sql.number(req.query.n).
+      const query = "SELECT * FROM events LIMIT :n OFFSET :m";
+      const parameters = {
+        n: sql.number("10"),
+        m: sql.number("20"),
+      };
+
+      const result = processor.convertToSQLParameters(query, parameters);
+
+      expect(result.parameters).toEqual([
+        { name: "n", value: "10", type: "BIGINT" },
+        { name: "m", value: "20", type: "BIGINT" },
+      ]);
+    });
+
+    test("sql.bigint(string) binds as BIGINT for LIMIT/OFFSET", () => {
+      const query = "SELECT * FROM events LIMIT :n";
+      const parameters = { n: sql.bigint("10") };
+
+      const result = processor.convertToSQLParameters(query, parameters);
+
+      expect(result.parameters).toEqual([
+        { name: "n", value: "10", type: "BIGINT" },
+      ]);
     });
   });
 
