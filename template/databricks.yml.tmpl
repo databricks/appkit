@@ -13,7 +13,7 @@ resources:
       description: "{{.appDescription}}"
       source_code_path: ./
 
-{{- if or .plugins.genie .plugins.files .plugins.serving .plugins.lakebase}}
+{{- if or .plugins.genie .plugins.files .plugins.serving}}
       user_api_scopes:
 {{- if .plugins.genie}}
         - dashboards.genie
@@ -24,11 +24,8 @@ resources:
 {{- if .plugins.serving}}
         - serving.serving-endpoints
 {{- end}}
-{{- if .plugins.lakebase}}
-        - postgres
-{{- end}}
 {{- else}}
-      # Uncomment to enable on behalf of user API scopes. Available scopes: sql, dashboards.genie, files.files, serving.serving-endpoints, postgres
+      # Uncomment to enable on behalf of user API scopes. Available scopes: sql, dashboards.genie, files.files, serving.serving-endpoints
       # user_api_scopes:
       #   - sql
 {{- end}}

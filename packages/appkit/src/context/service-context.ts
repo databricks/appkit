@@ -113,6 +113,7 @@ export class ServiceContext {
     token: string,
     userId: string,
     userName?: string,
+    userEmail?: string,
   ): UserContext {
     if (!token) {
       throw AuthenticationError.missingToken("user token");
@@ -141,6 +142,7 @@ export class ServiceContext {
       client: userClient,
       userId,
       userName,
+      userEmail,
       warehouseId: serviceCtx.warehouseId,
       workspaceId: serviceCtx.workspaceId,
       isUserContext: true,

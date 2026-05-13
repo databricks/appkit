@@ -40,3 +40,5 @@ export {
   createLakebasePoolManager,
   type LakebasePoolManager,
 } from "./pool-manager";
+
+export { RoutingPool } from "./routing-pool";

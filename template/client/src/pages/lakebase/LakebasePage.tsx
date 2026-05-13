@@ -12,10 +12,9 @@ import { useState, useEffect } from 'react';
 import { Check, X } from 'lucide-react';
 
 interface Todo {
-  id: string;
+  id: number;
   title: string;
   completed: boolean;
-  created_by: string | null;
   created_at: string;
 }
 
@@ -28,11 +27,8 @@ export function LakebasePage() {
 
   useEffect(() => {
     fetch('/api/lakebase/todos')
-      .then(async (res) => {
-        if (!res.ok) {
-          const body = await res.json().catch(() => null);
-          throw new Error(body?.error ?? `Failed to fetch todos: ${res.statusText}`);
-        }
+      .then((res) => {
+        if (!res.ok) throw new Error(`Failed to fetch todos: ${res.statusText}`);
         return res.json() as Promise<Todo[]>;
       })
       .then(setTodos)
@@ -52,10 +48,7 @@ export function LakebasePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title }),
       });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error ?? `Failed to create todo: ${res.statusText}`);
-      }
+      if (!res.ok) throw new Error(`Failed to create todo: ${res.statusText}`);
       const created = (await res.json()) as Todo;
       setTodos((prev) => [created, ...prev]);
       setNewTitle('');
@@ -66,13 +59,10 @@ export function LakebasePage() {
     }
   };
 
-  const toggleTodo = async (id: string) => {
+  const toggleTodo = async (id: number) => {
     try {
       const res = await fetch(`/api/lakebase/todos/${id}`, { method: 'PATCH' });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error ?? `Failed to update todo: ${res.statusText}`);
-      }
+      if (!res.ok) throw new Error(`Failed to update todo: ${res.statusText}`);
       const updated = (await res.json()) as Todo;
       setTodos((prev) => prev.map((t) => (t.id === id ? updated : t)));
     } catch (err) {
@@ -80,13 +70,10 @@ export function LakebasePage() {
     }
   };
 
-  const deleteTodo = async (id: string) => {
+  const deleteTodo = async (id: number) => {
     try {
       const res = await fetch(`/api/lakebase/todos/${id}`, { method: 'DELETE' });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error ?? `Failed to delete todo: ${res.statusText}`);
-      }
+      if (!res.ok) throw new Error(`Failed to delete todo: ${res.statusText}`);
       setTodos((prev) => prev.filter((t) => t.id !== id));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete todo');
@@ -162,16 +149,9 @@ export function LakebasePage() {
                     {todo.completed && <Check className="h-3 w-3" />}
                   </button>
 
-                  <div className="flex-1 min-w-0">
-                    <span className={todo.completed ? 'line-through text-muted-foreground' : ''}>
-                      {todo.title}
-                    </span>
-                    {todo.created_by && (
-                      <span className="block text-xs text-muted-foreground truncate">
-                        by {todo.created_by}
-                      </span>
-                    )}
-                  </div>
+                  <span className={`flex-1 ${todo.completed ? 'line-through text-muted-foreground' : ''}`}>
+                    {todo.title}
+                  </span>
 
                   <Button
                     variant="ghost"

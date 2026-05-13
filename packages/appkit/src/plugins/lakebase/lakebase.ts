@@ -1,6 +1,4 @@
-import { WorkspaceClient } from "@databricks/sdk-experimental";
-import type express from "express";
-import type { Pool, QueryResult, QueryResultRow } from "pg";
+import type { QueryResult, QueryResultRow } from "pg";
 import type { AgentToolDefinition, ToolProvider } from "shared";
 import { z } from "zod";
 import {
@@ -10,15 +8,16 @@ import {
   getLakebasePgConfig,
   getUsernameWithApiLookup,
   type LakebasePoolManager,
+  RoutingPool,
 } from "../../connectors/lakebase";
+import { getUserContext } from "../../context/execution-context";
 import { buildToolkitEntries } from "../../core/agent/build-toolkit";
 import {
   defineTool,
+  executeFromRegistry,
   toolsFromRegistry,
 } from "../../core/agent/tools/define-tool";
 import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
-import { formatZodError } from "../../core/agent/tools/tool";
-import { AuthenticationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
@@ -42,7 +41,9 @@ const OBO_POOL_DEFAULTS = {
  *
  * Supports On-Behalf-Of (OBO) via `asUser(req)` — each user gets a separate
  * `pg.Pool` authenticated with their Databricks identity, enabling features
- * like Row-Level Security (RLS).
+ * like Row-Level Security (RLS). Routing is handled transparently by
+ * {@link RoutingPool}, which reads the execution context set by the base
+ * class `asUser()`.
  *
  * @example
  * ```ts
@@ -64,31 +65,53 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
   static manifest = manifest as PluginManifest<"lakebase">;
 
   protected declare config: ILakebaseConfig;
-  private pool: Pool | null = null;
+  private pool: RoutingPool | null = null;
   private oboPoolManager: LakebasePoolManager | null = null;
 
   /**
    * Initializes the Lakebase connection pool and OBO pool manager.
    * Called automatically by AppKit during the plugin setup phase.
    *
-   * Resolves the PostgreSQL username via {@link getUsernameWithApiLookup},
-   * which tries config, env vars, and finally the Databricks workspace API.
+   * Creates a {@link RoutingPool} that automatically routes queries to either
+   * the service-principal pool or a per-user pool based on the execution
+   * context (set by `Plugin.asUser(req)` via AsyncLocalStorage).
    */
   async setup() {
     const poolConfig = this.config.pool;
     const user = await getUsernameWithApiLookup(poolConfig);
-    this.pool = createLakebasePool({ ...poolConfig, user });
-    logger.info("Lakebase pool initialized");
+
+    const spPool = createLakebasePool({ ...poolConfig, user });
+    logger.info("Lakebase SP pool initialized");
 
     this.oboPoolManager = createLakebasePoolManager({
       ...poolConfig,
       ...OBO_POOL_DEFAULTS,
     });
     logger.info("Lakebase OBO pool manager initialized");
+
+    this.pool = new RoutingPool(spPool, (ctx) => {
+      // Lakebase OAuth roles use email as the postgres role when available
+      const userKey = ctx.userEmail ?? ctx.userId;
+      const isNew = !this.oboPoolManager!.hasPool(userKey);
+      const pool = this.oboPoolManager!.getPool(userKey, {
+        workspaceClient: ctx.client,
+        user: userKey,
+      });
+      if (isNew) {
+        logger.debug(
+          "Created OBO pool for user (total: %d)",
+          this.oboPoolManager!.size,
+        );
+      }
+      return pool;
+    });
   }
 
   /**
    * Executes a parameterized SQL query against the Lakebase pool.
+   *
+   * When called inside `asUser(req)`, the query automatically routes to
+   * the per-user pool via {@link RoutingPool}.
    *
    * @param text - SQL query string, using `$1`, `$2`, ... placeholders
    * @param values - Parameter values corresponding to placeholders
@@ -144,123 +167,6 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
   }
 
   /**
-   * Returns a user-scoped version of the plugin that uses a per-user
-   * connection pool authenticated with the user's Databricks identity.
-   *
-   * Overrides the base `Plugin.asUser()` because Lakebase needs entirely
-   * separate `pg.Pool` instances per user (each with their own OAuth token
-   * refresh), rather than the standard AsyncLocalStorage context swap.
-   *
-   * @param req - Express request containing `x-forwarded-access-token` and `x-forwarded-email` headers
-   * @returns A proxied plugin instance where `query()` and `pool` use the user's pool
-   */
-  asUser(req: express.Request): this {
-    const token = req.header("x-forwarded-access-token");
-    const userEmail = req.header("x-forwarded-email");
-    const isDev = process.env.NODE_ENV === "development";
-
-    // In dev mode without token, delegate to the base class dev fallback
-    // which uses the SP pool with DEV_OBO_FALLBACK_KEY in OTel context
-    if (!token && isDev) {
-      return super.asUser(req);
-    }
-
-    if (!token) {
-      throw AuthenticationError.missingToken("user token");
-    }
-
-    if (!userEmail && !isDev) {
-      throw AuthenticationError.missingToken(
-        "x-forwarded-email header (required for Lakebase per-user pools)",
-      );
-    }
-
-    // Lakebase OAuth roles use email as postgres_role
-    const effectiveUser = userEmail || "local-dev-user";
-
-    // Get or create a per-user pool
-    // biome-ignore lint/style/noNonNullAssertion: oboPoolManager is guaranteed non-null after setup()
-    const isNew = !this.oboPoolManager!.hasPool(effectiveUser);
-    // biome-ignore lint/style/noNonNullAssertion: oboPoolManager is guaranteed non-null after setup()
-    const userPool = this.oboPoolManager!.getPool(effectiveUser, {
-      workspaceClient: new WorkspaceClient({
-        token,
-        host: process.env.DATABRICKS_HOST,
-        authType: "pat",
-      }),
-      user: effectiveUser,
-    });
-
-    if (isNew) {
-      logger.info(
-        'Created OBO pool for user "%s" (total: %d)',
-        effectiveUser,
-        // biome-ignore lint/style/noNonNullAssertion: oboPoolManager is guaranteed non-null after setup()
-        this.oboPoolManager!.size,
-      );
-    }
-
-    const pluginConfig = this.config;
-
-    // Return a proxy that intercepts pool-related methods and exports.
-    // The `pool` intercept is critical for agent tools: executeAgentTool
-    // calls this.runReadOnlyStatement() which accesses this.pool.connect().
-    // When `this` is the proxy, the get trap routes to the user pool.
-    return new Proxy(this, {
-      get(target, prop, receiver) {
-        if (prop === "pool") {
-          return userPool;
-        }
-
-        if (prop === "query") {
-          return <T extends QueryResultRow = any>(
-            text: string,
-            values?: unknown[],
-          ): Promise<QueryResult<T>> => userPool.query<T>(text, values);
-        }
-
-        if (prop === "exports") {
-          return () => ({
-            pool: userPool,
-            query: <T extends QueryResultRow = any>(
-              text: string,
-              values?: unknown[],
-            ) => userPool.query<T>(text, values),
-            getOrmConfig: () =>
-              getLakebaseOrmConfig({
-                ...pluginConfig.pool,
-                workspaceClient: new WorkspaceClient({
-                  token,
-                  host: process.env.DATABRICKS_HOST,
-                  authType: "pat",
-                }),
-                user: effectiveUser,
-              }),
-            getPgConfig: () =>
-              getLakebasePgConfig({
-                ...pluginConfig.pool,
-                workspaceClient: new WorkspaceClient({
-                  token,
-                  host: process.env.DATABRICKS_HOST,
-                  authType: "pat",
-                }),
-                user: effectiveUser,
-              }),
-          });
-        }
-
-        if (prop === "asUser") {
-          return () => {
-            throw new Error("asUser() cannot be chained");
-          };
-        }
-
-        return Reflect.get(target, prop, receiver);
-      },
-    }) as this;
-  }
-
-  /**
    * Gracefully drains and closes all connection pools (SP + OBO).
    * Called automatically by AppKit during shutdown.
    */
@@ -286,17 +192,6 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
   }
 
   /**
-   * Returns the plugin's public API, accessible via `AppKit.lakebase`.
-   *
-   * - `pool` — The raw `pg.Pool` instance (service principal), for use with ORMs or advanced scenarios
-   * - `query` — Convenience method for executing parameterized SQL queries
-   * - `getOrmConfig()` — Returns a config object compatible with Drizzle, TypeORM, Sequelize, etc.
-   * - `getPgConfig()` — Returns a `pg.PoolConfig` object for manual pool construction
-   *
-   * Use `AppKit.lakebase.asUser(req)` to get the same API backed by a per-user pool.
-   */
-
-  /**
    * Agent tool registry. Empty by default — the Lakebase plugin does NOT
    * expose its SQL connection to LLM agents unless the developer explicitly
    * opts in via `config.exposeAsAgentTool`. See {@link buildQueryTool}.
@@ -309,7 +204,7 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
     if (config.exposeAsAgentTool) {
       this.tools = { query: this.buildQueryTool(config.exposeAsAgentTool) };
       logger.warn(
-        "Lakebase agent tool is enabled (readOnly=%s). Every agent with access to this plugin can execute SQL against the Lakebase database as the service principal.",
+        "Lakebase agent tool is enabled (readOnly=%s). Every agent with access to this plugin can execute SQL against the Lakebase database as the requesting user's identity.",
         config.exposeAsAgentTool.readOnly !== false,
       );
     }
@@ -355,50 +250,57 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
     return toolsFromRegistry(this.tools);
   }
 
-  /**
-   * Executes a registered agent tool by name.
-   *
-   * This method intentionally inlines the tool dispatch instead of
-   * delegating to `executeFromRegistry`, so that `this.query()` and
-   * `this.runReadOnlyStatement()` resolve through the Proxy returned
-   * by `asUser(req)`. The Proxy intercepts `query` and `pool` to
-   * route SQL to the per-user connection pool, enabling OBO execution
-   * for agent tools.
-   */
   async executeAgentTool(
     name: string,
     args: unknown,
-    _signal?: AbortSignal,
+    signal?: AbortSignal,
   ): Promise<unknown> {
-    const entry = this.tools[name];
-    if (!entry) {
-      throw new Error(`Unknown tool: ${name}`);
-    }
-    const parsed = entry.schema.safeParse(args);
-    if (!parsed.success) {
-      return formatZodError(parsed.error, name);
-    }
-
-    const { text, values } = parsed.data;
-    if (entry.annotations?.readOnly) {
-      assertReadOnlySql(text);
-      return this.runReadOnlyStatement(text, values);
-    }
-    const result = await this.query(text, values);
-    return result.rows;
+    return executeFromRegistry(this.tools, name, args, signal);
   }
 
   toolkit(opts?: import("../../core/agent/types").ToolkitOptions) {
     return buildToolkitEntries(this.name, this.tools, opts);
   }
 
+  /**
+   * Returns the plugin's public API, accessible via `AppKit.lakebase`.
+   *
+   * - `pool` — The connection pool (routes to per-user pool when inside `asUser(req)`)
+   * - `query` — Convenience method for executing parameterized SQL queries
+   * - `getOrmConfig()` — Returns a config object compatible with Drizzle, TypeORM, Sequelize, etc.
+   * - `getPgConfig()` — Returns a `pg.PoolConfig` object for manual pool construction
+   *
+   * Use `AppKit.lakebase.asUser(req)` to get the same API backed by a per-user pool.
+   */
   exports() {
     return {
       // biome-ignore lint/style/noNonNullAssertion: pool is guaranteed non-null after setup(), which AppKit always awaits before exposing the plugin API
-      pool: this.pool!,
+      pool: this.pool! as unknown as import("pg").Pool,
       query: this.query.bind(this),
-      getOrmConfig: () => getLakebaseOrmConfig(this.config.pool),
-      getPgConfig: () => getLakebasePgConfig(this.config.pool),
+      getOrmConfig: () => {
+        const ctx = getUserContext();
+        if (ctx) {
+          const user = ctx.userEmail ?? ctx.userId;
+          return getLakebaseOrmConfig({
+            ...this.config.pool,
+            workspaceClient: ctx.client,
+            user,
+          });
+        }
+        return getLakebaseOrmConfig(this.config.pool);
+      },
+      getPgConfig: () => {
+        const ctx = getUserContext();
+        if (ctx) {
+          const user = ctx.userEmail ?? ctx.userId;
+          return getLakebasePgConfig({
+            ...this.config.pool,
+            workspaceClient: ctx.client,
+            user,
+          });
+        }
+        return getLakebasePgConfig(this.config.pool);
+      },
     };
   }
 }

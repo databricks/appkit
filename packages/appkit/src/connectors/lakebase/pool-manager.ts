@@ -76,6 +76,11 @@ export function createLakebasePoolManager(
       const existing = pools.get(key);
       if (existing) return existing;
 
+      // Safe without locking: createLakebasePool is synchronous and Node.js
+      // is single-threaded, so no preemption between get() and set().
+      // Each pool's password callback handles OAuth token refresh
+      // independently via its WorkspaceClient — the initial token is only
+      // used to bootstrap the refresh chain.
       const pool = createLakebasePool({ ...baseConfig, ...perPoolConfig });
       pools.set(key, pool);
       return pool;
