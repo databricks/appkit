@@ -43,7 +43,9 @@ export interface SQLTimestampMarker {
 
 /**
  * Object that identifies a typed SQL parameter.
- * Created using sql.date(), sql.string(), sql.number(), sql.boolean(), sql.timestamp(), sql.binary(), or sql.interval().
+ * Created using sql.date(), sql.string(), sql.number() (or the typed numeric
+ * variants sql.int/bigint/float/double/numeric), sql.boolean(),
+ * sql.timestamp(), or sql.binary().
  */
 export type SQLTypeMarker =
   | SQLStringMarker

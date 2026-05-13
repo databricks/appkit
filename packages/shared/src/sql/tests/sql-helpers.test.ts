@@ -63,6 +63,28 @@ describe("SQL Helpers", () => {
       });
     });
 
+    it("should accept BIGINT-boundary integer strings", () => {
+      expect(sql.number("9223372036854775807")).toEqual({
+        __sql_type: "BIGINT",
+        value: "9223372036854775807",
+      });
+      expect(sql.number("-9223372036854775808")).toEqual({
+        __sql_type: "BIGINT",
+        value: "-9223372036854775808",
+      });
+    });
+
+    it("should reject integer strings outside 64-bit signed range", () => {
+      // String input bypasses Number.MAX_SAFE_INTEGER guards, but the
+      // BIGINT wire type still cannot hold values outside 2^63.
+      expect(() => sql.number("9223372036854775808")).toThrow(
+        /BIGINT \(64-bit signed\) range/,
+      );
+      expect(() => sql.number("-9223372036854775809")).toThrow(
+        /BIGINT \(64-bit signed\) range/,
+      );
+    });
+
     it("should bind decimal-shaped strings as NUMERIC (preserve precision)", () => {
       const result = sql.number("123.4500000000001");
       expect(result).toEqual({

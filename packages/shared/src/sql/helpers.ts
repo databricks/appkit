@@ -239,8 +239,18 @@ export const sql = {
       }
       // Integer-shaped strings: emit BIGINT so HTTP-input callers
       // (`req.query.n` is always a string) work with LIMIT/OFFSET without
-      // having to reach for `sql.bigint("10")` explicitly.
+      // having to reach for `sql.bigint("10")` explicitly. Out-of-range
+      // values throw — sql.numeric() is the right helper for
+      // arbitrary-precision integers.
       if (INTEGER_LITERAL_RE.test(value)) {
+        ensureInBigIntRange(
+          BigInt(value),
+          BIGINT_MIN,
+          BIGINT_MAX,
+          "BIGINT (64-bit signed)",
+          "sql.number",
+          "Use sql.numeric() with a string for arbitrary-precision integers.",
+        );
         return { __sql_type: "BIGINT", value };
       }
       // Non-integer strings stay NUMERIC: the caller chose to pass a string,
