@@ -14,6 +14,7 @@ export interface IntrospectedColumn {
     column: string;
     onDelete?: CascadeAction;
     onUpdate?: CascadeAction;
+    inferred?: boolean;
   };
 }
 

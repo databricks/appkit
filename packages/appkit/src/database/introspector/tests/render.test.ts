@@ -291,6 +291,52 @@ describe("renderSchema", () => {
     expect(out).not.toContain("/* TODO: default");
   });
 
+  test("preserves .primaryKey() on a column that is both PK and FK", () => {
+    const out = renderSchema({
+      schemas: ["public"],
+      tables: [
+        {
+          schema: "public",
+          name: "cases",
+          policies: [],
+          columns: [
+            {
+              name: "case_id",
+              pgType: "text",
+              nullable: false,
+              hasDefault: false,
+              isPrimaryKey: true,
+            },
+          ],
+        },
+        {
+          schema: "public",
+          name: "ai_summaries",
+          policies: [],
+          columns: [
+            {
+              name: "case_id",
+              pgType: "text",
+              nullable: false,
+              hasDefault: false,
+              isPrimaryKey: true,
+              references: {
+                schema: "public",
+                table: "cases",
+                column: "case_id",
+                inferred: true,
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(out).toContain(
+      "case_id: fk(casesCols.case_id).notNull().primaryKey()",
+    );
+  });
+
   test("keeps self-references compileable with a TODO column", () => {
     const out = renderSchema({
       schemas: ["app"],

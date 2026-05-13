@@ -97,6 +97,10 @@ function renderColumn(
       expr += `.onUpdate(${JSON.stringify(column.references.onUpdate)})`;
     }
     if (!column.nullable) expr += ".notNull()";
+    if (column.isPrimaryKey) expr += ".primaryKey()";
+    if (column.references.inferred) {
+      expr += " /* inferred from naming convention; verify */";
+    }
     return expr;
   }
 

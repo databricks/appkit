@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import { inferRelationsByConvention } from "./infer-relations";
 import { runIntrospection } from "./queries";
 import type { IntrospectionResult } from "./types";
 
@@ -26,6 +27,14 @@ export interface IntrospectOptions {
   schemas?: string[];
   exclude?: string[];
   readonly?: boolean;
+  /**
+   * Infer foreign keys from naming convention when the database lacks
+   * declared FK constraints. Defaults to `true` so `.include()` works on
+   * schemas where FKs were never created at the DB level. Inferred relations
+   * are marked with `references.inferred = true` and the renderer emits an
+   * "inferred from naming convention" comment for human review.
+   */
+  inferRelations?: boolean;
 }
 
 /** Introspect a database and return the result. */
@@ -40,6 +49,10 @@ export async function introspect(
     ...(options.exclude ?? []),
   ]);
   const tables = await runIntrospection(pool, schemas, exclude);
+
+  if (options.inferRelations !== false) {
+    inferRelationsByConvention(tables);
+  }
 
   if (options.readonly) {
     for (const table of tables) table.readonly = true;
