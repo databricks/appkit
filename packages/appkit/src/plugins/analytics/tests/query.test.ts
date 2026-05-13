@@ -32,7 +32,7 @@ describe("QueryProcessor", () => {
       expect(result.statement).toBe(query);
       expect(result.parameters).toHaveLength(2);
       expect(result.parameters).toEqual([
-        { name: "user_id", value: "123", type: "BIGINT" },
+        { name: "user_id", value: "123", type: "INT" },
         { name: "name", value: "Alice", type: "STRING" },
       ]);
     });
@@ -167,11 +167,12 @@ describe("QueryProcessor", () => {
 
     test("should not override workspace_id if already provided", async () => {
       const query = "SELECT * FROM data WHERE workspace_id = :workspaceId";
+      // 9876543210 exceeds INT_MAX (2^31 - 1) so inference falls through to
+      // BIGINT — appropriate for ID columns.
       const parameters = { workspaceId: sql.number("9876543210") };
 
       const result = await processor.processQueryParams(query, parameters);
 
-      // Integer-shaped strings infer BIGINT (matches LIMIT/OFFSET pattern)
       expect(result.workspaceId).toEqual({
         __sql_type: "BIGINT",
         value: "9876543210",
@@ -180,7 +181,11 @@ describe("QueryProcessor", () => {
   });
 
   describe("LIMIT / OFFSET bindings (regression for #323)", () => {
-    test("sql.number(integer) binds as BIGINT for LIMIT/OFFSET", () => {
+    // Spark requires IntegerType for LIMIT/OFFSET; BIGINT/LongType is
+    // rejected with INVALID_LIMIT_LIKE_EXPRESSION.DATA_TYPE. These tests
+    // pin INT inference so sql.number(req.query.n) works against the
+    // warehouse without explicit casting.
+    test("sql.number(integer) binds as INT for LIMIT/OFFSET", () => {
       const query = "SELECT * FROM events LIMIT :n OFFSET :m";
       const parameters = {
         n: sql.number(10),
@@ -190,12 +195,12 @@ describe("QueryProcessor", () => {
       const result = processor.convertToSQLParameters(query, parameters);
 
       expect(result.parameters).toEqual([
-        { name: "n", value: "10", type: "BIGINT" },
-        { name: "m", value: "20", type: "BIGINT" },
+        { name: "n", value: "10", type: "INT" },
+        { name: "m", value: "20", type: "INT" },
       ]);
     });
 
-    test("sql.number(integer-shaped string) binds as BIGINT for LIMIT/OFFSET", () => {
+    test("sql.number(integer-shaped string) binds as INT for LIMIT/OFFSET", () => {
       // Express/URLSearchParams return strings — this is the common
       // handler pattern: sql.number(req.query.n).
       const query = "SELECT * FROM events LIMIT :n OFFSET :m";
@@ -207,19 +212,19 @@ describe("QueryProcessor", () => {
       const result = processor.convertToSQLParameters(query, parameters);
 
       expect(result.parameters).toEqual([
-        { name: "n", value: "10", type: "BIGINT" },
-        { name: "m", value: "20", type: "BIGINT" },
+        { name: "n", value: "10", type: "INT" },
+        { name: "m", value: "20", type: "INT" },
       ]);
     });
 
-    test("sql.bigint(string) binds as BIGINT for LIMIT/OFFSET", () => {
+    test("sql.int(string) binds as INT for LIMIT/OFFSET (explicit form)", () => {
       const query = "SELECT * FROM events LIMIT :n";
-      const parameters = { n: sql.bigint("10") };
+      const parameters = { n: sql.int("10") };
 
       const result = processor.convertToSQLParameters(query, parameters);
 
       expect(result.parameters).toEqual([
-        { name: "n", value: "10", type: "BIGINT" },
+        { name: "n", value: "10", type: "INT" },
       ]);
     });
   });
@@ -275,7 +280,7 @@ describe("QueryProcessor", () => {
       expect(result.parameters[0]).toEqual({
         name: "age",
         value: "25",
-        type: "BIGINT",
+        type: "INT",
       });
     });
 

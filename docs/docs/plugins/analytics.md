@@ -43,15 +43,17 @@ Use `:paramName` placeholders and optionally annotate parameter types using SQL 
 ```sql
 -- @param startDate DATE
 -- @param endDate DATE
--- @param limit BIGINT
+-- @param limit INT
 SELECT ...
 WHERE usage_date BETWEEN :startDate AND :endDate
 LIMIT :limit
 ```
 
-`LIMIT` / `OFFSET` require an integer-typed binding (`INT` or `BIGINT`).
-Annotate accordingly, or use `sql.number()` (auto-infers `BIGINT` for integer
-inputs) / `sql.bigint()` / `sql.int()` at the call site.
+`LIMIT` / `OFFSET` require Spark `IntegerType` specifically — `BIGINT`
+(`LongType`) is rejected with `INVALID_LIMIT_LIKE_EXPRESSION.DATA_TYPE`.
+Annotate with `INT`, or use `sql.number()` (auto-infers `INT` for values in
+`[-2^31, 2^31-1]`, falling back to `BIGINT` for wider values) / `sql.int()`
+at the call site.
 
 **Supported `-- @param` types** (case-insensitive):
 - `STRING`, `BOOLEAN`, `DATE`, `TIMESTAMP`, `BINARY`

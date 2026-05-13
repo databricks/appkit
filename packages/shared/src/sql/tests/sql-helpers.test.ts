@@ -37,11 +37,42 @@ describe("SQL Helpers", () => {
   });
 
   describe("number()", () => {
-    it("should bind a JS integer as BIGINT (works in LIMIT/OFFSET)", () => {
+    it("should bind a JS integer in INT range as INT (works with Spark LIMIT/OFFSET)", () => {
+      // Spark requires IntegerType for LIMIT/OFFSET; BIGINT/LongType is
+      // rejected with INVALID_LIMIT_LIKE_EXPRESSION.DATA_TYPE. INT is
+      // auto-widened to BIGINT/DECIMAL/DOUBLE by Catalyst for wider columns.
       const result = sql.number(1234567890);
       expect(result).toEqual({
-        __sql_type: "BIGINT",
+        __sql_type: "INT",
         value: "1234567890",
+      });
+    });
+
+    it("should bind a JS integer outside INT range as BIGINT", () => {
+      const result = sql.number(3_000_000_000);
+      expect(result).toEqual({
+        __sql_type: "BIGINT",
+        value: "3000000000",
+      });
+    });
+
+    it("should bind INT boundaries correctly", () => {
+      expect(sql.number(2147483647)).toEqual({
+        __sql_type: "INT",
+        value: "2147483647",
+      });
+      expect(sql.number(-2147483648)).toEqual({
+        __sql_type: "INT",
+        value: "-2147483648",
+      });
+      // Just past INT_MAX → BIGINT
+      expect(sql.number(2147483648)).toEqual({
+        __sql_type: "BIGINT",
+        value: "2147483648",
+      });
+      expect(sql.number(-2147483649)).toEqual({
+        __sql_type: "BIGINT",
+        value: "-2147483649",
       });
     });
 
@@ -53,13 +84,21 @@ describe("SQL Helpers", () => {
       });
     });
 
-    it("should bind an integer-shaped string as BIGINT (HTTP-input case)", () => {
+    it("should bind an integer-shaped string in INT range as INT (HTTP-input case)", () => {
       // Express/URLSearchParams return strings; common pattern is
-      // sql.number(req.query.n) which must work with LIMIT/OFFSET.
+      // sql.number(req.query.n) which must work with Spark LIMIT/OFFSET.
       const result = sql.number("1234567890");
       expect(result).toEqual({
-        __sql_type: "BIGINT",
+        __sql_type: "INT",
         value: "1234567890",
+      });
+    });
+
+    it("should bind an integer-shaped string outside INT range as BIGINT", () => {
+      const result = sql.number("3000000000");
+      expect(result).toEqual({
+        __sql_type: "BIGINT",
+        value: "3000000000",
       });
     });
 
@@ -112,10 +151,11 @@ describe("SQL Helpers", () => {
       expect(() => sql.number(Number.NaN)).toThrow(/finite number/);
     });
 
-    it("should emit canonical decimal text (no exponent) for safe integers", () => {
+    it("should emit canonical decimal text (no exponent) for large safe integers", () => {
       // Sanity check: even though Number.prototype.toString could emit
       // exponent form for very large integers, the helper always emits
-      // decimal text via BigInt(value).toString().
+      // decimal text via BigInt(value).toString(). 1e15 is outside INT
+      // range, so the wire type is BIGINT.
       const result = sql.number(1e15);
       expect(result).toEqual({
         __sql_type: "BIGINT",

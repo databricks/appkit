@@ -199,27 +199,35 @@ export const sql = {
   /**
    * Creates a numeric type parameter. The wire SQL type is inferred from the
    * value so the parameter binds correctly in any context, including `LIMIT`
-   * and `OFFSET` (which require integer types):
+   * and `OFFSET`:
    *
-   * - JS integer (`10`) → `BIGINT`
+   * - JS integer in `[-2^31, 2^31 - 1]` → `INT`
+   * - JS integer outside `INT` but within `Number.MAX_SAFE_INTEGER` → `BIGINT`
    * - JS non-integer (`3.14`) → `DOUBLE`
-   * - integer-shaped string (`"10"`) → `BIGINT` (common HTTP-input case;
-   *   works with `LIMIT :n` / `OFFSET :m`)
+   * - integer-shaped string in `INT` range → `INT` (common HTTP-input case)
+   * - integer-shaped string outside `INT` but within `BIGINT` → `BIGINT`
    * - decimal-shaped string (`"123.45"`) → `NUMERIC` (preserves precision)
    *
+   * Why default to `INT`? Spark's `LIMIT` and `OFFSET` operators require
+   * `IntegerType` specifically — `BIGINT` (`LongType`) is rejected with
+   * `INVALID_LIMIT_LIKE_EXPRESSION.DATA_TYPE`. Catalyst auto-widens `INT`
+   * to `BIGINT` / `DECIMAL` / `DOUBLE` for wider columns, so `INT` is a
+   * strictly better default than `BIGINT`.
+   *
    * Throws on `NaN`, `Infinity`, JS integers outside `Number.MAX_SAFE_INTEGER`,
-   * or non-numeric strings. Reach for `sql.int()`, `sql.bigint()`,
-   * `sql.float()`, `sql.double()`, or `sql.numeric()` if you need to override
-   * the inferred type.
+   * integer-shaped strings outside the `BIGINT` range, or non-numeric strings.
+   * Reach for `sql.int()`, `sql.bigint()`, `sql.float()`, `sql.double()`, or
+   * `sql.numeric()` to override the inferred type.
    *
    * @param value - Number or numeric string
    * @returns Marker for a numeric SQL parameter
    * @example
    * ```typescript
-   * sql.number(123);        // { __sql_type: "BIGINT", value: "123" }
-   * sql.number(0.5);        // { __sql_type: "DOUBLE", value: "0.5" }
-   * sql.number("10");       // { __sql_type: "BIGINT", value: "10" }
-   * sql.number("123.45");   // { __sql_type: "NUMERIC", value: "123.45" }
+   * sql.number(123);              // { __sql_type: "INT",    value: "123" }
+   * sql.number(3_000_000_000);    // { __sql_type: "BIGINT", value: "3000000000" }
+   * sql.number(0.5);              // { __sql_type: "DOUBLE", value: "0.5" }
+   * sql.number("10");             // { __sql_type: "INT",    value: "10" }
+   * sql.number("123.45");         // { __sql_type: "NUMERIC", value: "123.45" }
    * ```
    */
   number(value: number | string): SQLNumberMarker {
@@ -227,7 +235,13 @@ export const sql = {
       ensureFiniteNumber(value, "sql.number");
       if (Number.isInteger(value)) {
         ensureSafeInteger(value, "sql.number");
-        return { __sql_type: "BIGINT", value: BigInt(value).toString() };
+        const asBigInt = BigInt(value);
+        // INT (32-bit) is required by Spark for LIMIT/OFFSET; Catalyst
+        // widens INT → BIGINT/DECIMAL/DOUBLE automatically.
+        if (asBigInt >= INT_MIN && asBigInt <= INT_MAX) {
+          return { __sql_type: "INT", value: asBigInt.toString() };
+        }
+        return { __sql_type: "BIGINT", value: asBigInt.toString() };
       }
       return { __sql_type: "DOUBLE", value: value.toString() };
     }
@@ -237,20 +251,23 @@ export const sql = {
           `sql.number() expects number or numeric string, got: ${value === "" ? "empty string" : value}`,
         );
       }
-      // Integer-shaped strings: emit BIGINT so HTTP-input callers
-      // (`req.query.n` is always a string) work with LIMIT/OFFSET without
-      // having to reach for `sql.bigint("10")` explicitly. Out-of-range
-      // values throw — sql.numeric() is the right helper for
-      // arbitrary-precision integers.
+      // Integer-shaped strings get the same INT-preferring inference, so
+      // `sql.number(req.query.n)` (Express/URLSearchParams strings) works
+      // with LIMIT/OFFSET out of the box. Out-of-BIGINT-range throws —
+      // sql.numeric() is the right helper for arbitrary-precision integers.
       if (INTEGER_LITERAL_RE.test(value)) {
+        const parsed = BigInt(value);
         ensureInBigIntRange(
-          BigInt(value),
+          parsed,
           BIGINT_MIN,
           BIGINT_MAX,
           "BIGINT (64-bit signed)",
           "sql.number",
           "Use sql.numeric() with a string for arbitrary-precision integers.",
         );
+        if (parsed >= INT_MIN && parsed <= INT_MAX) {
+          return { __sql_type: "INT", value };
+        }
         return { __sql_type: "BIGINT", value };
       }
       // Non-integer strings stay NUMERIC: the caller chose to pass a string,
