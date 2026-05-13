@@ -1,4 +1,7 @@
 {{if .plugins.lakebase -}}
+// For per-user connections (OBO) with Row-Level Security, see:
+// https://www.databricks.com/devhub/docs/appkit/v0/plugins/lakebase#on-behalf-of-obo--per-user-connections
+
 import { z } from 'zod';
 import { Application } from 'express';
 

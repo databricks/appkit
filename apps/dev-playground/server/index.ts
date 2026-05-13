@@ -5,6 +5,7 @@ import {
   type FilePolicy,
   files,
   genie,
+  lakebase,
   PolicyDeniedError,
   server,
   serving,
@@ -327,6 +328,15 @@ const dashboard_pilot = createAgent({
   },
 });
 
+/**
+ * OBO demo policy: deny anything running as the SP (including the dev
+ * fallback when no `x-forwarded-access-token` is present). Only real
+ * end-users (`isServicePrincipal: false`) get through.
+ */
+const usersOnly: FilePolicy = (_action, _resource, user) => {
+  return user.isServicePrincipal !== true;
+};
+
 createApp({
   plugins: [
     server(),
@@ -336,6 +346,7 @@ createApp({
     genie({
       spaces: { demo: process.env.DATABRICKS_GENIE_SPACE_ID ?? "placeholder" },
     }),
+    ...(process.env.LAKEBASE_ENDPOINT ? [lakebase()] : []),
     lakebaseExamples(),
     files({
       volumes: {
@@ -362,6 +373,14 @@ createApp({
         write_only: { policy: files.policy.not(files.policy.publicRead()) },
         // no explicit policy → falls back to publicRead() + startup warning
         implicit: {},
+        // OBO demo volume — auth: "on-behalf-of-user" routes HTTP traffic
+        // through `runInUserContext` so SDK calls execute with the end
+        // user's access token. The `usersOnly` policy denies any traffic
+        // that wasn't authenticated via `x-forwarded-access-token`.
+        obo_demo: {
+          auth: "on-behalf-of-user",
+          policy: usersOnly,
+        },
       },
     }),
     serving(),
@@ -390,6 +409,51 @@ createApp({
   ...(process.env.APPKIT_E2E_TEST && { client: createMockClient() }),
   async onPluginsReady(appkit) {
     appkit.server.extend((app) => {
+      // ── Lakebase OBO routes (per-user pool, RLS enforced) ──────────
+
+      if ("lakebase" in appkit) {
+        // GET /api/lakebase-examples/raw/my-products — RLS-filtered list
+        app.get("/api/lakebase-examples/raw/my-products", async (req, res) => {
+          try {
+            const result = await appkit.lakebase
+              .asUser(req)
+              .query(
+                "SELECT * FROM raw_example.products ORDER BY created_at DESC",
+              );
+            res.json(result.rows);
+          } catch (error: unknown) {
+            const err = error as Error;
+            res.status(500).json({
+              error: "Failed to fetch user products",
+              message: err.message,
+            });
+          }
+        });
+
+        // POST /api/lakebase-examples/raw/my-products — create as user
+        // created_by is set to current_user by the per-user pool's identity
+        app.post("/api/lakebase-examples/raw/my-products", async (req, res) => {
+          try {
+            const { name, category, price, stock } = req.body;
+
+            const result = await appkit.lakebase.asUser(req).query(
+              `INSERT INTO raw_example.products (name, category, price, stock, created_by)
+                   VALUES ($1, $2, $3, $4, current_user) RETURNING *`,
+              [name, category, Number(price), Number(stock)],
+            );
+            res.json(result.rows[0]);
+          } catch (error: unknown) {
+            const err = error as Error;
+            res.status(500).json({
+              error: "Failed to create product",
+              message: err.message,
+            });
+          }
+        });
+      }
+
+      // ── Analytics examples ──────────
+
       app.get("/sp", (_req, res) => {
         appkit.analytics
           .query("SELECT * FROM samples.nyctaxi.trips;")
@@ -682,6 +746,43 @@ createApp({
           const msg = err instanceof Error ? err.message : String(err);
           res.status(404).json({ error: msg });
         }
+      });
+
+      /**
+       * Per-volume OBO mode demo. Hits the `obo_demo` volume — configured
+       * with `auth: "on-behalf-of-user"` — to confirm:
+       *
+       * 1. With a forwarded user identity, HTTP routes execute the SDK
+       *    call as the end user (request goes through `runInUserContext`).
+       * 2. Without `x-forwarded-access-token`, production returns 401;
+       *    development falls back to the SP and the `usersOnly` policy
+       *    rejects with 403.
+       * 3. Programmatic `appkit.files("obo_demo").asUser(req).list()` runs
+       *    inside the same user context.
+       *
+       * Returns the HTTP status, body, and the user identity the server
+       * observes — so the policy-matrix client can render a clear
+       * pass/fail panel.
+       */
+      app.get("/policy/obo-volume", async (req, res) => {
+        const xForwardedUser = req.header("x-forwarded-user") ?? null;
+        const xForwardedToken =
+          (req.header("x-forwarded-access-token")?.length ?? 0) > 0;
+
+        const programmatic: ProbeResult[] = await runProbes([
+          [
+            "obo_demo",
+            "list",
+            () => appkit.files("obo_demo").asUser(req).list(),
+          ],
+        ]);
+
+        res.json({
+          mode: "on-behalf-of-user",
+          xForwardedUser,
+          xForwardedAccessTokenPresent: xForwardedToken,
+          programmatic,
+        });
       });
     });
   },

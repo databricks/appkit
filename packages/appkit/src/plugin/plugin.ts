@@ -393,6 +393,7 @@ export abstract class Plugin<
   asUser(req: express.Request): this {
     const token = req.header("x-forwarded-access-token");
     const userId = req.header("x-forwarded-user");
+    const userEmail = req.header("x-forwarded-email");
     const isDev = process.env.NODE_ENV === "development";
 
     // In local development, skip user impersonation
@@ -434,6 +435,8 @@ export abstract class Plugin<
     const userContext = ServiceContext.createUserContext(
       token,
       effectiveUserId,
+      undefined,
+      userEmail ?? undefined,
     );
 
     // Return a proxy that wraps method calls in user context

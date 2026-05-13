@@ -204,6 +204,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.LakebasePoolManager",
+          label: "LakebasePoolManager"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.McpConnectAllResult",
           label: "McpConnectAllResult"
         },
@@ -499,6 +504,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.createLakebasePool",
           label: "createLakebasePool"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.createLakebasePoolManager",
+          label: "createLakebasePoolManager"
         },
         {
           type: "doc",

@@ -54,6 +54,12 @@ The `plugin.execute` span created by the execution interceptor chain includes th
 
 These attributes are automatically added when your plugin uses `execute()` or `executeStream()`. All built-in plugins use these methods for their OBO operations. Custom plugins should do the same to get automatic telemetry instrumentation.
 
+## Lakebase per-user connections
+
+The Lakebase plugin uses a different mechanism for `asUser(req)`: instead of swapping the `WorkspaceClient` via AsyncLocalStorage, it creates a **separate `pg.Pool` per user**, each with its own OAuth token refresh. This is necessary because PostgreSQL connections are authenticated at connection time — the pool itself is the authentication boundary.
+
+See [Lakebase plugin — per-user connections](./lakebase.md#on-behalf-of-obo--per-user-connections) for details.
+
 ## Development mode behavior
 
 In local development (`NODE_ENV=development`), if `asUser(req)` is called without a user token, it logs a warning and skips user impersonation — the operation runs with the default credentials configured for the app instead. The telemetry span will show `execution.context: "service"` with `execution.obo_dev_fallback: true` to distinguish these from regular service principal calls.

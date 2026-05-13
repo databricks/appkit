@@ -5,8 +5,8 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
  *
  * The plugin defaults to **not** exposing an agent tool at all. Enabling the
  * tool is an explicit opt-in (`exposeAsAgentTool` with an acknowledgement
- * flag) because every invocation runs with the application's service-
- * principal credentials regardless of which end user initiated the request.
+ * flag) because every invocation runs with the caller's execution context
+ * (SP or per-user via RoutingPool).
  */
 
 vi.mock("../../../cache", () => ({
@@ -30,28 +30,42 @@ vi.mock("../../../cache", () => ({
 const clientQueries: Array<{ text: string; values?: unknown[] }> = [];
 const clientReleases: number[] = [];
 
-vi.mock("../../../connectors/lakebase", () => ({
-  createLakebasePool: vi.fn(() => ({
-    query: vi.fn(),
-    connect: vi.fn(async () => {
-      let releaseCalls = 0;
-      return {
-        query: vi.fn(async (text: string, values?: unknown[]) => {
-          clientQueries.push({ text, values });
-          return { rows: [{ n: 1 }] };
-        }),
-        release: vi.fn(() => {
-          releaseCalls += 1;
-          clientReleases.push(releaseCalls);
-        }),
-      };
-    }),
-    end: vi.fn(),
-  })),
-  getLakebaseOrmConfig: vi.fn(() => ({})),
-  getLakebasePgConfig: vi.fn(() => ({})),
-  getUsernameWithApiLookup: vi.fn(async () => "test-user"),
-}));
+vi.mock("../../../connectors/lakebase", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../connectors/lakebase")>();
+  return {
+    ...actual,
+    createLakebasePool: vi.fn(() => ({
+      query: vi.fn(),
+      connect: vi.fn(async () => {
+        let releaseCalls = 0;
+        return {
+          query: vi.fn(async (text: string, values?: unknown[]) => {
+            clientQueries.push({ text, values });
+            return { rows: [{ n: 1 }] };
+          }),
+          release: vi.fn(() => {
+            releaseCalls += 1;
+            clientReleases.push(releaseCalls);
+          }),
+        };
+      }),
+      end: vi.fn(),
+      totalCount: 0,
+      idleCount: 0,
+      waitingCount: 0,
+    })),
+    createLakebasePoolManager: vi.fn(() => ({
+      getPool: vi.fn(),
+      hasPool: vi.fn(() => false),
+      closeAll: vi.fn(async () => {}),
+      size: 0,
+    })),
+    getLakebaseOrmConfig: vi.fn(() => ({})),
+    getLakebasePgConfig: vi.fn(() => ({})),
+    getUsernameWithApiLookup: vi.fn(async () => "test-user"),
+  };
+});
 
 import type { Pool, PoolClient } from "pg";
 import { LakebasePlugin } from "../lakebase";
@@ -83,6 +97,7 @@ describe("LakebasePlugin — agent tool opt-in", () => {
     expect(defs[0].annotations).toEqual({
       effect: "read",
       idempotent: false,
+      requiresUserContext: true,
     });
   });
 
@@ -94,6 +109,7 @@ describe("LakebasePlugin — agent tool opt-in", () => {
     expect(defs[0].annotations).toEqual({
       effect: "destructive",
       idempotent: false,
+      requiresUserContext: true,
     });
   });
 });
@@ -145,9 +161,6 @@ describe("LakebasePlugin — readOnly enforcement", () => {
   });
 
   test("forwards parameter values to the user statement only (the regression fix)", async () => {
-    // Prior to the fix this would have failed with "cannot insert multiple
-    // commands into a prepared statement" because pg's Extended Query
-    // protocol rejects multi-statement batches when values are supplied.
     await plugin.executeAgentTool("query", {
       text: "SELECT * FROM users WHERE id = $1",
       values: [42],
@@ -160,8 +173,6 @@ describe("LakebasePlugin — readOnly enforcement", () => {
   });
 
   test("releases the client even when the user statement throws", async () => {
-    // Poison the client so the middle query throws (simulates a Postgres
-    // error like "cannot execute UPDATE in a read-only transaction").
     const { createLakebasePool } = await import("../../../connectors/lakebase");
     const fakeClient = {
       query: vi
@@ -179,6 +190,9 @@ describe("LakebasePlugin — readOnly enforcement", () => {
       query: vi.fn(),
       connect: vi.fn(async (): Promise<PoolClient> => fakeClient),
       end: vi.fn(),
+      totalCount: 0,
+      idleCount: 0,
+      waitingCount: 0,
     } as unknown as Pool);
 
     clientQueries.length = 0;
@@ -220,5 +234,133 @@ describe("LakebasePlugin — destructive mode", () => {
       "UPDATE t SET x=1 WHERE id=$1",
       [42],
     );
+  });
+});
+
+describe("LakebasePlugin — OBO via RoutingPool", () => {
+  const userPoolQueries: Array<{ text: string; values?: unknown[] }> = [];
+  const userClientQueries: Array<{ text: string; values?: unknown[] }> = [];
+
+  function makeUserPool() {
+    return {
+      query: vi.fn(async (text: string, values?: unknown[]) => {
+        userPoolQueries.push({ text, values });
+        return { rows: [{ from: "user-pool" }] };
+      }),
+      connect: vi.fn(async () => ({
+        query: vi.fn(async (text: string, values?: unknown[]) => {
+          userClientQueries.push({ text, values });
+          return { rows: [{ from: "user-pool-client" }] };
+        }),
+        release: vi.fn(),
+      })),
+      end: vi.fn(),
+      totalCount: 0,
+      idleCount: 0,
+      waitingCount: 0,
+    };
+  }
+
+  beforeEach(async () => {
+    userPoolQueries.length = 0;
+    userClientQueries.length = 0;
+    clientQueries.length = 0;
+
+    const { createLakebasePoolManager } = await import(
+      "../../../connectors/lakebase"
+    );
+    vi.mocked(createLakebasePoolManager).mockReturnValue({
+      getPool: vi.fn(() => makeUserPool() as unknown as Pool),
+      hasPool: vi.fn(() => false),
+      closePool: vi.fn(async () => {}),
+      closeAll: vi.fn(async () => {}),
+      get size() {
+        return 1;
+      },
+    });
+  });
+
+  test("read-only query routes to user pool inside runInUserContext", async () => {
+    const { runInUserContext } = await import(
+      "../../../context/execution-context"
+    );
+    const plugin = makePlugin({ exposeAsAgentTool: {} });
+    await plugin.setup();
+
+    const userCtx = {
+      client: {} as any,
+      userId: "user-123",
+      userEmail: "alice@example.com",
+      workspaceId: Promise.resolve("ws-1"),
+      isUserContext: true as const,
+    };
+
+    const result = await runInUserContext(userCtx, () =>
+      plugin.executeAgentTool("query", { text: "SELECT 1" }),
+    );
+
+    expect(result).toEqual([{ from: "user-pool-client" }]);
+    expect(userClientQueries.map((c) => c.text)).toEqual([
+      "BEGIN READ ONLY",
+      "SELECT 1",
+      "ROLLBACK",
+    ]);
+    // SP pool should NOT have been touched
+    expect(clientQueries).toHaveLength(0);
+  });
+
+  test("destructive query routes to user pool inside runInUserContext", async () => {
+    const { runInUserContext } = await import(
+      "../../../context/execution-context"
+    );
+
+    const plugin = makePlugin({ exposeAsAgentTool: { readOnly: false } });
+    await plugin.setup();
+
+    const userCtx = {
+      client: {} as any,
+      userId: "user-123",
+      userEmail: "alice@example.com",
+      workspaceId: Promise.resolve("ws-1"),
+      isUserContext: true as const,
+    };
+
+    const result = await runInUserContext(userCtx, () =>
+      plugin.executeAgentTool("query", {
+        text: "UPDATE t SET x=1",
+        values: [42],
+      }),
+    );
+
+    expect(result).toEqual([{ from: "user-pool" }]);
+    expect(userPoolQueries).toEqual([
+      { text: "UPDATE t SET x=1", values: [42] },
+    ]);
+    expect(clientQueries).toHaveLength(0);
+  });
+
+  test("read-only policy still enforced in user context", async () => {
+    const { runInUserContext } = await import(
+      "../../../context/execution-context"
+    );
+
+    const plugin = makePlugin({ exposeAsAgentTool: {} });
+    await plugin.setup();
+
+    const userCtx = {
+      client: {} as any,
+      userId: "user-123",
+      workspaceId: Promise.resolve("ws-1"),
+      isUserContext: true as const,
+    };
+
+    await expect(
+      runInUserContext(userCtx, () =>
+        plugin.executeAgentTool("query", { text: "DROP TABLE users" }),
+      ),
+    ).rejects.toThrow(/read-only policy violation/i);
+
+    expect(userClientQueries).toHaveLength(0);
+    expect(clientQueries).toHaveLength(0);
   });
 });
