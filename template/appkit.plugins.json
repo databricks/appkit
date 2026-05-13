@@ -92,6 +92,9 @@
               "id": {
                 "env": "DATABRICKS_GENIE_SPACE_ID",
                 "description": "Default Genie Space ID"
+              },
+              "name": {
+                "description": "Genie Space display name"
               }
             }
           }
