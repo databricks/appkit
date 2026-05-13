@@ -19,6 +19,7 @@ export type { JobsConnectorConfig } from "./connectors/jobs";
 export type {
   DatabaseCredential,
   GenerateDatabaseCredentialRequest,
+  LakebasePool,
   LakebasePoolConfig,
   LakebasePoolManager,
   RequestedClaims,

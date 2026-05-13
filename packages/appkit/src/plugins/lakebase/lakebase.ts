@@ -7,6 +7,7 @@ import {
   getLakebaseOrmConfig,
   getLakebasePgConfig,
   getUsernameWithApiLookup,
+  type LakebasePool,
   type LakebasePoolManager,
   RoutingPool,
 } from "../../connectors/lakebase";
@@ -89,19 +90,18 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
     });
     logger.info("Lakebase OBO pool manager initialized");
 
+    const oboManager = this.oboPoolManager;
     this.pool = new RoutingPool(spPool, (ctx) => {
+      if (!oboManager) throw new Error("OBO pool manager not initialized");
       // Lakebase OAuth roles use email as the postgres role when available
       const userKey = ctx.userEmail ?? ctx.userId;
-      const isNew = !this.oboPoolManager!.hasPool(userKey);
-      const pool = this.oboPoolManager!.getPool(userKey, {
+      const isNew = !oboManager.hasPool(userKey);
+      const pool = oboManager.getPool(userKey, {
         workspaceClient: ctx.client,
         user: userKey,
       });
       if (isNew) {
-        logger.debug(
-          "Created OBO pool for user (total: %d)",
-          this.oboPoolManager!.size,
-        );
+        logger.debug("Created OBO pool for user (total: %d)", oboManager.size);
       }
       return pool;
     });
@@ -270,44 +270,37 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
   }
 
   /**
+   * Returns the pool config for the current execution context.
+   * Inside `asUser(req)`, returns user-scoped config; otherwise SP config.
+   */
+  private activePoolConfig() {
+    const ctx = getUserContext();
+    if (ctx) {
+      const user = ctx.userEmail ?? ctx.userId;
+      return { ...this.config.pool, workspaceClient: ctx.client, user };
+    }
+    return this.config.pool;
+  }
+
+  /**
    * Returns the plugin's public API, accessible via `AppKit.lakebase`.
    *
    * - `pool` — The connection pool (routes to per-user pool when inside `asUser(req)`)
    * - `query` — Convenience method for executing parameterized SQL queries
    * - `getOrmConfig()` — Returns a config object compatible with Drizzle, TypeORM, Sequelize, etc.
-   * - `getPgConfig()` — Returns a `pg.PoolConfig` object for manual pool construction
+   *   Inside `asUser(req)`, returns user-scoped config.
+   * - `getPgConfig()` — Returns a `pg.PoolConfig` object for manual pool construction.
+   *   Inside `asUser(req)`, returns user-scoped config.
    *
    * Use `AppKit.lakebase.asUser(req)` to get the same API backed by a per-user pool.
    */
   exports() {
     return {
       // biome-ignore lint/style/noNonNullAssertion: pool is guaranteed non-null after setup(), which AppKit always awaits before exposing the plugin API
-      pool: this.pool! as unknown as import("pg").Pool,
+      pool: this.pool! as LakebasePool,
       query: this.query.bind(this),
-      getOrmConfig: () => {
-        const ctx = getUserContext();
-        if (ctx) {
-          const user = ctx.userEmail ?? ctx.userId;
-          return getLakebaseOrmConfig({
-            ...this.config.pool,
-            workspaceClient: ctx.client,
-            user,
-          });
-        }
-        return getLakebaseOrmConfig(this.config.pool);
-      },
-      getPgConfig: () => {
-        const ctx = getUserContext();
-        if (ctx) {
-          const user = ctx.userEmail ?? ctx.userId;
-          return getLakebasePgConfig({
-            ...this.config.pool,
-            workspaceClient: ctx.client,
-            user,
-          });
-        }
-        return getLakebasePgConfig(this.config.pool);
-      },
+      getOrmConfig: () => getLakebaseOrmConfig(this.activePoolConfig()),
+      getPgConfig: () => getLakebasePgConfig(this.activePoolConfig()),
     };
   }
 }

@@ -91,6 +91,32 @@ describe("RoutingPool", () => {
     expect(client).toBeDefined();
   });
 
+  test("forwards query values to user pool inside runInUserContext", async () => {
+    const { runInUserContext } = await import(
+      "../../../context/execution-context"
+    );
+
+    const spPool = makeMockPool("sp");
+    const userPool = makeMockPool("user");
+    const pool = new RoutingPool(spPool, () => userPool);
+
+    const userCtx = {
+      client: {} as any,
+      userId: "user-1",
+      workspaceId: Promise.resolve("ws-1"),
+      isUserContext: true as const,
+    };
+    await runInUserContext(userCtx, () =>
+      pool.query("SELECT * FROM t WHERE id = $1", [42]),
+    );
+
+    expect(userPool.query).toHaveBeenCalledWith(
+      "SELECT * FROM t WHERE id = $1",
+      [42],
+    );
+    expect(spPool.query).not.toHaveBeenCalled();
+  });
+
   test("end() closes SP pool", async () => {
     const spPool = makeMockPool("sp");
     const pool = new RoutingPool(spPool, () => makeMockPool("user"));

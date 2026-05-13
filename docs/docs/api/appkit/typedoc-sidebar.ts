@@ -199,6 +199,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.LakebasePool",
+          label: "LakebasePool"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.LakebasePoolConfig",
           label: "LakebasePoolConfig"
         },

@@ -41,4 +41,4 @@ export {
   type LakebasePoolManager,
 } from "./pool-manager";
 
-export { RoutingPool } from "./routing-pool";
+export { type LakebasePool, RoutingPool } from "./routing-pool";

@@ -3,6 +3,25 @@ import { getUserContext } from "../../context/execution-context";
 import type { UserContext } from "../../context/user-context";
 
 /**
+ * Subset of `pg.Pool` exposed by the Lakebase plugin.
+ *
+ * RoutingPool does not extend EventEmitter — event listener methods
+ * like `on('error', ...)` are not available. Use `query()`, `connect()`,
+ * and `end()` for all pool operations.
+ */
+export interface LakebasePool {
+  query<T extends QueryResultRow = any>(
+    text: string,
+    values?: unknown[],
+  ): Promise<QueryResult<T>>;
+  connect(): Promise<PoolClient>;
+  end(): Promise<void>;
+  readonly totalCount: number;
+  readonly idleCount: number;
+  readonly waitingCount: number;
+}
+
+/**
  * A `pg.Pool`-like wrapper that routes queries to the appropriate pool
  * based on the current execution context.
  *
@@ -14,7 +33,7 @@ import type { UserContext } from "../../context/user-context";
  * the base class sets up AsyncLocalStorage context, and the RoutingPool
  * reads it transparently.
  */
-export class RoutingPool {
+export class RoutingPool implements LakebasePool {
   constructor(
     private spPool: Pool,
     private resolveUserPool: (ctx: UserContext) => Pool,
