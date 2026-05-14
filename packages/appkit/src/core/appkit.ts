@@ -10,14 +10,12 @@ import type {
 } from "shared";
 import { version as productVersion } from "../../package.json";
 import { CacheManager } from "../cache";
-import { runInUserContext, ServiceContext } from "../context";
-import type { UserContext } from "../context/user-context";
+import { ServiceContext } from "../context";
 import {
   isInternalTelemetryEnabled,
   TelemetryReporter,
 } from "../internal-telemetry";
 import { createLogger } from "../logging/logger";
-import { USER_CONTEXT_SYMBOL } from "../plugin/plugin";
 import { ResourceRegistry, ResourceType } from "../registry";
 import type { TelemetryConfig } from "../telemetry";
 import { TelemetryManager } from "../telemetry";
@@ -135,38 +133,17 @@ export class AppKit<TPlugins extends InputPluginMap> {
   }
 
   /**
-   * Wraps all function properties in an exports object so they run
-   * inside the given user context (via AsyncLocalStorage).
-   * This ensures RoutingPool and other context-aware code sees the
-   * user identity even though the function was obtained outside the proxy.
-   */
-  private wrapExportsInUserContext(
-    exports: Record<string, unknown>,
-    userContext: UserContext,
-  ) {
-    for (const key in exports) {
-      if (!Object.hasOwn(exports, key)) continue;
-      const val = exports[key];
-      if (typeof val === "function") {
-        const fn = val as (...args: unknown[]) => unknown;
-        exports[key] = (...args: unknown[]) =>
-          runInUserContext(userContext, () => fn(...args));
-      } else if (AppKit.isPlainObject(val)) {
-        this.wrapExportsInUserContext(
-          val as Record<string, unknown>,
-          userContext,
-        );
-      }
-    }
-  }
-
-  /**
    * Wraps a plugin's exports with an `asUser` method that returns
    * a user-scoped version of the exports.
    *
    * When `exports()` returns a callable (function), it is returned as-is
    * since the plugin manages its own `asUser` per-call (e.g. files plugin).
    * When it returns a plain object, the standard `asUser` wrapper is added.
+   *
+   * The OBO-side wrapping lives inside `Plugin.asUser` — calling
+   * `plugin.asUser(req).exports()` returns exports whose functions already
+   * run inside the user's AsyncLocalStorage scope. AppKit only adapts the
+   * shape; it does not own the user-context concept.
    */
   private wrapWithAsUser<T extends BasePlugin>(plugin: T) {
     // If plugin doesn't implement exports(), return empty object
@@ -192,26 +169,8 @@ export class AppKit<TPlugins extends InputPluginMap> {
        * Returns user-scoped exports where all methods execute with the
        * user's Databricks credentials instead of the service principal.
        */
-      asUser: (req: import("express").Request) => {
-        const userPlugin = (plugin as any).asUser(req);
-        const userContext = (userPlugin as any)[
-          USER_CONTEXT_SYMBOL
-        ] as UserContext;
-        const userExports = (plugin.exports?.() ?? {}) as Record<
-          string,
-          unknown
-        >;
-        // Wrap each export in runInUserContext instead of bind.
-        // bind() bypasses the Proxy get trap, so methods called via bind
-        // would not run inside the user's AsyncLocalStorage context.
-        if (userContext) {
-          this.wrapExportsInUserContext(userExports, userContext);
-        } else {
-          // Fallback for dev mode proxy (no userContext symbol)
-          this.bindExportMethods(userExports, userPlugin);
-        }
-        return userExports;
-      },
+      asUser: (req: import("express").Request) =>
+        (plugin as any).asUser(req).exports() as Record<string, unknown>,
     };
   }
 
