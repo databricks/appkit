@@ -300,9 +300,19 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
       // biome-ignore lint/style/noNonNullAssertion: pool is guaranteed non-null after setup(), which AppKit always awaits before exposing the plugin API
       pool: this.pool! as LakebasePool,
       query: this.query.bind(this),
-      getOrmConfig: () => getLakebaseOrmConfig(this.activePoolConfig()),
-      getPgConfig: () => getLakebasePgConfig(this.activePoolConfig()),
+      getOrmConfig: this.getOrmConfig.bind(this),
+      getPgConfig: this.getPgConfig.bind(this),
     };
+  }
+
+  /** Returns ORM-compatible config for the current execution context. */
+  getOrmConfig() {
+    return getLakebaseOrmConfig(this.activePoolConfig());
+  }
+
+  /** Returns pg.PoolConfig for the current execution context. */
+  getPgConfig() {
+    return getLakebasePgConfig(this.activePoolConfig());
   }
 }
 
