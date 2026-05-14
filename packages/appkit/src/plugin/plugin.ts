@@ -44,6 +44,14 @@ import type {
 const logger = createLogger("plugin");
 
 /**
+ * Symbol used to expose the UserContext from an asUser() proxy.
+ * Allows wrapWithAsUser in appkit.ts to retrieve the context and
+ * wrap export methods in runInUserContext().
+ */
+export const USER_CONTEXT_SYMBOL: unique symbol =
+  Symbol.for("appkit.userContext");
+
+/**
  * OTel context key for marking OBO dev mode fallback.
  * Set when asUser() is called in development mode without a user token.
  */
@@ -451,6 +459,9 @@ export abstract class Plugin<
   private _createUserContextProxy(userContext: UserContext): this {
     return new Proxy(this, {
       get: (target, prop, receiver) => {
+        // Expose userContext via symbol so wrapWithAsUser can wrap exports
+        if (prop === USER_CONTEXT_SYMBOL) return userContext;
+
         const value = Reflect.get(target, prop, receiver);
 
         if (typeof value !== "function") {
