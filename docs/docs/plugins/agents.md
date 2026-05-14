@@ -6,7 +6,7 @@ This plugin is currently **beta**. APIs may change between minor releases. Impor
 :::
 <!-- AUTO-GENERATED: stability-banner-end -->
 
-The `agents` plugin turns a Databricks AppKit app into an AI-agent host. It loads agent definitions from markdown on disk (one folder per agent: `config/agents/<id>/agent.md`), from TypeScript (`createAgent(def)`), or both, and exposes them at `POST /invocations` alongside routes for chat, thread management, and cancellation.
+The `agents` plugin turns a Databricks AppKit app into an AI-agent host. It loads agent definitions from markdown on disk (one folder per agent: `config/agents/<id>/agent.md`), from TypeScript (`createAgent(def)`), or both, and exposes them at `POST /invocations` and `POST /responses` (non-streaming, aliases) alongside `POST /chat` (streaming) and routes for thread management, cancellation, and HITL approval.
 
 This page covers the full lifecycle. For the hand-written primitives (`tool()`, `mcpServer()`), see [tools](./server.md).
 
@@ -31,7 +31,7 @@ await createApp({
 });
 ```
 
-That alone gives you a live HTTP server with `POST /invocations` wired to a markdown-driven agent.
+That alone gives you a live HTTP server with `POST /invocations` (and its alias `POST /responses`) wired to a markdown-driven agent. Use `POST /chat` instead when you want the streaming, HITL-capable surface.
 
 ## Level 1: drop a markdown agent package
 
@@ -65,7 +65,11 @@ On startup the plugin:
 
 The agent starts with **no tools**. Tools are opt-in — declare them in frontmatter (Level 2 below) or opt into auto-inherit explicitly with `agents({ autoInheritTools: { file: true } })`. See "Auto-inherit posture" further down for what that costs and why it's off by default.
 
-Requests land at `POST /invocations` with an OpenAI Responses-compatible body. Every tool call runs through `asUser(req)` so SQL executes as the requesting user, file access respects Unity Catalog ACLs, and telemetry spans are created automatically.
+Requests land at `POST /invocations` (or its alias `POST /responses`) with an OpenAI Responses-compatible body. These endpoints run the agent to completion and return a single JSON response — no SSE. Streaming clients should use `POST /chat`. Every tool call runs through `asUser(req)` so SQL executes as the requesting user, file access respects Unity Catalog ACLs, and telemetry spans are created automatically.
+
+:::warning No HITL on `/invocations` and `/responses`
+The non-streaming invoke surface has no way to surface a mid-call approval prompt back to the caller. When `approval.requireForDestructive` is enabled (default) and the resolved agent has any tool annotated with a mutating effect (`effect: "write" | "update" | "destructive"`, or the legacy `destructive: true`), `POST /invocations` and `POST /responses` reject the request with HTTP 400 before the adapter runs. Move HITL-capable agents to `POST /chat`, or disable approval via `agents({ approval: { requireForDestructive: false } })` for autonomous back-office agents.
+:::
 
 ## Level 2: scope tools in frontmatter
 
@@ -370,7 +374,7 @@ The route enforces that the decider is the stream owner: an approve from a diffe
 
 The plugin enforces a handful of caps to protect a single-instance deployment from runaway prompts, misbehaving clients, or prompt-injected delegation cycles. Some are static (enforced by the request schema) and some are configurable via `agents({ limits: { ... } })`.
 
-**Static caps** (applied at `POST /chat` and `POST /invocations` request parsing):
+**Static caps** (applied at `POST /chat`, `POST /invocations`, and `POST /responses` request parsing):
 
 | Field | Cap | Why |
 |---|---|---|

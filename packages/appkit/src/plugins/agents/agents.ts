@@ -10,6 +10,7 @@ import type {
   IAppRouter,
   Message,
   PluginPhase,
+  ResponseOutputMessage,
   ResponseStreamEvent,
   Thread,
   ToolAnnotations,
@@ -275,7 +276,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     const { agents, defaultAgentName } = await this.buildAgentRegistry();
     this.agents = agents;
     this.defaultAgentName = defaultAgentName;
-    this.mountInvocationsRoute();
+    this.mountInvokeRoutes();
     this.printRegistry();
   }
 
@@ -762,15 +763,19 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
   // ----------------- Route mounting and handlers ---------------------------
 
-  private mountInvocationsRoute() {
+  /**
+   * Mount the non-streaming invoke endpoints outside the `/api/<plugin>`
+   * namespace. `/invocations` and `/responses` are aliases — both run the
+   * default agent to completion and return a single JSON response. Streaming
+   * lives on `POST /chat` (mounted in `injectRoutes`).
+   */
+  private mountInvokeRoutes() {
     if (!this.context) return;
-    this.context.addRoute(
-      "post",
-      "/invocations",
-      (req: express.Request, res: express.Response) => {
-        this._handleInvocations(req, res);
-      },
-    );
+    const handler = (req: express.Request, res: express.Response) => {
+      this._handleInvoke(req, res);
+    };
+    this.context.addRoute("post", "/invocations", handler);
+    this.context.addRoute("post", "/responses", handler);
   }
 
   injectRoutes(router: IAppRouter) {
@@ -896,10 +901,41 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     return this._streamAgent(req, res, registered, thread, userId);
   }
 
-  private async _handleInvocations(
-    req: express.Request,
-    res: express.Response,
-  ) {
+  /**
+   * Returns the names of tools in `registered.toolIndex` whose annotations
+   * would trip the approval gate. Used by the non-streaming invoke path
+   * (`/invocations`, `/responses`) to fail-fast before the adapter runs:
+   * those endpoints have no channel back to the user mid-call, so an agent
+   * whose tool surface includes approval-gated tools cannot be served.
+   *
+   * Returns an empty list when the plugin is configured with
+   * `approval.requireForDestructive: false` — operators who explicitly
+   * disabled HITL keep the invoke surface unrestricted.
+   */
+  private collectApprovalRequiredToolNames(
+    registered: RegisteredAgent,
+  ): string[] {
+    if (!this.resolvedApprovalPolicy.requireForDestructive) return [];
+    const names: string[] = [];
+    for (const entry of registered.toolIndex.values()) {
+      if (requiresApproval(entry.def.annotations)) {
+        names.push(entry.def.name);
+      }
+    }
+    return names;
+  }
+
+  /**
+   * Shared handler for `POST /invocations` and `POST /responses`. Runs the
+   * default agent to completion and returns a single JSON response in the
+   * OpenAI Responses non-streaming shape. The two endpoints are aliases —
+   * streaming clients must use `POST /chat`.
+   *
+   * Rejects with HTTP 400 when the resolved agent has any approval-gated
+   * tool in scope: HITL requires a live SSE channel, which this surface
+   * does not provide. See {@link collectApprovalRequiredToolNames}.
+   */
+  private async _handleInvoke(req: express.Request, res: express.Response) {
     const parsed = invocationsRequestSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({
@@ -914,6 +950,24 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       res.status(400).json({ error: "No agent registered" });
       return;
     }
+
+    // Pre-flight HITL gate. The non-streaming invoke surface has no way to
+    // surface an approval prompt back to the caller and no way to receive
+    // a decision mid-run, so we reject up-front instead of having the
+    // approval gate auto-deny mid-stream (which would leave the caller
+    // with a confusing "denied by user" tool result in the final text).
+    const approvalGated = this.collectApprovalRequiredToolNames(registered);
+    if (approvalGated.length > 0) {
+      res.status(400).json({
+        error:
+          `Agent '${registered.name}' exposes ${approvalGated.length} approval-gated tool(s) ` +
+          `(${approvalGated.join(", ")}); /invocations and /responses are non-streaming and ` +
+          "cannot run HITL. Use POST /chat for HITL-capable agents, or disable approval via " +
+          "agents({ approval: { requireForDestructive: false } }).",
+      });
+      return;
+    }
+
     const userId = this.resolveUserId(req);
 
     // Match the rate-limit gate on /chat. Without this, a client can bypass
@@ -962,7 +1016,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
       return;
     }
 
-    return this._streamAgent(req, res, registered, thread, userId);
+    return this._runAgentNonStreaming(req, res, registered, thread, userId);
   }
 
   private async _streamAgent(
@@ -1121,6 +1175,159 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         stream: { ...agentStreamDefaults.stream, streamId: requestId },
       },
     );
+  }
+
+  /**
+   * Non-streaming counterpart to {@link _streamAgent} used by `/invocations`
+   * and `/responses`. Drives the adapter to completion, persists the
+   * assistant turn to the thread store, and returns a single JSON envelope
+   * shaped like the OpenAI Responses non-streaming API.
+   *
+   * No `EventChannel`, no `AgentEventTranslator`, no SSE — the caller is
+   * waiting on one HTTP response. The approval gate is force-disabled in
+   * the per-run state as defense-in-depth: `_handleInvoke` already rejects
+   * up-front if any tool in scope would require approval, but pinning
+   * `requireForDestructive: false` here means a tool that somehow slips
+   * past the precheck (e.g. annotations mutated at runtime) still won't
+   * stall the request waiting for an approval prompt that no one can
+   * answer.
+   *
+   * The `RunState` shape is otherwise unchanged so {@link dispatchToolCall}
+   * — including sub-agent recursion via {@link runSubAgent} — keeps the
+   * same tool-call budget, abort signal, and timeout enforcement as the
+   * streaming path. A still-typed translator is constructed but only
+   * consulted for `finalize()` so any in-flight `approval_pending` event
+   * synthesis (which would have been a coding bug given the precheck) is
+   * a dropped no-op instead of a runtime crash.
+   */
+  private async _runAgentNonStreaming(
+    req: express.Request,
+    res: express.Response,
+    registered: RegisteredAgent,
+    thread: Thread,
+    userId: string,
+  ): Promise<void> {
+    const abortController = new AbortController();
+    const signal = abortController.signal;
+    const requestId = randomUUID();
+    this.trackStream(requestId, userId, abortController);
+
+    const tools = Array.from(registered.toolIndex.values()).map((e) => e.def);
+    const limits = this.resolvedLimits;
+
+    const runState: RunState = {
+      req,
+      userId,
+      requestId,
+      abortController,
+      signal,
+      // Force approval off for the non-streaming invoke surface. The
+      // precheck in `_handleInvoke` already guarantees no approval-gated
+      // tool is reachable; this is belt-and-braces.
+      approvalPolicy: { requireForDestructive: false, timeoutMs: 0 },
+      limits,
+      translator: new AgentEventTranslator(),
+      outboundEvents: new EventChannel<ResponseStreamEvent>(),
+      toolCallsUsed: { count: 0 },
+    };
+
+    const executeTool = (name: string, args: unknown): Promise<unknown> =>
+      this.dispatchToolCall(runState, registered.toolIndex, name, args, 0);
+
+    let fullContent = "";
+    try {
+      const pluginNames = this.context
+        ? this.context
+            .getPluginNames()
+            .filter((n) => n !== this.name && n !== "server")
+        : [];
+      const fullPrompt = composePromptForAgent(
+        registered,
+        this.config.baseSystemPrompt,
+        {
+          agentName: registered.name,
+          pluginNames,
+          toolNames: tools.map((t) => t.name),
+        },
+      );
+
+      const messagesWithSystem: Message[] = [
+        {
+          id: "system",
+          role: "system",
+          content: fullPrompt,
+          createdAt: new Date(),
+        },
+        ...thread.messages,
+      ];
+
+      const stream = registered.adapter.run(
+        {
+          messages: messagesWithSystem,
+          tools,
+          threadId: thread.id,
+          signal,
+        },
+        { executeTool, signal },
+      );
+
+      fullContent = await consumeAdapterStream(stream, { signal });
+
+      if (fullContent) {
+        await this.threadStore.addMessage(thread.id, userId, {
+          id: randomUUID(),
+          role: "assistant",
+          content: fullContent,
+          createdAt: new Date(),
+        });
+      }
+    } catch (error) {
+      if (signal.aborted) {
+        res.status(499).json({ error: "Request aborted" });
+        return;
+      }
+      logger.error("Agent invoke error: %O", error);
+      const message =
+        process.env.NODE_ENV === "production"
+          ? "Internal server error"
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      res.status(500).json({ error: message });
+      return;
+    } finally {
+      this.approvalGate.abortStream(requestId);
+      this.untrackStream(requestId);
+      if (registered.ephemeral) {
+        try {
+          await this.threadStore.delete(thread.id, userId);
+        } catch (err) {
+          logger.warn(
+            "Failed to delete ephemeral thread %s: %O",
+            thread.id,
+            err,
+          );
+        }
+      }
+    }
+
+    const responseId = `resp_${randomUUID()}`;
+    const messageId = `msg_${randomUUID()}`;
+    const message: ResponseOutputMessage = {
+      type: "message",
+      id: messageId,
+      status: "completed",
+      role: "assistant",
+      content: [{ type: "output_text", text: fullContent }],
+    };
+    res.json({
+      id: responseId,
+      object: "response",
+      created_at: Math.floor(Date.now() / 1000),
+      status: "completed",
+      thread_id: thread.id,
+      output: [message],
+    });
   }
 
   /**
@@ -1528,7 +1735,8 @@ function composePromptForAgent(
 /**
  * Plugin factory for the agents plugin. Reads `config/agents/*.md` by default,
  * resolves toolkits/tools from registered plugins, exposes `appkit.agents.*`
- * runtime API and mounts `/invocations`.
+ * runtime API and mounts `POST /invocations` and `POST /responses` (aliased
+ * non-streaming invoke endpoints) plus `POST /chat` (streaming, HITL-capable).
  *
  * @example
  * ```ts
