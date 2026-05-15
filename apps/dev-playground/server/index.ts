@@ -11,12 +11,7 @@ import {
   serving,
   WRITE_ACTIONS,
 } from "@databricks/appkit";
-import {
-  agents,
-  createAgent,
-  database,
-  tool,
-} from "@databricks/appkit/beta";
+import { agents, createAgent, database, tool } from "@databricks/appkit/beta";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
 import { z } from "zod";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
