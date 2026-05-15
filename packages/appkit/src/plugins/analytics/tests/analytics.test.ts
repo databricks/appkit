@@ -1026,6 +1026,72 @@ describe("Analytics Plugin", () => {
       expect(Array.from(stashed)).toEqual(Array.from(arrowBytes));
     });
 
+    test("/query/:query_key falls back to EXTERNAL_LINKS when the inline stash is full", async () => {
+      // When the stash refuses a new entry (put returns null), the route
+      // must not strand the client with a useless inline- id. It retries
+      // the same statement with EXTERNAL_LINKS so the warehouse hands
+      // back a real, fetchable statement id and the client gets bytes.
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+
+      const fakeAttachment = Buffer.from(new Uint8Array([1, 2, 3])).toString(
+        "base64",
+      );
+      const executeMock = vi
+        .fn()
+        // First call: INLINE succeeds and produces an attachment.
+        .mockResolvedValueOnce({
+          result: { attachment: fakeAttachment, row_count: 1 },
+        })
+        // Second call: EXTERNAL_LINKS — returns a real warehouse id.
+        .mockResolvedValueOnce({
+          result: {
+            statement_id: "stmt-warehouse-real",
+            status: { state: "SUCCEEDED" },
+          },
+        });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      // Force the stash to reject the put — simulates capacity exhaustion.
+      vi.spyOn((plugin as any).inlineArrowStash, "put").mockReturnValue(null);
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {}, format: "ARROW_STREAM" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(executeMock).toHaveBeenCalledTimes(2);
+      expect(executeMock.mock.calls[0][1]).toMatchObject({
+        disposition: "INLINE",
+        format: "ARROW_STREAM",
+      });
+      expect(executeMock.mock.calls[1][1]).toMatchObject({
+        disposition: "EXTERNAL_LINKS",
+        format: "ARROW_STREAM",
+      });
+
+      // SSE payload carries the real warehouse statement id, not an inline- id.
+      const writeCalls = (mockRes.write as any).mock.calls.map(
+        (c: any[]) => c[0] as string,
+      );
+      const payload = writeCalls.find((s: string) => s.startsWith("data: "));
+      expect(payload).toBeDefined();
+      expect(payload).toContain('"type":"arrow"');
+      expect(payload).toContain('"statement_id":"stmt-warehouse-real"');
+      expect(payload).not.toMatch(/"statement_id":"inline-/);
+    });
+
     test("/query/:query_key rejects unknown format values with 400", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
