@@ -80,7 +80,7 @@ export function useDashboardData(filters: DashboardFilters) {
     data: kpisRaw,
     loading: kpisLoading,
     error: kpisError,
-  } = useAnalyticsQuery("dashboard_kpis", params) as {
+  } = useAnalyticsQuery("dashboard_kpis", params, { format: "JSON_ARRAY" }) as {
     data: KPIRawRow[] | null;
     loading: boolean;
     error: string | null;
@@ -90,7 +90,9 @@ export function useDashboardData(filters: DashboardFilters) {
     data: topZoneRaw,
     loading: topZoneLoading,
     error: topZoneError,
-  } = useAnalyticsQuery("dashboard_top_zone", params) as {
+  } = useAnalyticsQuery("dashboard_top_zone", params, {
+    format: "JSON_ARRAY",
+  }) as {
     data: TopZoneData[] | null;
     loading: boolean;
     error: string | null;
@@ -109,7 +111,9 @@ export function useDashboardData(filters: DashboardFilters) {
     data: tripsOverTime,
     loading: tripsLoading,
     error: tripsError,
-  } = useAnalyticsQuery("dashboard_trips_over_time", tripsParams) as {
+  } = useAnalyticsQuery("dashboard_trips_over_time", tripsParams, {
+    format: "JSON_ARRAY",
+  }) as {
     data: TripOverTime[] | null;
     loading: boolean;
     error: string | null;
@@ -119,7 +123,9 @@ export function useDashboardData(filters: DashboardFilters) {
     data: fareDistribution,
     loading: fareLoading,
     error: fareError,
-  } = useAnalyticsQuery("dashboard_fare_distribution", tripsParams) as {
+  } = useAnalyticsQuery("dashboard_fare_distribution", tripsParams, {
+    format: "JSON_ARRAY",
+  }) as {
     data: FareBucket[] | null;
     loading: boolean;
     error: string | null;
@@ -129,7 +135,9 @@ export function useDashboardData(filters: DashboardFilters) {
     data: heatmap,
     loading: heatmapLoading,
     error: heatmapError,
-  } = useAnalyticsQuery("dashboard_hourly_heatmap", params) as {
+  } = useAnalyticsQuery("dashboard_hourly_heatmap", params, {
+    format: "JSON_ARRAY",
+  }) as {
     data: HeatmapCell[] | null;
     loading: boolean;
     error: string | null;
@@ -139,7 +147,9 @@ export function useDashboardData(filters: DashboardFilters) {
     data: topZones,
     loading: topZonesLoading,
     error: topZonesError,
-  } = useAnalyticsQuery("dashboard_top_zones", params) as {
+  } = useAnalyticsQuery("dashboard_top_zones", params, {
+    format: "JSON_ARRAY",
+  }) as {
     data: TopZoneRow[] | null;
     loading: boolean;
     error: string | null;
@@ -149,7 +159,9 @@ export function useDashboardData(filters: DashboardFilters) {
     data: sparklines,
     loading: sparklinesLoading,
     error: sparklinesError,
-  } = useAnalyticsQuery("dashboard_kpi_sparklines", params) as {
+  } = useAnalyticsQuery("dashboard_kpi_sparklines", params, {
+    format: "JSON_ARRAY",
+  }) as {
     data: SparklineRow[] | null;
     loading: boolean;
     error: string | null;

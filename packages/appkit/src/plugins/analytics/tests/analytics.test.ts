@@ -699,7 +699,7 @@ describe("Analytics Plugin", () => {
       );
     });
 
-    test("/query/:query_key should use INLINE + JSON_ARRAY by default when no format specified", async () => {
+    test("/query/:query_key should use INLINE + ARROW_STREAM by default when no format specified", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -708,8 +708,11 @@ describe("Analytics Plugin", () => {
         isAsUser: false,
       });
 
+      // ARROW_STREAM + INLINE returns an attachment (one row's worth of
+      // Arrow IPC bytes is fine for shape-checking the request, the
+      // contents don't need to be decoded for this test).
       const executeMock = vi.fn().mockResolvedValue({
-        result: { data: [{ id: 1 }] },
+        result: { attachment: Buffer.from("AQID").toString("base64") },
       });
       (plugin as any).SQLClient.executeStatement = executeMock;
 
@@ -728,7 +731,7 @@ describe("Analytics Plugin", () => {
         expect.anything(),
         expect.objectContaining({
           disposition: "INLINE",
-          format: "JSON_ARRAY",
+          format: "ARROW_STREAM",
         }),
         expect.any(AbortSignal),
       );

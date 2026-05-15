@@ -73,10 +73,15 @@ export function TableWrapper<TRaw = any, TProcessed = any>(
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
 
-  const { data, loading, error } = useAnalyticsQuery<TRaw[]>(
-    queryKey,
-    parameters,
-  );
+  // Pinned to JSON_ARRAY: the table walks `data.length` / `data[i]` for
+  // tabular rendering. A migration to Arrow's columnar API is a separate
+  // optimization — keeping it on the JSON shape preserves behavior across
+  // the default-switch to ARROW_STREAM.
+  const { data, loading, error } = useAnalyticsQuery<
+    TRaw[],
+    typeof queryKey,
+    "JSON_ARRAY"
+  >(queryKey, parameters, { format: "JSON_ARRAY" });
 
   useEffect(() => {
     if (onRowSelectionChange && enableRowSelection) {

@@ -53,9 +53,15 @@ function AnalyticsRoute() {
     data: summaryDataRaw,
     loading: summaryLoading,
     error: summaryError,
-  } = useAnalyticsQuery("spend_summary", summaryParams);
+  } = useAnalyticsQuery("spend_summary", summaryParams, {
+    format: "JSON_ARRAY",
+  });
 
-  const { data: appsListData } = useAnalyticsQuery("apps_list", {});
+  const { data: appsListData } = useAnalyticsQuery(
+    "apps_list",
+    {},
+    { format: "JSON_ARRAY" },
+  );
 
   const untaggedAppsParams = useMemo(() => {
     return {
@@ -69,7 +75,9 @@ function AnalyticsRoute() {
     data: untaggedAppsData,
     loading: untaggedAppsLoading,
     error: untaggedAppsError,
-  } = useAnalyticsQuery("untagged_apps", untaggedAppsParams);
+  } = useAnalyticsQuery("untagged_apps", untaggedAppsParams, {
+    format: "JSON_ARRAY",
+  });
 
   const metrics = useMemo(() => {
     if (!summaryDataRaw || summaryDataRaw.length === 0) {

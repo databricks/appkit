@@ -205,7 +205,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     res: express.Response,
   ): Promise<void> {
     const { query_key } = req.params;
-    const { parameters, format: rawFormat = "JSON_ARRAY" } =
+    const { parameters, format: rawFormat = "ARROW_STREAM" } =
       req.body as IAnalyticsQueryRequest;
 
     if (

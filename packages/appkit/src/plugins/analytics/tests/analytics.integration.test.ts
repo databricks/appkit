@@ -244,12 +244,20 @@ describe("Analytics Plugin Integration", () => {
         createSuccessfulSQLResponse([["cached_value"]], [{ name: "value" }]),
       );
 
+      // Caching is JSON_ARRAY-only — the ARROW_STREAM default bypasses
+      // cache because inline-stash ids drain on first /arrow-result fetch,
+      // so a cache hit would replay a dead id. Explicitly request the
+      // cacheable shape.
+      const cacheableBody = JSON.stringify({
+        parameters: {},
+        format: "JSON_ARRAY",
+      });
       const response1 = await fetch(
         `${baseUrl}/api/analytics/query/cache_test`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ parameters: {} }),
+          body: cacheableBody,
         },
       );
       const data1 = await parseSSEResponse(response1);
@@ -259,7 +267,7 @@ describe("Analytics Plugin Integration", () => {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ parameters: {} }),
+          body: cacheableBody,
         },
       );
       const data2 = await parseSSEResponse(response2);

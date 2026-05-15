@@ -45,9 +45,9 @@ export interface TypedArrowTable<
 
 /** Options for configuring an analytics SSE query */
 export interface UseAnalyticsQueryOptions<
-  F extends AnalyticsFormat = "JSON_ARRAY",
+  F extends AnalyticsFormat = "ARROW_STREAM",
 > {
-  /** Response format - "JSON_ARRAY" (default) returns typed arrays, "ARROW_STREAM" uses Arrow (inline or external links) */
+  /** Response format - "ARROW_STREAM" (default) returns a TypedArrowTable (compact binary wire, type-preserving). "JSON_ARRAY" returns typed row arrays. */
   format?: F;
 
   /** Maximum size of serialized parameters in bytes */

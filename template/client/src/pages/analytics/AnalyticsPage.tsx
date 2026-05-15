@@ -42,13 +42,13 @@ export function AnalyticsPage() {
               </div>
             )}
             {error && <div className="text-destructive bg-destructive/10 p-3 rounded-md">Error: {error}</div>}
-            {data && data.length > 0 && (
+            {data && data.numRows > 0 && (
               <div className="space-y-2">
                 <div className="text-sm text-muted-foreground">Query: SELECT :message AS value</div>
-                <div className="text-2xl font-bold text-primary">{data[0].value}</div>
+                <div className="text-2xl font-bold text-primary">{data.getChild('value')?.get(0)}</div>
               </div>
             )}
-            {data && data.length === 0 && <div className="text-muted-foreground">No results</div>}
+            {data && data.numRows === 0 && <div className="text-muted-foreground">No results</div>}
           </CardContent>
         </Card>
 

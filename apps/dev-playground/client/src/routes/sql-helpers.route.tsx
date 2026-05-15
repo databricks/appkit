@@ -230,6 +230,7 @@ function SqlHelpersRoute() {
   const { data, loading, error } = useAnalyticsQuery(
     "sql_helpers_test",
     queryParams ?? {},
+    { format: "JSON_ARRAY" },
   );
 
   // Helper to show the marker result

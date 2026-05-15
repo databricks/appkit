@@ -77,8 +77,8 @@ function getArrowStreamUrl(id: string) {
  * Integration hook between client and analytics plugin.
  *
  * The return type is automatically inferred based on the format:
- * - `format: "JSON_ARRAY"` (default): Returns typed array from QueryRegistry
- * - `format: "ARROW_STREAM"`: Returns TypedArrowTable with row type preserved
+ * - `format: "ARROW_STREAM"` (default): Returns TypedArrowTable with row type preserved — works across all warehouse variants and avoids JSON serialization cost
+ * - `format: "JSON_ARRAY"`: Returns typed array from QueryRegistry
  *
  * Note: User context execution is determined by query file naming:
  * - `queryKey.obo.sql`: Executes as user (OBO = on-behalf-of / user delegation)
@@ -89,28 +89,28 @@ function getArrowStreamUrl(id: string) {
  * @param options - Analytics query settings including format
  * @returns Query result state with format-appropriate data type
  *
- * @example JSON_ARRAY format (default)
+ * @example ARROW_STREAM format (default)
  * ```typescript
  * const { data } = useAnalyticsQuery("spend_data", params);
- * // data: Array<{ group_key: string; cost_usd: number; ... }> | null
+ * // data: TypedArrowTable<{ group_key: string; cost_usd: number; ... }> | null
  * ```
  *
- * @example ARROW_STREAM format
+ * @example JSON_ARRAY format
  * ```typescript
- * const { data } = useAnalyticsQuery("spend_data", params, { format: "ARROW_STREAM" });
- * // data: TypedArrowTable<{ group_key: string; cost_usd: number; ... }> | null
+ * const { data } = useAnalyticsQuery("spend_data", params, { format: "JSON_ARRAY" });
+ * // data: Array<{ group_key: string; cost_usd: number; ... }> | null
  * ```
  */
 export function useAnalyticsQuery<
   T = unknown,
   K extends QueryKey = QueryKey,
-  F extends AnalyticsFormat = "JSON_ARRAY",
+  F extends AnalyticsFormat = "ARROW_STREAM",
 >(
   queryKey: K,
   parameters?: InferParams<K> | null,
   options: UseAnalyticsQueryOptions<F> = {} as UseAnalyticsQueryOptions<F>,
 ): UseAnalyticsQueryResult<InferResultByFormat<T, K, F>> {
-  const format = options?.format ?? "JSON_ARRAY";
+  const format = options?.format ?? "ARROW_STREAM";
   const maxParametersSize = options?.maxParametersSize ?? 100 * 1024;
   const autoStart = options?.autoStart ?? true;
 
