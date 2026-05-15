@@ -20,11 +20,22 @@ export interface ToolEntry<S extends z.ZodType = z.ZodType> {
    * consider it safe enough to appear in every agent's tool record without an
    * explicit `tools:` declaration. Destructive or privilege-sensitive tools
    * should leave this unset so that they only reach agents that wire them
-   * explicitly (via `tools:` object/function form, markdown `toolkits:`, or
+   * explicitly (via `tools:` object/function form, markdown `plugin:NAME`
+   * entries in the unified `tools:` list, or
    * `plugins.<name>.toolkit({ only: [...] })`).
    */
   autoInheritable?: boolean;
-  handler: (
+  /**
+   * Callback the agents plugin invokes after Zod validation succeeds.
+   *
+   * Named `execute` to match the public `tool({ execute })` form — both the
+   * agent-author surface and the plugin-author surface now spell their
+   * callback the same way. `args` is the inferred Zod output (so `T extends
+   * z.ZodType` flows through and `args` is fully typed). `signal` is the
+   * per-run AbortSignal: forward it to any awaited I/O so cancellation
+   * actually unwinds the call (analytics and lakebase both do this).
+   */
+  execute: (
     args: z.infer<S>,
     signal?: AbortSignal,
   ) => unknown | Promise<unknown>;
@@ -65,7 +76,7 @@ export async function executeFromRegistry(
   if (!parsed.success) {
     return formatZodError(parsed.error, name);
   }
-  return entry.handler(parsed.data, signal);
+  return entry.execute(parsed.data, signal);
 }
 
 /**

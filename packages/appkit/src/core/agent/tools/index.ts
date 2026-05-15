@@ -1,4 +1,7 @@
-export { AppKitMcpClient } from "../../../connectors/mcp/client";
+export {
+  AppKitMcpClient,
+  type McpConnectAllResult,
+} from "../../../connectors/mcp/client";
 export {
   defineTool,
   executeFromRegistry,

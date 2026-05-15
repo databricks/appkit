@@ -1,4 +1,4 @@
-export { AppKitMcpClient } from "./client";
+export { AppKitMcpClient, type McpConnectAllResult } from "./client";
 export {
   buildMcpHostPolicy,
   type McpHostPolicyConfig,

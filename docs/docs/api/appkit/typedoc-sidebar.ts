@@ -28,6 +28,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Class.AppKitMcpClient",
+          label: "AppKitMcpClient"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Class.AuthenticationError",
           label: "AuthenticationError"
         },
@@ -40,6 +45,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Class.ConnectionError",
           label: "ConnectionError"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Class.DatabricksAdapter",
+          label: "DatabricksAdapter"
         },
         {
           type: "doc",
@@ -89,6 +99,41 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
+          id: "api/appkit/Interface.AgentAdapter",
+          label: "AgentAdapter"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.AgentDefinition",
+          label: "AgentDefinition"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.AgentInput",
+          label: "AgentInput"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.AgentRunContext",
+          label: "AgentRunContext"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.AgentsPluginConfig",
+          label: "AgentsPluginConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.AgentToolDefinition",
+          label: "AgentToolDefinition"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.AutoInheritToolsConfig",
+          label: "AutoInheritToolsConfig"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.BasePluginConfig",
           label: "BasePluginConfig"
         },
@@ -116,6 +161,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.FileResource",
           label: "FileResource"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.FunctionTool",
+          label: "FunctionTool"
         },
         {
           type: "doc",
@@ -149,13 +199,48 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.LakebasePool",
+          label: "LakebasePool"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.LakebasePoolConfig",
           label: "LakebasePoolConfig"
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.LakebasePoolManager",
+          label: "LakebasePoolManager"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.McpConnectAllResult",
+          label: "McpConnectAllResult"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.Message",
+          label: "Message"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.PluginManifest",
           label: "PluginManifest"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.PluginToolkitProvider",
+          label: "PluginToolkitProvider"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.PromptContext",
+          label: "PromptContext"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.RegisteredAgent",
+          label: "RegisteredAgent"
         },
         {
           type: "doc",
@@ -184,6 +269,16 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.RunAgentInput",
+          label: "RunAgentInput"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.RunAgentResult",
+          label: "RunAgentResult"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.ServingEndpointEntry",
           label: "ServingEndpointEntry"
         },
@@ -204,6 +299,46 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.Thread",
+          label: "Thread"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ThreadStore",
+          label: "ThreadStore"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ToolAnnotations",
+          label: "ToolAnnotations"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ToolConfig",
+          label: "ToolConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ToolEntry",
+          label: "ToolEntry"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ToolkitEntry",
+          label: "ToolkitEntry"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ToolkitOptions",
+          label: "ToolkitOptions"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.ToolProvider",
+          label: "ToolProvider"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.ValidationResult",
           label: "ValidationResult"
         }
@@ -213,6 +348,31 @@ const typedocSidebar: SidebarsConfig = {
       type: "category",
       label: "Type Aliases",
       items: [
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.AgentEvent",
+          label: "AgentEvent"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.AgentTool",
+          label: "AgentTool"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.AgentTools",
+          label: "AgentTools"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.AgentToolsFn",
+          label: "AgentToolsFn"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.BaseSystemPromptOption",
+          label: "BaseSystemPromptOption"
+        },
         {
           type: "doc",
           id: "api/appkit/TypeAlias.ConfigSchema",
@@ -232,6 +392,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.FilePolicy",
           label: "FilePolicy"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.HostedTool",
+          label: "HostedTool"
         },
         {
           type: "doc",
@@ -255,6 +420,16 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.Plugins",
+          label: "Plugins"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.ResolvedToolEntry",
+          label: "ResolvedToolEntry"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.ResourcePermission",
           label: "ResourcePermission"
         },
@@ -262,6 +437,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.ServingFactory",
           label: "ServingFactory"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.ToolRegistry",
+          label: "ToolRegistry"
         },
         {
           type: "doc",
@@ -274,6 +454,11 @@ const typedocSidebar: SidebarsConfig = {
       type: "category",
       label: "Variables",
       items: [
+        {
+          type: "doc",
+          id: "api/appkit/Variable.agents",
+          label: "agents"
+        },
         {
           type: "doc",
           id: "api/appkit/Variable.READ_ACTIONS",
@@ -297,6 +482,11 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
+          id: "api/appkit/Function.agentIdFromMarkdownPath",
+          label: "agentIdFromMarkdownPath"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.appKitServingTypesPlugin",
           label: "appKitServingTypesPlugin"
         },
@@ -304,6 +494,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.appKitTypesPlugin",
           label: "appKitTypesPlugin"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.createAgent",
+          label: "createAgent"
         },
         {
           type: "doc",
@@ -317,6 +512,21 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.createLakebasePoolManager",
+          label: "createLakebasePoolManager"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.defineTool",
+          label: "defineTool"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.executeFromRegistry",
+          label: "executeFromRegistry"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.extractServingEndpoints",
           label: "extractServingEndpoints"
         },
@@ -324,6 +534,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.findServerFile",
           label: "findServerFile"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.functionToolToDefinition",
+          label: "functionToolToDefinition"
         },
         {
           type: "doc",
@@ -367,8 +582,63 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.isFunctionTool",
+          label: "isFunctionTool"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.isHostedTool",
+          label: "isHostedTool"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.isSQLTypeMarker",
           label: "isSQLTypeMarker"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.isToolkitEntry",
+          label: "isToolkitEntry"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.loadAgentFromFile",
+          label: "loadAgentFromFile"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.loadAgentsFromDir",
+          label: "loadAgentsFromDir"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.mcpServer",
+          label: "mcpServer"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.parseTextToolCalls",
+          label: "parseTextToolCalls"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.resolveHostedTools",
+          label: "resolveHostedTools"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.runAgent",
+          label: "runAgent"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.tool",
+          label: "tool"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.toolsFromRegistry",
+          label: "toolsFromRegistry"
         }
       ]
     }

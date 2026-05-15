@@ -176,13 +176,39 @@ describe("AgentsPlugin", () => {
     expect(api.get("support")?.instructions).toBe("From code");
   });
 
+  test("reload() does not close the existing mcpClient (in-flight streams keep working)", async () => {
+    // Regression: prior `reload()` called `await this.mcpClient.close()`
+    // and dropped the reference. Tool dispatch reads `this.mcpClient`
+    // at call time (agents.ts dispatchToolCall path), so a stream that
+    // started before reload and continues afterwards would hit "MCP
+    // client is closed" mid-conversation. The fix removes the
+    // synchronous close — the existing client survives reload and
+    // dispatches keep working.
+    const plugin = instantiate({ dir: false });
+    const closeSpy = vi.fn(async () => {});
+    const fakeClient = {
+      close: closeSpy,
+      callTool: vi.fn(),
+      connectAll: vi.fn(async () => ({ connected: [], failed: [] })),
+      getAllToolDefinitions: () => [],
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: seeding private mcpClient
+    (plugin as any).mcpClient = fakeClient;
+    await plugin.setup();
+    await plugin.reload();
+
+    expect(closeSpy).not.toHaveBeenCalled();
+    // biome-ignore lint/suspicious/noExplicitAny: read private mcpClient
+    expect((plugin as any).mcpClient).toBe(fakeClient);
+  });
+
   test("auto-inherit default is safe (both file and code get nothing without an explicit opt-in)", async () => {
     const registry: ToolRegistry = {
       query: defineTool({
         description: "q",
         schema: z.object({ sql: z.string() }),
         autoInheritable: true, // even with autoInheritable, no spread without opt-in
-        handler: () => "ok",
+        execute: () => "ok",
       }),
     };
     const provider = makeToolProvider("analytics", registry);
@@ -221,13 +247,13 @@ describe("AgentsPlugin", () => {
         description: "read-only query",
         schema: z.object({ sql: z.string() }),
         autoInheritable: true,
-        handler: () => "ok",
+        execute: () => "ok",
       }),
       destructive: defineTool({
         description: "mutation",
         schema: z.object({}),
         // autoInheritable left unset → skipped even when opted in
-        handler: () => "ok",
+        execute: () => "ok",
       }),
     };
     const provider = makeToolProvider("analytics", registry);
@@ -259,12 +285,12 @@ describe("AgentsPlugin", () => {
         description: "safe",
         schema: z.object({}),
         autoInheritable: true,
-        handler: () => "ok",
+        execute: () => "ok",
       }),
       unsafe: defineTool({
         description: "unsafe",
         schema: z.object({}),
-        handler: () => "ok",
+        execute: () => "ok",
       }),
     };
     const provider = makeToolProvider("p", registry);
@@ -299,14 +325,14 @@ describe("AgentsPlugin", () => {
       query: defineTool({
         description: "q",
         schema: z.object({ sql: z.string() }),
-        handler: () => "ok",
+        execute: () => "ok",
       }),
     };
     const registry2: ToolRegistry = {
       list: defineTool({
         description: "l",
         schema: z.object({}),
-        handler: () => [],
+        execute: () => [],
       }),
     };
     const ctx = fakeContext([
@@ -317,7 +343,7 @@ describe("AgentsPlugin", () => {
     writeMarkdownAgent(
       tmpDir,
       "analyst",
-      "---\ntoolkits: [analytics]\n---\nAnalyst.",
+      "---\ntools:\n  - plugin:analytics\n---\nAnalyst.",
     );
 
     const plugin = instantiate(
@@ -378,7 +404,7 @@ describe("AgentsPlugin", () => {
         query: defineTool({
           description: "q",
           schema: z.object({ sql: z.string() }),
-          handler: () => "ok",
+          execute: () => "ok",
         }),
       };
       const ctx = fakeContext([
@@ -417,7 +443,7 @@ describe("AgentsPlugin", () => {
         query: defineTool({
           description: "q",
           schema: z.object({ sql: z.string() }),
-          handler: () => "ok",
+          execute: () => "ok",
         }),
       };
       const ctx = fakeContext([
@@ -489,7 +515,7 @@ describe("AgentsPlugin", () => {
         query: defineTool({
           description: "q",
           schema: z.object({ sql: z.string() }),
-          handler: () => "ok",
+          execute: () => "ok",
         }),
       };
       const filesReg: ToolRegistry = {
@@ -497,7 +523,7 @@ describe("AgentsPlugin", () => {
           description: "l",
           schema: z.object({}),
           autoInheritable: true,
-          handler: () => [],
+          execute: () => [],
         }),
       };
       const ctx = fakeContext([
@@ -545,7 +571,7 @@ describe("AgentsPlugin", () => {
           description: "l",
           schema: z.object({}),
           autoInheritable: true,
-          handler: () => [],
+          execute: () => [],
         }),
       };
       const ctx = fakeContext([

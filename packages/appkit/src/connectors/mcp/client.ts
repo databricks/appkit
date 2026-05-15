@@ -34,6 +34,90 @@ import type { McpEndpointConfig } from "./types";
 
 const logger = createLogger("connector:mcp");
 
+/**
+ * Hard cap on the size of a single MCP response body, including SSE
+ * frames bundled into one HTTP response. MCP `initialize` / `tools/list`
+ * / `tools/call` responses are JSON-RPC payloads — single-digit kilobytes
+ * in normal use. A response anywhere near this size signals either a
+ * misbehaving server or an attempt to exhaust client memory; we'd rather
+ * fail loudly than allocate unbounded buffers from a remote.
+ */
+const MCP_RESPONSE_BODY_LIMIT_BYTES = 1024 * 1024;
+
+/**
+ * Read a fetch Response body into a string with a hard size cap. Aborts
+ * and throws if the cumulative bytes read cross {@link
+ * MCP_RESPONSE_BODY_LIMIT_BYTES}, so a remote server cannot keep
+ * streaming data past the limit. Returns the empty string when the
+ * response has no readable body.
+ */
+/**
+ * Empty-object fallback used when an MCP server ships a missing or
+ * malformed `inputSchema`. Matches the shape downstream adapters expect
+ * for a function tool that takes no arguments.
+ */
+const EMPTY_TOOL_PARAMETERS: AgentToolDefinition["parameters"] = {
+  type: "object",
+  properties: {},
+};
+
+/**
+ * Coerce a remote MCP server's reported `inputSchema` into the
+ * JSONSchema7 shape AppKit's adapters expect for a function tool's
+ * `parameters`. The MCP wire type is `Record<string, unknown>`, so a
+ * misbehaving (or malicious) server could ship arbitrary JSON. We accept
+ * only the standard `{ type: "object", properties: {...} }` shape and
+ * fall back to an empty-parameters schema otherwise — the tool still
+ * registers, it just can't accept arguments.
+ */
+function coerceToolParameters(
+  inputSchema: Record<string, unknown> | undefined,
+): AgentToolDefinition["parameters"] {
+  if (!inputSchema || typeof inputSchema !== "object") {
+    return EMPTY_TOOL_PARAMETERS;
+  }
+  const { type, properties } = inputSchema;
+  if (type !== "object") return EMPTY_TOOL_PARAMETERS;
+  if (
+    properties !== undefined &&
+    (typeof properties !== "object" ||
+      properties === null ||
+      Array.isArray(properties))
+  ) {
+    return EMPTY_TOOL_PARAMETERS;
+  }
+  return inputSchema as AgentToolDefinition["parameters"];
+}
+
+async function readResponseTextCapped(
+  response: Response,
+  maxBytes: number,
+  contextLabel: string,
+): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let total = 0;
+  let out = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        throw new Error(
+          `MCP ${contextLabel}: response body exceeded ${maxBytes} bytes — refusing to allocate unbounded buffer from a remote server.`,
+        );
+      }
+      out += decoder.decode(value, { stream: true });
+    }
+    out += decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+  return out;
+}
+
 interface JsonRpcRequest {
   jsonrpc: "2.0";
   id: number;
@@ -57,6 +141,16 @@ interface McpToolSchema {
 interface McpToolCallResult {
   content: Array<{ type: string; text?: string }>;
   isError?: boolean;
+}
+
+/**
+ * Per-endpoint outcome of {@link AppKitMcpClient.connectAll}. Callers (the
+ * agents plugin in particular) use the split to warn at startup when some
+ * MCP servers are unreachable without aborting boot for the rest.
+ */
+export interface McpConnectAllResult {
+  connected: string[];
+  failed: Array<{ name: string; error: Error }>;
 }
 
 interface McpServerConnection {
@@ -100,19 +194,39 @@ export class AppKitMcpClient {
     private options: { dnsLookup?: DnsLookup; fetchImpl?: typeof fetch } = {},
   ) {}
 
-  async connectAll(endpoints: McpEndpointConfig[]): Promise<void> {
+  /**
+   * Connects every endpoint in parallel and returns a structured summary so
+   * callers can distinguish "all connected" from "some failed".
+   *
+   * Returning the result instead of throwing is deliberate: one
+   * misconfigured MCP server should not take down the entire agents plugin
+   * at boot, and the agents plugin uses the summary to warn at startup with
+   * the failed-endpoint names. Errors are also logged here so a caller
+   * that ignores the return still gets per-endpoint diagnostics.
+   *
+   * @returns `connected` lists the endpoint names that initialised
+   *   successfully; `failed` carries `{ name, error }` for the rest.
+   */
+  async connectAll(
+    endpoints: McpEndpointConfig[],
+  ): Promise<McpConnectAllResult> {
     const results = await Promise.allSettled(
       endpoints.map((ep) => this.connect(ep)),
     );
+    const out: McpConnectAllResult = { connected: [], failed: [] };
     for (let i = 0; i < results.length; i++) {
-      if (results[i].status === "rejected") {
-        logger.error(
-          "Failed to connect MCP server %s: %O",
-          endpoints[i].name,
-          (results[i] as PromiseRejectedResult).reason,
-        );
+      const r = results[i];
+      const name = endpoints[i].name;
+      if (r.status === "fulfilled") {
+        out.connected.push(name);
+      } else {
+        const error =
+          r.reason instanceof Error ? r.reason : new Error(String(r.reason));
+        logger.error("Failed to connect MCP server %s: %O", name, error);
+        out.failed.push({ name, error });
       }
     }
+    return out;
   }
 
   private resolveUrl(endpoint: McpEndpointConfig): string {
@@ -201,11 +315,7 @@ export class AppKitMcpClient {
         defs.push({
           name: `mcp.${serverName}.${toolName}`,
           description: schema.description ?? toolName,
-          parameters:
-            (schema.inputSchema as AgentToolDefinition["parameters"]) ?? {
-              type: "object",
-              properties: {},
-            },
+          parameters: coerceToolParameters(schema.inputSchema),
         });
       }
     }
@@ -261,18 +371,22 @@ export class AppKitMcpClient {
     );
     const result = rpcResult.result as McpToolCallResult;
 
+    // `text` is optional on `McpToolCallResult.content[]` per the MCP
+    // spec; filtering only on `type === "text"` lets `c.text` be
+    // `undefined`, which `Array.join` would render as the literal
+    // string `"undefined"` and ship to the agent. Narrow on both
+    // fields so the joined string only contains real text.
+    const textContent = (result.content ?? []).filter(
+      (c): c is { type: "text"; text: string } =>
+        c.type === "text" && typeof c.text === "string",
+    );
+
     if (result.isError) {
-      const errText = (result.content ?? [])
-        .filter((c) => c.type === "text")
-        .map((c) => c.text)
-        .join("\n");
+      const errText = textContent.map((c) => c.text).join("\n");
       throw new Error(errText || "MCP tool call failed");
     }
 
-    return (result.content ?? [])
-      .filter((c) => c.type === "text")
-      .map((c) => c.text)
-      .join("\n");
+    return textContent.map((c) => c.text).join("\n");
   }
 
   async close(): Promise<void> {
@@ -334,11 +448,20 @@ export class AppKitMcpClient {
     }
 
     const contentType = response.headers.get("content-type") ?? "";
+    // Always read the body via the capped helper so a misconfigured or
+    // malicious server can't exhaust client memory by streaming an
+    // unbounded payload. Applies to both SSE (`response.text()` would
+    // have buffered the whole stream) and plain JSON (`response.json()`
+    // does the same internally).
+    const bodyText = await readResponseTextCapped(
+      response,
+      MCP_RESPONSE_BODY_LIMIT_BYTES,
+      method,
+    );
     let json: JsonRpcResponse;
 
     if (contentType.includes("text/event-stream")) {
-      const text = await response.text();
-      const lastData = text
+      const lastData = bodyText
         .split("\n")
         .filter((line) => line.startsWith("data: "))
         .map((line) => line.slice(6))
@@ -348,7 +471,10 @@ export class AppKitMcpClient {
       }
       json = JSON.parse(lastData) as JsonRpcResponse;
     } else {
-      json = (await response.json()) as JsonRpcResponse;
+      if (bodyText.length === 0) {
+        throw new Error(`MCP response for ${method} had an empty body`);
+      }
+      json = JSON.parse(bodyText) as JsonRpcResponse;
     }
 
     if (json.error) {
@@ -380,12 +506,36 @@ export class AppKitMcpClient {
     }
 
     const fetchImpl = this.options.fetchImpl ?? fetch;
-    await fetchImpl(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ jsonrpc: "2.0", method }),
-      signal: AbortSignal.timeout(30_000),
-    });
+    // MCP notifications are fire-and-forget per spec — we don't throw on
+    // failure. But silently swallowing 4xx/5xx hides server-side
+    // rejections that would otherwise look like a successful connect()
+    // followed by mysterious tool-call failures. Surface the bad status
+    // via the logger so the dev sees it without breaking the protocol
+    // contract.
+    try {
+      const response = await fetchImpl(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ jsonrpc: "2.0", method }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!response.ok) {
+        logger.warn(
+          "MCP notification %s to %s returned %d %s — the server may have rejected the request, but per MCP spec notifications are fire-and-forget and the connection is considered established.",
+          method,
+          url,
+          response.status,
+          response.statusText,
+        );
+      }
+    } catch (err) {
+      logger.warn(
+        "MCP notification %s to %s failed before a response was received: %O",
+        method,
+        url,
+        err,
+      );
+    }
   }
 
   /**

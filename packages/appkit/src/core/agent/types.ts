@@ -117,7 +117,24 @@ export type AgentTools = Record<string, AgentTool>;
 export type AgentToolsFn = (plugins: Plugins) => AgentTools;
 
 export interface AgentDefinition {
-  /** Filled in from the enclosing key when used in `agents: { foo: def }`. */
+  /**
+   * Stable identifier for the agent. **Optional and informational** —
+   * when the definition is registered via `agents: { foo: def }` (code) or
+   * lives at `config/agents/<id>/agent.md` (markdown), the **registry key
+   * always wins** and `name` is ignored. The agent will be reachable as
+   * `foo` (or `<id>`) regardless of what this field contains.
+   *
+   * Set `name` when:
+   *   - Running standalone via `runAgent({ agent: def })`, where there is
+   *     no enclosing key. The runtime uses it for the agent's slot in
+   *     error messages and OTel spans.
+   *   - Building a definition that may be passed to either form and you
+   *     want a consistent fallback label.
+   *
+   * Setting `name` to a value that differs from the registry key is
+   * harmless but confusing — prefer keeping them aligned or omitting `name`
+   * entirely.
+   */
   name?: string;
   /** System prompt body. For markdown-loaded agents this is the file body. */
   instructions: string;
@@ -161,8 +178,8 @@ export interface AgentDefinition {
  * with no explicit `tools:` declaration receive every registered ToolProvider
  * plugin tool whose author marked `autoInheritable: true`. Tools without that
  * flag — destructive, state-mutating, or privilege-sensitive — never spread
- * automatically and must be wired via `tools:` (object or function form) or
- * markdown `toolkits:`.
+ * automatically and must be wired via `tools:` (object or function form in
+ * code, `plugin:NAME` entries in markdown frontmatter).
  *
  * Defaults are `false` for both origins (safe-by-default): developers must
  * consciously opt an origin in to any auto-inherit behaviour.
@@ -199,14 +216,20 @@ export interface AgentsPluginConfig extends BasePluginConfig {
    */
   mcp?: McpHostPolicyConfig;
   /**
-   * Human-in-the-loop approval gate for destructive tool calls. When enabled
+   * Human-in-the-loop approval gate for mutating tool calls. When enabled
    * (the default), the agents plugin emits an `appkit.approval_pending` SSE
-   * event before executing any tool annotated `destructive: true` and waits
-   * for a `POST /chat/approve` decision from the same user who initiated the
-   * stream. A missing decision after `timeoutMs` auto-denies the call.
+   * event before executing any tool whose annotation flags it as mutating —
+   * `effect: "write" | "update" | "destructive"` (preferred) or the legacy
+   * `destructive: true` boolean — and waits for a `POST /chat/approve`
+   * decision from the same user who initiated the stream. A missing decision
+   * after `timeoutMs` auto-denies the call.
    */
   approval?: {
-    /** Require human approval for tools annotated `destructive: true`. Default: `true`. */
+    /**
+     * Require human approval for tools that mutate state. Triggered by
+     * `effect: "write" | "update" | "destructive"` (preferred) or the legacy
+     * `destructive: true` boolean. Default: `true`.
+     */
     requireForDestructive?: boolean;
     /** Milliseconds to wait before auto-denying. Default: 60_000. */
     timeoutMs?: number;

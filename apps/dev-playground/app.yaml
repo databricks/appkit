@@ -29,3 +29,11 @@ env:
     valueFrom: volume
   - name: DATABRICKS_VOLUME_IMPLICIT
     valueFrom: volume
+  # OBO demo: same physical volume; auth: "on-behalf-of-user" routes
+  # HTTP traffic through runInUserContext so SDK calls execute as the
+  # end user.
+  - name: DATABRICKS_VOLUME_OBO_DEMO
+    valueFrom: volume
+  # Lakebase database resource
+  - name: LAKEBASE_ENDPOINT
+    valueFrom: database

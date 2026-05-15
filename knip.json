@@ -23,6 +23,7 @@
     "packages/appkit/src/core/agent/tools/index.ts",
     "packages/appkit/src/core/agent/load-agents.ts",
     "packages/appkit/src/connectors/mcp/index.ts",
+    "packages/appkit/src/typedoc.entry.ts",
     "template/**",
     "tools/**",
     "docs/**",

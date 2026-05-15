@@ -63,11 +63,15 @@ describe("parseFrontmatter", () => {
     expect(content).toBe("Hello body");
   });
 
-  test("parses nested arrays", () => {
+  test("parses nested arrays in unified tools list", () => {
     const { data } = parseFrontmatter(
-      "---\ntoolkits:\n  - analytics\n  - files: [uploads.list]\n---\nbody",
+      "---\ntools:\n  - plugin:analytics\n  - plugin:files: [uploads.list]\n  - get_weather\n---\nbody",
     );
-    expect(data?.toolkits).toEqual(["analytics", { files: ["uploads.list"] }]);
+    expect(data?.tools).toEqual([
+      "plugin:analytics",
+      { "plugin:files": ["uploads.list"] },
+      "get_weather",
+    ]);
   });
 
   test("returns null data when no frontmatter", () => {
@@ -146,29 +150,30 @@ describe("loadAgentsFromDir", () => {
   test("throws when frontmatter references an unregistered plugin", async () => {
     writeAgent(
       "broken",
-      "---\nendpoint: e\ntoolkits: [missing]\n---\nBroken agent.",
+      "---\nendpoint: e\ntools:\n  - plugin:missing\n---\nBroken agent.",
     );
     await expect(loadAgentsFromDir(workDir, {})).rejects.toThrow(
-      /references toolkit 'missing'/,
+      /references 'plugin:missing'/,
     );
   });
 
   test("throws when frontmatter references an unknown ambient tool", async () => {
     writeAgent(
       "broken",
-      "---\nendpoint: e\ntools: [unknown_tool]\n---\nBroken.",
+      "---\nendpoint: e\ntools:\n  - unknown_tool\n---\nBroken.",
     );
     await expect(loadAgentsFromDir(workDir, {})).rejects.toThrow(
-      /references tool 'unknown_tool'/,
+      /references ambient tool 'unknown_tool'/,
     );
+    await expect(loadAgentsFromDir(workDir, {})).rejects.toThrow(/plugin:NAME/);
   });
 
-  test("resolves toolkits + ambient tools when provided", async () => {
+  test("resolves a mix of plugin and ambient tools in the unified list", async () => {
     const registry: ToolRegistry = {
       query: defineTool({
         description: "q",
         schema: z.object({ sql: z.string() }),
-        handler: () => "ok",
+        execute: () => "ok",
       }),
     };
     const plugins = new Map<
@@ -193,7 +198,7 @@ describe("loadAgentsFromDir", () => {
 
     writeAgent(
       "analyst",
-      "---\nendpoint: e\ntoolkits:\n  - analytics\ntools:\n  - get_weather\n---\nBody.",
+      "---\nendpoint: e\ntools:\n  - plugin:analytics\n  - get_weather\n---\nBody.",
     );
     const res = await loadAgentsFromDir(workDir, {
       plugins,
@@ -204,6 +209,91 @@ describe("loadAgentsFromDir", () => {
       "analytics.query",
       "get_weather",
     ]);
+  });
+
+  test("plugin:NAME with an array filters via { only }", async () => {
+    const registry: ToolRegistry = {
+      list: defineTool({
+        description: "l",
+        schema: z.object({}),
+        execute: () => [],
+      }),
+      read: defineTool({
+        description: "r",
+        schema: z.object({ path: z.string() }),
+        execute: () => "x",
+      }),
+      delete: defineTool({
+        description: "d",
+        schema: z.object({ path: z.string() }),
+        execute: () => undefined,
+      }),
+    };
+    const plugins = new Map<
+      string,
+      { toolkit: (opts?: unknown) => Record<string, unknown> }
+    >([
+      [
+        "files",
+        {
+          toolkit: (opts) =>
+            buildToolkitEntries("files", registry, opts as never),
+        },
+      ],
+    ]);
+
+    writeAgent(
+      "reader",
+      "---\nendpoint: e\ntools:\n  - plugin:files: [list, read]\n---\nReader.",
+    );
+    const res = await loadAgentsFromDir(workDir, { plugins });
+    expect(Object.keys(res.defs.reader.tools ?? {}).sort()).toEqual([
+      "files.list",
+      "files.read",
+    ]);
+  });
+
+  test("plugin:NAME with a full ToolkitOptions object honours prefix/rename", async () => {
+    const registry: ToolRegistry = {
+      query: defineTool({
+        description: "q",
+        schema: z.object({ sql: z.string() }),
+        execute: () => "ok",
+      }),
+    };
+    const plugins = new Map<
+      string,
+      { toolkit: (opts?: unknown) => Record<string, unknown> }
+    >([
+      [
+        "analytics",
+        {
+          toolkit: (opts) =>
+            buildToolkitEntries("analytics", registry, opts as never),
+        },
+      ],
+    ]);
+
+    writeAgent(
+      "renamer",
+      `---\nendpoint: e\ntools:\n  - plugin:analytics: { prefix: "", rename: { query: sql_query } }\n---\nBody.`,
+    );
+    const res = await loadAgentsFromDir(workDir, { plugins });
+    expect(Object.keys(res.defs.renamer.tools ?? {})).toEqual(["sql_query"]);
+  });
+
+  test("rejects an object entry whose key isn't 'plugin:NAME'", async () => {
+    writeAgent("bad", "---\nendpoint: e\ntools:\n  - files: [a]\n---\nBad.");
+    await expect(loadAgentsFromDir(workDir, {})).rejects.toThrow(
+      /reserved for plugin references/,
+    );
+  });
+
+  test("rejects empty 'plugin:' (no plugin name after the prefix)", async () => {
+    writeAgent("bad", "---\nendpoint: e\ntools:\n  - plugin:\n---\nBad.");
+    await expect(loadAgentsFromDir(workDir, {})).rejects.toThrow(
+      /empty plugin name/,
+    );
   });
 
   describe("agents: sibling sub-agent references", () => {

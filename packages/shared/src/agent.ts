@@ -76,6 +76,16 @@ export interface ToolCall {
   id: string;
   name: string;
   args: unknown;
+  /**
+   * Vendor-opaque "thought signature" blob attached by Vertex AI / Gemini
+   * 2.x models to every function call they emit. Resumed threads must
+   * echo this back verbatim on the next request or Vertex rejects with
+   * `INVALID_ARGUMENT: function call X is missing a thought_signature`.
+   * Stored here so adapters can preserve it across persistence
+   * boundaries. Non-Gemini endpoints leave this undefined.
+   * See https://docs.cloud.google.com/vertex-ai/generative-ai/docs/thought-signatures
+   */
+  thoughtSignature?: string;
 }
 
 export interface Thread {
@@ -121,10 +131,12 @@ export type AgentEvent =
   | { type: "metadata"; data: Record<string, unknown> }
   | {
       /**
-       * Emitted by the agents plugin (not adapters) when a tool call annotated
-       * `destructive: true` is awaiting human approval. Clients should render
-       * an approval prompt and POST to `/chat/approve` with the matching
-       * `approvalId` and a `decision` of `approve` or `deny`.
+       * Emitted by the agents plugin (not adapters) when a mutating tool call
+       * is awaiting human approval — fires for tools annotated with
+       * `effect: "write" | "update" | "destructive"` (preferred) or the
+       * legacy `destructive: true` boolean. Clients should render an approval
+       * prompt and POST to `/chat/approve` with the matching `approvalId` and
+       * a `decision` of `approve` or `deny`.
        */
       type: "approval_pending";
       approvalId: string;
@@ -225,8 +237,10 @@ export interface AppKitMetadataEvent {
 }
 
 /**
- * Emitted when a destructive tool call is awaiting human approval. The client
- * should render an approval UI and POST the decision to `/chat/approve` with
+ * Emitted when a mutating tool call is awaiting human approval. Fires for
+ * tools annotated with `effect: "write" | "update" | "destructive"`
+ * (preferred) or the legacy `destructive: true` boolean. The client should
+ * render an approval UI and POST the decision to `/chat/approve` with
  * `{ streamId, approvalId, decision: "approve" | "deny" }`. If no decision
  * arrives before the server-side timeout, the call is auto-denied and the
  * agent receives a denial string as the tool output.

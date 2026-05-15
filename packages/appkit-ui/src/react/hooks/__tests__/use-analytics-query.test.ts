@@ -1,23 +1,22 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-// Capture the onMessage handler so tests can drive SSE messages directly.
 let lastConnectArgs: any = null;
 const mockProcessArrowBuffer = vi.fn();
 const mockFetchArrow = vi.fn();
+const mockConnectSSE = vi.fn((args: any) => {
+  lastConnectArgs = args;
+  return () => {};
+});
 
 vi.mock("@/js", () => ({
-  connectSSE: vi.fn((args: any) => {
-    lastConnectArgs = args;
-    return () => {};
-  }),
+  connectSSE: (...args: unknown[]) => mockConnectSSE(...(args as [any])),
   ArrowClient: {
     fetchArrow: (...args: unknown[]) => mockFetchArrow(...args),
     processArrowBuffer: (...args: unknown[]) => mockProcessArrowBuffer(...args),
   },
 }));
 
-// useQueryHMR is a no-op shim for tests; mock to avoid HMR side effects.
 vi.mock("../use-query-hmr", () => ({
   useQueryHMR: vi.fn(),
 }));
@@ -116,11 +115,7 @@ describe("useAnalyticsQuery", () => {
       data: JSON.stringify({ type: "arrow_inline", attachment: "AQID" }),
     });
 
-    // Whatever the hook surfaces (error or noop), it must not have tried to
-    // decode the payload locally.
     await waitFor(() => {
-      // Either an error is set or loading completed without data — both are
-      // acceptable, but processArrowBuffer must never run on a base64 input.
       expect(
         result.current.loading ||
           result.current.error ||
@@ -168,5 +163,65 @@ describe("useAnalyticsQuery", () => {
     });
     expect(mockProcessArrowBuffer).not.toHaveBeenCalled();
     expect(mockFetchArrow).not.toHaveBeenCalled();
+  });
+
+  test("does not refetch when params object is structurally equal across renders", () => {
+    const { rerender } = renderHook(
+      ({ limit }: { limit: number }) =>
+        // biome-ignore lint/suspicious/noExplicitAny: typed registry not available in tests
+        useAnalyticsQuery("test_query" as any, { limit } as any),
+      { initialProps: { limit: 10 } },
+    );
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+
+    rerender({ limit: 10 });
+    rerender({ limit: 10 });
+    rerender({ limit: 10 });
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+  });
+
+  test("does refetch when a param value actually changes", () => {
+    const { rerender } = renderHook(
+      ({ limit }: { limit: number }) =>
+        // biome-ignore lint/suspicious/noExplicitAny: typed registry not available in tests
+        useAnalyticsQuery("test_query" as any, { limit } as any),
+      { initialProps: { limit: 10 } },
+    );
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+
+    rerender({ limit: 20 });
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(2);
+  });
+
+  test("does not refetch when params is undefined across renders", () => {
+    const { rerender } = renderHook(() =>
+      // biome-ignore lint/suspicious/noExplicitAny: typed registry not available in tests
+      useAnalyticsQuery("test_query" as any),
+    );
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+
+    rerender();
+    rerender();
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+  });
+
+  test("treats two empty object literals as equal", () => {
+    const { rerender } = renderHook(() =>
+      // biome-ignore lint/suspicious/noExplicitAny: typed registry not available in tests
+      useAnalyticsQuery("test_query" as any, {} as any),
+    );
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+
+    rerender();
+    rerender();
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
   });
 });

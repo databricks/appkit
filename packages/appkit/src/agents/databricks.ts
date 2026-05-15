@@ -159,6 +159,17 @@ interface OpenAIToolCall {
   id: string;
   type: "function";
   function: { name: string; arguments: string };
+  /**
+   * Opaque Vertex/Gemini "thought signature" blob the request must echo
+   * back verbatim on the next turn. Vertex's OpenAI-compat proxy emits
+   * this as `thoughtSignature` (camelCase) at the top level of the
+   * tool_call delta (verified against `gemini-3.1-flash-lite-preview`),
+   * and accepts the same spelling back on outbound. Non-Gemini endpoints
+   * (Claude on Databricks, external OpenAI-compat models, Llama, etc.)
+   * leave this undefined and the serializer omits the key.
+   * See https://docs.cloud.google.com/vertex-ai/generative-ai/docs/thought-signatures
+   */
+  thoughtSignature?: string;
 }
 
 interface OpenAITool {
@@ -175,6 +186,8 @@ interface DeltaToolCall {
   id?: string;
   type?: string;
   function?: { name?: string; arguments?: string };
+  /** See {@link OpenAIToolCall.thoughtSignature}. */
+  thoughtSignature?: string;
 }
 
 /**
@@ -499,7 +512,12 @@ export class DatabricksAdapter implements AgentAdapter {
     let fullText = "";
     const toolCallAccumulator = new Map<
       number,
-      { id: string; name: string; arguments: string }
+      {
+        id: string;
+        name: string;
+        arguments: string;
+        thoughtSignature?: string;
+      }
     >();
 
     try {
@@ -563,6 +581,7 @@ export class DatabricksAdapter implements AgentAdapter {
 
           for (const tc of toolCallsRaw) {
             if (!isStreamingDeltaToolCall(tc)) continue;
+            const sig = tc.thoughtSignature;
             const existing = toolCallAccumulator.get(tc.index);
             if (existing) {
               if (tc.function?.arguments) {
@@ -573,6 +592,9 @@ export class DatabricksAdapter implements AgentAdapter {
                   this.maxToolArgumentsChars,
                 );
                 existing.arguments += tc.function.arguments;
+              }
+              if (sig && !existing.thoughtSignature) {
+                existing.thoughtSignature = sig;
               }
             } else {
               const initial = tc.function?.arguments ?? "";
@@ -585,6 +607,7 @@ export class DatabricksAdapter implements AgentAdapter {
                 id: tc.id ?? `call_${tc.index}`,
                 name: tc.function?.name ?? "",
                 arguments: initial,
+                ...(sig ? { thoughtSignature: sig } : {}),
               });
             }
           }
@@ -615,6 +638,7 @@ export class DatabricksAdapter implements AgentAdapter {
       id: tc.id,
       type: "function" as const,
       function: { name: tc.name, arguments: tc.arguments || "{}" },
+      ...(tc.thoughtSignature ? { thoughtSignature: tc.thoughtSignature } : {}),
     }));
 
     return { text: fullText, toolCalls };
@@ -694,6 +718,9 @@ export class DatabricksAdapter implements AgentAdapter {
                 ? tc.args
                 : JSON.stringify(tc.args ?? {}),
           },
+          ...(tc.thoughtSignature
+            ? { thoughtSignature: tc.thoughtSignature }
+            : {}),
         }));
       }
 

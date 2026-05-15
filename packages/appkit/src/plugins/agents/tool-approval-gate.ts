@@ -1,10 +1,11 @@
 /**
- * Server-side state for the human-in-the-loop approval gate on
- * `destructive: true` agent tool calls.
+ * Server-side state for the human-in-the-loop approval gate on mutating
+ * agent tool calls — tools annotated with `effect: "write" | "update" |
+ * "destructive"` (preferred) or the legacy `destructive: true` boolean.
  *
  * Lifecycle:
  *
- * 1. `wait(...)` is called from inside `executeTool` when a destructive tool
+ * 1. `wait(...)` is called from inside `executeTool` when a mutating tool
  *    is about to execute. A `Pending` record is registered and a timer is
  *    scheduled for auto-deny. The returned promise is what blocks the
  *    adapter until the decision arrives.

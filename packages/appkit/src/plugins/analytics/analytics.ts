@@ -490,11 +490,11 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
           ),
       }),
       annotations: {
-        readOnly: true,
+        effect: "read",
         requiresUserContext: true,
       },
       autoInheritable: true,
-      handler: (args, signal) => {
+      execute: (args, signal) => {
         assertReadOnlySql(args.query);
         return this.query(args.query, undefined, undefined, signal);
       },

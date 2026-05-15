@@ -90,13 +90,14 @@ export class GeniePlugin extends Plugin implements ToolProvider {
               "Optional conversation ID to continue an existing conversation",
             ),
         }),
-        annotations: { requiresUserContext: true },
-        handler: async (args) => {
+        annotations: { effect: "read", requiresUserContext: true },
+        execute: async (args, signal) => {
           const events: GenieStreamEvent[] = [];
           for await (const event of this.sendMessage(
             alias,
             args.content,
             args.conversationId,
+            { signal },
           )) {
             events.push(event);
           }
@@ -110,9 +111,10 @@ export class GeniePlugin extends Plugin implements ToolProvider {
             .string()
             .describe("The conversation ID to retrieve"),
         }),
-        annotations: { readOnly: true, requiresUserContext: true },
+        annotations: { effect: "read", requiresUserContext: true },
         autoInheritable: true,
-        handler: (args) => this.getConversation(alias, args.conversationId),
+        execute: (args, signal) =>
+          this.getConversation(alias, args.conversationId, signal),
       }),
     };
   }
@@ -321,7 +323,13 @@ export class GeniePlugin extends Plugin implements ToolProvider {
   async getConversation(
     alias: string,
     conversationId: string,
+    signal?: AbortSignal,
   ): Promise<GenieConversationHistoryResponse> {
+    // Honour an already-cancelled stream before paying any I/O cost. The
+    // underlying connector's pagination loop is signal-agnostic today, so
+    // this catches the common case (tool dispatched after the user
+    // cancelled) without a deeper connector change.
+    signal?.throwIfAborted();
     const spaceId = this.resolveSpaceId(alias);
 
     if (!spaceId) {
@@ -345,8 +353,9 @@ export class GeniePlugin extends Plugin implements ToolProvider {
     alias: string,
     content: string,
     conversationId?: string,
-    options?: { timeout?: number },
+    options?: { timeout?: number; signal?: AbortSignal },
   ): AsyncGenerator<GenieStreamEvent> {
+    options?.signal?.throwIfAborted();
     const spaceId = this.resolveSpaceId(alias);
     if (!spaceId) {
       throw new Error(`Unknown space alias: ${alias}`);
@@ -358,7 +367,7 @@ export class GeniePlugin extends Plugin implements ToolProvider {
       spaceId,
       content,
       conversationId,
-      { timeout },
+      { timeout, signal: options?.signal },
     );
   }
 

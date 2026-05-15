@@ -163,6 +163,7 @@ jobs:
           APPKIT_E2E_TEST: 'true'
           DATABRICKS_WAREHOUSE_ID: e2e-mock
           DATABRICKS_WORKSPACE_ID: e2e-mock
+          DATABRICKS_SERVING_ENDPOINT_NAME: e2e-mock
 
   pr-template-artifact:
     name: PR Template Artifact

@@ -170,16 +170,44 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     }
   }
 
-  /** Effective approval policy with defaults applied. */
+  /**
+   * Effective approval policy with defaults applied. Memoised so the
+   * `timeoutMs` validation warning fires at most once per plugin instance —
+   * `resolvedApprovalPolicy` gets hit on every chat stream and a noisy
+   * misconfig would otherwise spam the logs.
+   *
+   * `timeoutMs` is clamped to a 1s floor so a misconfigured value (`0`,
+   * negative, or `NaN`) can't degrade into immediate auto-denial of every
+   * mutating tool call.
+   */
+  private cachedApprovalPolicy: {
+    requireForDestructive: boolean;
+    timeoutMs: number;
+  } | null = null;
+
   private get resolvedApprovalPolicy(): {
     requireForDestructive: boolean;
     timeoutMs: number;
   } {
+    if (this.cachedApprovalPolicy) return this.cachedApprovalPolicy;
     const cfg = this.config.approval ?? {};
-    return {
+    const APPROVAL_TIMEOUT_FLOOR_MS = 1_000;
+    const APPROVAL_TIMEOUT_DEFAULT_MS = 60_000;
+    let timeoutMs = cfg.timeoutMs ?? APPROVAL_TIMEOUT_DEFAULT_MS;
+    if (!Number.isFinite(timeoutMs) || timeoutMs < APPROVAL_TIMEOUT_FLOOR_MS) {
+      logger.warn(
+        "approval.timeoutMs=%s is below the %sms floor; using default %sms instead. Mutating tool calls would otherwise auto-deny before any UI could respond.",
+        cfg.timeoutMs,
+        APPROVAL_TIMEOUT_FLOOR_MS,
+        APPROVAL_TIMEOUT_DEFAULT_MS,
+      );
+      timeoutMs = APPROVAL_TIMEOUT_DEFAULT_MS;
+    }
+    this.cachedApprovalPolicy = {
       requireForDestructive: cfg.requireForDestructive ?? true,
-      timeoutMs: cfg.timeoutMs ?? 60_000,
+      timeoutMs,
     };
+    return this.cachedApprovalPolicy;
   }
 
   /** Effective DoS limits with defaults applied. */
@@ -233,7 +261,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     const entry = this.activeStreams.get(requestId);
     if (!entry) return;
     this.activeStreams.delete(requestId);
-    const next = (this.userStreamCounts.get(entry.userId) ?? 1) - 1;
+    const next = (this.userStreamCounts.get(entry.userId) ?? 0) - 1;
     if (next <= 0) {
       this.userStreamCounts.delete(entry.userId);
     } else {
@@ -257,10 +285,21 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
    */
   async reload(): Promise<void> {
     const next = await this.buildAgentRegistry();
-    if (this.mcpClient) {
-      await this.mcpClient.close();
-      this.mcpClient = null;
-    }
+    // Deliberately NOT closing the existing mcpClient here. Tool
+    // dispatch in `dispatchToolCall` reads `this.mcpClient` at call
+    // time; closing it mid-stream throws "MCP client is closed" from
+    // the next sendRpc and kills the in-flight conversation. The
+    // client owns only short-lived `fetch` handles (no keep-alive
+    // sockets) and the connections map persists in the live instance,
+    // so dropping `this.mcpClient` would also strand in-flight tool
+    // calls that resolved the field a moment earlier. Leave the live
+    // client in place; `buildAgentRegistry` -> `connectHostedTools`
+    // adds any new endpoints to the same instance, and stale
+    // connections from a removed config become unreachable through
+    // the new agent tool indexes (small memory cost, no correctness
+    // hazard). The shutdown path still closes — that's process
+    // teardown, where in-flight streams have already been aborted via
+    // `abortActiveOperations`.
     this.agents = next.agents;
     this.defaultAgentName = next.defaultAgentName;
   }
@@ -365,7 +404,9 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
   /**
    * Builds the map of plugin-name → toolkit that the markdown loader consults
-   * when resolving `toolkits:` frontmatter entries.
+   * when resolving `plugin:NAME` entries in the unified `tools:` frontmatter
+   * list (and, equivalently, that the code form passes as the `plugins`
+   * argument to `tools(plugins) => Record<...>`).
    */
   private pluginProviderIndex(): Map<
     string,
@@ -683,7 +724,20 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     }
 
     const endpoints = resolveHostedTools(hostedTools);
-    await this.mcpClient.connectAll(endpoints);
+    const result = await this.mcpClient.connectAll(endpoints);
+    if (result.failed.length > 0) {
+      // Per-endpoint errors are already logged inside `connectAll`; this
+      // aggregate warning makes the partial-success state visible at the
+      // agent-registration boundary so operators see "agent X registered
+      // without N hosted-tool endpoints" alongside the connect-time
+      // errors, instead of just an opaque list of MCP failures.
+      logger.warn(
+        "MCP: %s of %s endpoints failed to connect (%s). Agents that reference these endpoints will boot without their hosted tools.",
+        result.failed.length,
+        endpoints.length,
+        result.failed.map((f) => f.name).join(", "),
+      );
+    }
 
     for (const def of this.mcpClient.getAllToolDefinitions()) {
       index.set(def.name, {
@@ -1142,6 +1196,16 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
         runState.limits.toolCallTimeoutMs,
       );
     } else if (entry.source === "function") {
+      // Function tools declare their parameters as a JSON-object schema,
+      // so adapters always serialize `args` as an object. A non-object
+      // value here means the upstream model emitted malformed tool-call
+      // JSON; surface a clear error rather than silently passing through
+      // a wrong-shape value the tool will then choke on.
+      if (typeof args !== "object" || args === null || Array.isArray(args)) {
+        throw new Error(
+          `Function tool '${name}' received non-object arguments (got ${args === null ? "null" : Array.isArray(args) ? "array" : typeof args}); expected a JSON object.`,
+        );
+      }
       result = await entry.functionTool.execute(
         args as Record<string, unknown>,
       );

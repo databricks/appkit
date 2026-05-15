@@ -3,21 +3,20 @@
   "name": "agents",
   "displayName": "Agents Plugin",
   "stability": "beta",
-  "hidden": true,
   "description": "AI agents driven by markdown configs or code, with auto-tool-discovery from registered plugins",
   "resources": {
     "required": [],
     "optional": [
       {
         "type": "serving_endpoint",
-        "alias": "Model Serving (agents)",
+        "alias": "Default LLM for agents",
         "resourceKey": "agents-serving-endpoint",
-        "description": "Databricks Model Serving endpoint for agents using workspace-hosted models (`DatabricksAdapter.fromModelServing`). Wire the same endpoint name AppKit reads from `DATABRICKS_SERVING_ENDPOINT_NAME` when no per-agent model is configured. The same env var the `serving` plugin reads — one value covers both. Omit when agents use only external adapters.",
+        "description": "Default streaming-capable LLM endpoint for agents that don't pin their own model",
         "permission": "CAN_QUERY",
         "fields": {
           "name": {
             "env": "DATABRICKS_SERVING_ENDPOINT_NAME",
-            "description": "Endpoint name passed to Model Serving when agents default to `DatabricksAdapter.fromModelServing()`. Shared with the `serving` plugin."
+            "description": "Default LLM serving endpoint name"
           }
         }
       }

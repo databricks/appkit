@@ -38,6 +38,7 @@ export {
   type HostedTool,
   isFunctionTool,
   isHostedTool,
+  type McpConnectAllResult,
   mcpServer,
   resolveHostedTools,
   type ToolConfig,

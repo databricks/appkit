@@ -216,6 +216,21 @@ describe("ServiceContext", () => {
       });
     });
 
+    test("should include tokenFingerprint derived from the token", () => {
+      const userCtx = ServiceContext.createUserContext("user-token", "user-1");
+
+      expect(userCtx.tokenFingerprint).toBeDefined();
+      expect(typeof userCtx.tokenFingerprint).toBe("string");
+      expect(userCtx.tokenFingerprint).toHaveLength(16);
+    });
+
+    test("should produce different fingerprints for different tokens", () => {
+      const ctxA = ServiceContext.createUserContext("token-aaa", "user-1");
+      const ctxB = ServiceContext.createUserContext("token-bbb", "user-1");
+
+      expect(ctxA.tokenFingerprint).not.toBe(ctxB.tokenFingerprint);
+    });
+
     test("should handle missing userName gracefully", () => {
       const userCtx = ServiceContext.createUserContext("user-token", "user-1");
 
