@@ -1092,6 +1092,155 @@ describe("Analytics Plugin", () => {
       expect(payload).not.toMatch(/"statement_id":"inline-/);
     });
 
+    test("/query/:query_key falls back JSON_ARRAY to ARROW_STREAM INLINE when warehouse refuses JSON_ARRAY for INLINE", async () => {
+      // Some serverless warehouses (the ones this PR is centrally aimed at)
+      // only accept ARROW_STREAM for INLINE results — JSON_ARRAY + INLINE is
+      // rejected outright. The caller still asked for JSON_ARRAY, so the
+      // server retries as ARROW_STREAM + INLINE and decodes the attachment
+      // back into plain row objects: the caller's contract is preserved and
+      // the SSE channel still carries a `result` message, not an `arrow`
+      // message.
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+
+      // Real base64 Arrow IPC captured from a serverless warehouse running
+      // `SELECT 1 AS test_col, 2 AS test_col2` (one row, two INT columns).
+      const REAL_ARROW_ATTACHMENT =
+        "/////7gAAAAQAAAAAAAKAAwACgAJAAQACgAAABAAAAAAAQQACAAIAAAABAAIAAAABAAAAAIAAABMAAAABAAAAMz///8QAAAAGAAAAAAAAQIUAAAAvP///yAAAAAAAAABAAAAAAkAAAB0ZXN0X2NvbDIAAAAQABQAEAAOAA8ABAAAAAgAEAAAABgAAAAgAAAAAAABAhwAAAAIAAwABAALAAgAAAAgAAAAAAAAAQAAAAAIAAAAdGVzdF9jb2wAAAAA/////7gAAAAQAAAADAAaABgAFwAEAAgADAAAACAAAAAAAQAAAAAAAAAAAAAAAAADBAAKABgADAAIAAQACgAAADwAAAAQAAAAAQAAAAAAAAAAAAAAAgAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAEAAAAAAAAAQAAAAAAAAAAEAAAAAAAAAIAAAAAAAAAAAQAAAAAAAADAAAAAAAAAAAQAAAAAAAAA/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP////8AAAAA";
+
+      const executeMock = vi
+        .fn()
+        // First call: JSON_ARRAY + INLINE — warehouse rejects.
+        .mockRejectedValueOnce(
+          new Error(
+            'Response from server (Bad Request) {"error_code":"INVALID_PARAMETER_VALUE","message":"Inline disposition only supports ARROW_STREAM format."}',
+          ),
+        )
+        // Second call: ARROW_STREAM + INLINE — warehouse returns the bytes.
+        .mockResolvedValueOnce({
+          result: {
+            attachment: REAL_ARROW_ATTACHMENT,
+            status: { state: "SUCCEEDED" },
+          },
+        });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {}, format: "JSON_ARRAY" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      // Two calls: first JSON_ARRAY + INLINE (rejected), then the fallback
+      // ARROW_STREAM + INLINE (the warehouse's preferred shape for INLINE).
+      expect(executeMock).toHaveBeenCalledTimes(2);
+      expect(executeMock.mock.calls[0][1]).toMatchObject({
+        disposition: "INLINE",
+        format: "JSON_ARRAY",
+      });
+      expect(executeMock.mock.calls[1][1]).toMatchObject({
+        disposition: "INLINE",
+        format: "ARROW_STREAM",
+      });
+
+      // The SSE wire payload must look like a JSON_ARRAY result, not an
+      // arrow message — the caller asked for JSON_ARRAY and the server has
+      // already decoded Arrow → rows.
+      const writeCalls = (mockRes.write as any).mock.calls.map(
+        (c: any[]) => c[0] as string,
+      );
+      const payload = writeCalls.find((s: string) => s.startsWith("data: "));
+      expect(payload).toBeDefined();
+      expect(payload).toContain('"type":"result"');
+      expect(payload).not.toContain('"type":"arrow"');
+      // Real row values from the captured attachment: test_col=1, test_col2=2.
+      // Integer columns are coerced to strings to match what JSON_ARRAY would
+      // have produced for the same warehouse + same INT columns.
+      expect(payload).toContain('"test_col":"1"');
+      expect(payload).toContain('"test_col2":"2"');
+    });
+
+    test("/query/:query_key surfaces an error when both JSON_ARRAY + INLINE and the ARROW_STREAM retry fail", async () => {
+      // If the JSON_ARRAY retry path (ARROW_STREAM + INLINE) also fails — e.g.
+      // a downstream warehouse outage that affects both shapes — the route
+      // must surface the failure rather than silently dropping it.
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+
+      // First mocked call (JSON_ARRAY + INLINE) rejects with a needs-arrow
+      // signal; every subsequent call rejects with an unrelated failure. The
+      // retry interceptor may retry the second call multiple times — we only
+      // care that the retry path was taken and that the request ultimately
+      // surfaces an error rather than a successful result.
+      const executeMock = vi.fn().mockImplementation((_wc, opts) => {
+        if (opts?.disposition === "INLINE" && opts?.format === "JSON_ARRAY") {
+          return Promise.reject(
+            new Error(
+              'Response from server (Bad Request) {"error_code":"INVALID_PARAMETER_VALUE","message":"Inline disposition only supports ARROW_STREAM format."}',
+            ),
+          );
+        }
+        return Promise.reject(new Error("warehouse is down"));
+      });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {}, format: "JSON_ARRAY" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      // The retry happened: at least one ARROW_STREAM + INLINE call followed
+      // the initial JSON_ARRAY + INLINE rejection.
+      const formats = executeMock.mock.calls.map((c: any[]) => c[1]);
+      expect(
+        formats.some(
+          (f: any) => f?.disposition === "INLINE" && f?.format === "JSON_ARRAY",
+        ),
+      ).toBe(true);
+      expect(
+        formats.some(
+          (f: any) =>
+            f?.disposition === "INLINE" && f?.format === "ARROW_STREAM",
+        ),
+      ).toBe(true);
+      // No call should escalate to EXTERNAL_LINKS — that fallback only
+      // exists on the ARROW_STREAM caller path.
+      expect(
+        formats.some((f: any) => f?.disposition === "EXTERNAL_LINKS"),
+      ).toBe(false);
+
+      // The SSE payload, if any was written, must NOT carry a successful
+      // result frame.
+      const writeCalls = (mockRes.write as any).mock.calls.map(
+        (c: any[]) => c[0] as string,
+      );
+      const payload = writeCalls.find((s: string) => s.startsWith("data: "));
+      if (payload) {
+        expect(payload).not.toContain('"type":"result"');
+      }
+    });
+
     test("/query/:query_key rejects unknown format values with 400", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
@@ -1158,7 +1307,11 @@ describe("Analytics Plugin", () => {
       expect(executeMock).toHaveBeenCalledTimes(1);
     });
 
-    test("/query/:query_key should not fall back when format is explicitly JSON_ARRAY", async () => {
+    test("/query/:query_key does NOT fall back JSON_ARRAY when the rejection lacks a needs-arrow signal", async () => {
+      // A generic INVALID_PARAMETER_VALUE that doesn't mention the INLINE
+      // disposition could be any unrelated SQL/permission error. The classifier
+      // must NOT interpret it as "warehouse wants ARROW_STREAM" — falling back
+      // would mask the real failure.
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -1185,7 +1338,8 @@ describe("Analytics Plugin", () => {
 
       await handler(mockReq, mockRes);
 
-      // All calls use JSON_ARRAY + INLINE — explicit JSON_ARRAY, no fallback.
+      // All calls stay on JSON_ARRAY + INLINE — no retry path with a different
+      // disposition or format was taken.
       for (const call of executeMock.mock.calls) {
         expect(call[1]).toMatchObject({
           disposition: "INLINE",

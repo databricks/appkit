@@ -1,4 +1,5 @@
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
+import { tableFromIPC } from "apache-arrow";
 import type express from "express";
 import {
   type AgentToolDefinition,
@@ -317,15 +318,21 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
   }
 
   /**
-   * Execute a query with automatic disposition fallback for ARROW_STREAM.
+   * Execute a query with automatic disposition/format fallback.
    *
-   * - JSON_ARRAY: always uses INLINE disposition, no fallback.
-   * - ARROW_STREAM: tries INLINE first, falls back to EXTERNAL_LINKS.
-   *   This handles warehouses that only support one disposition.
+   * - **JSON_ARRAY** first tries `INLINE + JSON_ARRAY`. If the warehouse
+   *   only supports `ARROW_STREAM` for `INLINE` (some serverless variants),
+   *   retries as `INLINE + ARROW_STREAM`, decodes the Arrow IPC attachment
+   *   server-side, and returns plain row objects — the caller's
+   *   `JSON_ARRAY` contract is preserved.
+   * - **ARROW_STREAM** first tries `INLINE + ARROW_STREAM`. If the
+   *   warehouse refuses (most classic + some serverless variants), or the
+   *   inline stash is full, falls back to `EXTERNAL_LINKS + ARROW_STREAM`.
    *
-   * INLINE attachments are decoded once and put on the plugin's
-   * `inlineArrowStash`; the SSE message carries the synthetic stash id so
-   * the client fetches the bytes out-of-band via `/arrow-result/<id>`.
+   * INLINE Arrow attachments under the ARROW_STREAM path are decoded once
+   * and put on the plugin's `inlineArrowStash`; the SSE message carries the
+   * synthetic stash id so the client fetches the bytes out-of-band via
+   * `/arrow-result/<id>`.
    */
   private async _executeWithFormatFallback(
     executor: AnalyticsPlugin,
@@ -338,15 +345,44 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     signal?: AbortSignal,
   ): Promise<AnalyticsSseMessage> {
     if (requestedFormat === "JSON_ARRAY") {
-      const result = await executor.query(
+      try {
+        const result = await executor.query(
+          query,
+          processedParams,
+          { disposition: "INLINE", format: "JSON_ARRAY" },
+          signal,
+        );
+        return makeResultMessage(result?.data, {
+          status: result?.status,
+          statement_id: result?.statement_id,
+        });
+      } catch (err: unknown) {
+        if (signal?.aborted) throw err;
+        if (_classifyInlineRejection(err) !== "needs-arrow") throw err;
+
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.warn(
+          "JSON_ARRAY INLINE rejected by warehouse, retrying as ARROW_STREAM INLINE and decoding server-side: %s",
+          msg,
+        );
+      }
+
+      // Retry as ARROW_STREAM + INLINE so the warehouse will accept the
+      // request, then decode the Arrow IPC attachment to plain row
+      // objects so the caller still gets JSON_ARRAY-shaped data.
+      const arrowResult = await executor.query(
         query,
         processedParams,
-        { disposition: "INLINE", format: "JSON_ARRAY" },
+        { disposition: "INLINE", format: "ARROW_STREAM" },
         signal,
       );
-      return makeResultMessage(result?.data, {
-        status: result?.status,
-        statement_id: result?.statement_id,
+      if (!arrowResult?.attachment) {
+        throw ExecutionError.missingData("ARROW_STREAM attachment");
+      }
+      const rows = decodeArrowAttachmentToRows(arrowResult.attachment);
+      return makeResultMessage(rows, {
+        status: arrowResult.status,
+        statement_id: arrowResult.statement_id,
       });
     }
 
@@ -402,7 +438,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         throw err;
       }
 
-      if (!_isInlineArrowUnsupported(err)) {
+      if (_classifyInlineRejection(err) !== "needs-json") {
         throw err;
       }
 
@@ -539,45 +575,115 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
 }
 
 /**
- * Determine whether a warehouse error indicates that ARROW_STREAM + INLINE
- * is unsupported, vs an unrelated SQL/permission error.
+ * Decode a base64 Arrow IPC attachment to plain row objects.
  *
- * Preferred path: read the structured `errorCode` we now propagate from the
- * SDK's `ApiError.errorCode` and the warehouse's `status.error.error_code`
- * through `ExecutionError`. This is stable across error-message wording
- * changes.
+ * Used by the JSON_ARRAY fallback path when a warehouse refuses
+ * `JSON_ARRAY + INLINE` and we have to satisfy the request via
+ * `ARROW_STREAM + INLINE` — the bytes come back as Arrow IPC but the
+ * caller's contract is JSON-shaped rows, so we convert server-side.
  *
- * Substring backstop: if the upstream error didn't surface a code (legacy
- * SDK builds, or errors thrown outside the connector's wrap path), fall
- * back to requiring both INLINE and ARROW_STREAM keywords in the message
- * plus a marker phrase. The pair-requirement avoids matching unrelated SQL
- * errors that happen to mention one of the words (e.g. a column named
- * `INLINE_USERS`).
+ * Scalar values are stringified to match what the warehouse itself emits
+ * for INT/BIGINT/etc. columns under the JSON_ARRAY format (everything in
+ * `result.data_array` is a string on the wire) — so callers see the same
+ * row shape regardless of which path the bytes took. BigInts get the same
+ * stringification treatment (also necessary for JSON-serializability).
  */
-function _isInlineArrowUnsupported(err: unknown): boolean {
+function decodeArrowAttachmentToRows(
+  attachment: string,
+): Record<string, unknown>[] {
+  const decoded = Buffer.from(attachment, "base64");
+  const table = tableFromIPC(
+    new Uint8Array(decoded.buffer, decoded.byteOffset, decoded.byteLength),
+  );
+  const colNames = table.schema.fields.map((f) => f.name);
+  const rows: Record<string, unknown>[] = [];
+  for (let i = 0; i < table.numRows; i++) {
+    const row: Record<string, unknown> = {};
+    for (const name of colNames) {
+      const col = table.getChild(name);
+      const v = col?.get(i);
+      if (v == null) {
+        row[name] = null;
+      } else if (
+        typeof v === "number" ||
+        typeof v === "bigint" ||
+        typeof v === "boolean"
+      ) {
+        row[name] = String(v);
+      } else if (typeof v === "string") {
+        row[name] = v;
+      } else {
+        // Nested types (List, Struct, Map) — leave as-is. The JSON_ARRAY
+        // wire format renders these as JSON strings server-side, but that
+        // serialization isn't exposed to us here. Round-tripping through
+        // JSON.stringify would mismatch, so pass the typed value through.
+        row[name] = v;
+      }
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+/**
+ * Classify a warehouse rejection of an INLINE statement.
+ *
+ * Two distinct rejection modes are observed in the wild:
+ *
+ * - **needs-arrow**: warehouse refuses `JSON_ARRAY + INLINE`, only accepts
+ *   `ARROW_STREAM + INLINE`. Example message:
+ *   `"Inline disposition only supports ARROW_STREAM format."`
+ *   Action: retry as `ARROW_STREAM + INLINE` and decode server-side.
+ *
+ * - **needs-json**: warehouse refuses `ARROW_STREAM + INLINE`, only accepts
+ *   `JSON_ARRAY + INLINE`. Examples:
+ *   `"The format field must be JSON_ARRAY when the disposition field is INLINE."`
+ *   `"ARROW_STREAM not supported with INLINE disposition"`
+ *   `"ExternalLinks disposition is not yet implemented."` (same family —
+ *   the warehouse rejected the disposition/format combo we sent).
+ *   Action: retry as `ARROW_STREAM + EXTERNAL_LINKS`.
+ *
+ * The structured `errorCode` (INVALID_PARAMETER_VALUE / NOT_IMPLEMENTED)
+ * gates the classification so unrelated SQL errors don't trigger a retry.
+ * Message matching is case-insensitive — warehouses are inconsistent about
+ * casing of "Inline"/"INLINE".
+ */
+type InlineRejection = "needs-arrow" | "needs-json" | null;
+
+function _classifyInlineRejection(err: unknown): InlineRejection {
+  const msg = err instanceof Error ? err.message : String(err);
+  const lower = msg.toLowerCase();
+
   const structuredCode =
     err instanceof ExecutionError ? err.errorCode : undefined;
-  if (
+  const hasCode =
     structuredCode === "INVALID_PARAMETER_VALUE" ||
-    structuredCode === "NOT_IMPLEMENTED"
+    structuredCode === "NOT_IMPLEMENTED" ||
+    lower.includes("invalid_parameter_value") ||
+    lower.includes("not_implemented");
+  if (!hasCode) return null;
+
+  // Must mention the inline disposition to count as a disposition-rejection.
+  if (!lower.includes("inline")) return null;
+
+  // "needs-arrow": warehouse only supports ARROW_STREAM for INLINE.
+  if (
+    /only supports\s+arrow_stream/i.test(msg) ||
+    /must be\s+arrow_stream/i.test(msg)
   ) {
-    // Structured code already tells us the warehouse rejected the request.
-    // Require keyword pairing to confirm it's the disposition/format combo
-    // (vs an INVALID_PARAMETER_VALUE for something else entirely).
-    const msg = err instanceof Error ? err.message : String(err);
-    return msg.includes("INLINE") && msg.includes("ARROW_STREAM");
+    return "needs-arrow";
   }
 
-  // Backstop for errors without a structured code.
-  const msg = err instanceof Error ? err.message : String(err);
-  if (!msg.includes("INLINE") || !msg.includes("ARROW_STREAM")) {
-    return false;
+  // "needs-json": warehouse only supports JSON_ARRAY for INLINE.
+  if (
+    /only supports\s+json_array/i.test(msg) ||
+    /must be\s+json_array/i.test(msg) ||
+    /arrow_stream\s+(is\s+|was\s+)?not\s+supported/i.test(msg)
+  ) {
+    return "needs-json";
   }
-  return (
-    msg.includes("not supported") ||
-    msg.includes("INVALID_PARAMETER_VALUE") ||
-    msg.includes("NOT_IMPLEMENTED")
-  );
+
+  return null;
 }
 
 /**
