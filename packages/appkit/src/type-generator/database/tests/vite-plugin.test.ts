@@ -4,6 +4,15 @@ import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { appKitDatabaseTypesPlugin } from "../vite-plugin";
 
+// Vite hooks are typed as `T | ObjectHook<T>`; extract the underlying fn so
+// tests can invoke them regardless of how the plugin author wrote them.
+function extractHook<T extends (...args: never[]) => unknown>(
+  hook: T | { handler: T } | undefined,
+): T | undefined {
+  if (!hook) return undefined;
+  return typeof hook === "function" ? hook : hook.handler;
+}
+
 let pendingCleanups: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
@@ -30,14 +39,13 @@ describe("appKitDatabaseTypesPlugin", () => {
     await fs.writeFile(columnsPath, "export {};\n", "utf8");
 
     const plugin = appKitDatabaseTypesPlugin();
-    plugin.configResolved?.({
-      root: clientRoot,
-    } as Parameters<NonNullable<typeof plugin.configResolved>>[0]);
+    const configResolved = extractHook(plugin.configResolved);
+    configResolved?.call({} as never, { root: clientRoot } as never);
 
-    const tags =
-      typeof plugin.transformIndexHtml === "function"
-        ? plugin.transformIndexHtml("", { server: {} } as never)
-        : plugin.transformIndexHtml?.transform("");
+    const transformIndexHtml = extractHook(plugin.transformIndexHtml);
+    const tags = transformIndexHtml?.call({} as never, "", {
+      server: {},
+    } as never);
 
     expect(tags).toEqual([
       {
@@ -69,14 +77,11 @@ describe("appKitDatabaseTypesPlugin", () => {
     await fs.writeFile(columnsPath, "export {};\n", "utf8");
 
     const plugin = appKitDatabaseTypesPlugin();
-    plugin.configResolved?.({
-      root: clientRoot,
-    } as Parameters<NonNullable<typeof plugin.configResolved>>[0]);
+    const configResolved = extractHook(plugin.configResolved);
+    configResolved?.call({} as never, { root: clientRoot } as never);
 
-    const tags =
-      typeof plugin.transformIndexHtml === "function"
-        ? plugin.transformIndexHtml("")
-        : plugin.transformIndexHtml?.transform("");
+    const transformIndexHtml = extractHook(plugin.transformIndexHtml);
+    const tags = transformIndexHtml?.call({} as never, "", {} as never);
 
     expect(tags).toEqual([
       {
