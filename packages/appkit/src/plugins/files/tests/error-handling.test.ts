@@ -77,7 +77,7 @@ describe("FilesPlugin error handling", () => {
   });
 
   describe("_handleApiError", () => {
-    test("AuthenticationError returns 401 with error message", async () => {
+    test("AuthenticationError returns generic 401 (raw message stays server-side)", async () => {
       const plugin = new FilesPlugin(VOLUMES_CONFIG);
       const res = mockRes();
 
@@ -89,12 +89,12 @@ describe("FilesPlugin error handling", () => {
 
       expect(res.status).toHaveBeenCalledWith(401);
       expect(res.json).toHaveBeenCalledWith({
-        error: "Missing token",
+        error: "Unauthorized",
         plugin: "files",
       });
     });
 
-    test("ApiError with 4xx status preserves status and message", () => {
+    test("ApiError with 4xx returns standard status text (raw message stays server-side)", () => {
       const plugin = new FilesPlugin(VOLUMES_CONFIG);
       const res = mockRes();
 
@@ -112,7 +112,7 @@ describe("FilesPlugin error handling", () => {
       });
     });
 
-    test("ApiError with 404 preserves status", () => {
+    test("ApiError with 404 returns standard status text", () => {
       const plugin = new FilesPlugin(VOLUMES_CONFIG);
       const res = mockRes();
 
@@ -124,13 +124,13 @@ describe("FilesPlugin error handling", () => {
 
       expect(res.status).toHaveBeenCalledWith(404);
       expect(res.json).toHaveBeenCalledWith({
-        error: "Not found",
+        error: "Not Found",
         statusCode: 404,
         plugin: "files",
       });
     });
 
-    test("ApiError with 409 Conflict preserves status", () => {
+    test("ApiError with 409 Conflict returns standard status text", () => {
       const plugin = new FilesPlugin(VOLUMES_CONFIG);
       const res = mockRes();
 
@@ -212,8 +212,13 @@ describe("FilesPlugin error handling", () => {
       });
     });
 
-    test("AuthenticationError via route (missing identity headers in production)", async () => {
-      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+    test("AuthenticationError via route returns generic 401 on OBO volume without token", async () => {
+      process.env.DATABRICKS_VOLUME_OBO = "/Volumes/catalog/schema/obo";
+      const plugin = new FilesPlugin({
+        volumes: {
+          obo: { auth: "on-behalf-of-user", policy: () => true },
+        },
+      });
       const handler = getRouteHandler(plugin, "get", "/list");
       const res = mockRes();
 
@@ -223,7 +228,7 @@ describe("FilesPlugin error handling", () => {
       try {
         await handler(
           {
-            params: { volumeKey: "uploads" },
+            params: { volumeKey: "obo" },
             query: {},
             headers: {},
             header: () => undefined,
@@ -232,14 +237,13 @@ describe("FilesPlugin error handling", () => {
         );
 
         expect(res.status).toHaveBeenCalledWith(401);
-        expect(res.json).toHaveBeenCalledWith(
-          expect.objectContaining({
-            error: expect.stringContaining("x-forwarded-user"),
-            plugin: "files",
-          }),
-        );
+        expect(res.json).toHaveBeenCalledWith({
+          error: "Unauthorized",
+          plugin: "files",
+        });
       } finally {
         process.env.NODE_ENV = originalEnv;
+        delete process.env.DATABRICKS_VOLUME_OBO;
       }
     });
   });
