@@ -97,7 +97,16 @@
     "@types/json-schema": "7.0.15",
     "@types/pg": "8.16.0",
     "@types/ws": "8.18.1",
-    "@vitejs/plugin-react": "5.1.1"
+    "@vitejs/plugin-react": "5.1.1",
+    "drizzle-orm": "0.45.2"
+  },
+  "peerDependencies": {
+    "drizzle-orm": ">=0.34.0"
+  },
+  "peerDependenciesMeta": {
+    "drizzle-orm": {
+      "optional": true
+    }
   },
   "overrides": {
     "vite": "npm:rolldown-vite@7.1.14"

@@ -42,6 +42,10 @@ DATABRICKS_APP_PORT=8000
 #### Lakebase Configuration
 
 The Lakebase plugin requires additional environment variables for PostgreSQL connectivity. To learn how to configure the Lakebase plugin, see the [Lakebase plugin documentation](https://www.databricks.com/devhub/docs/appkit/v0/plugins/lakebase).
+
+This template uses [Drizzle ORM](https://orm.drizzle.team/) for type-safe database queries. Schema definitions are in `server/db/schema.ts`. For migrations:
+- **Development:** `npm run db:push` (pushes schema directly to database)
+- **Production:** `npm run db:generate && npm run db:migrate` (versioned migrations)
 {{- end}}
 
 ### CLI Authentication
@@ -190,11 +194,17 @@ databricks bundle deploy -t prod
   * public/        # Static assets
 * server/          # Express backend
   * server.ts      # Server entry point
+{{- if .plugins.lakebase}}
+  * db/            # Database schema and client (Drizzle ORM)
+{{- end}}
   * routes/        # Routes
 * shared/          # Shared types
 {{- if .plugins.analytics}}
 * config/          # Configuration
   * queries/       # SQL query files
+{{- end}}
+{{- if .plugins.lakebase}}
+* drizzle.config.ts # Drizzle Kit migration config
 {{- end}}
 * databricks.yml   # Bundle configuration
 * app.yaml         # App configuration

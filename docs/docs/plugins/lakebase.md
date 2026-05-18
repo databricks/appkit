@@ -39,33 +39,116 @@ await createApp({
 });
 ```
 
+## Drizzle ORM (default)
+
+Apps scaffolded with the Lakebase plugin use [Drizzle ORM](https://orm.drizzle.team/) for type-safe database queries. The Lakebase plugin provides a built-in `drizzle()` helper that creates a fully-typed Drizzle instance backed by the connection pool.
+
+### Schema definition
+
+Define your tables in `server/db/schema.ts`:
+
+```ts
+import { boolean, pgSchema, serial, text, timestamp } from "drizzle-orm/pg-core";
+
+export const appSchema = pgSchema("app");
+
+export const todos = appSchema.table("todos", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  completed: boolean("completed").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Inferred types for insert and select operations
+export type Todo = typeof todos.$inferSelect;
+export type NewTodo = typeof todos.$inferInsert;
+```
+
+### Initialization
+
+```ts
+import { createApp, lakebase, server } from "@databricks/appkit";
+import * as schema from "./db/schema";
+
+const AppKit = await createApp({
+  plugins: [server(), lakebase()],
+  async onPluginsReady(appkit) {
+    const db = await appkit.lakebase.drizzle(schema);
+
+    // Type-safe queries
+    const allTodos = await db.select().from(schema.todos);
+  },
+});
+```
+
+### Type-safe queries
+
+```ts
+import { eq, desc, not } from "drizzle-orm";
+import { todos } from "./db/schema";
+
+// Select
+const allTodos = await db.select().from(todos).orderBy(desc(todos.createdAt));
+
+// Insert
+const [created] = await db.insert(todos).values({ title: "New todo" }).returning();
+
+// Update (toggle boolean)
+const [updated] = await db
+  .update(todos)
+  .set({ completed: not(todos.completed) })
+  .where(eq(todos.id, 1))
+  .returning();
+
+// Delete
+await db.delete(todos).where(eq(todos.id, 1));
+```
+
+### Migrations with drizzle-kit
+
+The template includes [drizzle-kit](https://orm.drizzle.team/docs/kit-overview) for schema migrations:
+
+```bash
+npm run db:push       # Push schema directly to database (development)
+npm run db:generate   # Generate SQL migration files (production)
+npm run db:migrate    # Apply pending migrations (production)
+```
+
+:::note
+`drizzle-kit` requires password authentication. Lakebase supports it alongside OAuth — enable it in the Lakebase UI under **Branch Overview** → **Authentication**.
+:::
+
+### OBO with Drizzle
+
+On-Behalf-Of (OBO) works transparently with Drizzle. The Drizzle instance wraps AppKit's `RoutingPool`, which automatically routes queries to the per-user pool when inside `asUser(req)`:
+
+```ts
+app.get("/api/my-todos", async (req, res) => {
+  const userDb = await AppKit.lakebase.asUser(req).drizzle(schema);
+  const myTodos = await userDb.select().from(todos);
+  res.json(myTodos);
+});
+```
+
 ## Accessing the pool
 
-After initialization, access Lakebase through the `AppKit.lakebase` object:
+For raw SQL queries or integration with other ORMs, access the pool directly:
 
 ```ts
 const AppKit = await createApp({
   plugins: [server(), lakebase()],
 });
 
-await AppKit.lakebase.query(`CREATE SCHEMA IF NOT EXISTS app`);
-
-await AppKit.lakebase.query(`CREATE TABLE IF NOT EXISTS app.orders (
-  id SERIAL PRIMARY KEY,
-  user_id VARCHAR(255) NOT NULL,
-  amount DECIMAL(10, 2) NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)`);
-
+// Raw SQL queries
 const result = await AppKit.lakebase.query(
   "SELECT * FROM app.orders WHERE user_id = $1",
   [userId],
 );
 
-// Raw pg.Pool (for ORMs or advanced usage)
+// Raw pg.Pool (for other ORMs or advanced usage)
 const pool = AppKit.lakebase.pool;
 
-// ORM-ready config objects
+// ORM-ready config objects (for TypeORM, Sequelize, etc.)
 const ormConfig = AppKit.lakebase.getOrmConfig();  // { host, port, database, ... }
 const pgConfig = AppKit.lakebase.getPgConfig();    // pg.PoolConfig
 ```

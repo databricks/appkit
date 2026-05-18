@@ -15,7 +15,7 @@ interface Todo {
   id: number;
   title: string;
   completed: boolean;
-  created_at: string;
+  createdAt: string;
 }
 
 export function LakebasePage() {

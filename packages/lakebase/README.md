@@ -188,12 +188,23 @@ When used with AppKit, logging is automatically configured - see the [AppKit Int
 
 ```typescript
 import { drizzle } from "drizzle-orm/node-postgres";
+import { pgSchema, serial, text, timestamp } from "drizzle-orm/pg-core";
 import { createLakebasePool } from "@databricks/lakebase";
 
-const pool = createLakebasePool();
-const db = drizzle(pool);
+// Define schema
+const appSchema = pgSchema("app");
+const users = appSchema.table("users", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
-const users = await db.select().from(usersTable);
+// Create Drizzle instance
+const pool = createLakebasePool();
+const db = drizzle({ client: pool, schema: { users } });
+
+// Type-safe queries
+const allUsers = await db.select().from(users);
 ```
 
 ### Prisma

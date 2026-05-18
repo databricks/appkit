@@ -29,6 +29,6 @@
     "docs/**",
     ".github/scripts/**"
   ],
-  "ignoreDependencies": ["json-schema-to-typescript"],
+  "ignoreDependencies": ["json-schema-to-typescript", "drizzle-orm"],
   "ignoreBinaries": ["tarball", "appkit"]
 }

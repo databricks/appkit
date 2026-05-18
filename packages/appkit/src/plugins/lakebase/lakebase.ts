@@ -296,12 +296,54 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
    * Use `AppKit.lakebase.asUser(req)` to get the same API backed by a per-user pool.
    */
   exports() {
+    const pool = this.pool!;
     return {
       // biome-ignore lint/style/noNonNullAssertion: pool is guaranteed non-null after setup(), which AppKit always awaits before exposing the plugin API
-      pool: this.pool! as LakebasePool,
+      pool: pool as LakebasePool,
       query: this.query.bind(this),
       getOrmConfig: () => getLakebaseOrmConfig(this.activePoolConfig()),
       getPgConfig: () => getLakebasePgConfig(this.activePoolConfig()),
+      /**
+       * Creates a Drizzle ORM instance backed by the Lakebase connection pool.
+       *
+       * Requires `drizzle-orm` as a dependency in your project (`npm install drizzle-orm`).
+       * The module is loaded lazily via dynamic `import()` — zero cost if this method is never called.
+       *
+       * The returned Drizzle instance uses AppKit's {@link RoutingPool}, so queries automatically
+       * route to the service-principal pool or per-user pool based on `asUser(req)` context.
+       *
+       * @param schema - Optional Drizzle schema object for relational query support and type inference
+       * @returns A fully-typed `NodePgDatabase` instance
+       *
+       * @example
+       * ```ts
+       * import * as schema from './db/schema';
+       * const db = await AppKit.lakebase.drizzle(schema);
+       * const todos = await db.select().from(schema.todos);
+       * ```
+       */
+      drizzle: async <TSchema extends Record<string, unknown>>(
+        schema?: TSchema,
+      ) => {
+        try {
+          const mod = await import("drizzle-orm/node-postgres");
+          return mod.drizzle({
+            client: pool as any,
+            ...(schema ? { schema } : {}),
+          });
+        } catch (err: unknown) {
+          if (
+            err instanceof Error &&
+            (err.message.includes("Cannot find module") ||
+              err.message.includes("ERR_MODULE_NOT_FOUND"))
+          ) {
+            throw new Error(
+              "drizzle-orm is required for appkit.lakebase.drizzle(). Install it: npm install drizzle-orm",
+            );
+          }
+          throw err;
+        }
+      },
     };
   }
 }
