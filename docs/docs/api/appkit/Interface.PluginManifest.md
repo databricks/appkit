@@ -154,35 +154,6 @@ Omit.onSetupMessage
 
 ***
 
-### postScaffold?
-
-```ts
-optional postScaffold: {
-  instruction: string;
-  required?: boolean;
-}[];
-```
-
-#### instruction
-
-```ts
-instruction: string;
-```
-
-#### required?
-
-```ts
-optional required: boolean;
-```
-
-#### Inherited from
-
-```ts
-Omit.postScaffold
-```
-
-***
-
 ### repository?
 
 ```ts
@@ -223,6 +194,54 @@ required: Omit<ResourceRequirement, "required">[];
 ```
 
 Resources that must be available for the plugin to function
+
+***
+
+### scaffolding?
+
+```ts
+optional scaffolding: {
+  rules?: {
+     must?: string[];
+     never?: string[];
+     should?: string[];
+  };
+};
+```
+
+#### rules?
+
+```ts
+optional rules: {
+  must?: string[];
+  never?: string[];
+  should?: string[];
+};
+```
+
+##### rules.must?
+
+```ts
+optional must: string[];
+```
+
+##### rules.never?
+
+```ts
+optional never: string[];
+```
+
+##### rules.should?
+
+```ts
+optional should: string[];
+```
+
+#### Inherited from
+
+```ts
+Omit.scaffolding
+```
 
 ***
 

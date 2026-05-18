@@ -566,27 +566,89 @@ export const configSchemaSchema: z.ZodType = z.lazy(() =>
     .strict(),
 );
 
-// ── Post-scaffold step ───────────────────────────────────────────────────
+// ── Plugin-level scaffolding rules ───────────────────────────────────────
 
-export const postScaffoldStepSchema = z
+/**
+ * Per-item upper bound on plugin-level scaffolding rule strings. Matches the
+ * template-level `SCAFFOLDING_RULE_MAX_LENGTH` defined below — rules at both
+ * levels are short directives, not prose. The literal value lives here (and
+ * not by reference to the template-side constant) because this declaration
+ * is read in source order and the template constant is declared later.
+ */
+const PLUGIN_SCAFFOLDING_RULE_MAX_LENGTH = 120;
+
+const pluginScaffoldingRuleItemSchema = z
+  .string()
+  .min(1)
+  .max(
+    PLUGIN_SCAFFOLDING_RULE_MAX_LENGTH,
+    `rule entries must be ≤ ${PLUGIN_SCAFFOLDING_RULE_MAX_LENGTH} chars`,
+  );
+
+export const pluginScaffoldingRulesSchema = z
   .object({
-    instruction: z
-      .string()
-      .min(1)
-      .max(200, "instruction must be ≤ 200 chars")
-      .describe(
-        "Human-readable instruction for the user to follow after scaffolding.",
-      ),
-    required: z
-      .boolean()
+    must: z
+      .array(pluginScaffoldingRuleItemSchema)
       .optional()
-      .describe(
-        "Whether this step is required for the plugin to function correctly.",
-      ),
+      .describe("Actions the scaffolding agent must always perform."),
+    should: z
+      .array(pluginScaffoldingRuleItemSchema)
+      .optional()
+      .describe("Recommended actions for the scaffolding agent."),
+    never: z
+      .array(pluginScaffoldingRuleItemSchema)
+      .optional()
+      .describe("Actions the scaffolding agent must never perform."),
   })
   .strict()
+  .superRefine((rules, ctx) => {
+    // (a) Reject duplicate entries within any single array.
+    const buckets: Array<["must" | "should" | "never", string[] | undefined]> =
+      [
+        ["must", rules.must],
+        ["should", rules.should],
+        ["never", rules.never],
+      ];
+    for (const [bucketName, items] of buckets) {
+      if (!items) continue;
+      const seen = new Map<string, number>();
+      items.forEach((item, idx) => {
+        const prev = seen.get(item);
+        if (prev === undefined) {
+          seen.set(item, idx);
+          return;
+        }
+        ctx.addIssue({
+          code: "custom",
+          path: [bucketName, idx],
+          message: `duplicate rule entry: "${item}" already declared at index ${prev}`,
+        });
+      });
+    }
+    // (b) Reject a string that appears in more than one of must/should/never.
+    type Bucket = "must" | "should" | "never";
+    const owner = new Map<string, Bucket>();
+    for (const [bucketName, items] of buckets) {
+      if (!items) continue;
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const existing = owner.get(item);
+        if (existing === undefined) {
+          owner.set(item, bucketName);
+          continue;
+        }
+        if (existing !== bucketName) {
+          ctx.addIssue({
+            code: "custom",
+            path: [bucketName, i],
+            message: `rule entry "${item}" appears in both '${existing}' and '${bucketName}'; rules must belong to exactly one bucket`,
+          });
+        }
+      }
+    }
+  })
   .describe(
-    "A post-scaffolding instruction shown to the user after project initialization.",
+    "Structured rules for scaffolding agents declared at the plugin level. Each rule is a short directive (≤120 chars).",
   );
 
 // ── Plugin manifest (root) ───────────────────────────────────────────────
@@ -666,11 +728,18 @@ export const pluginManifestSchema = z
       .describe(
         "Plugin stability level. Beta plugins may have breaking API changes between minor releases but are on a path to GA. GA (general availability) plugins follow semver strictly.",
       ),
-    postScaffold: z
-      .array(postScaffoldStepSchema)
+    scaffolding: z
+      .object({
+        rules: pluginScaffoldingRulesSchema
+          .optional()
+          .describe(
+            "Structured rules for scaffolding agents declared at the plugin level.",
+          ),
+      })
+      .strict()
       .optional()
       .describe(
-        "Ordered list of post-scaffolding instructions shown to the user after project initialization. Array position determines display order.",
+        "Plugin-level scaffolding metadata consumed by scaffolding agents. Symmetric with template-level `scaffolding`.",
       ),
   })
   .strict()
@@ -856,11 +925,18 @@ export const templatePluginSchema = z
       .describe(
         "Plugin stability level. Beta is heading to GA; APIs may change between minor releases. GA (general availability) follows semver.",
       ),
-    postScaffold: z
-      .array(postScaffoldStepSchema)
+    scaffolding: z
+      .object({
+        rules: pluginScaffoldingRulesSchema
+          .optional()
+          .describe(
+            "Structured rules for scaffolding agents propagated from the plugin manifest.",
+          ),
+      })
+      .strict()
       .optional()
       .describe(
-        "Ordered list of post-scaffolding instructions propagated from the plugin manifest.",
+        "Plugin-level scaffolding metadata propagated from the plugin manifest.",
       ),
     resources: z
       .object({
@@ -920,6 +996,12 @@ export const scaffoldingRulesSchema = z
       .array(scaffoldingRuleItemSchema)
       .optional()
       .describe("Actions the scaffolding agent must always perform."),
+    should: z
+      .array(scaffoldingRuleItemSchema)
+      .optional()
+      .describe(
+        "Recommended actions for the scaffolding agent (parity with plugin-level rules).",
+      ),
   })
   .strict()
   .describe("Structured rules for scaffolding agents.");
@@ -1054,7 +1136,9 @@ export type ResourceFieldEntry = z.infer<typeof resourceFieldEntrySchema>;
 export type ResourceRequirement = z.infer<typeof resourceRequirementSchema>;
 export type ConfigSchemaProperty = z.infer<typeof configSchemaPropertySchema>;
 export type ConfigSchema = z.infer<typeof configSchemaSchema>;
-export type PostScaffoldStep = z.infer<typeof postScaffoldStepSchema>;
+export type PluginScaffoldingRules = z.infer<
+  typeof pluginScaffoldingRulesSchema
+>;
 export type PluginManifest = z.infer<typeof pluginManifestSchema>;
 export type Origin = z.infer<typeof originSchema>;
 // Template-side types use `z.input` so callers can construct a TemplatePlugin

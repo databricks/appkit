@@ -3,7 +3,7 @@ import type { JSONSchema7 } from "json-schema";
 import type {
   DiscoveryDescriptor,
   PluginManifest as GeneratedPluginManifest,
-  PostScaffoldStep,
+  PluginScaffoldingRules,
   ResourceFieldEntry,
 } from "./schemas/manifest";
 
@@ -11,7 +11,7 @@ import type {
 // Phase 4: sourced from `./schemas/manifest` (the Zod canonical) instead of
 // the legacy generated file, which has a stale `DiscoveryDescriptor` shape
 // (free-form vs. discriminated union after the Phase 4 reshape).
-export type { ResourceFieldEntry, DiscoveryDescriptor, PostScaffoldStep };
+export type { ResourceFieldEntry, DiscoveryDescriptor, PluginScaffoldingRules };
 
 /** Base plugin interface. */
 export interface BasePlugin {

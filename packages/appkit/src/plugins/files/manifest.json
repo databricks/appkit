@@ -26,16 +26,13 @@
     ],
     "optional": []
   },
-  "postScaffold": [
-    {
-      "instruction": "Verify your Unity Catalog volume exists and you have WRITE_VOLUME permission.",
-      "required": true
-    },
-    {
-      "instruction": "Set the DATABRICKS_VOLUME_FILES environment variable to the full volume path (e.g. /Volumes/catalog/schema/volume_name).",
-      "required": true
+  "scaffolding": {
+    "rules": {
+      "must": [
+        "Before init, verify your Unity Catalog volume exists and you have WRITE_VOLUME permission"
+      ]
     }
-  ],
+  },
   "config": {
     "schema": {
       "type": "object",

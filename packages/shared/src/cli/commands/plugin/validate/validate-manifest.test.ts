@@ -523,47 +523,30 @@ describe("validate-manifest", () => {
       expect(messages).toContain("<PROFILE>");
     });
 
-    it("rejects empty postScaffold instruction", () => {
+    it("rejects manifests that still carry the legacy postScaffold array", () => {
+      // After the substitutability-gate amendment, `postScaffold` no longer
+      // exists on the plugin manifest schema. The strict object should reject
+      // it as an unknown property, surfacing a clear failure for anyone
+      // migrating from a pre-cutover branch.
       const manifest = {
         ...VALID_MANIFEST,
-        postScaffold: [{ instruction: "" }],
+        postScaffold: [{ instruction: "Legacy step" }],
       };
       const result = validateManifest(manifest);
       expect(result.valid).toBe(false);
       const formatted = formatValidationErrors(result.errors ?? []);
-      expect(formatted).toContain("postScaffold[0].instruction");
-    });
-
-    it("rejects postScaffold instruction over 200 chars", () => {
-      const tooLong = "a".repeat(201);
-      const manifest = {
-        ...VALID_MANIFEST,
-        postScaffold: [{ instruction: tooLong }],
-      };
-      const result = validateManifest(manifest);
-      expect(result.valid).toBe(false);
-      const formatted = formatValidationErrors(result.errors ?? []);
-      expect(formatted).toContain("postScaffold[0].instruction");
-      expect(formatted).toContain("≤ 200 chars");
-    });
-
-    it("accepts postScaffold instruction at exactly 200 chars", () => {
-      const atMax = "a".repeat(200);
-      const manifest = {
-        ...VALID_MANIFEST,
-        postScaffold: [{ instruction: atMax }],
-      };
-      const result = validateManifest(manifest);
-      expect(result.valid).toBe(true);
+      expect(formatted).toMatch(/postScaffold|Unrecognized/);
     });
 
     it("passes for valid manifest with all new fields", () => {
       const manifest = {
         ...VALID_MANIFEST,
-        postScaffold: [
-          { instruction: "Run migrations", required: true },
-          { instruction: "Verify connectivity" },
-        ],
+        scaffolding: {
+          rules: {
+            must: ["Run migrations after init"],
+            should: ["Verify connectivity before first request"],
+          },
+        },
         resources: {
           required: [
             {
@@ -589,6 +572,87 @@ describe("validate-manifest", () => {
           ],
           optional: [],
         },
+      };
+      const result = validateManifest(manifest);
+      expect(result.valid).toBe(true);
+    });
+  });
+
+  describe("plugin scaffolding.rules (substitutability gate)", () => {
+    it("rejects a must[] entry exceeding 120 characters", () => {
+      const tooLong = "x".repeat(121);
+      const manifest = {
+        ...VALID_MANIFEST,
+        scaffolding: {
+          rules: { must: [tooLong] },
+        },
+      };
+      const result = validateManifest(manifest);
+      expect(result.valid).toBe(false);
+      const formatted = formatValidationErrors(result.errors ?? []);
+      expect(formatted).toContain("scaffolding.rules.must[0]");
+      expect(formatted).toMatch(/≤ 120 chars/);
+    });
+
+    it("accepts must[] entries at exactly 120 characters", () => {
+      const atMax = "x".repeat(120);
+      const manifest = {
+        ...VALID_MANIFEST,
+        scaffolding: {
+          rules: { must: [atMax] },
+        },
+      };
+      const result = validateManifest(manifest);
+      expect(result.valid).toBe(true);
+    });
+
+    it("rejects duplicate entries within the same rules bucket", () => {
+      const manifest = {
+        ...VALID_MANIFEST,
+        scaffolding: {
+          rules: {
+            must: ["Run migrations after init", "Run migrations after init"],
+          },
+        },
+      };
+      const result = validateManifest(manifest);
+      expect(result.valid).toBe(false);
+      const formatted = formatValidationErrors(result.errors ?? []);
+      expect(formatted).toMatch(/duplicate rule entry/);
+      expect(formatted).toContain("scaffolding.rules.must[1]");
+    });
+
+    it("rejects a string appearing in more than one rules bucket", () => {
+      const shared = "Run migrations after init";
+      const manifest = {
+        ...VALID_MANIFEST,
+        scaffolding: {
+          rules: {
+            must: [shared],
+            never: [shared],
+          },
+        },
+      };
+      const result = validateManifest(manifest);
+      expect(result.valid).toBe(false);
+      const formatted = formatValidationErrors(result.errors ?? []);
+      expect(formatted).toMatch(/exactly one bucket/);
+      expect(formatted).toMatch(/scaffolding\.rules\.(must|never|should)\[0\]/);
+    });
+
+    it("accepts an empty scaffolding.rules block", () => {
+      const manifest = {
+        ...VALID_MANIFEST,
+        scaffolding: { rules: {} },
+      };
+      const result = validateManifest(manifest);
+      expect(result.valid).toBe(true);
+    });
+
+    it("accepts a scaffolding object without rules", () => {
+      const manifest = {
+        ...VALID_MANIFEST,
+        scaffolding: {},
       };
       const result = validateManifest(manifest);
       expect(result.valid).toBe(true);

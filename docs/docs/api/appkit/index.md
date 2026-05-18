@@ -8,7 +8,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | Enumeration | Description |
 | ------ | ------ |
 | [RequestedClaimsPermissionSet](Enumeration.RequestedClaimsPermissionSet.md) | Permission set for Unity Catalog table access |
-| [ResourceType](Enumeration.ResourceType.md) | Resource types from schema $defs.resourceType.enum |
+| [ResourceType](Enumeration.ResourceType.md) | Resource types from resourceTypeSchema.options |
 
 ## Classes
 
@@ -65,8 +65,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [RequestedClaims](Interface.RequestedClaims.md) | Optional claims for fine-grained Unity Catalog table permissions When specified, the returned token will be scoped to only the requested tables |
 | [RequestedResource](Interface.RequestedResource.md) | Resource to request permissions for in Unity Catalog |
 | [ResourceEntry](Interface.ResourceEntry.md) | Internal representation of a resource in the registry. Extends ResourceRequirement with resolution state and plugin ownership. |
-| [ResourceFieldEntry](Interface.ResourceFieldEntry.md) | Defines a single field for a resource. Each field has its own environment variable and optional description. Single-value types use one key (e.g. id); multi-value types (database, secret) use multiple (e.g. instance_name, database_name or scope, key). |
-| [ResourceRequirement](Interface.ResourceRequirement.md) | Declares a resource requirement for a plugin. Can be defined statically in a manifest or dynamically via getResourceRequirements(). Narrows the generated base: type → ResourceType enum, permission → ResourcePermission union. |
+| [ResourceRequirement](Interface.ResourceRequirement.md) | Declares a resource requirement for a plugin. Can be defined statically in a manifest or dynamically via getResourceRequirements(). |
 | [RunAgentInput](Interface.RunAgentInput.md) | - |
 | [RunAgentResult](Interface.RunAgentResult.md) | - |
 | [ServingEndpointEntry](Interface.ServingEndpointEntry.md) | Shape of a single registry entry. |
@@ -103,6 +102,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [PluginData](TypeAlias.PluginData.md) | Tuple of plugin class, config, and name. Created by `toPlugin()` and passed to `createApp()`. |
 | [Plugins](TypeAlias.Plugins.md) | Plugin map passed to the function form of [AgentDefinition.tools](Interface.AgentDefinition.md#tools). Each entry exposes a `.toolkit(opts?)` method that returns a record of [ToolkitEntry](Interface.ToolkitEntry.md) markers ready to be spread into a tool record. |
 | [ResolvedToolEntry](TypeAlias.ResolvedToolEntry.md) | Internal tool-index entry after a tool record has been resolved to a dispatchable form. |
+| [ResourceFieldEntry](TypeAlias.ResourceFieldEntry.md) | - |
 | [ResourcePermission](TypeAlias.ResourcePermission.md) | Union of all possible permission levels across all resource types. |
 | [ServingFactory](TypeAlias.ServingFactory.md) | Factory function returned by `AppKit.serving`. |
 | [ToolRegistry](TypeAlias.ToolRegistry.md) | - |

@@ -25,16 +25,16 @@
     ],
     "optional": []
   },
-  "postScaffold": [
-    {
-      "instruction": "Ensure your SQL Warehouse is running and accessible from your workspace.",
-      "required": true
-    },
-    {
-      "instruction": "Create a config/queries/ directory and add .sql files for your analytics queries.",
-      "required": false
+  "scaffolding": {
+    "rules": {
+      "must": [
+        "Before init, ensure the SQL Warehouse passed via --set analytics.sql-warehouse.id is running"
+      ],
+      "should": [
+        "After init, ensure config/queries/ has at least one .sql file before running npm run typegen"
+      ]
     }
-  ],
+  },
   "config": {
     "schema": {
       "type": "object",

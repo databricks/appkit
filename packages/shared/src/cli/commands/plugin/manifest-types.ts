@@ -13,7 +13,7 @@ export type {
   DiscoveryDescriptor,
   Origin,
   PluginManifest,
-  PostScaffoldStep,
+  PluginScaffoldingRules,
   ResourceFieldEntry,
   ResourceKind,
   ResourceRequirement,

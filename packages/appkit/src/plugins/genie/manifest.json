@@ -28,16 +28,13 @@
     ],
     "optional": []
   },
-  "postScaffold": [
-    {
-      "instruction": "Configure the 'spaces' map in your plugin config with alias-to-Space-ID mappings.",
-      "required": true
-    },
-    {
-      "instruction": "Ensure your Genie Space(s) are configured with the appropriate data tables and instructions.",
-      "required": false
+  "scaffolding": {
+    "rules": {
+      "must": [
+        "After init, configure the 'spaces' map in plugin config with alias-to-Space-ID mappings"
+      ]
     }
-  ],
+  },
   "config": {
     "schema": {
       "type": "object",

@@ -97,8 +97,8 @@ async function loadPluginEntry(
         manifest.stability !== "ga" && {
           stability: manifest.stability,
         }),
-      ...(manifest.postScaffold && {
-        postScaffold: manifest.postScaffold,
+      ...(manifest.scaffolding && {
+        scaffolding: manifest.scaffolding,
       }),
     },
   ];
@@ -433,8 +433,8 @@ async function scanForPlugins(
           manifest.stability !== "ga" && {
             stability: manifest.stability,
           }),
-        ...(manifest.postScaffold && {
-          postScaffold: manifest.postScaffold,
+        ...(manifest.scaffolding && {
+          scaffolding: manifest.scaffolding,
         }),
       } satisfies TemplatePlugin;
     }

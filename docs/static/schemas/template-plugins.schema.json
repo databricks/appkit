@@ -54,27 +54,46 @@
             "type": "string",
             "enum": ["beta", "ga"]
           },
-          "postScaffold": {
-            "description": "Ordered list of post-scaffolding instructions propagated from the plugin manifest.",
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "instruction": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 200,
-                  "description": "Human-readable instruction for the user to follow after scaffolding."
+          "scaffolding": {
+            "description": "Plugin-level scaffolding metadata propagated from the plugin manifest.",
+            "type": "object",
+            "properties": {
+              "rules": {
+                "description": "Structured rules for scaffolding agents propagated from the plugin manifest.",
+                "type": "object",
+                "properties": {
+                  "must": {
+                    "description": "Actions the scaffolding agent must always perform.",
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    }
+                  },
+                  "should": {
+                    "description": "Recommended actions for the scaffolding agent.",
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    }
+                  },
+                  "never": {
+                    "description": "Actions the scaffolding agent must never perform.",
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    }
+                  }
                 },
-                "required": {
-                  "description": "Whether this step is required for the plugin to function correctly.",
-                  "type": "boolean"
-                }
-              },
-              "required": ["instruction"],
-              "additionalProperties": false,
-              "description": "A post-scaffolding instruction shown to the user after project initialization."
-            }
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
           },
           "resources": {
             "type": "object",
@@ -4624,6 +4643,14 @@
             },
             "must": {
               "description": "Actions the scaffolding agent must always perform.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 120
+              }
+            },
+            "should": {
+              "description": "Recommended actions for the scaffolding agent (parity with plugin-level rules).",
               "type": "array",
               "items": {
                 "type": "string",
