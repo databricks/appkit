@@ -193,8 +193,10 @@ function generateUnknownResultQuery(sql: string, queryName: string): string {
 
 export function extractParameterTypes(sql: string): Record<string, string> {
   const paramTypes: Record<string, string> = {};
+  // Alternation order matters: TIMESTAMP_NTZ must precede TIMESTAMP so the
+  // regex engine doesn't greedy-match TIMESTAMP and leave `_NTZ` unconsumed.
   const regex =
-    /--\s*@param\s+(\w+)\s+(STRING|NUMERIC|BOOLEAN|DATE|TIMESTAMP|BINARY)/gi;
+    /--\s*@param\s+(\w+)\s+(STRING|NUMERIC|DECIMAL|BIGINT|TINYINT|SMALLINT|INT|FLOAT|DOUBLE|BOOLEAN|DATE|TIMESTAMP_NTZ|TIMESTAMP|BINARY)\b/gi;
   const matches = sql.matchAll(regex);
   for (const match of matches) {
     const [, paramName, paramType] = match;
@@ -207,7 +209,15 @@ export function extractParameterTypes(sql: string): Record<string, string> {
 export function defaultForType(sqlType: string | undefined): string {
   switch (sqlType?.toUpperCase()) {
     case "NUMERIC":
+    case "DECIMAL":
+    case "BIGINT":
+    case "TINYINT":
+    case "SMALLINT":
+    case "INT":
       return "0";
+    case "FLOAT":
+    case "DOUBLE":
+      return "0.0";
     case "STRING":
       return "''";
     case "BOOLEAN":
@@ -216,6 +226,8 @@ export function defaultForType(sqlType: string | undefined): string {
       return "'2000-01-01'";
     case "TIMESTAMP":
       return "'2000-01-01T00:00:00Z'";
+    case "TIMESTAMP_NTZ":
+      return "'2000-01-01T00:00:00'";
     case "BINARY":
       return "X'00'";
     default:

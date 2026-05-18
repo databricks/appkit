@@ -1,1 +1,40 @@
 @import "@databricks/appkit-ui/styles.css";
+
+/**
+ * Realign Tailwind v4's `dark:` variant with appkit-ui's theme tokens.
+ *
+ * `packages/appkit-ui/.../globals.css` defines two paths into dark theme:
+ *   - An explicit `.dark` class on <html> (wins unconditionally).
+ *   - `@media (prefers-color-scheme: dark)` on `:root:not(.light)` — i.e.
+ *     the media query is ignored when the user has explicitly opted into
+ *     light via the `.light` class.
+ *
+ * Tailwind v4's default `dark:` variant, however, is purely media-query
+ * driven. That mismatch produces a split-personality theme in exactly one
+ * scenario, which is the one we hit: OS set to dark, user forces light
+ * via the theme selector (bootstrap script in index.html sets
+ * `<html class="light">`). `--card`, `--background`, etc. correctly
+ * resolve to light, but every `dark:*` utility keeps firing under the
+ * media query — cards end up with dark-mode backgrounds layered under
+ * light-mode text and chrome.
+ *
+ * This `@custom-variant dark` rebinds the variant to mirror the token
+ * logic exactly:
+ *   - Element is (or descends from) `.dark`      → dark utilities fire.
+ *   - `prefers-color-scheme: dark` AND no `.light` ancestor → also fire.
+ *   - Everything else                            → no-op.
+ *
+ * Scoped to the playground because the bootstrap script in index.html is
+ * what makes the `.light` / `.dark` classes meaningful here; other
+ * appkit-ui consumers may rely on the current media-only behaviour.
+ */
+@custom-variant dark {
+  &:where(.dark, .dark *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:not(.light):not(.light *)) {
+      @slot;
+    }
+  }
+}

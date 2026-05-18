@@ -30,16 +30,10 @@ This command generates static content into the `build` directory and can be serv
 
 ## Deployment
 
-Using SSH:
+Documentation is published on [DevHub](https://www.databricks.com/devhub/docs/appkit/v0/). GitHub Pages (`databricks.github.io/appkit/`) automatically redirects all existing URLs to DevHub via `.github/workflows/docs-deploy.yml`.
 
-```bash
-USE_SSH=true pnpm deploy
-```
+The `pnpm build` command:
+1. Runs `docusaurus build` — generates HTML, `llms.txt`, and `.md` files
+2. Runs `apply-redirects` — replaces HTML pages with redirect pages pointing to DevHub
 
-Not using SSH:
-
-```bash
-GIT_USER=<Your GitHub username> pnpm deploy
-```
-
-If you are using GitHub pages for hosting, this command is a convenient way to build the website and push to the `gh-pages` branch.
+Static files remain served from GitHub Pages: JSON schemas (`/schemas/`), `llms.txt`, and `.md` files (used by `npx @databricks/appkit docs` for npm-bundled documentation).

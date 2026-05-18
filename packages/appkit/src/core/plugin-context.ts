@@ -164,7 +164,12 @@ export class PluginContext {
    * The context:
    * 1. Resolves the plugin by name
    * 2. Calls `asUser(req)` for user-scoped execution
-   * 3. Wraps the call in a telemetry span with a 30s timeout
+   * 3. Wraps the call in a telemetry span with a configurable timeout
+   *
+   * @param timeoutMs Per-call timeout. Defaults to 5 minutes — the floor
+   *   for cold SQL Warehouse round-trips, long Genie conversations, and
+   *   busy serverless Lakebase queries. The agents plugin overrides this
+   *   per-app via `agents({ limits: { toolCallTimeoutMs } })`.
    */
   async executeTool(
     req: express.Request,
@@ -172,6 +177,7 @@ export class PluginContext {
     toolName: string,
     args: unknown,
     signal?: AbortSignal,
+    timeoutMs: number = 300_000,
   ): Promise<unknown> {
     const provider = this.toolProviders.get(pluginName);
     if (!provider) {
@@ -184,8 +190,7 @@ export class PluginContext {
     const operationName = `executeTool:${pluginName}.${toolName}`;
 
     return tracer.startActiveSpan(operationName, async (span) => {
-      const timeout = 30_000;
-      const timeoutSignal = AbortSignal.timeout(timeout);
+      const timeoutSignal = AbortSignal.timeout(timeoutMs);
       const combinedSignal = signal
         ? AbortSignal.any([signal, timeoutSignal])
         : timeoutSignal;

@@ -29,14 +29,14 @@ function makePlugin(): AnalyticsPlugin {
   return new AnalyticsPlugin({});
 }
 
-describe("AnalyticsPlugin.query agent tool — readOnly annotation", () => {
-  test("is advertised with readOnly:true and requiresUserContext:true", () => {
+describe("AnalyticsPlugin.query agent tool — annotations", () => {
+  test('is advertised with effect:"read" and requiresUserContext:true', () => {
     const plugin = makePlugin();
     const defs = plugin.getAgentTools();
     const query = defs.find((d) => d.name === "query");
     expect(query).toBeDefined();
     expect(query?.annotations).toEqual({
-      readOnly: true,
+      effect: "read",
       requiresUserContext: true,
     });
   });

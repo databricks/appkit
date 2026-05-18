@@ -286,6 +286,41 @@ describe("PluginContext", () => {
       const callArgs = (provider.executeAgentTool as any).mock.calls[0];
       expect(callArgs[2]).toBeDefined();
     });
+
+    test("aborts the call once `timeoutMs` elapses", async () => {
+      // Defaults previously hardcoded 30s in PluginContext, which truncated
+      // legitimate cold-warehouse SQL queries. The default is now 5 minutes
+      // and per-call configurable; assert the configured value actually
+      // drives the AbortSignal so the timeout knob has bite.
+      vi.useFakeTimers();
+      try {
+        const provider = createMockToolProvider();
+        // Resolve only when the inbound signal aborts, so the test can
+        // observe the timeout firing.
+        (provider.executeAgentTool as any).mockImplementation(
+          (_name: string, _args: unknown, signal: AbortSignal | undefined) =>
+            new Promise((_, reject) => {
+              signal?.addEventListener("abort", () =>
+                reject(new Error("Aborted")),
+              );
+            }),
+        );
+        ctx.registerToolProvider("analytics", provider);
+
+        const pending = ctx.executeTool(
+          { headers: {} } as any,
+          "analytics",
+          "query",
+          {},
+          undefined,
+          50,
+        );
+        await vi.advanceTimersByTimeAsync(60);
+        await expect(pending).rejects.toThrow();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe("lifecycle hooks", () => {

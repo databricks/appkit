@@ -1,4 +1,5 @@
 import type { AgentToolDefinition } from "shared";
+import { applyToolkitOptions } from "./toolkit-options";
 import type { ToolRegistry } from "./tools/define-tool";
 import { toToolJSONSchema } from "./tools/json-schema";
 import type { ToolkitEntry, ToolkitOptions } from "./types";
@@ -22,19 +23,11 @@ export function buildToolkitEntries(
   registry: ToolRegistry,
   opts: ToolkitOptions = {},
 ): Record<string, ToolkitEntry> {
-  const prefix = opts.prefix ?? `${pluginName}.`;
-  const only = opts.only ? new Set(opts.only) : null;
-  const except = opts.except ? new Set(opts.except) : null;
-  const rename = opts.rename ?? {};
-
   const out: Record<string, ToolkitEntry> = {};
 
   for (const [localName, entry] of Object.entries(registry)) {
-    if (only && !only.has(localName)) continue;
-    if (except?.has(localName)) continue;
-
-    const keyAfterPrefix = `${prefix}${localName}`;
-    const key = rename[localName] ?? keyAfterPrefix;
+    const key = applyToolkitOptions(localName, pluginName, opts);
+    if (key === null) continue;
 
     const parameters = toToolJSONSchema(
       entry.schema,

@@ -5,7 +5,8 @@
   "scripts": {
     "docusaurus": "docusaurus",
     "dev": "pnpm run gen && docusaurus start --no-open",
-    "build": "pnpm run gen && docusaurus build",
+    "build": "pnpm run gen && docusaurus build && pnpm run apply-redirects",
+    "apply-redirects": "tsx scripts/apply-redirects.ts",
     "gen": "pnpm run build-appkit-ui-styles && pnpm run generate-component-docs && pnpm run copy-schemas",
     "build-appkit-ui-styles": "tsx scripts/build-appkit-ui-styles.ts",
     "copy-schemas": "tsx scripts/copy-schemas.ts",

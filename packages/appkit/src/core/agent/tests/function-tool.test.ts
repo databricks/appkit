@@ -47,10 +47,14 @@ describe("isFunctionTool", () => {
     expect(isFunctionTool({ type: "function", name: "x" })).toBe(false);
   });
 
-  test("returns false when name is missing", () => {
-    expect(isFunctionTool({ type: "function", execute: () => "y" })).toBe(
-      false,
-    );
+  test("returns true when name is omitted (record key wins downstream)", () => {
+    // Regression: previously `tool({ description, schema, execute })` (no
+    // name) produced a FunctionTool whose `name: undefined` failed this
+    // guard and broke registration with "unrecognized shape". The agents
+    // plugin always overrides `name` with the record key from
+    // `tools: { my_tool: tool({...}) }`, so requiring `name` here was
+    // rejecting valid input.
+    expect(isFunctionTool({ type: "function", execute: () => "y" })).toBe(true);
   });
 });
 

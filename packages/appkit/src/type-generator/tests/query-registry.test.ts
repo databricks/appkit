@@ -148,19 +148,45 @@ SELECT * FROM users WHERE date BETWEEN :startDate AND :endDate`;
   test("handles all supported types", () => {
     const sql = `-- @param str STRING
 -- @param num NUMERIC
+-- @param dec DECIMAL
+-- @param i INT
+-- @param big BIGINT
+-- @param tiny TINYINT
+-- @param small SMALLINT
+-- @param f FLOAT
+-- @param d DOUBLE
 -- @param bool BOOLEAN
 -- @param dt DATE
 -- @param ts TIMESTAMP
+-- @param tsNtz TIMESTAMP_NTZ
 -- @param bin BINARY
 SELECT 1`;
     const types = extractParameterTypes(sql);
 
     expect(types.str).toBe("STRING");
     expect(types.num).toBe("NUMERIC");
+    expect(types.dec).toBe("DECIMAL");
+    expect(types.i).toBe("INT");
+    expect(types.big).toBe("BIGINT");
+    expect(types.tiny).toBe("TINYINT");
+    expect(types.small).toBe("SMALLINT");
+    expect(types.f).toBe("FLOAT");
+    expect(types.d).toBe("DOUBLE");
     expect(types.bool).toBe("BOOLEAN");
     expect(types.dt).toBe("DATE");
     expect(types.ts).toBe("TIMESTAMP");
+    expect(types.tsNtz).toBe("TIMESTAMP_NTZ");
     expect(types.bin).toBe("BINARY");
+  });
+
+  test("TIMESTAMP_NTZ is not partially matched as TIMESTAMP", () => {
+    // Regression: the alternation TIMESTAMP_NTZ must come before TIMESTAMP
+    // (and end with a word boundary) so the regex engine doesn't capture
+    // `TIMESTAMP` and leave `_NTZ` unconsumed.
+    const sql = `-- @param eventTs TIMESTAMP_NTZ
+SELECT 1`;
+    const types = extractParameterTypes(sql);
+    expect(types.eventTs).toBe("TIMESTAMP_NTZ");
   });
 
   test("ignores malformed @param comments", () => {
@@ -211,6 +237,23 @@ describe("defaultForType", () => {
 
   test("returns binary literal for BINARY", () => {
     expect(defaultForType("BINARY")).toBe("X'00'");
+  });
+
+  test("returns '0' for integer aliases (INT/BIGINT/TINYINT/SMALLINT/DECIMAL)", () => {
+    expect(defaultForType("INT")).toBe("0");
+    expect(defaultForType("BIGINT")).toBe("0");
+    expect(defaultForType("TINYINT")).toBe("0");
+    expect(defaultForType("SMALLINT")).toBe("0");
+    expect(defaultForType("DECIMAL")).toBe("0");
+  });
+
+  test("returns '0.0' for FLOAT and DOUBLE", () => {
+    expect(defaultForType("FLOAT")).toBe("0.0");
+    expect(defaultForType("DOUBLE")).toBe("0.0");
+  });
+
+  test("returns NTZ-shaped literal for TIMESTAMP_NTZ", () => {
+    expect(defaultForType("TIMESTAMP_NTZ")).toBe("'2000-01-01T00:00:00'");
   });
 
   test("returns empty string literal for undefined (unknown fallback)", () => {

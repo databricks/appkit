@@ -4,8 +4,20 @@ import type { Table } from "apache-arrow";
 // Data Format Types
 // ============================================================================
 
-/** Supported response formats for analytics queries */
-export type AnalyticsFormat = "JSON" | "ARROW";
+/**
+ * Supported response formats for analytics queries.
+ *
+ * "JSON" and "ARROW" are legacy aliases kept for backwards compatibility
+ * with appkit/appkit-ui < 0.33.0 — safe to remove once no consumer is on
+ * a pre-0.33.0 version.
+ */
+export type AnalyticsFormat =
+  | "JSON_ARRAY"
+  | "ARROW_STREAM"
+  /** @deprecated Use "JSON_ARRAY". Safe to remove once no consumer is on appkit-ui < 0.33.0. */
+  | "JSON"
+  /** @deprecated Use "ARROW_STREAM". Safe to remove once no consumer is on appkit-ui < 0.33.0. */
+  | "ARROW";
 
 /**
  * Typed Arrow Table - preserves row type information for type inference.
@@ -32,8 +44,10 @@ export interface TypedArrowTable<
 // ============================================================================
 
 /** Options for configuring an analytics SSE query */
-export interface UseAnalyticsQueryOptions<F extends AnalyticsFormat = "JSON"> {
-  /** Response format - "JSON" returns typed arrays, "ARROW" returns TypedArrowTable */
+export interface UseAnalyticsQueryOptions<
+  F extends AnalyticsFormat = "JSON_ARRAY",
+> {
+  /** Response format - "JSON_ARRAY" returns typed arrays, "ARROW_STREAM" returns TypedArrowTable */
   format?: F;
 
   /** Maximum size of serialized parameters in bytes */
@@ -116,11 +130,11 @@ export type InferRowType<K> = K extends AugmentedRegistry<QueryRegistry>
  * - JSON format: Returns the typed array from QueryRegistry
  * - ARROW format: Returns TypedArrowTable with row type preserved
  */
-export type InferResultByFormat<
-  T,
-  K,
-  F extends AnalyticsFormat,
-> = F extends "ARROW" ? TypedArrowTable<InferRowType<K>> : InferResult<T, K>;
+export type InferResultByFormat<T, K, F extends AnalyticsFormat> = F extends
+  | "ARROW_STREAM"
+  | "ARROW"
+  ? TypedArrowTable<InferRowType<K>>
+  : InferResult<T, K>;
 
 /**
  * Infers parameters type from QueryRegistry[K]["parameters"]

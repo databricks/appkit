@@ -15,11 +15,18 @@ import { {{$betaImports}} } from '@databricks/appkit/beta';
 {{- if .plugins.lakebase}}
 import { setupSampleLakebaseRoutes } from './routes/lakebase/todo-routes';
 {{- end}}
+{{- if .plugins.agents}}
+import { helper } from './agents/helper';
+{{- end}}
 
 createApp({
   plugins: [
 {{- range $name, $_ := .plugins}}
+{{- if eq $name "agents"}}
+    agents({ agents: { helper } }),
+{{- else}}
     {{$name}}(),
+{{- end}}
 {{- end}}
   ],
 {{- if .plugins.lakebase}}

@@ -15,9 +15,18 @@ export type {
   Message,
   Thread,
   ThreadStore,
+  ToolAnnotations,
   ToolProvider,
 } from "shared";
 export { DatabricksAdapter, parseTextToolCalls } from "./agents/databricks";
+
+// Agent runtime
+export { createAgent } from "./core/agent/create-agent";
+export {
+  type RunAgentInput,
+  type RunAgentResult,
+  runAgent,
+} from "./core/agent/run-agent";
 
 // Tool authoring primitives
 export {
@@ -29,6 +38,7 @@ export {
   type HostedTool,
   isFunctionTool,
   isHostedTool,
+  type McpConnectAllResult,
   mcpServer,
   resolveHostedTools,
   type ToolConfig,
@@ -37,11 +47,29 @@ export {
   tool,
   toolsFromRegistry,
 } from "./core/agent/tools";
+
+// Agent types
+export type {
+  AgentDefinition,
+  AgentsPluginConfig,
+  AgentTool,
+  AgentTools,
+  AgentToolsFn,
+  AutoInheritToolsConfig,
+  BaseSystemPromptOption,
+  Plugins,
+  PluginToolkitProvider,
+  PromptContext,
+  RegisteredAgent,
+  ResolvedToolEntry,
+  ToolkitEntry,
+  ToolkitOptions,
+} from "./plugins/agents";
 export {
-  type AgentTool,
+  agentIdFromMarkdownPath,
   isToolkitEntry,
-  type ToolkitEntry,
-  type ToolkitOptions,
-} from "./core/agent/types";
+  loadAgentFromFile,
+  loadAgentsFromDir,
+} from "./plugins/agents";
 
 export * from "./plugins/beta-exports.generated";

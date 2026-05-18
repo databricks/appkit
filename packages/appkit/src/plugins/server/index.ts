@@ -6,6 +6,7 @@ import express from "express";
 import getPort, { portNumbers } from "get-port";
 import type { PluginClientConfigs, PluginPhase } from "shared";
 import { ServerError } from "../../errors";
+import { TelemetryReporter } from "../../internal-telemetry";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
@@ -109,8 +110,16 @@ export class ServerPlugin extends Plugin {
    * @returns The express application.
    */
   async start(): Promise<express.Application> {
+    this.serverApplication.use(requestMetricsMiddleware);
     this.serverApplication.use(
       express.json({
+        // Express's stock 100kb default is too tight for modern apps —
+        // agent chat payloads and any base64-encoded upload (e.g. the
+        // dev playground's smart-dashboard "save view" screenshot at
+        // ~105KB) blow past it instantly. Raise to 1mb by default and
+        // let consumers tune via `server({ bodyLimit })` if they need
+        // more headroom.
+        limit: this.config.bodyLimit ?? "1mb",
         type: (req) => {
           // Skip JSON parsing for routes that declared skipBodyParsing
           // (e.g. file uploads where the raw body must flow through).
@@ -400,6 +409,8 @@ export class ServerPlugin extends Plugin {
       this.remoteTunnelController.cleanup();
     }
 
+    TelemetryReporter.getInstance()?.stop();
+
     // 1. abort active operations from plugins
     const shutdownPlugins = this.context?.getPlugins();
     if (shutdownPlugins) {
@@ -469,6 +480,30 @@ export class ServerPlugin extends Plugin {
 }
 
 const EXCLUDED_PLUGINS: string[] = [ServerPlugin.manifest.name];
+
+/** @internal Exported for unit tests. */
+export function requestMetricsMiddleware(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction,
+) {
+  const startMs = Date.now();
+  res.on("finish", () => {
+    const reporter = TelemetryReporter.getInstance();
+    if (!reporter) return;
+    const routePath = (req.route as { path?: string } | undefined)?.path;
+    if (!routePath) return;
+    const baseUrl = req.baseUrl ?? "";
+    const template = `${baseUrl}${routePath}`;
+    reporter.recordRequest(
+      req.method,
+      template,
+      res.statusCode,
+      Date.now() - startMs,
+    );
+  });
+  next();
+}
 
 /**
  * @internal

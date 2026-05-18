@@ -66,6 +66,7 @@ This Software contains code from the following open source projects:
 | [express](https://www.npmjs.com/package/express) | 4.22.0 | MIT | http://expressjs.com/ |
 | [get-port](https://www.npmjs.com/package/get-port) | 7.2.0 | MIT | https://github.com/sindresorhus/get-port#readme |
 | [input-otp](https://www.npmjs.com/package/input-otp) | 1.4.2 | MIT | https://input-otp.rodz.dev/ |
+| [js-yaml](https://www.npmjs.com/package/js-yaml) | 3.14.2, 4.1.1 | MIT | https://github.com/nodeca/js-yaml#readme |
 | [lucide-react](https://www.npmjs.com/package/lucide-react) | 0.554.0 | ISC | https://lucide.dev |
 | [marked](https://www.npmjs.com/package/marked) | 16.4.2, 17.0.3 | MIT | https://marked.js.org |
 | [next-themes](https://www.npmjs.com/package/next-themes) | 0.4.6 | MIT | https://github.com/pacocoursey/next-themes#readme |
