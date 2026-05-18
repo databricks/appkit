@@ -266,10 +266,17 @@ export const discoveryDescriptorSchema = z
  * - `unwrap`, when set, is the JSON path into the response wrapper (e.g.,
  *   `"warehouses"` for `{ warehouses: [...] }`). Omitted when the response
  *   is already a flat array.
+ * - `parents`, when set, lists transient query inputs the runner must
+ *   collect (as free-text prompts) before invoking the command. Each
+ *   `parents[i]` value substitutes the matching `{name}` placeholder in
+ *   the command string. Unlike `dependsOn` (which references a sibling
+ *   field on the same resource), `parents` covers inputs that aren't
+ *   persisted as fields on the resource.
  */
 export type ResourceKindCommand = {
   command: string;
   unwrap?: string;
+  parents?: readonly string[];
 };
 
 /**
@@ -284,13 +291,13 @@ export type ResourceKindCommand = {
  * return flat arrays. Refine in a follow-up if a kind's CLI returns wrapped
  * data.
  *
- * Volume's catalog/schema parent context is supplied via the `{catalog}` and
- * `{schema}` placeholders, prompted from the user via a Phase 6 MUST rule
- * (the CLI does not auto-discover these — it asks before listing volumes).
+ * Volume's catalog/schema parent context is supplied via the `parents`
+ * array, which the runner collects from the user as free-text prompts
+ * before invoking the listing command.
  */
 export const RESOURCE_KIND_COMMANDS: Record<
   z.infer<typeof resourceKindSchema>,
-  ResourceKindCommand
+  { command: string; unwrap?: string; parents?: readonly string[] }
 > = {
   warehouse: {
     command: "databricks warehouses list --profile <PROFILE> --output json",
@@ -317,11 +324,14 @@ export const RESOURCE_KIND_COMMANDS: Record<
       "databricks postgres list-databases {branch} --profile <PROFILE> --output json",
   },
   volume: {
-    // {catalog} and {schema} parent context must be supplied by the CLI
-    // runner — they are encoded as a Phase 6 MUST rule (prompt the user for
-    // catalog and schema before listing volumes), not as `dependsOn` siblings.
+    // `parents` declares free-text user prompts the runner must collect before
+    // invoking the discovery command. Each `parents[i]` value substitutes the
+    // matching `{name}` placeholder in the command string above. Unlike
+    // `dependsOn` (which references a sibling field on the same resource),
+    // `parents` covers transient query inputs that aren't persisted as fields.
     command:
       "databricks volumes list {catalog} {schema} --profile <PROFILE> --output json",
+    parents: ["catalog", "schema"] as const,
   },
 };
 

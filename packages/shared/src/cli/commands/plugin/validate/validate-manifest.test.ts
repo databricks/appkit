@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  RESOURCE_KIND_COMMANDS,
   scaffoldingDescriptorSchema,
   TEMPLATE_SCAFFOLDING,
 } from "../../../../schemas/manifest";
@@ -976,6 +977,32 @@ describe("validate-manifest", () => {
         "Skip resource configuration prompts",
         "Hardcode workspace-specific values in template files",
       ]);
+    });
+  });
+
+  describe("RESOURCE_KIND_COMMANDS (Phase 3/A6 candidate (a))", () => {
+    // Phase 3 chose to structurally model volume's catalog+schema prerequisite
+    // chain via a `parents` array on the kind table (rather than accept as
+    // prose in `scaffolding.rules.must`). These tests pin the chosen shape.
+
+    it("volume kind declares parents = [catalog, schema]", () => {
+      expect(RESOURCE_KIND_COMMANDS.volume.parents).toEqual([
+        "catalog",
+        "schema",
+      ]);
+    });
+
+    it("volume command string carries matching {catalog} and {schema} placeholders", () => {
+      expect(RESOURCE_KIND_COMMANDS.volume.command).toContain("{catalog}");
+      expect(RESOURCE_KIND_COMMANDS.volume.command).toContain("{schema}");
+    });
+
+    it("volume is the only kind declaring parents (others use dependsOn siblings)", () => {
+      const withParents = Object.entries(RESOURCE_KIND_COMMANDS).filter(
+        ([, v]) => v.parents,
+      );
+      expect(withParents).toHaveLength(1);
+      expect(withParents[0]?.[0]).toBe("volume");
     });
   });
 });
