@@ -407,26 +407,33 @@ pnpm typecheck
 pnpm test
 
 # 3. Re-sync the template manifest so the new plugin is picked up.
-#    In the AppKit monorepo prefer the workspace script — it points sync at
-#    `template/appkit.plugins.json` (the file shipped to consumers) instead of
-#    the project-root default that the raw CLI would write.
+#    In the AppKit monorepo prefer the workspace script — it wraps the CLI with
+#    `--plugins-dir packages/appkit/src/plugins` (so sync reads source manifests
+#    rather than `node_modules/@databricks/appkit/dist/plugins/`, which may be
+#    missing or stale) and `--output template/appkit.plugins.json` (the file
+#    that ships to consumers, instead of the project-root default that a bare
+#    `appkit plugin sync` writes).
 pnpm run sync:template
 
-# Outside the monorepo (or when sync:template is unavailable) fall back to:
-# npx @databricks/appkit plugin sync --write
+# Equivalent direct invocation — works both inside and outside the monorepo
+# (use it when you want to bypass the wrapper or pass extra flags):
+# npx @databricks/appkit plugin sync --write \
+#   --plugins-dir packages/appkit/src/plugins \
+#   --output template/appkit.plugins.json
 ```
 
 If the plugin must always ship with the template (i.e. be marked mandatory) even when not auto-detected via the server file's `plugins: [...]` array, pass it explicitly:
 
 ```bash
 pnpm run sync:template -- --require-plugins server,{name}
-# or: npx @databricks/appkit plugin sync --write \
+# or, equivalently, directly via the CLI:
+# npx @databricks/appkit plugin sync --write \
 #       --plugins-dir packages/appkit/src/plugins \
 #       --output template/appkit.plugins.json \
 #       --require-plugins server,{name}
 ```
 
-> **Note:** `--require-plugins` is **non-additive** — Commander treats it as a single string and the last value wins. The `sync:template` script already passes `--require-plugins server`, so when you override it from the CLI you **must repeat `server`** in the comma-separated list (e.g. `server,{name}`) or the `server` plugin will silently lose its `requiredByTemplate` flag. The standalone `npx` fallback needs `--plugins-dir packages/appkit/src/plugins` and `--output template/appkit.plugins.json` to match what `sync:template` does — without `--plugins-dir`, sync scans `node_modules/@databricks/appkit/dist/plugins/` instead of the source tree.
+> **Note:** `--require-plugins` is **non-additive** — Commander treats it as a single string and the last value wins. The `sync:template` script already passes `--require-plugins server`, so when you override it from the CLI you **must repeat `server`** in the comma-separated list (e.g. `server,{name}`) or the `server` plugin will silently lose its `requiredByTemplate` flag. If you invoke the CLI directly via `npx` instead of going through `sync:template`, also pass `--plugins-dir packages/appkit/src/plugins` (so sync reads the source manifests rather than `node_modules/@databricks/appkit/dist/plugins/`, which may be missing or stale) and `--output template/appkit.plugins.json` (so the synced file lands where consumers expect it).
 
 Use `npx @databricks/appkit plugin list --json` to confirm the plugin shows up in the synced manifest with the expected `displayName`, `package`, `stability`, and resource counts.
 
