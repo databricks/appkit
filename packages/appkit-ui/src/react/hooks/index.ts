@@ -13,6 +13,12 @@ export type {
   UseAnalyticsQueryOptions,
   UseAnalyticsQueryResult,
 } from "./types";
+export {
+  type AgentChatEvent,
+  type UseAgentChatOptions,
+  type UseAgentChatResult,
+  useAgentChat,
+} from "./use-agent-chat";
 export { useAnalyticsQuery } from "./use-analytics-query";
 export {
   type UseChartDataOptions,

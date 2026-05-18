@@ -1132,6 +1132,50 @@ describe("Genie Plugin", () => {
         error: "Unknown space alias: default",
       });
     });
+
+    test("should throw at construction when an alias maps to undefined (e.g. unset process.env.X)", () => {
+      // The IGenieConfig.spaces type accepts `string | undefined` so callers
+      // can pass process.env values directly without a TS hoist-and-narrow,
+      // but a missing env var is a code error — fail fast at construction
+      // with a clear message rather than letting it surface as a 404 later.
+      delete process.env.DATABRICKS_GENIE_SPACE_ID;
+
+      expect(
+        () =>
+          new GeniePlugin({
+            timeout: 5000,
+            spaces: { wanderbricks: process.env.DATABRICKS_GENIE_SPACE_ID },
+          }),
+      ).toThrow(/"wanderbricks".*missing/i);
+    });
+
+    test("should throw at construction when an alias maps to an empty string", () => {
+      // `process.env.X ?? ""` is a common pattern; treat it the same as
+      // an undefined value rather than letting an empty ID hit the API.
+      expect(
+        () =>
+          new GeniePlugin({
+            timeout: 5000,
+            spaces: { wanderbricks: "" },
+          }),
+      ).toThrow(/"wanderbricks".*missing/i);
+    });
+
+    test("should list all missing aliases in the construction error", () => {
+      delete process.env.DATABRICKS_GENIE_SPACE_ID;
+
+      expect(
+        () =>
+          new GeniePlugin({
+            timeout: 5000,
+            spaces: {
+              foo: undefined,
+              bar: "valid-id",
+              baz: undefined,
+            },
+          }),
+      ).toThrow(/"foo".*"baz"/);
+    });
   });
 
   describe("getConversation with pageToken", () => {

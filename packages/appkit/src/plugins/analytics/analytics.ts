@@ -29,6 +29,7 @@ import type {
   IAnalyticsConfig,
   IAnalyticsQueryRequest,
 } from "./types";
+import { normalizeAnalyticsFormat } from "./types";
 
 const logger = createLogger("analytics");
 
@@ -128,7 +129,9 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     res: express.Response,
   ): Promise<void> {
     const { query_key } = req.params;
-    const { parameters, format = "JSON" } = req.body as IAnalyticsQueryRequest;
+    const { parameters, format: rawFormat = "JSON_ARRAY" } =
+      req.body as IAnalyticsQueryRequest;
+    const format = normalizeAnalyticsFormat(rawFormat);
 
     // Request-scoped logging with WideEvent tracking
     logger.debug(req, "Executing query: %s (format=%s)", query_key, format);
@@ -164,7 +167,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     const executorKey = isAsUser ? this.resolveUserId(req) : "global";
 
     const queryParameters =
-      format === "ARROW"
+      format === "ARROW_STREAM"
         ? {
             formatParameters: {
               disposition: "EXTERNAL_LINKS",
@@ -287,11 +290,11 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
           ),
       }),
       annotations: {
-        readOnly: true,
+        effect: "read",
         requiresUserContext: true,
       },
       autoInheritable: true,
-      handler: (args, signal) => {
+      execute: (args, signal) => {
         assertReadOnlySql(args.query);
         return this.query(args.query, undefined, undefined, signal);
       },
@@ -314,8 +317,8 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    * Returns the plugin's tools as a keyed record of `ToolkitEntry` markers.
    * Called by the agents plugin (via `resolveToolkitFromProvider`) to spread
    * a filtered, renamed view of the plugin's tools into an agent's tool
-   * index. Most callers should go through `fromPlugin(analytics, opts)` at
-   * module scope instead of reaching for this directly.
+   * index. Inside the function form of `AgentDefinition.tools`, callers
+   * reach this method via `plugins.analytics.toolkit(opts)`.
    */
   toolkit(opts?: import("../../core/agent/types").ToolkitOptions) {
     return buildToolkitEntries(this.name, this.tools, opts);

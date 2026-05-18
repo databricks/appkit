@@ -13,6 +13,7 @@ import { Route as VectorSearchRouteRouteImport } from './routes/vector-search.ro
 import { Route as TypeSafetyRouteRouteImport } from './routes/type-safety.route'
 import { Route as TelemetryRouteRouteImport } from './routes/telemetry.route'
 import { Route as SqlHelpersRouteRouteImport } from './routes/sql-helpers.route'
+import { Route as SmartDashboardRouteRouteImport } from './routes/smart-dashboard.route'
 import { Route as ServingRouteRouteImport } from './routes/serving.route'
 import { Route as ReconnectRouteRouteImport } from './routes/reconnect.route'
 import { Route as PolicyMatrixRouteRouteImport } from './routes/policy-matrix.route'
@@ -24,6 +25,7 @@ import { Route as DataVisualizationRouteRouteImport } from './routes/data-visual
 import { Route as ChartInferenceRouteRouteImport } from './routes/chart-inference.route'
 import { Route as ArrowAnalyticsRouteRouteImport } from './routes/arrow-analytics.route'
 import { Route as AnalyticsRouteRouteImport } from './routes/analytics.route'
+import { Route as AgentRouteRouteImport } from './routes/agent.route'
 import { Route as IndexRouteImport } from './routes/index'
 
 const VectorSearchRouteRoute = VectorSearchRouteRouteImport.update({
@@ -44,6 +46,11 @@ const TelemetryRouteRoute = TelemetryRouteRouteImport.update({
 const SqlHelpersRouteRoute = SqlHelpersRouteRouteImport.update({
   id: '/sql-helpers',
   path: '/sql-helpers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SmartDashboardRouteRoute = SmartDashboardRouteRouteImport.update({
+  id: '/smart-dashboard',
+  path: '/smart-dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ServingRouteRoute = ServingRouteRouteImport.update({
@@ -101,6 +108,11 @@ const AnalyticsRouteRoute = AnalyticsRouteRouteImport.update({
   path: '/analytics',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AgentRouteRoute = AgentRouteRouteImport.update({
+  id: '/agent',
+  path: '/agent',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -109,6 +121,7 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/agent': typeof AgentRouteRoute
   '/analytics': typeof AnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/chart-inference': typeof ChartInferenceRouteRoute
@@ -120,6 +133,7 @@ export interface FileRoutesByFullPath {
   '/policy-matrix': typeof PolicyMatrixRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
   '/serving': typeof ServingRouteRoute
+  '/smart-dashboard': typeof SmartDashboardRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
   '/type-safety': typeof TypeSafetyRouteRoute
@@ -127,6 +141,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/agent': typeof AgentRouteRoute
   '/analytics': typeof AnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/chart-inference': typeof ChartInferenceRouteRoute
@@ -138,6 +153,7 @@ export interface FileRoutesByTo {
   '/policy-matrix': typeof PolicyMatrixRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
   '/serving': typeof ServingRouteRoute
+  '/smart-dashboard': typeof SmartDashboardRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
   '/type-safety': typeof TypeSafetyRouteRoute
@@ -146,6 +162,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/agent': typeof AgentRouteRoute
   '/analytics': typeof AnalyticsRouteRoute
   '/arrow-analytics': typeof ArrowAnalyticsRouteRoute
   '/chart-inference': typeof ChartInferenceRouteRoute
@@ -157,6 +174,7 @@ export interface FileRoutesById {
   '/policy-matrix': typeof PolicyMatrixRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
   '/serving': typeof ServingRouteRoute
+  '/smart-dashboard': typeof SmartDashboardRouteRoute
   '/sql-helpers': typeof SqlHelpersRouteRoute
   '/telemetry': typeof TelemetryRouteRoute
   '/type-safety': typeof TypeSafetyRouteRoute
@@ -166,6 +184,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/agent'
     | '/analytics'
     | '/arrow-analytics'
     | '/chart-inference'
@@ -177,6 +196,7 @@ export interface FileRouteTypes {
     | '/policy-matrix'
     | '/reconnect'
     | '/serving'
+    | '/smart-dashboard'
     | '/sql-helpers'
     | '/telemetry'
     | '/type-safety'
@@ -184,6 +204,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/agent'
     | '/analytics'
     | '/arrow-analytics'
     | '/chart-inference'
@@ -195,6 +216,7 @@ export interface FileRouteTypes {
     | '/policy-matrix'
     | '/reconnect'
     | '/serving'
+    | '/smart-dashboard'
     | '/sql-helpers'
     | '/telemetry'
     | '/type-safety'
@@ -202,6 +224,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/agent'
     | '/analytics'
     | '/arrow-analytics'
     | '/chart-inference'
@@ -213,6 +236,7 @@ export interface FileRouteTypes {
     | '/policy-matrix'
     | '/reconnect'
     | '/serving'
+    | '/smart-dashboard'
     | '/sql-helpers'
     | '/telemetry'
     | '/type-safety'
@@ -221,6 +245,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AgentRouteRoute: typeof AgentRouteRoute
   AnalyticsRouteRoute: typeof AnalyticsRouteRoute
   ArrowAnalyticsRouteRoute: typeof ArrowAnalyticsRouteRoute
   ChartInferenceRouteRoute: typeof ChartInferenceRouteRoute
@@ -232,6 +257,7 @@ export interface RootRouteChildren {
   PolicyMatrixRouteRoute: typeof PolicyMatrixRouteRoute
   ReconnectRouteRoute: typeof ReconnectRouteRoute
   ServingRouteRoute: typeof ServingRouteRoute
+  SmartDashboardRouteRoute: typeof SmartDashboardRouteRoute
   SqlHelpersRouteRoute: typeof SqlHelpersRouteRoute
   TelemetryRouteRoute: typeof TelemetryRouteRoute
   TypeSafetyRouteRoute: typeof TypeSafetyRouteRoute
@@ -266,6 +292,13 @@ declare module '@tanstack/react-router' {
       path: '/sql-helpers'
       fullPath: '/sql-helpers'
       preLoaderRoute: typeof SqlHelpersRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/smart-dashboard': {
+      id: '/smart-dashboard'
+      path: '/smart-dashboard'
+      fullPath: '/smart-dashboard'
+      preLoaderRoute: typeof SmartDashboardRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/serving': {
@@ -345,6 +378,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AnalyticsRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/agent': {
+      id: '/agent'
+      path: '/agent'
+      fullPath: '/agent'
+      preLoaderRoute: typeof AgentRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -357,6 +397,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AgentRouteRoute: AgentRouteRoute,
   AnalyticsRouteRoute: AnalyticsRouteRoute,
   ArrowAnalyticsRouteRoute: ArrowAnalyticsRouteRoute,
   ChartInferenceRouteRoute: ChartInferenceRouteRoute,
@@ -368,6 +409,7 @@ const rootRouteChildren: RootRouteChildren = {
   PolicyMatrixRouteRoute: PolicyMatrixRouteRoute,
   ReconnectRouteRoute: ReconnectRouteRoute,
   ServingRouteRoute: ServingRouteRoute,
+  SmartDashboardRouteRoute: SmartDashboardRouteRoute,
   SqlHelpersRouteRoute: SqlHelpersRouteRoute,
   TelemetryRouteRoute: TelemetryRouteRoute,
   TypeSafetyRouteRoute: TypeSafetyRouteRoute,

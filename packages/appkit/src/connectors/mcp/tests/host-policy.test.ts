@@ -8,7 +8,7 @@ import {
   isLoopbackHost,
   type McpHostPolicy,
   type McpHostPolicyConfig,
-} from "../tools/mcp-host-policy";
+} from "../host-policy";
 
 function stubLookup(
   addresses: Array<{ address: string; family?: number }>,

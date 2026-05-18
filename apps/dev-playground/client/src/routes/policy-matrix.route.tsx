@@ -86,6 +86,10 @@ function PolicyMatrixRoute() {
   const [runningAll, setRunningAll] = useState(false);
   const [spResult, setSpResult] = useState<string | null>(null);
   const [oboResult, setOboResult] = useState<string | null>(null);
+  const [oboVolumeResult, setOboVolumeResult] = useState<string | null>(null);
+  const [oboVolumeHttpResult, setOboVolumeHttpResult] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     fetch("/whoami")
@@ -197,6 +201,40 @@ function PolicyMatrixRoute() {
     setOboResult(JSON.stringify(await r.json(), null, 2));
   }, []);
 
+  /**
+   * Programmatic OBO-volume smoke. Calls the dev-playground's
+   * `/policy/obo-volume` route which hits `appkit.files("obo_demo")` —
+   * a volume configured with `auth: "on-behalf-of-user"` — through both
+   * `asUser(req)` and the bare callable. The browser automatically
+   * forwards `x-forwarded-user` / `x-forwarded-access-token` when running
+   * behind the Databricks Apps reverse proxy; locally they're absent and
+   * the dev fallback reports `service-principal` execution.
+   */
+  const runOboVolumeSmoke = useCallback(async () => {
+    setOboVolumeResult("…");
+    const r = await fetch("/policy/obo-volume");
+    setOboVolumeResult(JSON.stringify(await r.json(), null, 2));
+  }, []);
+
+  /**
+   * Direct HTTP probe against the OBO volume's `/list` route. Confirms
+   * end-to-end that the route handler routes the SDK call through
+   * `runInUserContext` when the headers are present, and returns 401 (or
+   * 403, in dev fallback) when they're missing.
+   */
+  const runOboVolumeHttp = useCallback(async () => {
+    setOboVolumeHttpResult("…");
+    try {
+      const r = await fetch(`/api/files/obo_demo/list`);
+      const body = await r.json().catch(() => ({}) as Record<string, unknown>);
+      setOboVolumeHttpResult(
+        JSON.stringify({ httpStatus: r.status, body }, null, 2),
+      );
+    } catch (err) {
+      setOboVolumeHttpResult(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
   const reset = useCallback(() => setState(initialState), [initialState]);
 
   return (
@@ -295,6 +333,41 @@ function PolicyMatrixRoute() {
           <div className="grid grid-cols-2 gap-4">
             <SmokePanel title="Service principal" body={spResult} />
             <SmokePanel title="On-behalf-of user" body={oboResult} />
+          </div>
+        </div>
+
+        <div className="mt-10">
+          <h2 className="text-xl font-semibold mb-2">
+            Per-volume OBO mode (<code>auth: "on-behalf-of-user"</code>)
+          </h2>
+          <p className="text-sm text-muted-foreground mb-4">
+            Hits the <code>obo_demo</code> volume — configured with{" "}
+            <code>auth: "on-behalf-of-user"</code> — to confirm SDK calls
+            execute as the end user when the request carries{" "}
+            <code>x-forwarded-access-token</code> +{" "}
+            <code>x-forwarded-user</code>. In the deployed Databricks App those
+            headers are injected by the platform reverse proxy. Locally they're
+            absent and the dev-mode fallback applies: <em>HTTP returns 403</em>{" "}
+            (the <code>usersOnly</code> policy denies SP traffic) and the
+            programmatic path runs as the SP.
+          </p>
+          <div className="flex gap-3 mb-4">
+            <Button variant="outline" onClick={runOboVolumeHttp}>
+              Hit /api/files/obo_demo/list
+            </Button>
+            <Button variant="outline" onClick={runOboVolumeSmoke}>
+              Run OBO-volume programmatic smoke
+            </Button>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <SmokePanel
+              title="HTTP — /api/files/obo_demo/list"
+              body={oboVolumeHttpResult}
+            />
+            <SmokePanel
+              title="Programmatic — appkit.files('obo_demo').asUser(req).list()"
+              body={oboVolumeResult}
+            />
           </div>
         </div>
       </div>

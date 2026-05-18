@@ -19,6 +19,9 @@
               "type": "kind",
               "resourceKind": "genie_space"
             }
+          },
+          "name": {
+            "description": "Genie Space display name"
           }
         }
       }

@@ -30,6 +30,76 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+## [0.35.2](https://github.com/databricks/appkit/compare/v0.35.1...v0.35.2) (2026-05-15)
+
+* unblock SP calls for UC in production ([#351](https://github.com/databricks/appkit/issues/351)) ([d97a2ef](https://github.com/databricks/appkit/commit/d97a2ef0c24b9d47283c4285f85d6e967ec49704))
+
+
+## [0.35.1](https://github.com/databricks/appkit/compare/v0.35.0...v0.35.1) (2026-05-15)
+
+### appkit-ui
+
+* **appkit-ui:** stabilize useAnalyticsQuery params reference to avoid infinite refetch ([#321](https://github.com/databricks/appkit/issues/321)) ([5496c6a](https://github.com/databricks/appkit/commit/5496c6a6ac02979a11094f5e9a55e3d92e2a7236))
+
+
+## [0.35.0](https://github.com/databricks/appkit/compare/v0.34.1...v0.35.0) (2026-05-14)
+
+### lakebase
+
+* **lakebase:** add per-user connections via asUser(req) ([#343](https://github.com/databricks/appkit/issues/343)) ([22afef0](https://github.com/databricks/appkit/commit/22afef0d70fecbcc35f13e5897a4a7fb50c3011c))
+
+
+## [0.34.1](https://github.com/databricks/appkit/compare/v0.34.0...v0.34.1) (2026-05-13)
+
+### appkit
+
+* **appkit:** honor TTL in CacheManager.getOrExecute ([#326](https://github.com/databricks/appkit/issues/326)) ([0aedd1b](https://github.com/databricks/appkit/commit/0aedd1b6eb8c9ead1a685bfb5b101a0751246ffd))
+
+
+## [0.34.0](https://github.com/databricks/appkit/compare/v0.33.0...v0.34.0) (2026-05-13)
+
+* add name field to genie manifest for non-interactive --set support ([#384](https://github.com/databricks/appkit/issues/384)) ([7adcec0](https://github.com/databricks/appkit/commit/7adcec03768e2e5168564f69617c9189c9ae1522))
+
+### appkit
+
+* **appkit:** infer numeric SQL type for sql.number(), add typed variants ([#323](https://github.com/databricks/appkit/issues/323)) ([f65be0e](https://github.com/databricks/appkit/commit/f65be0ec8d930d21e7d71c06f975a5b4fe6b8e55))
+
+
+## [0.33.0](https://github.com/databricks/appkit/compare/v0.32.0...v0.33.0) (2026-05-12)
+
+### appkit
+
+* **appkit:** allow undefined values in IGenieConfig.spaces ([#322](https://github.com/databricks/appkit/issues/322)) ([d5469e9](https://github.com/databricks/appkit/commit/d5469e9f36acfbfdf7c207fbf4d8dc958ec57425))
+* **appkit:** reference agent-app, dev-playground chat UI, docs, and template ([#306](https://github.com/databricks/appkit/issues/306)) ([6bd6dab](https://github.com/databricks/appkit/commit/6bd6dab1b7c3d3e50d58c6d4640efe1c5f5595eb))
+* **appkit:** tools(plugins) DX, runAgent plugins arg, shared toolkit-resolver ([#305](https://github.com/databricks/appkit/issues/305)) ([a348855](https://github.com/databricks/appkit/commit/a3488558a10d43b1a1f4478f98b54f59108523e7))
+
+* rename AnalyticsFormat to API enum names with legacy aliases ([#328](https://github.com/databricks/appkit/issues/328)) ([77d6a1b](https://github.com/databricks/appkit/commit/77d6a1bb1b6232a595ba028fd230949759689df3)), closes [#256](https://github.com/databricks/appkit/issues/256) [#327](https://github.com/databricks/appkit/issues/327)
+
+
+## [0.32.0](https://github.com/databricks/appkit/compare/v0.31.0...v0.32.0) (2026-05-08)
+
+### appkit
+
+* **appkit:** agents() plugin, createAgent(def), and markdown-driven agents ([#304](https://github.com/databricks/appkit/issues/304)) ([e4cf329](https://github.com/databricks/appkit/commit/e4cf329d8ff8e5994f59688d1e099cab50a679b2)), closes [#349](https://github.com/databricks/appkit/issues/349) [#8](https://github.com/databricks/appkit/issues/8) [#9](https://github.com/databricks/appkit/issues/9) [#11](https://github.com/databricks/appkit/issues/11)
+* **appkit:** plugin infrastructure — attachContext + PluginContext mediator ([#303](https://github.com/databricks/appkit/issues/303)) ([9d2920c](https://github.com/databricks/appkit/commit/9d2920c6266e0015d7cc05b8a62225256e75046f)), closes [#8](https://github.com/databricks/appkit/issues/8) [#9](https://github.com/databricks/appkit/issues/9) [#10](https://github.com/databricks/appkit/issues/10)
+* **appkit:** send internal telemetry via AppkitLog schema ([#332](https://github.com/databricks/appkit/issues/332)) ([cc942b5](https://github.com/databricks/appkit/commit/cc942b5d4ff93ca3e6e9340a38b2a1d151839d50)), closes [#send](https://github.com/databricks/appkit/issues/send) [#send](https://github.com/databricks/appkit/issues/send)
+* **appkit:** tool primitives and ToolProvider surfaces on core plugins ([#302](https://github.com/databricks/appkit/issues/302)) ([95f17b5](https://github.com/databricks/appkit/commit/95f17b5a1e6da427199aaed54149114334dd1fb4))
+
+
 ## [0.31.0](https://github.com/databricks/appkit/compare/v0.30.1...v0.31.0) (2026-05-06)
 
 ### appkit

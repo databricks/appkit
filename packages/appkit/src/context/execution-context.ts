@@ -89,3 +89,12 @@ export function isInUserContext(): boolean {
   const ctx = executionContextStorage.getStore();
   return ctx !== undefined;
 }
+
+/**
+ * Get the user context if one is active, otherwise `undefined`.
+ * Unlike `getExecutionContext()`, this does not require `ServiceContext`
+ * to be initialized and never throws.
+ */
+export function getUserContext(): UserContext | undefined {
+  return executionContextStorage.getStore();
+}

@@ -37,30 +37,140 @@ describe("SQL Helpers", () => {
   });
 
   describe("number()", () => {
-    it("should create a NUMERIC type parameter from a number", () => {
-      const number = 1234567890;
-      const result = sql.number(number);
+    it("should bind a JS integer in INT range as INT (works with Spark LIMIT/OFFSET)", () => {
+      // Spark requires IntegerType for LIMIT/OFFSET; BIGINT/LongType is
+      // rejected with INVALID_LIMIT_LIKE_EXPRESSION.DATA_TYPE. INT is
+      // auto-widened to BIGINT/DECIMAL/DOUBLE by Catalyst for wider columns.
+      const result = sql.number(1234567890);
       expect(result).toEqual({
-        __sql_type: "NUMERIC",
+        __sql_type: "INT",
         value: "1234567890",
       });
     });
 
-    it("should create a NUMERIC type parameter from a numeric string", () => {
-      const number = "1234567890";
-      const result = sql.number(number);
+    it("should bind a JS integer outside INT range as BIGINT", () => {
+      const result = sql.number(3_000_000_000);
       expect(result).toEqual({
-        __sql_type: "NUMERIC",
+        __sql_type: "BIGINT",
+        value: "3000000000",
+      });
+    });
+
+    it("should bind INT boundaries correctly", () => {
+      expect(sql.number(2147483647)).toEqual({
+        __sql_type: "INT",
+        value: "2147483647",
+      });
+      expect(sql.number(-2147483648)).toEqual({
+        __sql_type: "INT",
+        value: "-2147483648",
+      });
+      // Just past INT_MAX → BIGINT
+      expect(sql.number(2147483648)).toEqual({
+        __sql_type: "BIGINT",
+        value: "2147483648",
+      });
+      expect(sql.number(-2147483649)).toEqual({
+        __sql_type: "BIGINT",
+        value: "-2147483649",
+      });
+    });
+
+    it("should bind a JS non-integer as DOUBLE", () => {
+      const result = sql.number(3.14);
+      expect(result).toEqual({
+        __sql_type: "DOUBLE",
+        value: "3.14",
+      });
+    });
+
+    it("should bind an integer-shaped string in INT range as INT (HTTP-input case)", () => {
+      // Express/URLSearchParams return strings; common pattern is
+      // sql.number(req.query.n) which must work with Spark LIMIT/OFFSET.
+      const result = sql.number("1234567890");
+      expect(result).toEqual({
+        __sql_type: "INT",
         value: "1234567890",
       });
     });
 
-    it("should reject non-numeric string", () => {
-      const number = "hello";
-      expect(() => sql.number(number as any)).toThrow(
-        "sql.number() expects number or numeric string, got: hello",
+    it("should bind an integer-shaped string outside INT range as BIGINT", () => {
+      const result = sql.number("3000000000");
+      expect(result).toEqual({
+        __sql_type: "BIGINT",
+        value: "3000000000",
+      });
+    });
+
+    it("should accept BIGINT-boundary integer strings", () => {
+      expect(sql.number("9223372036854775807")).toEqual({
+        __sql_type: "BIGINT",
+        value: "9223372036854775807",
+      });
+      expect(sql.number("-9223372036854775808")).toEqual({
+        __sql_type: "BIGINT",
+        value: "-9223372036854775808",
+      });
+    });
+
+    it("should reject integer strings outside 64-bit signed range", () => {
+      // String input bypasses Number.MAX_SAFE_INTEGER guards, but the
+      // BIGINT wire type still cannot hold values outside 2^63.
+      expect(() => sql.number("9223372036854775808")).toThrow(
+        /BIGINT \(64-bit signed\) range/,
+      );
+      expect(() => sql.number("-9223372036854775809")).toThrow(
+        /BIGINT \(64-bit signed\) range/,
       );
     });
+
+    it("should bind decimal-shaped strings as NUMERIC (preserve precision)", () => {
+      const result = sql.number("123.4500000000001");
+      expect(result).toEqual({
+        __sql_type: "NUMERIC",
+        value: "123.4500000000001",
+      });
+    });
+
+    it("should reject JS integers outside Number.MAX_SAFE_INTEGER", () => {
+      // 9007199254740993 is MAX_SAFE_INTEGER + 2 and cannot be represented
+      // exactly as a JS number. The marker would advertise BIGINT but the
+      // value is already wrong before the helper runs.
+      expect(() => sql.number(Number.MAX_SAFE_INTEGER + 2)).toThrow(
+        /outside Number\.MAX_SAFE_INTEGER/,
+      );
+    });
+
+    it("should reject Infinity / -Infinity / NaN", () => {
+      expect(() => sql.number(Number.POSITIVE_INFINITY)).toThrow(
+        /finite number/,
+      );
+      expect(() => sql.number(Number.NEGATIVE_INFINITY)).toThrow(
+        /finite number/,
+      );
+      expect(() => sql.number(Number.NaN)).toThrow(/finite number/);
+    });
+
+    it("should emit canonical decimal text (no exponent) for large safe integers", () => {
+      // Sanity check: even though Number.prototype.toString could emit
+      // exponent form for very large integers, the helper always emits
+      // decimal text via BigInt(value).toString(). 1e15 is outside INT
+      // range, so the wire type is BIGINT.
+      const result = sql.number(1e15);
+      expect(result).toEqual({
+        __sql_type: "BIGINT",
+        value: "1000000000000000",
+      });
+    });
+
+    it.each([["NaN"], ["Infinity"], ["0x10"], ["  "], ["hello"]])(
+      "should reject non-numeric string %s",
+      (input) => {
+        expect(() => sql.number(input as any)).toThrow(
+          /expects number or numeric string/,
+        );
+      },
+    );
 
     it("should reject empty string", () => {
       expect(() => sql.number("")).toThrow(
@@ -69,9 +179,141 @@ describe("SQL Helpers", () => {
     });
 
     it("should reject boolean value", () => {
-      const number = true;
-      expect(() => sql.number(number as any)).toThrow(
+      expect(() => sql.number(true as any)).toThrow(
         "sql.number() expects number or numeric string, got: boolean",
+      );
+    });
+  });
+
+  describe("int() / bigint() / float() / double() / numeric()", () => {
+    it("sql.int() should produce INT", () => {
+      expect(sql.int(42)).toEqual({ __sql_type: "INT", value: "42" });
+      expect(sql.int("42")).toEqual({ __sql_type: "INT", value: "42" });
+    });
+
+    it("sql.int() should reject non-integers", () => {
+      expect(() => sql.int(3.14)).toThrow(
+        "sql.int() expects an integer, got non-integer number: 3.14",
+      );
+      expect(() => sql.int("3.14")).toThrow(
+        "sql.int() expects integer number or integer-shaped string, got: 3.14",
+      );
+    });
+
+    it("sql.int() should reject values outside 32-bit signed range", () => {
+      // 2^31 is just outside INT_MAX
+      expect(() => sql.int(2147483648)).toThrow(/INT \(32-bit signed\) range/);
+      expect(() => sql.int(-2147483649)).toThrow(/INT \(32-bit signed\) range/);
+      // string-shaped out-of-range value
+      expect(() => sql.int("9999999999999999999")).toThrow(
+        /INT \(32-bit signed\) range/,
+      );
+    });
+
+    it("sql.int() should accept the INT boundaries", () => {
+      expect(sql.int(2147483647)).toEqual({
+        __sql_type: "INT",
+        value: "2147483647",
+      });
+      expect(sql.int(-2147483648)).toEqual({
+        __sql_type: "INT",
+        value: "-2147483648",
+      });
+    });
+
+    it("sql.bigint() should produce BIGINT and accept JS bigint", () => {
+      expect(sql.bigint(42)).toEqual({ __sql_type: "BIGINT", value: "42" });
+      expect(sql.bigint("9007199254740993")).toEqual({
+        __sql_type: "BIGINT",
+        value: "9007199254740993",
+      });
+      expect(sql.bigint(9007199254740993n)).toEqual({
+        __sql_type: "BIGINT",
+        value: "9007199254740993",
+      });
+    });
+
+    it("sql.bigint(number) should reject values outside Number.MAX_SAFE_INTEGER", () => {
+      expect(() => sql.bigint(Number.MAX_SAFE_INTEGER + 2)).toThrow(
+        /outside Number\.MAX_SAFE_INTEGER/,
+      );
+    });
+
+    it("sql.bigint(bigint) should reject values outside 64-bit signed range", () => {
+      expect(() => sql.bigint(2n ** 63n)).toThrow(
+        /BIGINT \(64-bit signed\) range/,
+      );
+      expect(() => sql.bigint(-(2n ** 63n) - 1n)).toThrow(
+        /BIGINT \(64-bit signed\) range/,
+      );
+    });
+
+    it("sql.bigint() should accept the BIGINT boundaries", () => {
+      expect(sql.bigint(2n ** 63n - 1n)).toEqual({
+        __sql_type: "BIGINT",
+        value: "9223372036854775807",
+      });
+      expect(sql.bigint(-(2n ** 63n))).toEqual({
+        __sql_type: "BIGINT",
+        value: "-9223372036854775808",
+      });
+    });
+
+    it("sql.float() should produce FLOAT", () => {
+      expect(sql.float(3.14)).toEqual({ __sql_type: "FLOAT", value: "3.14" });
+      expect(sql.float("3.14")).toEqual({
+        __sql_type: "FLOAT",
+        value: "3.14",
+      });
+    });
+
+    it("sql.float() should reject non-finite and non-numeric inputs", () => {
+      expect(() => sql.float(Number.POSITIVE_INFINITY)).toThrow(
+        /finite number/,
+      );
+      expect(() => sql.float("hello" as any)).toThrow(
+        /expects number or numeric string/,
+      );
+    });
+
+    it("sql.double() should produce DOUBLE", () => {
+      expect(sql.double(3.14)).toEqual({
+        __sql_type: "DOUBLE",
+        value: "3.14",
+      });
+      expect(sql.double("3.14")).toEqual({
+        __sql_type: "DOUBLE",
+        value: "3.14",
+      });
+    });
+
+    it("sql.double() should reject non-finite and non-numeric inputs", () => {
+      expect(() => sql.double(Number.NaN)).toThrow(/finite number/);
+      expect(() => sql.double("0x10" as any)).toThrow(
+        /expects number or numeric string/,
+      );
+    });
+
+    it("sql.numeric() should produce NUMERIC from a string", () => {
+      expect(sql.numeric("12345.6789")).toEqual({
+        __sql_type: "NUMERIC",
+        value: "12345.6789",
+      });
+    });
+
+    it("sql.numeric(number) is lossy by design — caller is warned via docstring", () => {
+      // Regression test: passing a JS number to sql.numeric serialises with
+      // JS-double precision. This pins the behaviour the docstring warns
+      // about so the precision-loss caveat is visible in the test suite.
+      expect(sql.numeric(0.1 + 0.2)).toEqual({
+        __sql_type: "NUMERIC",
+        value: "0.30000000000000004",
+      });
+    });
+
+    it("sql.numeric() should reject non-numeric strings", () => {
+      expect(() => sql.numeric("hello" as any)).toThrow(
+        /expects number or numeric string/,
       );
     });
   });

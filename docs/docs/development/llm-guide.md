@@ -33,7 +33,6 @@ This guide is designed to work even when you *do not* have access to the AppKit 
 
 - **Do not invent APIs**. If unsure, stick to the patterns shown in the documentation and only use documented exports from `@databricks/appkit` and `@databricks/appkit-ui`.
 - **`createApp()` is async**. Prefer **top-level `await createApp(...)`**. If you can't, use `void createApp(...)` and do not ignore promise rejection.
-- **Always memoize query parameters** passed to `useAnalyticsQuery` / charts to avoid refetch loops.
 - **Always handle loading/error/empty states** in UI (use `Skeleton`, error text, empty state).
 - **Always use `sql.*` helpers** for query parameters (do not pass raw strings/numbers unless the query expects none).
 - **Never construct SQL strings dynamically**. Use parameterized queries with `:paramName`.

@@ -13,12 +13,12 @@ describe("defineTool()", () => {
       description: "echo",
       schema: z.object({ msg: z.string() }),
       annotations: { readOnly: true },
-      handler: ({ msg }) => msg,
+      execute: ({ msg }) => msg,
     });
 
     expect(entry.description).toBe("echo");
     expect(entry.annotations).toEqual({ readOnly: true });
-    expect(typeof entry.handler).toBe("function");
+    expect(typeof entry.execute).toBe("function");
   });
 });
 
@@ -27,11 +27,11 @@ describe("executeFromRegistry", () => {
     echo: defineTool({
       description: "echo",
       schema: z.object({ msg: z.string() }),
-      handler: ({ msg }) => `got ${msg}`,
+      execute: ({ msg }) => `got ${msg}`,
     }),
   };
 
-  test("validates args and calls handler on success", async () => {
+  test("validates args and calls execute on success", async () => {
     const result = await executeFromRegistry(registry, "echo", { msg: "hi" });
     expect(result).toBe("got hi");
   });
@@ -49,15 +49,15 @@ describe("executeFromRegistry", () => {
     );
   });
 
-  test("forwards AbortSignal to the handler", async () => {
-    const handler = vi.fn(async (_args: { x: string }, signal?: AbortSignal) =>
+  test("forwards AbortSignal to the execute callback", async () => {
+    const execute = vi.fn(async (_args: { x: string }, signal?: AbortSignal) =>
       signal?.aborted ? "aborted" : "ok",
     );
     const reg: ToolRegistry = {
       t: defineTool({
         description: "t",
         schema: z.object({ x: z.string() }),
-        handler,
+        execute,
       }),
     };
 
@@ -65,8 +65,8 @@ describe("executeFromRegistry", () => {
     controller.abort();
     await executeFromRegistry(reg, "t", { x: "hi" }, controller.signal);
 
-    expect(handler).toHaveBeenCalledTimes(1);
-    expect(handler.mock.calls[0][1]).toBe(controller.signal);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0][1]).toBe(controller.signal);
   });
 });
 
@@ -79,7 +79,7 @@ describe("toolsFromRegistry", () => {
           query: z.string().describe("SQL query"),
         }),
         annotations: { readOnly: true, requiresUserContext: true },
-        handler: () => "ok",
+        execute: () => "ok",
       }),
     };
 
@@ -105,12 +105,12 @@ describe("toolsFromRegistry", () => {
       "uploads.list": defineTool({
         description: "list uploads",
         schema: z.object({}),
-        handler: () => [],
+        execute: () => [],
       }),
       "documents.list": defineTool({
         description: "list documents",
         schema: z.object({}),
-        handler: () => [],
+        execute: () => [],
       }),
     };
 
@@ -124,7 +124,7 @@ describe("toolsFromRegistry", () => {
       plain: defineTool({
         description: "plain",
         schema: z.object({}),
-        handler: () => "ok",
+        execute: () => "ok",
       }),
     };
     const [def] = toolsFromRegistry(registry);

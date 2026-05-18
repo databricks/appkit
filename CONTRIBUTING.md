@@ -128,6 +128,14 @@ pnpm docs:serve  # Serve built docs
 
 See [docs/README.md](./docs/README.md) for more details.
 
+## Version resolution in Databricks CLI
+
+The Databricks CLI uses [`cli-compat.json`](https://github.com/databricks/cli/blob/main/internal/build/cli-compat.json)
+to determine which AppKit template version to use for `apps init`. The manifest maps
+CLI versions to compatible AppKit versions. It lives in the
+[CLI repository](https://github.com/databricks/cli) — see the
+[README](https://github.com/databricks/cli/blob/main/internal/build/README.md) for details.
+
 ## Adding or changing a resource type
 
 Resource types and their permissions are defined once in the plugin-manifest schema; the CLI (create, add-resource, validate) and the appkit registry types are derived from it.
