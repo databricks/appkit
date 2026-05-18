@@ -72,7 +72,11 @@ npx @databricks/appkit plugin list --dir packages/appkit/src/plugins --json \
 # and that no warnings about orphaned resources / removed plugins are printed.
 # Sync-time warnings → Category 1 (Manifest Design), severity SHOULD unless the
 # plugin is missing entirely (then MUST).
-npx @databricks/appkit plugin sync --json
+#
+# In the monorepo, --plugins-dir points sync at the source manifests (matching
+# the sync:template script). Without it, sync scans node_modules/@databricks/
+# appkit/dist/plugins/, which may be missing or stale.
+npx @databricks/appkit plugin sync --plugins-dir packages/appkit/src/plugins --json
 ```
 
 If `plugin validate` exits non-zero, record a MUST finding under Category 1 with the validator's error output as the description, and continue to Step 4 — the rest of the audit still applies.
