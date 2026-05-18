@@ -329,16 +329,12 @@
       }
     },
     "rules": {
+      "must": [],
+      "should": [],
       "never": [
         "Modify files inside the template directory",
         "Skip resource configuration prompts",
         "Hardcode workspace-specific values in template files"
-      ],
-      "must": [
-        "Use the template manifest (appkit.plugins.json) as the source of truth for available plugins",
-        "Respect requiredByTemplate flags when presenting plugin selection",
-        "Generate .env files with all required environment variables from selected plugins",
-        "When discovering volume resources, prompt the user for catalog and schema before listing volumes."
       ]
     }
   }

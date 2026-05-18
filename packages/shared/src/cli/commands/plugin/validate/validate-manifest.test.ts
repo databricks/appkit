@@ -961,14 +961,21 @@ describe("validate-manifest", () => {
       expect(parsed.command).toBe("databricks apps init");
       expect(parsed.rules?.must).toBeDefined();
       expect(parsed.rules?.never).toBeDefined();
+      expect(parsed.rules?.should).toBeDefined();
     });
 
-    it("TEMPLATE_SCAFFOLDING.rules.must includes the volume parent-walk MUST directive", () => {
-      // Phase 6: hierarchical context for volumes is encoded as a MUST rule
-      // rather than a schema-level dependency graph.
-      expect(TEMPLATE_SCAFFOLDING.rules.must).toContain(
-        "When discovering volume resources, prompt the user for catalog and schema before listing volumes.",
-      );
+    it("TEMPLATE_SCAFFOLDING.rules satisfies the substitutability gate (Phase 2/A4)", () => {
+      // Phase 2 pruned all four MUST entries from TEMPLATE_SCAFFOLDING.rules.must
+      // because each was substitutable: skill content (1), derivable from
+      // `requiredByTemplate` field (2), derivable from `field.env` enumeration
+      // (3), or a discovery-descriptor concern (4 — A6 candidate (a)).
+      expect(TEMPLATE_SCAFFOLDING.rules.must).toHaveLength(0);
+      expect(TEMPLATE_SCAFFOLDING.rules.should).toHaveLength(0);
+      expect(TEMPLATE_SCAFFOLDING.rules.never).toEqual([
+        "Modify files inside the template directory",
+        "Skip resource configuration prompts",
+        "Hardcode workspace-specific values in template files",
+      ]);
     });
   });
 });
