@@ -77,9 +77,10 @@ jobs:
             exit 1
           fi
       - name: Build shared package dist (for sync:template CLI)
-        # `pnpm run sync:template` runs through `packages/shared/bin/appkit.js`
-        # which imports the built `packages/shared/dist/cli/index.js`. The
-        # lint job doesn't otherwise build, so build just shared's dist
+        # `pnpm run sync:template` invokes the `appkit` bin (from
+        # `packages/appkit/bin/appkit.js`), which delegates to
+        # `packages/shared/bin/appkit.js` → `packages/shared/dist/cli/index.js`.
+        # The lint job doesn't otherwise build, so build just shared's dist
         # before invoking sync. We invoke tsdown directly rather than
         # `pnpm --filter shared build:package` because the latter also
         # re-runs `generate-schema-types.ts`, which writes the raw (unformatted)

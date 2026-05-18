@@ -4,6 +4,9 @@
   "version": "0.31.0",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "appkit": "./bin/appkit.js"
+  },
   "packageManager": "pnpm@10.21.0",
   "license": "Apache-2.0",
   "repository": {
