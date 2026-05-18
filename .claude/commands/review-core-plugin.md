@@ -89,7 +89,11 @@ npx @databricks/appkit plugin validate packages/appkit/src/plugins/{plugin-name}
 #     when the diff deletes a plugin → flag as a release-note / migration concern.
 #   - displayName / package / resource counts that differ from manifest.json
 #     → Category 1, SHOULD.
-npx @databricks/appkit plugin sync --json
+#
+# In the monorepo, --plugins-dir points sync at the source manifests (matching
+# the sync:template script). Without it, sync scans node_modules/@databricks/
+# appkit/dist/plugins/, which may be missing or stale.
+npx @databricks/appkit plugin sync --plugins-dir packages/appkit/src/plugins --json
 ```
 
 Conditional checks (only when the diff matches):
