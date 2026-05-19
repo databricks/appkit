@@ -75,6 +75,7 @@
     "@types/semver": "7.7.1",
     "dotenv": "16.6.1",
     "express": "4.22.0",
+    "magic-string": "0.30.21",
     "obug": "2.1.1",
     "pg": "8.18.0",
     "picocolors": "1.1.1",

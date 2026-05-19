@@ -2,12 +2,11 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'node:path';
-import reactSourceLoc from './vite-plugin-react-source-loc';
 
 // https://vite.dev/config/
 export default defineConfig({
   root: __dirname,
-  plugins: [react(), reactSourceLoc(), tailwindcss()],
+  plugins: [react(), tailwindcss()],
   server: {
     middlewareMode: true,
   },
