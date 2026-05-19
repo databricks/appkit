@@ -25,6 +25,7 @@ export {
   type UseChartDataResult,
   useChartData,
 } from "./use-chart-data";
+export { useIsMobile } from "./use-mobile";
 export { usePluginClientConfig } from "./use-plugin-config";
 export {
   type UseServingInvokeOptions,

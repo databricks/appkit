@@ -1,10 +1,18 @@
 import { createBrowserRouter, RouterProvider, NavLink, Outlet } from 'react-router';
+import { useState } from 'react';
 import {
+  Button,
   Card,
   CardContent,
   CardHeader,
   CardTitle,
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  useIsMobile,
 } from '@databricks/appkit-ui/react';
+import { Menu } from 'lucide-react';
 {{- if .plugins.agents}}
 import { AgentChat } from './pages/agents/AgentChat';
 {{- end}}
@@ -37,59 +45,90 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
       : 'text-muted-foreground hover:bg-muted hover:text-foreground'
   }`;
 
-function Layout() {
+const mobileNavLinkClass = ({ isActive }: { isActive: boolean }) =>
+  `block px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+    isActive
+      ? 'bg-primary text-primary-foreground'
+      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+  }`;
+
+function NavLinks({ className, linkClass, onClick }: { className?: string; linkClass: typeof navLinkClass; onClick?: () => void }) {
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      <header className="border-b px-6 py-3 flex items-center gap-4">
-        <h1 className="text-lg font-semibold text-foreground">{{.projectName}}</h1>
-        <nav className="flex gap-1">
-          <NavLink to="/" end className={navLinkClass}>
-            Home
-          </NavLink>
+    <nav className={className}>
+      <NavLink to="/" end className={linkClass} onClick={onClick}>
+        Home
+      </NavLink>
 {{- if .plugins.agents}}
-          <NavLink to="/agents" className={navLinkClass}>
-            Agents
-          </NavLink>
+      <NavLink to="/agents" className={linkClass} onClick={onClick}>
+        Agents
+      </NavLink>
 {{- end}}
 {{- if .plugins.analytics}}
-          <NavLink to="/analytics" className={navLinkClass}>
-            Analytics
-          </NavLink>
+      <NavLink to="/analytics" className={linkClass} onClick={onClick}>
+        Analytics
+      </NavLink>
 {{- end}}
 {{- if .plugins.lakebase}}
-          <NavLink to="/lakebase" className={navLinkClass}>
-            Lakebase
-          </NavLink>
+      <NavLink to="/lakebase" className={linkClass} onClick={onClick}>
+        Lakebase
+      </NavLink>
 {{- end}}
 {{- if .plugins.genie}}
-          <NavLink to="/genie" className={navLinkClass}>
-            Genie
-          </NavLink>
+      <NavLink to="/genie" className={linkClass} onClick={onClick}>
+        Genie
+      </NavLink>
 {{- end}}
 {{- if .plugins.files}}
-          <NavLink to="/files" className={navLinkClass}>
-            Files
-          </NavLink>
+      <NavLink to="/files" className={linkClass} onClick={onClick}>
+        Files
+      </NavLink>
 {{- end}}
 {{- if .plugins.serving}}
-          <NavLink to="/serving" className={navLinkClass}>
-            Serving
-          </NavLink>
+      <NavLink to="/serving" className={linkClass} onClick={onClick}>
+        Serving
+      </NavLink>
 {{- end}}
 {{- if .plugins.vectorSearch}}
-          <NavLink to="/vector-search" className={navLinkClass}>
-            Vector Search
-          </NavLink>
+      <NavLink to="/vector-search" className={linkClass} onClick={onClick}>
+        Vector Search
+      </NavLink>
 {{- end}}
 {{- if .plugins.jobs}}
-          <NavLink to="/jobs" className={navLinkClass}>
-            Jobs
-          </NavLink>
+      <NavLink to="/jobs" className={linkClass} onClick={onClick}>
+        Jobs
+      </NavLink>
 {{- end}}
-        </nav>
+    </nav>
+  );
+}
+
+function Layout() {
+  const isMobile = useIsMobile();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  return (
+    <div className="min-h-screen bg-background flex flex-col">
+      <header className="border-b px-4 sm:px-6 py-3 flex items-center gap-4">
+        <h1 className="text-lg font-semibold text-foreground">{{.projectName}}</h1>
+        {isMobile ? (
+          <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+            <Button variant="ghost" size="icon" className="ml-auto" onClick={() => setMobileNavOpen(true)}>
+              <Menu className="h-5 w-5" />
+              <span className="sr-only">Open navigation</span>
+            </Button>
+            <SheetContent side="left">
+              <SheetHeader>
+                <SheetTitle>Navigation</SheetTitle>
+              </SheetHeader>
+              <NavLinks className="flex flex-col gap-1 mt-4" linkClass={mobileNavLinkClass} onClick={() => setMobileNavOpen(false)} />
+            </SheetContent>
+          </Sheet>
+        ) : (
+          <NavLinks className="flex gap-1" linkClass={navLinkClass} />
+        )}
       </header>
 
-      <main className="flex-1 p-6">
+      <main className="flex-1 p-4 sm:p-6">
         <Outlet />
       </main>
     </div>

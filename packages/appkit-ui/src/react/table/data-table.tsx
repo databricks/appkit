@@ -256,8 +256,8 @@ export function DataTable(props: DataTableProps) {
                 </Table>
               </div>
             </div>
-            <div className="flex items-center justify-between py-4">
-              <div className="flex items-center gap-6">
+            <div className="flex flex-col-reverse sm:flex-row items-start sm:items-center justify-between gap-3 py-4">
+              <div className="flex flex-wrap items-center gap-3 sm:gap-6">
                 <div className="text-foreground text-sm">
                   {totalRows > 0
                     ? finalLabels.showing
