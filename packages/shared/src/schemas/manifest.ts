@@ -1062,12 +1062,13 @@ export const TEMPLATE_SCAFFOLDING = {
     },
   },
   rules: {
-    must: [],
-    should: [],
+    must: [
+      "Keep all secrets and credentials only in app.yaml, databricks.yml, and/or .env",
+    ],
+    should: ["ask user when in doubt of resource to use for plugin"],
     never: [
-      "Modify files inside the template directory",
-      "Skip resource configuration prompts",
-      "Hardcode workspace-specific values in template files",
+      "guess resources when multiple or no options are available",
+      "embed secrets in files that will go to the client-bundle",
     ],
   },
 } satisfies z.infer<typeof scaffoldingDescriptorSchema>;

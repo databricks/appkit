@@ -970,12 +970,24 @@ describe("validate-manifest", () => {
       // because each was substitutable: skill content (1), derivable from
       // `requiredByTemplate` field (2), derivable from `field.env` enumeration
       // (3), or a discovery-descriptor concern (4 — A6 candidate (a)).
-      expect(TEMPLATE_SCAFFOLDING.rules.must).toHaveLength(0);
-      expect(TEMPLATE_SCAFFOLDING.rules.should).toHaveLength(0);
+      //
+      // The post-Track-B-design pass replaced the remaining never entries with
+      // rules sharper against the conflict-detection step in databricks-apps
+      // skill 0.1.2 (Track B PR #79). The original "Modify files inside the
+      // template directory" rule conflicted with plugin setup instructions
+      // that legitimately edit scaffolded files; "Hardcode workspace-specific
+      // values" was reframed around credentials and runtime targets; "Skip
+      // resource configuration prompts" was split into a should/never pair
+      // covering the actual decision-time failures.
+      expect(TEMPLATE_SCAFFOLDING.rules.must).toEqual([
+        "Keep all secrets and credentials only in app.yaml, databricks.yml, and/or .env",
+      ]);
+      expect(TEMPLATE_SCAFFOLDING.rules.should).toEqual([
+        "ask user when in doubt of resource to use for plugin",
+      ]);
       expect(TEMPLATE_SCAFFOLDING.rules.never).toEqual([
-        "Modify files inside the template directory",
-        "Skip resource configuration prompts",
-        "Hardcode workspace-specific values in template files",
+        "guess resources when multiple or no options are available",
+        "embed secrets in files that will go to the client-bundle",
       ]);
     });
   });
