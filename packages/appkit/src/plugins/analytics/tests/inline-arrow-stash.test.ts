@@ -113,4 +113,124 @@ describe("InlineArrowStash", () => {
     expect(stash.count()).toBe(0);
     expect(stash.size()).toBe(0);
   });
+
+  describe("putBlocking backpressure", () => {
+    test("succeeds immediately when capacity is available", async () => {
+      const stash = new InlineArrowStash({
+        putWaitMs: 50,
+        idGenerator: () => "x",
+      });
+      const id = await stash.putBlocking("user-1", bytes(10));
+      expect(id).toBe("inline-x");
+    });
+
+    test("waits for a take() to free a slot, then succeeds", async () => {
+      let seq = 0;
+      const stash = new InlineArrowStash({
+        maxBytes: 100,
+        putWaitMs: 500,
+        idGenerator: () => String(seq++),
+      });
+      const a = mustPut(stash, "user-1", bytes(80));
+      mustPut(stash, "user-1", bytes(20));
+      expect(stash.size()).toBe(100);
+
+      // 50 bytes won't fit until something drains.
+      const pending = stash.putBlocking("user-1", bytes(50));
+      // Drain the 80-byte entry → frees room for 50.
+      stash.take(a, "user-1");
+
+      const id = await pending;
+      expect(id).not.toBeNull();
+      expect(stash.size()).toBe(70); // 20 left over + 50 just inserted
+    });
+
+    test("returns null when the wait elapses without a slot freeing", async () => {
+      const stash = new InlineArrowStash({
+        maxBytes: 100,
+        putWaitMs: 20,
+      });
+      mustPut(stash, "user-1", bytes(100));
+      const t0 = Date.now();
+      const id = await stash.putBlocking("user-1", bytes(50));
+      const elapsed = Date.now() - t0;
+      expect(id).toBeNull();
+      expect(elapsed).toBeGreaterThanOrEqual(15);
+    });
+
+    test("preserves FIFO order across waiters", async () => {
+      let seq = 0;
+      const stash = new InlineArrowStash({
+        maxBytes: 100,
+        putWaitMs: 500,
+        idGenerator: () => String(seq++),
+      });
+      const a = mustPut(stash, "user-1", bytes(100));
+
+      // A1 needs 60, A2 needs 30, both wait.
+      const a1 = stash.putBlocking("user-1", bytes(60));
+      const a2 = stash.putBlocking("user-1", bytes(30));
+
+      stash.take(a, "user-1"); // frees 100 → both fit
+      const [id1, id2] = await Promise.all([a1, a2]);
+      expect(id1).not.toBeNull();
+      expect(id2).not.toBeNull();
+      // Order of issued ids matches submission order.
+      expect(Number(id1!.replace("inline-", ""))).toBeLessThan(
+        Number(id2!.replace("inline-", "")),
+      );
+    });
+
+    test("rejects later waiters when head consumes the freed capacity", async () => {
+      let seq = 0;
+      const stash = new InlineArrowStash({
+        maxBytes: 100,
+        putWaitMs: 30,
+        idGenerator: () => String(seq++),
+      });
+      const a = mustPut(stash, "user-1", bytes(100));
+
+      const a1 = stash.putBlocking("user-1", bytes(80));
+      const a2 = stash.putBlocking("user-1", bytes(80));
+
+      stash.take(a, "user-1"); // 100 free → only a1 (80) fits
+      const [id1, id2] = await Promise.all([a1, a2]);
+      expect(id1).not.toBeNull();
+      // a2 was still queued, gets evicted on timeout
+      expect(id2).toBeNull();
+    });
+
+    test("settles with null when signal aborts mid-wait", async () => {
+      const stash = new InlineArrowStash({
+        maxBytes: 100,
+        putWaitMs: 5000,
+      });
+      mustPut(stash, "user-1", bytes(100));
+      const ac = new AbortController();
+      const pending = stash.putBlocking("user-1", bytes(50), ac.signal);
+      ac.abort();
+      expect(await pending).toBeNull();
+    });
+
+    test("pre-aborted signal short-circuits", async () => {
+      const stash = new InlineArrowStash({
+        maxBytes: 100,
+        putWaitMs: 5000,
+      });
+      mustPut(stash, "user-1", bytes(100));
+      const id = await stash.putBlocking(
+        "user-1",
+        bytes(50),
+        AbortSignal.abort(),
+      );
+      expect(id).toBeNull();
+    });
+
+    test("putWaitMs=0 (default) behaves like sync put", async () => {
+      const stash = new InlineArrowStash({ maxBytes: 100 });
+      mustPut(stash, "user-1", bytes(100));
+      const id = await stash.putBlocking("user-1", bytes(50));
+      expect(id).toBeNull();
+    });
+  });
 });

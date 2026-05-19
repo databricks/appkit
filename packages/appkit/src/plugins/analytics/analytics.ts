@@ -60,7 +60,15 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    * the bytes through the existing `/arrow-result/:jobId` endpoint with
    * a real binary content-type.
    */
-  protected inlineArrowStash: InlineArrowStash = new InlineArrowStash();
+  // Short put-wait so that a momentarily full stash backpressures rather
+  // than immediately falling back to EXTERNAL_LINKS — important on
+  // warehouses (e.g. Reyden) that refuse EXTERNAL_LINKS outright. The
+  // stash is drain-on-read, so an in-flight `/arrow-result` GET from any
+  // concurrent query usually frees a slot well within this window. True
+  // sustained overload still falls back via the existing path below.
+  protected inlineArrowStash: InlineArrowStash = new InlineArrowStash({
+    putWaitMs: 500,
+  });
 
   constructor(config: IAnalyticsConfig) {
     super(config);
@@ -327,7 +335,8 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    *   `JSON_ARRAY` contract is preserved.
    * - **ARROW_STREAM** first tries `INLINE + ARROW_STREAM`. If the
    *   warehouse refuses (most classic + some serverless variants), or the
-   *   inline stash is full, falls back to `EXTERNAL_LINKS + ARROW_STREAM`.
+   *   inline stash is full after a brief backpressure wait, falls back to
+   *   `EXTERNAL_LINKS + ARROW_STREAM`.
    *
    * INLINE Arrow attachments under the ARROW_STREAM path are decoded once
    * and put on the plugin's `inlineArrowStash`; the SSE message carries the
@@ -406,21 +415,24 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
           throw ExecutionError.canceled();
         }
         const decoded = Buffer.from(result.attachment, "base64");
-        const inlineId = this.inlineArrowStash.put(
+        const inlineId = await this.inlineArrowStash.putBlocking(
           stashUserKey,
           new Uint8Array(
             decoded.buffer,
             decoded.byteOffset,
             decoded.byteLength,
           ),
+          signal,
         );
         if (inlineId === null) {
-          // Stash is full — every id we have already handed out must
-          // stay valid, so the stash refuses new entries rather than
-          // evicting in-flight ones. Fall back to EXTERNAL_LINKS for
-          // this request so the client still gets its result.
+          // Stash is full even after the put-wait elapsed — every id we
+          // have already handed out must stay valid, so the stash refuses
+          // new entries rather than evicting in-flight ones. Fall back to
+          // EXTERNAL_LINKS for this request so the client still gets its
+          // result. On warehouses that refuse EXTERNAL_LINKS (e.g. Reyden)
+          // the executor will surface NOT_IMPLEMENTED to the caller.
           logger.warn(
-            "Inline Arrow stash full, falling back to EXTERNAL_LINKS for the current query",
+            "Inline Arrow stash full after put-wait, falling back to EXTERNAL_LINKS for the current query",
           );
         } else {
           return makeArrowMessage(inlineId, { status: result.status });

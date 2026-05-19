@@ -1057,8 +1057,13 @@ describe("Analytics Plugin", () => {
         });
       (plugin as any).SQLClient.executeStatement = executeMock;
 
-      // Force the stash to reject the put — simulates capacity exhaustion.
-      vi.spyOn((plugin as any).inlineArrowStash, "put").mockReturnValue(null);
+      // Force the stash to reject the put — simulates capacity exhaustion
+      // after the put-wait elapses. Stubbing putBlocking() directly skips
+      // the real timer; the production call site goes through putBlocking.
+      vi.spyOn(
+        (plugin as any).inlineArrowStash,
+        "putBlocking",
+      ).mockResolvedValue(null);
 
       plugin.injectRoutes(router);
 
