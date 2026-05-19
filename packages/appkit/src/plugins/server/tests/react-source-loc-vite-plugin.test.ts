@@ -23,14 +23,18 @@ interface TestableHooks {
     | Promise<{ code: string } | string | null | undefined>;
 }
 
-async function transformSource(code: string): Promise<string> {
+async function transformSource(
+  code: string,
+  root: string = clientRoot,
+  id: string = moduleId,
+): Promise<string> {
   const { configResolved, transform } =
     reactSourceLocPlugin() as unknown as TestableHooks;
-  const config = { root: clientRoot } as ResolvedConfig;
+  const config = { root } as ResolvedConfig;
 
   await configResolved?.(config);
 
-  const result = await transform?.(code, moduleId);
+  const result = await transform?.(code, id);
   if (!result) return code;
   return typeof result === "string" ? result : result.code;
 }
@@ -73,5 +77,19 @@ describe("reactSourceLocPlugin", () => {
     expect(output).not.toMatch(/<svg:circle data-source=/);
     expect(output).toContain('<motion.div data-source="manual"');
     expect(output).not.toMatch(/data-source="[^"]+" data-source=/);
+  });
+
+  it("resolves paths from app root when vite root is not a nested client dir", async () => {
+    const appRoot = path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "flat-app",
+    );
+    const flatModuleId = path.join(appRoot, "src", "Page.tsx");
+    const code = `export const Page = () => <div className="x" />;`;
+
+    const output = await transformSource(code, appRoot, flatModuleId);
+
+    expect(output).toMatch(/<div data-source="src\/Page\.tsx:/);
+    expect(output).not.toMatch(/data-source="[^"]*\.\./);
   });
 });

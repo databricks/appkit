@@ -12,6 +12,17 @@ const JSX_ELEMENT_MATCHER = {
   },
 };
 
+/** Matches nested client dirs from ViteDevServer.findClientRoot() (not "."). */
+const NESTED_CLIENT_DIRS = new Set(["client", "src", "app", "frontend"]);
+
+function resolveProjectRoot(clientRoot: string): string {
+  const resolved = path.resolve(clientRoot);
+  if (NESTED_CLIENT_DIRS.has(path.basename(resolved))) {
+    return path.resolve(resolved, "..");
+  }
+  return resolved;
+}
+
 function cleanModuleId(id: string): string {
   return id.split("?")[0].split("#")[0];
 }
@@ -59,8 +70,7 @@ export function reactSourceLocPlugin(): Plugin {
     apply: "serve",
 
     configResolved(config) {
-      // Vite root is client/; project root is one level up
-      projectRoot = path.resolve(config.root, "..");
+      projectRoot = resolveProjectRoot(config.root);
     },
 
     transform(code, id) {
