@@ -101,6 +101,42 @@ export class ServerPlugin extends Plugin {
     return config;
   }
 
+  private shouldSkipBodyParsing(urlPath: string): boolean {
+    const normalizedUrlPath = this.normalizePath(urlPath);
+    if (this.rawBodyPaths.has(normalizedUrlPath)) return true;
+
+    for (const rawBodyPath of this.rawBodyPaths) {
+      const normalizedRawBodyPath = this.normalizePath(rawBodyPath);
+      if (
+        normalizedRawBodyPath === normalizedUrlPath ||
+        this.matchesRawBodyPath(normalizedRawBodyPath, normalizedUrlPath)
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private normalizePath(urlPath: string): string {
+    return urlPath.length > 1 ? urlPath.replace(/\/+$/, "") : urlPath;
+  }
+
+  private matchesRawBodyPath(routePath: string, urlPath: string): boolean {
+    const routeSegments = routePath.split("/");
+    const urlSegments = urlPath.split("/");
+
+    if (routeSegments.length !== urlSegments.length) return false;
+
+    return routeSegments.every((segment, index) => {
+      if (segment.startsWith(":") && segment.length > 1) {
+        return urlSegments[index].length > 0;
+      }
+
+      return segment === urlSegments[index];
+    });
+  }
+
   /**
    * Start the server.
    *
@@ -126,7 +162,7 @@ export class ServerPlugin extends Plugin {
           // rawBodyPaths is populated by extendRoutes() below; the type
           // callback runs per-request so the set is already filled.
           const urlPath = req.url?.split("?")[0];
-          if (urlPath && this.rawBodyPaths.has(urlPath)) return false;
+          if (urlPath && this.shouldSkipBodyParsing(urlPath)) return false;
           const ct = req.headers["content-type"] ?? "";
           return ct.includes("json");
         },

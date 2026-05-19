@@ -409,7 +409,9 @@ describe("ServerPlugin", () => {
         },
       };
 
-      const plugin = new ServerPlugin({ plugins });
+      const plugin = new ServerPlugin({
+        context: createContextWithPlugins(plugins),
+      });
       await plugin.start();
 
       // Get the type function passed to express.json
@@ -417,12 +419,20 @@ describe("ServerPlugin", () => {
       const typeFn = jsonCall.type;
 
       // Should skip body parsing for the declared path
-      expect(typeFn({ url: "/api/files/upload", headers: {} })).toBe(false);
+      expect(
+        typeFn({
+          url: "/api/files/upload",
+          headers: { "content-type": "application/json" },
+        }),
+      ).toBe(false);
 
       // Should skip body parsing for declared path with query string
-      expect(typeFn({ url: "/api/files/upload?path=foo", headers: {} })).toBe(
-        false,
-      );
+      expect(
+        typeFn({
+          url: "/api/files/upload?path=foo",
+          headers: { "content-type": "application/json" },
+        }),
+      ).toBe(false);
 
       // Should NOT skip body parsing for other routes (no hardcoded /upload check)
       expect(
@@ -436,6 +446,54 @@ describe("ServerPlugin", () => {
       expect(
         typeFn({
           url: "/api/analytics/query",
+          headers: { "content-type": "application/json" },
+        }),
+      ).toBe(true);
+    });
+
+    test("should skip body parsing for parameterized paths if plugin declares skipBodyParsing", async () => {
+      process.env.NODE_ENV = "production";
+
+      const plugins: any = {
+        files: {
+          name: "files",
+          injectRoutes: vi.fn(),
+          getEndpoints: vi.fn().mockReturnValue({}),
+          getSkipBodyParsingPaths: vi
+            .fn()
+            .mockReturnValue(new Set(["/api/files/:volumeKey/upload"])),
+        },
+      };
+
+      const plugin = new ServerPlugin({
+        context: createContextWithPlugins(plugins),
+      });
+      await plugin.start();
+
+      const jsonCall = vi.mocked(express.json).mock.calls[0][0] as any;
+      const typeFn = jsonCall.type;
+
+      expect(
+        typeFn({
+          url: "/api/files/uploads/upload",
+          headers: { "content-type": "application/json" },
+        }),
+      ).toBe(false);
+      expect(
+        typeFn({
+          url: "/api/files/uploads/upload?path=foo",
+          headers: { "content-type": "application/json" },
+        }),
+      ).toBe(false);
+      expect(
+        typeFn({
+          url: "/api/files/uploads/upload/",
+          headers: { "content-type": "application/json" },
+        }),
+      ).toBe(false);
+      expect(
+        typeFn({
+          url: "/api/files/uploads/nested/upload",
           headers: { "content-type": "application/json" },
         }),
       ).toBe(true);
