@@ -113,6 +113,88 @@ await createApp({
 });
 ```
 
+## On-Behalf-Of (OBO) — per-user connections
+
+When your app needs Row-Level Security (RLS) or per-user data isolation, use `asUser(req)` to execute queries using a per-user Lakebase connection pool. Each user's pool is authenticated with their Databricks identity, so PostgreSQL's `current_user` reflects the actual user.
+
+### Prerequisites
+
+1. **Enable user authorization** in your Databricks App with the **`postgres`** scope. See [User authorization](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/auth#user-authorization) for setup instructions. In your `databricks.yml`:
+   ```yaml
+   resources:
+     apps:
+       app:
+         user_api_scopes:
+           - postgres
+   ```
+   Apps scaffolded with `databricks apps init` and the Lakebase plugin include this automatically.
+
+2. Each app user needs a **Postgres role** in Lakebase. Create one with the Databricks CLI:
+
+   ```bash
+   databricks postgres create-role "projects/{project_id}/branches/{branch_id}" \
+     --json '{"spec": {"identity_type": "USER", "postgres_role": "user@example.com"}}'
+   ```
+
+   Alternatively, create roles in the Lakebase UI under **Branch Overview** → **Add role**.
+
+   :::note
+   Do not grant `databricks_superuser` to OBO users — superusers bypass RLS. Use [fine-grained grants](#fine-grained-permissions) instead.
+   :::
+
+### Usage
+
+No configuration needed — just call `asUser(req)`:
+
+```ts
+const AppKit = await createApp({
+  plugins: [server(), lakebase()],
+});
+
+// Service principal query (default — bypasses RLS as table owner)
+const all = await AppKit.lakebase.query("SELECT * FROM app.orders");
+
+// User-scoped query (per-user pool, RLS enforced)
+app.get("/api/my-orders", async (req, res) => {
+  const result = await AppKit.lakebase
+    .asUser(req)
+    .query("SELECT * FROM app.orders ORDER BY created_at DESC");
+  res.json(result.rows);
+});
+```
+
+When `asUser(req)` is called:
+1. The user's token and identity are extracted from `x-forwarded-access-token` and `x-forwarded-email` headers (set automatically by Databricks Apps).
+2. A per-user `pg.Pool` is created (or reused) with the user's OAuth credentials.
+3. `query()` and `pool` use the user's pool — `current_user` in PostgreSQL reflects the user's identity.
+
+### Row-Level Security example
+
+```sql
+-- As the service principal (during app setup):
+ALTER TABLE app.orders ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY user_orders ON app.orders
+  FOR ALL TO PUBLIC
+  USING (owner = current_user);
+
+-- Grant access so OBO users can query
+GRANT USAGE ON SCHEMA app TO PUBLIC;
+GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA app TO PUBLIC;
+```
+
+### How it works
+
+- The **service principal pool** (`AppKit.lakebase.pool`) is always created and used for DDL operations, seeding, and admin queries.
+- **Per-user pools** are created on the first `asUser(req)` call and cached by user identity. Each pool has its own OAuth token refresh cycle.
+- Idle connections within per-user pools close automatically (30s idle timeout). Empty pool objects are cleaned up periodically.
+- On shutdown, all pools (SP + user) are closed gracefully.
+- In development mode (`NODE_ENV=development`), if no user token is available, `asUser(req)` falls back to the SP pool with a warning.
+
+:::caution[RLS and superusers]
+PostgreSQL superusers bypass Row-Level Security entirely. Users with the `databricks_superuser` role will see all rows regardless of RLS policies. For RLS enforcement, use [fine-grained grants](#fine-grained-permissions) instead of the superuser role.
+:::
+
 ## Database Permissions
 
 When you create the app with the Lakebase resource using the [Getting started](#getting-started-with-the-lakebase) guide, the Service Principal is automatically granted `CONNECT_AND_CREATE` permission on the `postgres` resource. This lets the Service Principal connect to the database and create new objects, but **not access any existing schemas or tables.**
@@ -123,21 +205,37 @@ To develop locally against a deployed Lakebase database:
 
 1. **Deploy the app first.** The Service Principal creates the database schema and tables on first deploy. Apps generated from `databricks apps init` handle this automatically - they check if tables exist on startup and skip creation if they do.
 
-2. **Grant `databricks_superuser` via the Lakebase UI:**
-   1. Open the Lakebase Autoscaling UI and navigate to your project's **Branch Overview** page.
-   2. Click **Add role** (or **Edit role** if your OAuth role already exists).
-   3. Select your Databricks identity as the principal and check the **`databricks_superuser`** system role.
+2. **Grant `databricks_superuser`** (skip if you are the Lakebase project owner — you already have full access):
+
+   ```bash
+   # Create a new role with databricks_superuser
+   databricks postgres create-role "projects/{project_id}/branches/{branch_id}" \
+     --json '{"spec": {"identity_type": "USER", "postgres_role": "user@example.com", "membership_roles": ["DATABRICKS_SUPERUSER"]}}'
+   ```
+
+   To grant superuser to an existing role, use [`update-role`](https://docs.databricks.com/aws/en/dev-tools/cli/reference/postgres-commands#databricks-postgres-update-role):
+
+   ```bash
+   databricks postgres update-role \
+     "projects/{project_id}/branches/{branch_id}/roles/{role_id}" \
+     "spec.membership_roles" \
+     --json '{"spec": {"membership_roles": ["DATABRICKS_SUPERUSER"]}}'
+   ```
+
+   Alternatively, you can manage roles in the Lakebase Autoscaling UI under your project's **Branch Overview** page → **Add role** / **Edit role**.
 
 3. **Run locally** - your Databricks user identity (email) is used for OAuth authentication. The `databricks_superuser` role gives full **DML access** (read/write data) but **not DDL** (creating schemas or tables) - that's why deploying first matters (see note below).
 
-For other users, use the same **Add role** flow in the Lakebase UI to create an OAuth role with `databricks_superuser` for each user.
+For other users, repeat step 2 to create an OAuth role with `databricks_superuser` for each user.
 
 :::tip
 [Postgres password authentication](https://docs.databricks.com/aws/en/oltp/projects/authentication#overview) is a simpler alternative that avoids OAuth role permission complexity. However, it requires you to set up a password for the user in the **Branch Overview** page in the Lakebase Autoscaling UI.
 :::
 
 :::info[Why deploy first?]
-When the app is deployed, the Service Principal creates schemas and tables and becomes their owner. A `databricks_superuser` has full **DML access** (SELECT, INSERT, UPDATE, DELETE) to these objects, but **cannot run DDL** (CREATE SCHEMA, CREATE TABLE) on schemas owned by the Service Principal. Deploying first ensures all objects exist before local development begins.
+When the app is deployed, the Service Principal creates schemas and tables and becomes their owner. `databricks_superuser` gives full DML access (read/write) but not DDL, so local development works only after the schema exists.
+
+If you run `npm run dev` first, your credentials own the schema and the deployed app hits `permission denied`. To recover, export any data first (`pg_dump` or a temporary schema copy), then drop the schema and redeploy. After redeploying, the Service Principal recreates the schema on startup. (PostgreSQL schema ownership is tied to the role that created it and cannot be reassigned by regular users.)
 :::
 
 ### Fine-grained permissions

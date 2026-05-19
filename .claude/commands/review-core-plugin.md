@@ -74,11 +74,55 @@ Read the file `.claude/references/plugin-best-practices.md`.
 
 For each **relevant** category identified in Step 4, extract all NEVER, MUST, and SHOULD guidelines from that category section.
 
+## Step 5.5: CLI Cross-Checks (per touched plugin)
+
+For **each** plugin detected in Step 3, run the AppKit CLI checks below before doing the textual review. Treat each non-zero exit or warning as a finding under the indicated category in Step 6.
+
+```bash
+# Schema-validate the touched manifest. Failures → Category 1 (Manifest Design), MUST.
+npx @databricks/appkit plugin validate packages/appkit/src/plugins/{plugin-name}
+
+# Preview the synced template manifest. Watch for:
+#   - The plugin missing from the output when the diff was supposed to add it
+#     → Category 0 / Category 1, MUST.
+#   - "Plugin '...' was removed. The following resource env vars may be orphaned: ..."
+#     when the diff deletes a plugin → flag as a release-note / migration concern.
+#   - displayName / package / resource counts that differ from manifest.json
+#     → Category 1, SHOULD.
+#
+# In the monorepo, --plugins-dir points sync at the source manifests (matching
+# the sync:template script). Without it, sync scans node_modules/@databricks/
+# appkit/dist/plugins/, which may be missing or stale.
+npx @databricks/appkit plugin sync --plugins-dir packages/appkit/src/plugins --json
+```
+
+Conditional checks (only when the diff matches):
+
+```bash
+# Diff changes manifest.json's "stability" field, OR adds/removes the /beta
+# import path for this plugin. The dry-run shows exactly which manifest fields
+# and which import sites promote would touch — the diff should match. Any
+# divergence → Category 0 (Structural Completeness), MUST.
+npx @databricks/appkit plugin promote {plugin-name} --to ga --dry-run
+
+# Diff adds entries to manifest.json's resources.required / resources.optional
+# arrays. Re-run the canonical scaffolder against an unmodified copy and compare
+# — the diff should match what add-resource would have produced (alias,
+# resourceKey, permission, fields.env defaults). Hand-rolled entries that drift
+# from the defaults → Category 1, SHOULD.
+npx @databricks/appkit plugin add-resource \
+  --path packages/appkit/src/plugins/{plugin-name} \
+  --type {resource-type} \
+  --dry-run
+```
+
+Capture the relevant output and reference it from the corresponding findings in Step 6.
+
 ## Step 6: Best-Practices Review
 
 Before evaluating, read the shared review rules in `.claude/references/plugin-review-guidance.md` and apply them throughout this step (deduplication, cache-key tracing).
 
-For each plugin detected in Step 3, review the changed code against the scoped guidelines from Step 5.
+For each plugin detected in Step 3, review the changed code against the scoped guidelines from Step 5, and **fold in the CLI results from Step 5.5** under the categories noted there.
 
 For each finding:
 - Identify the **severity** (NEVER, MUST, or SHOULD)

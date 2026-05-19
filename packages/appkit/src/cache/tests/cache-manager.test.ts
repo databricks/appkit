@@ -354,6 +354,30 @@ describe("CacheManager", () => {
       expect(result1).toBe("user1-data");
       expect(result2).toBe("user2-data");
     });
+
+    test("should re-execute function when cached entry has expired", async () => {
+      const cache = await CacheManager.getInstance({
+        storage: createMockStorage(),
+      });
+      let calls = 0;
+      const fn = vi.fn().mockImplementation(async () => `result-${++calls}`);
+
+      // First call - populates cache with a 1ms TTL
+      const r1 = await cache.getOrExecute(["key"], fn, "user1", {
+        ttl: 0.001,
+      });
+      expect(r1).toBe("result-1");
+
+      // Wait for expiry
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Second call - cached entry is past its expiry, fn must run again
+      const r2 = await cache.getOrExecute(["key"], fn, "user1", {
+        ttl: 0.001,
+      });
+      expect(r2).toBe("result-2");
+      expect(fn).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe("disabled cache", () => {

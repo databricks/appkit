@@ -50,15 +50,17 @@ export const sqlTypeToHelper: Record<string, string> = {
   BINARY: "sql.binary()",
   // boolean
   BOOLEAN: "sql.boolean()",
-  // numeric
-  NUMERIC: "sql.number()",
-  INT: "sql.number()",
-  BIGINT: "sql.number()",
-  TINYINT: "sql.number()",
-  SMALLINT: "sql.number()",
-  FLOAT: "sql.number()",
-  DOUBLE: "sql.number()",
-  DECIMAL: "sql.number()",
+  // numeric — route each SQL type to its closest typed helper. INT/BIGINT
+  // are critical for LIMIT/OFFSET; FLOAT/DOUBLE preserve precision intent;
+  // NUMERIC/DECIMAL route to sql.numeric() for exact-decimal columns.
+  NUMERIC: "sql.numeric()",
+  DECIMAL: "sql.numeric()",
+  BIGINT: "sql.bigint()",
+  INT: "sql.int()",
+  TINYINT: "sql.int()",
+  SMALLINT: "sql.int()",
+  FLOAT: "sql.float()",
+  DOUBLE: "sql.double()",
   // date/time
   DATE: "sql.date()",
   TIMESTAMP: "sql.timestamp()",

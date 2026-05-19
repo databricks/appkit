@@ -20,6 +20,7 @@ import {
   ServiceContext,
   type UserContext,
 } from "../context";
+import type { PluginContext } from "../core/plugin-context";
 import { AppKitError, AuthenticationError } from "../errors";
 import { createLogger } from "../logging/logger";
 import { StreamManager } from "../stream";
@@ -41,6 +42,13 @@ import type {
 } from "./interceptors/types";
 
 const logger = createLogger("plugin");
+
+/**
+ * Symbol used to expose the UserContext from an asUser() proxy.
+ * Allows wrapWithAsUser in appkit.ts to retrieve the context and
+ * wrap export methods in runInUserContext().
+ */
+export const USER_CONTEXT_SYMBOL = Symbol("appkit.userContext");
 
 /**
  * OTel context key for marking OBO dev mode fallback.
@@ -79,6 +87,7 @@ const EXCLUDED_FROM_PROXY = new Set([
   // Lifecycle methods
   "setup",
   "shutdown",
+  "attachContext",
   "injectRoutes",
   "getEndpoints",
   "getSkipBodyParsingPaths",
@@ -178,11 +187,12 @@ export abstract class Plugin<
 > implements BasePlugin
 {
   protected isReady = false;
-  protected cache: CacheManager;
+  protected cache!: CacheManager;
   protected app: AppManager;
   protected devFileReader: DevFileReader;
   protected streamManager: StreamManager;
-  protected telemetry: ITelemetry;
+  protected telemetry!: ITelemetry;
+  protected context?: PluginContext;
 
   /** Registered endpoints for this plugin */
   private registeredEndpoints: PluginEndpointMap = {};
@@ -208,12 +218,58 @@ export abstract class Plugin<
       config.name ??
       (this.constructor as { manifest?: { name: string } }).manifest?.name ??
       "plugin";
-    this.telemetry = TelemetryManager.getProvider(this.name, config.telemetry);
     this.streamManager = new StreamManager();
-    this.cache = CacheManager.getInstanceSync();
     this.app = new AppManager();
     this.devFileReader = DevFileReader.getInstance();
+    this.context = (config as Record<string, unknown>).context as
+      | PluginContext
+      | undefined;
 
+    // Eagerly bind telemetry + cache if the core services have already been
+    // initialized (normal createApp path, or tests that mock CacheManager).
+    // If they haven't, we leave these undefined and rely on `attachContext`
+    // being called later — this lets factories eagerly construct plugin
+    // instances at module top-level before `createApp` has run.
+    this.tryAttachContext();
+  }
+
+  private tryAttachContext(): void {
+    try {
+      this.cache = CacheManager.getInstanceSync();
+    } catch {
+      return;
+    }
+    this.telemetry = TelemetryManager.getProvider(
+      this.name,
+      this.config.telemetry,
+    );
+    this.isReady = true;
+  }
+
+  /**
+   * Binds runtime dependencies (telemetry provider, cache, plugin context) to
+   * this plugin. Called by `AppKit._createApp` after construction and before
+   * `setup()`. Idempotent: safe to call if the constructor already bound them
+   * eagerly. Kept separate so factories can eagerly construct plugin instances
+   * without running this before `TelemetryManager.initialize()` /
+   * `CacheManager.getInstance()` have run.
+   */
+  attachContext(
+    deps: {
+      context?: unknown;
+      telemetryConfig?: BasePluginConfig["telemetry"];
+    } = {},
+  ): void {
+    if (!this.cache) {
+      this.cache = CacheManager.getInstanceSync();
+    }
+    this.telemetry = TelemetryManager.getProvider(
+      this.name,
+      deps.telemetryConfig ?? this.config.telemetry,
+    );
+    if (deps.context !== undefined) {
+      this.context = deps.context as PluginContext;
+    }
     this.isReady = true;
   }
 
@@ -344,6 +400,7 @@ export abstract class Plugin<
   asUser(req: express.Request): this {
     const token = req.header("x-forwarded-access-token");
     const userId = req.header("x-forwarded-user");
+    const userEmail = req.header("x-forwarded-email");
     const isDev = process.env.NODE_ENV === "development";
 
     // In local development, skip user impersonation
@@ -385,6 +442,8 @@ export abstract class Plugin<
     const userContext = ServiceContext.createUserContext(
       token,
       effectiveUserId,
+      undefined,
+      userEmail ?? undefined,
     );
 
     // Return a proxy that wraps method calls in user context
@@ -399,6 +458,9 @@ export abstract class Plugin<
   private _createUserContextProxy(userContext: UserContext): this {
     return new Proxy(this, {
       get: (target, prop, receiver) => {
+        // Expose userContext via symbol so wrapWithAsUser can wrap exports
+        if (prop === USER_CONTEXT_SYMBOL) return userContext;
+
         const value = Reflect.get(target, prop, receiver);
 
         if (typeof value !== "function") {
@@ -480,8 +542,16 @@ export abstract class Plugin<
       }
     };
 
-    // stream the result to the client
-    await this.streamManager.stream(res, asyncWrapperFn, streamConfig);
+    // stream the result to the client. The effective user key is forwarded
+    // to the stream manager so that reconnections to existing streamIds are
+    // bound to the original creator (prevents cross-user stream takeover via
+    // guessed/leaked IDs).
+    await this.streamManager.stream(
+      res,
+      asyncWrapperFn,
+      streamConfig,
+      effectiveUserKey,
+    );
   }
 
   /**

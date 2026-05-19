@@ -28,7 +28,8 @@ If **neither** path exists, stop and output:
 > - `packages/appkit/src/plugins/{PLUGIN_NAME}/`
 > - `packages/appkit/src/connectors/{PLUGIN_NAME}/`
 >
-> Available plugins can be listed with: `ls packages/appkit/src/plugins/`
+> Available plugins can be listed with: `npx @databricks/appkit plugin list --dir packages/appkit/src/plugins --json`
+> (Falls back to `ls packages/appkit/src/plugins/` if the CLI is unavailable.)
 
 If at least one path exists, proceed.
 
@@ -50,6 +51,37 @@ Read **all** files under:
 - `packages/appkit/src/connectors/{PLUGIN_NAME}/` (recursively, if this directory exists)
 
 Collect the full contents of every file. You need the complete source to evaluate all 9 categories.
+
+## Step 3.5: CLI Cross-Checks
+
+Before evaluating files by hand, run the AppKit CLI checks below and capture their output. Each result feeds into a specific category in Step 5; treat any non-zero exit as a finding under that category.
+
+```bash
+# Schema-validates manifest.json against the plugin-manifest schema.
+# Failures → Category 1 (Manifest Design), severity MUST.
+npx @databricks/appkit plugin validate packages/appkit/src/plugins/{PLUGIN_NAME}
+
+# Confirms the plugin is discoverable from the synced manifest with the expected
+# displayName, package, stability, and resource counts. Mismatches → Category 1
+# (Manifest Design) or Category 0 (Structural Completeness).
+npx @databricks/appkit plugin list --dir packages/appkit/src/plugins --json \
+  | jq '.[] | select(.name == "{PLUGIN_NAME}")'
+
+# Previews the template manifest the loader would emit (no --write).
+# Use the output to verify the plugin appears, that resources match manifest.json,
+# and that no warnings about orphaned resources / removed plugins are printed.
+# Sync-time warnings → Category 1 (Manifest Design), severity SHOULD unless the
+# plugin is missing entirely (then MUST).
+#
+# In the monorepo, --plugins-dir points sync at the source manifests (matching
+# the sync:template script). Without it, sync scans node_modules/@databricks/
+# appkit/dist/plugins/, which may be missing or stale.
+npx @databricks/appkit plugin sync --plugins-dir packages/appkit/src/plugins --json
+```
+
+If `plugin validate` exits non-zero, record a MUST finding under Category 1 with the validator's error output as the description, and continue to Step 4 — the rest of the audit still applies.
+
+If `packages/appkit/src/plugins/{PLUGIN_NAME}/` does not exist (connector-only package), skip the three CLI checks and proceed.
 
 ## Step 4: Structural Completeness Check
 
@@ -75,6 +107,12 @@ Treat each missing `MUST` file as a **MUST**-severity finding under the "Structu
 ## Step 5: Full Best-Practices Review
 
 Before evaluating, read the shared review rules in `.claude/references/plugin-review-guidance.md` and apply them throughout this step (deduplication, cache-key tracing).
+
+Fold the Step 3.5 CLI results into the matching categories:
+- `plugin validate` failures → Category 1 (Manifest Design), MUST.
+- `plugin list --json` mismatches between manifest fields and synced output → Category 1 (Manifest Design), SHOULD unless the plugin is absent (MUST).
+- `plugin sync --json` warnings about orphaned resources / removed plugins → Category 0 (Structural Completeness) or Category 1, severity per the warning text.
+- If the manifest declares `"stability": "beta"`, also run `npx @databricks/appkit plugin promote {PLUGIN_NAME} --to ga --dry-run`. Any rewrites it would perform that conflict with the current `/beta` re-export wiring → Category 0 (Structural Completeness), SHOULD.
 
 Evaluate the plugin code against **all 9 categories** from the Category Index in `plugin-review-guidance.md`. Check each category's NEVER/MUST/SHOULD rules from the best-practices reference.
 

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { ApiError, WorkspaceClient } from "@databricks/sdk-experimental";
-import type { CacheConfig, CacheStorage } from "shared";
+import type { CacheConfig, CacheEntry, CacheStorage } from "shared";
 import { createLakebasePool } from "../connectors/lakebase";
 import { AppKitError, ExecutionError, InitializationError } from "../errors";
 import { createLogger } from "../logging/logger";
@@ -202,8 +202,7 @@ export class CacheManager {
       },
       async (span) => {
         try {
-          // check if the value is in the cache
-          const cached = await this.storage.get<T>(cacheKey);
+          const cached = await this.getValid<T>(cacheKey);
           if (cached !== null) {
             span.setAttribute("cache.hit", true);
             span.setStatus({ code: SpanStatusCode.OK });
@@ -216,7 +215,7 @@ export class CacheManager {
               cache_key: cacheKey,
             });
 
-            return cached.value as T;
+            return cached.value;
           }
 
           // check if the value is being processed by another request
@@ -308,6 +307,18 @@ export class CacheManager {
     // probabilistic cleanup trigger
     this.maybeCleanup();
 
+    const entry = await this.getValid<T>(key);
+    return entry?.value ?? null;
+  }
+
+  /**
+   * Get a cached entry only if it has not expired.
+   * Returns null on miss or expired (and deletes the expired entry).
+   *
+   * Storage implementations return entries unconditionally — expiry handling
+   * lives at the CacheManager layer.
+   */
+  private async getValid<T>(key: string): Promise<CacheEntry<T> | null> {
     const entry = await this.storage.get<T>(key);
     if (!entry) return null;
 
@@ -315,7 +326,7 @@ export class CacheManager {
       await this.storage.delete(key);
       return null;
     }
-    return entry.value as T;
+    return entry;
   }
 
   /** Probabilistically trigger cleanup of expired entries (fire-and-forget) */
@@ -386,14 +397,8 @@ export class CacheManager {
   async has(key: string): Promise<boolean> {
     if (!this.config.enabled) return false;
 
-    const entry = await this.storage.get(key);
-    if (!entry) return false;
-
-    if (Date.now() > entry.expiry) {
-      await this.storage.delete(key);
-      return false;
-    }
-    return true;
+    const entry = await this.getValid(key);
+    return entry !== null;
   }
 
   /**

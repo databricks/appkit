@@ -8,21 +8,32 @@ import type {
   PluginData,
   PluginMap,
 } from "shared";
+import { version as productVersion } from "../../package.json";
 import { CacheManager } from "../cache";
-import { ServiceContext } from "../context";
+import { runInUserContext, ServiceContext } from "../context";
+import type { UserContext } from "../context/user-context";
+import {
+  isInternalTelemetryEnabled,
+  TelemetryReporter,
+} from "../internal-telemetry";
 import { createLogger } from "../logging/logger";
+import { USER_CONTEXT_SYMBOL } from "../plugin/plugin";
 import { ResourceRegistry, ResourceType } from "../registry";
 import type { TelemetryConfig } from "../telemetry";
 import { TelemetryManager } from "../telemetry";
+import { isToolProvider, PluginContext } from "./plugin-context";
 
 const logger = createLogger("appkit");
 
 export class AppKit<TPlugins extends InputPluginMap> {
   #pluginInstances: Record<string, BasePlugin> = {};
   #setupPromises: Promise<void>[] = [];
+  #context: PluginContext;
 
   private constructor(config: { plugins: TPlugins }) {
     const { plugins, ...globalConfig } = config;
+
+    this.#context = new PluginContext();
 
     const pluginEntries = Object.entries(plugins);
 
@@ -38,20 +49,24 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
     for (const [name, pluginData] of corePlugins) {
       if (pluginData) {
-        this.createAndRegisterPlugin(globalConfig, name, pluginData);
+        this.createAndRegisterPlugin(globalConfig, name, pluginData, {
+          context: this.#context,
+        });
       }
     }
 
     for (const [name, pluginData] of normalPlugins) {
       if (pluginData) {
-        this.createAndRegisterPlugin(globalConfig, name, pluginData);
+        this.createAndRegisterPlugin(globalConfig, name, pluginData, {
+          context: this.#context,
+        });
       }
     }
 
     for (const [name, pluginData] of deferredPlugins) {
       if (pluginData) {
         this.createAndRegisterPlugin(globalConfig, name, pluginData, {
-          plugins: this.#pluginInstances,
+          context: this.#context,
         });
       }
     }
@@ -73,7 +88,19 @@ export class AppKit<TPlugins extends InputPluginMap> {
     };
     const pluginInstance = new Plugin(baseConfig);
 
+    if (typeof pluginInstance.attachContext === "function") {
+      pluginInstance.attachContext({
+        context: this.#context,
+        telemetryConfig: baseConfig.telemetry,
+      });
+    }
+
     this.#pluginInstances[name] = pluginInstance;
+
+    this.#context.registerPlugin(name, pluginInstance);
+    if (isToolProvider(pluginInstance)) {
+      this.#context.registerToolProvider(name, pluginInstance);
+    }
 
     this.#setupPromises.push(pluginInstance.setup());
 
@@ -103,6 +130,32 @@ export class AppKit<TPlugins extends InputPluginMap> {
         exports[key] = (val as (...args: unknown[]) => unknown).bind(context);
       } else if (AppKit.isPlainObject(val)) {
         this.bindExportMethods(val as Record<string, unknown>, context);
+      }
+    }
+  }
+
+  /**
+   * Wraps all function properties in an exports object so they run
+   * inside the given user context (via AsyncLocalStorage).
+   * This ensures RoutingPool and other context-aware code sees the
+   * user identity even though the function was obtained outside the proxy.
+   */
+  private wrapExportsInUserContext(
+    exports: Record<string, unknown>,
+    userContext: UserContext,
+  ) {
+    for (const key in exports) {
+      if (!Object.hasOwn(exports, key)) continue;
+      const val = exports[key];
+      if (typeof val === "function") {
+        const fn = val as (...args: unknown[]) => unknown;
+        exports[key] = (...args: unknown[]) =>
+          runInUserContext(userContext, () => fn(...args));
+      } else if (AppKit.isPlainObject(val)) {
+        this.wrapExportsInUserContext(
+          val as Record<string, unknown>,
+          userContext,
+        );
       }
     }
   }
@@ -141,11 +194,22 @@ export class AppKit<TPlugins extends InputPluginMap> {
        */
       asUser: (req: import("express").Request) => {
         const userPlugin = (plugin as any).asUser(req);
-        const userExports = (userPlugin.exports?.() ?? {}) as Record<
+        const userContext = (userPlugin as any)[
+          USER_CONTEXT_SYMBOL
+        ] as UserContext;
+        const userExports = (plugin.exports?.() ?? {}) as Record<
           string,
           unknown
         >;
-        this.bindExportMethods(userExports, userPlugin);
+        // Wrap each export in runInUserContext instead of bind.
+        // bind() bypasses the Proxy get trap, so methods called via bind
+        // would not run inside the user's AsyncLocalStorage context.
+        if (userContext) {
+          this.wrapExportsInUserContext(userExports, userContext);
+        } else {
+          // Fallback for dev mode proxy (no userContext symbol)
+          this.bindExportMethods(userExports, userPlugin);
+        }
         return userExports;
       },
     };
@@ -171,6 +235,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
       cache?: CacheConfig;
       client?: WorkspaceClient;
       onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
+      disableInternalTelemetry?: boolean;
     } = {},
   ): Promise<PluginMap<T>> {
     // Initialize core services
@@ -203,6 +268,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
     const instance = new AppKit(mergedConfig);
 
     await Promise.all(instance.#setupPromises);
+    await instance.#context.emitLifecycle("setup:complete");
 
     const handle = instance as unknown as PluginMap<T>;
 
@@ -212,12 +278,28 @@ export class AppKit<TPlugins extends InputPluginMap> {
       logger.debug("onPluginsReady hook completed");
     }
 
+    if (isInternalTelemetryEnabled(config)) {
+      AppKit.bootstrapInternalTelemetry();
+    }
+
     const serverPlugin = instance.#pluginInstances.server;
     if (serverPlugin && typeof (serverPlugin as any).start === "function") {
       await (serverPlugin as any).start();
     }
 
     return handle;
+  }
+
+  private static bootstrapInternalTelemetry(): void {
+    const serviceCtx = ServiceContext.get();
+    const reporter = TelemetryReporter.initialize({
+      workspaceId: serviceCtx.workspaceId,
+      client: serviceCtx.client,
+      appId: process.env.DATABRICKS_CLIENT_ID || "",
+      appkitVersion: productVersion,
+    });
+    reporter.start();
+    reporter.sendStartup().catch(() => {});
   }
 
   private static preparePlugins(
@@ -279,6 +361,7 @@ export async function createApp<
     cache?: CacheConfig;
     client?: WorkspaceClient;
     onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
+    disableInternalTelemetry?: boolean;
   } = {},
 ): Promise<PluginMap<T>> {
   return AppKit._createApp(config);

@@ -50,32 +50,32 @@ export interface UseChartDataResult {
 function resolveFormat(
   format: DataFormat,
   parameters?: Record<string, unknown>,
-): "JSON" | "ARROW" {
+): "JSON_ARRAY" | "ARROW_STREAM" {
   // Explicit format selection
-  if (format === "json") return "JSON";
-  if (format === "arrow") return "ARROW";
+  if (format === "json") return "JSON_ARRAY";
+  if (format === "arrow") return "ARROW_STREAM";
 
   // Auto-selection heuristics
   if (format === "auto") {
     // Check for explicit hint in parameters
-    if (parameters?._preferArrow === true) return "ARROW";
-    if (parameters?._preferJson === true) return "JSON";
+    if (parameters?._preferArrow === true) return "ARROW_STREAM";
+    if (parameters?._preferJson === true) return "JSON_ARRAY";
 
     // Check limit parameter as data size hint
     const limit = parameters?.limit;
     if (typeof limit === "number" && limit > ARROW_THRESHOLD) {
-      return "ARROW";
+      return "ARROW_STREAM";
     }
 
     // Check for date range queries (often large)
     if (parameters?.startDate && parameters?.endDate) {
-      return "ARROW";
+      return "ARROW_STREAM";
     }
 
-    return "JSON";
+    return "JSON_ARRAY";
   }
 
-  return "JSON";
+  return "JSON_ARRAY";
 }
 
 // ============================================================================
@@ -110,7 +110,7 @@ export function useChartData(options: UseChartDataOptions): UseChartDataResult {
     [format, parameters],
   );
 
-  const isArrowFormat = resolvedFormat === "ARROW";
+  const isArrowFormat = resolvedFormat === "ARROW_STREAM";
 
   // Fetch data using the analytics query hook
   const {
