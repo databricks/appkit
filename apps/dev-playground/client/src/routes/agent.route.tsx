@@ -1,9 +1,16 @@
 import { getPluginClientConfig } from "@databricks/appkit-ui/js";
 import { Button } from "@databricks/appkit-ui/react";
-import { ChatInput, Conversation } from "@databricks/appkit-ui/react/chat";
+import {
+  ChatInput,
+  Conversation,
+  type UseThreadListResult,
+  useThread,
+  useThreadList,
+  useThreadMessages,
+} from "@databricks/appkit-ui/react/chat";
 import { createFileRoute } from "@tanstack/react-router";
 import type { UIMessage, UIMessageChunk } from "ai";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 export const Route = createFileRoute("/agent")({
   component: AgentRoute,
@@ -113,6 +120,8 @@ function messageBodyText(message: UIMessage): string {
   return body;
 }
 
+const THREADS_API = "/api/agents/threads";
+
 function AgentRoute() {
   const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>(
     [],
@@ -123,6 +132,45 @@ function AgentRoute() {
   >([]);
   const nextChunkIdRef = useRef(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Thread history wiring: list lives at the route level so the
+  // ChatStatusWatcher can refresh it after each turn, and the
+  // history panel becomes a presentational sibling.
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  // Bumped on "New chat" so clicking the button always remounts the
+  // Conversation even when no thread is currently selected.
+  const [newChatNonce, setNewChatNonce] = useState(0);
+  const threadList = useThreadList({ api: THREADS_API });
+  const activeThread = useThread({
+    api: THREADS_API,
+    threadId: activeThreadId,
+  });
+  const { messages: activeThreadMessages } = useThreadMessages(activeThread);
+
+  // Seed messages for resumed threads. Gated on the fetched thread id
+  // matching the selected one so a stale previous-thread payload never
+  // mounts the Conversation with the wrong history.
+  const seedMessages = useMemo<UIMessage[] | undefined>(() => {
+    if (!activeThreadId) return undefined;
+    if (!activeThread.thread || activeThread.thread.id !== activeThreadId) {
+      return undefined;
+    }
+    return activeThreadMessages
+      .filter(
+        (m) =>
+          m.role === "user" || m.role === "assistant" || m.role === "system",
+      )
+      .map((m) => ({
+        id: m.id,
+        role: m.role as "user" | "assistant" | "system",
+        parts: [{ type: "text" as const, text: m.content }],
+      }));
+  }, [activeThreadId, activeThread.thread, activeThreadMessages]);
+
+  // Don't mount Conversation while we're still fetching the seed for a
+  // newly-selected thread — re-keying on activeThreadId remounts useChat,
+  // but useChat captures `messages` and `threadId` once at mount.
+  const conversationReady = !activeThreadId || seedMessages !== undefined;
 
   const agentConfig = getPluginClientConfig<{
     agents?: string[];
@@ -136,6 +184,16 @@ function AgentRoute() {
     requestSuggestion,
     clear: clearSuggestion,
   } = useAutocomplete(hasAutocomplete);
+
+  const handleSelectThread = useCallback(
+    (id: string) => setActiveThreadId(id),
+    [],
+  );
+
+  const handleNewChat = useCallback(() => {
+    setActiveThreadId(null);
+    setNewChatNonce((n) => n + 1);
+  }, []);
 
   const decideApproval = useCallback(
     async (
@@ -158,11 +216,24 @@ function AgentRoute() {
     [],
   );
 
+  if (!conversationReady) {
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="max-w-7xl mx-auto px-6 py-12 text-center text-muted-foreground">
+          Loading thread...
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-7xl mx-auto px-6 py-12">
         <Conversation
+          key={activeThreadId ?? `new-${newChatNonce}`}
           api="/api/agents/chat"
+          threadId={activeThreadId ?? undefined}
+          messages={seedMessages}
           onData={(part) => {
             if (part.type === "data-approval-pending") {
               const payload = part.data as PendingApproval;
@@ -179,6 +250,7 @@ function AgentRoute() {
               { id: nextChunkIdRef.current++, chunk },
             ])
           }
+          onFinish={() => threadList.refresh()}
         >
           {({
             id: chatId,
@@ -221,6 +293,13 @@ function AgentRoute() {
                 </div>
 
                 <div className="flex gap-6 h-[700px]">
+                  <ThreadHistoryPanel
+                    list={threadList}
+                    selectedId={activeThreadId}
+                    onSelect={handleSelectThread}
+                    onNewChat={handleNewChat}
+                  />
+
                   <div className="flex-1 flex flex-col border rounded-lg bg-card min-w-0">
                     <div
                       ref={containerRef}
@@ -441,6 +520,73 @@ function AgentRoute() {
             );
           }}
         </Conversation>
+      </div>
+    </div>
+  );
+}
+
+// Presentational sidebar. Selection lives in AgentRoute so picking a
+// thread can remount the Conversation with seeded messages, and the
+// list refreshes automatically after each completed turn (no Refresh
+// button needed).
+function ThreadHistoryPanel({
+  list,
+  selectedId,
+  onSelect,
+  onNewChat,
+}: {
+  list: UseThreadListResult;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  onNewChat: () => void;
+}) {
+  return (
+    <div className="w-72 shrink-0 flex flex-col border rounded-lg bg-card">
+      <div className="px-3 py-2 border-b flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-muted-foreground">
+          Chat history
+        </h3>
+        <div className="flex items-center gap-2">
+          {list.loading && (
+            <span className="text-[10px] font-mono text-muted-foreground/60">
+              loading...
+            </span>
+          )}
+          <Button type="button" variant="outline" size="sm" onClick={onNewChat}>
+            + New
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-2 space-y-1">
+        {list.error && (
+          <p className="text-xs text-red-500 px-2 py-1">{list.error.message}</p>
+        )}
+        {!list.error && list.threads?.length === 0 && (
+          <p className="text-xs text-muted-foreground/60 text-center py-8">
+            No threads yet. Send a message to start one.
+          </p>
+        )}
+        {list.threads?.map((thread) => {
+          const isActive = thread.id === selectedId;
+          return (
+            <button
+              key={thread.id}
+              type="button"
+              onClick={() => onSelect(thread.id)}
+              className={`w-full text-left rounded-md px-2 py-1.5 text-xs font-mono transition-colors ${
+                isActive
+                  ? "bg-primary/10 text-foreground"
+                  : "hover:bg-muted text-muted-foreground"
+              }`}
+            >
+              <div className="truncate">{thread.id.slice(0, 8)}...</div>
+              <div className="text-[10px] opacity-60">
+                {thread.updatedAt.toLocaleString()}
+              </div>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

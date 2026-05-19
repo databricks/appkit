@@ -1,6 +1,7 @@
 import { type UseChatHelpers, useChat as useAiChat } from "@ai-sdk/react";
 import type {
   ChatOnDataCallback,
+  ChatOnFinishCallback,
   HttpChatTransportInitOptions,
   UIMessage,
   UIMessageChunk,
@@ -14,6 +15,13 @@ export interface UseChatOptions<TMessage extends UIMessage = UIMessage> {
   api: string;
   /** Stable chat id. Defaults to a fresh UUID per mount. */
   id?: string;
+  /**
+   * Initial thread id for resuming an existing conversation. Captured into
+   * an internal ref at mount; to switch to a different thread, remount the
+   * hook (e.g. via a `key` prop on the consumer component) together with a
+   * fresh `messages` seed.
+   */
+  threadId?: string;
   /** Initial messages (e.g. when hydrating from history). */
   messages?: TMessage[];
   /** Extra fetch headers forwarded to the transport. */
@@ -24,6 +32,12 @@ export interface UseChatOptions<TMessage extends UIMessage = UIMessage> {
   onStreamPart?: (chunk: UIMessageChunk) => void;
   /** Called on stream errors. */
   onError?: (error: Error) => void;
+  /**
+   * Called once per completed turn (success, abort, disconnect, or error).
+   * Useful for side effects that should run when the stream settles, e.g.
+   * refreshing a thread-history list.
+   */
+  onFinish?: ChatOnFinishCallback<TMessage>;
 }
 
 export type UseChatReturn<TMessage extends UIMessage = UIMessage> =
@@ -32,7 +46,7 @@ export type UseChatReturn<TMessage extends UIMessage = UIMessage> =
 export function useChat<TMessage extends UIMessage = UIMessage>(
   options: UseChatOptions<TMessage>,
 ): UseChatReturn<TMessage> {
-  const { api, id: providedId, messages, onData, onError } = options;
+  const { api, id: providedId, messages, onData, onError, onFinish } = options;
 
   const [id] = useState(() => providedId ?? generateId());
   const initialMessagesRef = useRef<TMessage[]>(messages ?? []);
@@ -44,7 +58,7 @@ export function useChat<TMessage extends UIMessage = UIMessage>(
   const headersRef = useRef(options.headers);
   headersRef.current = options.headers;
 
-  const threadIdRef = useRef<string | undefined>(undefined);
+  const threadIdRef = useRef<string | undefined>(options.threadId);
 
   const transport = useMemo(
     () =>
@@ -74,6 +88,7 @@ export function useChat<TMessage extends UIMessage = UIMessage>(
     transport,
     onData,
     onError,
+    onFinish,
   });
 
   return { ...chat, id };
