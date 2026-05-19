@@ -208,6 +208,14 @@ export class LakebaseV1Connector {
       async (span) => {
         const pool = await this.getPool();
         const client = await pool.connect();
+        let clientReleased = false;
+        const releaseClient = () => {
+          if (!clientReleased) {
+            client.release();
+            clientReleased = true;
+          }
+        };
+
         try {
           await client.query("BEGIN");
           const result = await callback(client);
@@ -221,14 +229,14 @@ export class LakebaseV1Connector {
           // retry on auth failure
           if (this.isAuthError(error)) {
             span.addEvent("auth_error_retry");
-            client.release();
+            releaseClient();
             await this.rotateCredentials();
             const newPool = await this.getPool();
             const retryClient = await newPool.connect();
             try {
-              await client.query("BEGIN");
+              await retryClient.query("BEGIN");
               const result = await callback(retryClient);
-              await client.query("COMMIT");
+              await retryClient.query("COMMIT");
               span.setStatus({ code: SpanStatusCode.OK });
               return result;
             } catch (retryError) {
@@ -244,7 +252,7 @@ export class LakebaseV1Connector {
           // retry on transient errors, but only once
           if (this.isTransientError(error) && retryCount < 1) {
             span.addEvent("transaction_error_retry");
-            client.release();
+            releaseClient();
             await new Promise((resolve) => setTimeout(resolve, 100));
             return await this.transaction<T>(callback, retryCount + 1);
           }
@@ -262,7 +270,7 @@ export class LakebaseV1Connector {
           }
           throw ConnectionError.transactionFailed(error as Error);
         } finally {
-          client.release();
+          releaseClient();
           const duration = Date.now() - startTime;
           this.telemetryMetrics.queryCount.add(1);
           this.telemetryMetrics.queryDuration.record(duration);

@@ -358,6 +358,63 @@ describe("LakebaseV1Connector", () => {
       expect(mockClient.release).toHaveBeenCalled();
     });
 
+    test("should run retry transaction boundaries on the retry client if auth failure rotates credentials", async () => {
+      const authError = new Error("password authentication failed") as any;
+      authError.code = "28P01";
+
+      let initialClientReleased = false;
+      const initialClient = {
+        query: vi.fn().mockImplementation((sql: string) => {
+          if (sql === "BEGIN" && !initialClientReleased) {
+            return Promise.resolve({ rows: [] });
+          }
+          if (sql === "SELECT 1") {
+            return Promise.reject(authError);
+          }
+          if (sql === "ROLLBACK") {
+            return Promise.resolve({ rows: [] });
+          }
+          return Promise.reject(
+            new Error(`initial client should not run ${sql}`),
+          );
+        }),
+        release: vi.fn().mockImplementation(() => {
+          if (initialClientReleased) {
+            throw new Error("initial client released twice");
+          }
+          initialClientReleased = true;
+        }),
+      };
+      const retryClient = {
+        query: vi.fn().mockResolvedValue({ rows: [] }),
+        release: vi.fn(),
+      };
+      mockConnect
+        .mockResolvedValueOnce(initialClient)
+        .mockResolvedValueOnce(retryClient);
+
+      const seenClients: unknown[] = [];
+      const result = await connector.transaction(async (client) => {
+        seenClients.push(client);
+        await client.query("SELECT 1");
+        return seenClients.length === 2 ? "retried" : "initial";
+      });
+
+      expect(result).toBe("retried");
+      expect(seenClients[0]).toBe(initialClient);
+      expect(seenClients[1]).toBe(retryClient);
+      expect(initialClient.query).toHaveBeenNthCalledWith(1, "BEGIN");
+      expect(initialClient.query).toHaveBeenNthCalledWith(2, "SELECT 1");
+      expect(initialClient.query).toHaveBeenNthCalledWith(3, "ROLLBACK");
+      expect(initialClient.query).toHaveBeenCalledTimes(3);
+      expect(retryClient.query).toHaveBeenNthCalledWith(1, "BEGIN");
+      expect(retryClient.query).toHaveBeenNthCalledWith(2, "SELECT 1");
+      expect(retryClient.query).toHaveBeenNthCalledWith(3, "COMMIT");
+      expect(retryClient.query).toHaveBeenCalledTimes(3);
+      expect(initialClient.release).toHaveBeenCalledTimes(1);
+      expect(retryClient.release).toHaveBeenCalledTimes(1);
+    });
+
     test("should not log the SQL query string on transaction error", async () => {
       const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
