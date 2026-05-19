@@ -83,6 +83,44 @@ If `plugin validate` exits non-zero, record a MUST finding under Category 1 with
 
 If `packages/appkit/src/plugins/{PLUGIN_NAME}/` does not exist (connector-only package), skip the three CLI checks and proceed.
 
+## Step 3.6: Manifest v2.0 Semantic Checks
+
+Beyond schema validation, inspect the manifest for v2.0-specific semantic issues that the schema cannot catch. Read `packages/appkit/src/plugins/{PLUGIN_NAME}/manifest.json` and apply each check below. Every match becomes a finding under **Category 1 (Manifest Design)**.
+
+### 3.6a — Substitutability gate on `scaffolding.rules`
+
+For each entry in `scaffolding.rules.must`, `scaffolding.rules.should`, and `scaffolding.rules.never`, test these patterns. Severity is **SHOULD** unless noted.
+
+1. **Permission duplication.** Rule matches `/permission(?:s)?\s+(?:set\s+(?:as|to)|is|of|=|:)?\s*[A-Z][A-Z_]+/i` AND the named permission value appears in any `resources.required[].permission` or `resources.optional[].permission` of the same manifest. Example: rule `"Have permission set as CAN_USE for the defined SQL Warehouse"` when `resources.required[0].permission === "CAN_USE"`. **Finding:** duplicates structured `resources.permission` declaration; the agent already reads the permission from there.
+
+2. **Resource-existence tautology.** Rule matches `/Have\s+(?:at\s+least\s+one\s+)?[a-z_-]+\s+resource(?:s)?\s+(?:defined|declared)/i`. Example: `"Have at least one volume resource defined"`. **Finding:** trivially satisfied by the manifest declaring the resource; carries no agent-actionable signal.
+
+3. **Inactionable `--set` reference.** Rule contains `--set <token>` where `<token>` does not resolve to a `{plugin-name}.{resourceKey}.{fieldName}` triple present in this manifest's `resources.*[].fields`. **Finding:** refers to a parameter the user cannot supply via `databricks apps init --set`.
+
+4. **Enum-or wording.** Rule matches `/permission\s+(?:set\s+as\s+)?[A-Z_]+\s+or\s+[A-Z_]+/i`. Example: `"Have permission set as READ_VOLUME or WRITE_VOLUME"`. **Finding:** ambiguous; the manifest's `permission` field is a single value, not a disjunction. Either drop the rule (gate-violating duplicate) or pin to the specific permission the plugin actually requires.
+
+5. **Length cap.** Schema enforces ≤120 chars per entry; if for any reason a longer rule reached the manifest, flag as **MUST** with the offending entry's length.
+
+For each finding, cite `manifest.json` + the JSON path (e.g., `scaffolding.rules.must[1]`).
+
+### 3.6b — Discovery descriptor completeness
+
+For each resource field declared in `resources.required[].fields` or `resources.optional[].fields`:
+
+1. **Missing discovery on user-supplied field.** Field has `env` set (signalling user-supplied at scaffold time) but no `discovery` block. **Finding (SHOULD):** field is user-supplied but lacks a discovery descriptor; agents fall back to free-text prompting.
+
+2. **Free-form CLI when typed kind exists.** Field uses `discovery.type === "cli"` AND the underlying resource kind appears in `RESOURCE_KIND_COMMANDS` (warehouse, genie_space, postgres_project, postgres_branch, postgres_database, volume). **Finding (SHOULD):** typed `kind` variant is preferred — AppKit owns the command map and response unwrapping; free-form `cli` is an escape hatch for resources without a typed kind.
+
+3. **Missing `<PROFILE>` placeholder on `cli` discovery.** Field uses `discovery.type === "cli"` AND `discovery.cliCommand` does NOT contain the literal substring `<PROFILE>`. **Finding (MUST):** the schema enforces this, so a hit here would indicate schema drift or a freshly added entry — flag aggressively.
+
+4. **Shell metacharacters in `cli` discovery.** `discovery.cliCommand` or `discovery.shortcut` contains any of `;|&` `` ` `` `$` or newline. **Finding (MUST):** the schema rejects these; same drift signal as above.
+
+### 3.6c — `RESOURCE_KIND_COMMANDS.parents` consistency
+
+If the manifest declares a field with `discovery.type === "kind"` AND that kind has `parents` in `RESOURCE_KIND_COMMANDS` (e.g., `volume.parents === ["catalog", "schema"]`), verify no contradictory `dependsOn` chain is also declared on sibling fields. **Finding (SHOULD):** parents are runtime prompts owned by the kind, not sibling fields — using both creates ambiguity for the agent.
+
+If `packages/appkit/src/plugins/{PLUGIN_NAME}/manifest.json` does not exist (connector-only package), skip Step 3.6 entirely.
+
 ## Step 4: Structural Completeness Check
 
 If `packages/appkit/src/plugins/{PLUGIN_NAME}/` does not exist (connector-only package), mark Structural Completeness as **N/A** in the scorecard and proceed to Step 5.
@@ -113,6 +151,8 @@ Fold the Step 3.5 CLI results into the matching categories:
 - `plugin list --json` mismatches between manifest fields and synced output → Category 1 (Manifest Design), SHOULD unless the plugin is absent (MUST).
 - `plugin sync --json` warnings about orphaned resources / removed plugins → Category 0 (Structural Completeness) or Category 1, severity per the warning text.
 - If the manifest declares `"stability": "beta"`, also run `npx @databricks/appkit plugin promote {PLUGIN_NAME} --to ga --dry-run`. Any rewrites it would perform that conflict with the current `/beta` re-export wiring → Category 0 (Structural Completeness), SHOULD.
+
+Fold the Step 3.6 v2.0 semantic-check results into Category 1 (Manifest Design) at the severity recorded by each sub-check (3.6a, 3.6b, 3.6c).
 
 Evaluate the plugin code against **all 9 categories** from the Category Index in `plugin-review-guidance.md`. Check each category's NEVER/MUST/SHOULD rules from the best-practices reference.
 

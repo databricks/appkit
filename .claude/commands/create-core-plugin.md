@@ -321,6 +321,61 @@ Example resource entry:
 >
 > Use `--no-required` for optional resources, `--dry-run` to preview the updated manifest without writing.
 
+#### 4e.1. Enrich Manifest with v2.0 Discovery and Scaffolding (after scaffold)
+
+The base scaffolder emits minimal resource entries. The manifest schema's v2.0 fields (`discovery` per field, `scaffolding.rules` per plugin) give agents a richer scaffolding contract. Walk the post-scaffold `manifest.json` and apply the two passes below.
+
+**Pass 1 — Add `discovery` descriptors to user-supplied fields.**
+
+For each field under `resources.required[].fields` and `resources.optional[].fields` that has an `env` entry (signalling user-supplied at scaffold time), add a `discovery` block.
+
+- **Prefer the typed `kind` variant.** Use this when the resource is one AppKit owns a command for in `RESOURCE_KIND_COMMANDS` (`warehouse`, `genie_space`, `postgres_project`, `postgres_branch`, `postgres_database`, `volume`). AppKit owns the CLI command, response unwrapping, and (when applicable) parent prompts:
+
+  ```json
+  "discovery": { "type": "kind", "resourceKind": "warehouse" }
+  ```
+
+  Add `select` and `display` only when the kind's natural identifier (e.g., `id`) is not the field's value. Add `dependsOn: "<siblingField>"` when this field's discovery requires another sibling field to be resolved first.
+
+- **Use the `cli` escape hatch only for resources without a typed kind.** Required keys: `cliCommand` (must contain the literal `<PROFILE>` placeholder; no shell metacharacters `;|&`` ` ``$` or newlines) and `selectField` (jq-style path into the response):
+
+  ```json
+  "discovery": {
+    "type": "cli",
+    "cliCommand": "databricks foos list --profile <PROFILE> --output json",
+    "selectField": ".id"
+  }
+  ```
+
+**Pass 2 — Add `scaffolding.rules` only when justified by the substitutability gate.**
+
+The plugin manifest schema accepts an optional `scaffolding.rules: { must?, should?, never? }` block. Each rule is a string ≤120 chars. **Apply the substitutability gate before adding any rule:** a rule is legitimate only when it cannot be expressed as structured data on the resource, plugin config, or template.
+
+Reject (do not add) rules matching any of these anti-patterns:
+
+| Anti-pattern | Why it fails the gate |
+|---|---|
+| `"Have permission set as X for the defined Y"` | duplicates `resources.required[].permission` |
+| `"Have at least one X resource defined"` | trivially satisfied by the resource entry itself |
+| `"Have permission set as X or Y"` | `permission` is a single value, not a disjunction |
+| `"Set DATABRICKS_FOO env var to ..."` | derivable from `fields.*.env` |
+| Rule about a value the user cannot supply via `databricks apps init --set` | inactionable at scaffold time |
+
+Add a rule only when it captures one of these legitimate concerns:
+
+- **Workspace-state precondition** the user must verify before running `databricks apps init` (e.g., `"Before init, verify your Unity Catalog volume exists and you have WRITE_VOLUME permission"`).
+- **Post-init workflow step** that AppKit cannot run for the user (e.g., `"After init, run database migrations via 'pnpm drizzle:migrate' before first request"`).
+- **Cross-cutting agent guardrail** that doesn't reduce to structured data and applies regardless of selected plugins (template-level only).
+
+Choose the bucket by severity intent:
+- `must` — failure to follow this breaks the plugin
+- `should` — graded recommendation; non-following degrades UX or correctness
+- `never` — explicit prohibition the agent must enforce
+
+If no rule survives the gate, **omit the `scaffolding` block entirely** rather than emitting `rules: { must: [] }`. Empty buckets carry no signal.
+
+After enrichment, re-run `npx @databricks/appkit plugin validate packages/appkit/src/plugins/{name}` to confirm the updated manifest still passes schema validation.
+
 ### 4f. User API Scopes (OBO)
 
 If the plugin performs operations on behalf of the logged-in user via `this.asUser(req)`, it requires one or more `user_api_scopes` in the Databricks Apps bundle config (`databricks.yml`). Without the correct scopes, OBO calls will fail at runtime.
