@@ -1,17 +1,14 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ResolvedConfig } from "vite";
 import { describe, expect, it } from "vitest";
 import { reactSourceLocPlugin } from "../react-source-loc-vite-plugin";
 
-const clientRoot = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "client",
-);
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+const clientRoot = path.join(testDir, "client");
+const projectRoot = testDir;
 const moduleId = path.join(clientRoot, "src", "Example.tsx");
 
 interface TestableHooks {
-  configResolved?: (config: ResolvedConfig) => void | Promise<void>;
   transform?: (
     code: string,
     id: string,
@@ -27,12 +24,11 @@ async function transformSource(
   code: string,
   root: string = clientRoot,
   id: string = moduleId,
+  rootForPaths: string = projectRoot,
 ): Promise<string> {
-  const { configResolved, transform } =
-    reactSourceLocPlugin() as unknown as TestableHooks;
-  const config = { root } as ResolvedConfig;
-
-  await configResolved?.(config);
+  const { transform } = reactSourceLocPlugin({
+    projectRoot: rootForPaths,
+  }) as unknown as TestableHooks;
 
   const result = await transform?.(code, id);
   if (!result) return code;
@@ -79,15 +75,12 @@ describe("reactSourceLocPlugin", () => {
     expect(output).not.toMatch(/data-source="[^"]+" data-source=/);
   });
 
-  it("resolves paths from app root when vite root is not a nested client dir", async () => {
-    const appRoot = path.join(
-      path.dirname(fileURLToPath(import.meta.url)),
-      "flat-app",
-    );
+  it("resolves paths from app root when vite root is the app root", async () => {
+    const appRoot = path.join(testDir, "flat-app");
     const flatModuleId = path.join(appRoot, "src", "Page.tsx");
     const code = `export const Page = () => <div className="x" />;`;
 
-    const output = await transformSource(code, appRoot, flatModuleId);
+    const output = await transformSource(code, appRoot, flatModuleId, appRoot);
 
     expect(output).toMatch(/<div data-source="src\/Page\.tsx:/);
     expect(output).not.toMatch(/data-source="[^"]*\.\./);

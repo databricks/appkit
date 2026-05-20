@@ -53,6 +53,7 @@ export class ViteDevServer extends BaseServer {
     const react = await import("@vitejs/plugin-react");
 
     const clientRoot = this.findClientRoot();
+    const projectRoot = process.cwd();
 
     const loadedConfig = await loadConfigFromFile(
       {
@@ -82,7 +83,7 @@ export class ViteDevServer extends BaseServer {
       },
       plugins: [
         react.default(),
-        reactSourceLocPlugin(),
+        reactSourceLocPlugin({ projectRoot }),
         appKitTypesPlugin(),
         appKitServingTypesPlugin(),
       ],

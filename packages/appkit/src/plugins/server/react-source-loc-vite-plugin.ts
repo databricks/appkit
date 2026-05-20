@@ -12,15 +12,9 @@ const JSX_ELEMENT_MATCHER = {
   },
 };
 
-/** Matches nested client dirs from ViteDevServer.findClientRoot() (not "."). */
-const NESTED_CLIENT_DIRS = new Set(["client", "src", "app", "frontend"]);
-
-function resolveProjectRoot(clientRoot: string): string {
-  const resolved = path.resolve(clientRoot);
-  if (NESTED_CLIENT_DIRS.has(path.basename(resolved))) {
-    return path.resolve(resolved, "..");
-  }
-  return resolved;
+interface ReactSourceLocPluginOptions {
+  /** Absolute app root used for data-source relative paths (typically `process.cwd()`). */
+  projectRoot: string;
 }
 
 function cleanModuleId(id: string): string {
@@ -61,17 +55,15 @@ function hasDataSourceAttribute(node: SgNode): boolean {
  * Injects `data-source="<file>:<line>:<col>"` on native JSX elements so editors
  * can map DOM nodes back to source locations.
  */
-export function reactSourceLocPlugin(): Plugin {
-  let projectRoot: string;
+export function reactSourceLocPlugin(
+  options: ReactSourceLocPluginOptions,
+): Plugin {
+  const projectRoot = path.resolve(options.projectRoot);
 
   return {
     name: "react-source-loc",
     enforce: "pre",
     apply: "serve",
-
-    configResolved(config) {
-      projectRoot = resolveProjectRoot(config.root);
-    },
 
     transform(code, id) {
       if (!shouldTransform(id)) return;
