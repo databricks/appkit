@@ -49,8 +49,10 @@ function groupThreadsByDate(threads: Thread[]): GroupedThreads {
   const now = new Date();
   const yesterday = new Date(now.getTime() - MS_PER_DAY);
   const oneWeekAgo = new Date(now.getTime() - 7 * MS_PER_DAY);
-  const oneMonthAgo = new Date(now);
-  oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+  // Fixed 30-day window matches the "Last 30 days" label and avoids
+  // the end-of-month overflow you get with setMonth(getMonth() - 1)
+  // (e.g. on Mar 31, that rolls to Mar 3 because Feb has 28/29 days).
+  const oneMonthAgo = new Date(now.getTime() - 30 * MS_PER_DAY);
 
   return threads.reduce<GroupedThreads>(
     (groups, thread) => {
@@ -94,13 +96,28 @@ const GROUP_DEFINITIONS = [
   { key: "older" as const, label: "Older than last month" },
 ];
 
+interface ChatHistorySidebarDeleteState {
+  /** True while a `onDelete()` call is in flight. */
+  loading: boolean;
+  /** Last error from a `onDelete()` rejection, surfaced inside the dialog. */
+  error: Error | null;
+}
+
 interface ChatHistorySidebarProps {
   threads: Thread[] | null;
   loading: boolean;
   error: Error | null;
   activeThreadId: string | null;
   onSelect: (id: string) => void;
-  onDelete: (id: string) => Promise<void> | void;
+  /**
+   * Asynchronous delete handler. Should reject on failure so the
+   * confirmation dialog stays open and the user can retry. The parent
+   * is also expected to forward `deleteState` so the dialog can render
+   * `loading`/`error`.
+   */
+  onDelete: (id: string) => Promise<void>;
+  /** Latest mutation state of the underlying delete call. */
+  deleteState?: ChatHistorySidebarDeleteState;
 }
 
 /**
@@ -121,8 +138,11 @@ export function ChatHistorySidebar({
   activeThreadId,
   onSelect,
   onDelete,
+  deleteState,
 }: ChatHistorySidebarProps) {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const deleteLoading = deleteState?.loading ?? false;
+  const deleteError = deleteState?.error ?? null;
 
   if (loading && !threads) {
     return (
@@ -236,7 +256,9 @@ export function ChatHistorySidebar({
       <AlertDialog
         open={pendingDeleteId !== null}
         onOpenChange={(open) => {
-          if (!open) setPendingDeleteId(null);
+          // Block dismiss while a delete is in flight so users can't
+          // accidentally hide the spinner mid-request.
+          if (!open && !deleteLoading) setPendingDeleteId(null);
         }}
       >
         <AlertDialogContent>
@@ -247,17 +269,36 @@ export function ChatHistorySidebar({
               chat thread and its messages.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {deleteError && (
+            <div
+              role="alert"
+              className="border-destructive/30 bg-destructive/5 text-destructive rounded-md border px-3 py-2 text-sm"
+            >
+              {deleteError.message}
+            </div>
+          )}
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleteLoading}>
+              Cancel
+            </AlertDialogCancel>
             <AlertDialogAction
-              onClick={async () => {
+              disabled={deleteLoading}
+              // Radix's AlertDialogAction auto-closes on click via the
+              // Action primitive. Prevent default + manage state here so
+              // failed deletes keep the dialog open with the error.
+              onClick={async (e) => {
+                e.preventDefault();
                 if (!pendingDeleteId) return;
-                const id = pendingDeleteId;
-                setPendingDeleteId(null);
-                await onDelete(id);
+                try {
+                  await onDelete(pendingDeleteId);
+                  setPendingDeleteId(null);
+                } catch {
+                  // Error is surfaced via deleteState.error above; keep
+                  // the dialog open so the user can retry or cancel.
+                }
               }}
             >
-              Continue
+              {deleteLoading ? "Deleting…" : "Continue"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

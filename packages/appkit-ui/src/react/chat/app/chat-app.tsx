@@ -136,6 +136,16 @@ function ChatAppWithHistory<TMessage extends UIMessage = UIMessage>({
   // thread id actually matches the selected one. Without this, a stale
   // previous-thread payload could briefly mount the body with the wrong
   // history before re-keying.
+  //
+  // TODO(hydration): this drops `tool`-role messages and only emits a
+  // single `text` part per surviving message. Past tool invocations and
+  // approval cards therefore do NOT re-render when a thread is resumed —
+  // a conversation that previously ran a destructive tool looks like
+  // plain Q&A on reload. To fix end-to-end we need a shared
+  // Message → UIMessage converter that fans `Message.toolCalls` +
+  // tool-output messages back into the `tool-*` /
+  // `data-approval-pending` parts the renderer understands. Same TODO
+  // lives in `apps/dev-playground/.../agent.route.tsx`.
   const seedMessages = useMemo<TMessage[] | undefined>(() => {
     if (!activeThreadId) return undefined;
     if (!activeThread.thread || activeThread.thread.id !== activeThreadId) {
@@ -163,18 +173,18 @@ function ChatAppWithHistory<TMessage extends UIMessage = UIMessage>({
     setNewChatNonce((n) => n + 1);
   }, []);
 
-  const { deleteThread } = useDeleteThread({ api: threadsApi });
+  const {
+    deleteThread,
+    loading: deleteLoading,
+    error: deleteError,
+  } = useDeleteThread({ api: threadsApi });
   const handleDeleteThread = useCallback(
     async (id: string) => {
-      try {
-        await deleteThread(id);
-      } catch (err) {
-        // Swallow: the hook records `error` already; the sidebar UI
-        // doesn't currently surface delete failures, so just log for
-        // debuggability and bail without re-keying the body.
-        console.error("[ChatApp] delete thread failed", err);
-        return;
-      }
+      // Re-throw on failure so `ChatHistorySidebar` keeps the
+      // confirmation dialog open and surfaces `deleteState.error`. The
+      // hook already records the error; we just need the throw to
+      // propagate past the sidebar's `await onDelete(...)`.
+      await deleteThread(id);
       if (id === activeThreadId) {
         setActiveThreadId(null);
         setNewChatNonce((n) => n + 1);
@@ -182,6 +192,10 @@ function ChatAppWithHistory<TMessage extends UIMessage = UIMessage>({
       await threadList.refresh();
     },
     [deleteThread, activeThreadId, threadList],
+  );
+  const deleteState = useMemo(
+    () => ({ loading: deleteLoading, error: deleteError }),
+    [deleteLoading, deleteError],
   );
 
   // Chain the caller's onFinish with a list-refresh so the sidebar
@@ -243,6 +257,7 @@ function ChatAppWithHistory<TMessage extends UIMessage = UIMessage>({
                 activeThreadId={activeThreadId}
                 onSelect={setActiveThreadId}
                 onDelete={handleDeleteThread}
+                deleteState={deleteState}
               />
             </SidebarContent>
           </InlineSidebar>
