@@ -1,6 +1,6 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import type { ChatStatus, UIMessage } from "ai";
-import type { ReactNode, RefObject } from "react";
+import type { ReactNode } from "react";
 import { cn } from "../../lib/utils";
 import { Button } from "../../ui/button";
 import { ArrowDownIcon, DbIcon } from "../db-icons";
@@ -15,7 +15,12 @@ import type { ChatToolCallProps } from "./chat-tool-call";
 interface ChatMessagesProps<TMessage extends UIMessage = UIMessage> {
   messages: TMessage[];
   status: ChatStatus;
-  containerRef: RefObject<HTMLDivElement | null>;
+  /**
+   * Scroll-container ref. `useScrollToBottom` returns a ref callback
+   * (not a RefObject) so the listener attaches when the node mounts —
+   * forward whatever the hook gives you.
+   */
+  containerRef: (node: HTMLDivElement | null) => void;
   isAtBottom: boolean;
   scrollToBottom: () => void;
   approvals: Map<string, ApprovalEntry>;
