@@ -14,7 +14,7 @@ import { {{$betaImports}} } from '@databricks/appkit/beta';
 {{- end}}
 {{- if .plugins.lakebase}}
 import { setupTodoRoutes } from './routes/lakebase/todo-routes';
-import { ensureSchema, initDb } from './db';
+import { initDb, runMigrations } from './db';
 {{- end}}
 {{- if .plugins.agents}}
 import { helper } from './agents/helper';
@@ -32,14 +32,14 @@ createApp({
   ],
 {{- if .plugins.lakebase}}
   async onPluginsReady(appkit) {
+    const db = await initDb(appkit);
     try {
-      await ensureSchema(appkit.lakebase.pool);
+      await runMigrations(db);
     } catch (err) {
-      console.warn('[lakebase] Database setup failed:', (err as Error).message);
+      console.warn('[lakebase] Migration failed:', (err as Error).message);
       console.warn('[lakebase] Routes will be registered but may return errors');
       console.warn('[lakebase] See https://www.databricks.com/devhub/docs/appkit/v0/plugins/lakebase#database-permissions for troubleshooting');
     }
-    const db = await initDb(appkit);
     setupTodoRoutes(appkit, db);
   },
 {{- end}}
