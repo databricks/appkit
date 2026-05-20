@@ -1050,11 +1050,11 @@ export const TEMPLATE_SCAFFOLDING = {
   flags: {
     "--template-dir": {
       description: "Path to the template directory containing the app scaffold",
-      required: true,
+      required: false,
     },
     "--config-dir": {
       description: "Path to the output directory for the initialized app",
-      required: true,
+      required: false,
     },
     "--profile": {
       description: "Databricks CLI profile to use for authentication",
