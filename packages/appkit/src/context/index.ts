@@ -7,3 +7,4 @@ export {
   runInUserContext,
 } from "./execution-context";
 export { ServiceContext } from "./service-context";
+export type { UserContext } from "./user-context";
