@@ -106,7 +106,20 @@ export type PluginConstructor<
 export interface PluginManifest<TName extends string = string>
   extends Omit<
     GeneratedPluginManifest,
-    "name" | "config" | "$schema" | "resources"
+    | "name"
+    | "config"
+    | "$schema"
+    | "resources"
+    | "displayName"
+    | "description"
+    | "author"
+    | "version"
+    | "repository"
+    | "keywords"
+    | "license"
+    | "onSetupMessage"
+    | "hidden"
+    | "stability"
   > {
   name: TName;
   resources: {
@@ -116,6 +129,37 @@ export interface PluginManifest<TName extends string = string>
   config?: {
     schema: JSONSchema7;
   };
+  /** Human-readable display name for UI and CLI */
+  displayName: string;
+  /** Brief description of what the plugin does */
+  description: string;
+  /** Author name or organization */
+  author?: string;
+  /** Plugin version (semver format) */
+  version?: string;
+  /** URL to the plugin's source repository */
+  repository?: string;
+  /** Keywords for plugin discovery */
+  keywords?: string[];
+  /** SPDX license identifier */
+  license?: string;
+  /**
+   * Message displayed to the user after project initialization. Use this to
+   * inform about manual setup steps (e.g. environment variables, resource
+   * provisioning).
+   */
+  onSetupMessage?: string;
+  /**
+   * When true, this plugin is excluded from the template plugins manifest
+   * (appkit.plugins.json) during sync.
+   */
+  hidden?: boolean;
+  /**
+   * Plugin stability level. Beta plugins may have breaking API changes between
+   * minor releases but are on a path to GA. GA (general availability) plugins
+   * follow semver strictly.
+   */
+  stability?: "beta" | "ga";
 }
 
 /**
