@@ -8,39 +8,28 @@
       "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
       "Courier New", monospace;
-    --color-red-100: oklch(93.6% 0.032 17.717);
-    --color-red-300: oklch(80.8% 0.114 19.571);
     --color-red-600: oklch(57.7% 0.245 27.325);
     --color-red-700: oklch(50.5% 0.213 27.518);
     --color-red-800: oklch(44.4% 0.177 26.899);
-    --color-red-900: oklch(39.6% 0.141 25.723);
     --color-amber-50: oklch(98.7% 0.022 95.277);
-    --color-amber-100: oklch(96.2% 0.059 95.617);
     --color-amber-200: oklch(92.4% 0.12 95.746);
     --color-amber-300: oklch(87.9% 0.169 91.605);
     --color-amber-400: oklch(82.8% 0.189 84.429);
     --color-amber-600: oklch(66.6% 0.179 58.318);
     --color-amber-700: oklch(55.5% 0.163 48.998);
     --color-amber-800: oklch(47.3% 0.137 46.201);
-    --color-amber-900: oklch(41.4% 0.112 45.904);
     --color-amber-950: oklch(27.9% 0.077 45.635);
     --color-yellow-500: oklch(79.5% 0.184 86.047);
     --color-yellow-600: oklch(68.1% 0.162 75.834);
     --color-yellow-700: oklch(55.4% 0.135 66.442);
-    --color-green-100: oklch(96.2% 0.044 156.743);
-    --color-green-300: oklch(87.1% 0.15 154.449);
     --color-green-400: oklch(79.2% 0.209 151.711);
     --color-green-600: oklch(62.7% 0.194 149.214);
     --color-green-700: oklch(52.7% 0.154 150.069);
-    --color-green-900: oklch(39.3% 0.095 152.535);
     --color-sky-500: oklch(68.5% 0.169 237.323);
-    --color-blue-100: oklch(93.2% 0.032 255.585);
-    --color-blue-300: oklch(80.9% 0.105 251.813);
     --color-blue-500: oklch(62.3% 0.214 259.815);
     --color-blue-600: oklch(54.6% 0.245 262.881);
     --color-blue-700: oklch(48.8% 0.243 264.376);
     --color-blue-800: oklch(42.4% 0.199 265.638);
-    --color-blue-900: oklch(37.9% 0.146 265.522);
     --color-neutral-300: oklch(87% 0 0);
     --color-neutral-600: oklch(43.9% 0 0);
     --color-black: #000;
@@ -704,6 +693,9 @@
   .h-\[1\.15rem\] {
     height: 1.15rem;
   }
+  .h-\[44px\] {
+    height: 44px;
+  }
   .h-\[120px\] {
     height: 120px;
   }
@@ -811,6 +803,9 @@
   }
   .w-5 {
     width: calc(var(--spacing) * 5);
+  }
+  .w-7 {
+    width: calc(var(--spacing) * 7);
   }
   .w-8 {
     width: calc(var(--spacing) * 8);
@@ -1531,6 +1526,12 @@
   }
   .bg-sidebar {
     background-color: var(--sidebar);
+  }
+  .bg-sidebar-accent-foreground\/10 {
+    background-color: var(--sidebar-accent-foreground);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--sidebar-accent-foreground) 10%, transparent);
+    }
   }
   .bg-sidebar-border {
     background-color: var(--sidebar-border);
@@ -2343,6 +2344,12 @@
     &:is(:where(.group)[data-side="left"] *) {
       border-right-style: var(--tw-border-style);
       border-right-width: 1px;
+    }
+  }
+  .group-data-\[side\=left\]\:border-r-0 {
+    &:is(:where(.group)[data-side="left"] *) {
+      border-right-style: var(--tw-border-style);
+      border-right-width: 0px;
     }
   }
   .group-data-\[side\=right\]\:left-0 {
@@ -6103,6 +6110,14 @@
   --border: var(--color-grey-100);
   --input: var(--color-grey-100);
   --ring: #2272b4;
+  --sidebar: var(--color-grey-050);
+  --sidebar-foreground: var(--color-grey-800);
+  --sidebar-primary: var(--color-blue-600);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: var(--color-grey-100);
+  --sidebar-accent-foreground: var(--color-grey-800);
+  --sidebar-border: var(--color-grey-100);
+  --sidebar-ring: var(--ring);
   --action-default-background-hover: rgba(34, 114, 180, 0.08);
   --action-default-background-press: rgba(34, 114, 180, 0.16);
   --action-primary-background-hover: var(--color-blue-700);
@@ -6179,6 +6194,14 @@
   --border: #2a3a45;
   --input: #2a3a45;
   --ring: #4ba3d6;
+  --sidebar: #1a2530;
+  --sidebar-foreground: var(--color-grey-100);
+  --sidebar-primary: var(--color-blue-500);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #2a3a45;
+  --sidebar-accent-foreground: var(--color-grey-100);
+  --sidebar-border: #2a3a45;
+  --sidebar-ring: var(--ring);
   --warning: #dc6222;
   --success: #3ca45e;
   --action-default-background-hover: rgba(138, 202, 255, 0.08);

@@ -164,6 +164,21 @@
   --input: var(--color-grey-100);
   --ring: #2272b4;
 
+  /*
+   * Sidebar tokens (used by `<ChatApp history>`). The shadcn defaults
+   * in `globals.css` give a neutral grey palette; re-tune to the
+   * Databricks grey ladder so the history sidebar feels native inside
+   * the chat boundary.
+   */
+  --sidebar: var(--color-grey-050);
+  --sidebar-foreground: var(--color-grey-800);
+  --sidebar-primary: var(--color-blue-600);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: var(--color-grey-100);
+  --sidebar-accent-foreground: var(--color-grey-800);
+  --sidebar-border: var(--color-grey-100);
+  --sidebar-ring: var(--ring);
+
   /* Action token overrides */
   --action-default-background-hover: rgba(34, 114, 180, 0.08);
   --action-default-background-press: rgba(34, 114, 180, 0.16);
@@ -241,6 +256,16 @@
   line-height: 20px;
 }
 
+/*
+ * Disable radix open/close animations on tooltip and dropdown content
+ * rendered inside the chat boundary. 
+ */
+[data-appkit-chat] [data-slot="tooltip-content"],
+[data-appkit-chat] [data-slot="dropdown-menu-content"],
+[data-appkit-chat] [data-slot="dropdown-menu-sub-content"] {
+  animation: none;
+}
+
 .dark [data-appkit-chat],
 [data-appkit-chat].dark {
   --background: var(--color-grey-800);
@@ -267,6 +292,16 @@
   --border: #2a3a45;
   --input: #2a3a45;
   --ring: #4ba3d6;
+
+  /* Sidebar tokens (dark) — see comment in the light block above. */
+  --sidebar: #1a2530;
+  --sidebar-foreground: var(--color-grey-100);
+  --sidebar-primary: var(--color-blue-500);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #2a3a45;
+  --sidebar-accent-foreground: var(--color-grey-100);
+  --sidebar-border: #2a3a45;
+  --sidebar-ring: var(--ring);
 
   --warning: #dc6222;
   --success: #3ca45e;

@@ -11,7 +11,9 @@ export const Route = createFileRoute("/agent-chat-full")({
  */
 function AgentChatFullRoute() {
   return (
-    <div className="h-svh bg-background">
+    // The playground's sticky header in `__root.tsx` claims roughly
+    // 69px (36+16+16+1) of vertical layout space
+    <div className="h-[calc(100svh-69px)] bg-background">
       <ChatApp api="/api/agents/chat" />
     </div>
   );

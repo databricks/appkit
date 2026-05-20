@@ -1,20 +1,39 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import type { ChatStatus, UIMessage, UIMessageChunk } from "ai";
-import { type ReactNode, useCallback, useRef, useState } from "react";
+import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
+import { PortalContainerProvider } from "../../portal-container-context";
+import {
+  SidebarContent,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  useSidebar,
+} from "../../ui/sidebar";
+import {
+  DbIcon,
+  NewChatIcon,
+  SidebarCollapseIcon,
+  SidebarExpandIcon,
+} from "../db-icons";
 import { type UseChatOptions, useChat } from "../hooks/use-chat";
+import { useDeleteThread } from "../hooks/use-delete-thread";
 import { useScrollToBottom } from "../hooks/use-scroll-to-bottom";
+import {
+  type ApprovalDecision,
+  useSubmitApproval,
+} from "../hooks/use-submit-approval";
+import { useThread } from "../hooks/use-thread";
+import { useThreadList } from "../hooks/use-thread-list";
+import { useThreadMessages } from "../hooks/use-thread-messages";
 import { ChatComposer, type ChatComposerProps } from "./chat-composer";
 import { ChatGreeting } from "./chat-greeting";
+import { ChatHistorySidebar } from "./chat-history-sidebar";
 import type { ApprovalEntry, ChatMessageProps } from "./chat-message";
 import { ChatMessages } from "./chat-messages";
 import type { ChatToolCallProps } from "./chat-tool-call";
-
-export interface ApprovalDecision {
-  approvalId: string;
-  streamId: string;
-  decision: "approve" | "deny";
-}
 
 const DEFAULT_API = "/api/agents/chat";
 
@@ -22,6 +41,12 @@ export interface ChatAppProps<TMessage extends UIMessage = UIMessage>
   extends Omit<UseChatOptions<TMessage>, "api"> {
   /** Chat endpoint URL. Defaults to `/api/agents/chat`. */
   api?: string;
+  /**
+   * When `true` (default), renders a left-hand history sidebar wired to
+   * the `/threads` endpoints sibling to `api`. Pass `false` for the
+   * single-conversation layout (no sidebar, no thread switching).
+   */
+  history?: boolean;
   /** Empty-state node shown when there are no messages yet. */
   emptyState?: ReactNode;
   /** Placeholder text for the default composer. */
@@ -46,18 +71,272 @@ export interface ChatAppProps<TMessage extends UIMessage = UIMessage>
   className?: string;
 }
 
+function deriveSiblingUrl(api: string, suffix: string): string {
+  if (api.endsWith("/chat")) return `${api.slice(0, -"/chat".length)}${suffix}`;
+  return `${api}${suffix}`;
+}
+
 function deriveApproveUrl(api: string, override: string | undefined): string {
   if (override) return override;
-  if (api.endsWith("/chat")) return `${api.slice(0, -"/chat".length)}/approve`;
-  return `${api}/approve`;
+  return deriveSiblingUrl(api, "/approve");
+}
+
+function deriveThreadsUrl(api: string): string {
+  return deriveSiblingUrl(api, "/threads");
 }
 
 /**
- * Drop-in chat against an `agents()`-backed AppKit server. Fills its
- * parent — provide a sized container. For history, feedback, or file
- * attachments, wrap `useChat` directly instead.
+ * Drop-in chat against an `agents()`-backed AppKit server. With
+ * `history` (default), renders a Databricks-styled, collapsible
+ * sidebar listing the user's threads — wires to `GET/DELETE
+ * ${api-with-/chat-replaced-by-/threads}`. Pass `history={false}` to
+ * disable.
+ *
+ * Fills its parent — provide a sized container (e.g. `h-full` inside a
+ * flex column or an explicit pixel height). The history sidebar uses
+ * inline layout (no `position: fixed`), so embedding inside a panel
+ * below a host header works without overlap.
  */
-export function ChatApp<TMessage extends UIMessage = UIMessage>({
+export function ChatApp<TMessage extends UIMessage = UIMessage>(
+  props: ChatAppProps<TMessage>,
+) {
+  const { history = true, ...rest } = props;
+  if (history) {
+    return <ChatAppWithHistory<TMessage> {...rest} />;
+  }
+  return <ChatBody<TMessage> {...rest} />;
+}
+
+/**
+ * `<ChatApp history>` wrapper. Owns thread-history state (active id,
+ * new-chat nonce, list/thread fetches, delete) and re-keys the inner
+ * {@link ChatBody} on thread switches so `useChat` reinitializes with
+ * seeded messages — mirroring the pattern in
+ * `apps/dev-playground/.../agent.route.tsx`.
+ */
+function ChatAppWithHistory<TMessage extends UIMessage = UIMessage>({
+  api = DEFAULT_API,
+  ...bodyProps
+}: Omit<ChatAppProps<TMessage>, "history">) {
+  const threadsApi = useMemo(() => deriveThreadsUrl(api), [api]);
+
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  // Bumped on "New chat" so clicking the button always remounts the body
+  // even when no thread is currently selected.
+  const [newChatNonce, setNewChatNonce] = useState(0);
+
+  const threadList = useThreadList({ api: threadsApi });
+  const activeThread = useThread({
+    api: threadsApi,
+    threadId: activeThreadId,
+  });
+  const { messages: activeThreadMessages } = useThreadMessages(activeThread);
+
+  // Seed gate: only mount the body with seeded messages once the fetched
+  // thread id actually matches the selected one. Without this, a stale
+  // previous-thread payload could briefly mount the body with the wrong
+  // history before re-keying.
+  const seedMessages = useMemo<TMessage[] | undefined>(() => {
+    if (!activeThreadId) return undefined;
+    if (!activeThread.thread || activeThread.thread.id !== activeThreadId) {
+      return undefined;
+    }
+    return activeThreadMessages
+      .filter(
+        (m) =>
+          m.role === "user" || m.role === "assistant" || m.role === "system",
+      )
+      .map(
+        (m) =>
+          ({
+            id: m.id,
+            role: m.role as "user" | "assistant" | "system",
+            parts: [{ type: "text" as const, text: m.content }],
+          }) as unknown as TMessage,
+      );
+  }, [activeThreadId, activeThread.thread, activeThreadMessages]);
+
+  const conversationReady = !activeThreadId || seedMessages !== undefined;
+
+  const handleNewChat = useCallback(() => {
+    setActiveThreadId(null);
+    setNewChatNonce((n) => n + 1);
+  }, []);
+
+  const { deleteThread } = useDeleteThread({ api: threadsApi });
+  const handleDeleteThread = useCallback(
+    async (id: string) => {
+      try {
+        await deleteThread(id);
+      } catch (err) {
+        // Swallow: the hook records `error` already; the sidebar UI
+        // doesn't currently surface delete failures, so just log for
+        // debuggability and bail without re-keying the body.
+        console.error("[ChatApp] delete thread failed", err);
+        return;
+      }
+      if (id === activeThreadId) {
+        setActiveThreadId(null);
+        setNewChatNonce((n) => n + 1);
+      }
+      await threadList.refresh();
+    },
+    [deleteThread, activeThreadId, threadList],
+  );
+
+  // Chain the caller's onFinish with a list-refresh so the sidebar
+  // picks up the new thread (or updated `updatedAt`) once a turn ends.
+  const callerOnFinishRef = useRef(bodyProps.onFinish);
+  callerOnFinishRef.current = bodyProps.onFinish;
+  const onFinish = useCallback<
+    NonNullable<UseChatOptions<TMessage>["onFinish"]>
+  >(
+    (args) => {
+      callerOnFinishRef.current?.(args);
+      void threadList.refresh();
+    },
+    [threadList],
+  );
+
+  // Portal target so radix DropdownMenu/Tooltip/AlertDialog content
+  // renders inside the chat boundary and inherits the chat-scoped styles
+  const [portalContainer, setPortalContainer] = useState<HTMLDivElement | null>(
+    null,
+  );
+
+  return (
+    <div
+      ref={setPortalContainer}
+      data-appkit-chat=""
+      className="bg-background h-full min-h-0 overflow-hidden"
+    >
+      <PortalContainerProvider container={portalContainer}>
+        <SidebarProvider className="h-full min-h-0">
+          <InlineSidebar>
+            <HistorySidebarHeader />
+            <div className="px-2 pt-2">
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    type="button"
+                    tooltip={{ children: "New chat", className: "text-base" }}
+                    onClick={handleNewChat}
+                    className="cursor-pointer"
+                  >
+                    <DbIcon icon={NewChatIcon} size={16} />
+                    <span className="group-data-[collapsible=icon]:hidden">
+                      New chat
+                    </span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </div>
+
+            {/* History list is suppressed in icon-collapsed mode — matches
+              the original `{effectiveOpen && <SidebarHistory />}` gate
+              from app-templates/.../app-sidebar.tsx. */}
+            <SidebarContent className="group-data-[collapsible=icon]:hidden">
+              <ChatHistorySidebar
+                threads={threadList.threads}
+                loading={threadList.loading}
+                error={threadList.error}
+                activeThreadId={activeThreadId}
+                onSelect={setActiveThreadId}
+                onDelete={handleDeleteThread}
+              />
+            </SidebarContent>
+          </InlineSidebar>
+
+          <main className="bg-background flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            {conversationReady ? (
+              <ChatBody<TMessage>
+                key={activeThreadId ?? `new-${newChatNonce}`}
+                api={api}
+                {...bodyProps}
+                threadId={activeThreadId ?? undefined}
+                messages={seedMessages}
+                onFinish={onFinish}
+              />
+            ) : (
+              <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
+                Loading thread…
+              </div>
+            )}
+          </main>
+        </SidebarProvider>
+      </PortalContainerProvider>
+    </div>
+  );
+}
+
+/**
+ * Inline-positioned sidebar shell. Mirrors the data attributes
+ * (`data-state`, `data-collapsible`) and the `.group` marker that
+ * `SidebarMenuButton` / `SidebarMenuAction` / `SidebarGroupLabel`
+ * children rely on for their `group-data-[collapsible=icon]:*`
+ * selectors, but uses plain flow layout instead of the upstream
+ * `Sidebar` primitive's `fixed inset-y-0 h-svh` chrome — so embedding
+ * `<ChatApp history>` below a host header doesn't make the sidebar
+ * overlap the viewport edges.
+ */
+function InlineSidebar({ children }: { children: ReactNode }) {
+  const { state } = useSidebar();
+  const collapsed = state === "collapsed";
+  return (
+    <aside
+      data-slot="sidebar"
+      data-state={state}
+      data-collapsible={collapsed ? "icon" : ""}
+      data-side="left"
+      className={cn(
+        "group bg-sidebar text-sidebar-foreground border-sidebar-border flex h-full shrink-0 flex-col overflow-hidden border-r transition-[width] duration-200 ease-linear",
+        collapsed ? "w-(--sidebar-width-icon)" : "w-(--sidebar-width)",
+      )}
+    >
+      {children}
+    </aside>
+  );
+}
+
+/** Sidebar header with the title (hidden in icon mode) and toggle. */
+function HistorySidebarHeader() {
+  const { state, toggleSidebar } = useSidebar();
+  const expanded = state === "expanded";
+  return (
+    <SidebarHeader
+      className={cn(
+        "h-[44px] flex-row items-center gap-2 px-2 py-0",
+        expanded ? "justify-between" : "justify-center",
+      )}
+    >
+      {expanded && (
+        <span className="text-foreground px-1 text-base font-semibold">
+          Chat
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={toggleSidebar}
+        aria-label={expanded ? "Collapse sidebar" : "Expand sidebar"}
+        className="text-muted-foreground hover:text-foreground hover:bg-sidebar-accent flex h-7 w-7 cursor-pointer items-center justify-center rounded-md"
+      >
+        <DbIcon
+          icon={expanded ? SidebarCollapseIcon : SidebarExpandIcon}
+          size={16}
+          color="muted"
+        />
+      </button>
+    </SidebarHeader>
+  );
+}
+
+/**
+ * Single-conversation chat body. Owns the `useChat` lifecycle, approvals
+ * map, scroll-stick logic, and renders the messages list + composer.
+ * Re-keyed by {@link ChatAppWithHistory} on thread switches so seed
+ * `messages` and `threadId` are captured at mount.
+ */
+function ChatBody<TMessage extends UIMessage = UIMessage>({
   api = DEFAULT_API,
   emptyState,
   placeholder,
@@ -69,7 +348,7 @@ export function ChatApp<TMessage extends UIMessage = UIMessage>({
   approveUrl,
   className,
   ...chatOptions
-}: ChatAppProps<TMessage>) {
+}: Omit<ChatAppProps<TMessage>, "history">) {
   const [approvals, setApprovals] = useState<Map<string, ApprovalEntry>>(
     () => new Map(),
   );
@@ -114,6 +393,12 @@ export function ChatApp<TMessage extends UIMessage = UIMessage>({
   const { containerRef, isAtBottom, scrollToBottom } =
     useScrollToBottom<HTMLDivElement>({ trigger: chat.messages });
 
+  const approveApi = useMemo(
+    () => deriveApproveUrl(api, approveUrl),
+    [api, approveUrl],
+  );
+  const { submit: submitApproval } = useSubmitApproval({ api: approveApi });
+
   const submitDecision = useCallback(
     async (decision: ApprovalDecision) => {
       const setState = (state: ApprovalEntry["state"]) => {
@@ -136,21 +421,7 @@ export function ChatApp<TMessage extends UIMessage = UIMessage>({
         if (onApprovalDecision) {
           await onApprovalDecision(decision);
         } else {
-          const url = deriveApproveUrl(api, approveUrl);
-          const res = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              streamId: decision.streamId,
-              approvalId: decision.approvalId,
-              decision: decision.decision,
-            }),
-          });
-          if (!res.ok) {
-            throw new Error(
-              `Approval POST failed: ${res.status} ${res.statusText}`,
-            );
-          }
+          await submitApproval(decision);
         }
         setState(decision.decision === "approve" ? "approved" : "denied");
       } catch (err) {
@@ -159,7 +430,7 @@ export function ChatApp<TMessage extends UIMessage = UIMessage>({
         setState("pending");
       }
     },
-    [onApprovalDecision, approveUrl, api],
+    [onApprovalDecision, submitApproval],
   );
 
   const onApprove = useCallback(
@@ -188,46 +459,55 @@ export function ChatApp<TMessage extends UIMessage = UIMessage>({
 
   const isEmpty = chat.messages.length === 0;
 
+  // See note in `ChatAppWithHistory` — re-target radix portals so they
+  // inherit the chat-scoped CSS variables.
+  const [portalContainer, setPortalContainer] = useState<HTMLDivElement | null>(
+    null,
+  );
+
   return (
     <div
+      ref={setPortalContainer}
       data-appkit-chat=""
-      className={cn("flex h-full min-h-0 flex-col bg-background", className)}
+      className={cn("bg-background flex h-full min-h-0 flex-col", className)}
     >
-      {isEmpty ? (
-        <div className="flex flex-1 items-center justify-center px-4 py-6">
-          <div className="flex w-full max-w-3xl flex-col items-stretch">
-            {emptyState ?? <ChatGreeting />}
-            {composer}
-          </div>
-        </div>
-      ) : (
-        <>
-          <ChatMessages<TMessage>
-            messages={chat.messages}
-            status={chat.status}
-            containerRef={containerRef}
-            isAtBottom={isAtBottom}
-            scrollToBottom={scrollToBottom}
-            approvals={approvals}
-            onApprove={onApprove}
-            onDeny={onDeny}
-            setMessages={chat.setMessages}
-            regenerate={chat.regenerate}
-            renderMessage={renderMessage}
-            renderToolCall={renderToolCall}
-          />
-          {chat.error && (
-            <div className="mx-auto w-full max-w-4xl px-4 pb-2">
-              <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                {chat.error.message}
-              </div>
+      <PortalContainerProvider container={portalContainer}>
+        {isEmpty ? (
+          <div className="flex flex-1 items-center justify-center px-4 py-6">
+            <div className="flex w-full max-w-3xl flex-col items-stretch">
+              {emptyState ?? <ChatGreeting />}
+              {composer}
             </div>
-          )}
-          <div className="sticky bottom-0 z-10 mx-auto w-full max-w-3xl px-2 pb-3 md:px-4 md:pb-4">
-            {composer}
           </div>
-        </>
-      )}
+        ) : (
+          <>
+            <ChatMessages<TMessage>
+              messages={chat.messages}
+              status={chat.status}
+              containerRef={containerRef}
+              isAtBottom={isAtBottom}
+              scrollToBottom={scrollToBottom}
+              approvals={approvals}
+              onApprove={onApprove}
+              onDeny={onDeny}
+              setMessages={chat.setMessages}
+              regenerate={chat.regenerate}
+              renderMessage={renderMessage}
+              renderToolCall={renderToolCall}
+            />
+            {chat.error && (
+              <div className="mx-auto w-full max-w-4xl px-4 pb-2">
+                <div className="border-destructive/30 bg-destructive/5 text-destructive rounded-md border px-3 py-2 text-sm">
+                  {chat.error.message}
+                </div>
+              </div>
+            )}
+            <div className="sticky bottom-0 z-10 mx-auto w-full max-w-3xl px-2 pb-3 md:px-4 md:pb-4">
+              {composer}
+            </div>
+          </>
+        )}
+      </PortalContainerProvider>
     </div>
   );
 }
