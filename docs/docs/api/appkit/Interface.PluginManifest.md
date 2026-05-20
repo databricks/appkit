@@ -94,8 +94,7 @@ Omit.displayName
 optional hidden: boolean;
 ```
 
-When true, this plugin is excluded from the template plugins manifest
-(appkit.plugins.json) during sync.
+When true, this plugin is excluded from the template plugins manifest (appkit.plugins.json) during sync.
 
 #### Inherited from
 
@@ -159,9 +158,7 @@ Omit.name
 optional onSetupMessage: string;
 ```
 
-Message displayed to the user after project initialization. Use this to
-inform about manual setup steps (e.g. environment variables, resource
-provisioning).
+Message displayed to the user after project initialization. Use this to inform about manual setup steps (e.g. environment variables, resource provisioning).
 
 #### Inherited from
 
@@ -270,9 +267,7 @@ Omit.scaffolding
 optional stability: "beta" | "ga";
 ```
 
-Plugin stability level. Beta plugins may have breaking API changes between
-minor releases but are on a path to GA. GA (general availability) plugins
-follow semver strictly.
+Plugin stability level. Beta plugins may have breaking API changes between minor releases but are on a path to GA. GA (general availability) plugins follow semver strictly.
 
 #### Inherited from
 

@@ -143,22 +143,11 @@ export interface PluginManifest<TName extends string = string>
   keywords?: string[];
   /** SPDX license identifier */
   license?: string;
-  /**
-   * Message displayed to the user after project initialization. Use this to
-   * inform about manual setup steps (e.g. environment variables, resource
-   * provisioning).
-   */
+  /** Message displayed to the user after project initialization. Use this to inform about manual setup steps (e.g. environment variables, resource provisioning). */
   onSetupMessage?: string;
-  /**
-   * When true, this plugin is excluded from the template plugins manifest
-   * (appkit.plugins.json) during sync.
-   */
+  /** When true, this plugin is excluded from the template plugins manifest (appkit.plugins.json) during sync. */
   hidden?: boolean;
-  /**
-   * Plugin stability level. Beta plugins may have breaking API changes between
-   * minor releases but are on a path to GA. GA (general availability) plugins
-   * follow semver strictly.
-   */
+  /** Plugin stability level. Beta plugins may have breaking API changes between minor releases but are on a path to GA. GA (general availability) plugins follow semver strictly. */
   stability?: "beta" | "ga";
 }
 
