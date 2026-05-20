@@ -141,7 +141,6 @@ export function buildHorizontalBarOption(
       right: "10%",
       top: ctx.title ? "15%" : "5%",
       bottom: ctx.showLegend && hasMultipleSeries ? "15%" : "5%",
-      containLabel: true,
     },
     xAxis: { type: "value" },
     yAxis: {
@@ -200,7 +199,6 @@ export function buildHeatmapOption(
       right: "15%",
       top: ctx.title ? "15%" : "10%",
       bottom: "15%",
-      containLabel: true,
     },
     xAxis: {
       type: "category",
