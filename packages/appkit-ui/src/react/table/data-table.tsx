@@ -256,6 +256,7 @@ export function DataTable(props: DataTableProps) {
                 </Table>
               </div>
             </div>
+            {/* On mobile, flex-col-reverse places pagination buttons above the info row for easier thumb access */}
             <div className="flex flex-col-reverse sm:flex-row items-start sm:items-center justify-between gap-3 py-4">
               <div className="flex flex-wrap items-center gap-3 sm:gap-6">
                 <div className="text-foreground text-sm">
