@@ -348,6 +348,38 @@ describe("Plugin.asUser proxy", () => {
       expect(second.arrowFn()).toBe("alice");
     });
 
+    test("interception does not mutate the underlying export object", () => {
+      // Plugin that returns the same exports object reference each call
+      // (memoized — an anti-pattern, but the proxy must not corrupt it).
+      class MemoizedExportsPlugin extends Plugin<BasePluginConfig> {
+        readUser = () => getUserContext()?.userId;
+        private cached?: Record<string, unknown>;
+        exports() {
+          if (!this.cached) {
+            this.cached = {
+              read: this.readUser,
+              nested: { read: this.readUser },
+            };
+          }
+          return this.cached;
+        }
+      }
+      const plugin = new MemoizedExportsPlugin(config);
+
+      const wrapped = plugin.asUser(createReqWithObo()).exports() as any;
+      expect(wrapped.read()).toBe("alice");
+
+      // The plugin's own (memoized) exports() must still be the originals.
+      const raw = plugin.exports() as any;
+      expect(raw.read).toBe(plugin.readUser);
+      expect(raw.read()).toBeUndefined();
+      expect(raw.nested.read).toBe(plugin.readUser);
+
+      // The wrapped view is a fresh structure, not the same nested object.
+      expect(wrapped).not.toBe(raw);
+      expect(wrapped.nested).not.toBe(raw.nested);
+    });
+
     test("callable exports (function return) are returned as-is", () => {
       const plugin = new CallablePlugin(config);
       const result = plugin.asUser(createReqWithObo()).exports();
@@ -355,6 +387,22 @@ describe("Plugin.asUser proxy", () => {
       // Same function identity as the plugin's own exports() return value.
       expect(typeof result).toBe("function");
       expect((result as (k: string) => string)("vol")).toBe("handle:vol");
+    });
+
+    test("top-level non-plain object exports pass through as-is", () => {
+      // exports() returning an Array, Map, etc. (not plain object, not
+      // function) hits the fallthrough branch and is returned unchanged.
+      class ArrayExportsPlugin extends Plugin<BasePluginConfig> {
+        readonly source: unknown[] = [() => getUserContext()?.userId];
+        exports(): unknown[] {
+          return this.source;
+        }
+      }
+      const plugin = new ArrayExportsPlugin(config);
+      const result = plugin.asUser(createReqWithObo()).exports();
+
+      // Same identity as the plugin's own return — not copied, not wrapped.
+      expect(result).toBe(plugin.source);
     });
 
     test("exports() returning undefined yields an empty object", () => {

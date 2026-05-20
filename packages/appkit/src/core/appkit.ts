@@ -16,6 +16,7 @@ import {
   TelemetryReporter,
 } from "../internal-telemetry";
 import { createLogger } from "../logging/logger";
+import { isPlainObject } from "../plugin/plugin";
 import { ResourceRegistry, ResourceType } from "../registry";
 import type { TelemetryConfig } from "../telemetry";
 import { TelemetryManager } from "../telemetry";
@@ -126,7 +127,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
       const val = exports[key];
       if (typeof val === "function") {
         exports[key] = (val as (...args: unknown[]) => unknown).bind(context);
-      } else if (AppKit.isPlainObject(val)) {
+      } else if (isPlainObject(val)) {
         this.bindExportMethods(val as Record<string, unknown>, context);
       }
     }
@@ -172,17 +173,6 @@ export class AppKit<TPlugins extends InputPluginMap> {
       asUser: (req: import("express").Request) =>
         (plugin as any).asUser(req).exports() as Record<string, unknown>,
     };
-  }
-
-  /**
-   * Returns true if the value is a plain object (not an array, Date, etc.).
-   */
-  private static isPlainObject(
-    value: unknown,
-  ): value is Record<string, unknown> {
-    if (typeof value !== "object" || value === null) return false;
-    const proto = Object.getPrototypeOf(value);
-    return proto === Object.prototype || proto === null;
   }
 
   static async _createApp<

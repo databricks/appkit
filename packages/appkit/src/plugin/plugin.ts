@@ -48,34 +48,43 @@ const DEV_OBO_FALLBACK_KEY = createContextKey("appkit.devOboFallback");
  * Returns true if `value` is a plain object literal (not an array, Date,
  * class instance, etc.). Used to decide whether to recurse into nested
  * export shapes when wrapping functions.
+ *
+ * @internal exported so the AppKit core can reuse the same predicate for
+ * its `bindExportMethods` walk; not part of the public package surface.
  */
-function isPlainObject(value: unknown): value is Record<string, unknown> {
+export function isPlainObject(
+  value: unknown,
+): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null) return false;
   const proto = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
 }
 
 /**
- * Recursively replaces every function in `exports` with `wrap(fn)`,
- * walking into nested plain objects. Mutates and returns `exports`.
+ * Returns a deep copy of `exports` where every function has been replaced
+ * with `wrap(fn)`, walking into nested plain objects.
  *
  * Used by the asUser proxy to make the user context follow function
- * references that escape the proxy via `exports()`.
+ * references that escape the proxy via `exports()`. The original input is
+ * not mutated, so plugins that memoize `exports()` are safe — each call
+ * through the proxy yields an independent, freshly wrapped view.
  */
 function wrapExportFunctions(
   exports: Record<string, unknown>,
   wrap: (fn: (...a: unknown[]) => unknown) => (...a: unknown[]) => unknown,
 ): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
   for (const key of Object.keys(exports)) {
-    if (!Object.hasOwn(exports, key)) continue;
     const val = exports[key];
     if (typeof val === "function") {
-      exports[key] = wrap(val as (...a: unknown[]) => unknown);
+      result[key] = wrap(val as (...a: unknown[]) => unknown);
     } else if (isPlainObject(val)) {
-      wrapExportFunctions(val as Record<string, unknown>, wrap);
+      result[key] = wrapExportFunctions(val, wrap);
+    } else {
+      result[key] = val;
     }
   }
-  return exports;
+  return result;
 }
 
 /**
