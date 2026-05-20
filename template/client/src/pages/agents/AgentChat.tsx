@@ -141,7 +141,7 @@ export function AgentChat() {
         </p>
       </div>
 
-      <Card className="h-[600px] flex flex-col">
+      <Card className="h-[min(600px,70vh)] flex flex-col">
         <CardContent
           className="flex-1 overflow-y-auto p-4 space-y-3"
           ref={scrollRef}

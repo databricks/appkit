@@ -38,6 +38,38 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+## [0.36.0](https://github.com/databricks/appkit/compare/v0.35.2...v0.36.0) (2026-05-20)
+
+* add source-map support for editor DOM mapping ([#347](https://github.com/databricks/appkit/issues/347)) ([0d595c2](https://github.com/databricks/appkit/commit/0d595c2c198992cd31923d42137d72aa3da5effb))
+
+
+## [0.35.2](https://github.com/databricks/appkit/compare/v0.35.1...v0.35.2) (2026-05-15)
+
+* unblock SP calls for UC in production ([#351](https://github.com/databricks/appkit/issues/351)) ([d97a2ef](https://github.com/databricks/appkit/commit/d97a2ef0c24b9d47283c4285f85d6e967ec49704))
+
+
+## [0.35.1](https://github.com/databricks/appkit/compare/v0.35.0...v0.35.1) (2026-05-15)
+
+### appkit-ui
+
+* **appkit-ui:** stabilize useAnalyticsQuery params reference to avoid infinite refetch ([#321](https://github.com/databricks/appkit/issues/321)) ([5496c6a](https://github.com/databricks/appkit/commit/5496c6a6ac02979a11094f5e9a55e3d92e2a7236))
+
+
+## [0.35.0](https://github.com/databricks/appkit/compare/v0.34.1...v0.35.0) (2026-05-14)
+
+### lakebase
+
+* **lakebase:** add per-user connections via asUser(req) ([#343](https://github.com/databricks/appkit/issues/343)) ([22afef0](https://github.com/databricks/appkit/commit/22afef0d70fecbcc35f13e5897a4a7fb50c3011c))
+
+
 ## [0.34.1](https://github.com/databricks/appkit/compare/v0.34.0...v0.34.1) (2026-05-13)
 
 ### appkit

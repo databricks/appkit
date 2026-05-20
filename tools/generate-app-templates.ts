@@ -66,6 +66,7 @@ const APP_TEMPLATES: AppTemplate[] = [
       "analytics.sql-warehouse.id": "placeholder",
       "files.files.path": "placeholder",
       "genie.genie-space.id": "placeholder",
+      "genie.genie-space.name": "placeholder",
       "lakebase.postgres.branch": "placeholder",
       "lakebase.postgres.database": "placeholder",
       "serving.serving-endpoint.name": "placeholder",
@@ -86,6 +87,7 @@ const APP_TEMPLATES: AppTemplate[] = [
     features: ["genie"],
     set: {
       "genie.genie-space.id": "placeholder",
+      "genie.genie-space.name": "placeholder",
     },
     description:
       "Node.js app with AI/BI Genie for natural language data queries",
