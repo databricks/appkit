@@ -566,4 +566,54 @@ describe("ResponsesApiTransport", () => {
     }
     expect(chunks.map((c) => c.type)).toEqual(["start", "finish"]);
   });
+
+  test("parses CRLF-encoded SSE frames (proxy normalization)", async () => {
+    const encoder = new TextEncoder();
+    const body =
+      `id: 1\r\nevent: response.output_item.added\r\ndata: ${JSON.stringify({
+        type: "response.output_item.added",
+        output_index: 0,
+        item: messageItem("msg_a"),
+        sequence_number: 0,
+      })}\r\n\r\n` +
+      `id: 2\r\nevent: response.output_text.delta\r\ndata: ${JSON.stringify({
+        type: "response.output_text.delta",
+        item_id: "msg_a",
+        output_index: 0,
+        content_index: 0,
+        delta: "hi",
+        sequence_number: 1,
+      })}\r\n\r\n` +
+      `id: 3\r\nevent: response.completed\r\ndata: ${JSON.stringify({
+        type: "response.completed",
+        sequence_number: 2,
+        response: {},
+      })}\r\n\r\n`;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(body));
+        controller.close();
+      },
+    });
+    const transport = new TestableTransport<UIMessage>({ api: "/test" });
+    const out = transport.process(stream);
+    const reader = out.getReader();
+    const chunks: UIMessageChunk[] = [];
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+    expect(chunks.map((c) => c.type)).toEqual([
+      "start",
+      "text-start",
+      "text-delta",
+      "finish",
+    ]);
+    expect(chunks).toContainEqual({
+      type: "text-delta",
+      id: "msg_a",
+      delta: "hi",
+    });
+  });
 });

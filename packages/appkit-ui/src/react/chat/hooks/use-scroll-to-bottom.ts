@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 export interface UseScrollToBottomOptions {
   /** Pixels from the bottom that still count as "at bottom". Default 50. */
@@ -8,7 +8,13 @@ export interface UseScrollToBottomOptions {
 }
 
 export interface UseScrollToBottomReturn<T extends HTMLElement> {
-  containerRef: React.RefObject<T | null>;
+  /**
+   * Ref callback. Attach with `ref={containerRef}` on the scroll
+   * container. Re-runs the listener-attach effect whenever the
+   * underlying DOM node changes — so containers that mount after the
+   * first render (e.g. behind a `loading` gate) still get the listener.
+   */
+  containerRef: (node: T | null) => void;
   isAtBottom: boolean;
   scrollToBottom: (behavior?: ScrollBehavior) => void;
 }
@@ -21,42 +27,49 @@ export function useScrollToBottom<T extends HTMLElement = HTMLDivElement>({
   threshold = 50,
   trigger,
 }: UseScrollToBottomOptions = {}): UseScrollToBottomReturn<T> {
-  const containerRef = useRef<T | null>(null);
+  // State-backed so changes to the underlying DOM node re-run the
+  // listener-attach effect (e.g. when the container mounts after the
+  // first render).
+  const [element, setElement] = useState<T | null>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
 
-  const handleScroll = useCallback(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    setIsAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < threshold);
-  }, [threshold]);
+  const containerRef = useCallback((node: T | null) => {
+    setElement(node);
+  }, []);
 
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    el.addEventListener("scroll", handleScroll, { passive: true });
+    if (!element) return;
+    const handleScroll = () => {
+      setIsAtBottom(
+        element.scrollHeight - element.scrollTop - element.clientHeight <
+          threshold,
+      );
+    };
+    element.addEventListener("scroll", handleScroll, { passive: true });
     handleScroll();
-    return () => el.removeEventListener("scroll", handleScroll);
-  }, [handleScroll]);
+    return () => element.removeEventListener("scroll", handleScroll);
+  }, [element, threshold]);
 
   useEffect(() => {
     // `trigger` is referenced only to opt the effect into a re-run when
     // its identity changes (e.g. on every new message during streaming).
     void trigger;
-    if (isAtBottom && containerRef.current) {
+    if (isAtBottom && element) {
       // `instant` here so streaming re-renders don't queue smooth animations.
-      containerRef.current.scrollTo({
-        top: containerRef.current.scrollHeight,
+      element.scrollTo({
+        top: element.scrollHeight,
         behavior: "instant",
       });
     }
-  }, [trigger, isAtBottom]);
+  }, [trigger, isAtBottom, element]);
 
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
-    containerRef.current?.scrollTo({
-      top: containerRef.current.scrollHeight,
-      behavior,
-    });
-  }, []);
+  const scrollToBottom = useCallback(
+    (behavior: ScrollBehavior = "smooth") => {
+      if (!element) return;
+      element.scrollTo({ top: element.scrollHeight, behavior });
+    },
+    [element],
+  );
 
   return { containerRef, isAtBottom, scrollToBottom };
 }

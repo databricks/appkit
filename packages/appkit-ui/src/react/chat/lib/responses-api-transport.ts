@@ -123,7 +123,9 @@ function sseEventLineParser(): TransformStream<string, ResponseStreamEvent> {
   let buffer = "";
   return new TransformStream({
     transform(chunk, controller) {
-      buffer += chunk;
+      // Normalize CRLF → LF so the `\n\n` boundary split works behind
+      // intermediaries that re-emit SSE frames with CRLF line endings.
+      buffer += chunk.replace(/\r\n/g, "\n");
       let separatorIdx: number;
       // biome-ignore lint/suspicious/noAssignInExpressions: standard SSE buffer drain pattern
       while ((separatorIdx = buffer.indexOf("\n\n")) !== -1) {
