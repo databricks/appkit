@@ -150,6 +150,16 @@ function AgentRoute() {
   // Seed messages for resumed threads. Gated on the fetched thread id
   // matching the selected one so a stale previous-thread payload never
   // mounts the Conversation with the wrong history.
+  //
+  // TODO(hydration): this drops `tool`-role messages and only emits a
+  // single `text` part per surviving message. Past tool invocations and
+  // approval cards therefore do NOT re-render when a thread is resumed —
+  // a conversation that previously ran a destructive tool looks like
+  // plain Q&A on reload. To fix end-to-end we need to fan
+  // `Message.toolCalls` + tool-output messages back into the
+  // `tool-*` / `data-approval-pending` parts the renderer understands;
+  // that conversion belongs next to the `Thread`/`Message` shape in
+  // shared, so it can be reused by `<ChatApp>` too.
   const seedMessages = useMemo<UIMessage[] | undefined>(() => {
     if (!activeThreadId) return undefined;
     if (!activeThread.thread || activeThread.thread.id !== activeThreadId) {

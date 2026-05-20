@@ -6,7 +6,7 @@ import type {
   UIMessage,
   UIMessageChunk,
 } from "ai";
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { ResponsesApiTransport } from "../lib/responses-api-transport";
 import { generateId } from "../lib/utils";
 
@@ -46,7 +46,7 @@ export type UseChatReturn<TMessage extends UIMessage = UIMessage> =
 export function useChat<TMessage extends UIMessage = UIMessage>(
   options: UseChatOptions<TMessage>,
 ): UseChatReturn<TMessage> {
-  const { api, id: providedId, messages, onData, onError, onFinish } = options;
+  const { api, id: providedId, messages, onData, onError } = options;
 
   const [id] = useState(() => providedId ?? generateId());
   const initialMessagesRef = useRef<TMessage[]>(messages ?? []);
@@ -57,6 +57,17 @@ export function useChat<TMessage extends UIMessage = UIMessage>(
   onStreamPartRef.current = options.onStreamPart;
   const headersRef = useRef(options.headers);
   headersRef.current = options.headers;
+  // Same treatment for onFinish — consumers commonly chain it with
+  // other state (`useCallback(..., [threadList])`) and we don't want
+  // that to depend on whatever the AI SDK does with the callback
+  // identity. A stable wrapper that dereferences the ref each turn
+  // gives us "always run the latest" semantics without churning the
+  // transport or any other memo that touches `chat`.
+  const onFinishRef = useRef(options.onFinish);
+  onFinishRef.current = options.onFinish;
+  const onFinish = useCallback<ChatOnFinishCallback<TMessage>>((args) => {
+    onFinishRef.current?.(args);
+  }, []);
 
   const threadIdRef = useRef<string | undefined>(options.threadId);
 
