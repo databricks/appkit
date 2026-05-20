@@ -3,8 +3,8 @@
  * `schemas/manifest.ts`. Single source of truth so create, add-resource, and
  * validate stay in sync with the schema.
  *
- * Phase 5 update: replaced runtime JSON-schema reads with direct imports from
- * the Zod module. Values are now constant at module load — no caching needed.
+ * Values are constant at module load (direct Zod imports, no runtime JSON-schema
+ * read), so no caching is needed.
  */
 import {
   appPermissionSchema,

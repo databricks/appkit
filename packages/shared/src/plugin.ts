@@ -8,9 +8,8 @@ import type {
 } from "./schemas/manifest";
 
 // Re-export the canonical schema-derived types as the shared definitions.
-// Phase 4: sourced from `./schemas/manifest` (the Zod canonical) instead of
-// the legacy generated file, which has a stale `DiscoveryDescriptor` shape
-// (free-form vs. discriminated union after the Phase 4 reshape).
+// Sourced from `./schemas/manifest` (the Zod canonical) so `DiscoveryDescriptor`
+// stays the discriminated union shape rather than the free-form predecessor.
 export type { ResourceFieldEntry, DiscoveryDescriptor, PluginScaffoldingRules };
 
 /** Base plugin interface. */

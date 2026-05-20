@@ -4,11 +4,6 @@
  * site's static schemas directory. Those files are what the published
  * docs URL serves to plugin authors' editors via $schema.
  *
- * Phase 1: this generator runs alongside the existing
- * `tools/generate-schema-types.ts` (which still emits TypeScript types from
- * the hand-written JSON Schema). Phases 2-5 cut downstream consumers over
- * to the Zod-authored shape and delete the legacy generator.
- *
  * Run from repo root: pnpm exec tsx tools/generate-json-schema.ts
  */
 import fs from "node:fs";

@@ -6,25 +6,26 @@
  * `tools/generate-json-schema.ts` and live only in `docs/static/schemas/`
  * (no package-internal copies).
  *
- * - Phase 2: cross-field constraints (cycle/dangling-reference checks,
- *   `<PROFILE>` placeholder, post-scaffold instruction non-empty) are
- *   refinements co-located with the shape they constrain. Validation is
- *   driven through the Standard Schema interface from `validate-manifest.ts`.
- * - Phase 3: `templateFieldEntrySchema` is a transform that emits `origin`
- *   from `localOnly`/`value`/`resolve`. The input slot is still allowed so
+ * - Cross-field constraints (cycle/dangling-reference checks, `<PROFILE>`
+ *   placeholder, post-scaffold instruction non-empty) are refinements
+ *   co-located with the shape they constrain. Validation is driven through
+ *   the Standard Schema interface from `validate-manifest.ts`.
+ * - `templateFieldEntrySchema` is a transform that emits `origin` from
+ *   `localOnly`/`value`/`resolve`. The input slot is still allowed so
  *   re-parsing previously-synced template manifests does not fail, but the
  *   transform always overwrites it — drift-by-construction for hand-edits.
- * - Phase 4: `discoveryDescriptorSchema` is a discriminated union over a
- *   `type` literal. The `kind` variant references one of five well-known
+ * - `discoveryDescriptorSchema` is a discriminated union over a `type`
+ *   literal. The `kind` variant references one of the well-known
  *   `resourceKind` values for which AppKit owns the CLI command map (see
  *   `RESOURCE_KIND_COMMANDS` below). The `cli` variant is the escape hatch
  *   carrying the existing free-form fields (with the `<PROFILE>`
  *   refinement). Hierarchical context for volumes (catalog/schema parent
- *   walk) is encoded as a Phase 6 MUST rule, not modeled in the schema.
- * - Phase 6: scaffolding rule items carry a `maxLength` (120 chars) so
- *   `rules.never[]` / `rules.must[]` stay short directives by contract, and
- *   the canonical `TEMPLATE_SCAFFOLDING` constant lives co-located with the
- *   scaffolding schemas (sync.ts imports it).
+ *   walk) is encoded via the kind's `parents` array, not via dependsOn.
+ * - Scaffolding rule items carry a `maxLength` (120 chars) so
+ *   `rules.never[]` / `rules.must[]` / `rules.should[]` stay short
+ *   directives by contract, and the canonical `TEMPLATE_SCAFFOLDING`
+ *   constant lives co-located with the scaffolding schemas (sync.ts
+ *   imports it).
  */
 
 import { z } from "zod";
