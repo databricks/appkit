@@ -587,13 +587,33 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
 }
 
 /**
- * Hard cap on rows produced by the server-side JSON_ARRAY fallback. The
- * fallback materializes every row into a plain JS object on the Node
- * main thread (O(rows × cols) allocations), so a runaway result would
- * block the event loop for hundreds of ms and pressure GC. Past this
- * cap, surface a clear error instead of silently degrading throughput.
+ * Hard caps on the server-side JSON_ARRAY fallback. The materializer
+ * builds every row as a plain JS object on the Node main thread
+ * (O(rows × cols) allocations), so a runaway result blocks the event
+ * loop and pressures GC. We cap two ways — rows AND decoded bytes —
+ * because either dimension can blow up independently (100k×1B rows is
+ * fine, 10 rows × 10MB cells is not).
  */
 const JSON_ARRAY_FALLBACK_MAX_ROWS = 100_000;
+const JSON_ARRAY_FALLBACK_MAX_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Replacer used by the nested-value `JSON.stringify` path. Arrow IPC
+ * carries column values whose JS representations include `bigint`
+ * (which the spec'd `JSON.stringify` cannot serialize and throws on),
+ * `Uint8Array` (binary buffers — would serialize as `{"0":...,"1":...}`
+ * which is wrong), and `Date` (would lose timezone fidelity inside a
+ * nested struct). Coerce each to a string form that matches what the
+ * warehouse itself emits under native JSON_ARRAY.
+ */
+function nestedJsonReplacer(_key: string, value: unknown): unknown {
+  if (typeof value === "bigint") return value.toString();
+  if (value instanceof Uint8Array) {
+    return Buffer.from(value).toString("base64");
+  }
+  if (value instanceof Date) return value.toISOString();
+  return value;
+}
 
 /**
  * Decode a base64 Arrow IPC attachment to plain row objects.
@@ -608,19 +628,25 @@ const JSON_ARRAY_FALLBACK_MAX_ROWS = 100_000;
  * - **Scalars (number / bigint / boolean)**: stringified. JSON_ARRAY
  *   wire format emits everything in `result.data_array` as strings;
  *   bigint stringification is also necessary for JSON-serializability.
- * - **Strings**: passthrough.
- * - **Nested (List / Struct / Map)**: JSON-stringified. The warehouse
- *   emits nested values as JSON-encoded strings under JSON_ARRAY;
- *   apache-arrow's `Vector.get()` returns a typed wrapper whose
- *   `toJSON()` yields plain JS values, so `JSON.stringify` produces
- *   the same string shape the warehouse would have produced natively.
- *   This eliminates the previous correctness gap where callers saw an
- *   Arrow vector wrapper instead of a JSON string.
+ * - **Strings / Date / Uint8Array**: stringified consistently —
+ *   `Date` to ISO string, `Uint8Array` to base64.
+ * - **Nested (List / Struct / Map)**: `JSON.stringify` with the
+ *   `nestedJsonReplacer` so nested bigints / Dates / binary buffers
+ *   serialize sanely instead of throwing or producing object-as-map
+ *   output. Apache-arrow's typed values expose `toJSON()` so the
+ *   resulting string matches what the warehouse would have emitted.
  */
 function decodeArrowAttachmentToRows(
   attachment: string,
 ): Record<string, unknown>[] {
   const decoded = Buffer.from(attachment, "base64");
+  if (decoded.byteLength > JSON_ARRAY_FALLBACK_MAX_BYTES) {
+    throw ExecutionError.statementFailed(
+      `Result attachment is ${decoded.byteLength} bytes; JSON_ARRAY fallback materializer caps at ${JSON_ARRAY_FALLBACK_MAX_BYTES} bytes. Re-issue the query with format="ARROW_STREAM" to stream the full result.`,
+      "RESULT_TOO_LARGE_FOR_JSON_FALLBACK",
+      "Result too large for JSON format. Re-run with ARROW_STREAM format.",
+    );
+  }
   const table = tableFromIPC(
     new Uint8Array(decoded.buffer, decoded.byteOffset, decoded.byteLength),
   );
@@ -631,12 +657,17 @@ function decodeArrowAttachmentToRows(
       `Result too large for JSON format (over ${JSON_ARRAY_FALLBACK_MAX_ROWS} rows). Re-run with ARROW_STREAM format.`,
     );
   }
-  const colNames = table.schema.fields.map((f) => f.name);
+  // Resolve the child vectors once. `table.getChild(name)` walks the
+  // schema fields on every call; without this hoist we'd pay that cost
+  // O(rows × cols) times. At 100k × 50 columns that's millions of
+  // redundant lookups on the event loop.
+  const columns = table.schema.fields.map(
+    (f) => [f.name, table.getChild(f.name)] as const,
+  );
   const rows: Record<string, unknown>[] = [];
   for (let i = 0; i < table.numRows; i++) {
     const row: Record<string, unknown> = {};
-    for (const name of colNames) {
-      const col = table.getChild(name);
+    for (const [name, col] of columns) {
       const v = col?.get(i);
       if (v == null) {
         row[name] = null;
@@ -648,11 +679,16 @@ function decodeArrowAttachmentToRows(
         row[name] = String(v);
       } else if (typeof v === "string") {
         row[name] = v;
+      } else if (v instanceof Date) {
+        row[name] = v.toISOString();
+      } else if (v instanceof Uint8Array) {
+        row[name] = Buffer.from(v).toString("base64");
       } else {
-        // Nested types (List, Struct, Map). Native JSON_ARRAY emits
-        // these as JSON-encoded strings; apache-arrow's typed values
-        // expose `toJSON()` so `JSON.stringify` yields the same shape.
-        row[name] = JSON.stringify(v);
+        // Nested types (List, Struct, Map). Use the replacer so nested
+        // bigint / Date / Uint8Array values serialize predictably —
+        // bare `JSON.stringify` throws on bigint and emits broken
+        // shapes for binary buffers.
+        row[name] = JSON.stringify(v, nestedJsonReplacer);
       }
     }
     rows.push(row);

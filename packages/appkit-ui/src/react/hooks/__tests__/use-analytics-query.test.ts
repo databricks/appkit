@@ -184,11 +184,12 @@ describe("useAnalyticsQuery", () => {
     expect(result.current.data).toBeNull();
   });
 
-  test("a server error event carrying a structured errorCode surfaces it through the error path", async () => {
+  test("a server error event carrying a structured errorCode exposes it on the hook return value", async () => {
     // The SSE error broadcaster forwards an `errorCode` field for
-    // UI branching (e.g. INLINE_ARROW_STASH_EXHAUSTED). The hook reports
-    // the human `error` text; downstream code can read `errorCode` from
-    // the parsed payload if needed via console.error.
+    // UI branching (e.g. INLINE_ARROW_STASH_EXHAUSTED). The hook
+    // surfaces both the human `error` text AND the structured
+    // `errorCode` so consumers can branch on the stable identifier
+    // instead of substring-matching the sanitized human message.
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const { result } = renderHook(() =>
@@ -208,6 +209,7 @@ describe("useAnalyticsQuery", () => {
       expect(result.current.error).toBe("Server is at capacity, please retry");
     });
     expect(result.current.loading).toBe(false);
+    expect(result.current.errorCode).toBe("INLINE_ARROW_STASH_EXHAUSTED");
 
     errorSpy.mockRestore();
   });

@@ -121,6 +121,7 @@ export function useAnalyticsQuery<
   const [data, setData] = useState<ResultType | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   if (!queryKey || queryKey.trim().length === 0) {
@@ -168,6 +169,7 @@ export function useAnalyticsQuery<
 
     setLoading(true);
     setError(null);
+    setErrorCode(null);
     setData(null);
 
     const abortController = new AbortController();
@@ -237,6 +239,14 @@ export function useAnalyticsQuery<
 
             setLoading(false);
             setError(errorMsg);
+            // Propagate the upstream structured code so UI consumers
+            // can branch on a stable identifier (e.g. retry on
+            // INLINE_ARROW_STASH_EXHAUSTED, format-switch on
+            // RESULT_TOO_LARGE_FOR_JSON_FALLBACK) instead of parsing
+            // the human-readable message.
+            if (typeof parsed.errorCode === "string") {
+              setErrorCode(parsed.errorCode);
+            }
 
             if (parsed.code) {
               console.error(
@@ -263,9 +273,15 @@ export function useAnalyticsQuery<
           // `loading=true` with no error surfaced — the UI would just
           // spin forever. Clear loading and report a user-facing error
           // so the consumer can render a retry affordance.
+          //
+          // We also abort the SSE connection: if the upstream is
+          // emitting un-parseable frames, leaving the stream open just
+          // re-fires the same failure on the next message. Closing
+          // forces the consumer into a clean retry path.
           console.warn("[useAnalyticsQuery] Malformed message received", error);
           setLoading(false);
           setError("Unable to load data, please try again");
+          abortController.abort();
         }
       },
       onError: (error) => {
@@ -305,5 +321,5 @@ export function useAnalyticsQuery<
   // Enable HMR for query updates in dev mode
   useQueryHMR(queryKey, start);
 
-  return { data, loading, error };
+  return { data, loading, error, errorCode };
 }

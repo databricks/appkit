@@ -57,7 +57,14 @@ describe("InlineArrowStash", () => {
 
   test("entries past TTL are evicted on next gc tick", () => {
     let clock = 0;
-    const stash = new InlineArrowStash({ ttlMs: 1000, now: () => clock });
+    // gcMinIntervalMs: 0 disables gc throttling so the test can drive
+    // the clock past TTL on a sub-throttle scale without the gc pass
+    // being skipped.
+    const stash = new InlineArrowStash({
+      ttlMs: 1000,
+      gcMinIntervalMs: 0,
+      now: () => clock,
+    });
     const id = mustPut(stash, "user-1", bytes(50));
     clock = 999;
     expect(stash.take(id, "user-1")).toBeDefined();
@@ -112,15 +119,37 @@ describe("InlineArrowStash", () => {
     expect(stash.take(b, "user-1")).toBeDefined();
   });
 
-  test("put throws when a single payload would not fit even with overflow (caller misconfiguration)", () => {
+  test("put throws when a single payload would not fit in the largest pool (caller misconfiguration)", () => {
     const stash = new InlineArrowStash({
       maxBytes: 100,
       maxOverflowBytes: 100,
     });
-    // 300 > maxBytes + maxOverflowBytes (200), so this can never fit.
+    // 300 > max(maxBytes, maxOverflowBytes) (100); pools don't split,
+    // so no individual put can ever succeed.
     expect(() => stash.put("user-1", bytes(300))).toThrow(
-      /exceeds stash capacity/,
+      /exceeds largest stash slot/,
     );
+  });
+
+  test("overflow entries expire on a shorter TTL than regular entries", () => {
+    let clock = 0;
+    const stash = new InlineArrowStash({
+      maxBytes: 80,
+      maxOverflowBytes: 80,
+      ttlMs: 600_000,
+      overflowTtlMs: 30_000,
+      gcMinIntervalMs: 0,
+      now: () => clock,
+    });
+    const reg = mustPut(stash, "user-1", bytes(80)); // fills regular
+    const ovf = mustPut(stash, "user-1", bytes(80)); // spills to overflow
+    expect(stash.size()).toBe(80);
+    expect(stash.overflowSize()).toBe(80);
+
+    // 45 s in: overflow expired, regular still alive.
+    clock = 45_000;
+    expect(stash.take(ovf, "user-1")).toBeUndefined();
+    expect(stash.take(reg, "user-1")).toBeDefined();
   });
 
   test("synthetic ids are unique across puts", () => {

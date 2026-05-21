@@ -24,14 +24,16 @@ import { randomUUID } from "node:crypto";
  *   top of unguessable ids.
  * - **Memory bounded with overflow slot**: total stashed bytes are capped
  *   at `maxBytes`. When `put()` cannot fit a payload, it spills into a
- *   separate overflow pool capped at `maxOverflowBytes` (default same as
- *   `maxBytes`). Overflow entries behave identically to regular ones
- *   except they do not count against the regular cap — they are bytes
- *   the caller has *already paid to decode for this single request*, so
- *   throwing them away would force a second warehouse round-trip. Only
- *   when both pools are full does `put()` return `null` and the caller
- *   has to fall back to a different delivery path. Memory is bounded
- *   above by `maxBytes + maxOverflowBytes`.
+ *   separate overflow pool capped at `maxOverflowBytes` (default
+ *   `maxBytes / 4` — kept small because overflow only needs to bridge
+ *   the immediate `/arrow-result` fetch). Overflow entries behave like
+ *   regular ones except (a) they do not count against the regular cap
+ *   and (b) they expire on a much shorter TTL (`overflowTtlMs`,
+ *   default 30s) — they exist to absorb already-decoded bytes for a
+ *   single request, not to hold them long-term. Only when both pools
+ *   are full does `put()` return `null` and the caller has to fall
+ *   back to a different delivery path. Memory is bounded above by
+ *   `maxBytes + maxOverflowBytes`.
  *
  * Caveat (multi-replica deployments): this stash is process-local. A
  * subsequent `GET /arrow-result/inline-*` that lands on a different
@@ -41,8 +43,17 @@ import { randomUUID } from "node:crypto";
  * shared external store, neither of which is in scope here.
  */
 interface InlineArrowStashOptions {
-  /** Entries older than this are dropped on the next gc tick. */
+  /** Regular-pool entries older than this are dropped on the next gc tick. */
   ttlMs?: number;
+  /**
+   * Overflow-pool entries older than this are dropped on the next gc
+   * tick. Defaults to 30s — overflow exists solely to bridge the
+   * immediate `/arrow-result` fetch that follows the SSE `arrow`
+   * message, so it should drain on the order of seconds, not minutes.
+   * A short TTL bounds the cross-user memory pressure that overflow
+   * can sustain in a multi-tenant deployment.
+   */
+  overflowTtlMs?: number;
   /**
    * Hard cap on total bytes held in the regular pool. `put()` spills to
    * the overflow pool when this cap would be exceeded; entries already
@@ -53,10 +64,18 @@ interface InlineArrowStashOptions {
    * Hard cap on total bytes held in the overflow pool. Overflow holds
    * bytes that have already been decoded for an in-flight request — its
    * purpose is to avoid throwing those bytes away and double-billing
-   * the warehouse. Defaults to `maxBytes`. `put()` returns `null` only
-   * when both regular and overflow pools are at cap.
+   * the warehouse. Defaults to `maxBytes / 4` (kept small because the
+   * pool only needs to absorb transient spillover, not hold long-term
+   * state). `put()` returns `null` only when both regular and overflow
+   * pools are at cap.
    */
   maxOverflowBytes?: number;
+  /**
+   * Minimum interval between gc passes. `gc()` is O(N) in entry count,
+   * so on hot paths we skip when the previous pass was recent enough.
+   * Defaults to 5s. Set to 0 to disable throttling (test seam).
+   */
+  gcMinIntervalMs?: number;
   /** Test seam: override the synthetic-id generator. */
   idGenerator?: () => string;
   /** Test seam: override the clock. */
@@ -76,16 +95,22 @@ export class InlineArrowStash {
   private entries = new Map<string, StashEntry>();
   private totalBytes = 0;
   private overflowBytes = 0;
+  private lastGcAt = 0;
   private readonly ttlMs: number;
+  private readonly overflowTtlMs: number;
   private readonly maxBytes: number;
   private readonly maxOverflowBytes: number;
+  private readonly gcMinIntervalMs: number;
   private readonly idGenerator: () => string;
   private readonly now: () => number;
 
   constructor(opts: InlineArrowStashOptions = {}) {
     this.ttlMs = opts.ttlMs ?? 10 * 60 * 1000;
+    this.overflowTtlMs = opts.overflowTtlMs ?? 30 * 1000;
     this.maxBytes = opts.maxBytes ?? 256 * 1024 * 1024;
-    this.maxOverflowBytes = opts.maxOverflowBytes ?? this.maxBytes;
+    this.maxOverflowBytes =
+      opts.maxOverflowBytes ?? Math.floor(this.maxBytes / 4);
+    this.gcMinIntervalMs = opts.gcMinIntervalMs ?? 5000;
     this.idGenerator = opts.idGenerator ?? randomUUID;
     this.now = opts.now ?? Date.now;
   }
@@ -106,14 +131,17 @@ export class InlineArrowStash {
    * single-use on the next `/arrow-result` fetch — is strictly safer
    * than re-execution.
    *
-   * Single payloads that exceed `maxBytes + maxOverflowBytes` outright
-   * throw so the caller sees the misconfiguration loudly.
+   * A single payload can only land in one pool — the pools are not
+   * split across — so the largest payload we can accept is
+   * `Math.max(maxBytes, maxOverflowBytes)`. Exceeding that throws
+   * synchronously so the caller sees the misconfiguration loudly
+   * rather than burning a warehouse round-trip and then getting `null`.
    */
   put(userId: string, bytes: Uint8Array): string | null {
-    const totalCap = this.maxBytes + this.maxOverflowBytes;
-    if (bytes.length > totalCap) {
+    const largestSlot = Math.max(this.maxBytes, this.maxOverflowBytes);
+    if (bytes.length > largestSlot) {
       throw new Error(
-        `Inline Arrow payload (${bytes.length} bytes) exceeds stash capacity (${totalCap})`,
+        `Inline Arrow payload (${bytes.length} bytes) exceeds largest stash slot (${largestSlot}); cannot fit in either pool`,
       );
     }
     this.gc();
@@ -127,17 +155,18 @@ export class InlineArrowStash {
     }
     const id = `inline-${this.idGenerator()}`;
     const now = this.now();
+    const overflow = !fitsRegular;
     this.entries.set(id, {
       userId,
       bytes,
-      expiresAt: now + this.ttlMs,
+      expiresAt: now + (overflow ? this.overflowTtlMs : this.ttlMs),
       insertedAt: now,
-      overflow: !fitsRegular,
+      overflow,
     });
-    if (fitsRegular) {
-      this.totalBytes += bytes.length;
-    } else {
+    if (overflow) {
       this.overflowBytes += bytes.length;
+    } else {
+      this.totalBytes += bytes.length;
     }
     return id;
   }
@@ -181,6 +210,14 @@ export class InlineArrowStash {
 
   private gc(): void {
     const now = this.now();
+    if (now - this.lastGcAt < this.gcMinIntervalMs) {
+      // Skip the O(N) sweep — recent enough to assume nothing
+      // significant has expired since the last pass. Worst case an
+      // entry lingers an extra `gcMinIntervalMs` past its TTL, which
+      // is negligible relative to either pool's intended lifetime.
+      return;
+    }
+    this.lastGcAt = now;
     for (const [id, entry] of this.entries) {
       if (entry.expiresAt <= now) {
         this.entries.delete(id);
