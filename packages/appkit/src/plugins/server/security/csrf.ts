@@ -39,7 +39,14 @@ function buildTrustedOrigins(config?: CsrfConfig): Set<string> {
   }
 
   for (const o of config?.allowedOrigins ?? []) {
-    origins.add(o.toLowerCase().replace(/\/$/, ""));
+    try {
+      origins.add(new URL(o).origin.toLowerCase());
+    } catch {
+      logger.warn(
+        "CSRF allowedOrigins entry is not a valid URL: %s — skipping",
+        o,
+      );
+    }
   }
 
   for (const o of parseEnvOrigins(process.env.APPKIT_CSRF_ALLOWED_ORIGINS)) {

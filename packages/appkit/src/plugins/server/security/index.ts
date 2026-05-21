@@ -34,14 +34,14 @@ function getDefaultHelmetOptions(isDev: boolean) {
   return {
     contentSecurityPolicy: {
       directives: {
-        defaultSrc: ["https:", "wss:"],
-        scriptSrc: ["https:"],
-        styleSrc: ["'self'", "https:", "'unsafe-inline'"],
-        imgSrc: ["https:", "data:"],
-        fontSrc: ["https:", "data:"],
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "https:", "data:"],
+        fontSrc: ["'self'", "https:", "data:"],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
-        connectSrc: ["https:", "wss:"],
+        connectSrc: ["'self'", "https:", "wss:"],
         frameAncestors: ["'none'"],
       },
     },
