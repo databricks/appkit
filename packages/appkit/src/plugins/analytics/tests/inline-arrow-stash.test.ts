@@ -5,19 +5,20 @@ function bytes(n: number): Uint8Array {
   return new Uint8Array(n);
 }
 
-// `put()` returns `string | null` — it rejects with null when the stash is
-// full. Every test below that exercises a successful put narrows via this
-// helper so the non-null contract is explicit at the call site.
+// `put()` returns `{ id, pool } | null` — it rejects with null when the stash
+// is full. Most tests only care about the id; this helper narrows via the
+// non-null contract and returns just the id. Tests that need the pool tag
+// call `stash.put(...)` directly.
 function mustPut(
   stash: InlineArrowStash,
   userId: string,
   b: Uint8Array,
 ): string {
-  const id = stash.put(userId, b);
-  if (id === null) {
+  const result = stash.put(userId, b);
+  if (result === null) {
     throw new Error("test setup: stash unexpectedly rejected put");
   }
-  return id;
+  return result.id;
 }
 
 describe("InlineArrowStash", () => {
@@ -117,6 +118,17 @@ describe("InlineArrowStash", () => {
     expect(c).toBeNull();
     expect(stash.take(a, "user-1")).toBeDefined();
     expect(stash.take(b, "user-1")).toBeDefined();
+  });
+
+  test("put tags the result with its pool so callers can label telemetry without re-introspecting", () => {
+    const stash = new InlineArrowStash({
+      maxBytes: 100,
+      maxOverflowBytes: 100,
+    });
+    expect(stash.put("u", bytes(80))).toMatchObject({ pool: "regular" });
+    // Regular has 80/100 used; another 80 would push it to 160 > 100 so it
+    // spills.
+    expect(stash.put("u", bytes(80))).toMatchObject({ pool: "overflow" });
   });
 
   test("put throws when a single payload would not fit in the largest pool (caller misconfiguration)", () => {

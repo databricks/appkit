@@ -34,22 +34,30 @@ export const AnalyticsResultMessage = z.object({
   // results that pushes hundreds of ms to seconds of TBT into the
   // render pipeline. The server constructs `data` via the typed
   // `makeResultMessage` builder, so the per-row shape is enforced at
-  // the source, not at validation time.
+  // the source, not at validation time. The TS-level interface below
+  // narrows `data` to `Record<string, unknown>[]` for callers.
   data: z.array(z.unknown()).optional(),
   // Status is opaque metadata forwarded from the warehouse — keep it as
   // `unknown` so we don't bake the SDK's detailed shape into the contract.
   status: z.unknown().optional(),
   statement_id: z.string().optional(),
 });
-// The TS-level shape narrows `data` to `Record<string, unknown>[]` to
-// match the typed `makeResultMessage` builder — the Zod schema is
-// intentionally looser at runtime for performance (see comment above).
-export type AnalyticsResultMessage = Omit<
-  z.infer<typeof AnalyticsResultMessage>,
-  "data"
-> & {
+
+/**
+ * TS-level shape of a successful row-shaped result message.
+ *
+ * **Kept in sync by hand** with `AnalyticsResultMessage` above. The Zod
+ * schema is intentionally loose (`z.array(z.unknown())`) to keep client
+ * validation cheap; this interface narrows `data` to
+ * `Record<string, unknown>[]` so consumers don't have to cast at every
+ * call site. If you add a field to the Zod schema, add it here too.
+ */
+export interface AnalyticsResultMessage {
+  type: "result";
   data?: Record<string, unknown>[];
-};
+  status?: unknown;
+  statement_id?: string;
+}
 
 /**
  * ARROW_STREAM result delivered via /arrow-result/:jobId. The id is either:

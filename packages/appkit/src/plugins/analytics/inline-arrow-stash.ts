@@ -135,9 +135,17 @@ export class InlineArrowStash {
    * split across — so the largest payload we can accept is
    * `Math.max(maxBytes, maxOverflowBytes)`. Exceeding that throws
    * synchronously so the caller sees the misconfiguration loudly
-   * rather than burning a warehouse round-trip and then getting `null`.
+   * rather than burning a warehouse round-trip and then getting a
+   * null id.
+   *
+   * Returns `{ id, pool }` on success (`pool` ∈ {"regular", "overflow"})
+   * or `null` when both pools are at cap. The pool tag lets callers
+   * emit accurate telemetry labels without re-introspecting the stash.
    */
-  put(userId: string, bytes: Uint8Array): string | null {
+  put(
+    userId: string,
+    bytes: Uint8Array,
+  ): { id: string; pool: "regular" | "overflow" } | null {
     const largestSlot = Math.max(this.maxBytes, this.maxOverflowBytes);
     if (bytes.length > largestSlot) {
       throw new Error(
@@ -168,7 +176,7 @@ export class InlineArrowStash {
     } else {
       this.totalBytes += bytes.length;
     }
-    return id;
+    return { id, pool: overflow ? "overflow" : "regular" };
   }
 
   /**

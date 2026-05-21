@@ -26,6 +26,7 @@ import { ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
+import type { Counter, Histogram } from "../../telemetry";
 import { queryDefaults } from "./defaults";
 import { InlineArrowStash } from "./inline-arrow-stash";
 import manifest from "./manifest.json";
@@ -61,6 +62,22 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    * a real binary content-type.
    */
   protected inlineArrowStash: InlineArrowStash = new InlineArrowStash();
+
+  /**
+   * Stash telemetry — created lazily on first stash operation because
+   * `this.telemetry` may not be bound at constructor time (see
+   * `Plugin.attachContext`). Cached via `_stashMetrics` after the first
+   * call; subsequent puts hit the cached counter/histogram instances.
+   *
+   * Counter labels: `result` ∈ {"regular", "overflow", "exhausted"} —
+   * one counter with a label is friendlier to dashboards than three
+   * separate metrics, and aggregates trivially in Prometheus / OTel.
+   */
+  private _stashMetrics?: {
+    putCount: Counter;
+    putBytes: Histogram;
+  };
+  private _stashMetricsAttempted = false;
 
   constructor(config: IAnalyticsConfig) {
     super(config);
@@ -178,6 +195,51 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         plugin: this.name,
       });
     }
+  }
+
+  /**
+   * Lazy accessor for stash telemetry instruments. Returns `undefined`
+   * when telemetry isn't bound (factory-constructed plugins before
+   * `attachContext`, no-op test paths) — callers should branch on the
+   * return value rather than relying on it being present.
+   *
+   * Records once per call site:
+   * - `analytics.inline_arrow_stash.put.count{result}` — counter with
+   *   label "regular" | "overflow" | "exhausted"
+   * - `analytics.inline_arrow_stash.put.bytes` — histogram of accepted
+   *   payload sizes (label same as counter; exhausted puts record 0)
+   */
+  private _getStashMetrics() {
+    if (this._stashMetricsAttempted) return this._stashMetrics;
+    this._stashMetricsAttempted = true;
+    if (!this.telemetry) return undefined;
+    const meter = this.telemetry.getMeter();
+    this._stashMetrics = {
+      putCount: meter.createCounter("analytics.inline_arrow_stash.put.count", {
+        description:
+          "Count of inline-Arrow stash put attempts, labeled by pool outcome (regular | overflow | exhausted).",
+        unit: "1",
+      }),
+      putBytes: meter.createHistogram(
+        "analytics.inline_arrow_stash.put.bytes",
+        {
+          description:
+            "Sizes of accepted inline-Arrow stash payloads. Aggregate by `result` label for utilization analysis.",
+          unit: "By",
+        },
+      ),
+    };
+    return this._stashMetrics;
+  }
+
+  private _recordStashOutcome(
+    result: "regular" | "overflow" | "exhausted",
+    bytes: number,
+  ): void {
+    const m = this._getStashMetrics();
+    if (!m) return;
+    m.putCount.add(1, { result });
+    m.putBytes.record(result === "exhausted" ? 0 : bytes, { result });
   }
 
   /**
@@ -352,49 +414,108 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     stashUserKey: string,
     signal?: AbortSignal,
   ): Promise<AnalyticsSseMessage> {
-    if (requestedFormat === "JSON_ARRAY") {
-      try {
-        const result = await executor.query(
+    return requestedFormat === "JSON_ARRAY"
+      ? this._executeJsonArrayPath(executor, query, processedParams, signal)
+      : this._executeArrowStreamPath(
+          executor,
           query,
           processedParams,
-          { disposition: "INLINE", format: "JSON_ARRAY" },
+          stashUserKey,
           signal,
         );
-        return makeResultMessage(result?.data, {
-          status: result?.status,
-          statement_id: result?.statement_id,
-        });
-      } catch (err: unknown) {
-        if (signal?.aborted) throw err;
-        if (_classifyInlineRejection(err) !== "needs-arrow") throw err;
+  }
 
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.warn(
-          "JSON_ARRAY INLINE rejected by warehouse, retrying as ARROW_STREAM INLINE and decoding server-side: %s",
-          msg,
-        );
-      }
-
-      // Retry as ARROW_STREAM + INLINE so the warehouse will accept the
-      // request, then decode the Arrow IPC attachment to plain row
-      // objects so the caller still gets JSON_ARRAY-shaped data.
-      const arrowResult = await executor.query(
+  /**
+   * JSON_ARRAY path. Tries `INLINE + JSON_ARRAY` first; on a structured
+   * `needs-arrow` rejection (warehouse only accepts ARROW_STREAM under
+   * INLINE), retries as `INLINE + ARROW_STREAM` and decodes the Arrow
+   * IPC attachment server-side so the caller's JSON_ARRAY contract is
+   * preserved.
+   *
+   * Failure modes surfaced to the caller:
+   * - Unrelated warehouse errors (anything not classified as
+   *   `needs-arrow`) propagate untouched.
+   * - The retry can throw `ExecutionError.missingData("ARROW_STREAM
+   *   attachment")` if the warehouse returned no attachment.
+   * - The decode itself can throw `RESULT_TOO_LARGE_FOR_JSON_FALLBACK`
+   *   when the attachment exceeds the row or byte cap.
+   */
+  private async _executeJsonArrayPath(
+    executor: AnalyticsPlugin,
+    query: string,
+    processedParams:
+      | Record<string, SQLTypeMarker | null | undefined>
+      | undefined,
+    signal?: AbortSignal,
+  ): Promise<AnalyticsSseMessage> {
+    try {
+      const result = await executor.query(
         query,
         processedParams,
-        { disposition: "INLINE", format: "ARROW_STREAM" },
+        { disposition: "INLINE", format: "JSON_ARRAY" },
         signal,
       );
-      if (!arrowResult?.attachment) {
-        throw ExecutionError.missingData("ARROW_STREAM attachment");
-      }
-      const rows = decodeArrowAttachmentToRows(arrowResult.attachment);
-      return makeResultMessage(rows, {
-        status: arrowResult.status,
-        statement_id: arrowResult.statement_id,
+      return makeResultMessage(result?.data, {
+        status: result?.status,
+        statement_id: result?.statement_id,
       });
+    } catch (err: unknown) {
+      if (signal?.aborted) throw err;
+      if (_classifyInlineRejection(err) !== "needs-arrow") throw err;
+
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(
+        "JSON_ARRAY INLINE rejected by warehouse, retrying as ARROW_STREAM INLINE and decoding server-side: %s",
+        msg,
+      );
     }
 
-    // ARROW_STREAM: try INLINE first, fall back to EXTERNAL_LINKS.
+    // Retry as ARROW_STREAM + INLINE so the warehouse will accept the
+    // request, then decode the Arrow IPC attachment to plain row
+    // objects so the caller still gets JSON_ARRAY-shaped data.
+    const arrowResult = await executor.query(
+      query,
+      processedParams,
+      { disposition: "INLINE", format: "ARROW_STREAM" },
+      signal,
+    );
+    if (!arrowResult?.attachment) {
+      throw ExecutionError.missingData("ARROW_STREAM attachment");
+    }
+    const rows = decodeArrowAttachmentToRows(arrowResult.attachment);
+    return makeResultMessage(rows, {
+      status: arrowResult.status,
+      statement_id: arrowResult.statement_id,
+    });
+  }
+
+  /**
+   * ARROW_STREAM path. Tries `INLINE + ARROW_STREAM` first; on a
+   * structured `needs-json` rejection (warehouse refuses ARROW_STREAM
+   * under INLINE), falls back to `EXTERNAL_LINKS + ARROW_STREAM`. When
+   * INLINE succeeds with an Arrow attachment, the decoded bytes go
+   * through `inlineArrowStash` and the client fetches them via
+   * `/arrow-result/inline-<uuid>` — never the SSE channel.
+   *
+   * Failure modes surfaced to the caller:
+   * - Unrelated warehouse errors (not classified as `needs-json`)
+   *   propagate untouched.
+   * - `ExecutionError.canceled()` if the client disconnects between
+   *   the INLINE response and the stash put.
+   * - `ExecutionError.stashExhausted()` if both stash pools are full —
+   *   we never silently re-run on EXTERNAL_LINKS because that would
+   *   double-bill the warehouse and risk a divergent result for
+   *   non-deterministic SQL.
+   */
+  private async _executeArrowStreamPath(
+    executor: AnalyticsPlugin,
+    query: string,
+    processedParams:
+      | Record<string, SQLTypeMarker | null | undefined>
+      | undefined,
+    stashUserKey: string,
+    signal?: AbortSignal,
+  ): Promise<AnalyticsSseMessage> {
     try {
       const result = await executor.query(
         query,
@@ -402,57 +523,21 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         { disposition: "INLINE", format: "ARROW_STREAM" },
         signal,
       );
-      // INLINE responses with an Arrow IPC attachment go through the
-      // stash-and-serve path: decode the base64 once, hold the bytes
-      // server-side, emit a synthetic statement id. The client fetches via
-      // /arrow-result so multi-MiB Arrow blobs never traverse SSE.
       if (result?.attachment) {
-        // If the client has already disconnected, the SSE write would be
-        // dropped anyway — skip the decode + stash so the bytes do not
-        // linger in memory until TTL eviction.
-        if (signal?.aborted) {
-          throw ExecutionError.canceled();
-        }
-        const decoded = Buffer.from(result.attachment, "base64");
-        const inlineId = this.inlineArrowStash.put(
-          stashUserKey,
-          new Uint8Array(
-            decoded.buffer,
-            decoded.byteOffset,
-            decoded.byteLength,
-          ),
-        );
-        if (inlineId === null) {
-          // Both regular and overflow pools are at cap. Throw with a
-          // clear signal rather than re-running the same statement on
-          // EXTERNAL_LINKS: the bytes we already decoded are gone, the
-          // warehouse has been billed, and a second execution could
-          // return a divergent result for non-deterministic SQL
-          // (CURRENT_TIMESTAMP, RAND, late-arriving rows). The right
-          // recovery is upstream backpressure or capacity tuning, not
-          // silently double-billing.
-          logger.warn(
-            "Inline Arrow stash exhausted (regular + overflow); rejecting",
-          );
-          throw ExecutionError.stashExhausted();
-        }
-        return makeArrowMessage(inlineId, { status: result.status });
-      } else {
-        return makeResultMessage(result?.data, {
-          status: result?.status,
-          statement_id: result?.statement_id,
-        });
+        return this._stashAndEmitInline(result, stashUserKey, signal);
       }
+      // INLINE succeeded but the warehouse didn't return an Arrow
+      // attachment — degrade to a plain result message with whatever
+      // data the warehouse did return.
+      return makeResultMessage(result?.data, {
+        status: result?.status,
+        statement_id: result?.statement_id,
+      });
     } catch (err: unknown) {
       // If the request was aborted, do not retry — the signal is dead and
       // a second statement would be billed but never read.
-      if (signal?.aborted) {
-        throw err;
-      }
-
-      if (_classifyInlineRejection(err) !== "needs-json") {
-        throw err;
-      }
+      if (signal?.aborted) throw err;
+      if (_classifyInlineRejection(err) !== "needs-json") throw err;
 
       const msg = err instanceof Error ? err.message : String(err);
       logger.warn(
@@ -468,6 +553,46 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       signal,
     );
     return makeArrowMessage(result.statement_id, { status: result.status });
+  }
+
+  /**
+   * Decode an INLINE Arrow attachment, push it onto the stash, and
+   * return the `arrow` SSE message that references the synthetic id.
+   * Pulled out of `_executeArrowStreamPath` so the cap / overflow /
+   * exhaustion logic lives in one place.
+   */
+  private _stashAndEmitInline(
+    result: { attachment: string; status?: unknown },
+    stashUserKey: string,
+    signal?: AbortSignal,
+  ): AnalyticsSseMessage {
+    // If the client has already disconnected, the SSE write would be
+    // dropped anyway — skip the decode + stash so the bytes do not
+    // linger in memory until TTL eviction.
+    if (signal?.aborted) {
+      throw ExecutionError.canceled();
+    }
+    const decoded = Buffer.from(result.attachment, "base64");
+    const stashBytes = new Uint8Array(
+      decoded.buffer,
+      decoded.byteOffset,
+      decoded.byteLength,
+    );
+    const putResult = this.inlineArrowStash.put(stashUserKey, stashBytes);
+    if (putResult === null) {
+      // Both regular and overflow pools are at cap. Throw with a clear
+      // signal rather than re-running the same statement on
+      // EXTERNAL_LINKS: the bytes we already decoded are gone, the
+      // warehouse has been billed, and a second execution could return
+      // a divergent result for non-deterministic SQL.
+      this._recordStashOutcome("exhausted", stashBytes.byteLength);
+      logger.warn(
+        "Inline Arrow stash exhausted (regular + overflow); rejecting",
+      );
+      throw ExecutionError.stashExhausted();
+    }
+    this._recordStashOutcome(putResult.pool, stashBytes.byteLength);
+    return makeArrowMessage(putResult.id, { status: result.status });
   }
 
   /**

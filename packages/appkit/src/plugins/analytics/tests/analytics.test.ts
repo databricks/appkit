@@ -113,7 +113,7 @@ describe("Analytics Plugin", () => {
       plugin.injectRoutes(router);
 
       const arrowBytes = new Uint8Array([0xff, 0xfe, 0xfd, 0xfc]);
-      const id = (plugin as any).inlineArrowStash.put("global", arrowBytes);
+      const { id } = (plugin as any).inlineArrowStash.put("global", arrowBytes);
       expect(id.startsWith("inline-")).toBe(true);
 
       const handler = getHandler("GET", "/arrow-result/:jobId");
@@ -175,7 +175,7 @@ describe("Analytics Plugin", () => {
       // (no x-forwarded-user header) — keys differ, take must return
       // nothing, and the entry stays put (single-user view).
       const bytes = new Uint8Array([1, 2, 3]);
-      const id = (plugin as any).inlineArrowStash.put("user-a", bytes);
+      const { id } = (plugin as any).inlineArrowStash.put("user-a", bytes);
 
       const handler = getHandler("GET", "/arrow-result/:jobId");
       const mockReq = createMockRequest({ params: { jobId: id } });
