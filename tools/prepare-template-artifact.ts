@@ -51,20 +51,14 @@ const STAGING_DIR = join(ROOT, outputDir);
 function getTarballName(
   dir: string,
   packageName: string,
-  required?: true,
-): string;
-function getTarballName(
-  dir: string,
-  packageName: string,
-  required: false,
-): string | undefined;
-function getTarballName(dir: string, packageName: string, required = true) {
+  required = true,
+): string {
   const prefix = `databricks-${packageName}-`;
   const matches = readdirSync(dir).filter(
     (entry) => entry.startsWith(prefix) && entry.endsWith(".tgz"),
   );
   if (!required && matches.length === 0) {
-    return undefined;
+    return "";
   }
   if (matches.length !== 1) {
     console.error(
@@ -95,7 +89,7 @@ const APPKIT_TARBALL = getTarballName(appkitDir, "appkit");
 const APPKIT_UI_TARBALL = getTarballName(appkitUiDir, "appkit-ui");
 const LAKEBASE_TARBALL = existsSync(lakebaseDir)
   ? getTarballName(lakebaseDir, "lakebase", false)
-  : undefined;
+  : "";
 
 const appkitSrc = join(appkitDir, APPKIT_TARBALL);
 const appkitUiSrc = join(appkitUiDir, APPKIT_UI_TARBALL);
@@ -104,9 +98,7 @@ copyFileSync(appkitSrc, join(STAGING_DIR, APPKIT_TARBALL));
 copyFileSync(appkitUiSrc, join(STAGING_DIR, APPKIT_UI_TARBALL));
 console.log(`✓ Copied ${APPKIT_TARBALL} and ${APPKIT_UI_TARBALL}`);
 
-const lakebaseSrc = LAKEBASE_TARBALL
-  ? join(lakebaseDir, LAKEBASE_TARBALL)
-  : undefined;
+const lakebaseSrc = LAKEBASE_TARBALL ? join(lakebaseDir, LAKEBASE_TARBALL) : "";
 if (LAKEBASE_TARBALL && lakebaseSrc && existsSync(lakebaseSrc)) {
   copyFileSync(lakebaseSrc, join(STAGING_DIR, LAKEBASE_TARBALL));
   console.log(`✓ Copied ${LAKEBASE_TARBALL}`);
