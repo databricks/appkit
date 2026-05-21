@@ -53,16 +53,24 @@ function getTarballName(
   packageName: string,
   required = true,
 ): string {
-  const prefix = `databricks-${packageName}-`;
-  const matches = readdirSync(dir).filter(
-    (entry) => entry.startsWith(prefix) && entry.endsWith(".tgz"),
+  const pattern = new RegExp(
+    `^databricks-${packageName}-\\d+\\.\\d+\\.\\d+(?:-pr\\.[0-9a-f]+)?\\.tgz$`,
+    "i",
   );
+  if (!existsSync(dir)) {
+    if (!required) {
+      return "";
+    }
+    console.error(`Expected tarball directory to exist: ${dir}`);
+    process.exit(1);
+  }
+  const matches = readdirSync(dir).filter((entry) => pattern.test(entry));
   if (!required && matches.length === 0) {
     return "";
   }
   if (matches.length !== 1) {
     console.error(
-      `Expected exactly one ${prefix}*.tgz tarball in ${dir}, found ${matches.length}`,
+      `Expected exactly one ${pattern.source} tarball in ${dir}, found ${matches.length}`,
     );
     process.exit(1);
   }
@@ -87,9 +95,7 @@ const lakebaseDir = tarballDir
 
 const APPKIT_TARBALL = getTarballName(appkitDir, "appkit");
 const APPKIT_UI_TARBALL = getTarballName(appkitUiDir, "appkit-ui");
-const LAKEBASE_TARBALL = existsSync(lakebaseDir)
-  ? getTarballName(lakebaseDir, "lakebase", false)
-  : "";
+const LAKEBASE_TARBALL = getTarballName(lakebaseDir, "lakebase", false);
 
 const appkitSrc = join(appkitDir, APPKIT_TARBALL);
 const appkitUiSrc = join(appkitUiDir, APPKIT_UI_TARBALL);
