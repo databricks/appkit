@@ -303,6 +303,154 @@ describe("ExecutionError", () => {
     expect(error.message).toBe("No chunks or schema found in response");
     expect(error.context?.dataType).toBe("chunks or schema");
   });
+
+  describe("statementFailed clientMessage passthrough", () => {
+    test("BAD_REQUEST passes through the warehouse-authored message — user's own SQL error", () => {
+      // DBR sets errorDisplayMessage from the SQL parser / semantic
+      // analyzer; "Table not found" is the user's own SQL artifact
+      // and the entire point of an error message is to show it back.
+      const error = ExecutionError.statementFailed(
+        "Table or view 'users' not found",
+        "BAD_REQUEST",
+      );
+      expect(error.clientMessage).toBe(
+        "Statement failed: Table or view 'users' not found",
+      );
+      expect(error.errorCode).toBe("BAD_REQUEST");
+    });
+
+    test("NOT_FOUND passes through (catalog miss is user-authored)", () => {
+      const error = ExecutionError.statementFailed(
+        "Schema 'analytics' not found",
+        "NOT_FOUND",
+      );
+      expect(error.clientMessage).toBe(
+        "Statement failed: Schema 'analytics' not found",
+      );
+    });
+
+    test("ALREADY_EXISTS passes through (catalog conflict is user-authored)", () => {
+      const error = ExecutionError.statementFailed(
+        "Table 'foo' already exists",
+        "ALREADY_EXISTS",
+      );
+      expect(error.clientMessage).toBe(
+        "Statement failed: Table 'foo' already exists",
+      );
+    });
+
+    test("DEADLINE_EXCEEDED passes through (timeout text is user-actionable)", () => {
+      const error = ExecutionError.statementFailed(
+        "Query timed out after 30s",
+        "DEADLINE_EXCEEDED",
+      );
+      expect(error.clientMessage).toBe(
+        "Statement failed: Query timed out after 30s",
+      );
+    });
+
+    test("CANCELLED passes through (cancellation is initiated by user/admin)", () => {
+      const error = ExecutionError.statementFailed(
+        "Statement was canceled",
+        "CANCELLED",
+      );
+      expect(error.clientMessage).toBe(
+        "Statement failed: Statement was canceled",
+      );
+    });
+
+    test("UNAUTHENTICATED passes through (SDK auth messages are generic)", () => {
+      const error = ExecutionError.statementFailed(
+        "Permission denied",
+        "UNAUTHENTICATED",
+      );
+      expect(error.clientMessage).toBe("Statement failed: Permission denied");
+    });
+
+    test("INTERNAL_ERROR collapses to generic — control-plane text may carry stack traces, correlation IDs, internal paths (CWE-209)", () => {
+      const error = ExecutionError.statementFailed(
+        "RPC to warehouse-prod-us-east-1.svc failed: corrId=abc-123, stack: at scheduler.process()",
+        "INTERNAL_ERROR",
+      );
+      // .message keeps the raw text for server logs.
+      expect(error.message).toContain("corrId=abc-123");
+      // .clientMessage collapses to the generic default.
+      expect(error.clientMessage).toBe("Query execution failed");
+    });
+
+    test("IO_ERROR collapses to generic (may leak storage paths / bucket names)", () => {
+      const error = ExecutionError.statementFailed(
+        "Failed to read s3://internal-staging-bucket-3/path/to/shard",
+        "IO_ERROR",
+      );
+      expect(error.clientMessage).toBe("Query execution failed");
+      expect(error.message).toContain("internal-staging-bucket-3");
+    });
+
+    test("UNKNOWN collapses to generic (unclassified by definition)", () => {
+      const error = ExecutionError.statementFailed(
+        "Something went wrong: scheduler-pod-3 returned 500",
+        "UNKNOWN",
+      );
+      expect(error.clientMessage).toBe("Query execution failed");
+    });
+
+    test("RESOURCE_EXHAUSTED collapses to generic (mixed: may leak load data)", () => {
+      const error = ExecutionError.statementFailed(
+        "Cluster at 92% capacity, scheduler-pod-3",
+        "RESOURCE_EXHAUSTED",
+      );
+      expect(error.clientMessage).toBe("Query execution failed");
+    });
+
+    test("absent errorCode falls back to generic (default-deny on unknown source)", () => {
+      const error = ExecutionError.statementFailed("Some upstream text");
+      expect(error.clientMessage).toBe("Query execution failed");
+    });
+
+    test("unrecognized errorCode (post-SDK-update) defaults to generic", () => {
+      // When the SDK adds a new code we haven't reviewed yet, we must
+      // NOT passthrough by default — security relies on the allowlist
+      // being explicit.
+      const error = ExecutionError.statementFailed(
+        "scheduler internal: stack overflow at sun.misc.Unsafe.park()",
+        "SOME_NEW_CODE_NOT_IN_ALLOWLIST",
+      );
+      expect(error.clientMessage).toBe("Query execution failed");
+    });
+
+    test("explicit clientMessage argument wins over the allowlist (caller knows best)", () => {
+      // Even on an allowlisted code, an explicit clientMessage takes
+      // precedence — for cases where the caller has constructed a
+      // better-tuned message in-process.
+      const error = ExecutionError.statementFailed(
+        "Table or view 'users' not found",
+        "BAD_REQUEST",
+        "We could not find the requested table.",
+      );
+      expect(error.clientMessage).toBe(
+        "We could not find the requested table.",
+      );
+    });
+
+    test("server-side .message always preserves the raw upstream text for log debugging", () => {
+      // Regardless of passthrough decision, the raw text stays on
+      // `.message` for `logger.error(err)` calls to capture full detail.
+      const safe = ExecutionError.statementFailed(
+        "Table 'users' not found",
+        "BAD_REQUEST",
+      );
+      expect(safe.message).toBe("Statement failed: Table 'users' not found");
+
+      const unsafe = ExecutionError.statementFailed(
+        "Internal RPC failed: corrId=abc",
+        "INTERNAL_ERROR",
+      );
+      expect(unsafe.message).toBe(
+        "Statement failed: Internal RPC failed: corrId=abc",
+      );
+    });
+  });
 });
 
 describe("InitializationError", () => {

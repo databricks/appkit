@@ -1,4 +1,5 @@
 import { AppKitError } from "./base";
+import { isSqlErrorPassthrough } from "./dbsql-error-allowlist";
 
 /**
  * Error thrown when an operation execution fails.
@@ -50,16 +51,22 @@ export class ExecutionError extends AppKitError {
   /**
    * Create an execution error for statement failure.
    * @param errorMessage Human-readable error from the warehouse / SDK.
-   *   Goes into `.message` for server logs only — *never* echoed to the
-   *   client. Pass `clientMessage` explicitly if a sanitized text should
-   *   reach the UI.
-   * @param errorCode Structured code (e.g. "INVALID_PARAMETER_VALUE") to
-   *   preserve through wrapping. Optional. Forwarded on SSE error
-   *   payloads so UI can branch on it instead of substring-matching
-   *   `error`.
-   * @param clientMessage Optional client-safe replacement for `.message`.
-   *   Defaults to "Query execution failed" via the `clientMessage`
-   *   getter. Set this only when the upstream text is known-safe.
+   *   When `errorCode` is on the DBSQL safe-passthrough allowlist (see
+   *   `dbsql-error-allowlist.ts`), this text is forwarded to clients
+   *   verbatim — it's authored by DBR for the user's own SQL and is
+   *   inherently user-facing. For codes NOT on the allowlist (control
+   *   plane errors carrying correlation IDs, internal paths, stack
+   *   traces), `.message` goes into server logs only and the client
+   *   sees a generic "Query execution failed". An explicit
+   *   `clientMessage` argument always wins over both paths.
+   * @param errorCode Structured code (e.g. "BAD_REQUEST",
+   *   "INVALID_PARAMETER_VALUE") to preserve through wrapping. Optional.
+   *   Forwarded on SSE error payloads so UI can branch on it instead of
+   *   substring-matching `error`. Also drives the passthrough decision.
+   * @param clientMessage Explicit client-safe message that always wins —
+   *   bypasses the allowlist check. Use when the upstream text is
+   *   known-safe regardless of code (e.g. constructed in-process from a
+   *   trusted template).
    */
   static statementFailed(
     errorMessage?: string,
@@ -69,7 +76,20 @@ export class ExecutionError extends AppKitError {
     const message = errorMessage
       ? `Statement failed: ${errorMessage}`
       : "Statement failed: Unknown error";
-    return new ExecutionError(message, { errorCode, clientMessage });
+
+    // Allowlist-driven passthrough: BAD_REQUEST / NOT_FOUND /
+    // ALREADY_EXISTS / etc. carry DBR-authored messages that *are* the
+    // user's own SQL error ("Table 'foo' not found", "Syntax error
+    // near ',' on line 3"). Hiding these forces users to debug in the
+    // dark; surfacing them is the entire reason an error message
+    // exists. Any code not on the allowlist defaults to generic.
+    const inferredClient =
+      clientMessage ?? (isSqlErrorPassthrough(errorCode) ? message : undefined);
+
+    return new ExecutionError(message, {
+      errorCode,
+      clientMessage: inferredClient,
+    });
   }
 
   /**
