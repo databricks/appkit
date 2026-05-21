@@ -9,6 +9,7 @@ import { sql } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ServiceContext } from "../../../context/service-context";
 import { AnalyticsPlugin, analytics } from "../analytics";
+import { InlineArrowStash } from "../inline-arrow-stash";
 import type { IAnalyticsConfig } from "../types";
 
 // Mock CacheManager singleton with actual caching behavior
@@ -1026,11 +1027,14 @@ describe("Analytics Plugin", () => {
       expect(Array.from(stashed)).toEqual(Array.from(arrowBytes));
     });
 
-    test("/query/:query_key falls back to EXTERNAL_LINKS when the inline stash is full", async () => {
-      // When the stash refuses a new entry (put returns null), the route
-      // must not strand the client with a useless inline- id. It retries
-      // the same statement with EXTERNAL_LINKS so the warehouse hands
-      // back a real, fetchable statement id and the client gets bytes.
+    test("/query/:query_key spills the already-decoded bytes into the stash overflow pool when the regular pool is full — single execution, no double-billing", async () => {
+      // The regular stash put may refuse new entries when at cap. We must
+      // NOT respond by re-executing the same statement with EXTERNAL_LINKS:
+      // the warehouse has already been billed, the bytes are already
+      // decoded server-side, and a second execution can return a divergent
+      // result for non-deterministic SQL (CURRENT_TIMESTAMP, RAND, late
+      // rows). The stash's overflow pool absorbs the bytes so the client
+      // still gets an inline- id pointing at the original result.
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
 
@@ -1042,22 +1046,74 @@ describe("Analytics Plugin", () => {
       const fakeAttachment = Buffer.from(new Uint8Array([1, 2, 3])).toString(
         "base64",
       );
-      const executeMock = vi
-        .fn()
-        // First call: INLINE succeeds and produces an attachment.
-        .mockResolvedValueOnce({
-          result: { attachment: fakeAttachment, row_count: 1 },
-        })
-        // Second call: EXTERNAL_LINKS — returns a real warehouse id.
-        .mockResolvedValueOnce({
-          result: {
-            statement_id: "stmt-warehouse-real",
-            status: { state: "SUCCEEDED" },
-          },
-        });
+      const executeMock = vi.fn().mockResolvedValueOnce({
+        result: { attachment: fakeAttachment, row_count: 1 },
+      });
       (plugin as any).SQLClient.executeStatement = executeMock;
 
-      // Force the stash to reject the put — simulates capacity exhaustion.
+      // Force the regular pool to be at cap so the put spills into overflow.
+      // We construct a tiny stash and pre-fill the regular pool.
+      const tinyStash = new InlineArrowStash({
+        maxBytes: 4,
+        maxOverflowBytes: 64,
+      });
+      tinyStash.put("filler", new Uint8Array([9, 9, 9, 9]));
+      (plugin as any).inlineArrowStash = tinyStash;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {}, format: "ARROW_STREAM" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      // Single execution: no EXTERNAL_LINKS retry.
+      expect(executeMock).toHaveBeenCalledTimes(1);
+      expect(executeMock.mock.calls[0][1]).toMatchObject({
+        disposition: "INLINE",
+        format: "ARROW_STREAM",
+      });
+
+      // SSE payload carries an inline- id pointing at the overflow entry.
+      const writeCalls = (mockRes.write as any).mock.calls.map(
+        (c: any[]) => c[0] as string,
+      );
+      const payload = writeCalls.find((s: string) => s.startsWith("data: "));
+      expect(payload).toBeDefined();
+      expect(payload).toContain('"type":"arrow"');
+      expect(payload).toMatch(/"statement_id":"inline-[^"]+"/);
+
+      // Bytes landed in the overflow pool, regular pool size unchanged.
+      expect(tinyStash.overflowSize()).toBe(3);
+      expect(tinyStash.size()).toBe(4);
+    });
+
+    test("/query/:query_key surfaces a stable error when both regular and overflow pools are exhausted — never silently double-bills", async () => {
+      // When even the overflow pool cannot fit the payload, the route
+      // surfaces INLINE_ARROW_STASH_EXHAUSTED instead of re-running the
+      // statement on EXTERNAL_LINKS. The previous behavior (silent retry)
+      // double-billed the warehouse and could return divergent results.
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+
+      const fakeAttachment = Buffer.from(new Uint8Array([1, 2, 3])).toString(
+        "base64",
+      );
+      const executeMock = vi.fn().mockResolvedValueOnce({
+        result: { attachment: fakeAttachment, row_count: 1 },
+      });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      // Force both put paths to refuse: spy returns null unconditionally.
       vi.spyOn((plugin as any).inlineArrowStash, "put").mockReturnValue(null);
 
       plugin.injectRoutes(router);
@@ -1071,25 +1127,22 @@ describe("Analytics Plugin", () => {
 
       await handler(mockReq, mockRes);
 
-      expect(executeMock).toHaveBeenCalledTimes(2);
-      expect(executeMock.mock.calls[0][1]).toMatchObject({
-        disposition: "INLINE",
-        format: "ARROW_STREAM",
-      });
-      expect(executeMock.mock.calls[1][1]).toMatchObject({
-        disposition: "EXTERNAL_LINKS",
-        format: "ARROW_STREAM",
-      });
+      // Single execution: never re-runs on EXTERNAL_LINKS.
+      expect(executeMock).toHaveBeenCalledTimes(1);
 
-      // SSE payload carries the real warehouse statement id, not an inline- id.
+      // SSE error payload carries the stable errorCode for UI branching.
+      // The writer emits separate lines (`id:`, `event: error`, `data: ...`)
+      // — join them so we can match across the framing.
       const writeCalls = (mockRes.write as any).mock.calls.map(
         (c: any[]) => c[0] as string,
       );
-      const payload = writeCalls.find((s: string) => s.startsWith("data: "));
-      expect(payload).toBeDefined();
-      expect(payload).toContain('"type":"arrow"');
-      expect(payload).toContain('"statement_id":"stmt-warehouse-real"');
-      expect(payload).not.toMatch(/"statement_id":"inline-/);
+      const errorFrame = writeCalls
+        .filter((s: string) => s.startsWith("data: "))
+        .join("\n");
+      expect(errorFrame).toContain("INLINE_ARROW_STASH_EXHAUSTED");
+      // Client-safe message reaches the wire; raw upstream text does not.
+      expect(errorFrame).toContain("Server is at capacity");
+      expect(errorFrame).not.toContain("Inline Arrow stash exhausted");
     });
 
     test("/query/:query_key falls back JSON_ARRAY to ARROW_STREAM INLINE when warehouse refuses JSON_ARRAY for INLINE", async () => {

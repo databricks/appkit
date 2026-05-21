@@ -165,6 +165,53 @@ describe("useAnalyticsQuery", () => {
     expect(mockFetchArrow).not.toHaveBeenCalled();
   });
 
+  test("a malformed (non-JSON) SSE payload clears loading and surfaces an error — does not strand the hook in loading=true", async () => {
+    // A `JSON.parse` failure inside the SSE handler used to be swallowed
+    // by the outer catch with only a console.warn, leaving the hook
+    // permanently in `loading=true` with no error surfaced. The UI would
+    // spin forever. The handler now reports a user-facing error so the
+    // consumer can render a retry affordance.
+    const { result } = renderHook(() =>
+      useAnalyticsQuery("q", null, { format: "JSON_ARRAY" }),
+    );
+
+    await lastConnectArgs.onMessage({ data: "not-json{" });
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+    expect(result.current.error).toBe("Unable to load data, please try again");
+    expect(result.current.data).toBeNull();
+  });
+
+  test("a server error event carrying a structured errorCode surfaces it through the error path", async () => {
+    // The SSE error broadcaster forwards an `errorCode` field for
+    // UI branching (e.g. INLINE_ARROW_STASH_EXHAUSTED). The hook reports
+    // the human `error` text; downstream code can read `errorCode` from
+    // the parsed payload if needed via console.error.
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { result } = renderHook(() =>
+      useAnalyticsQuery("q", null, { format: "ARROW_STREAM" }),
+    );
+
+    await lastConnectArgs.onMessage({
+      data: JSON.stringify({
+        type: "error",
+        error: "Server is at capacity, please retry",
+        code: "UPSTREAM_ERROR",
+        errorCode: "INLINE_ARROW_STASH_EXHAUSTED",
+      }),
+    });
+
+    await waitFor(() => {
+      expect(result.current.error).toBe("Server is at capacity, please retry");
+    });
+    expect(result.current.loading).toBe(false);
+
+    errorSpy.mockRestore();
+  });
+
   test("does not refetch when params object is structurally equal across renders", () => {
     const { rerender } = renderHook(
       ({ limit }: { limit: number }) =>

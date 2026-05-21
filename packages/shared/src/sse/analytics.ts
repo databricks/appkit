@@ -27,13 +27,29 @@ import { z } from "zod";
 /** Successful row-shaped result (JSON_ARRAY format, or empty results). */
 export const AnalyticsResultMessage = z.object({
   type: z.literal("result"),
-  data: z.array(z.record(z.string(), z.unknown())).optional(),
+  // `data` is intentionally `z.array(z.unknown())` rather than a deep
+  // row schema. Validating every row's keys for shape costs O(rows × cols)
+  // CPU and main-thread blocking time on the *client* (the schema is
+  // also reused for `safeParse` in `useAnalyticsQuery`); for large JSON
+  // results that pushes hundreds of ms to seconds of TBT into the
+  // render pipeline. The server constructs `data` via the typed
+  // `makeResultMessage` builder, so the per-row shape is enforced at
+  // the source, not at validation time.
+  data: z.array(z.unknown()).optional(),
   // Status is opaque metadata forwarded from the warehouse — keep it as
   // `unknown` so we don't bake the SDK's detailed shape into the contract.
   status: z.unknown().optional(),
   statement_id: z.string().optional(),
 });
-export type AnalyticsResultMessage = z.infer<typeof AnalyticsResultMessage>;
+// The TS-level shape narrows `data` to `Record<string, unknown>[]` to
+// match the typed `makeResultMessage` builder — the Zod schema is
+// intentionally looser at runtime for performance (see comment above).
+export type AnalyticsResultMessage = Omit<
+  z.infer<typeof AnalyticsResultMessage>,
+  "data"
+> & {
+  data?: Record<string, unknown>[];
+};
 
 /**
  * ARROW_STREAM result delivered via /arrow-result/:jobId. The id is either:

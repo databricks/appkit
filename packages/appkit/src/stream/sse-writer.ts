@@ -39,12 +39,14 @@ export class SSEWriter {
     eventId: string,
     error: string,
     code: SSEErrorCode = SSEErrorCode.INTERNAL_ERROR,
+    errorCode?: string,
   ): void {
     if (res.writableEnded) return;
 
     const errorData: SSEError = {
       error,
       code,
+      ...(errorCode ? { errorCode } : {}),
     };
 
     res.write(`id: ${eventId}\n`);

@@ -258,7 +258,14 @@ export function useAnalyticsQuery<
             return;
           }
         } catch (error) {
+          // A `JSON.parse` failure (or any other thrown error inside the
+          // SSE message handler) used to leave the hook permanently in
+          // `loading=true` with no error surfaced — the UI would just
+          // spin forever. Clear loading and report a user-facing error
+          // so the consumer can render a retry affordance.
           console.warn("[useAnalyticsQuery] Malformed message received", error);
+          setLoading(false);
+          setError("Unable to load data, please try again");
         }
       },
       onError: (error) => {

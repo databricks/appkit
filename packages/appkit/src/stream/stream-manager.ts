@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { context } from "@opentelemetry/api";
 import type { IAppResponse, StreamConfig } from "shared";
+import { AppKitError } from "../errors/base";
+import { ExecutionError } from "../errors/execution";
 import { createLogger } from "../logging/logger";
 import { EventRingBuffer } from "./buffers";
 import { streamDefaults } from "./defaults";
@@ -285,8 +287,21 @@ export class StreamManager {
         // cleanup if no clients are connected
         this._cleanupStream(streamEntry);
       } catch (error) {
-        const errorMsg =
+        // Two distinct messages: a *raw* one for server-side logs (full
+        // detail, statement fragments, correlation IDs) and a *client*
+        // one for the SSE payload (sanitized, stable, safe to render in
+        // a UI). Mixing them leaks upstream wording to anyone connected
+        // to the stream — see CWE-209.
+        const rawMsg =
           error instanceof Error ? error.message : "Internal server error";
+        const clientMsg =
+          error instanceof AppKitError
+            ? error.clientMessage
+            : "Internal server error";
+        // Upstream structured code (e.g. INLINE_ARROW_STASH_EXHAUSTED,
+        // NOT_IMPLEMENTED). UI should branch on this, not on `error`.
+        const upstreamCode =
+          error instanceof ExecutionError ? error.errorCode : undefined;
         const errorEventId = randomUUID();
         const errorCode = this._categorizeError(error);
 
@@ -295,17 +310,24 @@ export class StreamManager {
           logger.info("Stream aborted by client (code=%s)", errorCode);
         } else {
           logger.error(
-            "Stream execution failed: %s (code=%s)",
-            errorMsg,
+            "Stream execution failed: %s (code=%s upstreamCode=%s)",
+            rawMsg,
             errorCode,
+            upstreamCode ?? "n/a",
           );
         }
+
+        const payload: Record<string, unknown> = {
+          error: clientMsg,
+          code: errorCode,
+        };
+        if (upstreamCode) payload.errorCode = upstreamCode;
 
         // buffer error event
         streamEntry.eventBuffer.add({
           id: errorEventId,
           type: "error",
-          data: JSON.stringify({ error: errorMsg, code: errorCode }),
+          data: JSON.stringify(payload),
           timestamp: Date.now(),
         });
 
@@ -313,9 +335,10 @@ export class StreamManager {
         this._broadcastErrorToClients(
           streamEntry,
           errorEventId,
-          errorMsg,
+          clientMsg,
           errorCode,
           true,
+          upstreamCode,
         );
         streamEntry.isCompleted = true;
       }
@@ -370,10 +393,17 @@ export class StreamManager {
     errorMessage: string,
     errorCode: SSEErrorCode,
     closeClients: boolean = false,
+    upstreamCode?: string,
   ): void {
     for (const client of streamEntry.clients) {
       if (!client.writableEnded) {
-        this.sseWriter.writeError(client, eventId, errorMessage, errorCode);
+        this.sseWriter.writeError(
+          client,
+          eventId,
+          errorMessage,
+          errorCode,
+          upstreamCode,
+        );
         if (closeClients) {
           client.end();
         }

@@ -69,30 +69,57 @@ describe("InlineArrowStash", () => {
     expect(stash.take(id2, "user-1")).toBeUndefined();
   });
 
-  test("put returns null when adding the payload would exceed maxBytes, leaving existing entries intact", () => {
+  test("put spills into the overflow pool when the regular pool is at cap — every issued id remains valid", () => {
     let seq = 0;
     const stash = new InlineArrowStash({
       maxBytes: 200,
+      maxOverflowBytes: 200,
       idGenerator: () => String(seq++),
     });
     const a = mustPut(stash, "user-1", bytes(80));
     const b = mustPut(stash, "user-1", bytes(80));
     expect(stash.size()).toBe(160);
+    expect(stash.overflowSize()).toBe(0);
 
-    // This third 80-byte entry would push total to 240 (>200). It must
-    // be rejected, and both prior entries must survive — every id we have
-    // already handed out stays valid until drained or expired.
-    const c = stash.put("user-1", bytes(80));
-    expect(c).toBeNull();
+    // The third 80-byte entry would push the regular pool to 240 (>200),
+    // so it spills into overflow. Both prior entries must survive.
+    const c = mustPut(stash, "user-1", bytes(80));
     expect(stash.size()).toBe(160);
+    expect(stash.overflowSize()).toBe(80);
+    expect(stash.take(a, "user-1")).toBeDefined();
+    expect(stash.take(b, "user-1")).toBeDefined();
+    expect(stash.take(c, "user-1")).toBeDefined();
+    // After draining the overflow entry, the counter reflects it.
+    expect(stash.overflowSize()).toBe(0);
+  });
+
+  test("put returns null only when both regular and overflow pools are full", () => {
+    let seq = 0;
+    const stash = new InlineArrowStash({
+      maxBytes: 100,
+      maxOverflowBytes: 100,
+      idGenerator: () => String(seq++),
+    });
+    const a = mustPut(stash, "user-1", bytes(100)); // fills regular
+    const b = mustPut(stash, "user-1", bytes(100)); // fills overflow
+    expect(stash.size()).toBe(100);
+    expect(stash.overflowSize()).toBe(100);
+
+    // Both pools at cap — refuse rather than evict.
+    const c = stash.put("user-1", bytes(50));
+    expect(c).toBeNull();
     expect(stash.take(a, "user-1")).toBeDefined();
     expect(stash.take(b, "user-1")).toBeDefined();
   });
 
-  test("put throws for a single payload larger than maxBytes (caller misconfiguration)", () => {
-    const stash = new InlineArrowStash({ maxBytes: 100 });
-    expect(() => stash.put("user-1", bytes(200))).toThrow(
-      /exceeds stash maxBytes/,
+  test("put throws when a single payload would not fit even with overflow (caller misconfiguration)", () => {
+    const stash = new InlineArrowStash({
+      maxBytes: 100,
+      maxOverflowBytes: 100,
+    });
+    // 300 > maxBytes + maxOverflowBytes (200), so this can never fit.
+    expect(() => stash.put("user-1", bytes(300))).toThrow(
+      /exceeds stash capacity/,
     );
   });
 

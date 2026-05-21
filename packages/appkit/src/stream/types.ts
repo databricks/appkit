@@ -25,6 +25,12 @@ export type SSEErrorCode = (typeof SSEErrorCode)[keyof typeof SSEErrorCode];
 export interface SSEError {
   error: string;
   code: SSEErrorCode;
+  /**
+   * Upstream-domain structured code (e.g. `INLINE_ARROW_STASH_EXHAUSTED`,
+   * `NOT_IMPLEMENTED`). UI code should branch on this instead of parsing
+   * the human-readable `error` string.
+   */
+  errorCode?: string;
 }
 
 export interface BufferedEvent {

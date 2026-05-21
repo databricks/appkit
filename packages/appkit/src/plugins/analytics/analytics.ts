@@ -167,8 +167,14 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       res.send(Buffer.from(result.data));
     } catch (error) {
       logger.error("Arrow job error: %O", error);
+      // Do not echo upstream / SDK error text to the client — it can
+      // include statement fragments, internal object names, and
+      // correlation IDs. The full detail stays in the server log above.
+      const errorCode =
+        error instanceof ExecutionError ? error.errorCode : undefined;
       res.status(404).json({
-        error: error instanceof Error ? error.message : "Arrow job not found",
+        error: "Arrow result unavailable",
+        errorCode,
         plugin: this.name,
       });
     }
@@ -326,8 +332,10 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    *   server-side, and returns plain row objects — the caller's
    *   `JSON_ARRAY` contract is preserved.
    * - **ARROW_STREAM** first tries `INLINE + ARROW_STREAM`. If the
-   *   warehouse refuses (most classic + some serverless variants), or the
-   *   inline stash is full, falls back to `EXTERNAL_LINKS + ARROW_STREAM`.
+   *   warehouse refuses (most classic + some serverless variants), falls
+   *   back to `EXTERNAL_LINKS + ARROW_STREAM`. When the regular stash is
+   *   full, the already-decoded bytes spill into the stash's overflow
+   *   pool — never thrown away to trigger a second warehouse round-trip.
    *
    * INLINE Arrow attachments under the ARROW_STREAM path are decoded once
    * and put on the plugin's `inlineArrowStash`; the SSE message carries the
@@ -415,16 +423,20 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
           ),
         );
         if (inlineId === null) {
-          // Stash is full — every id we have already handed out must
-          // stay valid, so the stash refuses new entries rather than
-          // evicting in-flight ones. Fall back to EXTERNAL_LINKS for
-          // this request so the client still gets its result.
+          // Both regular and overflow pools are at cap. Throw with a
+          // clear signal rather than re-running the same statement on
+          // EXTERNAL_LINKS: the bytes we already decoded are gone, the
+          // warehouse has been billed, and a second execution could
+          // return a divergent result for non-deterministic SQL
+          // (CURRENT_TIMESTAMP, RAND, late-arriving rows). The right
+          // recovery is upstream backpressure or capacity tuning, not
+          // silently double-billing.
           logger.warn(
-            "Inline Arrow stash full, falling back to EXTERNAL_LINKS for the current query",
+            "Inline Arrow stash exhausted (regular + overflow); rejecting",
           );
-        } else {
-          return makeArrowMessage(inlineId, { status: result.status });
+          throw ExecutionError.stashExhausted();
         }
+        return makeArrowMessage(inlineId, { status: result.status });
       } else {
         return makeResultMessage(result?.data, {
           status: result?.status,
@@ -575,6 +587,15 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
 }
 
 /**
+ * Hard cap on rows produced by the server-side JSON_ARRAY fallback. The
+ * fallback materializes every row into a plain JS object on the Node
+ * main thread (O(rows × cols) allocations), so a runaway result would
+ * block the event loop for hundreds of ms and pressure GC. Past this
+ * cap, surface a clear error instead of silently degrading throughput.
+ */
+const JSON_ARRAY_FALLBACK_MAX_ROWS = 100_000;
+
+/**
  * Decode a base64 Arrow IPC attachment to plain row objects.
  *
  * Used by the JSON_ARRAY fallback path when a warehouse refuses
@@ -582,11 +603,19 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
  * `ARROW_STREAM + INLINE` — the bytes come back as Arrow IPC but the
  * caller's contract is JSON-shaped rows, so we convert server-side.
  *
- * Scalar values are stringified to match what the warehouse itself emits
- * for INT/BIGINT/etc. columns under the JSON_ARRAY format (everything in
- * `result.data_array` is a string on the wire) — so callers see the same
- * row shape regardless of which path the bytes took. BigInts get the same
- * stringification treatment (also necessary for JSON-serializability).
+ * Shape rules (chosen to match what the warehouse emits natively under
+ * JSON_ARRAY, so callers cannot tell which path served their query):
+ * - **Scalars (number / bigint / boolean)**: stringified. JSON_ARRAY
+ *   wire format emits everything in `result.data_array` as strings;
+ *   bigint stringification is also necessary for JSON-serializability.
+ * - **Strings**: passthrough.
+ * - **Nested (List / Struct / Map)**: JSON-stringified. The warehouse
+ *   emits nested values as JSON-encoded strings under JSON_ARRAY;
+ *   apache-arrow's `Vector.get()` returns a typed wrapper whose
+ *   `toJSON()` yields plain JS values, so `JSON.stringify` produces
+ *   the same string shape the warehouse would have produced natively.
+ *   This eliminates the previous correctness gap where callers saw an
+ *   Arrow vector wrapper instead of a JSON string.
  */
 function decodeArrowAttachmentToRows(
   attachment: string,
@@ -595,6 +624,13 @@ function decodeArrowAttachmentToRows(
   const table = tableFromIPC(
     new Uint8Array(decoded.buffer, decoded.byteOffset, decoded.byteLength),
   );
+  if (table.numRows > JSON_ARRAY_FALLBACK_MAX_ROWS) {
+    throw ExecutionError.statementFailed(
+      `Result has ${table.numRows} rows; JSON_ARRAY fallback materializer caps at ${JSON_ARRAY_FALLBACK_MAX_ROWS}. Re-issue the query with format="ARROW_STREAM" to stream the full result.`,
+      "RESULT_TOO_LARGE_FOR_JSON_FALLBACK",
+      `Result too large for JSON format (over ${JSON_ARRAY_FALLBACK_MAX_ROWS} rows). Re-run with ARROW_STREAM format.`,
+    );
+  }
   const colNames = table.schema.fields.map((f) => f.name);
   const rows: Record<string, unknown>[] = [];
   for (let i = 0; i < table.numRows; i++) {
@@ -613,11 +649,10 @@ function decodeArrowAttachmentToRows(
       } else if (typeof v === "string") {
         row[name] = v;
       } else {
-        // Nested types (List, Struct, Map) — leave as-is. The JSON_ARRAY
-        // wire format renders these as JSON strings server-side, but that
-        // serialization isn't exposed to us here. Round-tripping through
-        // JSON.stringify would mismatch, so pass the typed value through.
-        row[name] = v;
+        // Nested types (List, Struct, Map). Native JSON_ARRAY emits
+        // these as JSON-encoded strings; apache-arrow's typed values
+        // expose `toJSON()` so `JSON.stringify` yields the same shape.
+        row[name] = JSON.stringify(v);
       }
     }
     rows.push(row);

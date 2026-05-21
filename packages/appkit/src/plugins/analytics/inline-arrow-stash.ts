@@ -22,12 +22,16 @@ import { randomUUID } from "node:crypto";
  * - **Per-user keyed**: `take()` only returns bytes if the requesting
  *   user matches the user that originally put them. Defense in depth on
  *   top of unguessable ids.
- * - **Memory bounded with rejection**: total stashed bytes are capped.
- *   When `put()` cannot fit a payload without exceeding the cap it
- *   returns `null` rather than evicting older entries — every issued id
- *   stays valid until it is drained, expires, or the process exits.
- *   Callers are expected to fall back to a different delivery path (e.g.
- *   EXTERNAL_LINKS) when `put()` rejects.
+ * - **Memory bounded with overflow slot**: total stashed bytes are capped
+ *   at `maxBytes`. When `put()` cannot fit a payload, it spills into a
+ *   separate overflow pool capped at `maxOverflowBytes` (default same as
+ *   `maxBytes`). Overflow entries behave identically to regular ones
+ *   except they do not count against the regular cap — they are bytes
+ *   the caller has *already paid to decode for this single request*, so
+ *   throwing them away would force a second warehouse round-trip. Only
+ *   when both pools are full does `put()` return `null` and the caller
+ *   has to fall back to a different delivery path. Memory is bounded
+ *   above by `maxBytes + maxOverflowBytes`.
  *
  * Caveat (multi-replica deployments): this stash is process-local. A
  * subsequent `GET /arrow-result/inline-*` that lands on a different
@@ -40,11 +44,19 @@ interface InlineArrowStashOptions {
   /** Entries older than this are dropped on the next gc tick. */
   ttlMs?: number;
   /**
-   * Hard cap on total bytes held. `put()` rejects (returns `null`) once
-   * the cap would be exceeded; entries already in the stash are not
-   * evicted to fit new ones.
+   * Hard cap on total bytes held in the regular pool. `put()` spills to
+   * the overflow pool when this cap would be exceeded; entries already
+   * in the stash are not evicted to fit new ones.
    */
   maxBytes?: number;
+  /**
+   * Hard cap on total bytes held in the overflow pool. Overflow holds
+   * bytes that have already been decoded for an in-flight request — its
+   * purpose is to avoid throwing those bytes away and double-billing
+   * the warehouse. Defaults to `maxBytes`. `put()` returns `null` only
+   * when both regular and overflow pools are at cap.
+   */
+  maxOverflowBytes?: number;
   /** Test seam: override the synthetic-id generator. */
   idGenerator?: () => string;
   /** Test seam: override the clock. */
@@ -56,43 +68,61 @@ interface StashEntry {
   bytes: Uint8Array;
   expiresAt: number;
   insertedAt: number;
+  /** True for entries in the overflow pool (do not count against maxBytes). */
+  overflow: boolean;
 }
 
 export class InlineArrowStash {
   private entries = new Map<string, StashEntry>();
   private totalBytes = 0;
+  private overflowBytes = 0;
   private readonly ttlMs: number;
   private readonly maxBytes: number;
+  private readonly maxOverflowBytes: number;
   private readonly idGenerator: () => string;
   private readonly now: () => number;
 
   constructor(opts: InlineArrowStashOptions = {}) {
     this.ttlMs = opts.ttlMs ?? 10 * 60 * 1000;
     this.maxBytes = opts.maxBytes ?? 256 * 1024 * 1024;
+    this.maxOverflowBytes = opts.maxOverflowBytes ?? this.maxBytes;
     this.idGenerator = opts.idGenerator ?? randomUUID;
     this.now = opts.now ?? Date.now;
   }
 
   /**
-   * Stash a payload and return its synthetic job id, or `null` when the
-   * stash cannot accept it without evicting older entries. The caller is
-   * expected to fall back to an out-of-band delivery path (e.g.
-   * EXTERNAL_LINKS) when the return value is `null`.
+   * Stash a payload and return its synthetic job id.
    *
-   * Single payloads that exceed `maxBytes` outright throw so the caller
-   * sees the misconfiguration loudly instead of degrading silently every
-   * time.
+   * Tries the regular pool first; if it would overflow, spills into the
+   * overflow pool (sized at `maxOverflowBytes`). Returns `null` only when
+   * both pools are at cap — the caller then has no choice but to fall
+   * back to a different delivery path (e.g. EXTERNAL_LINKS).
+   *
+   * The overflow pool exists because the caller has *already decoded*
+   * these bytes for an in-flight request: throwing them away would force
+   * a second warehouse round-trip (extra latency, double billing, and
+   * potentially divergent results for non-deterministic SQL). Holding
+   * them transiently in a bounded overflow region — they are drained
+   * single-use on the next `/arrow-result` fetch — is strictly safer
+   * than re-execution.
+   *
+   * Single payloads that exceed `maxBytes + maxOverflowBytes` outright
+   * throw so the caller sees the misconfiguration loudly.
    */
   put(userId: string, bytes: Uint8Array): string | null {
-    if (bytes.length > this.maxBytes) {
+    const totalCap = this.maxBytes + this.maxOverflowBytes;
+    if (bytes.length > totalCap) {
       throw new Error(
-        `Inline Arrow payload (${bytes.length} bytes) exceeds stash maxBytes (${this.maxBytes})`,
+        `Inline Arrow payload (${bytes.length} bytes) exceeds stash capacity (${totalCap})`,
       );
     }
     this.gc();
-    if (this.totalBytes + bytes.length > this.maxBytes) {
-      // Refuse rather than evicting: every id we have already issued must
-      // remain valid until naturally drained or expired.
+    const fitsRegular = this.totalBytes + bytes.length <= this.maxBytes;
+    const fitsOverflow =
+      !fitsRegular &&
+      this.overflowBytes + bytes.length <= this.maxOverflowBytes;
+    if (!fitsRegular && !fitsOverflow) {
+      // Both pools are full — refuse rather than evicting any issued id.
       return null;
     }
     const id = `inline-${this.idGenerator()}`;
@@ -102,8 +132,13 @@ export class InlineArrowStash {
       bytes,
       expiresAt: now + this.ttlMs,
       insertedAt: now,
+      overflow: !fitsRegular,
     });
-    this.totalBytes += bytes.length;
+    if (fitsRegular) {
+      this.totalBytes += bytes.length;
+    } else {
+      this.overflowBytes += bytes.length;
+    }
     return id;
   }
 
@@ -117,13 +152,21 @@ export class InlineArrowStash {
     if (!entry) return undefined;
     if (entry.userId !== userId) return undefined;
     this.entries.delete(id);
-    this.totalBytes -= entry.bytes.length;
+    if (entry.overflow) {
+      this.overflowBytes -= entry.bytes.length;
+    } else {
+      this.totalBytes -= entry.bytes.length;
+    }
     return entry.bytes;
   }
 
   /** Inspection helpers (primarily for tests). */
   size(): number {
     return this.totalBytes;
+  }
+  /** Bytes currently held in the overflow pool. */
+  overflowSize(): number {
+    return this.overflowBytes;
   }
   count(): number {
     return this.entries.size;
@@ -133,6 +176,7 @@ export class InlineArrowStash {
   clear(): void {
     this.entries.clear();
     this.totalBytes = 0;
+    this.overflowBytes = 0;
   }
 
   private gc(): void {
@@ -140,7 +184,11 @@ export class InlineArrowStash {
     for (const [id, entry] of this.entries) {
       if (entry.expiresAt <= now) {
         this.entries.delete(id);
-        this.totalBytes -= entry.bytes.length;
+        if (entry.overflow) {
+          this.overflowBytes -= entry.bytes.length;
+        } else {
+          this.totalBytes -= entry.bytes.length;
+        }
       }
     }
   }
