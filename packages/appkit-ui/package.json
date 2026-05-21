@@ -52,6 +52,7 @@
     "clean": "rm -rf dist tmp",
     "dist": "tsx ../../tools/dist-appkit.ts",
     "tarball": "rm -rf tmp && pnpm dist && npm pack ./tmp --pack-destination ./tmp",
+    "tarball:prerelease": "rm -rf tmp && SHORTSHA=$(git rev-parse --short HEAD) && pnpm dist --prerelease $SHORTSHA && npm pack ./tmp --pack-destination ./tmp",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
