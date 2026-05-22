@@ -263,7 +263,7 @@ export class CacheManager {
           const existing = this.inFlightRequests.get(cacheKey) as
             | InFlightEntry<T>
             | undefined;
-          if (existing) {
+          if (existing && !existing.sharedController.signal.aborted) {
             existing.refCount++;
             span.setAttribute("cache.hit", true);
             span.setAttribute("cache.deduplication", true);
@@ -282,7 +282,6 @@ export class CacheManager {
               cache_deduplication: true,
             });
 
-            span.end();
             return await this._waitWithRefCount(existing, callerSignal);
           }
 
@@ -332,7 +331,9 @@ export class CacheManager {
               );
             })
             .finally(() => {
-              this.inFlightRequests.delete(cacheKey);
+              if (this.inFlightRequests.get(cacheKey) === entry) {
+                this.inFlightRequests.delete(cacheKey);
+              }
             });
 
           // Suppress unhandled rejection warnings when every caller bailed

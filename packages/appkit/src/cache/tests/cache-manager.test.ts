@@ -424,7 +424,11 @@ describe("CacheManager", () => {
         callerSignal: controller2.signal,
       });
 
-      // Abort caller 1
+      // Wait for fn to be invoked and both callers to join the entry
+      await vi.waitFor(() => expect(fn).toHaveBeenCalledTimes(1));
+      await new Promise((r) => setTimeout(r, 0));
+
+      // Abort caller 1 — caller 2 still holds a ref
       controller1.abort();
       await expect(p1).rejects.toThrow();
 
@@ -562,6 +566,119 @@ describe("CacheManager", () => {
       await expect(p1).resolves.toBe("first-caller-result");
 
       expect(fn).toHaveBeenCalledTimes(1);
+    });
+
+    test("fn rejects while multiple callers wait — all receive the error", async () => {
+      const cache = await CacheManager.getInstance({
+        storage: createMockStorage(),
+      });
+
+      let rejectFn!: (error: Error) => void;
+      const fn = vi.fn().mockImplementation(
+        () =>
+          new Promise<string>((_resolve, reject) => {
+            rejectFn = reject;
+          }),
+      );
+
+      const controller1 = new AbortController();
+      const controller2 = new AbortController();
+
+      const p1 = cache.getOrExecute(["key"], fn, "user1", {
+        ttl: 60,
+        callerSignal: controller1.signal,
+      });
+      const p2 = cache.getOrExecute(["key"], fn, "user1", {
+        ttl: 60,
+        callerSignal: controller2.signal,
+      });
+
+      // Wait for fn to be invoked inside the telemetry span
+      await vi.waitFor(() => expect(rejectFn).toBeDefined());
+
+      const networkError = new Error("network failure");
+      rejectFn(networkError);
+
+      await expect(p1).rejects.toThrow("network failure");
+      await expect(p2).rejects.toThrow("network failure");
+      expect(fn).toHaveBeenCalledTimes(1);
+    });
+
+    test("caller aborts after promise already resolved — gets the resolved value", async () => {
+      const cache = await CacheManager.getInstance({
+        storage: createMockStorage(),
+      });
+
+      let resolveFn!: (value: string) => void;
+      const fn = vi.fn().mockImplementation(
+        () =>
+          new Promise<string>((resolve) => {
+            resolveFn = resolve;
+          }),
+      );
+
+      const controller = new AbortController();
+
+      const p = cache.getOrExecute(["key"], fn, "user1", {
+        ttl: 60,
+        callerSignal: controller.signal,
+      });
+
+      // Wait for fn to be invoked inside the telemetry span
+      await vi.waitFor(() => expect(resolveFn).toBeDefined());
+
+      // Resolve first, then abort
+      resolveFn("already-resolved");
+      // Allow microtask to settle the promise
+      await new Promise((r) => setTimeout(r, 0));
+      controller.abort();
+
+      await expect(p).resolves.toBe("already-resolved");
+    });
+
+    test("new caller after previous entry fully aborted gets fresh execution", async () => {
+      const cache = await CacheManager.getInstance({
+        storage: createMockStorage(),
+      });
+
+      let callCount = 0;
+      const capturedSignals: AbortSignal[] = [];
+      const fn = vi.fn().mockImplementation(
+        (signal: AbortSignal) =>
+          new Promise<string>((resolve, reject) => {
+            callCount++;
+            capturedSignals.push(signal);
+            const currentCall = callCount;
+            signal.addEventListener("abort", () =>
+              reject(new DOMException("aborted", "AbortError")),
+            );
+            // Auto-resolve after a tick if not aborted (for the second call)
+            setTimeout(() => {
+              if (!signal.aborted) resolve(`result-${currentCall}`);
+            }, 10);
+          }),
+      );
+
+      const controller1 = new AbortController();
+      const p1 = cache.getOrExecute(["key"], fn, "user1", {
+        ttl: 60,
+        callerSignal: controller1.signal,
+      });
+
+      // Abort the only caller — shared controller should also abort
+      controller1.abort();
+      await expect(p1).rejects.toThrow();
+
+      // Allow the entry.promise .finally() to clean up
+      await new Promise((r) => setTimeout(r, 0));
+
+      // New caller arrives — should get a fresh execution, not the aborted one
+      const p2 = cache.getOrExecute(["key"], fn, "user1", { ttl: 60 });
+      await expect(p2).resolves.toBe("result-2");
+
+      expect(fn).toHaveBeenCalledTimes(2);
+      expect(capturedSignals[0].aborted).toBe(true);
+      expect(capturedSignals[1].aborted).toBe(false);
     });
   });
 
