@@ -378,6 +378,191 @@ describe("CacheManager", () => {
       expect(r2).toBe("result-2");
       expect(fn).toHaveBeenCalledTimes(2);
     });
+
+    test("should work when fn ignores signal parameter (non-signal caller regression)", async () => {
+      const cache = await CacheManager.getInstance({
+        storage: createMockStorage(),
+      });
+      // Simulates direct callers like telemetry-example-plugin that pass
+      // a plain async function without accepting the shared signal.
+      const fn = vi.fn().mockResolvedValue("no-signal-result");
+
+      const result = await cache.getOrExecute(["key"], fn, "user1", {
+        ttl: 60,
+      });
+
+      expect(result).toBe("no-signal-result");
+      expect(fn).toHaveBeenCalledTimes(1);
+      // The cache passes the shared AbortSignal even if the fn ignores it
+      expect(fn).toHaveBeenCalledWith(expect.any(AbortSignal));
+    });
+  });
+
+  describe("abort / ref-counting", () => {
+    test("one caller aborts while another still waits — waiting caller resolves normally", async () => {
+      const cache = await CacheManager.getInstance({
+        storage: createMockStorage(),
+      });
+
+      let resolveFn!: (value: string) => void;
+      const fn = vi.fn().mockImplementation(
+        () =>
+          new Promise<string>((resolve) => {
+            resolveFn = resolve;
+          }),
+      );
+
+      const controller1 = new AbortController();
+      const controller2 = new AbortController();
+
+      const p1 = cache.getOrExecute(["key"], fn, "user1", {
+        ttl: 60,
+        callerSignal: controller1.signal,
+      });
+      const p2 = cache.getOrExecute(["key"], fn, "user1", {
+        ttl: 60,
+        callerSignal: controller2.signal,
+      });
+
+      // Abort caller 1
+      controller1.abort();
+      await expect(p1).rejects.toThrow();
+
+      // Resolve the underlying fn — caller 2 should still get the result
+      resolveFn("shared-result");
+      await expect(p2).resolves.toBe("shared-result");
+
+      expect(fn).toHaveBeenCalledTimes(1);
+    });
+
+    test("all callers abort — shared controller signal is aborted", async () => {
+      const cache = await CacheManager.getInstance({
+        storage: createMockStorage(),
+      });
+
+      let capturedSignal!: AbortSignal;
+      const fn = vi.fn().mockImplementation(
+        (signal: AbortSignal) =>
+          new Promise<string>((resolve, reject) => {
+            capturedSignal = signal;
+            signal.addEventListener("abort", () =>
+              reject(new DOMException("aborted", "AbortError")),
+            );
+          }),
+      );
+
+      const controller1 = new AbortController();
+      const controller2 = new AbortController();
+
+      const p1 = cache.getOrExecute(["key"], fn, "user1", {
+        ttl: 60,
+        callerSignal: controller1.signal,
+      });
+      const p2 = cache.getOrExecute(["key"], fn, "user1", {
+        ttl: 60,
+        callerSignal: controller2.signal,
+      });
+
+      // Wait for fn to be invoked inside the telemetry span
+      await vi.waitFor(() => expect(capturedSignal).toBeDefined());
+      expect(capturedSignal.aborted).toBe(false);
+
+      controller1.abort();
+      await expect(p1).rejects.toThrow();
+
+      // Shared signal still active — one caller remains
+      expect(capturedSignal.aborted).toBe(false);
+
+      controller2.abort();
+      await expect(p2).rejects.toThrow();
+
+      // Now shared signal should be aborted
+      expect(capturedSignal.aborted).toBe(true);
+    });
+
+    test("pre-aborted callerSignal throws immediately without executing fn", async () => {
+      const cache = await CacheManager.getInstance({
+        storage: createMockStorage(),
+      });
+
+      const controller = new AbortController();
+      controller.abort();
+
+      const fn = vi.fn().mockResolvedValue("should-not-run");
+
+      await expect(
+        cache.getOrExecute(["key"], fn, "user1", {
+          ttl: 60,
+          callerSignal: controller.signal,
+        }),
+      ).rejects.toThrow();
+
+      expect(fn).not.toHaveBeenCalled();
+    });
+
+    test("single caller abort mid-flight rejects with abort error and aborts shared controller", async () => {
+      const cache = await CacheManager.getInstance({
+        storage: createMockStorage(),
+      });
+
+      let capturedSignal!: AbortSignal;
+      const fn = vi.fn().mockImplementation(
+        (signal: AbortSignal) =>
+          new Promise<string>((resolve, reject) => {
+            capturedSignal = signal;
+            signal.addEventListener("abort", () =>
+              reject(new DOMException("aborted", "AbortError")),
+            );
+          }),
+      );
+
+      const controller = new AbortController();
+      const p = cache.getOrExecute(["key"], fn, "user1", {
+        ttl: 60,
+        callerSignal: controller.signal,
+      });
+
+      controller.abort();
+      await expect(p).rejects.toThrow();
+
+      // With only one caller, shared controller should also abort
+      expect(capturedSignal.aborted).toBe(true);
+    });
+
+    test("deduped caller abort does not poison the first caller's result", async () => {
+      const cache = await CacheManager.getInstance({
+        storage: createMockStorage(),
+      });
+
+      let resolveFn!: (value: string) => void;
+      const fn = vi.fn().mockImplementation(
+        () =>
+          new Promise<string>((resolve) => {
+            resolveFn = resolve;
+          }),
+      );
+
+      const controllerDeduped = new AbortController();
+
+      // First caller — no signal (or non-aborting)
+      const p1 = cache.getOrExecute(["key"], fn, "user1", { ttl: 60 });
+
+      // Second caller joins with an abort signal
+      const p2 = cache.getOrExecute(["key"], fn, "user1", {
+        ttl: 60,
+        callerSignal: controllerDeduped.signal,
+      });
+
+      // Abort the deduped caller
+      controllerDeduped.abort();
+      await expect(p2).rejects.toThrow();
+
+      // Resolve underlying fn — first caller should get the result
+      resolveFn("first-caller-result");
+      await expect(p1).resolves.toBe("first-caller-result");
+
+      expect(fn).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("disabled cache", () => {

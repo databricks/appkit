@@ -30,8 +30,9 @@ const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn(),
-    getOrExecute: vi.fn(async (_key: unknown[], fn: () => Promise<unknown>) =>
-      fn(),
+    getOrExecute: vi.fn(
+      async (_key: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
+        fn(),
     ),
     generateKey: vi.fn((...args: unknown[]) => JSON.stringify(args)),
   };
