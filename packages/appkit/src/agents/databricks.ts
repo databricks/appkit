@@ -424,6 +424,32 @@ export class DatabricksAdapter implements AgentAdapter {
     });
   }
 
+  /**
+   * Discoverability shim for the Supervisor API adapter. Returns a
+   * {@link import("./supervisor-api").SupervisorApiAdapter}, NOT a
+   * {@link DatabricksAdapter} — the two are separate classes (different
+   * wire formats, different lifecycle). Surfaced here so application
+   * developers see a single `DatabricksAdapter.from*` autocomplete root.
+   *
+   * Dynamic-imports `./supervisor-api` to avoid forming a load-time cycle:
+   * both files share `connectors/serving/client.ts`.
+   *
+   * @example
+   * ```ts
+   * import { DatabricksAdapter } from "@databricks/appkit/beta";
+   *
+   * const model = await DatabricksAdapter.fromSupervisorApi({
+   *   model: "databricks-claude-sonnet-4-5",
+   * });
+   * ```
+   */
+  static async fromSupervisorApi(
+    options: import("./supervisor-api").SupervisorApiAdapterOptions,
+  ): Promise<import("./supervisor-api").SupervisorApiAdapter> {
+    const { fromSupervisorApi } = await import("./supervisor-api");
+    return fromSupervisorApi(options);
+  }
+
   async *run(
     input: AgentInput,
     context: AgentRunContext,

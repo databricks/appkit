@@ -24,12 +24,16 @@ export {
   parseTextToolCalls,
 } from "./agents/databricks";
 export type {
+  HostedSupervisorTool,
   SupervisorApiAdapterCtorOptions,
   SupervisorApiAdapterOptions,
+  SupervisorExtension,
   SupervisorTool,
 } from "./agents/supervisor-api";
 export {
   fromSupervisorApi,
+  isSupervisorTool,
+  SUPERVISOR_EXTENSION_KEY,
   SupervisorApiAdapter,
   supervisorTools,
 } from "./agents/supervisor-api";

@@ -150,3 +150,40 @@ serving surface — no bespoke `fetch()` + `authenticate()` plumbing.
 #### Returns
 
 `Promise`\<`DatabricksAdapter`\>
+
+***
+
+### fromSupervisorApi()
+
+```ts
+static fromSupervisorApi(options: SupervisorApiAdapterOptions): Promise<SupervisorApiAdapter>;
+```
+
+Discoverability shim for the Supervisor API adapter. Returns a
+import("./supervisor-api").SupervisorApiAdapter, NOT a
+DatabricksAdapter — the two are separate classes (different
+wire formats, different lifecycle). Surfaced here so application
+developers see a single `DatabricksAdapter.from*` autocomplete root.
+
+Dynamic-imports `./supervisor-api` to avoid forming a load-time cycle:
+both files share `connectors/serving/client.ts`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `options` | [`SupervisorApiAdapterOptions`](Interface.SupervisorApiAdapterOptions.md) |
+
+#### Returns
+
+`Promise`\<[`SupervisorApiAdapter`](Class.SupervisorApiAdapter.md)\>
+
+#### Example
+
+```ts
+import { DatabricksAdapter } from "@databricks/appkit/beta";
+
+const model = await DatabricksAdapter.fromSupervisorApi({
+  model: "databricks-claude-sonnet-4-5",
+});
+```

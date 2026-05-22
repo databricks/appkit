@@ -221,17 +221,17 @@ const result = await runAgent(classifier, {
 
 `runAgent` eagerly constructs each plugin in `RunAgentInput.plugins`, runs the standard `attachContext({})` + `await setup()` lifecycle, and shares the instances across the top-level run and every sub-agent dispatch. Plugins whose `setup()` requires `createApp`-only runtime (e.g. `WorkspaceClient`, `ServiceContext`) throw at standalone-init with a clear "use createApp instead" message rather than mid-stream.
 
-Hosted tools (MCP) are still `agents()`-only since they require the live MCP client. Plugin tool dispatch in standalone mode runs as the service principal (no OBO) and **bypasses the agents-plugin approval gate** — treat standalone runAgent as a trusted-prompt environment (CI, batch eval, internal scripts), not as an exposed user-facing surface.
+MCP hosted tools (`mcpServer(...)`) still require `agents()` (they need a live MCP client). Supervisor-API hosted tools (`supervisorTools.*`), by contrast, **work in standalone `runAgent`** — the adapter has everything it needs to execute them server-side. This makes batch-eval / CI use of supervisor agents possible without `createApp`. Plugin tool dispatch in standalone mode runs as the service principal (no OBO) and **bypasses the agents-plugin approval gate** — treat standalone runAgent as a trusted-prompt environment (CI, batch eval, internal scripts), not as an exposed user-facing surface.
 
 ## Managed agents: the Supervisor API adapter
 
-`fromSupervisorApi` (beta) is the zero-config way to run an agent: instead of provisioning and pointing at a model-serving endpoint, you run the agentic loop in the Databricks workspace by targeting the AI Gateway Responses API (`/ai-gateway/mlflow/v1/responses`), which runs the LLM — and any hosted tools — as a managed service on Databricks. No `DATABRICKS_SERVING_ENDPOINT_NAME`, no stream-capability check, no JS tool plumbing for the common cases.
+`DatabricksAdapter.fromSupervisorApi` (beta) is the zero-config way to run an agent: instead of provisioning and pointing at a model-serving endpoint, you run the agentic loop in the Databricks workspace by targeting the AI Gateway Responses API (`/ai-gateway/mlflow/v1/responses`), which runs the LLM — and any hosted tools — as a managed service on Databricks. No `DATABRICKS_SERVING_ENDPOINT_NAME`, no stream-capability check, no JS tool plumbing for the common cases.
 
 The minimal agent is one extra line versus a markdown agent:
 
 ```ts
 import { createApp, createAgent } from "@databricks/appkit";
-import { agents, fromSupervisorApi } from "@databricks/appkit/beta";
+import { agents, DatabricksAdapter } from "@databricks/appkit/beta";
 
 await createApp({
   plugins: [
@@ -239,7 +239,9 @@ await createApp({
       agents: {
         assistant: createAgent({
           instructions: "You are a helpful assistant.",
-          model: fromSupervisorApi({ model: "databricks-claude-sonnet-4-5" }),
+          model: DatabricksAdapter.fromSupervisorApi({
+            model: "databricks-claude-sonnet-4-5",
+          }),
         }),
       },
     }),
@@ -247,29 +249,38 @@ await createApp({
 });
 ```
 
-`createAgent({ model })` already accepts adapters and adapter promises in addition to the model-name string used in earlier examples, so you can drop the factory result straight in. `fromSupervisorApi` resolves credentials through the SDK chain (`DATABRICKS_HOST`, OAuth, PAT, …); pass `workspaceClient` to reuse an existing client.
+`createAgent({ model })` already accepts adapters and adapter promises in addition to the model-name string used in earlier examples, so you can drop the factory result straight in. The factory resolves credentials through the SDK chain (`DATABRICKS_HOST`, OAuth, PAT, …); pass `workspaceClient` to reuse an existing client.
 
 ### Hosted tools
 
-Expose Genie spaces, Unity Catalog functions/connections, Knowledge Assistants, or other AppKit apps to the model by listing them on the adapter — execution stays server-side, you write no tool code:
+Expose Genie spaces, Unity Catalog functions/connections, Knowledge Assistants, or other AppKit apps to the model by declaring them as agent tools — same place every other tool is declared. Execution stays server-side; you write no tool code:
 
 ```ts
-import { fromSupervisorApi, supervisorTools } from "@databricks/appkit/beta";
+import { createAgent } from "@databricks/appkit";
+import {
+  DatabricksAdapter,
+  supervisorTools,
+} from "@databricks/appkit/beta";
 
-const model = fromSupervisorApi({
-  model: "databricks-claude-sonnet-4-5",
-  tools: [
-    supervisorTools.genieSpace(
-      "01ABCDEF12345678",
-      "NYC taxi trip records and zones",
-    ),
-    supervisorTools.ucFunction(
-      "main.default.add",
-      "Adds two integers and returns the sum.",
-    ),
-  ],
+const assistant = createAgent({
+  instructions: "You are a helpful data assistant.",
+  model: DatabricksAdapter.fromSupervisorApi({
+    model: "databricks-claude-sonnet-4-5",
+  }),
+  tools: () => ({
+    nyc: supervisorTools.genieSpace({
+      id: "01ABCDEF12345678",
+      description: "NYC taxi trip records and zones",
+    }),
+    add: supervisorTools.ucFunction({
+      name: "main.default.add",
+      description: "Adds two integers and returns the sum.",
+    }),
+  }),
 });
 ```
+
+Each `supervisorTools.*` factory takes a single named-options object — routing-critical strings get labels at the call site, so positional-argument swap bugs are impossible.
 
 `description` is **required and non-empty** — the LLM uses it to route between tools, so two Genie spaces both labelled "Genie space" will be indistinguishable.
 
@@ -281,22 +292,56 @@ The same caution applies to MCP `description`s and to any other field the model 
 
 | Factory | Tool kind | Identifier |
 |---|---|---|
-| `supervisorTools.genieSpace(id, description)` | Genie space | space id |
-| `supervisorTools.ucFunction(name, description)` | Unity Catalog function | three-part name |
-| `supervisorTools.knowledgeAssistant(id, description)` | Knowledge Assistant | assistant id |
-| `supervisorTools.app(name, description)` | Databricks App | app name |
-| `supervisorTools.ucConnection(name, description)` | UC connection | connection name |
+| `supervisorTools.genieSpace({ id, description })` | Genie space | space id |
+| `supervisorTools.ucFunction({ name, description })` | Unity Catalog function | three-part name |
+| `supervisorTools.knowledgeAssistant({ knowledgeAssistantId, description })` | Knowledge Assistant | assistant id |
+| `supervisorTools.app({ name, description })` | Databricks App | app name |
+| `supervisorTools.ucConnection({ name, description })` | UC connection | connection name |
+
+### Declaring hosted tools in markdown agents
+
+Hosted-supervisor tools also work in markdown-driven agents: declare the tool in code (under `agents({ tools: { ... } })`) and reference its key in frontmatter:
+
+```ts
+// server.ts
+agents({
+  agents: { /* ... */ },
+  tools: {
+    nyc_taxi: supervisorTools.genieSpace({
+      id: "01ABCDEF12345678",
+      description: "NYC taxi trip records and zones",
+    }),
+  },
+});
+```
+
+```md
+---
+endpoint: databricks-claude-sonnet-4-5
+tools:
+  - nyc_taxi
+---
+
+You answer questions about NYC taxi data using the Genie space.
+```
+
+No new frontmatter syntax — the ambient-tool lookup in `tools:` already resolves bare keys against `agents({ tools })`, and the tagged-record shape of `supervisorTools.*` lets the plugin classify them automatically.
 
 ### What does *not* apply to Supervisor-API agents
 
-The managed runtime owns its own tool execution, so the adapter intentionally **ignores the agents-plugin tool index**. For any agent whose `model:` is a Supervisor adapter:
+The managed runtime owns its own tool execution, so the adapter intentionally **ignores function tools and sub-agents from the agents-plugin tool index**. For any agent whose `model:` is a Supervisor adapter:
 
-- Tools wired via markdown `tools:` or the `tools(plugins)` function form are not exposed to the model — declare hosted tools via `fromSupervisorApi({ tools: […] })` instead.
-- The **human-in-the-loop approval gate** does not fire (tool calls never enter the Node process; `effect: "destructive"` annotations on plugin tools are irrelevant here).
+- Only `supervisorTools.*` entries reach the model. Function tools (`tool({...})`), MCP hosted tools (`mcpServer(...)`), and local sub-agents (`agents: { ... }`) declared alongside a supervisor adapter will trigger a registration-time warning and **will not be exposed to the model**. The capability check fires from `consumesInputTools: false` on the adapter.
+- The **human-in-the-loop approval gate** does not fire (tool calls never enter the Node process; `effect: "destructive"` annotations are irrelevant for hosted tools).
 - `limits.maxToolCalls` is not enforced (the managed runtime accounts for its own calls).
 - Per-call **OBO** does not apply to hosted tools; they run with the credentials the managed runtime uses for the target resource.
 
-Standard-adapter agents and Supervisor-API agents can coexist in the same `agents({ agents: { … } })` map and can be composed as sub-agents (Level 4) — only the agent whose `model:` points at a Supervisor adapter is exempt from the items above.
+### Cross-adapter sub-agent composition
+
+Supervisor and chat-completions adapters can both appear in the same `agents({ agents: { ... } })` map, but composition only goes one direction:
+
+- **Chat-completions parent → supervisor sub-agent** works natively. The parent dispatches via `agent-{key}` as a regular function tool; the child's adapter runs entirely on the AI Gateway.
+- **Supervisor parent → function-tool / local sub-agent children** is not yet wired. The capability check warns at registration; those tools will not reach the supervisor model. Future work will lift this restriction by routing SA's `response.function_call` events through `context.executeTool`.
 
 :::note Recovery path for non-streaming tool turns
 Some hosted tool kinds return their final assistant text without incremental `output_text.delta` events. The adapter has a recovery path that pulls the text out of `response.completed.output[]` so the turn is not silently empty. Set `DEBUG=appkit:agents:supervisor-api` to log the per-turn event-type histogram if you want to verify which path a turn took.

@@ -103,8 +103,10 @@ interface WorkspaceClientLike extends ApiClientLike {
  * the wire format the endpoint expects, so the adapter passes the array
  * straight into the request body.
  *
- * Prefer the {@link supervisorTools} factories — they fill in the
- * SA-validation-bug workaround for `description` (must be non-empty).
+ * This is an adapter-internal wire type. Application code authors tools via
+ * the {@link supervisorTools} factories, which return tagged
+ * {@link HostedSupervisorTool} records — the agents plugin then unwraps
+ * the `.spec` when routing through {@link AgentInput.extensions}.
  */
 export type SupervisorTool =
   | { type: "genie_space"; genie_space: { id: string; description: string } }
@@ -123,58 +125,167 @@ export type SupervisorTool =
     };
 
 /**
+ * Tagged record returned by every {@link supervisorTools} factory. The
+ * `__kind` discriminator lets the agents plugin (and standalone
+ * `runAgent`) classify these tools without a structural match against the
+ * wire format — keeps the SA wire shape free to evolve and avoids
+ * namespace collisions with MCP hosted tools (which use `type: "genie-space"`
+ * hyphenated, vs SA's `type: "genie_space"` underscored).
+ */
+export interface HostedSupervisorTool {
+  readonly __kind: "hosted-supervisor";
+  readonly spec: SupervisorTool;
+}
+
+/**
+ * Type guard for {@link HostedSupervisorTool}. Used by the agents plugin
+ * (`buildToolIndex`) and standalone `runAgent` (`classifyTool`) to route
+ * supervisor-hosted tools to the extensions payload rather than the
+ * adapter's `tools` array.
+ */
+export function isSupervisorTool(
+  value: unknown,
+): value is HostedSupervisorTool {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as Record<string, unknown>).__kind === "hosted-supervisor"
+  );
+}
+
+/**
  * Concise factories for declaring Supervisor API tools.
+ *
+ * Each factory accepts a single named-options object: routing-critical
+ * strings (`id`, `name`, `description`) get labels at the call site so
+ * "we swapped the args and didn't notice for two weeks" bugs are
+ * impossible.
  *
  * `description` is required: SA's protobuf validation rejects `null`/`""`,
  * AND the LLM running on SA reads this string to decide when to route to
  * the tool. Two genie spaces both labelled "Genie space" give the model
  * nothing to discriminate on, so callers always own the routing hint.
  *
+ * ⚠ The `description` is read by the LLM at routing time — it is a
+ * prompt-injection sink. Do **not** derive it from untrusted input (user
+ * messages, request bodies, external systems). Treat it as application
+ * configuration. (CWE-1427)
+ *
  * @example
  * ```ts
- * fromSupervisorApi({
- *   model: "databricks-claude-sonnet-4",
- *   tools: [
- *     supervisorTools.genieSpace(
- *       "01ABCDEF12345678",
- *       "NYC taxi trip records and zones",
- *     ),
- *     supervisorTools.ucFunction(
- *       "main.default.add",
- *       "Adds two integers and returns the sum.",
- *     ),
- *   ],
+ * import { createAgent } from "@databricks/appkit";
+ * import {
+ *   agents,
+ *   DatabricksAdapter,
+ *   supervisorTools,
+ * } from "@databricks/appkit/beta";
+ *
+ * const assistant = createAgent({
+ *   instructions: "You are a helpful assistant.",
+ *   model: DatabricksAdapter.fromSupervisorApi({
+ *     model: "databricks-claude-sonnet-4",
+ *   }),
+ *   tools: () => ({
+ *     nyc: supervisorTools.genieSpace({
+ *       id: "01ABCDEF12345678",
+ *       description: "NYC taxi trip records and zones",
+ *     }),
+ *     add: supervisorTools.ucFunction({
+ *       name: "main.default.add",
+ *       description: "Adds two integers and returns the sum.",
+ *     }),
+ *   }),
  * });
  * ```
  */
 export const supervisorTools = {
-  genieSpace: (id: string, description: string): SupervisorTool => ({
-    type: "genie_space",
-    genie_space: { id, description },
+  genieSpace: ({
+    id,
+    description,
+  }: {
+    id: string;
+    description: string;
+  }): HostedSupervisorTool => ({
+    __kind: "hosted-supervisor",
+    spec: { type: "genie_space", genie_space: { id, description } },
   }),
-  ucFunction: (name: string, description: string): SupervisorTool => ({
-    type: "uc_function",
-    uc_function: { name, description },
+  ucFunction: ({
+    name,
+    description,
+  }: {
+    name: string;
+    description: string;
+  }): HostedSupervisorTool => ({
+    __kind: "hosted-supervisor",
+    spec: { type: "uc_function", uc_function: { name, description } },
   }),
-  knowledgeAssistant: (
-    knowledgeAssistantId: string,
-    description: string,
-  ): SupervisorTool => ({
-    type: "knowledge_assistant",
-    knowledge_assistant: {
-      knowledge_assistant_id: knowledgeAssistantId,
-      description,
+  knowledgeAssistant: ({
+    knowledgeAssistantId,
+    description,
+  }: {
+    knowledgeAssistantId: string;
+    description: string;
+  }): HostedSupervisorTool => ({
+    __kind: "hosted-supervisor",
+    spec: {
+      type: "knowledge_assistant",
+      knowledge_assistant: {
+        knowledge_assistant_id: knowledgeAssistantId,
+        description,
+      },
     },
   }),
-  app: (name: string, description: string): SupervisorTool => ({
-    type: "app",
-    app: { name, description },
+  app: ({
+    name,
+    description,
+  }: {
+    name: string;
+    description: string;
+  }): HostedSupervisorTool => ({
+    __kind: "hosted-supervisor",
+    spec: { type: "app", app: { name, description } },
   }),
-  ucConnection: (name: string, description: string): SupervisorTool => ({
-    type: "uc_connection",
-    uc_connection: { name, description },
+  ucConnection: ({
+    name,
+    description,
+  }: {
+    name: string;
+    description: string;
+  }): HostedSupervisorTool => ({
+    __kind: "hosted-supervisor",
+    spec: { type: "uc_connection", uc_connection: { name, description } },
   }),
 };
+
+// ---------------------------------------------------------------------------
+// AgentInput.extensions integration
+// ---------------------------------------------------------------------------
+
+/**
+ * Namespace key under which the adapter reads its hosted-tool payload
+ * from {@link AgentInput.extensions}. Exported so the agents plugin and
+ * standalone `runAgent` (the producers) can write under the same key the
+ * adapter reads.
+ */
+export const SUPERVISOR_EXTENSION_KEY = "databricks.supervisor" as const;
+
+/**
+ * Shape of the value at `AgentInput.extensions[SUPERVISOR_EXTENSION_KEY]`.
+ * The agents plugin / `runAgent` build this from the tool index; advanced
+ * callers invoking `adapter.run(...)` directly populate it themselves.
+ */
+export interface SupervisorExtension {
+  hostedTools?: SupervisorTool[];
+}
+
+function readSupervisorExtension(input: AgentInput): SupervisorExtension {
+  const raw = input.extensions?.[SUPERVISOR_EXTENSION_KEY];
+  // Single cast at the boundary. The contract on `extensions` is opaque;
+  // we trust the producer (agents plugin / runAgent / caller) to use the
+  // shape declared here.
+  if (!raw || typeof raw !== "object") return {};
+  return raw as SupervisorExtension;
+}
 
 // ---------------------------------------------------------------------------
 // Adapter
@@ -186,11 +297,6 @@ export interface SupervisorApiAdapterOptions {
    * (e.g. "databricks-claude-sonnet-4").
    */
   model: string;
-  /**
-   * Hosted tools the SA endpoint should expose to the model. Use the
-   * {@link supervisorTools} factories for the most common shapes.
-   */
-  tools?: SupervisorTool[];
   /**
    * A WorkspaceClient (or structural equivalent) used for host resolution
    * and per-request authentication. When omitted, a `WorkspaceClient({})`
@@ -209,7 +315,6 @@ export interface SupervisorApiAdapterOptions {
 export interface SupervisorApiAdapterCtorOptions {
   streamBody: StreamBody;
   model: string;
-  tools?: SupervisorTool[];
 }
 
 /**
@@ -233,24 +338,22 @@ export interface SupervisorApiAdapterCtorOptions {
  * a per-turn event-type histogram and the SA-reported status/error/
  * incomplete_details, so it's already actionable without DEBUG.
  *
+ * Tools are not configured on the adapter. Declare them via
+ * `createAgent({ tools: () => ({ key: supervisorTools.genieSpace({...}) }) })`
+ * (or markdown frontmatter referencing an ambient `supervisorTools.*` entry);
+ * the agents plugin / standalone `runAgent` aggregates hosted-supervisor
+ * entries and routes them to the adapter via
+ * `AgentInput.extensions[SUPERVISOR_EXTENSION_KEY]`. Advanced callers
+ * invoking `adapter.run(...)` directly populate that key themselves.
+ *
  * @example
  * ```ts
  * import { createApp, createAgent } from "@databricks/appkit";
  * import {
  *   agents,
- *   fromSupervisorApi,
+ *   DatabricksAdapter,
  *   supervisorTools,
  * } from "@databricks/appkit/beta";
- *
- * const adapter = await fromSupervisorApi({
- *   model: "databricks-claude-sonnet-4",
- *   tools: [
- *     supervisorTools.genieSpace(
- *       "01ABCDEF12345678",
- *       "NYC taxi trip records and zones",
- *     ),
- *   ],
- * });
  *
  * await createApp({
  *   plugins: [
@@ -258,7 +361,15 @@ export interface SupervisorApiAdapterCtorOptions {
  *       agents: {
  *         assistant: createAgent({
  *           instructions: "You are a helpful assistant.",
- *           model: adapter,
+ *           model: DatabricksAdapter.fromSupervisorApi({
+ *             model: "databricks-claude-sonnet-4",
+ *           }),
+ *           tools: () => ({
+ *             nyc: supervisorTools.genieSpace({
+ *               id: "01ABCDEF12345678",
+ *               description: "NYC taxi trip records and zones",
+ *             }),
+ *           }),
  *         }),
  *       },
  *     }),
@@ -269,12 +380,27 @@ export interface SupervisorApiAdapterCtorOptions {
 export class SupervisorApiAdapter implements AgentAdapter {
   private streamBody: StreamBody;
   private model: string;
-  private tools: SupervisorTool[];
+
+  /**
+   * Capability negotiation: the adapter reads its hosted-tool payload
+   * from {@link AgentInput.extensions} under {@link SUPERVISOR_EXTENSION_KEY}.
+   * The agents plugin uses this list to warn at registration when the tool
+   * index produces extensions the adapter wouldn't consume.
+   */
+  readonly acceptsExtensions = [SUPERVISOR_EXTENSION_KEY] as const;
+
+  /**
+   * Capability negotiation: the adapter does not consume `input.tools`.
+   * Tool execution is owned by the Databricks AI Gateway server-side, so
+   * any function tools or local sub-agents declared on this agent would
+   * be silently dropped — the agents plugin warns at registration when
+   * that combination is detected.
+   */
+  readonly consumesInputTools = false;
 
   constructor(options: SupervisorApiAdapterCtorOptions) {
     this.streamBody = options.streamBody;
     this.model = options.model;
-    this.tools = options.tools ?? [];
   }
 
   async *run(
@@ -288,12 +414,19 @@ export class SupervisorApiAdapter implements AgentAdapter {
     const { instructions, input: payloadInput } = this.buildInput(
       input.messages,
     );
-    yield* this.streamResponse(instructions, payloadInput, context.signal);
+    const hostedTools = readSupervisorExtension(input).hostedTools ?? [];
+    yield* this.streamResponse(
+      instructions,
+      payloadInput,
+      hostedTools,
+      context.signal,
+    );
   }
 
   private async *streamResponse(
     instructions: string | undefined,
     input: ResponseInput,
+    hostedTools: SupervisorTool[],
     signal?: AbortSignal,
   ): AsyncGenerator<AgentEvent, void, unknown> {
     const body: Record<string, unknown> = {
@@ -306,8 +439,8 @@ export class SupervisorApiAdapter implements AgentAdapter {
     }
     // SA's protobuf validation rejects `tools: []` and `tools: null`. Only
     // include the field when at least one tool is configured.
-    if (this.tools.length > 0) {
-      body.tools = this.tools;
+    if (hostedTools.length > 0) {
+      body.tools = hostedTools;
     }
 
     logger.debug(
@@ -315,7 +448,7 @@ export class SupervisorApiAdapter implements AgentAdapter {
       this.model,
       instructions?.length ?? 0,
       typeof input === "string" ? "string" : `array[${input.length}]`,
-      this.tools.length,
+      hostedTools.length,
     );
 
     let stream: ReadableStream<Uint8Array>;
@@ -645,22 +778,43 @@ function mapEvent(
  * Responses API (`/ai-gateway/mlflow/v1/responses`).
  *
  * Uses the SDK's default credential chain for auth (reads DATABRICKS_HOST,
- * DATABRICKS_TOKEN, OAuth config, etc.).
+ * DATABRICKS_TOKEN, OAuth config, etc.). Tools are declared on the agent
+ * (via `createAgent({ tools })`), not on this factory.
+ *
+ * Application code should prefer the
+ * {@link DatabricksAdapter.fromSupervisorApi} static — it delegates here
+ * and keeps a single `DatabricksAdapter.from*` autocomplete root for all
+ * Databricks-backed adapters. This free function is the implementation
+ * behind the static and remains exported for callers that want to import
+ * it directly without pulling in {@link DatabricksAdapter}.
  *
  * @example
  * ```ts
+ * import { createApp, createAgent } from "@databricks/appkit";
  * import {
- *   fromSupervisorApi,
+ *   agents,
+ *   DatabricksAdapter,
  *   supervisorTools,
  * } from "@databricks/appkit/beta";
  *
- * const adapter = await fromSupervisorApi({
- *   model: "databricks-claude-sonnet-4",
- *   tools: [
- *     supervisorTools.genieSpace(
- *       "01ABCDEF12345678",
- *       "NYC taxi trip records and zones",
- *     ),
+ * await createApp({
+ *   plugins: [
+ *     agents({
+ *       agents: {
+ *         assistant: createAgent({
+ *           instructions: "You are a helpful assistant.",
+ *           model: DatabricksAdapter.fromSupervisorApi({
+ *             model: "databricks-claude-sonnet-4",
+ *           }),
+ *           tools: () => ({
+ *             nyc: supervisorTools.genieSpace({
+ *               id: "01ABCDEF12345678",
+ *               description: "NYC taxi trip records and zones",
+ *             }),
+ *           }),
+ *         }),
+ *       },
+ *     }),
  *   ],
  * });
  * ```
@@ -670,6 +824,9 @@ function mapEvent(
  * {@link SupervisorApiAdapterOptions.workspaceClient} — the client is
  * captured once and reused, so per-request OBO clients would leak
  * identity across requests.
+ *
+ * @see {@link DatabricksAdapter.fromSupervisorApi} — the recommended
+ * application-facing entry point.
  */
 export async function fromSupervisorApi(
   options: SupervisorApiAdapterOptions,
@@ -689,6 +846,5 @@ export async function fromSupervisorApi(
     streamBody: (body, signal) =>
       streamPath(resolved, "/ai-gateway/mlflow/v1/responses", body, signal),
     model: options.model,
-    tools: options.tools ?? [],
   });
 }

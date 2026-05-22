@@ -14,7 +14,7 @@ import {
 import {
   agents,
   createAgent,
-  fromSupervisorApi,
+  DatabricksAdapter,
   tool,
 } from "@databricks/appkit/beta";
 import { WorkspaceClient } from "@databricks/sdk-experimental";
@@ -73,10 +73,12 @@ const helper = createAgent({
   },
 });
 
-// Supervisor API demo agent. Tools are configured on the adapter (the SA
-// endpoint executes them server-side), not on the createAgent definition.
-// Uncomment a `supervisorTools.*` entry (and import 'supervisorTools' from
-// '@databricks/appkit/beta') to give the model real powers.
+// Supervisor API demo agent. The Databricks AI Gateway executes hosted
+// tools server-side; declare them via `createAgent({ tools })` like any
+// other agent tool — the agents plugin classifies the tagged record and
+// routes it to the adapter via AgentInput.extensions. Import
+// `supervisorTools` from '@databricks/appkit/beta' and uncomment an
+// entry below to give the model real powers.
 //
 // `createAgent({ model })` accepts an adapter promise, so the factory's
 // host/credential resolution is awaited lazily on first dispatch (via
@@ -85,18 +87,18 @@ const helper = createAgent({
 const supervisor = createAgent({
   instructions:
     "You are an assistant powered by the Databricks Supervisor API.",
-  model: fromSupervisorApi({
+  model: DatabricksAdapter.fromSupervisorApi({
     model: "databricks-claude-sonnet-4-5",
-    tools: [
-      // supervisorTools.genieSpace(
-      //   "01ABCDEF12345678",
-      //   "NYC taxi trip records and zones",
-      // ),
-      // supervisorTools.ucFunction(
-      //   "main.default.add",
-      //   "Adds two integers and returns the sum.",
-      // ),
-    ],
+  }),
+  tools: () => ({
+    // nyc: supervisorTools.genieSpace({
+    //   id: "01ABCDEF12345678",
+    //   description: "NYC taxi trip records and zones",
+    // }),
+    // add: supervisorTools.ucFunction({
+    //   name: "main.default.add",
+    //   description: "Adds two integers and returns the sum.",
+    // }),
   }),
 });
 

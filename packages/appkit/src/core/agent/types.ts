@@ -33,10 +33,15 @@ export interface ToolkitEntry {
 
 /**
  * Any tool an agent can invoke: inline function tools (`tool()`), hosted MCP
- * tools (`mcpServer()` / raw hosted), or toolkit references from plugins
- * (`analytics().toolkit()`).
+ * tools (`mcpServer()` / raw hosted), toolkit references from plugins
+ * (`analytics().toolkit()`), or adapter-hosted Supervisor-API tools
+ * (`supervisorTools.*`).
  */
-export type AgentTool = FunctionTool | HostedTool | ToolkitEntry;
+export type AgentTool =
+  | FunctionTool
+  | HostedTool
+  | ToolkitEntry
+  | import("../../agents/supervisor-api").HostedSupervisorTool;
 
 export interface ToolkitOptions {
   /** Key prefix to prepend to each tool's local name. Defaults to `${pluginName}.`. */
@@ -307,6 +312,21 @@ export type ResolvedToolEntry =
   | {
       source: "subagent";
       agentName: string;
+      def: AgentToolDefinition;
+    }
+  | {
+      /**
+       * Adapter-side hosted tool (executed by the model-host, not by the
+       * Node process). Today: Supervisor API hosted tools (Genie spaces,
+       * UC functions, etc.). The `spec` is opaque to the agents plugin —
+       * it routes the entry into `AgentInput.extensions` for the adapter
+       * that declared the matching `acceptsExtensions` key. `def` is a
+       * synthetic placeholder kept so the index has a uniform shape; it
+       * is intentionally NOT included in the `tools` array passed to
+       * `adapter.run()` (those entries are not callable functions).
+       */
+      source: "hosted-supervisor";
+      spec: import("../../agents/supervisor-api").SupervisorTool;
       def: AgentToolDefinition;
     };
 

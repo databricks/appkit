@@ -2,7 +2,10 @@ import type { AgentEvent, AgentInput } from "shared";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   fromSupervisorApi,
+  isSupervisorTool,
+  SUPERVISOR_EXTENSION_KEY,
   SupervisorApiAdapter,
+  type SupervisorExtension,
   type SupervisorTool,
   supervisorTools,
 } from "../supervisor-api";
@@ -42,14 +45,26 @@ function makeStreamBody(chunks: string[]): {
   return { streamBody, lastBody: () => captured };
 }
 
-function createInput(): AgentInput {
+function createInput(overrides: Partial<AgentInput> = {}): AgentInput {
   return {
     messages: [
       { id: "1", role: "user", content: "Hello", createdAt: new Date() },
     ],
     tools: [],
     threadId: "thread-1",
+    ...overrides,
   };
+}
+
+/**
+ * Convenience to build the `extensions` payload the agents plugin / runAgent
+ * produce, so tests don't have to repeat the key/shape boilerplate.
+ */
+function withSupervisorTools(
+  hostedTools: SupervisorTool[],
+): Pick<AgentInput, "extensions"> {
+  const ext: SupervisorExtension = { hostedTools };
+  return { extensions: { [SUPERVISOR_EXTENSION_KEY]: ext } };
 }
 
 async function collect(
@@ -61,54 +76,133 @@ async function collect(
 }
 
 describe("supervisorTools factories", () => {
-  test("genieSpace produces correct wire shape", () => {
-    expect(supervisorTools.genieSpace("space123", "NYC taxi data")).toEqual({
+  test("genieSpace returns a tagged record wrapping the wire spec", () => {
+    const tool = supervisorTools.genieSpace({
+      id: "space123",
+      description: "NYC taxi data",
+    });
+    expect(tool).toEqual({
+      __kind: "hosted-supervisor",
+      spec: {
+        type: "genie_space",
+        genie_space: { id: "space123", description: "NYC taxi data" },
+      },
+    });
+  });
+
+  test("ucFunction returns a tagged record wrapping the wire spec", () => {
+    const tool = supervisorTools.ucFunction({
+      name: "main.default.add",
+      description: "Adds two integers.",
+    });
+    expect(tool).toEqual({
+      __kind: "hosted-supervisor",
+      spec: {
+        type: "uc_function",
+        uc_function: {
+          name: "main.default.add",
+          description: "Adds two integers.",
+        },
+      },
+    });
+  });
+
+  test("knowledgeAssistant maps knowledgeAssistantId into the wire field", () => {
+    const tool = supervisorTools.knowledgeAssistant({
+      knowledgeAssistantId: "ka-1",
+      description: "Internal docs Q&A",
+    });
+    expect(tool).toEqual({
+      __kind: "hosted-supervisor",
+      spec: {
+        type: "knowledge_assistant",
+        knowledge_assistant: {
+          knowledge_assistant_id: "ka-1",
+          description: "Internal docs Q&A",
+        },
+      },
+    });
+  });
+
+  test("app returns a tagged record wrapping the wire spec", () => {
+    const tool = supervisorTools.app({
+      name: "my-app",
+      description: "Demo Databricks app.",
+    });
+    expect(tool).toEqual({
+      __kind: "hosted-supervisor",
+      spec: {
+        type: "app",
+        app: { name: "my-app", description: "Demo Databricks app." },
+      },
+    });
+  });
+
+  test("ucConnection returns a tagged record wrapping the wire spec", () => {
+    const tool = supervisorTools.ucConnection({
+      name: "my-conn",
+      description: "Connection to external DB.",
+    });
+    expect(tool).toEqual({
+      __kind: "hosted-supervisor",
+      spec: {
+        type: "uc_connection",
+        uc_connection: {
+          name: "my-conn",
+          description: "Connection to external DB.",
+        },
+      },
+    });
+  });
+});
+
+describe("isSupervisorTool", () => {
+  test("accepts every supervisorTools.* factory output", () => {
+    expect(
+      isSupervisorTool(
+        supervisorTools.genieSpace({ id: "g", description: "d" }),
+      ),
+    ).toBe(true);
+    expect(
+      isSupervisorTool(
+        supervisorTools.ucFunction({ name: "main.x.y", description: "d" }),
+      ),
+    ).toBe(true);
+    expect(
+      isSupervisorTool(
+        supervisorTools.knowledgeAssistant({
+          knowledgeAssistantId: "ka",
+          description: "d",
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isSupervisorTool(supervisorTools.app({ name: "a", description: "d" })),
+    ).toBe(true);
+    expect(
+      isSupervisorTool(
+        supervisorTools.ucConnection({ name: "c", description: "d" }),
+      ),
+    ).toBe(true);
+  });
+
+  test("rejects plain wire-format objects (no __kind tag)", () => {
+    const wireOnly: SupervisorTool = {
       type: "genie_space",
-      genie_space: { id: "space123", description: "NYC taxi data" },
-    });
+      genie_space: { id: "g", description: "d" },
+    };
+    expect(isSupervisorTool(wireOnly)).toBe(false);
   });
 
-  test("ucFunction produces correct wire shape", () => {
-    expect(
-      supervisorTools.ucFunction("main.default.add", "Adds two integers."),
-    ).toEqual({
-      type: "uc_function",
-      uc_function: {
-        name: "main.default.add",
-        description: "Adds two integers.",
-      },
-    });
-  });
-
-  test("knowledgeAssistant maps id into knowledge_assistant_id", () => {
-    expect(
-      supervisorTools.knowledgeAssistant("ka-1", "Internal docs Q&A"),
-    ).toEqual({
-      type: "knowledge_assistant",
-      knowledge_assistant: {
-        knowledge_assistant_id: "ka-1",
-        description: "Internal docs Q&A",
-      },
-    });
-  });
-
-  test("app produces correct wire shape", () => {
-    expect(supervisorTools.app("my-app", "Demo Databricks app.")).toEqual({
-      type: "app",
-      app: { name: "my-app", description: "Demo Databricks app." },
-    });
-  });
-
-  test("ucConnection produces correct wire shape", () => {
-    expect(
-      supervisorTools.ucConnection("my-conn", "Connection to external DB."),
-    ).toEqual({
-      type: "uc_connection",
-      uc_connection: {
-        name: "my-conn",
-        description: "Connection to external DB.",
-      },
-    });
+  test("rejects MCP hosted tools and other shapes", () => {
+    expect(isSupervisorTool({ type: "genie-space", genie_space: {} })).toBe(
+      false,
+    );
+    expect(isSupervisorTool(null)).toBe(false);
+    expect(isSupervisorTool(undefined)).toBe(false);
+    expect(isSupervisorTool("hosted-supervisor")).toBe(false);
+    expect(isSupervisorTool({})).toBe(false);
+    expect(isSupervisorTool({ __kind: "function" })).toBe(false);
   });
 });
 
@@ -117,19 +211,23 @@ describe("SupervisorApiAdapter", () => {
     vi.restoreAllMocks();
   });
 
-  test("posts model, input, tools, and stream:true through streamBody", async () => {
+  test("declares capability negotiation fields (acceptsExtensions, consumesInputTools)", () => {
+    const adapter = new SupervisorApiAdapter({
+      streamBody: vi.fn(),
+      model: "databricks-claude-sonnet-4",
+    });
+    expect(adapter.acceptsExtensions).toEqual([SUPERVISOR_EXTENSION_KEY]);
+    expect(adapter.consumesInputTools).toBe(false);
+  });
+
+  test("posts model, input, and stream:true through streamBody", async () => {
     const { streamBody, lastBody } = makeStreamBody([
       sseEvent("response.output_text.delta", { delta: "Hi" }),
       sseEvent("response.completed", {}),
     ]);
-
-    const tools: SupervisorTool[] = [
-      supervisorTools.genieSpace("g1", "Test genie space"),
-    ];
     const adapter = new SupervisorApiAdapter({
       streamBody,
       model: "databricks-claude-sonnet-4",
-      tools,
     });
 
     await collect(adapter.run(createInput(), { executeTool: vi.fn() }));
@@ -139,11 +237,12 @@ describe("SupervisorApiAdapter", () => {
       model: "databricks-claude-sonnet-4",
       input: "Hello",
       stream: true,
-      tools,
     });
+    // No tools wired via extensions -> no `tools` field on the wire.
+    expect(lastBody()).not.toHaveProperty("tools");
   });
 
-  test("omits the tools field entirely when no tools are configured", async () => {
+  test("reads hosted tools from AgentInput.extensions and posts them in the request body", async () => {
     const { streamBody, lastBody } = makeStreamBody([
       sseEvent("response.completed", {}),
     ]);
@@ -151,7 +250,61 @@ describe("SupervisorApiAdapter", () => {
       streamBody,
       model: "databricks-claude-sonnet-4",
     });
-    await collect(adapter.run(createInput(), { executeTool: vi.fn() }));
+
+    const genie = supervisorTools.genieSpace({
+      id: "g1",
+      description: "Test genie space",
+    });
+    const uc = supervisorTools.ucFunction({
+      name: "main.x.add",
+      description: "Adds two integers.",
+    });
+
+    await collect(
+      adapter.run(createInput(withSupervisorTools([genie.spec, uc.spec])), {
+        executeTool: vi.fn(),
+      }),
+    );
+
+    expect(lastBody()?.tools).toEqual([genie.spec, uc.spec]);
+  });
+
+  test("ignores extensions written under a different key (key namespacing)", async () => {
+    const { streamBody, lastBody } = makeStreamBody([
+      sseEvent("response.completed", {}),
+    ]);
+    const adapter = new SupervisorApiAdapter({
+      streamBody,
+      model: "databricks-claude-sonnet-4",
+    });
+
+    await collect(
+      adapter.run(
+        createInput({
+          extensions: {
+            "other.namespace": { hostedTools: [{ type: "ignored" }] },
+          },
+        }),
+        { executeTool: vi.fn() },
+      ),
+    );
+
+    expect(lastBody()).not.toHaveProperty("tools");
+  });
+
+  test("omits the tools field entirely when extensions carry an empty hostedTools array", async () => {
+    const { streamBody, lastBody } = makeStreamBody([
+      sseEvent("response.completed", {}),
+    ]);
+    const adapter = new SupervisorApiAdapter({
+      streamBody,
+      model: "databricks-claude-sonnet-4",
+    });
+    await collect(
+      adapter.run(createInput(withSupervisorTools([])), {
+        executeTool: vi.fn(),
+      }),
+    );
     expect(lastBody()).not.toHaveProperty("tools");
   });
 
@@ -925,5 +1078,19 @@ describe("fromSupervisorApi", () => {
       stream: true,
     });
     expect(requestArgs.payload).not.toHaveProperty("tools");
+  });
+});
+
+describe("DatabricksAdapter.fromSupervisorApi", () => {
+  test("returns a SupervisorApiAdapter instance", async () => {
+    const { DatabricksAdapter } = await import("../databricks");
+    const adapter = await DatabricksAdapter.fromSupervisorApi({
+      model: "databricks-claude-sonnet-4",
+      workspaceClient: {
+        config: { ensureResolved: vi.fn(async () => {}) },
+        apiClient: { request: vi.fn() },
+      },
+    });
+    expect(adapter).toBeInstanceOf(SupervisorApiAdapter);
   });
 });
