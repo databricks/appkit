@@ -2,30 +2,37 @@ import { describe, expect, test } from "vitest";
 import { isSqlErrorPassthrough } from "../dbsql-error-allowlist";
 
 describe("isSqlErrorPassthrough", () => {
-  // Allowlist members — DBR-authored, user-facing messages.
+  // Allowlist members — designed-for-user messages.
   test.each([
+    // DBR data plane — user's own SQL errors.
     ["BAD_REQUEST"],
     ["NOT_FOUND"],
     ["ALREADY_EXISTS"],
+    // SDK-level codes with generic templates.
     ["DEADLINE_EXCEEDED"],
     ["CANCELLED"],
     ["UNAUTHENTICATED"],
-  ])("%s is allowlisted (DBR-authored user-facing message)", (code) => {
+    // 5xx-class service messages — stable user-facing templates
+    // ("DBSQL temporarily unavailable. Please try again in a few
+    // minutes."). Hiding these forces users to guess whether a failure
+    // is on their side or ours.
+    ["TEMPORARILY_UNAVAILABLE"],
+    ["WORKSPACE_TEMPORARILY_UNAVAILABLE"],
+    ["SERVICE_UNDER_MAINTENANCE"],
+    // Quota — stable user-actionable templates ("Stop or delete
+    // existing warehouses to free up capacity.").
+    ["RESOURCE_EXHAUSTED"],
+    // Concurrency conflict — short reason strings, user-relevant for
+    // retry decisions.
+    ["ABORTED"],
+  ])("%s is allowlisted (designed-for-user message)", (code) => {
     expect(isSqlErrorPassthrough(code)).toBe(true);
   });
 
-  // Explicit denylist — control-plane sourced, internal state risk.
-  test.each([
-    ["INTERNAL_ERROR"],
-    ["IO_ERROR"],
-    ["UNKNOWN"],
-    ["RESOURCE_EXHAUSTED"],
-    ["SERVICE_UNDER_MAINTENANCE"],
-    ["TEMPORARILY_UNAVAILABLE"],
-    ["WORKSPACE_TEMPORARILY_UNAVAILABLE"],
-    ["ABORTED"],
-  ])(
-    "%s is denied (control-plane sourced, may carry internal state)",
+  // Explicit denylist — designed-for-debugging, interpolates internal
+  // identifiers, stack traces, or storage paths.
+  test.each([["INTERNAL_ERROR"], ["IO_ERROR"], ["UNKNOWN"]])(
+    "%s is denied (designed-for-debugging, interpolates internal state)",
     (code) => {
       expect(isSqlErrorPassthrough(code)).toBe(false);
     },

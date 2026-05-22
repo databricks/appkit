@@ -395,12 +395,58 @@ describe("ExecutionError", () => {
       expect(error.clientMessage).toBe("Query execution failed");
     });
 
-    test("RESOURCE_EXHAUSTED collapses to generic (mixed: may leak load data)", () => {
+    test("RESOURCE_EXHAUSTED passes through (quota templates are user-actionable)", () => {
+      // SchedulerRpcValidatorHook.scala emits stable templates like
+      // "The maximum number of warehouses has been reached. Please
+      // contact Databricks support." Telling users "Query execution
+      // failed" when they've actually hit a quota is unhelpful.
       const error = ExecutionError.statementFailed(
-        "Cluster at 92% capacity, scheduler-pod-3",
+        "The maximum number of warehouses has been reached. Please contact Databricks support.",
         "RESOURCE_EXHAUSTED",
       );
-      expect(error.clientMessage).toBe("Query execution failed");
+      expect(error.clientMessage).toBe(
+        "Statement failed: The maximum number of warehouses has been reached. Please contact Databricks support.",
+      );
+    });
+
+    test("TEMPORARILY_UNAVAILABLE passes through (stable service-down template)", () => {
+      // Source: SchedulerRpcClient.scala — fixed string authored for
+      // end users.
+      const error = ExecutionError.statementFailed(
+        "DBSQL temporarily unavailable. Please try again in a few minutes.",
+        "TEMPORARILY_UNAVAILABLE",
+      );
+      expect(error.clientMessage).toBe(
+        "Statement failed: DBSQL temporarily unavailable. Please try again in a few minutes.",
+      );
+    });
+
+    test("SERVICE_UNDER_MAINTENANCE passes through (maintenance messages are user-facing by design)", () => {
+      const error = ExecutionError.statementFailed(
+        "DBSQL is undergoing scheduled maintenance.",
+        "SERVICE_UNDER_MAINTENANCE",
+      );
+      expect(error.clientMessage).toBe(
+        "Statement failed: DBSQL is undergoing scheduled maintenance.",
+      );
+    });
+
+    test("WORKSPACE_TEMPORARILY_UNAVAILABLE passes through (shard topology is low-sensitivity, retry-relevant)", () => {
+      const error = ExecutionError.statementFailed(
+        "Workspace temporarily unavailable: shard moving",
+        "WORKSPACE_TEMPORARILY_UNAVAILABLE",
+      );
+      expect(error.clientMessage).toBe(
+        "Statement failed: Workspace temporarily unavailable: shard moving",
+      );
+    });
+
+    test("ABORTED passes through (conflict reason strings are retry-relevant)", () => {
+      const error = ExecutionError.statementFailed(
+        "version mismatch",
+        "ABORTED",
+      );
+      expect(error.clientMessage).toBe("Statement failed: version mismatch");
     });
 
     test("absent errorCode falls back to generic (default-deny on unknown source)", () => {
