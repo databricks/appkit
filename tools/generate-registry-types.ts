@@ -3,9 +3,8 @@
  * the canonical Zod schemas in `packages/shared/src/schemas/manifest.ts`. Single
  * source of truth for resource types and permissions.
  *
- * Phase 5: replaced JSON-Schema runtime read with direct Zod imports. The
- * resource-type enum + per-type permission enums are extracted via Zod 4's
- * native `.options` accessor on enum schemas.
+ * The resource-type enum + per-type permission enums are extracted via Zod 4's
+ * native `.options` accessor on enum schemas (no runtime JSON-schema read).
  *
  * Run from repo root: pnpm exec tsx tools/generate-registry-types.ts
  */
@@ -27,8 +26,8 @@ import {
   ucFunctionPermissionSchema,
   vectorSearchIndexPermissionSchema,
   volumePermissionSchema,
-} from "../packages/shared/src/schemas/manifest.ts";
-import { formatWithBiome } from "./format-with-biome.ts";
+} from "../packages/shared/src/schemas/manifest";
+import { formatWithBiome } from "./format-with-biome";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, "..");

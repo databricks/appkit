@@ -6,25 +6,26 @@
  * `tools/generate-json-schema.ts` and live only in `docs/static/schemas/`
  * (no package-internal copies).
  *
- * - Phase 2: cross-field constraints (cycle/dangling-reference checks,
- *   `<PROFILE>` placeholder, post-scaffold instruction non-empty) are
- *   refinements co-located with the shape they constrain. Validation is
- *   driven through the Standard Schema interface from `validate-manifest.ts`.
- * - Phase 3: `templateFieldEntrySchema` is a transform that emits `origin`
- *   from `localOnly`/`value`/`resolve`. The input slot is still allowed so
+ * - Cross-field constraints (cycle/dangling-reference checks, `<PROFILE>`
+ *   placeholder, post-scaffold instruction non-empty) are refinements
+ *   co-located with the shape they constrain. Validation is driven through
+ *   the Standard Schema interface from `validate-manifest.ts`.
+ * - `templateFieldEntrySchema` is a transform that emits `origin` from
+ *   `localOnly`/`value`/`resolve`. The input slot is still allowed so
  *   re-parsing previously-synced template manifests does not fail, but the
  *   transform always overwrites it — drift-by-construction for hand-edits.
- * - Phase 4: `discoveryDescriptorSchema` is a discriminated union over a
- *   `type` literal. The `kind` variant references one of five well-known
+ * - `discoveryDescriptorSchema` is a discriminated union over a `type`
+ *   literal. The `kind` variant references one of the well-known
  *   `resourceKind` values for which AppKit owns the CLI command map (see
  *   `RESOURCE_KIND_COMMANDS` below). The `cli` variant is the escape hatch
  *   carrying the existing free-form fields (with the `<PROFILE>`
  *   refinement). Hierarchical context for volumes (catalog/schema parent
- *   walk) is encoded as a Phase 6 MUST rule, not modeled in the schema.
- * - Phase 6: scaffolding rule items carry a `maxLength` (120 chars) so
- *   `rules.never[]` / `rules.must[]` stay short directives by contract, and
- *   the canonical `TEMPLATE_SCAFFOLDING` constant lives co-located with the
- *   scaffolding schemas (sync.ts imports it).
+ *   walk) is encoded via the kind's `parents` array, not via dependsOn.
+ * - Scaffolding rule items carry a `maxLength` (120 chars) so
+ *   `rules.never[]` / `rules.must[]` / `rules.should[]` stay short
+ *   directives by contract, and the canonical `TEMPLATE_SCAFFOLDING`
+ *   constant lives co-located with the scaffolding schemas (sync.ts
+ *   imports it).
  */
 
 import { z } from "zod";
@@ -1048,16 +1049,51 @@ export const scaffoldingDescriptorSchema = z
 export const TEMPLATE_SCAFFOLDING = {
   command: "databricks apps init",
   flags: {
-    "--template-dir": {
-      description: "Path to the template directory containing the app scaffold",
+    "--name": {
+      description:
+        "Project name — sets {{.projectName}} in package.json, databricks.yml, and .env. Required for non-interactive scaffolding.",
       required: true,
+      pattern: "^[a-z][a-z0-9-]*$",
     },
-    "--config-dir": {
-      description: "Path to the output directory for the initialized app",
-      required: true,
+    "--template": {
+      description: "Template path (local directory or GitHub URL)",
+      required: false,
+    },
+    "--version": {
+      description: "AppKit version to use; defaults to auto-detected",
+      required: false,
+    },
+    "--features": {
+      description:
+        "Plugins to enable (comma-separated, no spaces; must match keys in this manifest's plugins map)",
+      required: false,
+      pattern: "^[a-zA-Z0-9_-]+(,[a-zA-Z0-9_-]+)*$",
+    },
+    "--set": {
+      description:
+        "Set resource values (format: plugin.resourceKey.field=value, repeatable)",
+      required: false,
+    },
+    "--output-dir": {
+      description: "Directory to write the project to",
+      required: false,
+    },
+    "--description": {
+      description: "App description",
+      required: false,
+    },
+    "--run": {
+      description: "Run the app after creation (none, dev, dev-remote)",
+      required: false,
+    },
+    "--auto-approve": {
+      description:
+        "Pass as a bare flag (no value) to skip prompts for optional resources. Not recommended for agent-driven init — conflicts with the 'ask user when in doubt' rule.",
+      required: false,
     },
     "--profile": {
-      description: "Databricks CLI profile to use for authentication",
+      description:
+        "Databricks CLI profile to use for authentication (global flag)",
       required: false,
     },
   },

@@ -525,10 +525,8 @@ describe("validate-manifest", () => {
     });
 
     it("rejects manifests that still carry the legacy postScaffold array", () => {
-      // After the substitutability-gate amendment, `postScaffold` no longer
-      // exists on the plugin manifest schema. The strict object should reject
-      // it as an unknown property, surfacing a clear failure for anyone
-      // migrating from a pre-cutover branch.
+      // `postScaffold` is no longer part of the plugin manifest schema; the
+      // strict object rejects it as an unknown property.
       const manifest = {
         ...VALID_MANIFEST,
         postScaffold: [{ instruction: "Legacy step" }],
@@ -579,7 +577,7 @@ describe("validate-manifest", () => {
     });
   });
 
-  describe("plugin scaffolding.rules (substitutability gate)", () => {
+  describe("plugin scaffolding.rules", () => {
     it("rejects a must[] entry exceeding 120 characters", () => {
       const tooLong = "x".repeat(121);
       const manifest = {
@@ -890,7 +888,7 @@ describe("validate-manifest", () => {
     });
   });
 
-  describe("scaffolding rule item maxLength (Phase 6)", () => {
+  describe("scaffolding rule item maxLength", () => {
     function buildTemplateManifestWithRules(rules: {
       never?: string[];
       must?: string[];
@@ -965,20 +963,9 @@ describe("validate-manifest", () => {
       expect(parsed.rules?.should).toBeDefined();
     });
 
-    it("TEMPLATE_SCAFFOLDING.rules satisfies the substitutability gate (Phase 2/A4)", () => {
-      // Phase 2 pruned all four MUST entries from TEMPLATE_SCAFFOLDING.rules.must
-      // because each was substitutable: skill content (1), derivable from
-      // `requiredByTemplate` field (2), derivable from `field.env` enumeration
-      // (3), or a discovery-descriptor concern (4 — A6 candidate (a)).
-      //
-      // The post-Track-B-design pass replaced the remaining never entries with
-      // rules sharper against the conflict-detection step in databricks-apps
-      // skill 0.1.2 (Track B PR #79). The original "Modify files inside the
-      // template directory" rule conflicted with plugin setup instructions
-      // that legitimately edit scaffolded files; "Hardcode workspace-specific
-      // values" was reframed around credentials and runtime targets; "Skip
-      // resource configuration prompts" was split into a should/never pair
-      // covering the actual decision-time failures.
+    it("TEMPLATE_SCAFFOLDING.rules contains the expected directives", () => {
+      // Pins the canonical content of TEMPLATE_SCAFFOLDING.rules so changes
+      // to the must/should/never strings are explicit and reviewed.
       expect(TEMPLATE_SCAFFOLDING.rules.must).toEqual([
         "Keep all secrets and credentials only in app.yaml, databricks.yml, and/or .env",
       ]);
@@ -992,10 +979,9 @@ describe("validate-manifest", () => {
     });
   });
 
-  describe("RESOURCE_KIND_COMMANDS (Phase 3/A6 candidate (a))", () => {
-    // Phase 3 chose to structurally model volume's catalog+schema prerequisite
-    // chain via a `parents` array on the kind table (rather than accept as
-    // prose in `scaffolding.rules.must`). These tests pin the chosen shape.
+  describe("RESOURCE_KIND_COMMANDS", () => {
+    // Volume's catalog+schema prerequisite chain is modeled structurally via
+    // a `parents` array on the kind table. These tests pin that shape.
 
     it("volume kind declares parents = [catalog, schema]", () => {
       expect(RESOURCE_KIND_COMMANDS.volume.parents).toEqual([
