@@ -85,6 +85,15 @@ export async function invoke(
  *
  * When `signal` is provided it is bridged to the SDK's `Context` /
  * `CancellationToken` so aborts cancel the outbound HTTP request.
+ *
+ * @internal
+ *
+ * Not part of the public AppKit surface. `path` is passed through to the
+ * SDK without any allowlist — exposing this to user-controlled input would
+ * turn it into workspace-credentialled SSRF (CWE-918). Internal callers
+ * must hard-code the path (or build it from a closed enum). New callers
+ * inside the package: keep this constraint, and do not re-export from
+ * `beta.ts` or any other entry point.
  */
 export async function streamPath(
   client: ApiClientLike,

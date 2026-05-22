@@ -221,25 +221,14 @@ describe("SupervisorApiAdapter", () => {
     ]);
   });
 
-  test("maps response.failed to a status:error event", async () => {
-    const { streamBody } = makeStreamBody([sseEvent("response.failed", {})]);
-    const adapter = new SupervisorApiAdapter({
-      streamBody,
-      model: "databricks-claude-sonnet-4",
-    });
-    const events = await collect(
-      adapter.run(createInput(), { executeTool: vi.fn() }),
-    );
-    expect(events).toContainEqual({
-      type: "status",
-      status: "error",
-      error: "Response failed",
-    });
-  });
-
-  test("maps top-level error events", async () => {
+  test("maps response.failed to a sanitised status:error event", async () => {
+    // The verbose upstream payload must NOT reach the client (CWE-209) —
+    // only the stable `upstream_failed` code does. Server logs still keep
+    // the full detail via logger.warn.
     const { streamBody } = makeStreamBody([
-      sseEvent("error", { error: "rate limited" }),
+      sseEvent("response.failed", {
+        response: { error: { message: "secret-internal-stack-trace" } },
+      }),
     ]);
     const adapter = new SupervisorApiAdapter({
       streamBody,
@@ -251,16 +240,46 @@ describe("SupervisorApiAdapter", () => {
     expect(events).toContainEqual({
       type: "status",
       status: "error",
-      error: "rate limited",
+      error: "Supervisor API error (upstream_failed)",
     });
+    // Belt-and-braces: the leaky upstream string is never in the event.
+    for (const e of events) {
+      if (e.type === "status" && "error" in e) {
+        expect(e.error).not.toContain("secret-internal-stack-trace");
+      }
+    }
   });
 
-  test("maps response.output_item.done with id:'error' to status:error", async () => {
+  test("maps top-level error events to sanitised upstream_unknown code", async () => {
+    const { streamBody } = makeStreamBody([
+      sseEvent("error", { error: "rate limited (workspace abc-123)" }),
+    ]);
+    const adapter = new SupervisorApiAdapter({
+      streamBody,
+      model: "databricks-claude-sonnet-4",
+    });
+    const events = await collect(
+      adapter.run(createInput(), { executeTool: vi.fn() }),
+    );
+    expect(events).toContainEqual({
+      type: "status",
+      status: "error",
+      error: "Supervisor API error (upstream_unknown)",
+    });
+    for (const e of events) {
+      if (e.type === "status" && "error" in e) {
+        expect(e.error).not.toContain("workspace abc-123");
+      }
+    }
+  });
+
+  test("maps response.output_item.done error item to sanitised upstream_tool code", async () => {
     const { streamBody } = makeStreamBody([
       sseEvent("response.output_item.done", {
         item: {
           id: "error",
-          content: [{ text: "Tool execution failed" }],
+          type: "error",
+          content: [{ text: "Tool stack trace with /home/user paths" }],
         },
       }),
       sseEvent("response.completed", {}),
@@ -275,8 +294,43 @@ describe("SupervisorApiAdapter", () => {
     expect(events).toContainEqual({
       type: "status",
       status: "error",
-      error: "Tool execution failed",
+      error: "Supervisor API error (upstream_tool)",
     });
+    for (const e of events) {
+      if (e.type === "status" && "error" in e) {
+        expect(e.error).not.toContain("/home/user");
+      }
+    }
+  });
+
+  test("does NOT treat output_item.done id:'error' as error when type:'message' (collision guard)", async () => {
+    // SA reserves `id === "error"` for tool failures, but the 5-char id
+    // could collide with a legitimately-id'd assistant message. The guard
+    // requires `type === "error"` (or a non-message type alongside the
+    // reserved id) so a stray message with id="error" is not mis-classified.
+    const { streamBody } = makeStreamBody([
+      sseEvent("response.output_item.done", {
+        item: {
+          id: "error",
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "hello from error-id msg" }],
+        },
+      }),
+      sseEvent("response.completed", {}),
+    ]);
+    const adapter = new SupervisorApiAdapter({
+      streamBody,
+      model: "databricks-claude-sonnet-4",
+    });
+    const events = await collect(
+      adapter.run(createInput(), { executeTool: vi.fn() }),
+    );
+    expect(events).toEqual([
+      { type: "status", status: "running" },
+      { type: "message_delta", content: "hello from error-id msg" },
+      { type: "status", status: "complete" },
+    ]);
   });
 
   test("falls back to output_item.done text when no deltas streamed (tool-driven SA response)", async () => {
@@ -345,10 +399,14 @@ describe("SupervisorApiAdapter", () => {
     ]);
   });
 
-  test("emits status:error when the underlying streamBody throws", async () => {
+  test("emits sanitised transport error when the underlying streamBody throws", async () => {
     const streamBody = vi
       .fn()
-      .mockRejectedValue(new Error("Supervisor API error (500): boom"));
+      .mockRejectedValue(
+        new Error(
+          "HTTP 500 from https://workspace-internal.foo: stack trace ...",
+        ),
+      );
     const adapter = new SupervisorApiAdapter({
       streamBody,
       model: "databricks-claude-sonnet-4",
@@ -359,8 +417,45 @@ describe("SupervisorApiAdapter", () => {
     expect(events).toContainEqual({
       type: "status",
       status: "error",
-      error: "Supervisor API error: Supervisor API error (500): boom",
+      error: "Supervisor API error (transport)",
     });
+    for (const e of events) {
+      if (e.type === "status" && "error" in e) {
+        expect(e.error).not.toContain("workspace-internal.foo");
+        expect(e.error).not.toContain("stack trace");
+      }
+    }
+  });
+
+  test("does NOT emit a terminal error when the consumer aborts before streamBody resolves", async () => {
+    // Regression: previously the streamBody catch yielded a sanitised
+    // `{status:"error"}` even when the underlying rejection was an abort
+    // triggered by the consumer. Consumers that issued the abort must see
+    // a clean stop (zero further events after their abort), not a
+    // contradictory terminal error.
+    const controller = new AbortController();
+    const streamBody = vi.fn(async (_body, signal?: AbortSignal) => {
+      controller.abort();
+      // Simulate the SDK transport rejecting because the signal aborted.
+      // The catch path must observe `signal.aborted` and return silently.
+      throw new DOMException(
+        signal?.aborted ? "aborted" : "fetch failed",
+        "AbortError",
+      );
+    });
+
+    const adapter = new SupervisorApiAdapter({
+      streamBody,
+      model: "databricks-claude-sonnet-4",
+    });
+    const events = await collect(
+      adapter.run(createInput(), {
+        executeTool: vi.fn(),
+        signal: controller.signal,
+      }),
+    );
+
+    expect(events).toEqual([{ type: "status", status: "running" }]);
   });
 
   test("short-circuits when the signal is already aborted", async () => {
@@ -546,8 +641,72 @@ describe("SupervisorApiAdapter", () => {
     );
     expect(events).toEqual([
       { type: "status", status: "running" },
-      { type: "status", status: "error", error: "Response failed" },
+      {
+        type: "status",
+        status: "error",
+        error: "Supervisor API error (upstream_failed)",
+      },
     ]);
+  });
+
+  test("does NOT yield complete when response.completed carries status:'failed'", async () => {
+    // Regression for the silent-success-on-failure bug: SA occasionally
+    // reports a failed turn via `response.completed.status = "failed"`
+    // (with optional `error`/`incomplete_details`) rather than emitting
+    // `response.failed`. The adapter must surface this as a terminal
+    // error and NOT yield `{status:"complete"}`.
+    const { streamBody } = makeStreamBody([
+      sseEvent("response.completed", {
+        response: {
+          status: "failed",
+          error: { message: "tool timeout" },
+        },
+      }),
+    ]);
+    const adapter = new SupervisorApiAdapter({
+      streamBody,
+      model: "databricks-claude-sonnet-4",
+    });
+    const events = await collect(
+      adapter.run(createInput(), { executeTool: vi.fn() }),
+    );
+    expect(events).toEqual([
+      { type: "status", status: "running" },
+      {
+        type: "status",
+        status: "error",
+        error: "Supervisor API error (upstream_failed)",
+      },
+    ]);
+  });
+
+  test("does NOT yield complete when response.completed carries a populated error", async () => {
+    // Variant: status reported as "completed" but `error` is non-null.
+    // Treat as a terminal failure rather than silently completing.
+    const { streamBody } = makeStreamBody([
+      sseEvent("response.completed", {
+        response: {
+          status: "completed",
+          error: { code: "internal" },
+        },
+      }),
+    ]);
+    const adapter = new SupervisorApiAdapter({
+      streamBody,
+      model: "databricks-claude-sonnet-4",
+    });
+    const events = await collect(
+      adapter.run(createInput(), { executeTool: vi.fn() }),
+    );
+    expect(events).toContainEqual({
+      type: "status",
+      status: "error",
+      error: "Supervisor API error (upstream_failed)",
+    });
+    expect(events).not.toContainEqual({
+      type: "status",
+      status: "complete",
+    });
   });
 
   test("does not yield complete when the consumer aborts mid-stream", async () => {

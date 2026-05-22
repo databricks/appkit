@@ -78,10 +78,10 @@ const helper = createAgent({
 // Uncomment a `supervisorTools.*` entry (and import 'supervisorTools' from
 // '@databricks/appkit/beta') to give the model real powers.
 //
-// We `await` the factory at module init so a misconfigured workspace
-// (missing host, bad credentials) fails fast with a clear error here
-// instead of as an unhandled rejection. Top-level await is fine in this
-// ESM module.
+// `createAgent({ model })` accepts an adapter promise, so the factory's
+// host/credential resolution is awaited lazily on first dispatch (via
+// `resolveAdapter` in the agents plugin). A misconfigured workspace will
+// surface at first chat request, not at module init.
 const supervisor = createAgent({
   instructions:
     "You are an assistant powered by the Databricks Supervisor API.",

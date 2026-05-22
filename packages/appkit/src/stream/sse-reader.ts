@@ -15,6 +15,33 @@ export interface SseEvent {
 }
 
 /**
+ * Configuration for {@link readSseEvents}. All limits are in UTF-16 code
+ * units (JS string `.length`) and exist as a DoS guard (CWE-770) for
+ * untrusted upstreams that might stream arbitrarily large lines or never
+ * emit a block terminator.
+ */
+interface ReadSseEventsOptions {
+  /**
+   * Maximum length of any single SSE event block (i.e. the text between
+   * two `\n\n` separators). Exceeding this throws.
+   *
+   * @default 1 MiB (1_048_576)
+   */
+  maxLineChars?: number;
+  /**
+   * Maximum length of the rolling input buffer when no block terminator
+   * has been seen yet. Exceeding this throws — protects against an
+   * upstream that streams indefinitely without ever sending `\n\n`.
+   *
+   * @default 8 MiB (8_388_608)
+   */
+  maxBufferChars?: number;
+}
+
+const DEFAULT_MAX_SSE_LINE_CHARS = 1024 * 1024;
+const DEFAULT_MAX_SSE_BUFFER_CHARS = 8 * 1024 * 1024;
+
+/**
  * Async-iterates Server-Sent Events from a UTF-8 byte stream.
  *
  * Block-oriented parser: events are delimited by blank lines (`\n\n` after
@@ -26,12 +53,18 @@ export interface SseEvent {
  * after destructuring.
  *
  * Terminates when the stream closes or `signal` aborts; releases the reader
- * lock in either case.
+ * lock in either case. Throws when {@link ReadSseEventsOptions.maxLineChars}
+ * or {@link ReadSseEventsOptions.maxBufferChars} are exceeded.
  */
 export async function* readSseEvents(
   stream: ReadableStream<Uint8Array>,
   signal?: AbortSignal,
+  options?: ReadSseEventsOptions,
 ): AsyncGenerator<SseEvent, void, unknown> {
+  const maxLineChars = options?.maxLineChars ?? DEFAULT_MAX_SSE_LINE_CHARS;
+  const maxBufferChars =
+    options?.maxBufferChars ?? DEFAULT_MAX_SSE_BUFFER_CHARS;
+
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -55,6 +88,11 @@ export async function* readSseEvents(
       if (signal?.aborted) break;
       const { done, value } = await reader.read();
       if (done) {
+        if (buffer.length > maxLineChars) {
+          throw new Error(
+            `readSseEvents: trailing SSE block exceeds maxLineChars (${maxLineChars} UTF-16 code units)`,
+          );
+        }
         const tail = parseSseBlock(buffer);
         if (tail) yield tail;
         break;
@@ -62,13 +100,27 @@ export async function* readSseEvents(
 
       buffer += decoder.decode(value, { stream: true });
 
-      const normalized = buffer.replace(/\r\n/g, "\n");
+      // Gate the CRLF normalize on `\r` presence — saves a full-buffer
+      // regex scan on every chunk for the common LF-only steady state.
+      const normalized =
+        buffer.indexOf("\r") !== -1 ? buffer.replace(/\r\n/g, "\n") : buffer;
       const blocks = normalized.split("\n\n");
       // Last entry is either an incomplete block or "" (when the chunk ended
       // exactly on a boundary). Either way, keep it for the next iteration.
       buffer = blocks.pop() ?? "";
 
+      if (buffer.length > maxBufferChars) {
+        throw new Error(
+          `readSseEvents: incomplete SSE block exceeds maxBufferChars (${maxBufferChars} UTF-16 code units) without a terminator`,
+        );
+      }
+
       for (const block of blocks) {
+        if (block.length > maxLineChars) {
+          throw new Error(
+            `readSseEvents: SSE block exceeds maxLineChars (${maxLineChars} UTF-16 code units)`,
+          );
+        }
         const event = parseSseBlock(block);
         if (event) yield event;
       }
@@ -79,24 +131,35 @@ export async function* readSseEvents(
   }
 }
 
+/**
+ * Per the SSE spec, only a single leading `U+0020` is stripped from a field
+ * value — not arbitrary whitespace. `trimStart()` would also strip tabs,
+ * NBSP, etc.; for callers that feed binary or whitespace-prefixed payloads
+ * this is a footgun.
+ */
+function stripOneLeadingSpace(s: string): string {
+  return s.startsWith(" ") ? s.slice(1) : s;
+}
+
 function parseSseBlock(block: string): SseEvent | null {
   if (block.length === 0) return null;
+  // CRLF was already normalised at the buffer level, so each `line` here is
+  // already free of trailing `\r` — no per-line strip needed.
   const lines = block.split("\n");
 
   let eventName = "";
   let id: string | undefined;
   const dataLines: string[] = [];
 
-  for (const rawLine of lines) {
-    const line = rawLine.replace(/\r$/, "");
+  for (const line of lines) {
     if (line === "" || line.startsWith(":")) continue;
 
     if (line.startsWith("event:")) {
-      eventName = line.slice(6).trimStart();
+      eventName = stripOneLeadingSpace(line.slice(6));
     } else if (line.startsWith("data:")) {
-      dataLines.push(line.slice(5).trimStart());
+      dataLines.push(stripOneLeadingSpace(line.slice(5)));
     } else if (line.startsWith("id:")) {
-      id = line.slice(3).trimStart();
+      id = stripOneLeadingSpace(line.slice(3));
     }
     // Other fields (`retry:`, custom) are ignored by design.
   }

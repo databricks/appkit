@@ -179,4 +179,57 @@ describe("readSseEvents", () => {
     const events = await collect(readSseEvents(stream));
     expect(events).toEqual([{ event: "", data: "✓", id: undefined }]);
   });
+
+  test("throws when a single block exceeds maxLineChars (DoS guard)", async () => {
+    // A complete block whose total length exceeds the cap must throw rather
+    // than silently propagate to the consumer — protects callers from
+    // upstreams that stream arbitrarily large payloads (CWE-770).
+    const huge = `data: ${"x".repeat(200)}\n\n`;
+    await expect(async () => {
+      for await (const _ of readSseEvents(streamOf([huge]), undefined, {
+        maxLineChars: 100,
+      })) {
+        /* iterate */
+      }
+    }).rejects.toThrow(/exceeds maxLineChars/);
+  });
+
+  test("throws when the rolling buffer exceeds maxBufferChars without a terminator", async () => {
+    // An upstream that streams forever without ever sending the `\n\n`
+    // block separator must not grow the buffer unboundedly — throw once
+    // the cap is exceeded.
+    const stream = new ReadableStream<Uint8Array>({
+      pull(c) {
+        c.enqueue(new TextEncoder().encode("x".repeat(50)));
+        // No close() — keep feeding until the cap fires.
+      },
+    });
+    await expect(async () => {
+      for await (const _ of readSseEvents(stream, undefined, {
+        maxBufferChars: 200,
+        maxLineChars: 10_000,
+      })) {
+        /* iterate */
+      }
+    }).rejects.toThrow(/exceeds maxBufferChars/);
+  });
+
+  test("strips only a single leading U+0020 from field values (spec compliance)", async () => {
+    // `trimStart()` would strip tabs / NBSP / multi-space prefixes, which
+    // is wrong per the SSE spec — only one leading U+0020 may be removed.
+    const events = await collect(
+      readSseEvents(streamOf(["data:  with-leading-spaces\n\n"])),
+    );
+    // First space is stripped; second is preserved.
+    expect(events).toEqual([
+      { event: "", data: " with-leading-spaces", id: undefined },
+    ]);
+  });
+
+  test("preserves tab-prefixed data values (trimStart would have stripped)", async () => {
+    const events = await collect(
+      readSseEvents(streamOf(["data:\t\tvalue\n\n"])),
+    );
+    expect(events).toEqual([{ event: "", data: "\t\tvalue", id: undefined }]);
+  });
 });

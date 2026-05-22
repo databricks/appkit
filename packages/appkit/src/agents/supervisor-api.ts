@@ -13,6 +13,59 @@ import { readSseEvents } from "../stream";
 const logger = createLogger("agents:supervisor-api");
 
 /**
+ * Stable client-facing error codes. We never surface raw upstream error
+ * strings to the client (CWE-209) — the helper logs the verbose detail
+ * server-side and returns one of these codes in the {@link AgentEvent}.
+ */
+type SupervisorErrorCode =
+  | "transport"
+  | "upstream_failed"
+  | "upstream_tool"
+  | "upstream_unknown";
+
+/**
+ * Single sink for all error events emitted by the adapter. Logs the verbose
+ * detail (stack, upstream payload, etc.) at `warn` level and returns a
+ * sanitised {@link AgentEvent} carrying only a stable code so the client
+ * never sees raw upstream text.
+ */
+function emitError(code: SupervisorErrorCode, detail: unknown): AgentEvent {
+  logger.warn("supervisor-api error code=%s detail=%O", code, detail);
+  return {
+    type: "status",
+    status: "error",
+    error: `Supervisor API error (${code})`,
+  };
+}
+
+/**
+ * Renders an upstream error / incomplete_details payload as a short
+ * single-line string for log lines. Avoids dumping the full JSON tree
+ * (CWE-532): we keep the discriminator (`type`/`code`) plus a trimmed
+ * message, and that's it. Full payloads are still available via
+ * `DEBUG=appkit:agents:supervisor-api`.
+ */
+function summariseErrorPayload(payload: unknown): string {
+  if (payload == null) return "<none>";
+  if (typeof payload === "string") {
+    return payload.length > 80 ? `${payload.slice(0, 80)}…` : payload;
+  }
+  if (typeof payload !== "object") return String(payload);
+  const obj = payload as Record<string, unknown>;
+  const kind =
+    (typeof obj.type === "string" && obj.type) ||
+    (typeof obj.code === "string" && obj.code) ||
+    (typeof obj.reason === "string" && obj.reason) ||
+    "object";
+  const message =
+    (typeof obj.message === "string" && obj.message) ||
+    (typeof obj.detail === "string" && obj.detail) ||
+    "";
+  const trimmed = message.length > 80 ? `${message.slice(0, 80)}…` : message;
+  return trimmed ? `${kind}: ${trimmed}` : kind;
+}
+
+/**
  * Transport shim: given a request body, returns the raw SSE byte stream from
  * the Supervisor API endpoint. Injected at construction time so callers can
  * swap in the workspace SDK (the {@link fromSupervisorApi} factory), a bare
@@ -135,6 +188,12 @@ export interface SupervisorApiAdapterOptions {
    * and per-request authentication. When omitted, a `WorkspaceClient({})`
    * is created internally using the default SDK credential chain
    * (`DATABRICKS_HOST`, OAuth, PAT, etc.).
+   *
+   * ⚠ The `workspaceClient` is captured at construction and reused across
+   * every request. Passing a per-request OBO (On-Behalf-Of) client here
+   * would silently leak the first request's identity into all subsequent
+   * requests served by this adapter instance. Use the default credential
+   * chain or pass a service-principal client. (CWE-664)
    */
   workspaceClient?: WorkspaceClientLike;
 }
@@ -168,11 +227,12 @@ export interface SupervisorApiAdapterCtorOptions {
  *
  * @example
  * ```ts
- * import { createApp, createAgent, agents } from "@databricks/appkit";
+ * import { createApp, createAgent } from "@databricks/appkit";
  * import {
+ *   agents,
  *   fromSupervisorApi,
  *   supervisorTools,
- * } from "@databricks/appkit/agents/supervisor-api";
+ * } from "@databricks/appkit/beta";
  *
  * const adapter = await fromSupervisorApi({
  *   model: "databricks-claude-sonnet-4",
@@ -254,13 +314,11 @@ export class SupervisorApiAdapter implements AgentAdapter {
     try {
       stream = await this.streamBody(body, signal);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      logger.warn("Supervisor API request failed: %s", message);
-      yield {
-        type: "status",
-        status: "error",
-        error: `Supervisor API error: ${message}`,
-      };
+      // Aborts surface as exceptions thrown by `fetch`/SDK transports when
+      // the consumer cancels mid-request. Treat as a clean stop so consumers
+      // don't see a contradictory terminal `error` after their own abort.
+      if (signal?.aborted) return;
+      yield emitError("transport", err);
       return;
     }
 
@@ -360,6 +418,22 @@ export class SupervisorApiAdapter implements AgentAdapter {
     }
 
     if (eventCounts.has("response.completed")) {
+      // SA sometimes signals a failed turn via `response.completed` with a
+      // nested `status: "failed"` (or a populated `error`/`incomplete_details`)
+      // rather than emitting `response.failed`. Without this gate the
+      // adapter would silently yield `complete` on a server-side failure.
+      if (
+        lastCompleted?.status === "failed" ||
+        lastCompleted?.error != null ||
+        lastCompleted?.incomplete_details != null
+      ) {
+        yield emitError("upstream_failed", {
+          status: lastCompleted?.status,
+          error: lastCompleted?.error,
+          incomplete_details: lastCompleted?.incomplete_details,
+        });
+        return;
+      }
       yield { type: "status", status: "complete" };
     }
 
@@ -367,19 +441,18 @@ export class SupervisorApiAdapter implements AgentAdapter {
       const histogram = [...eventCounts.entries()]
         .map(([t, n]) => `${t}=${n}`)
         .join(", ");
-      const completedError = lastCompleted?.error
-        ? JSON.stringify(lastCompleted.error)
-        : undefined;
-      const completedIncomplete = lastCompleted?.incomplete_details
-        ? JSON.stringify(lastCompleted.incomplete_details)
-        : undefined;
       logger.warn(
         "Supervisor API stream completed without any output_text deltas. " +
           "events={%s} completed.status=%s completed.error=%s completed.incomplete=%s",
         histogram,
         lastCompleted?.status ?? "<none>",
-        completedError ?? "<none>",
-        completedIncomplete ?? "<none>",
+        summariseErrorPayload(lastCompleted?.error),
+        summariseErrorPayload(lastCompleted?.incomplete_details),
+      );
+      logger.debug(
+        "Supervisor API no-delta full payload: error=%O incomplete=%O",
+        lastCompleted?.error,
+        lastCompleted?.incomplete_details,
       );
     }
   }
@@ -476,14 +549,20 @@ function mapEvent(
     // the stream produced none, then emits `{status:"complete"}` itself.
 
     case "response.failed":
-      return { type: "status", status: "error", error: "Response failed" };
+      return emitError("upstream_failed", data);
 
     case "error": {
-      const errMsg =
+      // Branch detail extraction so a missing `error` field doesn't surface
+      // the JSON-stringified literal `'"Unknown error"'` (with quotes) in
+      // server logs. The client never sees this string — `emitError`
+      // sanitises it to a stable code.
+      const detail =
         typeof data.error === "string"
           ? data.error
-          : JSON.stringify(data.error ?? "Unknown error");
-      return { type: "status", status: "error", error: errMsg };
+          : data.error == null
+            ? "Unknown error"
+            : data.error;
+      return emitError("upstream_unknown", detail);
     }
 
     case "response.output_item.done": {
@@ -495,9 +574,15 @@ function mapEvent(
           }
         | undefined;
 
-      if (item?.id === "error") {
-        const errText = item.content?.[0]?.text ?? "Unknown tool error from SA";
-        return { type: "status", status: "error", error: errText };
+      // SA's contract reserves `item.id === "error"` for tool failures, but
+      // a 5-char identifier collision is too small a margin. Require either
+      // an explicit `type === "error"` or pair the reserved id with a
+      // non-message type (a normal assistant message uses `type: "message"`).
+      if (
+        item?.type === "error" ||
+        (item?.id === "error" && item?.type !== "message")
+      ) {
+        return emitError("upstream_tool", item);
       }
 
       // Fallback: when SA produces a tool-driven response (e.g. Genie space),
@@ -541,7 +626,7 @@ function mapEvent(
  * import {
  *   fromSupervisorApi,
  *   supervisorTools,
- * } from "@databricks/appkit/agents/supervisor-api";
+ * } from "@databricks/appkit/beta";
  *
  * const adapter = await fromSupervisorApi({
  *   model: "databricks-claude-sonnet-4",
@@ -553,6 +638,12 @@ function mapEvent(
  *   ],
  * });
  * ```
+ *
+ * @remarks
+ * ⚠ When passing your own `workspaceClient`, see the warning on
+ * {@link SupervisorApiAdapterOptions.workspaceClient} — the client is
+ * captured once and reused, so per-request OBO clients would leak
+ * identity across requests.
  */
 export async function fromSupervisorApi(
   options: SupervisorApiAdapterOptions,

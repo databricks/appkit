@@ -273,6 +273,12 @@ const model = fromSupervisorApi({
 
 `description` is **required and non-empty** — the LLM uses it to route between tools, so two Genie spaces both labelled "Genie space" will be indistinguishable.
 
+:::warning Hosted-tool descriptions are trusted application configuration (CWE-1427)
+A hosted tool's `description` is read by the LLM to decide when to route to that tool. **Do not derive it from untrusted input** — user messages, request bodies, freeform fields from external systems, or any value an attacker could influence. Treat `description` (and `id`/`name`) as application-controlled, alongside the agent's `instructions`. Allowing a user-controlled string here is a prompt-injection sink: a hostile description can convince the model to route to (or away from) a tool for any future request handled by the agent.
+
+The same caution applies to MCP `description`s and to any other field the model reads at routing time.
+:::
+
 | Factory | Tool kind | Identifier |
 |---|---|---|
 | `supervisorTools.genieSpace(id, description)` | Genie space | space id |
