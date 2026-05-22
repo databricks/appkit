@@ -76,7 +76,9 @@ export class StreamManager {
   abortAll(): void {
     this.activeOperations.forEach((operation) => {
       if (operation.heartbeat) clearInterval(operation.heartbeat);
-      operation.controller.abort("Server shutdown");
+      operation.controller.abort(
+        new DOMException("Server shutdown", "AbortError"),
+      );
     });
     this.activeOperations.clear();
     this.streamRegistry.clear();
@@ -140,7 +142,9 @@ export class StreamManager {
 
       // Stop the generator when no clients remain
       if (streamEntry.clients.size === 0 && !streamEntry.isCompleted) {
-        streamEntry.abortController.abort("All clients disconnected");
+        streamEntry.abortController.abort(
+          new DOMException("All clients disconnected", "AbortError"),
+        );
       }
 
       // cleanup if stream is completed and no clients are connected
@@ -227,7 +231,9 @@ export class StreamManager {
       // Stop the generator when no clients remain so polling loops
       // (e.g. jobs runAndWait) don't keep running in the background.
       if (streamEntry.clients.size === 0 && !streamEntry.isCompleted) {
-        abortController.abort("Client disconnected");
+        abortController.abort(
+          new DOMException("Client disconnected", "AbortError"),
+        );
       }
     });
 
