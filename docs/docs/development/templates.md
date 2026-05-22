@@ -131,16 +131,18 @@ The `scaffolding` block at the top level of `appkit.plugins.json` describes the 
   "scaffolding": {
     "command": "databricks apps init",
     "flags": {
-      "--template-dir": {
-        "description": "Path to the template directory containing the app scaffold",
-        "required": true
+      "--name": {
+        "description": "Project name — sets {{.projectName}} in package.json, databricks.yml, and .env. Required for non-interactive scaffolding.",
+        "required": true,
+        "pattern": "^[a-z][a-z0-9-]*$"
       },
-      "--config-dir": {
-        "description": "Path to the output directory for the initialized app",
-        "required": true
+      "--features": {
+        "description": "Plugins to enable (comma-separated, no spaces; must match keys in this manifest's plugins map)",
+        "required": false,
+        "pattern": "^[a-zA-Z0-9_-]+(,[a-zA-Z0-9_-]+)*$"
       },
       "--profile": {
-        "description": "Databricks CLI profile to use for authentication",
+        "description": "Databricks CLI profile to use for authentication (global flag)",
         "required": false
       }
     },
@@ -167,6 +169,21 @@ The `scaffolding` block at the top level of `appkit.plugins.json` describes the 
 | `rules.must` | Actions the scaffolding agent must always perform. |
 | `rules.should` | Recommended actions — applied unless overridden by a plugin-level rule. |
 | `rules.never` | Actions the scaffolding agent must never perform. |
+
+The example above shows three flags. The canonical flag set shipped with every synced template manifest is:
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--name` | yes | Project name — sets `{{.projectName}}` in `package.json`, `databricks.yml`, and `.env`. |
+| `--template` | no | Template path (local directory or GitHub URL). |
+| `--version` | no | AppKit version to use; defaults to auto-detected. |
+| `--features` | no | Plugins to enable (comma-separated, no spaces; must match keys in the `plugins` map). |
+| `--set` | no | Set resource values (format: `plugin.resourceKey.field=value`, repeatable). |
+| `--output-dir` | no | Directory to write the project to. |
+| `--description` | no | App description. |
+| `--run` | no | Run the app after creation (`none`, `dev`, `dev-remote`). |
+| `--auto-approve` | no | Skip prompts for optional resources. Not recommended for agent-driven init — conflicts with the "ask user when in doubt" rule. |
+| `--profile` | no | Databricks CLI profile to use for authentication (global flag). |
 
 Each rule item is capped at **120 characters** by the schema. Long prose fails validation — split into discrete actionable directives.
 

@@ -227,10 +227,8 @@ Plugin authors do not declare `parents` in their manifest; it is part of the App
 {
   "scaffolding": {
     "rules": {
-      "must": [
-        "After init, run database migrations via 'pnpm drizzle:migrate' before first request"
-      ],
       "should": [
+        "After init, run any database migrations for your chosen ORM before first request",
         "After init, verify Lakebase connectivity with 'psql $PGHOST -c \"select 1\"'"
       ]
     }
@@ -256,7 +254,7 @@ A rule belongs in the manifest **only if it cannot be expressed as structured da
 
 Examples of what **does** survive the gate:
 
-- `"After init, run database migrations via 'pnpm drizzle:migrate' before first request"` — runtime sequencing, not derivable from any resource shape.
+- `"After init, run any database migrations for your chosen ORM before first request"` — runtime sequencing, not derivable from any resource shape.
 - `"After init, configure the 'spaces' map in plugin config with alias-to-Space-ID mappings"` — config-population guidance the schema cannot encode.
 
 Examples of what does **not** survive (and should be modeled instead):
