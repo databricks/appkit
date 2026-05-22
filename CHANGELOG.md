@@ -46,6 +46,17 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.37.0](https://github.com/databricks/appkit/compare/v0.36.0...v0.37.0) (2026-05-20)
+
+### appkit
+
+* **appkit:** one chat integration ([#386](https://github.com/databricks/appkit/issues/386)) ([35ecfd3](https://github.com/databricks/appkit/commit/35ecfd33e825bd2c1e593533d440626dcfeb2836))
+
+* improve template and component responsiveness ([#391](https://github.com/databricks/appkit/issues/391)) ([d451278](https://github.com/databricks/appkit/commit/d451278c2aac07e6a24296f3519baed22f4e51a0))
+
+
 ## [0.36.0](https://github.com/databricks/appkit/compare/v0.35.2...v0.36.0) (2026-05-20)
 
 * add source-map support for editor DOM mapping ([#347](https://github.com/databricks/appkit/issues/347)) ([0d595c2](https://github.com/databricks/appkit/commit/0d595c2c198992cd31923d42137d72aa3da5effb))

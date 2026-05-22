@@ -258,12 +258,12 @@ describe("POST /chat — per-user concurrent-stream limit", () => {
     const { res, setHeader, json } = mockRes();
     await (
       plugin as unknown as {
-        _handleInvocations: (
+        _handleInvoke: (
           r: express.Request,
           w: express.Response,
         ) => Promise<void>;
       }
-    )._handleInvocations(mockReq({ input: "hi" }, "alice"), res);
+    )._handleInvoke(mockReq({ input: "hi" }, "alice"), res);
 
     expect(res.status).toHaveBeenCalledWith(429);
     expect(setHeader).toHaveBeenCalledWith("Retry-After", "5");

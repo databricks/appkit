@@ -270,6 +270,7 @@ export function buildCartesianOption(
       right: "10%",
       top: ctx.title ? "15%" : "10%",
       bottom: ctx.showLegend && hasMultipleSeries ? "20%" : "15%",
+      containLabel: true,
     },
     xAxis: {
       type: isScatter ? "value" : isTimeSeries ? "time" : "category",

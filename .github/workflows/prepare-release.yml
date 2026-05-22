@@ -150,7 +150,6 @@ jobs:
       - name: Prepare template artifact
         run: >
           pnpm exec tsx tools/prepare-template-artifact.ts
-          --version "${{ needs.prepare.outputs.version }}"
           --tarball-dir release-artifacts
           --output-dir template-artifact
 

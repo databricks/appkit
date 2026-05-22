@@ -186,18 +186,19 @@ jobs:
         id: version
         env:
           BRANCH: ${{ github.head_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           SANITIZED_BRANCH=$(echo "$BRANCH" | sed 's/[^a-zA-Z0-9-]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//')
+          SHORTSHA=$(git rev-parse --short HEAD)
           CURRENT_VERSION=$(node -p "require('./packages/appkit/package.json').version")
-          PR_VERSION="${CURRENT_VERSION}-${SANITIZED_BRANCH}"
+          PR_VERSION="${CURRENT_VERSION}-pr.${SHORTSHA}-${SANITIZED_BRANCH}-${PR_NUMBER}"
           echo "version=$PR_VERSION" >> "$GITHUB_OUTPUT"
-          pnpm exec tsx tools/sync-versions.ts "$PR_VERSION"
 
       - name: Build SDK tarballs
-        run: pnpm pack:sdk
+        run: pnpm pack:prerelease
 
       - name: Prepare template artifact
-        run: pnpm exec tsx tools/prepare-template-artifact.ts --version "${{ steps.version.outputs.version }}"
+        run: pnpm exec tsx tools/prepare-template-artifact.ts
 
       - name: Install template dependencies
         working-directory: pr-template
@@ -205,13 +206,13 @@ jobs:
 
       - name: Create zip artifact
         working-directory: pr-template
-        run: zip -r ../pr-template.zip . -x 'node_modules/*'
+        run: zip -r "../appkit-template-${{ steps.version.outputs.version }}.zip" . -x 'node_modules/*'
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: appkit-template-${{ steps.version.outputs.version }}
-          path: pr-template.zip
+          path: appkit-template-${{ steps.version.outputs.version }}.zip
 
   docs-build:
     name: Docs Build

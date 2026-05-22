@@ -34,6 +34,7 @@
     "lint:fix": "biome lint --write .",
     "lint": "biome lint .",
     "pack:sdk": "pnpm build && pnpm --filter=docs build && pnpm -r tarball",
+    "pack:prerelease": "pnpm build && pnpm --filter=docs build && pnpm -r --filter='@databricks/*' tarball:prerelease",
     "prepare": "husky",
     "release:sbom": "pnpm exec cdxgen -t js --no-recurse --required-only -o packages/appkit/tmp/sbom.cdx.json packages/appkit && pnpm exec cdxgen -t js --no-recurse --required-only -o packages/appkit-ui/tmp/sbom.cdx.json packages/appkit-ui",
     "release:dry": "release-it --dry-run",
