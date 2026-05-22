@@ -480,7 +480,11 @@ describe("CacheManager", () => {
       controller2.abort();
       await expect(p2).rejects.toThrow();
 
-      // Now shared signal should be aborted
+      // Shared signal not yet aborted (grace period)
+      expect(capturedSignal.aborted).toBe(false);
+
+      // Wait for grace period to expire
+      await new Promise((r) => setTimeout(r, 150));
       expect(capturedSignal.aborted).toBe(true);
     });
 
@@ -529,7 +533,11 @@ describe("CacheManager", () => {
       controller.abort();
       await expect(p).rejects.toThrow();
 
-      // With only one caller, shared controller should also abort
+      // Grace period: shared controller not yet aborted
+      expect(capturedSignal.aborted).toBe(false);
+
+      // Wait for grace period to expire
+      await new Promise((r) => setTimeout(r, 150));
       expect(capturedSignal.aborted).toBe(true);
     });
 
@@ -652,10 +660,13 @@ describe("CacheManager", () => {
             signal.addEventListener("abort", () =>
               reject(new DOMException("aborted", "AbortError")),
             );
-            // Auto-resolve after a tick if not aborted (for the second call)
-            setTimeout(() => {
-              if (!signal.aborted) resolve(`result-${currentCall}`);
-            }, 10);
+            // Only auto-resolve for the second call (first is held open
+            // until the abort timer fires and cancels it)
+            if (currentCall > 1) {
+              setTimeout(() => {
+                if (!signal.aborted) resolve(`result-${currentCall}`);
+              }, 10);
+            }
           }),
       );
 
@@ -665,12 +676,12 @@ describe("CacheManager", () => {
         callerSignal: controller1.signal,
       });
 
-      // Abort the only caller — shared controller should also abort
+      // Abort the only caller — shared controller should abort after grace period
       controller1.abort();
       await expect(p1).rejects.toThrow();
 
-      // Allow the entry.promise .finally() to clean up
-      await new Promise((r) => setTimeout(r, 0));
+      // Wait for grace period + .finally() cleanup
+      await new Promise((r) => setTimeout(r, 200));
 
       // New caller arrives — should get a fresh execution, not the aborted one
       const p2 = cache.getOrExecute(["key"], fn, "user1", { ttl: 60 });
@@ -679,6 +690,89 @@ describe("CacheManager", () => {
       expect(fn).toHaveBeenCalledTimes(2);
       expect(capturedSignals[0].aborted).toBe(true);
       expect(capturedSignals[1].aborted).toBe(false);
+    });
+
+    test("grace period: new caller joins before timer fires — no abort, single execution", async () => {
+      const cache = await CacheManager.getInstance({
+        storage: createMockStorage(),
+      });
+
+      let resolveFn!: (value: string) => void;
+      let capturedSignal!: AbortSignal;
+      const fn = vi.fn().mockImplementation(
+        (signal: AbortSignal) =>
+          new Promise<string>((resolve) => {
+            capturedSignal = signal;
+            resolveFn = resolve;
+          }),
+      );
+
+      const controller1 = new AbortController();
+
+      // Mount #1: starts execution
+      const p1 = cache.getOrExecute(["key"], fn, "user1", {
+        ttl: 60,
+        callerSignal: controller1.signal,
+      });
+
+      // Wait for fn to be invoked
+      await vi.waitFor(() => expect(fn).toHaveBeenCalledTimes(1));
+
+      // Mount #1 unmounts — abort fires, grace period starts
+      controller1.abort();
+      await expect(p1).rejects.toThrow();
+
+      // Shared signal should NOT be aborted yet (grace period active)
+      expect(capturedSignal.aborted).toBe(false);
+
+      // Mount #2 arrives within the grace period — joins the same entry
+      const p2 = cache.getOrExecute(["key"], fn, "user1", { ttl: 60 });
+
+      // Resolve the underlying fn — mount #2 gets the result
+      resolveFn("shared-result");
+      await expect(p2).resolves.toBe("shared-result");
+
+      // fn was only called once — no duplicate execution
+      expect(fn).toHaveBeenCalledTimes(1);
+      // Shared signal was never aborted
+      expect(capturedSignal.aborted).toBe(false);
+    });
+
+    test("grace period: no new caller arrives — timer fires and aborts shared controller", async () => {
+      const cache = await CacheManager.getInstance({
+        storage: createMockStorage(),
+      });
+
+      let capturedSignal!: AbortSignal;
+      const fn = vi.fn().mockImplementation(
+        (signal: AbortSignal) =>
+          new Promise<string>((_resolve, reject) => {
+            capturedSignal = signal;
+            signal.addEventListener("abort", () =>
+              reject(new DOMException("aborted", "AbortError")),
+            );
+          }),
+      );
+
+      const controller = new AbortController();
+      const p = cache.getOrExecute(["key"], fn, "user1", {
+        ttl: 60,
+        callerSignal: controller.signal,
+      });
+
+      await vi.waitFor(() => expect(capturedSignal).toBeDefined());
+
+      controller.abort();
+      await expect(p).rejects.toThrow();
+
+      // Shared signal not yet aborted (grace period)
+      expect(capturedSignal.aborted).toBe(false);
+
+      // Wait for grace period to expire (100ms + buffer)
+      await new Promise((r) => setTimeout(r, 150));
+
+      // Now shared signal should be aborted
+      expect(capturedSignal.aborted).toBe(true);
     });
   });
 

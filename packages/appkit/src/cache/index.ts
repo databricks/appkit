@@ -27,6 +27,7 @@ interface InFlightEntry<T> {
   promise: Promise<T>;
   refCount: number;
   sharedController: AbortController;
+  abortTimer?: ReturnType<typeof setTimeout>;
 }
 
 function createAbortError(signal: AbortSignal): unknown {
@@ -265,6 +266,11 @@ export class CacheManager {
             | undefined;
           if (existing && !existing.sharedController.signal.aborted) {
             existing.refCount++;
+            // Cancel any pending abort timer — a new caller has joined
+            if (existing.abortTimer) {
+              clearTimeout(existing.abortTimer);
+              existing.abortTimer = undefined;
+            }
             span.setAttribute("cache.hit", true);
             span.setAttribute("cache.deduplication", true);
             span.addEvent("cache.deduplication_used", {
@@ -377,9 +383,15 @@ export class CacheManager {
       const release = () => {
         if (entry.refCount > 0) entry.refCount--;
         if (entry.refCount <= 0 && !entry.sharedController.signal.aborted) {
-          entry.sharedController.abort(
-            callerSignal.reason ?? "all cache callers aborted",
-          );
+          // Grace period: delay abort so a StrictMode remount can join
+          // the in-flight entry before the shared execution is cancelled.
+          entry.abortTimer = setTimeout(() => {
+            if (entry.refCount <= 0 && !entry.sharedController.signal.aborted) {
+              entry.sharedController.abort(
+                callerSignal.reason ?? "all cache callers aborted",
+              );
+            }
+          }, 100);
         }
       };
 
