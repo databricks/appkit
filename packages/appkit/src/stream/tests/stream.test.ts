@@ -271,9 +271,14 @@ describe("StreamManager", () => {
       await streamManager.stream(mockRes as any, generator);
 
       expect(events).toContain("event: error\n");
-      expect(events).toContain(
-        'data: {"error":"Internal server error","code":"INTERNAL_ERROR"}\n\n',
-      );
+      // Match the error payload shape rather than the exact frame string —
+      // the frame now also carries a per-error requestId (randomUUID) for
+      // support triage, so we can't pin the full data line literally.
+      const dataLines = events.filter((e: string) => e.startsWith("data: "));
+      const errorLine = dataLines.find((e: string) => e.includes('"error"'));
+      expect(errorLine).toContain('"error":"Internal server error"');
+      expect(errorLine).toContain('"code":"INTERNAL_ERROR"');
+      expect(errorLine).toMatch(/"requestId":"[0-9a-f-]+"/);
     });
 
     test("should not crash if client disconnects during error", async () => {

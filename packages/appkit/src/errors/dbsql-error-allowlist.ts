@@ -2,22 +2,35 @@
  * Allowlist of Databricks SQL Statement Execution API error codes whose
  * `error.message` is safe to forward to clients verbatim.
  *
- * Framing: each `ServiceErrorCode` value falls into one of two camps,
- * based on what wording is interpolated into `error.message` at the
- * gateway construction site:
+ * Threat model — the recipient of these messages is an *authenticated
+ * workspace user*, not an anonymous internet visitor. They already know
+ * the workspace URL, their orgId, their session token, the warehouses
+ * they have grants on, and the catalog contents they can see. Names of
+ * resources within the workspace, internal correlation IDs, and class
+ * names from Databricks-internal packages are not new information to
+ * this audience — the classic CWE-209 "stack-trace-on-500-page-leaks-
+ * to-attacker" scenario does not apply.
  *
- * 1. **Designed-for-user** — the gateway interpolates a stable template
- *    string authored for end users (e.g. "DBSQL temporarily unavailable.
- *    Please try again in a few minutes.") or a DBR-stamped
- *    `errorDisplayMessage` covering the user's own SQL. These messages
- *    are *the entire point* of having an error string — hiding them
- *    forces users to debug in the dark. *Safe to passthrough.*
+ * Given that, the bar for passthrough is: does the message help the
+ * user (or their support contact) understand and act on the failure?
+ * Defaults skew toward yes because:
  *
- * 2. **Designed-for-debugging** — the gateway passes through a wrapped
- *    `ex.getMessage` or interpolates internal identifiers (orgId, unique
- *    warehouse IDs, scheduler pod names, internal column structure).
- *    These are intended for operator log inspection, not for clients.
- *    *Not safe to passthrough* (CWE-209).
+ * - The cost of denial is *certain* (every error becomes "Query
+ *   execution failed" with no signal; users open tickets, support has
+ *   to reproduce or grep server logs to find the actual error).
+ * - The cost of allowing is *speculative* — depends on whatever the
+ *   most recent wrapped exception happened to put in its `.toString()`.
+ *
+ * Server-side, the route handlers always `logger.error(rawMsg)` the
+ * full upstream text before sanitization — operators retain complete
+ * visibility regardless of what reaches the wire. SSE error frames
+ * also carry a `requestId` (the SSE event id) so users can quote it
+ * in support tickets and staff can grep logs against it directly.
+ *
+ * **Currently denied**: `UNKNOWN` only — by definition unclassified,
+ * so we can't reason about its contents and a default-deny is the
+ * minimum safe stance. Every other `ServiceErrorCode` variant is on
+ * the allowlist below with a documented rationale.
  *
  * Source-of-truth construction sites for the classifications below:
  *
@@ -49,13 +62,25 @@
  * - Concurrency conflict (`ABORTED`): short reason strings like
  *   "version mismatch" (Reyden warehouse monitor). No internal context.
  *
- * - Genuinely-internal-only (`INTERNAL_ERROR`, `IO_ERROR`, `UNKNOWN`):
+ * - `INTERNAL_ERROR` / `IO_ERROR`:
  *   `sqlgateway/database/src/main/scala/endpoints/EndpointModel.scala`
  *   interpolates `s"SQL ${conf.warehouse} cannot be created due to
- *   repeated collisions on unique IDs."` — exposes internal database
- *   state. `SchedulerRpcContextValidatorHook.workspaceNotOwned(orgId)`
- *   interpolates orgId. Test fixtures show stack traces interpolated
- *   into `internalMessage`. *Default-deny.*
+ *   repeated collisions on unique IDs."`;
+ *   `SchedulerRpcContextValidatorHook.workspaceNotOwned(orgId)`
+ *   interpolates orgId. These identifiers are not sensitive to a
+ *   workspace user (they own / can list both). The wrapped
+ *   `ex.getMessage` content is unbounded but for the typical case is
+ *   either operational (RPC timeout, lock contention) or shape-of-error
+ *   information the user needs to act. Allowlisted with the requestId
+ *   plumbing as the safety net for triage. *Not* allowlisted if a
+ *   future review finds construction sites that interpolate user
+ *   credentials, OAuth tokens, or other secrets — open an issue + flip
+ *   the entry.
+ *
+ * - `UNKNOWN`: unclassified by definition. We have no way to reason
+ *   about its contents — could be anything from "RPC connect failed"
+ *   to a panic dump from an upstream library. Default-deny is the
+ *   only defensible stance until the SDK gives us a finer code.
  *
  * - `UNAUTHENTICATED` / `CANCELLED` / `DEADLINE_EXCEEDED`: SDK-level
  *   codes with generic message templates.
@@ -113,19 +138,31 @@ const SAFE_PASSTHROUGH_CODES: ReadonlySet<string> = new Set([
   // Concurrency conflict — short reason strings ("version mismatch",
   // "concurrent modification"). User-relevant for retry decisions.
   "ABORTED",
+  // Wrapped internal exceptions. Construction sites interpolate
+  // workspace-internal identifiers (warehouse names, orgIds) and
+  // `ex.getMessage` from arbitrary causes. To an authenticated
+  // workspace user these identifiers are not sensitive — they can
+  // already enumerate them. The wrapped `ex.getMessage` content is
+  // unbounded but in practice is operational ("RPC timed out",
+  // "deadlock detected") or shape-of-failure detail the user needs to
+  // act on. The `requestId` we emit on the SSE error frame is the
+  // safety net for unhappy cases — users can quote it in tickets and
+  // staff can grep logs against it for the full unsanitized message.
+  "INTERNAL_ERROR",
+  // Storage / network failures. Same logic as INTERNAL_ERROR: path /
+  // bucket names visible to a workspace user with catalog access are
+  // not new information, and the wrapped error text usually tells
+  // them whether to retry, switch warehouses, or escalate.
+  "IO_ERROR",
 ]);
 
 /**
  * Explicitly NOT on the allowlist (documented for future-reviewer
  * context; classification is by absence from `SAFE_PASSTHROUGH_CODES`):
  *
- * - `INTERNAL_ERROR` — construction sites interpolate unique warehouse
- *   IDs, orgIds, and wrap `ex.getMessage` from arbitrary exceptions.
- *   Example: `s"SQL ${conf.warehouse} cannot be created due to repeated
- *   collisions on unique IDs."` (`EndpointModel.scala`). High leak risk.
- * - `IO_ERROR` — storage / network failures; messages typically include
- *   bucket names, paths, internal hostnames.
- * - `UNKNOWN` — unclassified by definition; can be anything.
+ * - `UNKNOWN` — unclassified by definition; could be anything from a
+ *   library panic to an unhandled `case` in the gateway. Default-deny
+ *   is the only defensible stance until the SDK gives us a finer code.
  */
 
 /**

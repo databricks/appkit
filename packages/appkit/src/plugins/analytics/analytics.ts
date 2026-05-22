@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import { tableFromIPC } from "apache-arrow";
 import type express from "express";
@@ -146,9 +147,15 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         // Already drained, expired, or never belonged to this user. 410
         // distinguishes this from "warehouse statement id not found" (404)
         // so the client can surface a useful error.
-        logger.debug("Inline Arrow stash miss for jobId=%s", jobId);
+        const requestId = randomUUID();
+        logger.debug(
+          "Inline Arrow stash miss for jobId=%s requestId=%s",
+          jobId,
+          requestId,
+        );
         res.status(410).json({
           error: "Inline Arrow result expired or unknown",
+          requestId,
           plugin: this.name,
         });
         return;
@@ -183,15 +190,18 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       );
       res.send(Buffer.from(result.data));
     } catch (error) {
-      logger.error("Arrow job error: %O", error);
-      // Do not echo upstream / SDK error text to the client — it can
-      // include statement fragments, internal object names, and
-      // correlation IDs. The full detail stays in the server log above.
+      const requestId = randomUUID();
+      logger.error("Arrow job error (requestId=%s): %O", requestId, error);
+      // Do not echo upstream / SDK error text to the client — the
+      // detail stays in the server log above, keyed by requestId so
+      // a user quoting it in a support ticket lets staff grep
+      // directly to this line.
       const errorCode =
         error instanceof ExecutionError ? error.errorCode : undefined;
       res.status(404).json({
         error: "Arrow result unavailable",
         errorCode,
+        requestId,
         plugin: this.name,
       });
     }

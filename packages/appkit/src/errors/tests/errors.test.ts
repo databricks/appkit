@@ -367,27 +367,32 @@ describe("ExecutionError", () => {
       expect(error.clientMessage).toBe("Statement failed: Permission denied");
     });
 
-    test("INTERNAL_ERROR collapses to generic — control-plane text may carry stack traces, correlation IDs, internal paths (CWE-209)", () => {
+    test("INTERNAL_ERROR passes through (workspace identifiers are non-sensitive to authenticated user; requestId backstops triage)", () => {
+      // Interpolated warehouse names and orgIds are not new information
+      // to a workspace user — they can enumerate both via the SDK.
+      // Wrapped `ex.getMessage` is operationally useful for the user
+      // to act ("RPC timed out", "deadlock detected") and the
+      // requestId on the SSE error frame keys server logs for triage.
       const error = ExecutionError.statementFailed(
-        "RPC to warehouse-prod-us-east-1.svc failed: corrId=abc-123, stack: at scheduler.process()",
+        "SQL my-warehouse cannot be created due to repeated collisions on unique IDs.",
         "INTERNAL_ERROR",
       );
-      // .message keeps the raw text for server logs.
-      expect(error.message).toContain("corrId=abc-123");
-      // .clientMessage collapses to the generic default.
-      expect(error.clientMessage).toBe("Query execution failed");
+      expect(error.clientMessage).toBe(
+        "Statement failed: SQL my-warehouse cannot be created due to repeated collisions on unique IDs.",
+      );
     });
 
-    test("IO_ERROR collapses to generic (may leak storage paths / bucket names)", () => {
+    test("IO_ERROR passes through (storage path / network failure detail is actionable, not credential-bearing)", () => {
       const error = ExecutionError.statementFailed(
-        "Failed to read s3://internal-staging-bucket-3/path/to/shard",
+        "Failed to read manifest after 3 retries",
         "IO_ERROR",
       );
-      expect(error.clientMessage).toBe("Query execution failed");
-      expect(error.message).toContain("internal-staging-bucket-3");
+      expect(error.clientMessage).toBe(
+        "Statement failed: Failed to read manifest after 3 retries",
+      );
     });
 
-    test("UNKNOWN collapses to generic (unclassified by definition)", () => {
+    test("UNKNOWN collapses to generic (unclassified by definition — cannot reason about contents)", () => {
       const error = ExecutionError.statementFailed(
         "Something went wrong: scheduler-pod-3 returned 500",
         "UNKNOWN",
@@ -481,20 +486,23 @@ describe("ExecutionError", () => {
 
     test("server-side .message always preserves the raw upstream text for log debugging", () => {
       // Regardless of passthrough decision, the raw text stays on
-      // `.message` for `logger.error(err)` calls to capture full detail.
+      // `.message` for `logger.error(err)` calls to capture full
+      // detail. For UNKNOWN (the only denied code), clientMessage
+      // collapses but .message still has the full content.
       const safe = ExecutionError.statementFailed(
         "Table 'users' not found",
         "BAD_REQUEST",
       );
       expect(safe.message).toBe("Statement failed: Table 'users' not found");
 
-      const unsafe = ExecutionError.statementFailed(
-        "Internal RPC failed: corrId=abc",
-        "INTERNAL_ERROR",
+      const denied = ExecutionError.statementFailed(
+        "Unclassified failure with corrId=abc",
+        "UNKNOWN",
       );
-      expect(unsafe.message).toBe(
-        "Statement failed: Internal RPC failed: corrId=abc",
+      expect(denied.message).toBe(
+        "Statement failed: Unclassified failure with corrId=abc",
       );
+      expect(denied.clientMessage).toBe("Query execution failed");
     });
   });
 });

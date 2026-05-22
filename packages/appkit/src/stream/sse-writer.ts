@@ -43,9 +43,17 @@ export class SSEWriter {
   ): void {
     if (res.writableEnded) return;
 
+    // The SSE `id:` line and the in-payload `requestId` are
+    // intentionally the same value: the wire-level id is invisible to
+    // most React consumers (the event-source `data` is what reaches
+    // app code), so we duplicate it inside the JSON so the hook can
+    // surface it. Server-side logs use this same id in the
+    // `Stream execution failed` line — a user quoting it lets staff
+    // grep logs directly.
     const errorData: SSEError = {
       error,
       code,
+      requestId: eventId,
       ...(errorCode ? { errorCode } : {}),
     };
 

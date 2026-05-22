@@ -122,6 +122,7 @@ export function useAnalyticsQuery<
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
+  const [requestId, setRequestId] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   if (!queryKey || queryKey.trim().length === 0) {
@@ -170,6 +171,7 @@ export function useAnalyticsQuery<
     setLoading(true);
     setError(null);
     setErrorCode(null);
+    setRequestId(null);
     setData(null);
 
     const abortController = new AbortController();
@@ -247,10 +249,16 @@ export function useAnalyticsQuery<
             if (typeof parsed.errorCode === "string") {
               setErrorCode(parsed.errorCode);
             }
+            // requestId is the SSE event id of the error frame — same
+            // value the server logs in its `Stream execution failed`
+            // line, so users can quote it in support tickets.
+            if (typeof parsed.requestId === "string") {
+              setRequestId(parsed.requestId);
+            }
 
             if (parsed.code) {
               console.error(
-                `[useAnalyticsQuery] Code: ${parsed.code}, Message: ${errorMsg}`,
+                `[useAnalyticsQuery] Code: ${parsed.code}, Message: ${errorMsg}, requestId: ${parsed.requestId ?? "n/a"}`,
               );
             }
             return;
@@ -321,5 +329,5 @@ export function useAnalyticsQuery<
   // Enable HMR for query updates in dev mode
   useQueryHMR(queryKey, start);
 
-  return { data, loading, error, errorCode };
+  return { data, loading, error, errorCode, requestId };
 }

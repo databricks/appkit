@@ -2,7 +2,10 @@ import { describe, expect, test } from "vitest";
 import { isSqlErrorPassthrough } from "../dbsql-error-allowlist";
 
 describe("isSqlErrorPassthrough", () => {
-  // Allowlist members — designed-for-user messages.
+  // Allowlist members — passthrough is net-positive given the
+  // workspace-user threat model (recipient already knows the workspace's
+  // resources). Server-side full-detail logging + the requestId on the
+  // SSE error frame backstop the unhappy cases.
   test.each([
     // DBR data plane — user's own SQL errors.
     ["BAD_REQUEST"],
@@ -22,21 +25,24 @@ describe("isSqlErrorPassthrough", () => {
     // Quota — stable user-actionable templates ("Stop or delete
     // existing warehouses to free up capacity.").
     ["RESOURCE_EXHAUSTED"],
-    // Concurrency conflict — short reason strings, user-relevant for
-    // retry decisions.
+    // Concurrency conflict — short reason strings, user-relevant.
     ["ABORTED"],
-  ])("%s is allowlisted (designed-for-user message)", (code) => {
+    // Wrapped internal exceptions — interpolated identifiers (orgId,
+    // warehouse name) are non-sensitive to an authenticated workspace
+    // user; the wrapped `ex.getMessage` content is operationally
+    // useful for triage. RequestId on the SSE error frame is the
+    // safety net for unhappy cases.
+    ["INTERNAL_ERROR"],
+    ["IO_ERROR"],
+  ])("%s is allowlisted", (code) => {
     expect(isSqlErrorPassthrough(code)).toBe(true);
   });
 
-  // Explicit denylist — designed-for-debugging, interpolates internal
-  // identifiers, stack traces, or storage paths.
-  test.each([["INTERNAL_ERROR"], ["IO_ERROR"], ["UNKNOWN"]])(
-    "%s is denied (designed-for-debugging, interpolates internal state)",
-    (code) => {
-      expect(isSqlErrorPassthrough(code)).toBe(false);
-    },
-  );
+  // Only UNKNOWN stays denied — unclassified by definition, so the
+  // wrapped content is unbounded in shape AND in source.
+  test("UNKNOWN is denied (unclassified — cannot reason about contents)", () => {
+    expect(isSqlErrorPassthrough("UNKNOWN")).toBe(false);
+  });
 
   test("undefined and empty string are denied (default-deny on missing source)", () => {
     expect(isSqlErrorPassthrough(undefined)).toBe(false);

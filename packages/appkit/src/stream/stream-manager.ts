@@ -309,17 +309,22 @@ export class StreamManager {
         if (errorCode === SSEErrorCode.STREAM_ABORTED) {
           logger.info("Stream aborted by client (code=%s)", errorCode);
         } else {
+          // Log line includes the requestId we'll emit to the client —
+          // a user quoting their requestId in a support ticket lets
+          // staff grep this exact line for the full raw message.
           logger.error(
-            "Stream execution failed: %s (code=%s upstreamCode=%s)",
+            "Stream execution failed: %s (code=%s upstreamCode=%s requestId=%s)",
             rawMsg,
             errorCode,
             upstreamCode ?? "n/a",
+            errorEventId,
           );
         }
 
         const payload: Record<string, unknown> = {
           error: clientMsg,
           code: errorCode,
+          requestId: errorEventId,
         };
         if (upstreamCode) payload.errorCode = upstreamCode;
 

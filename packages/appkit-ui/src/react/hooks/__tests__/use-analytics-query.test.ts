@@ -184,12 +184,12 @@ describe("useAnalyticsQuery", () => {
     expect(result.current.data).toBeNull();
   });
 
-  test("a server error event carrying a structured errorCode exposes it on the hook return value", async () => {
-    // The SSE error broadcaster forwards an `errorCode` field for
-    // UI branching (e.g. INLINE_ARROW_STASH_EXHAUSTED). The hook
-    // surfaces both the human `error` text AND the structured
-    // `errorCode` so consumers can branch on the stable identifier
-    // instead of substring-matching the sanitized human message.
+  test("a server error event carrying a structured errorCode + requestId exposes both on the hook return value", async () => {
+    // The SSE error broadcaster forwards `errorCode` (for UI branching)
+    // and `requestId` (for support triage — same id appears in the
+    // server-side logger.error line). The hook surfaces both so
+    // consumers can render "Error ref: <requestId>" alongside the
+    // human message and branch behavior on the stable errorCode.
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const { result } = renderHook(() =>
@@ -202,6 +202,7 @@ describe("useAnalyticsQuery", () => {
         error: "Server is at capacity, please retry",
         code: "UPSTREAM_ERROR",
         errorCode: "INLINE_ARROW_STASH_EXHAUSTED",
+        requestId: "11111111-2222-3333-4444-555555555555",
       }),
     });
 
@@ -210,6 +211,9 @@ describe("useAnalyticsQuery", () => {
     });
     expect(result.current.loading).toBe(false);
     expect(result.current.errorCode).toBe("INLINE_ARROW_STASH_EXHAUSTED");
+    expect(result.current.requestId).toBe(
+      "11111111-2222-3333-4444-555555555555",
+    );
 
     errorSpy.mockRestore();
   });

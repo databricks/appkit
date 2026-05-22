@@ -73,6 +73,15 @@ export interface UseAnalyticsQueryResult<T> {
    * matching `error`, which is a free-form sanitized message.
    */
   errorCode: string | null;
+  /**
+   * Server-side correlation id for support triage. When non-null, the
+   * server emitted this id on the error frame and the same id appears
+   * in the backend's `logger.error` line. Surface it in error UIs
+   * ("Error ref: abc-123 — quote when filing a support ticket") so
+   * staff can grep server logs directly instead of asking the user to
+   * reproduce.
+   */
+  requestId: string | null;
 }
 
 /**

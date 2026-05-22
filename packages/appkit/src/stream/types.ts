@@ -31,6 +31,14 @@ export interface SSEError {
    * the human-readable `error` string.
    */
   errorCode?: string;
+  /**
+   * Correlation id for support triage. Set to the SSE event id of the
+   * error frame — the same value that appears in the server-side
+   * `logger.error("Stream execution failed: ...")` line, so a user
+   * quoting this id lets staff grep logs directly. Stable per-error,
+   * unique across the process lifetime.
+   */
+  requestId?: string;
 }
 
 export interface BufferedEvent {
