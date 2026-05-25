@@ -18,8 +18,9 @@ vi.mock("../../cache", () => ({
       get: vi.fn(),
       set: vi.fn(),
       delete: vi.fn(),
-      getOrExecute: vi.fn(async (_k: unknown[], fn: () => Promise<unknown>) =>
-        fn(),
+      getOrExecute: vi.fn(
+        async (_k: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
+          fn(),
       ),
       generateKey: vi.fn(() => "test-key"),
     })),
@@ -27,8 +28,9 @@ vi.mock("../../cache", () => ({
       get: vi.fn(),
       set: vi.fn(),
       delete: vi.fn(),
-      getOrExecute: vi.fn(async (_k: unknown[], fn: () => Promise<unknown>) =>
-        fn(),
+      getOrExecute: vi.fn(
+        async (_k: unknown[], fn: (signal?: AbortSignal) => Promise<unknown>) =>
+          fn(),
       ),
       generateKey: vi.fn(() => "test-key"),
     })),

@@ -51,6 +51,7 @@ function createAbortError(signal: AbortSignal): unknown {
  */
 export class CacheManager {
   private static readonly MIN_CLEANUP_INTERVAL_MS = 60_000;
+  private static readonly ABORT_GRACE_PERIOD_MS = 100;
   private readonly name: string = "cache-manager";
   private static instance: CacheManager | null = null;
   private static initPromise: Promise<CacheManager> | null = null;
@@ -276,7 +277,6 @@ export class CacheManager {
             span.addEvent("cache.deduplication_used", {
               "cache.key": cacheKey,
             });
-            span.setStatus({ code: SpanStatusCode.OK });
             this.telemetryMetrics.cacheHitCount.add(1, {
               "cache.key": cacheKey,
               "cache.deduplication": "true",
@@ -288,7 +288,7 @@ export class CacheManager {
               cache_deduplication: true,
             });
 
-            return await this._waitWithRefCount(existing, callerSignal);
+            return await this.waitWithRefCount(existing, callerSignal);
           }
 
           // cache miss - execute function under a shared abort controller
@@ -344,12 +344,12 @@ export class CacheManager {
 
           // Suppress unhandled rejection warnings when every caller bailed
           // before fn() resolved (their own promises rejected via
-          // _waitWithRefCount; the underlying entry.promise has no awaiter).
+          // waitWithRefCount; the underlying entry.promise has no awaiter).
           entry.promise.catch(() => {});
 
           this.inFlightRequests.set(cacheKey, entry as InFlightEntry<unknown>);
 
-          const result = await this._waitWithRefCount(entry, callerSignal);
+          const result = await this.waitWithRefCount(entry, callerSignal);
           span.setStatus({ code: SpanStatusCode.OK });
           return result;
         } catch (error) {
@@ -371,7 +371,7 @@ export class CacheManager {
    * underlying `fn()` can stop. Other callers continue to await the same
    * entry and receive the result when it arrives.
    */
-  private _waitWithRefCount<T>(
+  private waitWithRefCount<T>(
     entry: InFlightEntry<T>,
     callerSignal?: AbortSignal,
   ): Promise<T> {
@@ -391,7 +391,7 @@ export class CacheManager {
                 callerSignal.reason ?? "all cache callers aborted",
               );
             }
-          }, 100);
+          }, CacheManager.ABORT_GRACE_PERIOD_MS);
         }
       };
 
@@ -517,6 +517,9 @@ export class CacheManager {
   /** Clear the cache */
   async clear(): Promise<void> {
     await this.storage.clear();
+    for (const entry of this.inFlightRequests.values()) {
+      if (entry.abortTimer) clearTimeout(entry.abortTimer);
+    }
     this.inFlightRequests.clear();
   }
 

@@ -27,7 +27,11 @@ const { mockCacheStore, mockCacheInstance } = vi.hoisted(() => {
     set: vi.fn(),
     delete: vi.fn(),
     getOrExecute: vi.fn(
-      async (key: unknown[], fn: () => Promise<unknown>, userKey: string) => {
+      async (
+        key: unknown[],
+        fn: (signal?: AbortSignal) => Promise<unknown>,
+        userKey: string,
+      ) => {
         const cacheKey = generateKey(key, userKey);
         if (store.has(cacheKey)) {
           return store.get(cacheKey);
