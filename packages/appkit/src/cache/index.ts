@@ -27,6 +27,7 @@ interface InFlightEntry<T> {
   promise: Promise<T>;
   refCount: number;
   sharedController: AbortController;
+  abortTimer?: ReturnType<typeof setTimeout>;
 }
 
 function createAbortError(signal: AbortSignal): unknown {
@@ -50,6 +51,7 @@ function createAbortError(signal: AbortSignal): unknown {
  */
 export class CacheManager {
   private static readonly MIN_CLEANUP_INTERVAL_MS = 60_000;
+  private static readonly ABORT_GRACE_PERIOD_MS = 100;
   private readonly name: string = "cache-manager";
   private static instance: CacheManager | null = null;
   private static initPromise: Promise<CacheManager> | null = null;
@@ -263,14 +265,18 @@ export class CacheManager {
           const existing = this.inFlightRequests.get(cacheKey) as
             | InFlightEntry<T>
             | undefined;
-          if (existing) {
+          if (existing && !existing.sharedController.signal.aborted) {
             existing.refCount++;
+            // Cancel any pending abort timer — a new caller has joined
+            if (existing.abortTimer) {
+              clearTimeout(existing.abortTimer);
+              existing.abortTimer = undefined;
+            }
             span.setAttribute("cache.hit", true);
             span.setAttribute("cache.deduplication", true);
             span.addEvent("cache.deduplication_used", {
               "cache.key": cacheKey,
             });
-            span.setStatus({ code: SpanStatusCode.OK });
             this.telemetryMetrics.cacheHitCount.add(1, {
               "cache.key": cacheKey,
               "cache.deduplication": "true",
@@ -282,7 +288,6 @@ export class CacheManager {
               cache_deduplication: true,
             });
 
-            span.end();
             return await this._waitWithRefCount(existing, callerSignal);
           }
 
@@ -332,12 +337,14 @@ export class CacheManager {
               );
             })
             .finally(() => {
-              this.inFlightRequests.delete(cacheKey);
+              if (this.inFlightRequests.get(cacheKey) === entry) {
+                this.inFlightRequests.delete(cacheKey);
+              }
             });
 
           // Suppress unhandled rejection warnings when every caller bailed
           // before fn() resolved (their own promises rejected via
-          // _waitWithRefCount; the underlying entry.promise has no awaiter).
+          // waitWithRefCount; the underlying entry.promise has no awaiter).
           entry.promise.catch(() => {});
 
           this.inFlightRequests.set(cacheKey, entry as InFlightEntry<unknown>);
@@ -376,9 +383,15 @@ export class CacheManager {
       const release = () => {
         if (entry.refCount > 0) entry.refCount--;
         if (entry.refCount <= 0 && !entry.sharedController.signal.aborted) {
-          entry.sharedController.abort(
-            callerSignal.reason ?? "all cache callers aborted",
-          );
+          // Grace period: delay abort so a StrictMode remount can join
+          // the in-flight entry before the shared execution is cancelled.
+          entry.abortTimer = setTimeout(() => {
+            if (entry.refCount <= 0 && !entry.sharedController.signal.aborted) {
+              entry.sharedController.abort(
+                callerSignal.reason ?? "all cache callers aborted",
+              );
+            }
+          }, CacheManager.ABORT_GRACE_PERIOD_MS);
         }
       };
 
@@ -504,6 +517,9 @@ export class CacheManager {
   /** Clear the cache */
   async clear(): Promise<void> {
     await this.storage.clear();
+    for (const entry of this.inFlightRequests.values()) {
+      if (entry.abortTimer) clearTimeout(entry.abortTimer);
+    }
     this.inFlightRequests.clear();
   }
 
