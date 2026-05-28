@@ -1,16 +1,21 @@
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
+import type { sql, WorkspaceClient } from "@databricks/sdk-experimental";
 import type express from "express";
 import type {
   AgentToolDefinition,
   IAppRouter,
-  PluginExecuteConfig,
   SQLTypeMarker,
-  StreamExecutionSettings,
   ToolProvider,
 } from "shared";
 import { z } from "zod";
 import { SQLWarehouseConnector } from "../../connectors";
-import { getWarehouseId, getWorkspaceClient } from "../../context";
+import {
+  getCurrentUserContext,
+  getCurrentUserId,
+  getWarehouseId,
+  getWorkspaceClient,
+  isInUserContext,
+  runInUserContext,
+} from "../../context";
 import { buildToolkitEntries } from "../../core/agent/build-toolkit";
 import {
   defineTool,
@@ -18,10 +23,11 @@ import {
   toolsFromRegistry,
 } from "../../core/agent/tools/define-tool";
 import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
+import { ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
-import { queryDefaults } from "./defaults";
+import { type TypedTaskContext, userContextFromTaskCtx } from "../../tasks";
 import manifest from "./manifest.json";
 import { QueryProcessor } from "./query";
 import type {
@@ -29,9 +35,41 @@ import type {
   IAnalyticsConfig,
   IAnalyticsQueryRequest,
 } from "./types";
-import { normalizeAnalyticsFormat } from "./types";
 
 const logger = createLogger("analytics");
+
+/**
+ * Input for the durable `analytics:query` task. Every field participates
+ * in the engine-derived IK, so the SP/OBO discriminator (`executorKey`,
+ * `isAsUser`) and `formatType` must live here to keep dedup correct.
+ */
+interface AnalyticsQueryTaskInput {
+  queryKey: string;
+  statement: string;
+  parameters?: Record<string, SQLTypeMarker | null | undefined>;
+  formatParameters?: Record<string, unknown>;
+  executorKey: string;
+  isAsUser: boolean;
+  formatType: "arrow" | "result";
+}
+
+/** Flat shape mirroring the legacy `response.result`: `{ statement_id, status }` for Arrow, `{ ...rest, data }` for JSON, or `null`. */
+type AnalyticsQueryTaskResult = Record<string, unknown> | null;
+
+/**
+ * Typed `ctx.emit` map. Each key becomes the SSE `event:` name on the wire.
+ * - `data`: terminal frame the client renders.
+ * - `statement_submitted`: WAL checkpoint so recovery can re-attach.
+ * - `recovered`: signals revival, with or without re-attach.
+ */
+interface AnalyticsTaskEvents extends Record<string, unknown> {
+  data: { type: "arrow" | "result"; [k: string]: unknown };
+  statement_submitted: {
+    statement_id: string;
+    status?: sql.StatementStatus["state"];
+  };
+  recovered: { reattach: true; statement_id: string } | { reattach: false };
+}
 
 export class AnalyticsPlugin extends Plugin implements ToolProvider {
   /** Plugin manifest declaring metadata and resource requirements */
@@ -44,6 +82,11 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
   private SQLClient: SQLWarehouseConnector;
   private queryProcessor: QueryProcessor;
 
+  /** Plugin-scoped task name so multi-instance setups don't collide. */
+  private get queryTaskName(): string {
+    return `${this.name}:query`;
+  }
+
   constructor(config: IAnalyticsConfig) {
     super(config);
     this.config = config;
@@ -53,6 +96,175 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       timeout: config.timeout,
       telemetry: config.telemetry,
     });
+  }
+
+  /**
+   * Register the durable `analytics:<name>:query` task. No-op when
+   * TaskFlow is opted out; {@link query} falls back to the direct path.
+   *
+   * `autoRecover: false` because OBO recovery needs a fresh request:
+   * callers revive via `this.task.resume(ik, { context: req })`.
+   */
+  async setup(): Promise<void> {
+    if (!this.task) {
+      logger.debug("TaskFlow disabled; analytics will use the direct path.");
+      return;
+    }
+    this.task.task<
+      AnalyticsQueryTaskInput,
+      AnalyticsQueryTaskResult,
+      AnalyticsTaskEvents
+    >({
+      name: this.queryTaskName,
+      execute: (input, ctx) => this._runQueryTask(input, ctx),
+      autoRecover: false,
+    });
+  }
+
+  /**
+   * Resolves SP vs OBO from `ctx.context`, then delegates to
+   * {@link _runQueryInner}. OBO without a forwarded UserContext is a
+   * hard error — silently falling back to SP would leak results across
+   * users.
+   */
+  private async _runQueryTask(
+    input: AnalyticsQueryTaskInput,
+    ctx: TypedTaskContext<AnalyticsTaskEvents>,
+  ): Promise<AnalyticsQueryTaskResult> {
+    const userCtx = input.isAsUser ? userContextFromTaskCtx(ctx) : null;
+    if (input.isAsUser && !userCtx) {
+      throw new Error(
+        "OBO analytics task ran without a UserContext. Pass `context: req` " +
+          "to `this.task.resume(...)` from a fresh authenticated request, or " +
+          "invoke via `appkit.<plugin>.asUser(req)` so the bridge captures " +
+          "it. Falling back to the service principal would leak results.",
+      );
+    }
+    if (userCtx) {
+      return runInUserContext(userCtx, () => this._runQueryInner(input, ctx));
+    }
+    return this._runQueryInner(input, ctx);
+  }
+
+  private async _runQueryInner(
+    input: AnalyticsQueryTaskInput,
+    ctx: TypedTaskContext<AnalyticsTaskEvents>,
+  ): Promise<AnalyticsQueryTaskResult> {
+    const wsClient = getWorkspaceClient();
+    const warehouseId = await getWarehouseId();
+
+    if (ctx.isRecovery) {
+      const events = Array.isArray(ctx.previousEvents)
+        ? ctx.previousEvents
+        : [];
+      let submitted: (typeof events)[number] | undefined;
+      for (let i = events.length - 1; i >= 0; i--) {
+        const evt = events[i];
+        if (evt?.eventType === "custom:statement_submitted") {
+          submitted = evt;
+          break;
+        }
+      }
+      const statementId =
+        submitted?.payload && typeof submitted.payload === "object"
+          ? (submitted.payload as { statement_id?: string }).statement_id
+          : undefined;
+      if (statementId) {
+        logger.info(
+          "[analytics:task] RECOVERY REATTACH — polling existing statement_id=%s (no resubmit to warehouse)",
+          statementId,
+        );
+        await ctx.emit("recovered", {
+          reattach: true,
+          statement_id: statementId,
+        });
+        const raw = await this.SQLClient.pollStatement(wsClient, statementId);
+        const flat = AnalyticsPlugin._flattenStatementResult(raw);
+        await this._emitDataFrame(ctx, input, flat);
+        return flat;
+      }
+      logger.warn(
+        "[analytics:task] RECOVERY FALLBACK — no statement_submitted checkpoint in previousEvents; re-executing from scratch",
+      );
+      // Crashed before the checkpoint landed — re-execute.
+      await ctx.emit("recovered", { reattach: false });
+    }
+
+    const { statement, parameters: sqlParameters } =
+      this.queryProcessor.convertToSQLParameters(
+        input.statement,
+        input.parameters,
+      );
+
+    // Force early-return so the WAL checkpoint lands before a long
+    // query finishes. Without this, the connector's default
+    // `wait_timeout: 30s` makes Statement Execution API hold the
+    // connection until the query completes (when <30s), collapsing the
+    // crash-recovery window. `on_wait_timeout: CONTINUE` keeps the
+    // statement running on the warehouse so the recovery poll can
+    // reattach by `statement_id`.
+    const submitStart = Date.now();
+    const submission = await this.SQLClient.submitStatement(wsClient, {
+      statement,
+      warehouse_id: warehouseId,
+      parameters: sqlParameters,
+      wait_timeout: "5s",
+      on_wait_timeout: "CONTINUE",
+      ...(input.formatParameters as Partial<sql.ExecuteStatementRequest>),
+    });
+    const statementId = submission.statement_id as string;
+    logger.info(
+      "[analytics:task] statement submitted statement_id=%s elapsed_ms=%d state=%s",
+      statementId,
+      Date.now() - submitStart,
+      submission.status?.state,
+    );
+    await ctx.emit("statement_submitted", {
+      statement_id: statementId,
+      status: submission.status?.state,
+    });
+
+    const raw =
+      submission.status?.state === "SUCCEEDED"
+        ? this.SQLClient.transformResult(submission)
+        : await this.SQLClient.pollStatement(wsClient, statementId);
+    const flat = AnalyticsPlugin._flattenStatementResult(raw);
+    await this._emitDataFrame(ctx, input, flat);
+    return flat;
+  }
+
+  /**
+   * Unwraps `.result` so SSE and programmatic callers see the same flat
+   * shape as the legacy direct path. Returns `null` for DDL/DML with no
+   * result body.
+   */
+  private static _flattenStatementResult(
+    raw: sql.StatementResponse | { result: unknown },
+  ): AnalyticsQueryTaskResult {
+    if (raw && typeof raw === "object" && "result" in raw) {
+      const inner = (raw as { result: unknown }).result;
+      if (inner && typeof inner === "object" && !Array.isArray(inner)) {
+        return inner as Record<string, unknown>;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Emits the terminal `data` frame in the flat shape the analytics
+   * client expects (`{ type, ...flat }`). The engine's own `completed`
+   * frame wraps the handler return — clients read this one instead.
+   */
+  private async _emitDataFrame(
+    ctx: TypedTaskContext<AnalyticsTaskEvents>,
+    input: AnalyticsQueryTaskInput,
+    flat: AnalyticsQueryTaskResult,
+  ): Promise<void> {
+    const body: AnalyticsTaskEvents["data"] = {
+      type: input.formatType,
+      ...(flat ?? {}),
+    };
+    await ctx.emit("data", body);
   }
 
   injectRoutes(router: IAppRouter) {
@@ -129,9 +341,11 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     res: express.Response,
   ): Promise<void> {
     const { query_key } = req.params;
-    const { parameters, format: rawFormat = "JSON_ARRAY" } =
-      req.body as IAnalyticsQueryRequest;
-    const format = normalizeAnalyticsFormat(rawFormat);
+    const {
+      parameters,
+      format = "JSON",
+      direct = false,
+    } = req.body as IAnalyticsQueryRequest;
 
     // Request-scoped logging with WideEvent tracking
     logger.debug(req, "Executing query: %s (format=%s)", query_key, format);
@@ -161,80 +375,101 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     }
 
     const { query, isAsUser } = queryResult;
-
-    // get execution context - user-scoped if .obo.sql, otherwise service principal
-    const executor = isAsUser ? this.asUser(req) : this;
     const executorKey = isAsUser ? this.resolveUserId(req) : "global";
 
-    const queryParameters =
-      format === "ARROW_STREAM"
-        ? {
-            formatParameters: {
-              disposition: "EXTERNAL_LINKS",
-              format: "ARROW_STREAM",
-            },
-            type: "arrow",
-          }
-        : {
-            type: "result",
-          };
+    const isArrow = format === "ARROW";
+    const formatParametersForRequest = isArrow
+      ? { disposition: "EXTERNAL_LINKS", format: "ARROW_STREAM" }
+      : undefined;
+    const formatType: "arrow" | "result" = isArrow ? "arrow" : "result";
 
-    const hashedQuery = this.queryProcessor.hashQuery(query);
+    const processedParams = await this.queryProcessor.processQueryParams(
+      query,
+      parameters,
+    );
 
-    const defaultConfig: PluginExecuteConfig = {
-      ...queryDefaults,
-      cache: {
-        ...queryDefaults.cache,
-        cacheKey: [
-          "analytics:query",
-          query_key,
-          JSON.stringify(parameters),
-          JSON.stringify(format),
-          hashedQuery,
-          executorKey,
-        ],
-      },
-    };
+    // OBO goes through the `asUser(req)` proxy so `executeTask` runs
+    // inside `runInUserContext` and the bridge forwards the user to the
+    // engine sidecar.
+    const target = isAsUser ? this.asUser(req) : this;
 
-    const streamExecutionSettings: StreamExecutionSettings = {
-      default: defaultConfig,
-    };
+    // `direct: true` opts out for hot paths where the WAL + spawn
+    // overhead dominates a sub-500ms query. Auto-falls-through when
+    // TaskFlow is disabled at boot.
+    if (direct || !this.task) {
+      await this._handleDirectQueryRoute(req, res, target as this, {
+        query,
+        processedParams,
+        formatParametersForRequest,
+        formatType,
+        isAsUser,
+      });
+      return;
+    }
 
-    await executor.executeStream(
+    // OBO uses `at_most_once` to prevent two pods double-submitting the
+    // same warehouse statement (DML side effects, billing). SP stays on
+    // `at_least_once` for latency since results are read-only.
+    await target.executeTask<AnalyticsQueryTaskInput>(
       res,
-      async (signal) => {
-        const processedParams = await this.queryProcessor.processQueryParams(
-          query,
-          parameters,
-        );
-
-        const result = await executor.query(
-          query,
-          processedParams,
-          queryParameters.formatParameters,
-          signal,
-        );
-
-        return { type: queryParameters.type, ...result };
+      this.queryTaskName,
+      {
+        queryKey: query_key,
+        statement: query,
+        parameters: processedParams,
+        formatParameters: formatParametersForRequest,
+        executorKey,
+        isAsUser,
+        formatType,
       },
-      streamExecutionSettings,
-      executorKey,
+      {
+        executeMode: isAsUser ? "at_most_once" : "at_least_once",
+      },
     );
   }
 
   /**
-   * Execute a SQL query using the current execution context.
+   * Bypasses TaskFlow but emits the same `{ type, ...flat }` payload as
+   * the durable path. No IK, no recovery, no dedup — one-shot.
+   */
+  private async _handleDirectQueryRoute(
+    _req: express.Request,
+    res: express.Response,
+    target: this,
+    args: {
+      query: string;
+      processedParams: Record<string, SQLTypeMarker | null | undefined>;
+      formatParametersForRequest: Record<string, unknown> | undefined;
+      formatType: "arrow" | "result";
+      isAsUser: boolean;
+    },
+  ): Promise<void> {
+    const flat = await target._queryDirect(
+      args.query,
+      args.processedParams,
+      args.formatParametersForRequest,
+    );
+    const body = {
+      type: args.formatType,
+      ...((flat as Record<string, unknown> | null | undefined) ?? {}),
+    };
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.status(200).json(body);
+  }
+
+  /**
+   * Execute a SQL query. Defaults to the durable TaskFlow path
+   * (statement+params+format+executor dedup, crash-recovery via the
+   * persisted `statement_submitted` checkpoint). Falls back to the
+   * direct path when `options.direct` or when TaskFlow is opted out.
    *
-   * When called directly: uses service principal credentials.
-   * When called via asUser(req).query(...): uses user's credentials.
+   * Identity is the active execution context: SP by default, the
+   * caller's user when invoked via `asUser(req).query(...)`.
    *
    * @example
    * ```typescript
-   * // Service principal execution
-   * const result = await analytics.query("SELECT * FROM table")
-   *
-   * // User context execution (in route handler)
-   * const result = await this.asUser(req).query("SELECT * FROM table")
+   * await analytics.query("SELECT * FROM table");                 // SP
+   * await this.asUser(req).query("SELECT * FROM table");          // OBO
    * ```
    */
   async query(
@@ -242,13 +477,82 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     parameters?: Record<string, SQLTypeMarker | null | undefined>,
     formatParameters?: Record<string, any>,
     signal?: AbortSignal,
+    options?: { direct?: boolean },
+  ): Promise<any> {
+    if (options?.direct || !this.task) {
+      return this._queryDirect(query, parameters, formatParameters, signal);
+    }
+
+    const isAsUser = isInUserContext();
+    // `executorKey` shape MUST match `_handleQueryRoute`: same logical
+    // query through HTTP and the programmatic API has to produce the
+    // same IK, otherwise dedup breaks across entrypoints.
+    const executorKey = isAsUser ? getCurrentUserId() : "global";
+    const formatType: "arrow" | "result" =
+      formatParameters?.disposition === "EXTERNAL_LINKS" ? "arrow" : "result";
+    const input: AnalyticsQueryTaskInput = {
+      queryKey: "programmatic",
+      statement: query,
+      parameters,
+      formatParameters,
+      executorKey,
+      isAsUser,
+      formatType,
+    };
+
+    // OBO: forward the live UserContext via the engine sidecar so the
+    // handler can re-enter `runInUserContext` without re-parsing
+    // headers. `at_most_once` to avoid double-submit across pods.
+    const handle = await this.task.start(this.queryTaskName, input, {
+      userId: isAsUser ? executorKey : undefined,
+      context: getCurrentUserContext() ?? undefined,
+      executeMode: isAsUser ? "at_most_once" : "at_least_once",
+    });
+
+    for await (const evt of this.task.subscribe(handle.idempotencyKey)) {
+      if (signal?.aborted) {
+        // Best-effort cooperative stop; engine owns the final state.
+        await this.task
+          .stop(handle.idempotencyKey, {
+            reason: "client_aborted",
+            userId: isAsUser ? executorKey : undefined,
+          })
+          .catch(() => {});
+        throw ExecutionError.canceled();
+      }
+      const type = evt.event.eventType;
+      if (type === "completed") {
+        const payload = evt.event.payload as {
+          result?: unknown;
+        } | null;
+        return payload?.result ?? payload;
+      }
+      if (type === "failed") {
+        const message =
+          (evt.event.payload as { error?: string } | null)?.error ??
+          "task failed";
+        throw ExecutionError.statementFailed(message);
+      }
+      if (type === "cancelled" || type === "suspended") {
+        throw ExecutionError.canceled();
+      }
+    }
+    throw ExecutionError.statementFailed(
+      "Query stream closed without a terminal event",
+    );
+  }
+
+  /** Direct path — single point of fallback when TaskFlow is opted out or `direct: true`. */
+  private async _queryDirect(
+    query: string,
+    parameters?: Record<string, SQLTypeMarker | null | undefined>,
+    formatParameters?: Record<string, any>,
+    signal?: AbortSignal,
   ): Promise<any> {
     const workspaceClient = getWorkspaceClient();
     const warehouseId = await getWarehouseId();
-
     const { statement, parameters: sqlParameters } =
       this.queryProcessor.convertToSQLParameters(query, parameters);
-
     const response = await this.SQLClient.executeStatement(
       workspaceClient,
       {
@@ -259,7 +563,6 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       },
       signal,
     );
-
     return response.result;
   }
 

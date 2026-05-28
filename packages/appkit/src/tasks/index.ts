@@ -24,3 +24,4 @@ export { TaskManager } from "./manager";
 export { type SseEvent, setupSseHeaders, writeSseFrame } from "./sse";
 export { step } from "./step";
 export type { TaskDefinition, TaskRef, TypedTaskContext } from "./types";
+export { userContextFromTaskCtx } from "./user-context";

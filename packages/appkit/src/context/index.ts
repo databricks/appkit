@@ -5,6 +5,7 @@ export {
   getWarehouseId,
   getWorkspaceClient,
   getWorkspaceId,
+  isInUserContext,
   runInUserContext,
 } from "./execution-context";
 export { ServiceContext } from "./service-context";

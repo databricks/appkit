@@ -20,25 +20,16 @@ export type AnalyticsFormat =
   /** @deprecated Use "ARROW_STREAM". Safe to remove once no consumer is on appkit < 0.33.0. */
   | "ARROW";
 
-/** Canonical (post-normalization) analytics format values. */
-type CanonicalAnalyticsFormat = "JSON_ARRAY" | "ARROW_STREAM";
-
-/**
- * Map a (possibly legacy) AnalyticsFormat to its canonical form.
- * Legacy values come from appkit/appkit-ui < 0.33.0 and can be removed
- * along with the deprecated aliases once no such consumer remains.
- */
-export function normalizeAnalyticsFormat(
-  f: AnalyticsFormat,
-): CanonicalAnalyticsFormat {
-  if (f === "JSON") return "JSON_ARRAY";
-  if (f === "ARROW") return "ARROW_STREAM";
-  return f;
-}
-
 export interface IAnalyticsQueryRequest {
   parameters?: Record<string, any>;
   format?: AnalyticsFormat;
+  /**
+   * Opt out of TaskFlow for this single call. Wire shape is unchanged
+   * (`{ type, ...flat }` either way). No dedup, no recovery, no
+   * cooperative stop. Useful for sub-500ms hot paths where WAL +
+   * spawn overhead dominates. Defaults to `false`.
+   */
+  direct?: boolean;
 }
 
 export interface AnalyticsQueryResponse {

@@ -109,8 +109,10 @@ describe("Analytics Plugin Integration", () => {
         "text/event-stream; charset=utf-8",
       );
 
-      const sseData = await parseSSEResponse(response);
-      expect(sseData.eventType).toBe("result");
+      const sseData = await parseSSEResponse(response, { eventType: "data" });
+      expect(sseData.eventType).toBe("data");
+      expect(sseData.type).toBe("result");
+      // Flat shape (rows at `data`, not `result.data`) — matches the legacy direct path.
       expect(sseData.data).toEqual([
         { name: "Alice", age: "30" },
         { name: "Bob", age: "25" },
@@ -152,6 +154,9 @@ describe("Analytics Plugin Integration", () => {
       );
 
       expect(response.status).toBe(200);
+      // Drain the SSE stream first — the bridge returns 200 as soon as
+      // headers go out, so the handler hasn't run yet.
+      await parseSSEResponse(response, { eventType: "data" });
 
       const callArgs = mockClient.mocks.executeStatement.mock.calls[0][0];
       expect(callArgs.parameters).toEqual(
@@ -194,7 +199,12 @@ describe("Analytics Plugin Integration", () => {
         isAsUser: false,
       });
 
+      // Both `submit` and `poll` must surface FAILED — the handler
+      // can take either path depending on the warehouse's response timing.
       mockClient.mocks.executeStatement.mockResolvedValue(
+        createFailedSQLResponse("Table not found"),
+      );
+      mockClient.mocks.getStatement.mockResolvedValue(
         createFailedSQLResponse("Table not found"),
       );
 
@@ -206,7 +216,7 @@ describe("Analytics Plugin Integration", () => {
 
       expect(response.status).toBe(200);
       const text = await response.text();
-      expect(text).toContain("event: error");
+      expect(text).toContain("event: failed");
     });
 
     test("should handle SDK exceptions", async () => {
@@ -227,12 +237,12 @@ describe("Analytics Plugin Integration", () => {
 
       expect(response.status).toBe(200);
       const text = await response.text();
-      expect(text).toContain("event: error");
+      expect(text).toContain("event: failed");
     });
   });
 
-  describe("Caching", () => {
-    test("should cache results for identical requests", async () => {
+  describe("Idempotency", () => {
+    test("identical requests return identical data", async () => {
       const testQuery = "SELECT * FROM cached";
 
       getAppQuerySpy.mockResolvedValue({
@@ -252,7 +262,7 @@ describe("Analytics Plugin Integration", () => {
           body: JSON.stringify({ parameters: {} }),
         },
       );
-      const data1 = await parseSSEResponse(response1);
+      const data1 = await parseSSEResponse(response1, { eventType: "data" });
 
       const response2 = await fetch(
         `${baseUrl}/api/analytics/query/cache_test`,
@@ -262,11 +272,13 @@ describe("Analytics Plugin Integration", () => {
           body: JSON.stringify({ parameters: {} }),
         },
       );
-      const data2 = await parseSSEResponse(response2);
+      const data2 = await parseSSEResponse(response2, { eventType: "data" });
 
+      // Identical IK → identical wire payload. We don't assert the
+      // submit count: `at_least_once` dedupes in-flight only, so
+      // sequential requests after a terminal state may re-execute.
       expect(data1.data).toEqual([{ value: "cached_value" }]);
       expect(data2.data).toEqual([{ value: "cached_value" }]);
-      expect(mockClient.mocks.executeStatement).toHaveBeenCalledTimes(1);
     });
   });
 });
