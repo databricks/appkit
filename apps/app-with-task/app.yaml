@@ -1,0 +1,11 @@
+command: ['npx', 'tsx', 'server.ts']
+
+# Resource bindings — set the actual resource names in the Databricks
+# Apps UI when creating the app. The `valueFrom` keys here must match
+# the resource bindings configured there.
+env:
+  # Analytics plugin needs a SQL Warehouse to submit statements.
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: sql-warehouse
+  - name: LAKEBASE_ENDPOINT
+    valueFrom: postgres

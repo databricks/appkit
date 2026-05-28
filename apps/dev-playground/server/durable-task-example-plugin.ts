@@ -169,7 +169,7 @@ export class DurableTaskExamplePlugin extends Plugin {
   private requireTask() {
     if (!this.task) {
       throw new Error(
-        "Durable task example requires `task` enabled; this app was created with `task: false`.",
+        "Durable task example requires durable execution. Enable it with createApp({ task: true }) or an explicit task config.",
       );
     }
     return this.task;
