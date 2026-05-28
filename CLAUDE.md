@@ -234,6 +234,60 @@ The SDK has built-in SSE support with automatic reconnection:
 - Plugin name as default tracer/meter scope
 - Supports traces, metrics, logs (configurable per plugin)
 
+### Durable Task Service
+
+A built-in **durable execution service** available to plugins via `this.task` when the app opts in with `createApp({ task: true })` or an explicit `task` config. When the app does not opt in, `this.task` is `null` and `this.executeTask` throws. Use tasks for any operation that needs to survive process restart: long-running queries, agent loops with expensive LLM calls, multi-step pipelines, sagas, async user-facing operations.
+
+**Mental model:** a durable function with an event log. Handlers emit structured events during execution, those events are appended to a write-ahead log, and on crash the recovery worker re-spawns the handler with `previousEvents` so it can resume from the last meaningful checkpoint. There is no workflow DSL, no replay engine, no determinism constraint on the handler.
+
+**Three primitives:**
+- **Event log** — handlers emit checkpoints/intermediate results via `ctx.emit(name, payload)`. Each event is sequenced and committed to the WAL. Same log doubles as a real-time SSE stream for clients.
+- **Smart recovery** — opt-in per task. If the task crashes, `recover` (or the same handler with `ctx.isRecovery = true`) gets `ctx.previousEvents` and decides what "resume" means.
+- **WAL-first durability** — every state transition appends to a sequential WAL before anything else. A background worker batches flushes to SQLite. Sub-millisecond per-event latency, with explicit-flush available when correctness needs strict persistence.
+
+**Bootstrap:** the task service is opt-in. `createApp({ task: true, plugins: [...] })` initializes it with SQLite at `.appkit/tasks/tasks.db` and WAL at `.appkit/tasks/wal`; an explicit `task: { ... }` object initializes it with the provided config. Omitting `task` or passing `task: false` does not boot TaskFlow, and `this.task` remains `null`. SQLite storage is **ephemeral on Databricks Apps** (multi-pod, no shared volume) — the runtime logs a startup warning and falls back to "tasks die with the pod" semantics. For durability in Apps, configure `task: { storage: { backend: 'lakebase', connectionString: … } }`.
+
+**Public API on `this.task`:**
+```typescript
+this.task.task({ name, execute, recover?, autoRecover? })   // register a durable task in setup()
+this.task.start(name, input, opts)                           // spawn an attempt; returns { idempotencyKey }
+this.task.subscribe(idempotencyKey, lastSeq?)                // async iterable of TaskEvent
+this.task.resume(idempotencyKey, opts?)                      // resume a paused/suspended task
+this.task.stop(idempotencyKey, opts?)                        // request cooperative cancellation
+```
+
+**The `executeTask` shortcut.** For the common "POST starts a durable task, GET streams its progress over SSE" pattern, use `this.executeTask(res, taskName, input, settings?)` from any route handler. It calls `start`, bridges `subscribe` to the SSE response with `Last-Event-ID` reconnection support, captures the request context for OBO automatically, and dedupes against existing tasks by idempotency key. **`executeTask` deliberately omits the `retry`, `cache`, and `timeout` knobs that `execute()` accepts** — the engine replaces those with stronger primitives (smart recovery, idempotency-key dedup, cooperative `stop`). Compile-time error if you try to pass them.
+
+**When to use which execution method:**
+
+| Method | Use for | Durability | Recovery |
+|---|---|---|---|
+| `this.execute(fn, settings)` | Sub-second to ~5s reads with retry/cache/timeout | None | None (retry from scratch) |
+| `this.executeStream(res, gen, settings)` | Live progress for short ops; no crash survival | None | None |
+| `this.executeTask(res, name, input)` | Anything that should survive restart, agentic loops, long pipelines | WAL → SQLite | Smart, opt-in via `recover` |
+
+**Recovery snippet:**
+```typescript
+this.task.task({
+  name: "agent-loop",
+  autoRecover: true,
+  execute: async (input: ChatInput, ctx): Promise<ChatOutput> => {
+    if (ctx.isRecovery) {
+      // Find the last successful checkpoint and resume from there.
+      const lastTurn = ctx.previousEvents.findLast(e => e.eventType === "custom:turn_done");
+      input = { ...input, resumeFromTurn: lastTurn?.payload.turn ?? 0 };
+    }
+    for (let turn = input.resumeFromTurn ?? 0; turn < MAX_TURNS; turn++) {
+      const result = await this.callLlm(ctx, input);
+      await ctx.emit("turn_done", { turn, result });
+      if (result.stop_reason !== "tool_use") return { turns: turn + 1 };
+    }
+  },
+});
+```
+
+**OBO (asUser) is automatic** when calling `executeTask` from inside a route handler — the bridge captures the active `UserContext` via the `asUser(req)` proxy and forwards it to the handler as `ctx.context`. Inside the handler, `appkit.<plugin>.asUser(ctx.context)` works exactly like in a normal route. **Never pass `context: req` manually** — `executeTask` does it for you. Combining `autoRecover: true` with OBO is incompatible (the recovery worker has no UserContext after restart) and produces a one-time runtime warning at the first OBO `executeTask` call for a misconfigured task; use `autoRecover: false` + explicit `this.task.resume()` from a fresh authenticated request instead.
+
 ### Analytics Query Pattern
 
 The AnalyticsPlugin provides SQL query execution:
@@ -402,6 +456,7 @@ This project uses conventional commits (enforced by commitlint):
 
 ### Key Dependencies
 - `@databricks/sdk-experimental` v0.16.0 - Databricks services SDK
+- `@databricks/taskflow` (vendored at `packages/appkit/vendor/taskflow/`) - Durable execution engine (Rust + Node.js FFI). Bootstraps only when AppKit is created with `task: true` or an explicit `task` config. Vendored artifacts are pinned in `packages/appkit/vendor/taskflow/VENDOR.json` (sha256 per platform); refresh by re-running the upstream `taskflow` build and copying outputs into the vendor directory, then rerun `pnpm test` with `APPKIT_VERIFY_TASKFLOW_VENDOR=1` to re-derive the digests.
 - `express` - HTTP server
 - `zod` - Runtime validation
 - `OpenTelemetry` - Observability (traces, metrics, logs)
@@ -412,9 +467,12 @@ This project uses conventional commits (enforced by commitlint):
 3. **Streaming-first** - Built-in SSE support with reconnection
 4. **Observability** - OpenTelemetry integration is first-class
 5. **Dev Experience** - HMR, hot-reload, source maps, inspection tools
+6. **Durable by default for long ops** - Any operation that should survive process restart belongs on the task service (`this.task` / `this.executeTask`). Don't reinvent durability with retry-and-disk.
 
 ### Graceful Shutdown
 The server handles SIGTERM/SIGINT with:
-- 15-second timeout
-- Aborts in-flight operations
-- Closes connections gracefully
+- 15-second timeout (force-exit deadline)
+- Re-entrancy guard: the second signal during a Ctrl-C race is ignored
+- Aborts in-flight operations (SSE streams release HTTP connections first)
+- Drains core services in reverse boot order — the task manager walks active `executeTask` bridges and writes a final `event: error / server_shutting_down` frame so clients see a clean signal instead of an EOF
+- Closes HTTP listener last

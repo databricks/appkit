@@ -35,6 +35,19 @@ import type { ActiveBridge } from "./types";
  */
 export const TASK_IDEMPOTENCY_HEADER = "X-AppKit-Task-Idempotency-Key";
 
+/**
+ * Wall-clock idle keep-alive interval, in milliseconds. The engine
+ * already emits its own `heartbeat` events when the executor is
+ * actively running, but a task can be quiet for several seconds at a
+ * time (e.g. waiting on a slow downstream call, or stopped/paused
+ * while a client is still subscribed). 25 s sits comfortably under
+ * the typical 60 s idle-socket timeout enforced by AWS ELBs,
+ * Cloudflare, GCP HTTPS LBs, and most corporate proxies.
+ *
+ * @internal
+ */
+export const IDLE_KEEPALIVE_INTERVAL_MS = 25_000;
+
 const logger = createLogger("tasks:execute");
 
 /** Process-scoped to log the OBO+autoRecover warning once per (plugin, task). @internal */
@@ -95,6 +108,12 @@ export async function executeTask<TInput>(
   // Hoisted so the outer `finally` can release the bridge regardless
   // of which branch unwinds.
   let unregisterBridge: (() => void) | null = null;
+  // Wall-clock idle keep-alive timer. Belt-and-braces on top of the
+  // engine `heartbeat` event stream: if the engine stays silent for
+  // more than {@link IDLE_KEEPALIVE_INTERVAL_MS} we still write a
+  // comment frame so an idle load balancer doesn't drop the socket
+  // mid-task. Cleared from the outer `finally`.
+  let idleKeepAlive: ReturnType<typeof setInterval> | null = null;
   try {
     // `context` is the live executor sidecar — never serialised, never
     // seen by recovery. Lets the task body re-enter `runInUserContext`
@@ -184,6 +203,16 @@ export async function executeTask<TInput>(
       },
     };
     unregisterBridge = manager._registerBridge(bridge);
+
+    // Install the wall-clock keep-alive. `unref()` so this timer
+    // doesn't keep the process alive on its own — if everything else
+    // has shut down, the SSE response is already in the process of
+    // closing and there's nothing to keep alive.
+    idleKeepAlive = setInterval(() => {
+      if (res.writableEnded) return;
+      writeSseComment(res, "hb");
+    }, IDLE_KEEPALIVE_INTERVAL_MS);
+    idleKeepAlive.unref?.();
 
     for await (const streamEvent of manager.subscribe(
       idempotencyKey,
@@ -300,6 +329,7 @@ export async function executeTask<TInput>(
     );
     throw err;
   } finally {
+    if (idleKeepAlive) clearInterval(idleKeepAlive);
     unregisterBridge?.();
     span?.end();
   }
