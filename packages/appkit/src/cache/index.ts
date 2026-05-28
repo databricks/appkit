@@ -134,6 +134,22 @@ export class CacheManager {
     return CacheManager.initPromise;
   }
 
+  /** @internal */
+  static async boot(
+    config?: CacheConfig,
+  ): Promise<{ instance: CacheManager; stop(): Promise<void> }> {
+    const mgr = await CacheManager.getInstance(config);
+    return { instance: mgr, stop: () => mgr.shutdown() };
+  }
+
+  /** @internal */
+  async shutdown(): Promise<void> {
+    await this.close();
+    this.inFlightRequests.clear();
+    CacheManager.instance = null;
+    CacheManager.initPromise = null;
+  }
+
   /**
    * Create a new cache manager instance
    *

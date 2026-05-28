@@ -9,30 +9,28 @@ import type {
   PluginMap,
 } from "shared";
 import { version as productVersion } from "../../package.json";
-import { CacheManager } from "../cache";
 import { ServiceContext } from "../context";
 import {
   isInternalTelemetryEnabled,
   TelemetryReporter,
 } from "../internal-telemetry";
-import { createLogger } from "../logging/logger";
 import { isPlainObject } from "../plugin/plugin";
 import { ResourceRegistry, ResourceType } from "../registry";
 import type { TelemetryConfig } from "../telemetry";
-import { TelemetryManager } from "../telemetry";
 import { isToolProvider, PluginContext } from "./plugin-context";
-
-const logger = createLogger("appkit");
+import { type ServiceManager, startCoreServices } from "./service-manager";
 
 export class AppKit<TPlugins extends InputPluginMap> {
   #pluginInstances: Record<string, BasePlugin> = {};
   #setupPromises: Promise<void>[] = [];
   #context: PluginContext;
+  #services: ServiceManager;
 
-  private constructor(config: { plugins: TPlugins }) {
+  private constructor(config: { plugins: TPlugins }, services: ServiceManager) {
     const { plugins, ...globalConfig } = config;
 
     this.#context = new PluginContext();
+    this.#services = services;
 
     const pluginEntries = Object.entries(plugins);
 
@@ -90,6 +88,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
     if (typeof pluginInstance.attachContext === "function") {
       pluginInstance.attachContext({
         context: this.#context,
+        services: this.#services,
         telemetryConfig: baseConfig.telemetry,
       });
     }
@@ -187,56 +186,59 @@ export class AppKit<TPlugins extends InputPluginMap> {
       disableInternalTelemetry?: boolean;
     } = {},
   ): Promise<PluginMap<T>> {
-    // Initialize core services
-    TelemetryManager.initialize(config?.telemetry);
-    await CacheManager.getInstance(config?.cache);
+    const services = await startCoreServices({
+      telemetry: config?.telemetry,
+      cache: config?.cache,
+    });
 
-    const rawPlugins = config.plugins as T;
+    try {
+      const rawPlugins = config.plugins as T;
 
-    // Collect manifest resources via registry
-    const registry = new ResourceRegistry();
-    registry.collectResources(rawPlugins);
+      const resourceRegistry = new ResourceRegistry();
+      resourceRegistry.collectResources(rawPlugins);
 
-    // Derive ServiceContext needs from what manifests declared
-    const needsWarehouse = registry
-      .getRequired()
-      .some((r) => r.type === ResourceType.SQL_WAREHOUSE);
-    await ServiceContext.initialize(
-      { warehouseId: needsWarehouse },
-      config?.client,
-    );
+      const needsWarehouse = resourceRegistry
+        .getRequired()
+        .some((r) => r.type === ResourceType.SQL_WAREHOUSE);
+      await ServiceContext.initialize(
+        { warehouseId: needsWarehouse },
+        config?.client,
+      );
 
-    // Validate env vars
-    registry.enforceValidation();
+      resourceRegistry.enforceValidation();
 
-    const preparedPlugins = AppKit.preparePlugins(rawPlugins);
-    const mergedConfig = {
-      plugins: preparedPlugins,
-    };
+      const preparedPlugins = AppKit.preparePlugins(rawPlugins);
+      const mergedConfig = {
+        plugins: preparedPlugins,
+      };
 
-    const instance = new AppKit(mergedConfig);
+      const instance = new AppKit(mergedConfig, services);
 
-    await Promise.all(instance.#setupPromises);
-    await instance.#context.emitLifecycle("setup:complete");
+      await Promise.all(instance.#setupPromises);
+      await instance.#context.emitLifecycle("setup:complete");
 
-    const handle = instance as unknown as PluginMap<T>;
+      const handle = instance as unknown as PluginMap<T>;
 
-    if (config.onPluginsReady) {
-      logger.debug("Running onPluginsReady hook");
-      await config.onPluginsReady(handle);
-      logger.debug("onPluginsReady hook completed");
+      if (config.onPluginsReady) {
+        await config.onPluginsReady(handle);
+      }
+
+      if (isInternalTelemetryEnabled(config)) {
+        AppKit.bootstrapInternalTelemetry();
+      }
+
+      const serverPlugin = instance.#pluginInstances.server;
+      if (serverPlugin && typeof (serverPlugin as any).start === "function") {
+        await (serverPlugin as any).start({
+          shutdownCoreServices: () => services.stop(),
+        });
+      }
+
+      return handle;
+    } catch (error) {
+      await services.stop();
+      throw error;
     }
-
-    if (isInternalTelemetryEnabled(config)) {
-      AppKit.bootstrapInternalTelemetry();
-    }
-
-    const serverPlugin = instance.#pluginInstances.server;
-    if (serverPlugin && typeof (serverPlugin as any).start === "function") {
-      await (serverPlugin as any).start();
-    }
-
-    return handle;
   }
 
   private static bootstrapInternalTelemetry(): void {

@@ -257,23 +257,23 @@ AuthenticationError if user token is not available in request headers (productio
 ```ts
 attachContext(deps: {
   context?: unknown;
+  services?: {
+     get: T | null;
+  };
   telemetryConfig?: TelemetryOptions;
 }): void;
 ```
 
-Binds runtime dependencies (telemetry provider, cache, plugin context) to
-this plugin. Called by `AppKit._createApp` after construction and before
-`setup()`. Idempotent: safe to call if the constructor already bound them
-eagerly. Kept separate so factories can eagerly construct plugin instances
-without running this before `TelemetryManager.initialize()` /
-`CacheManager.getInstance()` have run.
+Binds runtime deps (context, core services). Called before `setup()`.
 
 #### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
-| `deps` | \{ `context?`: `unknown`; `telemetryConfig?`: `TelemetryOptions`; \} |
+| `deps` | \{ `context?`: `unknown`; `services?`: \{ `get`: `T` \| `null`; \}; `telemetryConfig?`: `TelemetryOptions`; \} |
 | `deps.context?` | `unknown` |
+| `deps.services?` | \{ `get`: `T` \| `null`; \} |
+| `deps.services.get` |
 | `deps.telemetryConfig?` | `TelemetryOptions` |
 
 #### Returns

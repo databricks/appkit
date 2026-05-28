@@ -54,8 +54,6 @@ describe("TelemetryManager", () => {
     vi.clearAllMocks();
     // @ts-expect-error - accessing private static property for testing
     TelemetryManager.instance = undefined;
-    // @ts-expect-error - accessing private static property for testing
-    TelemetryManager.shutdownRegistered = false;
   });
 
   afterEach(() => {

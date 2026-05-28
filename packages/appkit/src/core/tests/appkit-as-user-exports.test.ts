@@ -14,6 +14,21 @@ import type { UserContext } from "../../context/user-context";
 
 vi.mock("../../cache", () => ({
   CacheManager: {
+    boot: vi.fn(async () => ({
+      instance: {
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn(),
+        getOrExecute: vi.fn(
+          async (
+            _k: unknown[],
+            fn: (signal?: AbortSignal) => Promise<unknown>,
+          ) => fn(),
+        ),
+        generateKey: vi.fn(() => "test-key"),
+      },
+      stop: vi.fn(),
+    })),
     getInstance: vi.fn(async () => ({
       get: vi.fn(),
       set: vi.fn(),
@@ -43,6 +58,7 @@ vi.mock("../../telemetry", async () => {
   return {
     ...actual,
     TelemetryManager: {
+      boot: vi.fn(async () => null),
       initialize: vi.fn(),
       getProvider: () => ({
         getTracer: () => ({

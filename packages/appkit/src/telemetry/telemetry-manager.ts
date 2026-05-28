@@ -95,11 +95,25 @@ export class TelemetryManager {
       });
 
       this.sdk.start();
-      this.registerShutdown();
       logger.debug("Initialized successfully");
     } catch (error) {
       logger.error("Failed to initialize: %O", error);
     }
+  }
+
+  /** True once the underlying NodeSDK has started. */
+  isActive(): boolean {
+    return this.sdk !== undefined;
+  }
+
+  /** Returns `null` when no OTLP endpoint is configured (telemetry opt-out). */
+  static async boot(
+    config?: TelemetryConfig,
+  ): Promise<{ instance: TelemetryManager; stop(): Promise<void> } | null> {
+    TelemetryManager.initialize(config);
+    const instance = TelemetryManager.getInstance();
+    if (!instance.isActive()) return null;
+    return { instance, stop: () => instance.shutdown() };
   }
 
   /**
@@ -158,15 +172,12 @@ export class TelemetryManager {
     ];
   }
 
-  private registerShutdown() {
-    const shutdownFn = async () => {
-      await TelemetryManager.getInstance().shutdown();
-    };
-    process.once("SIGTERM", shutdownFn);
-    process.once("SIGINT", shutdownFn);
-  }
-
-  private async shutdown(): Promise<void> {
+  /**
+   * Drains pending spans/metrics/logs and shuts down the NodeSDK.
+   * Idempotent.
+   * @internal
+   */
+  async shutdown(): Promise<void> {
     if (!this.sdk) {
       return;
     }

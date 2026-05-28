@@ -70,6 +70,10 @@ vi.mock("../../../context", async (importOriginal) => {
 
 vi.mock("../../../cache", () => ({
   CacheManager: {
+    boot: vi.fn(async () => ({
+      instance: mockCacheInstance,
+      stop: vi.fn(),
+    })),
     getInstanceSync: vi.fn(() => mockCacheInstance),
     getInstance: vi.fn(async () => mockCacheInstance),
   },
