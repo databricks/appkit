@@ -14,5 +14,6 @@ export const executeStatementDefaults: ExecuteStatementDefaults = {
   disposition: "INLINE",
   format: "JSON_ARRAY",
   on_wait_timeout: "CONTINUE",
-  timeout: 60000,
+  /** Polling timeout in ms. 0 = indefinite. */
+  timeout: 0,
 };
