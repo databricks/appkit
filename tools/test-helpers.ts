@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Span, SpanOptions } from "@opentelemetry/api";
 import type { IAppRouter } from "shared";
 import { vi } from "vitest";
@@ -314,32 +315,50 @@ export async function runWithRequestContext<T>(
 }
 
 /**
- * Parses SSE response. Format: "event: result\ndata: {...}\n\n"
+ * Parses an SSE response body and returns one frame's data merged with
+ * `{ eventType }`. Handles multi-line `data:` payloads, CRLF, and SSE
+ * comments. Pass `eventType` to pick a specific frame; without it, the
+ * last frame wins.
  */
-export async function parseSSEResponse(response: Response): Promise<any> {
-  const text = await response.text();
-  const lines = text.split("\n");
+export async function parseSSEResponse(
+  response: Response,
+  options: { eventType?: string } = {},
+): Promise<any> {
+  const text = (await response.text()).replace(/\r\n?/g, "\n");
+  const target = options.eventType;
 
-  let eventType: string | null = null;
-  let dataLine: string | null = null;
+  let chosenEventType: string | null = null;
+  let chosenDataLines: string[] | null = null;
+  let lastEventType: string | null = null;
+  let lastDataLines: string[] | null = null;
 
-  for (const line of lines) {
-    if (line.startsWith("event: ")) {
-      eventType = line.substring(7).trim();
-    } else if (line.startsWith("data: ")) {
-      dataLine = line.substring(6);
+  for (const frame of text.split("\n\n")) {
+    let eventType: string | null = null;
+    const dataLines: string[] = [];
+    for (const line of frame.split("\n")) {
+      if (line.startsWith(":")) continue;
+      if (line.startsWith("event: ")) eventType = line.substring(7).trim();
+      else if (line.startsWith("data: ")) dataLines.push(line.substring(6));
+    }
+    if (dataLines.length === 0) continue;
+    lastEventType = eventType;
+    lastDataLines = dataLines;
+    if (target && eventType === target) {
+      chosenEventType = eventType;
+      chosenDataLines = dataLines;
     }
   }
 
-  if (!dataLine) {
-    throw new Error(`No data found in SSE response: ${text}`);
+  const eventType = target ? chosenEventType : lastEventType;
+  const dataLines = target ? chosenDataLines : lastDataLines;
+
+  if (!dataLines || dataLines.length === 0) {
+    throw new Error(
+      `No ${target ? `${target} ` : ""}data found in SSE response: ${text}`,
+    );
   }
 
-  const parsed = JSON.parse(dataLine);
-  return {
-    eventType,
-    ...parsed,
-  };
+  return { eventType, ...JSON.parse(dataLines.join("\n")) };
 }
 
 export function createConfigurableMockWorkspaceClient() {
@@ -393,4 +412,213 @@ export function createFailedSQLResponse(errorMessage: string) {
     },
     statement_id: `stmt-${Date.now()}`,
   };
+}
+
+/**
+ * In-process stand-in for `TaskManager` that runs the handler directly
+ * inside `subscribe()` instead of through the vendored Rust engine.
+ * Use for unit tests where the real engine (SQLite WAL, recovery
+ * worker, FFI sidecar) is overkill.
+ *
+ * - `start()` keys runs by an engine-shaped IK
+ *   (`sha256(name || canon(input) || userId)`).
+ * - `subscribe()` yields every `ctx.emit(name, payload)` as
+ *   `custom:<name>` then a single `completed` / `failed` terminal.
+ * - `_emitHeartbeat` / `_emitStepCheckpoint` exercise the bridge
+ *   filters without booting the engine.
+ *
+ * Skips real recovery, storage dedup, and IK-cache eviction — for
+ * those, run against `createApp(...)`.
+ */
+export function createStubTaskManager() {
+  type TaskDef = {
+    name: string;
+    execute: (input: unknown, ctx: any) => Promise<unknown>;
+    recover?: (input: unknown, ctx: any) => Promise<unknown>;
+    autoRecover?: boolean;
+  };
+
+  const tasks = new Map<string, TaskDef>();
+  const stashedRuns = new Map<
+    string,
+    {
+      name: string;
+      input: unknown;
+      opts: { userId?: string; context?: unknown };
+    }
+  >();
+  /** Pre-injected events keyed by IK; yielded ahead of handler events. */
+  const injectedEvents = new Map<
+    string,
+    Array<{ event: any; streamSeq: number }>
+  >();
+  let seq = 0;
+
+  // Mirrors the engine IK shape (sha256 hex; the engine emits base64
+  // but tests only need stable equality, not byte-for-byte parity).
+  const canonicalize = (value: unknown): string => {
+    if (value === null || value === undefined) return "null";
+    if (typeof value !== "object") return JSON.stringify(value);
+    if (Array.isArray(value)) {
+      return `[${value.map(canonicalize).join(",")}]`;
+    }
+    const keys = Object.keys(value as Record<string, unknown>).sort();
+    const parts = keys.map(
+      (k) =>
+        `${JSON.stringify(k)}:${canonicalize((value as Record<string, unknown>)[k])}`,
+    );
+    return `{${parts.join(",")}}`;
+  };
+  const computeIK = (name: string, input: unknown, userId?: string) => {
+    const payload = `${name}|${canonicalize(input)}|${userId ?? ""}`;
+    return createHash("sha256").update(payload).digest("hex");
+  };
+
+  const stub = {
+    task: vi.fn((def: TaskDef) => {
+      tasks.set(def.name, def);
+    }),
+
+    start: vi.fn(
+      async (
+        name: string,
+        input: unknown,
+        opts: { userId?: string; context?: unknown } = {},
+      ) => {
+        const ik = computeIK(name, input, opts.userId);
+        stashedRuns.set(ik, { name, input, opts });
+        return { taskId: ik, idempotencyKey: ik };
+      },
+    ),
+
+    subscribe: vi.fn((ik: string) => {
+      const run = stashedRuns.get(ik);
+      const def = run ? tasks.get(run.name) : undefined;
+
+      return (async function* () {
+        if (!run || !def) return;
+
+        // Pre-injected events first (exercises bridge filters).
+        const pre = injectedEvents.get(ik);
+        if (pre) {
+          for (const e of pre) yield e;
+        }
+
+        const events: Array<{ event: any; streamSeq: number }> = [];
+        const ctx = {
+          taskId: ik,
+          idempotencyKey: ik,
+          userId: run.opts.userId ?? null,
+          attempt: 1,
+          previousEvents: [],
+          isRecovery: false,
+          context: run.opts.context ?? null,
+          emit: async (eventType: string, payload?: unknown) => {
+            events.push({
+              event: {
+                id: "",
+                taskId: ik,
+                idempotencyKey: ik,
+                seq: ++seq,
+                eventType: `custom:${eventType}`,
+                timestampMs: Date.now(),
+                payload,
+              },
+              streamSeq: seq,
+            });
+          },
+          heartbeat: async () => {},
+        };
+
+        try {
+          const result = await def.execute(run.input, ctx);
+          events.push({
+            event: {
+              id: "",
+              taskId: ik,
+              idempotencyKey: ik,
+              seq: ++seq,
+              eventType: "completed",
+              timestampMs: Date.now(),
+              payload: { result },
+            },
+            streamSeq: seq,
+          });
+        } catch (err) {
+          events.push({
+            event: {
+              id: "",
+              taskId: ik,
+              idempotencyKey: ik,
+              seq: ++seq,
+              eventType: "failed",
+              timestampMs: Date.now(),
+              payload: {
+                error: err instanceof Error ? err.message : String(err),
+              },
+            },
+            streamSeq: seq,
+          });
+        }
+
+        for (const e of events) yield e;
+      })();
+    }),
+
+    stop: vi.fn(async (ik: string) => ({ taskId: ik, idempotencyKey: ik })),
+    resume: vi.fn(async () => null),
+    reconnect: vi.fn(async () => null),
+    simulateCrash: vi.fn(),
+
+    hasTask: vi.fn((name: string) => tasks.has(name)),
+    getRegistration: vi.fn((name: string) => {
+      const t = tasks.get(name);
+      return t
+        ? { autoRecover: t.autoRecover ?? true, hasRecover: !!t.recover }
+        : undefined;
+    }),
+
+    // No-op: tests don't simulate shutdown drainage.
+    _registerBridge: vi.fn(() => () => {}),
+
+    /** Queue a `heartbeat` engine event ahead of handler events. */
+    _emitHeartbeat: (ik: string) => {
+      const list = injectedEvents.get(ik) ?? [];
+      list.push({
+        event: {
+          id: "",
+          taskId: ik,
+          idempotencyKey: ik,
+          seq: ++seq,
+          eventType: "heartbeat",
+          timestampMs: Date.now(),
+          payload: null,
+        },
+        streamSeq: seq,
+      });
+      injectedEvents.set(ik, list);
+    },
+
+    /** Queue a `custom:step:*` checkpoint event (WAL-only, dropped on the wire). */
+    _emitStepCheckpoint: (ik: string, name: string, value?: unknown) => {
+      const list = injectedEvents.get(ik) ?? [];
+      list.push({
+        event: {
+          id: "",
+          taskId: ik,
+          idempotencyKey: ik,
+          seq: ++seq,
+          eventType: `custom:step:${name}`,
+          timestampMs: Date.now(),
+          payload: value,
+        },
+        streamSeq: seq,
+      });
+      injectedEvents.set(ik, list);
+    },
+
+    shutdown: vi.fn(async () => {}),
+  };
+
+  return stub;
 }

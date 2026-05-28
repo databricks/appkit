@@ -108,8 +108,30 @@ export {
   ResourceRegistry,
   ResourceType,
 } from "./registry";
-export type { TaskConfig } from "./tasks";
-export { TaskManager } from "./tasks";
+// Durable execution. `TaskManager` is exported type-only: it's
+// constructed by `createApp` and addressed via `this.task` inside
+// plugins; internal statics must not leak to consumers.
+export {
+  type ExecuteTaskSettings,
+  type ResumeOptions,
+  type SseEvent,
+  type StopOptions,
+  type StreamEvent,
+  type SubmitOptions,
+  setupSseHeaders,
+  step,
+  TASK_IDEMPOTENCY_HEADER,
+  type Task,
+  type TaskConfig,
+  type TaskContext,
+  type TaskDefinition,
+  type TaskEvent,
+  type TaskHandle,
+  type TaskManager,
+  type TaskRef,
+  type TypedTaskContext,
+  writeSseFrame,
+} from "./tasks";
 // Telemetry (for advanced custom telemetry)
 export {
   type Counter,

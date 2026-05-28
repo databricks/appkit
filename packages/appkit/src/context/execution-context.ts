@@ -83,11 +83,22 @@ export function getWorkspaceId(): Promise<string> {
 }
 
 /**
- * Check if currently running in a user context.
+ * Check if currently running in a user context. Sugar for
+ * `getCurrentUserContext() !== null` — prefer {@link getCurrentUserContext}
+ * when you also need the value.
  */
 export function isInUserContext(): boolean {
-  const ctx = executionContextStorage.getStore();
-  return ctx !== undefined;
+  return getCurrentUserContext() !== null;
+}
+
+/**
+ * Returns the active {@link UserContext} when inside a
+ * `runInUserContext` scope (set by `plugin.asUser(req).method(...)`),
+ * or `null`. Use to forward user identity to a downstream layer
+ * (e.g. spawning a durable task that should run as the caller).
+ */
+export function getCurrentUserContext(): UserContext | null {
+  return executionContextStorage.getStore() ?? null;
 }
 
 /**

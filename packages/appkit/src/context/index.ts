@@ -1,4 +1,5 @@
 export {
+  getCurrentUserContext,
   getCurrentUserId,
   getExecutionContext,
   getWarehouseId,

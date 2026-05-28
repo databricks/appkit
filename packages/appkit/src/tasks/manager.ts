@@ -13,6 +13,7 @@ import type {
   StreamEvent,
   SubmitOptions,
   Task,
+  TaskContext,
   Engine as TaskflowEngine,
   TaskHandle,
 } from "../../vendor/taskflow/taskflow.js";
@@ -24,9 +25,48 @@ import {
   type TelemetryProvider,
 } from "../telemetry";
 import { mergeTaskDefaults, type TaskOption } from "./defaults";
+import type {
+  ActiveBridge,
+  TaskDefinition,
+  TaskHandleRef,
+  TaskRegistrationRecord,
+} from "./types";
 import { loadVendorModule } from "./vendor-loader";
 
 const logger = createLogger("tasks");
+
+/**
+ * Build the registration options object passed to the vendor engine's
+ * `registerTask`. Validates `recoveryMaxAgeMs` so a bad value surfaces
+ * at registration time rather than as an opaque native error.
+ */
+function buildRegisterOpts(definition: {
+  name: string;
+  autoRecover?: boolean;
+  recoveryMaxAgeMs?: number;
+}): { autoRecover?: boolean; recoveryMaxAgeMs?: number } | null {
+  const opts: { autoRecover?: boolean; recoveryMaxAgeMs?: number } = {};
+  if (definition.autoRecover !== undefined) {
+    opts.autoRecover = definition.autoRecover;
+  }
+  if (definition.recoveryMaxAgeMs !== undefined) {
+    const v = definition.recoveryMaxAgeMs;
+    if (
+      typeof v !== "number" ||
+      !Number.isFinite(v) ||
+      !Number.isInteger(v) ||
+      v < 0
+    ) {
+      throw new Error(
+        `task '${definition.name}': recoveryMaxAgeMs must be a non-negative integer (got ${String(
+          v,
+        )})`,
+      );
+    }
+    opts.recoveryMaxAgeMs = v;
+  }
+  return Object.keys(opts).length === 0 ? null : opts;
+}
 
 interface TaskCounters {
   starts: Counter;
@@ -49,6 +89,8 @@ export class TaskManager {
 
   private readonly telemetry: TelemetryProvider;
   private readonly metrics: TaskCounters;
+  private readonly registrations = new Map<string, TaskRegistrationRecord>();
+  private readonly activeBridges = new Set<ActiveBridge>();
   private hasShutdown = false;
 
   private constructor(engine: TaskflowEngine) {
@@ -114,6 +156,109 @@ export class TaskManager {
   /** Returns the live instance or `null` when tasks are not enabled. */
   static getInstanceSync(): TaskManager | null {
     return TaskManager._instance;
+  }
+
+  /**
+   * Registers a durable task. Call from the plugin's `setup()` hook
+   * with handlers bound to the plugin instance. `TEvents` constrains
+   * `ctx.emit(name, payload)`, which is also the SSE wire shape.
+   *
+   * @example
+   * ```ts
+   * type AgentEvents = { turn_done: { turn: number; result: string } };
+   *
+   * this.task.task<AgentInput, AgentOutput, AgentEvents>({
+   *   name: "agent-loop",
+   *   execute: async (input, ctx) => {
+   *     await ctx.emit("turn_done", { turn: 1, result: "ok" });
+   *   },
+   *   autoRecover: false,
+   * });
+   * ```
+   */
+  task<
+    TInput = unknown,
+    TResult = unknown,
+    TEvents extends Record<string, unknown> = Record<string, unknown>,
+  >(
+    definition: TaskDefinition<TInput, TResult, TEvents>,
+  ): TaskHandleRef<TInput, TResult, TEvents> {
+    this.assertAlive();
+    if (this.registrations.has(definition.name)) {
+      // Throw in prod so a duplicate doesn't silently shadow the first
+      // handler (recovery worker would route in-flight tasks to a stale
+      // closure). Warn-only in dev so HMR loops keep working.
+      const message = `Task "${definition.name}" is already registered.`;
+      if (process.env.NODE_ENV === "production") {
+        throw new Error(message);
+      }
+      logger.warn(`${message} (allowed in non-production)`);
+    }
+    // TODO(taskflow#engine-binding-reconciliation): vendored
+    // `registerTask` is positional at runtime even though the .d.ts
+    // documents the object form. `TypedTaskContext` is compile-time
+    // only — at runtime emit is unconstrained `(string, any)`.
+    const recoverFn = definition.recover ?? null;
+    const registerOpts = buildRegisterOpts(definition);
+    (
+      this.engine as unknown as {
+        registerTask(
+          n: string,
+          exec: (input: unknown, ctx: TaskContext) => Promise<unknown>,
+          recover:
+            | ((input: unknown, ctx: TaskContext) => Promise<unknown>)
+            | null,
+          opts: { autoRecover?: boolean; recoveryMaxAgeMs?: number } | null,
+        ): void;
+      }
+    ).registerTask(
+      definition.name,
+      definition.execute as unknown as (
+        input: unknown,
+        ctx: TaskContext,
+      ) => Promise<unknown>,
+      recoverFn as unknown as
+        | ((input: unknown, ctx: TaskContext) => Promise<unknown>)
+        | null,
+      registerOpts,
+    );
+    this.registrations.set(definition.name, {
+      autoRecover: definition.autoRecover ?? true,
+      hasRecover: typeof definition.recover === "function",
+      recoveryMaxAgeMs: definition.recoveryMaxAgeMs,
+    });
+    return { name: definition.name } as TaskHandleRef<TInput, TResult, TEvents>;
+  }
+
+  /** Process-local lookup; not cross-pod. */
+  hasTask(name: string): boolean {
+    return this.registrations.has(name);
+  }
+
+  /** Used by `executeTask` to surface OBO misconfigurations. @internal */
+  getRegistration(name: string): TaskRegistrationRecord | undefined {
+    return this.registrations.get(name);
+  }
+
+  /**
+   * Registers an SSE bridge so shutdown can drain it with a graceful
+   * `event: error` / `server_shutting_down` frame before the engine
+   * closes the subscription. Returns an unregister callback.
+   * @internal
+   */
+  _registerBridge(bridge: ActiveBridge): () => void {
+    if (this.hasShutdown) {
+      try {
+        bridge.drain("server_shutting_down");
+      } catch (err) {
+        logger.debug("Bridge drain after shutdown threw: %O", err);
+      }
+      return () => {};
+    }
+    this.activeBridges.add(bridge);
+    return () => {
+      this.activeBridges.delete(bridge);
+    };
   }
 
   /**
@@ -233,6 +378,24 @@ export class TaskManager {
     if (this.hasShutdown) return;
     this.hasShutdown = true;
     logger.info("Shutting down task engine");
+    // Drain bridges before the engine — otherwise iterators close and
+    // clients see a silent EOF instead of an actionable error frame.
+    if (this.activeBridges.size > 0) {
+      logger.debug(
+        `Draining ${this.activeBridges.size} active SSE bridge(s) before engine shutdown`,
+      );
+      for (const bridge of this.activeBridges) {
+        try {
+          bridge.drain("server_shutting_down");
+        } catch (err) {
+          logger.debug(
+            `Bridge drain failed for IK ${bridge.idempotencyKey}: %O`,
+            err,
+          );
+        }
+      }
+      this.activeBridges.clear();
+    }
     await this.engine.shutdown();
     if (TaskManager._instance === this) {
       TaskManager._instance = null;

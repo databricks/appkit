@@ -9,6 +9,16 @@ type VendorModule = typeof import("../../vendor/taskflow/taskflow.js");
 
 let cachedVendor: VendorModule | null = null;
 
+/**
+ * Returns the loaded vendor module without awaiting — `null` until
+ * {@link loadVendorModule} has resolved at least once. Callers must
+ * already be inside a task body (where the engine has booted).
+ * @internal
+ */
+export function getCachedVendorSync(): VendorModule | null {
+  return cachedVendor;
+}
+
 interface VendorManifest {
   name?: string;
   version?: string;

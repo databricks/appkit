@@ -19,7 +19,12 @@ import type { PluginContext } from "../core/plugin-context";
 import { AppKitError, AuthenticationError } from "../errors";
 import { createLogger } from "../logging/logger";
 import { StreamManager } from "../stream";
-import { TaskManager } from "../tasks";
+import {
+  type ExecuteTaskSettings,
+  executeTask as executeTaskImpl,
+  TaskManager,
+  type TaskRef,
+} from "../tasks";
 import {
   type ITelemetry,
   normalizeTelemetryOptions,
@@ -112,11 +117,14 @@ function hasHttpStatusCode(
 
 /**
  * Methods that should not be proxied by asUser().
- * These are lifecycle/internal methods that don't make sense
- * to execute in a user context.
+ * Lifecycle/internal methods that don't make sense in a user context.
+ *
+ * Note: `executeTask` is deliberately NOT excluded — it MUST run inside
+ * the proxy's `runInUserContext` so `getCurrentUserContext()` forwards
+ * the OBO context to the engine. Excluding it would silently downgrade
+ * OBO calls to SP.
  */
 const EXCLUDED_FROM_PROXY = new Set([
-  // Lifecycle methods
   "setup",
   "shutdown",
   "attachContext",
@@ -125,9 +133,8 @@ const EXCLUDED_FROM_PROXY = new Set([
   "getSkipBodyParsingPaths",
   "abortActiveOperations",
   "clientConfig",
-  // asUser itself - prevent chaining like .asUser().asUser()
+  // Prevent chained .asUser().asUser().
   "asUser",
-  // Internal methods
   "constructor",
 ]);
 
@@ -588,6 +595,58 @@ export abstract class Plugin<
       asyncWrapperFn,
       streamConfig,
       effectiveUserKey,
+    );
+  }
+
+  /**
+   * Bridges a registered durable task to an SSE response.
+   *
+   * Submits via `this.task.start(...)`, subscribes, writes each event
+   * as `id: <seq>\nevent: <name>\ndata: <json>`. Supports
+   * `Last-Event-ID` reconnect from the WAL.
+   *
+   * Identity comes from the active `runInUserContext` scope. For OBO,
+   * call through the proxy: `this.asUser(req).executeTask(...)`.
+   *
+   * Unlike `execute()` / `executeStream()`, this does not accept
+   * `retry` / `cache` / `timeout` — the task engine handles them
+   * natively.
+   *
+   * @throws if the app was created without `task: true` or an explicit task config.
+   *
+   * @example
+   * ```ts
+   * // SP
+   * await this.executeTask(res, "agent-loop", req.body);
+   *
+   * // OBO, no cancel on reconnect
+   * await this.asUser(req).executeTask(res, "agent-loop", req.body, {
+   *   cancelOnDisconnect: false,
+   * });
+   * ```
+   */
+  protected async executeTask<
+    TInput = unknown,
+    TResult = unknown,
+    TEvents extends Record<string, unknown> = Record<string, unknown>,
+  >(
+    res: express.Response,
+    task: string | TaskRef<TInput, TResult, TEvents>,
+    input: TInput,
+    settings?: ExecuteTaskSettings,
+  ): Promise<void> {
+    if (!this.task) {
+      throw new Error(
+        "executeTask() requires durable execution. Enable it with createApp({ task: true }) or an explicit task config.",
+      );
+    }
+    const taskName = typeof task === "string" ? task : task.name;
+    return executeTaskImpl(
+      { manager: this.task, telemetry: this.telemetry, pluginName: this.name },
+      res,
+      taskName,
+      input,
+      settings,
     );
   }
 
