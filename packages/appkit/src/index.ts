@@ -14,6 +14,15 @@ export type {
   StreamExecutionSettings,
 } from "shared";
 export { isSQLTypeMarker, sql } from "shared";
+export type {
+  ResumeOptions,
+  StopOptions,
+  StreamEvent,
+  SubmitOptions,
+  Task,
+  TaskEvent,
+  TaskHandle,
+} from "../vendor/taskflow/taskflow.js";
 export { CacheManager } from "./cache";
 export type { JobsConnectorConfig } from "./connectors/jobs";
 export type {
@@ -99,6 +108,8 @@ export {
   ResourceRegistry,
   ResourceType,
 } from "./registry";
+export type { TaskConfig } from "./tasks";
+export { TaskManager } from "./tasks";
 // Telemetry (for advanced custom telemetry)
 export {
   type Counter,

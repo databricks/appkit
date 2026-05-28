@@ -16,7 +16,9 @@ import {
 } from "../internal-telemetry";
 import { isPlainObject } from "../plugin/plugin";
 import { ResourceRegistry, ResourceType } from "../registry";
+import type { TaskOption } from "../tasks";
 import type { TelemetryConfig } from "../telemetry";
+import { registerGracefulShutdownHandlers } from "./graceful-shutdown";
 import { isToolProvider, PluginContext } from "./plugin-context";
 import { type ServiceManager, startCoreServices } from "./service-manager";
 
@@ -181,6 +183,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
       plugins?: T;
       telemetry?: TelemetryConfig;
       cache?: CacheConfig;
+      task?: TaskOption;
       client?: WorkspaceClient;
       onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
       disableInternalTelemetry?: boolean;
@@ -189,6 +192,7 @@ export class AppKit<TPlugins extends InputPluginMap> {
     const services = await startCoreServices({
       telemetry: config?.telemetry,
       cache: config?.cache,
+      task: config?.task,
     });
 
     try {
@@ -229,10 +233,10 @@ export class AppKit<TPlugins extends InputPluginMap> {
 
       const serverPlugin = instance.#pluginInstances.server;
       if (serverPlugin && typeof (serverPlugin as any).start === "function") {
-        await (serverPlugin as any).start({
-          shutdownCoreServices: () => services.stop(),
-        });
+        await (serverPlugin as any).start();
       }
+
+      registerGracefulShutdownHandlers(serverPlugin, services);
 
       return handle;
     } catch (error) {
@@ -310,6 +314,7 @@ export async function createApp<
     plugins?: T;
     telemetry?: TelemetryConfig;
     cache?: CacheConfig;
+    task?: TaskOption;
     client?: WorkspaceClient;
     onPluginsReady?: (appkit: PluginMap<T>) => void | Promise<void>;
     disableInternalTelemetry?: boolean;

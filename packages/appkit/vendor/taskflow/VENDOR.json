@@ -1,0 +1,24 @@
+{
+  "$schema": "./VENDOR.schema.json",
+  "name": "@databricks/taskflow",
+  "description": "Vendored TaskFlow Node.js bindings (Rust + napi). Source of truth: github.com/databricks/taskflow.",
+  "version": "0.1.0-internal",
+  "platforms": {
+    "darwin-arm64": {
+      "file": "taskflow-darwin-arm64.node",
+      "sha256": "80e602504b0b0f4403ccaa95aaf8420be6e8ab9237a47ab17c9ef438af975e52"
+    },
+    "linux-x64": {
+      "file": "taskflow-linux-x64.node",
+      "sha256": "fa3783f8e91b5bc58d5059c4946bf2437aaea9b24d3d3c48afcc1c8c872b9044"
+    }
+  },
+  "loader": {
+    "file": "taskflow.js",
+    "sha256": "eb3018ede76ff68a7980ba3578cdc3557fe15ed41171c2aad056bd7c86ea8618"
+  },
+  "types": {
+    "file": "taskflow.d.ts",
+    "sha256": "4d30bbb49368e52587260941e02eb599f73b9f1a266bbad6024c42b67f77fe1b"
+  }
+}

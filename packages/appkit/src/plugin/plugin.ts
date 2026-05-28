@@ -19,6 +19,7 @@ import type { PluginContext } from "../core/plugin-context";
 import { AppKitError, AuthenticationError } from "../errors";
 import { createLogger } from "../logging/logger";
 import { StreamManager } from "../stream";
+import { TaskManager } from "../tasks";
 import {
   type ITelemetry,
   normalizeTelemetryOptions,
@@ -225,6 +226,8 @@ export abstract class Plugin<
   protected telemetry!: ITelemetry;
   protected context?: PluginContext;
 
+  protected task: TaskManager | null = null;
+
   /** Registered endpoints for this plugin */
   private registeredEndpoints: PluginEndpointMap = {};
 
@@ -270,6 +273,7 @@ export abstract class Plugin<
       this.name,
       this.config.telemetry,
     );
+    this.task = TaskManager.getInstanceSync();
     this.isReady = true;
   }
 
@@ -280,16 +284,19 @@ export abstract class Plugin<
       telemetryConfig?: BasePluginConfig["telemetry"];
     } = {},
   ): void {
+    const { services, telemetryConfig, context } = deps;
     this.cache =
-      deps.services?.get<CacheManager>("cache") ??
+      services?.get<CacheManager>("cache") ??
       this.cache ??
       CacheManager.getInstanceSync();
     this.telemetry = TelemetryManager.getProvider(
       this.name,
-      deps.telemetryConfig ?? this.config.telemetry,
+      telemetryConfig ?? this.config.telemetry,
     );
-    if (deps.context !== undefined) {
-      this.context = deps.context as PluginContext;
+    this.task =
+      services?.get<TaskManager>("task") ?? TaskManager.getInstanceSync();
+    if (context !== undefined) {
+      this.context = context as PluginContext;
     }
     this.isReady = true;
   }

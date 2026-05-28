@@ -1,6 +1,7 @@
 import type { CacheConfig } from "shared";
 import { CacheManager } from "../cache";
 import { createLogger } from "../logging";
+import { TaskManager, type TaskOption } from "../tasks";
 import { type TelemetryConfig, TelemetryManager } from "../telemetry";
 
 const logger = createLogger("services");
@@ -55,11 +56,15 @@ export class ServiceManager {
 export async function startCoreServices(config: {
   telemetry?: TelemetryConfig;
   cache?: CacheConfig;
+  task?: TaskOption;
 }): Promise<ServiceManager> {
   const services = new ServiceManager();
   try {
     services.add("telemetry", await TelemetryManager.boot(config.telemetry));
     services.add("cache", await CacheManager.boot(config.cache));
+    if (config.task !== undefined && config.task !== false) {
+      services.add("task", await TaskManager.boot(config.task));
+    }
     return services;
   } catch (error) {
     await services.stop();

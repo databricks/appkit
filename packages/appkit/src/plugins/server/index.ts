@@ -102,12 +102,8 @@ export class ServerPlugin extends Plugin {
   }
 
   /**
-   * Start the server.
-   *
-   * This method starts the server and sets up the frontend.
-   * It also sets up the remote tunneling if enabled.
-   *
-   * @returns The express application.
+   * Starts the server and registers the frontend (and, in dev, the
+   * remote tunnel).
    */
   async start(): Promise<express.Application> {
     this.serverApplication.use(requestMetricsMiddleware);
@@ -121,10 +117,9 @@ export class ServerPlugin extends Plugin {
         // more headroom.
         limit: this.config.bodyLimit ?? "1mb",
         type: (req) => {
-          // Skip JSON parsing for routes that declared skipBodyParsing
-          // (e.g. file uploads where the raw body must flow through).
-          // rawBodyPaths is populated by extendRoutes() below; the type
-          // callback runs per-request so the set is already filled.
+          // Skip JSON parsing for routes that opted out (e.g. file
+          // uploads). `rawBodyPaths` is populated by `extendRoutes()`
+          // before any request hits this callback.
           const urlPath = req.url?.split("?")[0];
           if (urlPath && this.rawBodyPaths.has(urlPath)) return false;
           const ct = req.headers["content-type"] ?? "";
@@ -160,14 +155,52 @@ export class ServerPlugin extends Plugin {
     // attach server to remote tunnel controller
     this.remoteTunnelController.setServer(server);
 
-    process.on("SIGTERM", () => this._gracefulShutdown());
-    process.on("SIGINT", () => this._gracefulShutdown());
-
     if (process.env.NODE_ENV === "development") {
       const allRoutes = getRoutes(this.serverApplication._router.stack);
       printRoutes(allRoutes);
     }
     return this.serverApplication;
+  }
+
+  /**
+   * Stops Vite/tunnel/reporter, aborts in-flight plugin work, then closes HTTP.
+   */
+  async gracefulClose(): Promise<void> {
+    logger.info("Closing server...");
+    await this.closeDevStack();
+    this.abortAllPluginOperations();
+    await this.closeHttpServer();
+  }
+
+  private async closeDevStack(): Promise<void> {
+    if (this.viteDevServer) await this.viteDevServer.close();
+    if (this.remoteTunnelController) this.remoteTunnelController.cleanup();
+    TelemetryReporter.getInstance()?.stop();
+  }
+
+  private abortAllPluginOperations(): void {
+    const plugins = this.context?.getPlugins();
+    if (!plugins) return;
+    for (const plugin of plugins.values()) {
+      if (!plugin.abortActiveOperations) continue;
+      try {
+        plugin.abortActiveOperations();
+      } catch (err) {
+        logger.error(
+          "Error aborting operations for plugin %s: %O",
+          plugin.name,
+          err,
+        );
+      }
+    }
+  }
+
+  private async closeHttpServer(): Promise<void> {
+    if (!this.server) return;
+    await new Promise<void>((resolve) => {
+      this.server?.close(() => resolve());
+    });
+    logger.debug("Server closed gracefully");
   }
 
   /**
@@ -395,54 +428,6 @@ export class ServerPlugin extends Plugin {
         remoteServerController.isAllowedByEnv() ? "allowed" : "blocked",
         remoteServerController.isActive() ? "active" : "inactive",
       );
-    }
-  }
-
-  private async _gracefulShutdown() {
-    logger.info("Starting graceful shutdown...");
-
-    if (this.viteDevServer) {
-      await this.viteDevServer.close();
-    }
-
-    if (this.remoteTunnelController) {
-      this.remoteTunnelController.cleanup();
-    }
-
-    TelemetryReporter.getInstance()?.stop();
-
-    // 1. abort active operations from plugins
-    const shutdownPlugins = this.context?.getPlugins();
-    if (shutdownPlugins) {
-      for (const plugin of shutdownPlugins.values()) {
-        if (plugin.abortActiveOperations) {
-          try {
-            plugin.abortActiveOperations();
-          } catch (err) {
-            logger.error(
-              "Error aborting operations for plugin %s: %O",
-              plugin.name,
-              err,
-            );
-          }
-        }
-      }
-    }
-
-    // 2. close the server
-    if (this.server) {
-      this.server.close(() => {
-        logger.debug("Server closed gracefully");
-        process.exit(0);
-      });
-
-      // 3. timeout to force shutdown after 15 seconds
-      setTimeout(() => {
-        logger.debug("Force shutdown after timeout");
-        process.exit(1);
-      }, 15000);
-    } else {
-      process.exit(0);
     }
   }
 

@@ -33,6 +33,11 @@ export default defineConfig([
         to: "dist/plugins/server/remote-tunnel",
         flatten: true,
       },
+      {
+        from: "vendor/taskflow/*",
+        to: "dist/appkit/vendor/taskflow",
+        flatten: true,
+      },
     ],
   },
 ]);

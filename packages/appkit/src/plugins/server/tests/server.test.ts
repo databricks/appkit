@@ -694,13 +694,9 @@ describe("ServerPlugin", () => {
     });
   });
 
-  describe("_gracefulShutdown", () => {
+  describe("gracefulClose", () => {
     test("aborts plugin operations (with error isolation) and closes server", async () => {
-      vi.useFakeTimers();
       mockLoggerError.mockClear();
-      const exitSpy = vi
-        .spyOn(process, "exit")
-        .mockImplementation(((_code?: number) => undefined) as any);
 
       const plugin = new ServerPlugin({
         context: createContextWithPlugins({
@@ -717,18 +713,47 @@ describe("ServerPlugin", () => {
         }),
       } as any);
 
-      // pretend started
       (plugin as any).server = mockHttpServer;
 
-      await (plugin as any)._gracefulShutdown();
-      vi.runAllTimers();
+      await plugin.gracefulClose();
 
       expect(mockLoggerError).toHaveBeenCalled();
       expect(mockHttpServer.close).toHaveBeenCalled();
-      expect(exitSpy).toHaveBeenCalled();
+    });
 
-      exitSpy.mockRestore();
-      vi.useRealTimers();
+    test("resolves only after server.close callback fires", async () => {
+      let closeCb: (() => void) | undefined;
+      const closeSpy = vi.fn((cb: any) => {
+        closeCb = cb;
+      });
+
+      const plugin = new ServerPlugin({
+        context: createContextWithPlugins({}),
+      } as any);
+
+      (plugin as any).server = { ...mockHttpServer, close: closeSpy };
+
+      let resolved = false;
+      const done = plugin.gracefulClose().then(() => {
+        resolved = true;
+      });
+
+      // Wait a microtask; the server hasn't fired its close cb yet.
+      await Promise.resolve();
+      expect(resolved).toBe(false);
+
+      closeCb?.();
+      await done;
+      expect(resolved).toBe(true);
+    });
+
+    test("returns immediately when server never started", async () => {
+      const plugin = new ServerPlugin({
+        context: createContextWithPlugins({}),
+      } as any);
+
+      // No `this.server` assigned.
+      await expect(plugin.gracefulClose()).resolves.toBeUndefined();
     });
   });
 });
