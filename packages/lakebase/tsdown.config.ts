@@ -3,11 +3,15 @@ import { defineConfig } from "tsdown";
 export default defineConfig([
   {
     publint: true,
+    attw: {
+      profile: "strict",
+      level: "error",
+    },
     name: "@databricks/lakebase",
     entry: "src/index.ts",
     outDir: "dist",
     hash: false,
-    format: "esm",
+    format: ["esm", "cjs"],
     platform: "node",
     minify: false,
     dts: {
@@ -17,8 +21,8 @@ export default defineConfig([
     clean: false,
     unbundle: true,
     noExternal: [],
-    outExtensions: () => ({
-      js: ".js",
+    outExtensions: ({ format }) => ({
+      js: format === "cjs" ? ".cjs" : ".js",
     }),
     external: (id) => {
       // Bundle all internal modules

@@ -7,6 +7,11 @@ settings:
 overrides:
   conventional-changelog-conventionalcommits: 9.1.0
 
+patchedDependencies:
+  '@arethetypeswrong/core':
+    hash: fa45172231d2a8936721f7c43e9181572de47d131a0f91bb503207f3b6205d4f
+    path: patches/@arethetypeswrong__core.patch
+
 importers:
 
   .:
@@ -61,7 +66,7 @@ importers:
         version: 19.2.0(@types/node@24.7.2)(magicast@0.3.5)
       tsdown:
         specifier: 0.20.3
-        version: 0.20.3(oxc-resolver@11.19.1)(publint@0.3.15)(typescript@5.9.3)
+        version: 0.20.3(@arethetypeswrong/core@0.18.2(patch_hash=fa45172231d2a8936721f7c43e9181572de47d131a0f91bb503207f3b6205d4f))(oxc-resolver@11.19.1)(publint@0.3.15)(typescript@5.9.3)
       tsx:
         specifier: 4.20.6
         version: 4.20.6
@@ -159,7 +164,7 @@ importers:
         version: 16.6.1
       tsdown:
         specifier: 0.20.3
-        version: 0.20.3(oxc-resolver@11.19.1)(publint@0.3.15)(typescript@5.9.3)
+        version: 0.20.3(@arethetypeswrong/core@0.18.2(patch_hash=fa45172231d2a8936721f7c43e9181572de47d131a0f91bb503207f3b6205d4f))(oxc-resolver@11.19.1)(publint@0.3.15)(typescript@5.9.3)
       tsx:
         specifier: 4.20.6
         version: 4.20.6
@@ -676,6 +681,9 @@ packages:
     resolution: {integrity: sha512-UrcABB+4bUrFABwbluTIBErXwvbsU/V7TZWfmbgJfbkwiBuziS9gxdODUyuiecfdGQ85jglMW6juS3+z5TsKLw==}
     engines: {node: '>=10'}
 
+  '@andrewbranch/untar.js@1.0.3':
+    resolution: {integrity: sha512-Jh15/qVmrLGhkKJBdXlK1+9tY4lZruYjsgkDFj08ZmDiWVBLJcqkok7Z0/R0In+i1rScBpJlSvrTS2Lm41Pbnw==}
+
   '@antfu/install-pkg@1.1.0':
     resolution: {integrity: sha512-MGQsmw10ZyI+EJo45CdSER4zEb+p31LpDAFp2Z3gkSd1yqVZGi0Ebx++YTEMonJy4oChEMLsxZ64j8FH6sSqtQ==}
 
@@ -698,6 +706,10 @@ packages:
 
   '@appthreat/sqlite3@7.0.3':
     resolution: {integrity: sha512-pJcqUz0FfpJP7yGLcCvlqm9mQuHFPF2xh8Af1B9Z9hr0dBxEJ8MPYrO9Nqst+TZFEskMyPE+x4KVgFoXc+OQgg==}
+    engines: {node: '>=20'}
+
+  '@arethetypeswrong/core@0.18.2':
+    resolution: {integrity: sha512-GiwTmBFOU1/+UVNqqCGzFJYfBXEytUkiI+iRZ6Qx7KmUVtLm00sYySkfe203C9QtPG11yOz1ZaMek8dT/xnlgg==}
     engines: {node: '>=20'}
 
   '@asamuzakjp/css-color@4.0.5':
@@ -1468,6 +1480,9 @@ packages:
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [win32]
+
+  '@braidai/lang@1.1.2':
+    resolution: {integrity: sha512-qBcknbBufNHlui137Hft8xauQMTZDKdophmLFv05r2eNmdIv/MlPuP4TdUknHG68UdWLgVZwgxVe735HzJNIwA==}
 
   '@braintree/sanitize-url@7.1.1':
     resolution: {integrity: sha512-i1L7noDNxtFyL5DmZafWy1wRVhGehQmzZaz1HiN5e7iylJMSZR7ekOV7NsIqa5qBldlLrsKv4HbgFUVlQrz8Mw==}
@@ -2653,6 +2668,9 @@ packages:
 
   '@leichtgewicht/ip-codec@2.0.5':
     resolution: {integrity: sha512-Vo+PSpZG2/fmgmiNzYK9qWRh8h/CHrwD0mo1h1DzL4yzHNSfWYujGTYsWGreD000gcgmZ7K4Ys6Tx9TxtsKdDw==}
+
+  '@loaderkit/resolve@1.0.6':
+    resolution: {integrity: sha512-G8FdIoF5CypfwmD9rl8BXod5HDn8JqB0CCNBXDTaRZ+yRYhARrrSToX1zg1zy9jX3zLqigsELwhT4gNtkdQAUg==}
 
   '@mdx-js/mdx@3.1.1':
     resolution: {integrity: sha512-f6ZO2ifpwAQIpzGWaBQT2TXxPv6z3RBzQKpVftEWN78Vl/YweF1uwussDx8ECAXVtr3Rs89fKyG9YlzUs9DyGQ==}
@@ -7147,6 +7165,9 @@ packages:
     resolution: {integrity: sha512-7yAQpD2UMJzLi1Dqv7qFYnPbaPx7ZfFK6PiIxQ4PfkGPyNyl2Ugx+a/umUonmKqjhM4DnfbMvdX6otXq83soQQ==}
     engines: {node: ^12.20 || >= 14.13}
 
+  fflate@0.8.3:
+    resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
+
   figures@3.2.0:
     resolution: {integrity: sha512-yaduQFRKLXYOGgEn6AZau90j3ggSOyiqXU0F9JZfeXYhNa+Jk4X+s45A2zg5jns87GAFa34BBm2kXw4XpNcbdg==}
     engines: {node: '>=8'}
@@ -11266,6 +11287,11 @@ packages:
       eslint: ^8.57.0 || ^9.0.0
       typescript: '>=4.8.4 <6.0.0'
 
+  typescript@5.6.1-rc:
+    resolution: {integrity: sha512-E3b2+1zEFu84jB0YQi9BORDjz9+jGbwwy1Zi3G0LUNw7a7cePUrHMRNy8aPh53nXpkFGVHSxIZo5vKTfYaFiBQ==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
   typescript@5.6.3:
     resolution: {integrity: sha512-hjcS1mhfuyi4WW8IWtjP7brDrG2cuDZukyrYrSauoXGNgx0S7zceP07adYkJycEr56BOUTNPzbInooiN3fn1qw==}
     engines: {node: '>=14.17'}
@@ -11496,6 +11522,10 @@ packages:
 
   validate-npm-package-license@3.0.4:
     resolution: {integrity: sha512-DpKm2Ui/xN7/HQKCtpZxoRWBhZ9Z0kqtygG8XCgNQ8ZlDnxuQmWhj566j8fN4Cu3/JmbhsDo7fcAJq4s9h27Ew==}
+
+  validate-npm-package-name@5.0.1:
+    resolution: {integrity: sha512-OljLrQ9SQdOUqTaQxqL5dEfZWrXExyyWsozYlAWFawPVNuD83igl7uJD2RTkNMbniIYgt8l81eCJGIdQF7avLQ==}
+    engines: {node: ^14.17.0 || ^16.13.0 || >=18.0.0}
 
   validate-npm-package-name@7.0.2:
     resolution: {integrity: sha512-hVDIBwsRruT73PbK7uP5ebUt+ezEtCmzZz3F59BSr2F6OVFnJ/6h8liuvdLrQ88Xmnk6/+xGGuq+pG9WwTuy3A==}
@@ -12086,6 +12116,9 @@ snapshots:
 
   '@alloc/quick-lru@5.2.0': {}
 
+  '@andrewbranch/untar.js@1.0.3':
+    optional: true
+
   '@antfu/install-pkg@1.1.0':
     dependencies:
       package-manager-detector: 1.6.0
@@ -12121,6 +12154,18 @@ snapshots:
       node-gyp: 12.2.0
     transitivePeerDependencies:
       - supports-color
+    optional: true
+
+  '@arethetypeswrong/core@0.18.2(patch_hash=fa45172231d2a8936721f7c43e9181572de47d131a0f91bb503207f3b6205d4f)':
+    dependencies:
+      '@andrewbranch/untar.js': 1.0.3
+      '@loaderkit/resolve': 1.0.6
+      cjs-module-lexer: 1.4.3
+      fflate: 0.8.3
+      lru-cache: 11.2.2
+      semver: 7.7.3
+      typescript: 5.6.1-rc
+      validate-npm-package-name: 5.0.1
     optional: true
 
   '@asamuzakjp/css-color@4.0.5':
@@ -13050,6 +13095,9 @@ snapshots:
     optional: true
 
   '@biomejs/cli-win32-x64@2.2.6':
+    optional: true
+
+  '@braidai/lang@1.1.2':
     optional: true
 
   '@braintree/sanitize-url@7.1.1': {}
@@ -14858,6 +14906,11 @@ snapshots:
       - supports-color
 
   '@leichtgewicht/ip-codec@2.0.5': {}
+
+  '@loaderkit/resolve@1.0.6':
+    dependencies:
+      '@braidai/lang': 1.1.2
+    optional: true
 
   '@mdx-js/mdx@3.1.1':
     dependencies:
@@ -19701,6 +19754,9 @@ snapshots:
       node-domexception: 1.0.0
       web-streams-polyfill: 3.3.3
 
+  fflate@0.8.3:
+    optional: true
+
   figures@3.2.0:
     dependencies:
       escape-string-regexp: 1.0.5
@@ -24379,7 +24435,7 @@ snapshots:
     optionalDependencies:
       typescript: 5.9.3
 
-  tsdown@0.20.3(oxc-resolver@11.19.1)(publint@0.3.15)(typescript@5.9.3):
+  tsdown@0.20.3(@arethetypeswrong/core@0.18.2(patch_hash=fa45172231d2a8936721f7c43e9181572de47d131a0f91bb503207f3b6205d4f))(oxc-resolver@11.19.1)(publint@0.3.15)(typescript@5.9.3):
     dependencies:
       ansis: 4.2.0
       cac: 6.7.14
@@ -24398,6 +24454,7 @@ snapshots:
       unconfig-core: 7.5.0
       unrun: 0.2.28
     optionalDependencies:
+      '@arethetypeswrong/core': 0.18.2(patch_hash=fa45172231d2a8936721f7c43e9181572de47d131a0f91bb503207f3b6205d4f)
       publint: 0.3.15
       typescript: 5.9.3
     transitivePeerDependencies:
@@ -24538,6 +24595,9 @@ snapshots:
       typescript: 5.9.3
     transitivePeerDependencies:
       - supports-color
+
+  typescript@5.6.1-rc:
+    optional: true
 
   typescript@5.6.3: {}
 
@@ -24754,6 +24814,9 @@ snapshots:
     dependencies:
       spdx-correct: 3.2.0
       spdx-expression-parse: 3.0.1
+
+  validate-npm-package-name@5.0.1:
+    optional: true
 
   validate-npm-package-name@7.0.2: {}
 
