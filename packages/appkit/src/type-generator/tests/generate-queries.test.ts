@@ -38,6 +38,20 @@ vi.mock("../cache", async (importOriginal) => {
 });
 
 const { generateQueriesFromDescribe } = await import("../query-registry");
+const { CACHE_VERSION, hashSQL } = await import("../cache");
+
+// Sentinel for a previously-generated good type. The code passes cached types
+// through verbatim, so equality proves reuse rather than regeneration.
+const CACHED_GOOD_TYPE = "RESULT_REUSED_FROM_CACHE";
+
+// The `queries` map of the cache object last handed to saveCache — i.e. what
+// actually got persisted this run.
+const lastSavedQueries = () =>
+  (
+    mocks.saveCache.mock.calls.at(-1)?.[0] as
+      | { queries: Record<string, { type: string }> }
+      | undefined
+  )?.queries;
 
 function succeededResult(columns: [string, string, string | null][]) {
   return {
@@ -64,7 +78,10 @@ describe("generateQueriesFromDescribe", () => {
       ]),
     );
 
-    const { schemas } = await generateQueriesFromDescribe("/queries", "wh-123");
+    const { schemas, syntaxErrors } = await generateQueriesFromDescribe(
+      "/queries",
+      "wh-123",
+    );
 
     expect(schemas).toHaveLength(1);
     expect(schemas[0].name).toBe("users");
@@ -72,6 +89,9 @@ describe("generateQueriesFromDescribe", () => {
     expect(schemas[0].type).toContain("name: string");
     expect(mocks.spinnerStop).toHaveBeenCalledWith("");
     expect(mocks.saveCache).toHaveBeenCalledTimes(1);
+    // clean success: cached, and not flagged as a syntax error
+    expect(syntaxErrors).toEqual([]);
+    expect(lastSavedQueries()?.users.type).toContain("id: number");
   });
 
   test("FAILED status with error message — reports SQL error and produces unknown result type", async () => {
@@ -156,7 +176,10 @@ describe("generateQueriesFromDescribe", () => {
         status: { state: "FAILED", error: { message: "Table not found" } },
       });
 
-    const { schemas } = await generateQueriesFromDescribe("/queries", "wh-123");
+    const { schemas, syntaxErrors } = await generateQueriesFromDescribe(
+      "/queries",
+      "wh-123",
+    );
 
     expect(schemas).toHaveLength(2);
     expect(schemas[0].name).toBe("a");
@@ -166,6 +189,11 @@ describe("generateQueriesFromDescribe", () => {
 
     // saveCache called once after all parallel queries complete
     expect(mocks.saveCache).toHaveBeenCalledTimes(1);
+    // a = connectivity (rejected) → NOT a syntax error; b = FAILED → syntax error
+    expect(syntaxErrors).toEqual([{ name: "b", message: "Table not found" }]);
+    // neither failure is persisted to the cache
+    expect(lastSavedQueries()).not.toHaveProperty("a");
+    expect(lastSavedQueries()).not.toHaveProperty("b");
   });
 
   test("concurrency batching — saves cache after each batch", async () => {
@@ -211,5 +239,118 @@ describe("generateQueriesFromDescribe", () => {
     expect(schemas[0].type).toContain("status: SQLStringMarker");
     expect(schemas[0].type).toContain("org: SQLTypeMarker");
     expect(schemas[0].type).toContain("result: unknown");
+  });
+
+  test("connectivity failure reuses the last-known-good cached type", async () => {
+    const sql = "SELECT id FROM users";
+    mocks.readdir.mockResolvedValue(["users.sql"]);
+    mocks.readFile.mockResolvedValue(sql);
+    // A prior good type cached under a STALE hash: the query is a cache MISS
+    // (so DESCRIBE is attempted) but a known-good type still exists to reuse.
+    mocks.loadCache.mockReturnValueOnce({
+      version: CACHE_VERSION,
+      queries: {
+        users: { hash: "stale-hash", type: CACHED_GOOD_TYPE, retry: false },
+      },
+    });
+    mocks.executeStatement.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+
+    const { schemas, syntaxErrors } = await generateQueriesFromDescribe(
+      "/queries",
+      "wh-123",
+    );
+
+    // reused the cached type instead of clobbering it with `result: unknown`
+    expect(schemas[0].type).toBe(CACHED_GOOD_TYPE);
+    expect(schemas[0].type).not.toContain("result: unknown");
+    // connectivity is never recorded as a syntax error
+    expect(syntaxErrors).toEqual([]);
+    // the existing good entry is left intact (not overwritten)
+    expect(lastSavedQueries()?.users).toEqual({
+      hash: "stale-hash",
+      type: CACHED_GOOD_TYPE,
+      retry: false,
+    });
+  });
+
+  test("empty result (described, no columns) is unknown, not a syntax error, not cached", async () => {
+    mocks.readdir.mockResolvedValue(["empty.sql"]);
+    mocks.readFile.mockResolvedValue("SELECT 1");
+    mocks.executeStatement.mockResolvedValue(succeededResult([]));
+
+    const { schemas, syntaxErrors } = await generateQueriesFromDescribe(
+      "/queries",
+      "wh-123",
+    );
+
+    expect(schemas[0].type).toContain("result: unknown");
+    expect(syntaxErrors).toEqual([]);
+    expect(lastSavedQueries()).not.toHaveProperty("empty");
+  });
+
+  test("syntax error (FAILED) is recorded in syntaxErrors and not cached", async () => {
+    mocks.readdir.mockResolvedValue(["broken.sql"]);
+    mocks.readFile.mockResolvedValue("SELECT * FROM missing");
+    mocks.executeStatement.mockResolvedValue({
+      statement_id: "stmt",
+      status: {
+        state: "FAILED",
+        error: { message: "Table or view not found: missing" },
+      },
+    });
+
+    const { schemas, syntaxErrors } = await generateQueriesFromDescribe(
+      "/queries",
+      "wh-123",
+    );
+
+    expect(schemas[0].type).toContain("result: unknown");
+    expect(syntaxErrors).toEqual([
+      { name: "broken", message: "Table or view not found: missing" },
+    ]);
+    expect(lastSavedQueries()).not.toHaveProperty("broken");
+  });
+
+  test("cache HIT serves the stored type without calling the warehouse", async () => {
+    const sql = "SELECT id FROM t";
+    mocks.readdir.mockResolvedValue(["t.sql"]);
+    mocks.readFile.mockResolvedValue(sql);
+    mocks.loadCache.mockReturnValueOnce({
+      version: CACHE_VERSION,
+      queries: {
+        t: { hash: hashSQL(sql), type: CACHED_GOOD_TYPE, retry: false },
+      },
+    });
+
+    const { schemas, syntaxErrors } = await generateQueriesFromDescribe(
+      "/queries",
+      "wh-123",
+    );
+
+    expect(mocks.executeStatement).not.toHaveBeenCalled();
+    expect(schemas[0].type).toBe(CACHED_GOOD_TYPE);
+    expect(syntaxErrors).toEqual([]);
+  });
+
+  test("stale retry-flagged cache entry is re-described, not reused", async () => {
+    const sql = "SELECT id FROM t";
+    mocks.readdir.mockResolvedValue(["t.sql"]);
+    mocks.readFile.mockResolvedValue(sql);
+    // Matching hash but retry:true (legacy poisoned entry) → must NOT be a HIT.
+    mocks.loadCache.mockReturnValueOnce({
+      version: CACHE_VERSION,
+      queries: {
+        t: { hash: hashSQL(sql), type: "STALE_UNKNOWN", retry: true },
+      },
+    });
+    mocks.executeStatement.mockResolvedValue(
+      succeededResult([["id", "INT", null]]),
+    );
+
+    const { schemas } = await generateQueriesFromDescribe("/queries", "wh-123");
+
+    expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
+    expect(schemas[0].type).toContain("id: number");
+    expect(schemas[0].type).not.toBe("STALE_UNKNOWN");
   });
 });
