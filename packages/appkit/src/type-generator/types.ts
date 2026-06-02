@@ -76,3 +76,30 @@ export interface QuerySchema {
   name: string;
   type: string;
 }
+
+/**
+ * A genuine SQL error: `DESCRIBE QUERY` ran against a *reachable* warehouse and
+ * the warehouse reported the statement as FAILED (bad table, syntax error,
+ * incompatible type, …). Distinct from a connectivity failure (warehouse
+ * unreachable), which is non-fatal and never recorded here.
+ * @property name - the query name
+ * @property message - the SQL error message reported by the warehouse
+ */
+export interface QuerySyntaxError {
+  name: string;
+  message: string;
+}
+
+/**
+ * Result of describing a folder of queries.
+ * @property schemas - one schema per query, in original file order. Queries that
+ *   could not be described carry `result: unknown` so output stays valid.
+ * @property syntaxErrors - queries whose DESCRIBE failed against a reachable
+ *   warehouse (genuine SQL errors). Connectivity failures are deliberately NOT
+ *   included: they degrade silently (reuse last-known-good type or emit
+ *   `unknown`) so a transient outage never fails a build.
+ */
+export interface QueryGenerationResult {
+  schemas: QuerySchema[];
+  syntaxErrors: QuerySyntaxError[];
+}

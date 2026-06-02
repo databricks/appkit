@@ -9,11 +9,38 @@ import {
 } from "./migration";
 import { generateQueriesFromDescribe } from "./query-registry";
 import { generateServingTypes as generateServingTypesImpl } from "./serving/generator";
-import type { QuerySchema } from "./types";
+import type { QuerySchema, QuerySyntaxError } from "./types";
 
 dotenv.config();
 
 const logger = createLogger("type-generator");
+
+/**
+ * Thrown when one or more queries fail `DESCRIBE QUERY` against a *reachable*
+ * warehouse — i.e. genuine SQL errors (bad table, syntax, incompatible type),
+ * as opposed to a connectivity failure (warehouse unreachable), which degrades
+ * silently. Whether this is fatal is the caller's decision: the Vite plugin and
+ * CLI fail the build in production and warn-only in development.
+ */
+export class TypegenSyntaxError extends Error {
+  readonly queries: QuerySyntaxError[];
+
+  constructor(queries: QuerySyntaxError[], warehouseId?: string) {
+    const names = queries.map((q) => q.name).join(", ");
+    super(
+      [
+        `Type generation failed: ${queries.length} ${queries.length === 1 ? "query" : "queries"} could not be described: ${names}.`,
+        `DESCRIBE QUERY failed for these queries — see the error codes above for details.`,
+        `Common causes: SQL syntax errors, missing tables/views, or warehouse format incompatibilities.`,
+        warehouseId
+          ? `To debug: run the failing query directly in a SQL editor against warehouse ${warehouseId}.`
+          : `To debug: run the failing query directly in a SQL editor.`,
+      ].join("\n"),
+    );
+    this.name = "TypegenSyntaxError";
+    this.queries = queries;
+  }
+}
 
 /**
  * Generate type declarations for QueryRegistry
@@ -64,28 +91,13 @@ export async function generateFromEntryPoint(options: {
   logger.debug("Starting type generation...");
 
   let queryRegistry: QuerySchema[] = [];
-  if (queryFolder)
-    queryRegistry = await generateQueriesFromDescribe(
-      queryFolder,
-      warehouseId,
-      {
-        noCache,
-      },
-    );
-
-  const failedQueries = queryRegistry.filter((q) =>
-    q.type.includes("result: unknown"),
-  );
-  if (failedQueries.length > 0) {
-    const names = failedQueries.map((q) => q.name).join(", ");
-    throw new Error(
-      [
-        `Type generation failed: ${failedQueries.length} ${failedQueries.length === 1 ? "query" : "queries"} could not be described: ${names}.`,
-        `DESCRIBE QUERY failed for these queries — see the error codes above for details.`,
-        `Common causes: SQL syntax errors, missing tables/views, or warehouse format incompatibilities.`,
-        `To debug: run the failing query directly in a SQL editor against warehouse ${warehouseId}.`,
-      ].join("\n"),
-    );
+  let syntaxErrors: QuerySyntaxError[] = [];
+  if (queryFolder) {
+    const result = await generateQueriesFromDescribe(queryFolder, warehouseId, {
+      noCache,
+    });
+    queryRegistry = result.schemas;
+    syntaxErrors = result.syntaxErrors;
   }
 
   const typeDeclarations = generateTypeDeclarations(queryRegistry);
@@ -96,6 +108,15 @@ export async function generateFromEntryPoint(options: {
   // One-time migration: remove old generated file and patch project configs
   await removeOldGeneratedTypes(projectRoot, "appKitTypes.d.ts");
   await migrateProjectConfig(projectRoot);
+
+  // Types are always written above — including `result: unknown` for any query
+  // that could not be described — so a transient warehouse outage never blocks a
+  // build. Only a genuine SQL error against a REACHABLE warehouse is surfaced as
+  // a throw; the Vite plugin / CLI apply the prod-fails / dev-warns gate.
+  // Connectivity failures are absent from `syntaxErrors`, so they pass silently.
+  if (syntaxErrors.length > 0) {
+    throw new TypegenSyntaxError(syntaxErrors, warehouseId);
+  }
 
   logger.debug("Type generation complete!");
 }

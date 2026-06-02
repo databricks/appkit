@@ -64,7 +64,7 @@ describe("generateQueriesFromDescribe", () => {
       ]),
     );
 
-    const schemas = await generateQueriesFromDescribe("/queries", "wh-123");
+    const { schemas } = await generateQueriesFromDescribe("/queries", "wh-123");
 
     expect(schemas).toHaveLength(1);
     expect(schemas[0].name).toBe("users");
@@ -85,7 +85,7 @@ describe("generateQueriesFromDescribe", () => {
       },
     });
 
-    const schemas = await generateQueriesFromDescribe("/queries", "wh-123");
+    const { schemas } = await generateQueriesFromDescribe("/queries", "wh-123");
 
     expect(schemas).toHaveLength(1);
     expect(schemas[0].name).toBe("bad_table");
@@ -102,7 +102,7 @@ describe("generateQueriesFromDescribe", () => {
       status: { state: "FAILED" },
     });
 
-    const schemas = await generateQueriesFromDescribe("/queries", "wh-123");
+    const { schemas } = await generateQueriesFromDescribe("/queries", "wh-123");
 
     expect(schemas).toHaveLength(1);
     expect(schemas[0].name).toBe("query");
@@ -127,7 +127,7 @@ describe("generateQueriesFromDescribe", () => {
         },
       });
 
-    const schemas = await generateQueriesFromDescribe("/queries", "wh-123");
+    const { schemas } = await generateQueriesFromDescribe("/queries", "wh-123");
 
     expect(schemas).toHaveLength(2);
 
@@ -143,7 +143,7 @@ describe("generateQueriesFromDescribe", () => {
     expect(mocks.saveCache).toHaveBeenCalledTimes(1);
   });
 
-  test("all queries fail — caches with retry flag, all unknown result types", async () => {
+  test("all queries fail (connectivity + syntax) — all produce unknown result types", async () => {
     mocks.readdir.mockResolvedValue(["a.sql", "b.sql"]);
     mocks.readFile
       .mockResolvedValueOnce("SELECT * FROM table_a")
@@ -156,7 +156,7 @@ describe("generateQueriesFromDescribe", () => {
         status: { state: "FAILED", error: { message: "Table not found" } },
       });
 
-    const schemas = await generateQueriesFromDescribe("/queries", "wh-123");
+    const { schemas } = await generateQueriesFromDescribe("/queries", "wh-123");
 
     expect(schemas).toHaveLength(2);
     expect(schemas[0].name).toBe("a");
@@ -181,9 +181,13 @@ describe("generateQueriesFromDescribe", () => {
       .mockResolvedValueOnce(succeededResult([["id", "INT", null]]))
       .mockResolvedValueOnce(succeededResult([["id", "INT", null]]));
 
-    const schemas = await generateQueriesFromDescribe("/queries", "wh-123", {
-      concurrency: 2,
-    });
+    const { schemas } = await generateQueriesFromDescribe(
+      "/queries",
+      "wh-123",
+      {
+        concurrency: 2,
+      },
+    );
 
     expect(schemas).toHaveLength(3);
     expect(schemas[0].name).toBe("q1");
@@ -201,7 +205,7 @@ describe("generateQueriesFromDescribe", () => {
     );
     mocks.executeStatement.mockRejectedValueOnce(new Error("timeout"));
 
-    const schemas = await generateQueriesFromDescribe("/queries", "wh-123");
+    const { schemas } = await generateQueriesFromDescribe("/queries", "wh-123");
 
     expect(schemas).toHaveLength(1);
     expect(schemas[0].type).toContain("status: SQLStringMarker");
