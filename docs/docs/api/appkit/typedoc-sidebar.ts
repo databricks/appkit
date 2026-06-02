@@ -239,6 +239,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.RawResponse",
+          label: "RawResponse"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.RegisteredAgent",
           label: "RegisteredAgent"
         },
@@ -251,6 +256,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.RequestedResource",
           label: "RequestedResource"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.RequestOptions",
+          label: "RequestOptions"
         },
         {
           type: "doc",
@@ -336,6 +346,16 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.ValidationResult",
           label: "ValidationResult"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.WorkspaceClient",
+          label: "WorkspaceClient"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.WorkspaceClientOptions",
+          label: "WorkspaceClientOptions"
         }
       ]
     },
@@ -517,6 +537,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Function.createWorkspaceClient",
+          label: "createWorkspaceClient"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Function.defineTool",
           label: "defineTool"
         },
@@ -544,6 +569,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.generateDatabaseCredential",
           label: "generateDatabaseCredential"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.getApiErrorStatusCode",
+          label: "getApiErrorStatusCode"
         },
         {
           type: "doc",
@@ -579,6 +609,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.getWorkspaceClient",
           label: "getWorkspaceClient"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.isApiError",
+          label: "isApiError"
         },
         {
           type: "doc",

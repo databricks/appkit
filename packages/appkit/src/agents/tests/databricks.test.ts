@@ -875,7 +875,7 @@ describe("DatabricksAdapter", () => {
 });
 
 describe("DatabricksAdapter.fromServingEndpoint", () => {
-  test("routes tool-free chat through apiClient.request with a streaming payload", async () => {
+  test("routes tool-free chat through http.request with a streaming payload", async () => {
     const apiClient = {
       request: vi.fn().mockResolvedValue({
         contents: createReadableStream([textDelta("Hi"), sseChunk("[DONE]")]),
@@ -883,7 +883,8 @@ describe("DatabricksAdapter.fromServingEndpoint", () => {
     };
 
     const adapter = await DatabricksAdapter.fromServingEndpoint({
-      workspaceClient: { apiClient },
+      // Wrapper exposes `http` instead of `apiClient` post-migration.
+      workspaceClient: { http: apiClient },
       endpointName: "my-model",
     });
 
@@ -912,7 +913,7 @@ describe("DatabricksAdapter.fromServingEndpoint", () => {
     };
 
     const adapter = await DatabricksAdapter.fromServingEndpoint({
-      workspaceClient: { apiClient },
+      workspaceClient: { http: apiClient },
       endpointName: "my model/with spaces",
     });
 
@@ -972,7 +973,7 @@ describe("DatabricksAdapter.fromModelServing", () => {
     };
 
     const adapter = await DatabricksAdapter.fromModelServing("explicit-model", {
-      workspaceClient: { apiClient },
+      workspaceClient: { http: apiClient },
     });
 
     expect(adapter).toBeInstanceOf(DatabricksAdapter);

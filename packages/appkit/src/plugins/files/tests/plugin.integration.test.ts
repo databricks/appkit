@@ -16,7 +16,7 @@ import { files } from "../index";
 import { streamFromString } from "./utils";
 
 const { mockFilesApi, mockSdkClient, MockApiError } = vi.hoisted(() => {
-  const mockFilesApi = {
+  const mockFilesApi: Record<string, ReturnType<typeof vi.fn>> = {
     listDirectoryContents: vi.fn(),
     download: vi.fn(),
     getMetadata: vi.fn(),
@@ -24,6 +24,14 @@ const { mockFilesApi, mockSdkClient, MockApiError } = vi.hoisted(() => {
     createDirectory: vi.fn(),
     delete: vi.fn(),
   };
+  // Modular SDK method aliases — PoC migration to @databricks/sdk-files
+  // renamed/iter-ized these methods. Tests still reference legacy names,
+  // so we share the same spy under both names. TODO(prod): rewrite tests
+  // against modular method names + camelCase fields.
+  mockFilesApi.listDirectoryContentsIter = mockFilesApi.listDirectoryContents;
+  mockFilesApi.downloadFile = mockFilesApi.download;
+  mockFilesApi.getFileMetadata = mockFilesApi.getMetadata;
+  mockFilesApi.deleteFile = mockFilesApi.delete;
 
   const mockSdkClient = {
     files: mockFilesApi,
@@ -169,7 +177,23 @@ describe("Files Plugin Integration", () => {
 
   describe("List Directory", () => {
     test(`GET /api/files/${VOL}/list returns directory entries`, async () => {
-      const MOCKED_ENTRIES = [
+      // Connector now calls modular `listDirectoryContentsIter` (aliased
+      // to `listDirectoryContents` spy in the hoisted mock) and reads
+      // camelCase fields (`isDirectory`, `fileSize`, `lastModified`),
+      // then maps them back to AppKit's public snake_case shape.
+      const MOCKED_ENTRIES_FROM_SDK = [
+        {
+          name: "file1.txt",
+          path: "/Volumes/catalog/schema/vol/file1.txt",
+          isDirectory: false,
+        },
+        {
+          name: "subdir",
+          path: "/Volumes/catalog/schema/vol/subdir",
+          isDirectory: true,
+        },
+      ];
+      const EXPECTED_PUBLIC_ENTRIES = [
         {
           name: "file1.txt",
           path: "/Volumes/catalog/schema/vol/file1.txt",
@@ -184,7 +208,7 @@ describe("Files Plugin Integration", () => {
 
       mockFilesApi.listDirectoryContents.mockReturnValue(
         (async function* () {
-          for (const entry of MOCKED_ENTRIES) {
+          for (const entry of MOCKED_ENTRIES_FROM_SDK) {
             yield entry;
           }
         })(),
@@ -196,7 +220,7 @@ describe("Files Plugin Integration", () => {
 
       expect(response.status).toBe(200);
       const data = await response.json();
-      expect(data).toEqual(MOCKED_ENTRIES);
+      expect(data).toEqual(EXPECTED_PUBLIC_ENTRIES);
     });
 
     test(`GET /api/files/${VOL}/list?path=/abs/path uses provided path`, async () => {
@@ -210,8 +234,9 @@ describe("Files Plugin Integration", () => {
       );
 
       expect(response.status).toBe(200);
+      // Modular SDK field name is `directoryPath` (camelCase).
       expect(mockFilesApi.listDirectoryContents).toHaveBeenCalledWith({
-        directory_path: "/Volumes/other/path",
+        directoryPath: "/Volumes/other/path",
       });
     });
   });
@@ -279,10 +304,13 @@ describe("Files Plugin Integration", () => {
 
   describe("Metadata", () => {
     test(`GET /api/files/${VOL}/metadata returns correct metadata`, async () => {
+      // Modular SDK's getFileMetadata returns camelCase fields
+      // (contentLength: bigint, contentType, lastModified) rather than
+      // kebab-case HTTP-style headers.
       mockFilesApi.getMetadata.mockResolvedValue({
-        "content-length": 256,
-        "content-type": "application/json",
-        "last-modified": "2025-06-15T10:00:00Z",
+        contentLength: 256n,
+        contentType: "application/json",
+        lastModified: "2025-06-15T10:00:00Z",
       });
 
       const response = await fetch(

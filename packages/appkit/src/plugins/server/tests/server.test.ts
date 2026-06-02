@@ -395,7 +395,7 @@ describe("ServerPlugin", () => {
       );
     });
 
-    test("should skip body parsing for paths declared by plugins", async () => {
+    test("should skip body parsing for paths declared by plugins (template + concrete URL)", async () => {
       process.env.NODE_ENV = "production";
 
       const plugins: any = {
@@ -403,36 +403,62 @@ describe("ServerPlugin", () => {
           name: "files",
           injectRoutes: vi.fn(),
           getEndpoints: vi.fn().mockReturnValue({}),
-          getSkipBodyParsingPaths: vi
-            .fn()
-            .mockReturnValue(new Set(["/api/files/upload"])),
+          // Plugins register templated routes — the server has to match
+          // them against concrete URLs at request time. This was a
+          // pre-existing bug (exact-string Set lookup) that broke every
+          // file upload under a `:param` route.
+          getSkipBodyParsingPaths: vi.fn().mockReturnValue(
+            new Set([
+              "/api/files/upload", // no params
+              "/api/files/:volumeKey/upload", // single param
+            ]),
+          ),
         },
       };
 
       const plugin = new ServerPlugin({ plugins });
       await plugin.start();
 
-      // Get the type function passed to express.json
       const jsonCall = vi.mocked(express.json).mock.calls[0][0] as any;
       const typeFn = jsonCall.type;
 
-      // Should skip body parsing for the declared path
+      // Concrete URL for the no-param template.
       expect(typeFn({ url: "/api/files/upload", headers: {} })).toBe(false);
-
-      // Should skip body parsing for declared path with query string
       expect(typeFn({ url: "/api/files/upload?path=foo", headers: {} })).toBe(
         false,
       );
 
-      // Should NOT skip body parsing for other routes (no hardcoded /upload check)
+      // Concrete URL with the `:volumeKey` param substituted — this is
+      // the case the bug missed. Body parsing MUST be skipped or every
+      // file upload bombs in body-parser.
+      expect(typeFn({ url: "/api/files/files/upload", headers: {} })).toBe(
+        false,
+      );
+      expect(
+        typeFn({ url: "/api/files/exports/upload?force=1", headers: {} }),
+      ).toBe(false);
+
+      // Anchored matching — `/api/files` prefix alone must NOT match.
+      expect(
+        typeFn({
+          url: "/api/files",
+          headers: { "content-type": "application/json" },
+        }),
+      ).toBe(true);
+      expect(
+        typeFn({
+          url: "/api/files/files/list",
+          headers: { "content-type": "application/json" },
+        }),
+      ).toBe(true);
+
+      // Unrelated routes still parse JSON normally.
       expect(
         typeFn({
           url: "/api/other/upload",
           headers: { "content-type": "application/json" },
         }),
       ).toBe(true);
-
-      // Should still parse JSON for normal routes
       expect(
         typeFn({
           url: "/api/analytics/query",

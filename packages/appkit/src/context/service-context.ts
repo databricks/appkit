@@ -1,10 +1,5 @@
 import { createHash } from "node:crypto";
-import {
-  type ClientOptions,
-  ConfigError,
-  type sql,
-  WorkspaceClient,
-} from "@databricks/sdk-experimental";
+import { ConfigError } from "@databricks/sdk-experimental";
 import { coerce } from "semver";
 import {
   name as productName,
@@ -15,6 +10,12 @@ import {
   ConfigurationError,
   InitializationError,
 } from "../errors";
+import {
+  createWorkspaceClient,
+  type sql,
+  type WorkspaceClient,
+  type WorkspaceClientOptions,
+} from "../workspace-client";
 import type { UserContext } from "./user-context";
 
 /**
@@ -32,11 +33,14 @@ export interface ServiceContextState {
   workspaceId: Promise<string>;
 }
 
-function getClientOptions(): ClientOptions {
+function getClientOptions(): Omit<
+  WorkspaceClientOptions,
+  "host" | "token" | "authType"
+> {
   const isDev = process.env.NODE_ENV === "development";
   const semver = coerce(productVersion);
   const normalizedVersion = (semver?.version ??
-    productVersion) as ClientOptions["productVersion"];
+    productVersion) as WorkspaceClientOptions["productVersion"];
 
   return {
     product: productName,
@@ -130,14 +134,12 @@ export class ServiceContext {
     // Create user client with the OAuth token from Databricks Apps
     // Note: We use authType: "pat" because the token is passed as a Bearer token
     // just like a PAT, even though it's technically an OAuth token
-    const userClient = new WorkspaceClient(
-      {
-        token,
-        host,
-        authType: "pat",
-      },
-      getClientOptions(),
-    );
+    const userClient = createWorkspaceClient({
+      token,
+      host,
+      authType: "pat",
+      ...getClientOptions(),
+    });
 
     const tokenFingerprint = createHash("sha256")
       .update(token)
@@ -160,7 +162,10 @@ export class ServiceContext {
    * Get the client options for WorkspaceClient.
    * Exposed for testing purposes.
    */
-  static getClientOptions(): ClientOptions {
+  static getClientOptions(): Omit<
+    WorkspaceClientOptions,
+    "host" | "token" | "authType"
+  > {
     return getClientOptions();
   }
 
@@ -169,7 +174,7 @@ export class ServiceContext {
     client?: WorkspaceClient,
   ): Promise<ServiceContextState> {
     try {
-      const wsClient = client ?? new WorkspaceClient({}, getClientOptions());
+      const wsClient = client ?? createWorkspaceClient(getClientOptions());
 
       const [resolvedWorkspaceId, currentUser, resolvedWarehouseId] =
         await Promise.all([
@@ -213,12 +218,9 @@ export class ServiceContext {
       return process.env.DATABRICKS_WORKSPACE_ID;
     }
 
-    const response = (await client.apiClient.request({
+    const response = (await client.http.request({
       path: "/api/2.0/preview/scim/v2/Me",
       method: "GET",
-      headers: new Headers(),
-      raw: false,
-      query: {},
       responseHeaders: ["x-databricks-org-id"],
     })) as { "x-databricks-org-id": string };
 
@@ -237,14 +239,10 @@ export class ServiceContext {
     }
 
     if (process.env.NODE_ENV === "development") {
-      const response = (await client.apiClient.request({
+      const response = (await client.http.request({
         path: "/api/2.0/sql/warehouses",
         method: "GET",
-        headers: new Headers(),
-        raw: false,
-        query: {
-          skip_cannot_use: "true",
-        },
+        query: { skip_cannot_use: "true" },
       })) as { warehouses: sql.EndpointInfo[] };
 
       const priorities: Record<sql.State, number> = {

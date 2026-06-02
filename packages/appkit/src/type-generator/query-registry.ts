@@ -1,8 +1,15 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { WorkspaceClient } from "@databricks/sdk-experimental";
 import pc from "picocolors";
+import {
+  name as productName,
+  version as productVersion,
+} from "../../package.json";
 import { createLogger } from "../logging/logger";
+import {
+  createWorkspaceClient,
+  type WorkspaceClient,
+} from "../workspace-client";
 import { CACHE_VERSION, hashSQL, loadCache, saveCache } from "./cache";
 import { Spinner } from "./spinner";
 import {
@@ -292,7 +299,10 @@ export async function generateQueriesFromDescribe(
   const queryFiles = allFiles.filter((file) => file.endsWith(".sql"));
   logger.debug("Found %d SQL queries", queryFiles.length);
 
-  const client = new WorkspaceClient({});
+  const client = createWorkspaceClient({
+    product: productName,
+    productVersion: productVersion as `${number}.${number}.${number}`,
+  });
   const spinner = new Spinner();
 
   // Read all SQL files in parallel

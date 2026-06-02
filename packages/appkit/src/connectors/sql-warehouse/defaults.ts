@@ -1,4 +1,4 @@
-import type { sql } from "@databricks/sdk-experimental";
+import type { sql } from "../../workspace-client";
 
 interface ExecuteStatementDefaults {
   wait_timeout: string;

@@ -1,8 +1,13 @@
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
+// TODO(prod): rewrite this connector against `@databricks/sdk-genie` and
+// drop the legacy waiter / Time / TimeUnits idiom. For the PoC the genie
+// service is delegated to the legacy SDK via the wrapper's
+// `.toLegacyWorkspaceClient().genie` (transparently via `wrapper.genie`),
+// so the connector keeps working unchanged against the old types.
 import * as SDK from "@databricks/sdk-experimental";
 import type { GenieMessage } from "@databricks/sdk-experimental/dist/apis/dashboards";
 import type { Waiter } from "@databricks/sdk-experimental/dist/wait";
 import { createLogger } from "../../logging";
+import type { WorkspaceClient } from "../../workspace-client";
 import { genieConnectorDefaults } from "./defaults";
 import { pollWaiter } from "./poll-waiter";
 import type {

@@ -61,9 +61,11 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [PluginManifest](Interface.PluginManifest.md) | Plugin manifest that declares metadata and resource requirements. Attached to plugin classes as a static property. Extends the shared PluginManifest with strict resource types. |
 | [PluginToolkitProvider](Interface.PluginToolkitProvider.md) | Minimum shape every entry in the [Plugins](TypeAlias.Plugins.md) map must expose. Core plugins (analytics, files, genie, lakebase) implement this directly via their `.toolkit()` method. The agents plugin and standalone `runAgent` synthesize this shape for any registered plugin that doesn't implement `.toolkit()` directly (falling back to `getAgentTools()` walking). |
 | [PromptContext](Interface.PromptContext.md) | Context passed to `baseSystemPrompt` callbacks. |
+| [RawResponse](Interface.RawResponse.md) | Returned when `raw: true` is set. |
 | [RegisteredAgent](Interface.RegisteredAgent.md) | - |
 | [RequestedClaims](Interface.RequestedClaims.md) | Optional claims for fine-grained Unity Catalog table permissions When specified, the returned token will be scoped to only the requested tables |
 | [RequestedResource](Interface.RequestedResource.md) | Resource to request permissions for in Unity Catalog |
+| [RequestOptions](Interface.RequestOptions.md) | Mirrors the old SDK's `apiClient.request(...)` arguments. We deliberately keep the shape (snake-case absent; old keys preserved) so existing call sites move over without semantic edits. |
 | [ResourceEntry](Interface.ResourceEntry.md) | Internal representation of a resource in the registry. Extends ResourceRequirement with resolution state and plugin ownership. |
 | [ResourceRequirement](Interface.ResourceRequirement.md) | Declares a resource requirement for a plugin. Can be defined statically in a manifest or dynamically via getResourceRequirements(). |
 | [RunAgentInput](Interface.RunAgentInput.md) | - |
@@ -81,6 +83,8 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [ToolkitOptions](Interface.ToolkitOptions.md) | - |
 | [ToolProvider](Interface.ToolProvider.md) | - |
 | [ValidationResult](Interface.ValidationResult.md) | Result of validating all registered resources against the environment. |
+| [WorkspaceClient](Interface.WorkspaceClient.md) | The wrapper's facade type. Migrated services use modular SDK clients directly; legacy delegates are explicitly marked. |
+| [WorkspaceClientOptions](Interface.WorkspaceClientOptions.md) | Options used to construct the wrapper. Mirrors the subset of the old SDK's `Config` + `ClientOptions` that AppKit relies on today; we explicitly do NOT re-expose every old-SDK config knob. |
 
 ## Type Aliases
 
@@ -128,12 +132,14 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [createApp](Function.createApp.md) | Bootstraps AppKit with the provided configuration. |
 | [createLakebasePool](Function.createLakebasePool.md) | Create a Lakebase pool with appkit's logger integration. Telemetry automatically uses appkit's OpenTelemetry configuration via global registry. |
 | [createLakebasePoolManager](Function.createLakebasePoolManager.md) | Create a pool manager that maintains per-key Lakebase connection pools. |
+| [createWorkspaceClient](Function.createWorkspaceClient.md) | Construct an AppKit workspace client. |
 | [defineTool](Function.defineTool.md) | Defines a single tool entry for a plugin's internal registry. |
 | [executeFromRegistry](Function.executeFromRegistry.md) | Validates tool-call arguments against the entry's schema and invokes its handler. On validation failure, returns an LLM-friendly error string (matching the behavior of `tool()`) rather than throwing, so the model can self-correct on its next turn. |
 | [extractServingEndpoints](Function.extractServingEndpoints.md) | Extract serving endpoint config from a server file by AST-parsing it. Looks for `serving({ endpoints: { alias: { env: "..." }, ... } })` calls and extracts the endpoint alias names and their environment variable mappings. |
 | [findServerFile](Function.findServerFile.md) | Find the server entry file by checking candidate paths in order. |
 | [functionToolToDefinition](Function.functionToolToDefinition.md) | - |
 | [generateDatabaseCredential](Function.generateDatabaseCredential.md) | Generate OAuth credentials for Postgres database connection using the proper Postgres API. |
+| [getApiErrorStatusCode](Function.getApiErrorStatusCode.md) | Returns the HTTP status code for an SDK error from either SDK shape, or `undefined` if `err` is not a recognized SDK error. |
 | [getExecutionContext](Function.getExecutionContext.md) | Get the current execution context. |
 | [getLakebaseOrmConfig](Function.getLakebaseOrmConfig.md) | Get Lakebase connection configuration for ORMs that don't accept pg.Pool directly. |
 | [getLakebasePgConfig](Function.getLakebasePgConfig.md) | Get Lakebase connection configuration for PostgreSQL clients. |
@@ -141,6 +147,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [getResourceRequirements](Function.getResourceRequirements.md) | Gets the resource requirements from a plugin's manifest. |
 | [getUsernameWithApiLookup](Function.getUsernameWithApiLookup.md) | Resolves the PostgreSQL username for a Lakebase connection. |
 | [getWorkspaceClient](Function.getWorkspaceClient.md) | Get workspace client from config or SDK default auth chain |
+| [isApiError](Function.isApiError.md) | True if `err` is a Databricks SDK API error from EITHER the modular `@databricks/sdk-core/apierror` `ApiError` OR the legacy `@databricks/sdk-experimental` `ApiError`. Replaces ad-hoc `error instanceof ApiError` checks at the boundary between AppKit and the SDK. |
 | [isFunctionTool](Function.isFunctionTool.md) | - |
 | [isHostedTool](Function.isHostedTool.md) | - |
 | [isSQLTypeMarker](Function.isSQLTypeMarker.md) | Type guard to check if a value is a SQL type marker |

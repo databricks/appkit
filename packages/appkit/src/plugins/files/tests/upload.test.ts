@@ -11,7 +11,7 @@ import {
 } from "./_test-helpers";
 
 const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
-  const mockFilesApi = {
+  const mockFilesApi: Record<string, ReturnType<typeof vi.fn>> = {
     listDirectoryContents: vi.fn(),
     download: vi.fn(),
     getMetadata: vi.fn(),
@@ -19,6 +19,14 @@ const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
     createDirectory: vi.fn(),
     delete: vi.fn(),
   };
+  // Modular SDK method aliases — PoC migration to @databricks/sdk-files
+  // renamed/iter-ized these methods. Tests still reference legacy names,
+  // so we share the same spy under both names. TODO(prod): rewrite tests
+  // against modular method names + camelCase fields.
+  mockFilesApi.listDirectoryContentsIter = mockFilesApi.listDirectoryContents;
+  mockFilesApi.downloadFile = mockFilesApi.download;
+  mockFilesApi.getFileMetadata = mockFilesApi.getMetadata;
+  mockFilesApi.deleteFile = mockFilesApi.delete;
   const mockClient = {
     files: mockFilesApi,
     config: {

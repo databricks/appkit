@@ -1,5 +1,4 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { ApiError, type WorkspaceClient } from "@databricks/sdk-experimental";
 import type { TelemetryOptions } from "shared";
 import { createLogger } from "../../logging/logger";
 import type {
@@ -17,6 +16,11 @@ import {
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
+import {
+  ApiError,
+  getApiErrorStatusCode,
+  type WorkspaceClient,
+} from "../../workspace-client";
 import {
   contentTypeFromPath,
   FILES_MAX_READ_SIZE,
@@ -190,10 +194,20 @@ export class FilesConnector {
 
     return this.traced("list", { "files.path": resolvedPath }, async () => {
       const entries: DirectoryEntry[] = [];
-      for await (const entry of client.files.listDirectoryContents({
-        directory_path: resolvedPath,
+      for await (const entry of client.files.listDirectoryContentsIter({
+        directoryPath: resolvedPath,
       })) {
-        entries.push(entry);
+        // Map modular SDK DirectoryEntry (camelCase) → AppKit public
+        // DirectoryEntry (snake_case, re-exported from old SDK for API
+        // stability). TODO(prod): switch the public type to camelCase
+        // and drop this mapping.
+        entries.push({
+          name: entry.name,
+          path: entry.path,
+          is_directory: entry.isDirectory,
+          file_size: entry.fileSize,
+          last_modified: entry.lastModified,
+        });
       }
       return entries;
     });
@@ -238,9 +252,22 @@ export class FilesConnector {
   ): Promise<DownloadResponse> {
     const resolvedPath = this.resolvePath(filePath);
     return this.traced("download", { "files.path": resolvedPath }, async () => {
-      return client.files.download({
-        file_path: resolvedPath,
+      const response = await client.files.downloadFile({
+        filePath: resolvedPath,
       });
+      // Map modular SDK DownloadFileResponse (camelCase, contentLength: bigint)
+      // back to AppKit's public DownloadResponse shape (kebab-case keys
+      // re-exported from old SDK). TODO(prod): switch the public type
+      // and drop this mapping.
+      return {
+        "content-length":
+          response.contentLength !== undefined
+            ? Number(response.contentLength)
+            : undefined,
+        "content-type": response.contentType,
+        contents: response.contents,
+        "last-modified": response.lastModified,
+      } as DownloadResponse;
     });
   }
 
@@ -251,7 +278,11 @@ export class FilesConnector {
         await this.metadata(client, filePath);
         return true;
       } catch (error) {
-        if (error instanceof ApiError && error.statusCode === 404) {
+        // Use the unified helper because the error may come from EITHER
+        // the modular SDK (FilesClient → @databricks/sdk-core/apierror)
+        // OR the legacy SDK (via .toLegacyWorkspaceClient()). Both shapes
+        // surface a 404 the same way through getApiErrorStatusCode.
+        if (getApiErrorStatusCode(error) === 404) {
           return false;
         }
         throw error;
@@ -265,17 +296,20 @@ export class FilesConnector {
   ): Promise<FileMetadata> {
     const resolvedPath = this.resolvePath(filePath);
     return this.traced("metadata", { "files.path": resolvedPath }, async () => {
-      const response = await client.files.getMetadata({
-        file_path: resolvedPath,
+      const response = await client.files.getFileMetadata({
+        filePath: resolvedPath,
       });
       return {
-        contentLength: response["content-length"],
+        contentLength:
+          response.contentLength !== undefined
+            ? Number(response.contentLength)
+            : undefined,
         contentType: contentTypeFromPath(
           filePath,
-          response["content-type"],
+          response.contentType,
           this.customContentTypes,
         ),
-        lastModified: response["last-modified"],
+        lastModified: response.lastModified,
       };
     });
   }
@@ -351,7 +385,7 @@ export class FilesConnector {
       { "files.path": resolvedPath },
       async () => {
         await client.files.createDirectory({
-          directory_path: resolvedPath,
+          directoryPath: resolvedPath,
         });
       },
     );
@@ -360,8 +394,8 @@ export class FilesConnector {
   async delete(client: WorkspaceClient, filePath: string): Promise<void> {
     const resolvedPath = this.resolvePath(filePath);
     return this.traced("delete", { "files.path": resolvedPath }, async () => {
-      await client.files.delete({
-        file_path: resolvedPath,
+      await client.files.deleteFile({
+        filePath: resolvedPath,
       });
     });
   }
@@ -381,8 +415,8 @@ export class FilesConnector {
         return { ...meta, textPreview: null, isText: false, isImage };
       }
 
-      const response = await client.files.download({
-        file_path: resolvedPath,
+      const response = await client.files.downloadFile({
+        filePath: resolvedPath,
       });
       if (!response.contents) {
         return { ...meta, textPreview: "", isText: true, isImage: false };

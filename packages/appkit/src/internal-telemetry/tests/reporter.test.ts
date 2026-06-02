@@ -1,5 +1,5 @@
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import type { WorkspaceClient } from "../../workspace-client";
 import { TelemetryReporter } from "../reporter";
 
 type RequestSpy = ReturnType<typeof vi.fn>;
@@ -9,7 +9,8 @@ function createMockClient(): {
   request: RequestSpy;
 } {
   const request = vi.fn().mockResolvedValue({});
-  const client = { apiClient: { request } } as unknown as WorkspaceClient;
+  // The reporter calls `client.http.request(...)` via the wrapper.
+  const client = { http: { request } } as unknown as WorkspaceClient;
   return { client, request };
 }
 
@@ -62,7 +63,6 @@ describe("TelemetryReporter", () => {
       path: "/telemetry-ext",
       method: "POST",
       query: { o: "1234567890" },
-      raw: false,
     });
     expect(lastProtoLog(opts.__spy).entry.appkit_log).toMatchObject({
       event_name: "APP_STARTUP",

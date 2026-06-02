@@ -1,4 +1,3 @@
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type express from "express";
 import type {
   AgentToolDefinition,
@@ -21,6 +20,7 @@ import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
+import type { WorkspaceClient } from "../../workspace-client";
 import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import { QueryProcessor } from "./query";

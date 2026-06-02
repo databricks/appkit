@@ -1,0 +1,66 @@
+diff --git a/dist/v1/client.js b/dist/v1/client.js
+index 575fe0bcfca585f7fd2eaef884d4cd58cd309120..f52159807c00d3d503c80f84ba1fe412d69c0780 100644
+--- a/dist/v1/client.js
++++ b/dist/v1/client.js
+@@ -2,10 +2,10 @@
+ import { VERSION as AUTH_VERSION } from '@databricks/sdk-auth';
+ import { createDefault } from '@databricks/sdk-core/clientinfo';
+ import { NoOpLogger } from '@databricks/sdk-core/logger';
+-import { newHttpClient } from './transport';
+-import { buildHttpRequest, executeCall, executeHttpCall, marshalRequest, parseResponse, executeWait, StillRunningError, } from './utils';
++import { newHttpClient } from './transport.js';
++import { buildHttpRequest, executeCall, executeHttpCall, marshalRequest, parseResponse, executeWait, StillRunningError, } from './utils.js';
+ import pkgJson from '../../package.json' with { type: 'json' };
+-import { EndpointState, marshalCreateWarehouseRequestSchema, marshalDefaultWarehouseOverrideSchema, marshalEditWarehouseRequestSchema, marshalSetWorkspaceWarehouseConfigRequestSchema, marshalStartRequestSchema, marshalStopRequestSchema, unmarshalCreateWarehouseRequest_ResponseSchema, unmarshalDefaultWarehouseOverrideSchema, unmarshalDeleteWarehouseRequest_ResponseSchema, unmarshalEditWarehouseRequest_ResponseSchema, unmarshalGetWarehouseRequest_ResponseSchema, unmarshalGetWorkspaceWarehouseConfigRequest_ResponseSchema, unmarshalListDefaultWarehouseOverridesResponseSchema, unmarshalListWarehousesRequest_ResponseSchema, unmarshalSetWorkspaceWarehouseConfigRequest_ResponseSchema, unmarshalStartRequest_ResponseSchema, unmarshalStopRequest_ResponseSchema, } from './model';
++import { EndpointState, marshalCreateWarehouseRequestSchema, marshalDefaultWarehouseOverrideSchema, marshalEditWarehouseRequestSchema, marshalSetWorkspaceWarehouseConfigRequestSchema, marshalStartRequestSchema, marshalStopRequestSchema, unmarshalCreateWarehouseRequest_ResponseSchema, unmarshalDefaultWarehouseOverrideSchema, unmarshalDeleteWarehouseRequest_ResponseSchema, unmarshalEditWarehouseRequest_ResponseSchema, unmarshalGetWarehouseRequest_ResponseSchema, unmarshalGetWorkspaceWarehouseConfigRequest_ResponseSchema, unmarshalListDefaultWarehouseOverridesResponseSchema, unmarshalListWarehousesRequest_ResponseSchema, unmarshalSetWorkspaceWarehouseConfigRequest_ResponseSchema, unmarshalStartRequest_ResponseSchema, unmarshalStopRequest_ResponseSchema, } from './model.js';
+ // Package identity segment for this client to be used in the User-Agent header.
+ const PACKAGE_SEGMENT = {
+     key: 'sdk-js-' + pkgJson.name.replace(/^@[^/]+\/sdk-/, ''),
+diff --git a/dist/v1/index.js b/dist/v1/index.js
+index 55c8e05d86387110d1070af1e2a3cc441995f36e..9a6d52656b632524bdd82c1de81d595cbee97f3b 100644
+--- a/dist/v1/index.js
++++ b/dist/v1/index.js
+@@ -1,5 +1,5 @@
+ // Code generated from API definition by Databricks SDK Generator. DO NOT EDIT.
+-export { WarehousesClient, CreateWarehouseWaiter, EditWarehouseWaiter, StartWarehouseWaiter, StopWarehouseWaiter, } from './client';
+-export { ChannelName, DefaultWarehouseOverrideType, EndpointSecurityPolicy, EndpointSpotInstancePolicy, EndpointState, TerminationCode, TerminationType, WarehouseType, EndpointHealth_Status, } from './model';
+-export { defaultWarehouseOverrideFieldMask } from './model';
++export { WarehousesClient, CreateWarehouseWaiter, EditWarehouseWaiter, StartWarehouseWaiter, StopWarehouseWaiter, } from './client.js';
++export { ChannelName, DefaultWarehouseOverrideType, EndpointSecurityPolicy, EndpointSpotInstancePolicy, EndpointState, TerminationCode, TerminationType, WarehouseType, EndpointHealth_Status, } from './model.js';
++export { defaultWarehouseOverrideFieldMask } from './model.js';
+ //# sourceMappingURL=index.js.map
+\ No newline at end of file
+diff --git a/dist/v1/utils.js b/dist/v1/utils.js
+index a8f5fa929e64750ad03b08b1349516c452090b39..b6344d3d4caca4c7b7914c674721ae4562a50a14 100644
+--- a/dist/v1/utils.js
++++ b/dist/v1/utils.js
+@@ -97,6 +97,15 @@ export function buildHttpRequest(method, url, headers, signal, body) {
+ }
+ export function parseResponse(body, schema) {
+     const text = new TextDecoder().decode(body);
++    // Upstream bug workaround: `jsonBigint.parse("")` throws a plain
++    // object (not an Error) which then loses all information through
++    // sdk-core/ops/executeImpl's toError(). Endpoints that return HTTP
++    // 204 No Content (e.g. createDirectory) hit this path. Treat empty
++    // bodies as the schema's empty-object form, which works because
++    // void-response endpoints have empty-object schemas.
++    if (text === "") {
++        return schema.parse({});
++    }
+     const parsed = jsonBigint.parse(text);
+     return schema.parse(parsed);
+ }
+diff --git a/package.json b/package.json
+index f5255b21d634b1f7eaca1c782802997c18992414..cecddb9573ee9fbf813289891ef186a274d3dc16 100644
+--- a/package.json
++++ b/package.json
+@@ -6,7 +6,8 @@
+   "exports": {
+     "./v1": {
+       "types": "./dist/v1/index.d.ts",
+-      "import": "./dist/v1/index.js"
++      "import": "./dist/v1/index.js",
++      "default": "./dist/v1/index.js"
+     }
+   },
+   "files": [

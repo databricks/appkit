@@ -1,6 +1,6 @@
-import type { sql } from "@databricks/sdk-experimental";
 import { ExecutionError, ValidationError } from "../errors";
 import { createLogger } from "../logging/logger";
+import type { sql } from "../workspace-client";
 
 const logger = createLogger("stream:arrow");
 

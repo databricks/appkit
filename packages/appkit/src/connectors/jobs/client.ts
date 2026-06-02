@@ -1,8 +1,4 @@
-import {
-  Context,
-  type jobs,
-  type WorkspaceClient,
-} from "@databricks/sdk-experimental";
+import { Context } from "@databricks/sdk-experimental";
 import { AppKitError, ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import type { TelemetryProvider } from "../../telemetry";
@@ -14,6 +10,7 @@ import {
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
+import type { jobs, WorkspaceClient } from "../../workspace-client";
 import type { JobsConnectorConfig } from "./types";
 
 const logger = createLogger("connectors:jobs");

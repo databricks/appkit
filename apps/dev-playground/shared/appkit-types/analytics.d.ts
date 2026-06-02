@@ -270,7 +270,7 @@ declare module "@databricks/appkit-ui/react" {
         parameters: {
           /** STRING - use sql.string() */
           stringParam: SQLStringMarker;
-          /** NUMERIC - use sql.numeric() */
+          /** NUMERIC - use sql.number() */
           numberParam: SQLNumberMarker;
           /** BOOLEAN - use sql.boolean() */
           booleanParam: SQLBooleanMarker;

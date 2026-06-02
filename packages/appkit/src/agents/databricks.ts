@@ -117,14 +117,19 @@ function isStreamBodyOptions(
 }
 
 /**
- * Duck-typed subset of the Databricks SDK `WorkspaceClient`. Callers of
- * `fromServingEndpoint` and `fromModelServing` pass a real `WorkspaceClient`,
- * but we only need the `apiClient.request` surface — so we declare the minimal
- * interface rather than importing the SDK type directly. This keeps the adapter
- * free of a hard compile-time dependency on `@databricks/sdk-experimental`.
+ * Duck-typed subset of the AppKit `WorkspaceClient` wrapper. Callers of
+ * `fromServingEndpoint` and `fromModelServing` pass a real wrapper, but we
+ * only need the `http.request` surface — so we declare the minimal
+ * interface rather than importing the wrapper type directly. This keeps
+ * the adapter free of a hard compile-time dependency on the wrapper.
+ *
+ * TODO(prod): external callers that previously passed an
+ * `@databricks/sdk-experimental` `WorkspaceClient` directly here now need
+ * to wrap it via `createWorkspaceClient` (or pass an AppKit wrapper). Doc
+ * this in the changelog when promoting from PoC to prod.
  */
 interface WorkspaceClientLike {
-  apiClient: {
+  http: {
     request(options: Record<string, unknown>): Promise<unknown>;
   };
 }
@@ -356,10 +361,14 @@ export class DatabricksAdapter implements AgentAdapter {
     let workspaceClient: WorkspaceClientLike | undefined =
       options?.workspaceClient;
     if (!workspaceClient) {
-      const sdk = await import("@databricks/sdk-experimental");
-      workspaceClient = new sdk.WorkspaceClient(
-        {},
-      ) as unknown as WorkspaceClientLike;
+      const { createWorkspaceClient } = await import("../workspace-client");
+      const { name: productName, version: productVersion } = await import(
+        "../../package.json"
+      );
+      workspaceClient = createWorkspaceClient({
+        product: productName,
+        productVersion: productVersion as `${number}.${number}.${number}`,
+      }) as unknown as WorkspaceClientLike;
     }
 
     return DatabricksAdapter.fromServingEndpoint({

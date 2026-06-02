@@ -288,8 +288,11 @@ describe("LakebasePlugin — OBO via RoutingPool", () => {
     const plugin = makePlugin({ exposeAsAgentTool: {} });
     await plugin.setup();
 
+    // Lakebase plugin now calls `ctx.client.toLegacyWorkspaceClient()` to
+    // bridge through the wrapper's escape hatch (the underlying lakebase
+    // package still types `workspaceClient` against the old SDK).
     const userCtx = {
-      client: {} as any,
+      client: { toLegacyWorkspaceClient: () => ({}) } as any,
       userId: "user-123",
       userEmail: "alice@example.com",
       workspaceId: Promise.resolve("ws-1"),
@@ -319,7 +322,7 @@ describe("LakebasePlugin — OBO via RoutingPool", () => {
     await plugin.setup();
 
     const userCtx = {
-      client: {} as any,
+      client: { toLegacyWorkspaceClient: () => ({}) } as any,
       userId: "user-123",
       userEmail: "alice@example.com",
       workspaceId: Promise.resolve("ws-1"),

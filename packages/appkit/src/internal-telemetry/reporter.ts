@@ -1,4 +1,4 @@
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
+import type { WorkspaceClient } from "../workspace-client";
 import {
   type AppkitLog,
   buildAppkitPayload,
@@ -174,13 +174,11 @@ export class TelemetryReporter {
   async #send(logs: AppkitLog[]): Promise<void> {
     if (logs.length === 0) return;
     const workspaceId = await this.#workspaceIdPromise;
-    await this.#client.apiClient.request({
+    await this.#client.http.request({
       path: "/telemetry-ext",
       method: "POST",
       query: { o: workspaceId },
-      headers: new Headers(),
       payload: buildAppkitPayload(logs),
-      raw: false,
     });
   }
 }

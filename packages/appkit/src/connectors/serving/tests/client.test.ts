@@ -1,4 +1,3 @@
-import { Context } from "@databricks/sdk-experimental";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { invoke, stream } from "../client";
 
@@ -8,7 +7,9 @@ function createMockClient(host = "https://test.databricks.com") {
     servingEndpoints: {
       query: vi.fn(),
     },
-    apiClient: {
+    // Wrapper exposes `http.request` instead of `apiClient.request` for raw
+    // HTTP. AbortSignal is passed natively — no SDK `Context` bridge.
+    http: {
       request: vi.fn(),
     },
   } as any;
@@ -78,7 +79,7 @@ describe("Serving Connector", () => {
   });
 
   describe("stream", () => {
-    test("returns a ReadableStream from apiClient.request", async () => {
+    test("returns a ReadableStream from http.request", async () => {
       const encoder = new TextEncoder();
       const mockContents = new ReadableStream<Uint8Array>({
         start(controller) {
@@ -88,52 +89,51 @@ describe("Serving Connector", () => {
       });
 
       const client = createMockClient();
-      client.apiClient.request.mockResolvedValue({ contents: mockContents });
+      client.http.request.mockResolvedValue({ contents: mockContents });
 
       const result = await stream(client, "my-endpoint", { messages: [] });
 
       expect(result).toBeInstanceOf(ReadableStream);
     });
 
-    test("sends stream: true in payload via apiClient.request", async () => {
+    test("sends stream: true in payload via http.request", async () => {
       const client = createMockClient();
-      client.apiClient.request.mockResolvedValue({
+      client.http.request.mockResolvedValue({
         contents: new ReadableStream(),
       });
 
       await stream(client, "my-endpoint", { messages: [] });
 
-      expect(client.apiClient.request).toHaveBeenCalledWith(
+      expect(client.http.request).toHaveBeenCalledWith(
         expect.objectContaining({
           path: "/serving-endpoints/my-endpoint/invocations",
           method: "POST",
           raw: true,
           payload: expect.objectContaining({ stream: true }),
         }),
-        undefined,
       );
     });
 
-    test("passes SDK Context when AbortSignal is provided", async () => {
+    test("forwards AbortSignal natively (no Context bridge)", async () => {
       const client = createMockClient();
-      client.apiClient.request.mockResolvedValue({
+      client.http.request.mockResolvedValue({
         contents: new ReadableStream(),
       });
 
       const controller = new AbortController();
       await stream(client, "my-endpoint", { messages: [] }, controller.signal);
 
-      expect(client.apiClient.request).toHaveBeenCalledWith(
+      expect(client.http.request).toHaveBeenCalledWith(
         expect.objectContaining({
           path: "/serving-endpoints/my-endpoint/invocations",
+          signal: controller.signal,
         }),
-        expect.any(Context),
       );
     });
 
     test("strips user-provided stream and re-injects", async () => {
       const client = createMockClient();
-      client.apiClient.request.mockResolvedValue({
+      client.http.request.mockResolvedValue({
         contents: new ReadableStream(),
       });
 
@@ -142,13 +142,13 @@ describe("Serving Connector", () => {
         stream: false,
       });
 
-      const payload = client.apiClient.request.mock.calls[0][0].payload;
+      const payload = client.http.request.mock.calls[0][0].payload;
       expect(payload.stream).toBe(true);
     });
 
     test("throws when response has no contents", async () => {
       const client = createMockClient();
-      client.apiClient.request.mockResolvedValue({ contents: null });
+      client.http.request.mockResolvedValue({ contents: null });
 
       await expect(
         stream(client, "my-endpoint", { messages: [] }),

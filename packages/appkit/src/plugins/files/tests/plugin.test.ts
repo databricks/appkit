@@ -14,7 +14,7 @@ import { FilesPlugin, files } from "../plugin";
 import { PolicyDeniedError, policy } from "../policy";
 
 const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
-  const mockFilesApi = {
+  const mockFilesApi: Record<string, ReturnType<typeof vi.fn>> = {
     listDirectoryContents: vi.fn(),
     download: vi.fn(),
     getMetadata: vi.fn(),
@@ -22,6 +22,14 @@ const { mockClient, MockApiError, mockCacheInstance } = vi.hoisted(() => {
     createDirectory: vi.fn(),
     delete: vi.fn(),
   };
+  // Modular SDK method aliases — PoC migration to @databricks/sdk-files
+  // renamed/iter-ized these methods. Tests still reference legacy names,
+  // so we share the same spy under both names. TODO(prod): rewrite tests
+  // against modular method names + camelCase fields.
+  mockFilesApi.listDirectoryContentsIter = mockFilesApi.listDirectoryContents;
+  mockFilesApi.downloadFile = mockFilesApi.download;
+  mockFilesApi.getFileMetadata = mockFilesApi.getMetadata;
+  mockFilesApi.deleteFile = mockFilesApi.delete;
 
   const mockClient = {
     files: mockFilesApi,
@@ -2909,11 +2917,14 @@ describe("FilesPlugin", () => {
             h.set("Authorization", "Bearer USER-TOKEN-DEL");
           }),
         },
-        files: {
-          delete: vi.fn(async () => {
+        files: (() => {
+          // Connector now calls `deleteFile` (modular SDK name); alias.
+          // TODO(prod): rewrite tests against modular SDK method names.
+          const del = vi.fn(async () => {
             throw new MockApiError("UC denied", 403);
-          }),
-        },
+          });
+          return { delete: del, deleteFile: del };
+        })(),
       };
 
       serviceContextMock.createUserContextSpy.mockImplementation(
@@ -3362,7 +3373,13 @@ describe("FilesPlugin", () => {
           host: "https://test.databricks.com",
           authenticate: vi.fn(),
         },
-        files: { listDirectoryContents: userListSpy },
+        // Connector calls `listDirectoryContentsIter` (modular SDK name);
+        // alias to the same generator spy.
+        // TODO(prod): rewrite tests against modular SDK method names.
+        files: {
+          listDirectoryContents: userListSpy,
+          listDirectoryContentsIter: userListSpy,
+        },
       };
 
       // Wire `_buildUserContextOrNull → ServiceContext.createUserContext` to

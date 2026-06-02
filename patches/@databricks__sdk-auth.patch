@@ -1,0 +1,226 @@
+diff --git a/dist/credentials/default/chain.js b/dist/credentials/default/chain.js
+index c6711c7587138f4e4eb1da25640dcb579bdf34b3..6200645395365f6eb02175ff107030b44c5e9758 100644
+--- a/dist/credentials/default/chain.js
++++ b/dist/credentials/default/chain.js
+@@ -1,6 +1,6 @@
+-import { newM2mCredentials } from '../m2m';
+-import { newPatCredentials } from '../pat';
+-import { DefaultCredentialsError } from './errors';
++import { newM2mCredentials } from '../m2m.js';
++import { newPatCredentials } from '../pat.js';
++import { DefaultCredentialsError } from './errors.js';
+ const AUTH_DOC_URL = 'https://docs.databricks.com/aws/en/dev-tools/auth/index';
+ const NO_AUTH_CONFIGURED_MESSAGE = `cannot configure default credentials, please check ${AUTH_DOC_URL} to configure credentials for your preferred authentication method`;
+ /**
+diff --git a/dist/credentials/default/default-credentials.js b/dist/credentials/default/default-credentials.js
+index 7916804013f0475c1c3df7870f35d611c2d9c7bf..7a531559d787b2559a7cc15fa4cce0eda410c5d6 100644
+--- a/dist/credentials/default/default-credentials.js
++++ b/dist/credentials/default/default-credentials.js
+@@ -1,6 +1,6 @@
+ import { resolve } from '@databricks/sdk-core/profiles';
+-import { DefaultCredentials, m2mStrategy, patStrategy } from './chain';
+-import { u2mStrategy } from './u2m-strategy';
++import { DefaultCredentials, m2mStrategy, patStrategy } from './chain.js';
++import { u2mStrategy } from './u2m-strategy.js';
+ const STRATEGIES = [patStrategy, m2mStrategy, u2mStrategy];
+ /**
+  * Returns a lazy {@link Credentials} that resolves to the first configured
+diff --git a/dist/credentials/default/u2m-strategy.js b/dist/credentials/default/u2m-strategy.js
+index 0a877213732586aa3c0909af6899ecc90cba1603..5b906992faaf52cd2852579ad851b0000bb01c85 100644
+--- a/dist/credentials/default/u2m-strategy.js
++++ b/dist/credentials/default/u2m-strategy.js
+@@ -1,4 +1,4 @@
+-import { newU2mCredentials } from '../u2m';
++import { newU2mCredentials } from '../u2m.js';
+ /**
+  * U2M (Databricks CLI) strategy. Configured when the profile was loaded
+  * from the config file (so the section name is known) and a host is set.
+diff --git a/dist/credentials/index.browser.js b/dist/credentials/index.browser.js
+index 0fa2a4fa0d010abe352dc2dbc6b13b0d5b320218..a11f0676fa2e0d0f6a21ef2ac86045305fde9acc 100644
+--- a/dist/credentials/index.browser.js
++++ b/dist/credentials/index.browser.js
+@@ -3,7 +3,7 @@
+  * that depend on Node.js-only APIs (e.g. `databricks-cli` auth which spawns
+  * the CLI binary).
+  */
+-export { M2mCredentialsError } from './errors';
+-export { newM2mCredentials } from './m2m';
+-export { newPatCredentials } from './pat';
++export { M2mCredentialsError } from './errors.js';
++export { newM2mCredentials } from './m2m.js';
++export { newPatCredentials } from './pat.js';
+ //# sourceMappingURL=index.browser.js.map
+\ No newline at end of file
+diff --git a/dist/credentials/index.js b/dist/credentials/index.js
+index 0f55a8f4f430590160404fcfdd1d771b9c4a09d0..f77d8c2a617f99be4ee2683f71b21fc9462b2cd7 100644
+--- a/dist/credentials/index.js
++++ b/dist/credentials/index.js
+@@ -1,10 +1,10 @@
+ /**
+  * Credential implementations for the Databricks SDK.
+  */
+-export { M2mCredentialsError, U2mCredentialsError } from './errors';
+-export { newM2mCredentials } from './m2m';
+-export { newPatCredentials } from './pat';
+-export { newU2mCredentials } from './u2m';
+-export { defaultCredentials } from './default/default-credentials';
+-export { DefaultCredentialsError } from './default/errors';
++export { M2mCredentialsError, U2mCredentialsError } from './errors.js';
++export { newM2mCredentials } from './m2m.js';
++export { newPatCredentials } from './pat.js';
++export { newU2mCredentials } from './u2m.js';
++export { defaultCredentials } from './default/default-credentials.js';
++export { DefaultCredentialsError } from './default/errors.js';
+ //# sourceMappingURL=index.js.map
+\ No newline at end of file
+diff --git a/dist/credentials/m2m.js b/dist/credentials/m2m.js
+index a2d4b0eff5ed07e3c397e5448f6fda64d1872ed1..93368094ea0635320db9d0c9aefd2ff700557aa4 100644
+--- a/dist/credentials/m2m.js
++++ b/dist/credentials/m2m.js
+@@ -2,9 +2,9 @@
+  * Machine-to-machine (M2M) OAuth credentials for the Databricks SDK.
+  */
+ import { z } from 'zod';
+-import { newTokenCredentials, tokenProviderFn } from '../auth';
+-import { M2mCredentialsError } from './errors';
+-import { resolveTokenEndpoint } from './host-metadata';
++import { newTokenCredentials, tokenProviderFn } from '../auth.js';
++import { M2mCredentialsError } from './errors.js';
++import { resolveTokenEndpoint } from './host-metadata.js';
+ const DEFAULT_SCOPES = ['all-apis'];
+ /**
+  * Creates a TokenCredentials that authenticates as a Databricks service
+diff --git a/dist/credentials/u2m.js b/dist/credentials/u2m.js
+index 85131c26049aec7290129e190351e2b2b5947b01..a83483949bd09a78110b6feb6471d8643efa6810 100644
+--- a/dist/credentials/u2m.js
++++ b/dist/credentials/u2m.js
+@@ -11,8 +11,8 @@ import { join, sep } from 'node:path';
+ import { env, platform } from 'node:process';
+ import { promisify } from 'node:util';
+ import { z } from 'zod';
+-import { newTokenCredentials, tokenProviderFn } from '../auth';
+-import { U2mCredentialsError } from './errors';
++import { newTokenCredentials, tokenProviderFn } from '../auth.js';
++import { U2mCredentialsError } from './errors.js';
+ const execFileAsync = promisify(execFile);
+ /**
+  * Distinguishes the modern Go-based Databricks CLI (>= 0.100.0) from the
+diff --git a/dist/index.js b/dist/index.js
+index b6f302186a8b4aaeeedccbf549153fb55e35145e..7f99b161811bf9073898cec29082fc89d6efc455 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -4,7 +4,7 @@
+  * @packageDocumentation
+  */
+ import pkgJson from '../package.json' with { type: 'json' };
+-export { newTokenCredentials, tokenProviderFn } from './auth';
++export { newTokenCredentials, tokenProviderFn } from './auth.js';
+ /** Version of this auth library, sourced from package.json. */
+ export const VERSION = pkgJson.version;
+ //# sourceMappingURL=index.js.map
+\ No newline at end of file
+diff --git a/dist/oidc/env.js b/dist/oidc/env.js
+index 45f20018dfec4176a196ee676415be5da5f44c5b..92ed54537899d7e469b9f778c31b33a4e8b837a1 100644
+--- a/dist/oidc/env.js
++++ b/dist/oidc/env.js
+@@ -1,5 +1,5 @@
+ import { env } from 'node:process';
+-import { idTokenProviderFn } from './oidc';
++import { idTokenProviderFn } from './oidc.js';
+ /**
+  * Returns an IdTokenProvider that reads the ID token from environment variable
+  * `name`.
+diff --git a/dist/oidc/file.js b/dist/oidc/file.js
+index 2c824643a21766eacdaf9cb860e7bfdbf58f9315..8e527f1f1a0862e08dacbacd4bc4ef00a9a557a6 100644
+--- a/dist/oidc/file.js
++++ b/dist/oidc/file.js
+@@ -1,5 +1,5 @@
+ import { readFile } from 'node:fs/promises';
+-import { idTokenProviderFn } from './oidc';
++import { idTokenProviderFn } from './oidc.js';
+ /**
+  * Returns an IdTokenProvider that reads the ID token from a file. The file
+  * should contain a single line with the token.
+diff --git a/dist/oidc/index.browser.js b/dist/oidc/index.browser.js
+index e5db429490c0661be33f9495d26d7be6d293c407..c757c838b1fc906985889f03cc3d9a7824cd6fac 100644
+--- a/dist/oidc/index.browser.js
++++ b/dist/oidc/index.browser.js
+@@ -6,6 +6,6 @@
+  *
+  * @packageDocumentation
+  */
+-export { idTokenProviderFn } from './oidc';
+-export { newDatabricksOidcTokenProvider } from './tokensource';
++export { idTokenProviderFn } from './oidc.js';
++export { newDatabricksOidcTokenProvider } from './tokensource.js';
+ //# sourceMappingURL=index.browser.js.map
+\ No newline at end of file
+diff --git a/dist/oidc/index.js b/dist/oidc/index.js
+index 7ec00ccf86912509211b9f51145a5db927812b09..79884dc83fcb636225a1a380ecfc6500510ad66c 100644
+--- a/dist/oidc/index.js
++++ b/dist/oidc/index.js
+@@ -5,8 +5,8 @@
+  *
+  * @packageDocumentation
+  */
+-export { idTokenProviderFn } from './oidc';
+-export { newEnvIdTokenProvider } from './env';
+-export { newFileTokenProvider } from './file';
+-export { newDatabricksOidcTokenProvider } from './tokensource';
++export { idTokenProviderFn } from './oidc.js';
++export { newEnvIdTokenProvider } from './env.js';
++export { newFileTokenProvider } from './file.js';
++export { newDatabricksOidcTokenProvider } from './tokensource.js';
+ //# sourceMappingURL=index.js.map
+\ No newline at end of file
+diff --git a/dist/oidc/tokensource.js b/dist/oidc/tokensource.js
+index 137525d88f8b9282a6c0ba6235c421708707f805..9c0b089499ae49d7bcdeef992d1a846538739805 100644
+--- a/dist/oidc/tokensource.js
++++ b/dist/oidc/tokensource.js
+@@ -3,7 +3,7 @@
+  * Databricks access token using the OAuth 2.0 token-exchange grant.
+  */
+ import { z } from 'zod';
+-import { tokenProviderFn } from '../auth';
++import { tokenProviderFn } from '../auth.js';
+ /**
+  * Returns a new Databricks OIDC TokenProvider that exchanges an OIDC ID token
+  * for a Databricks access token using the OAuth 2.0 token-exchange grant.
+diff --git a/package.json b/package.json
+index f146b4f0b5d70bc694740f359d726ea81d4163ab..32a502eaa9624bb2114382866f9f6fcc4de7d594 100644
+--- a/package.json
++++ b/package.json
+@@ -8,23 +8,28 @@
+   "exports": {
+     ".": {
+       "types": "./dist/index.d.ts",
+-      "import": "./dist/index.js"
++      "import": "./dist/index.js",
++      "default": "./dist/index.js"
+     },
+     "./credentials": {
+       "types": "./dist/credentials/index.d.ts",
+-      "import": "./dist/credentials/index.js"
++      "import": "./dist/credentials/index.js",
++      "default": "./dist/credentials/index.js"
+     },
+     "./credentials/browser": {
+       "types": "./dist/credentials/index.browser.d.ts",
+-      "import": "./dist/credentials/index.browser.js"
++      "import": "./dist/credentials/index.browser.js",
++      "default": "./dist/credentials/index.browser.js"
+     },
+     "./oidc": {
+       "types": "./dist/oidc/index.d.ts",
+-      "import": "./dist/oidc/index.js"
++      "import": "./dist/oidc/index.js",
++      "default": "./dist/oidc/index.js"
+     },
+     "./oidc/browser": {
+       "types": "./dist/oidc/index.browser.d.ts",
+-      "import": "./dist/oidc/index.browser.js"
++      "import": "./dist/oidc/index.browser.js",
++      "default": "./dist/oidc/index.browser.js"
+     }
+   },
+   "files": [

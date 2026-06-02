@@ -116,3 +116,17 @@ export {
 export { appKitServingTypesPlugin } from "./type-generator/serving/vite-plugin";
 // Vite plugin and type generation
 export { appKitTypesPlugin } from "./type-generator/vite-plugin";
+// AppKit workspace-client wrapper (modular SDK facade).
+// PoC public surface — exposed so external callers (and smoke scripts) can
+// construct a wrapper. TODO(prod): audit which of these belong in the
+// public API long-term vs internal-only.
+export {
+  ApiError,
+  createWorkspaceClient,
+  getApiErrorStatusCode,
+  isApiError,
+  type RawResponse,
+  type RequestOptions,
+  type WorkspaceClient,
+  type WorkspaceClientOptions,
+} from "./workspace-client";

@@ -1,8 +1,8 @@
-import {
-  Context,
-  type sql,
-  type WorkspaceClient,
-} from "@databricks/sdk-experimental";
+// Context stays on the legacy SDK — sql-warehouse still uses the legacy
+// `statementExecution` service which expects a `Context` for cancellation.
+// TODO(prod): replace once a modular `@databricks/sdk-statement-execution`
+// package is available with native AbortSignal support.
+import { Context } from "@databricks/sdk-experimental";
 import type { TelemetryOptions } from "shared";
 import {
   AppKitError,
@@ -21,6 +21,7 @@ import {
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
+import type { sql, WorkspaceClient } from "../../workspace-client";
 import { executeStatementDefaults } from "./defaults";
 
 const logger = createLogger("connectors:sql-warehouse");

@@ -7,17 +7,35 @@ import {
 } from "../../errors";
 import { ServiceContext } from "../service-context";
 
-// ── Mock @databricks/sdk-experimental ──────────────────────────────
+// ── Mock the AppKit workspace-client wrapper ───────────────────────
+//
+// ServiceContext now uses `createWorkspaceClient(...)` from the wrapper
+// instead of constructing `new WorkspaceClient(...)` from
+// `@databricks/sdk-experimental` directly. The mock therefore intercepts
+// the wrapper's surface (currentUser, http.request, config, etc.) rather
+// than the legacy SDK module.
+//
+// `mockApiRequest` is still used for `wrapper.http.request(...)` calls —
+// the wrapper's http helper is what replaced the old `apiClient.request`.
 
 const { mockMe, mockApiRequest, MockWorkspaceClient, MockConfigError } =
   vi.hoisted(() => {
     const mockMe = vi.fn();
     const mockApiRequest = vi.fn();
 
-    const MockWorkspaceClient = vi.fn().mockImplementation(() => ({
-      currentUser: { me: mockMe },
-      apiClient: { request: mockApiRequest },
-    }));
+    // The wrapper's surface that ServiceContext touches: `currentUser.me`,
+    // `http.request`. We also include `config.host`/`authenticate` and a
+    // `toLegacyWorkspaceClient()` stub so any incidental access doesn't
+    // crash.
+    const MockWorkspaceClient = vi.fn().mockImplementation(() => {
+      const inner: any = {
+        currentUser: { me: mockMe },
+        http: { request: mockApiRequest },
+        config: { host: "https://test.databricks.com", authenticate: vi.fn() },
+      };
+      inner.toLegacyWorkspaceClient = () => inner;
+      return inner;
+    });
 
     class MockConfigError extends Error {
       baseMessage: string;
@@ -30,9 +48,22 @@ const { mockMe, mockApiRequest, MockWorkspaceClient, MockConfigError } =
     return { mockMe, mockApiRequest, MockWorkspaceClient, MockConfigError };
   });
 
+vi.mock("../../workspace-client", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    createWorkspaceClient: MockWorkspaceClient,
+  };
+});
+
 vi.mock("@databricks/sdk-experimental", () => ({
-  WorkspaceClient: MockWorkspaceClient,
+  // ConfigError is still imported by service-context directly for the
+  // try/catch around credential setup.
   ConfigError: MockConfigError,
+  // The wrapper's `legacy.ts` also touches this — provide a no-op shim so
+  // `import { WorkspaceClient } from "@databricks/sdk-experimental"` works
+  // even though the test never exercises it.
+  WorkspaceClient: vi.fn(),
 }));
 
 // ── Helpers ────────────────────────────────────────────────────────

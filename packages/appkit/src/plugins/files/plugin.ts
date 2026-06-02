@@ -1,6 +1,5 @@
 import { STATUS_CODES } from "node:http";
 import { Readable } from "node:stream";
-import { ApiError } from "@databricks/sdk-experimental";
 import type express from "express";
 import type {
   AgentToolDefinition,
@@ -38,6 +37,7 @@ import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest, ResourceRequirement } from "../../registry";
 import { ResourceType } from "../../registry";
+import { getApiErrorStatusCode, isApiError } from "../../workspace-client";
 import {
   FILES_DOWNLOAD_DEFAULTS,
   FILES_MAX_UPLOAD_SIZE,
@@ -744,8 +744,8 @@ export class FilesPlugin extends Plugin implements ToolProvider {
       res.status(401).json({ error: "Unauthorized", plugin: this.name });
       return;
     }
-    if (error instanceof ApiError) {
-      const status = error.statusCode ?? 500;
+    if (isApiError(error)) {
+      const status = getApiErrorStatusCode(error) ?? 500;
       if (status >= 400 && status < 500) {
         // Don't reflect raw SDK error.message — it can leak internal volume
         // paths, hostnames, or principal names. Use the standard HTTP status

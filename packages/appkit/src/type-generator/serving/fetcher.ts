@@ -1,5 +1,9 @@
-import { ApiError, type WorkspaceClient } from "@databricks/sdk-experimental";
 import { createLogger } from "../../logging/logger";
+import {
+  getApiErrorStatusCode,
+  isApiError,
+  type WorkspaceClient,
+} from "../../workspace-client";
 
 const logger = createLogger("type-generator:serving:fetcher");
 
@@ -105,8 +109,8 @@ export async function fetchOpenApiSchema(
 
     return { spec, pathKey };
   } catch (err) {
-    if (err instanceof ApiError) {
-      const status = err.statusCode ?? 0;
+    if (isApiError(err)) {
+      const status = getApiErrorStatusCode(err) ?? 0;
       if (status === 404) {
         logger.warn(
           "Endpoint '%s' not found, skipping type generation",

@@ -89,20 +89,41 @@ import { Plugin } from "../../plugin/plugin";
 import { toPlugin } from "../../plugin/to-plugin";
 import { createApp } from "../appkit";
 
-// ── Mock SDK ────────────────────────────────────────────────────────
+// ── Mock the AppKit workspace-client wrapper ────────────────────────
+//
+// ServiceContext + cache + other appkit-internal callers now route through
+// `createWorkspaceClient`. The mock intercepts the wrapper rather than the
+// legacy SDK module directly. Surface: `currentUser.me`, `http.request`,
+// `config`, and `toLegacyWorkspaceClient()`.
 
 const { MockWorkspaceClient } = vi.hoisted(() => {
-  const MockWorkspaceClient = vi.fn().mockImplementation(() => ({
-    currentUser: { me: vi.fn().mockResolvedValue({ id: "sp-user-123" }) },
-    apiClient: {
-      request: vi.fn().mockResolvedValue({ "x-databricks-org-id": "ws-456" }),
-    },
-  }));
+  const MockWorkspaceClient = vi.fn().mockImplementation(() => {
+    const inner: any = {
+      currentUser: { me: vi.fn().mockResolvedValue({ id: "sp-user-123" }) },
+      http: {
+        request: vi.fn().mockResolvedValue({ "x-databricks-org-id": "ws-456" }),
+      },
+      config: {
+        host: "https://test.databricks.com",
+        authenticate: vi.fn(),
+      },
+    };
+    inner.toLegacyWorkspaceClient = () => inner;
+    return inner;
+  });
   return { MockWorkspaceClient };
 });
 
+vi.mock("../../workspace-client", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    createWorkspaceClient: MockWorkspaceClient,
+  };
+});
+
 vi.mock("@databricks/sdk-experimental", () => ({
-  WorkspaceClient: MockWorkspaceClient,
+  WorkspaceClient: vi.fn(),
   ConfigError: class extends Error {},
 }));
 

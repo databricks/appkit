@@ -93,7 +93,8 @@ const validVsResponse = {
 
 const mockRequest = vi.fn().mockResolvedValue(validVsResponse);
 const mockWorkspaceClient = {
-  apiClient: { request: mockRequest },
+  // Wrapper exposes `http.request` instead of `apiClient.request`.
+  http: { request: mockRequest },
 };
 
 import { VectorSearchPlugin } from "../vector-search";

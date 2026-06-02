@@ -1,0 +1,26 @@
+diff --git a/package.json b/package.json
+index 2b6f9982de57a5ff0421ad73f8d35f387bb5bafc..413a343fe85a4c46d97f526e539a43d4997b4867 100644
+--- a/package.json
++++ b/package.json
+@@ -6,15 +6,18 @@
+   "exports": {
+     "./client": {
+       "types": "./dist/client/index.d.ts",
+-      "import": "./dist/client/index.js"
++      "import": "./dist/client/index.js",
++      "default": "./dist/client/index.js"
+     },
+     "./call": {
+       "types": "./dist/call/index.d.ts",
+-      "import": "./dist/call/index.js"
++      "import": "./dist/call/index.js",
++      "default": "./dist/call/index.js"
+     },
+     "./lro": {
+       "types": "./dist/lro/index.d.ts",
+-      "import": "./dist/lro/index.js"
++      "import": "./dist/lro/index.js",
++      "default": "./dist/lro/index.js"
+     }
+   },
+   "files": [

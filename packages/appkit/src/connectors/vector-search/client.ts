@@ -1,4 +1,3 @@
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import { createLogger } from "../../logging/logger";
 import type { TelemetryProvider } from "../../telemetry";
 import {
@@ -7,6 +6,7 @@ import {
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
+import type { WorkspaceClient } from "../../workspace-client";
 import type {
   VectorSearchConnectorConfig,
   VsNextPageParams,
@@ -79,13 +79,11 @@ export class VectorSearchConnector {
       async (span: Span) => {
         const startTime = Date.now();
         try {
-          const response = (await workspaceClient.apiClient.request({
+          const response = (await workspaceClient.http.request({
             method: "POST",
             path: `/api/2.0/vector-search/indexes/${params.indexName}/query`,
             payload: body,
-            headers: new Headers({ "Content-Type": "application/json" }),
-            raw: false,
-            query: {},
+            signal,
           })) as VsRawResponse;
 
           const duration = Date.now() - startTime;
@@ -146,16 +144,14 @@ export class VectorSearchConnector {
       },
       async (span: Span) => {
         try {
-          const response = (await workspaceClient.apiClient.request({
+          const response = (await workspaceClient.http.request({
             method: "POST",
             path: `/api/2.0/vector-search/indexes/${params.indexName}/query-next-page`,
             payload: {
               endpoint_name: params.endpointName,
               page_token: params.pageToken,
             },
-            headers: new Headers({ "Content-Type": "application/json" }),
-            raw: false,
-            query: {},
+            signal,
           })) as VsRawResponse;
 
           span.setAttribute("vs.result_count", response.result.row_count);

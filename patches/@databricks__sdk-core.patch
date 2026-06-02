@@ -1,0 +1,294 @@
+diff --git a/dist/apierror/apierror.js b/dist/apierror/apierror.js
+index 20f4c98d6cdc14549e335cb3e70f6f5b016cc953..a6cb108bf74c9b1ad30b28bc6f5616d150468c09 100644
+--- a/dist/apierror/apierror.js
++++ b/dist/apierror/apierror.js
+@@ -1,6 +1,6 @@
+ import { z } from 'zod';
+-import { Code, codeFromString } from './codes';
+-import { parseErrorDetails } from './details';
++import { Code, codeFromString } from './codes/index.js';
++import { parseErrorDetails } from './details.js';
+ // Reusable schema fragment for nullish string fields.
+ const nullishString = z
+     .string()
+diff --git a/dist/apierror/codes/index.js b/dist/apierror/codes/index.js
+index c9b85919749610f2dc1f7458fc476ac37b1f4ecf..33d9b61e14e32e96aa81f4e9e8d915312debb7da 100644
+--- a/dist/apierror/codes/index.js
++++ b/dist/apierror/codes/index.js
+@@ -3,5 +3,5 @@
+  *
+  * @packageDocumentation
+  */
+-export { Code, codeToString, codeFromString } from './codes';
++export { Code, codeToString, codeFromString } from './codes.js';
+ //# sourceMappingURL=index.js.map
+\ No newline at end of file
+diff --git a/dist/apierror/index.js b/dist/apierror/index.js
+index 65f9c0fc2ccd666a1165634112f6534a99132748..24d150e4645e79389a39d090d03419ca6fec4a5e 100644
+--- a/dist/apierror/index.js
++++ b/dist/apierror/index.js
+@@ -3,5 +3,5 @@
+  *
+  * @packageDocumentation
+  */
+-export { ApiError } from './apierror';
++export { ApiError } from './apierror.js';
+ //# sourceMappingURL=index.js.map
+\ No newline at end of file
+diff --git a/dist/clientinfo/base.js b/dist/clientinfo/base.js
+index 9597cd1f86eb3ed02e399bee95a42c0b71ad4d02..d19e6d1d3058b3d666fa37f1274b17299f1d7f63 100644
+--- a/dist/clientinfo/base.js
++++ b/dist/clientinfo/base.js
+@@ -4,7 +4,7 @@
+  *
+  * @module
+  */
+-import { ClientInfo, ClientInfoError, isSemVer } from './clientinfo';
++import { ClientInfo, ClientInfoError, isSemVer } from './clientinfo.js';
+ import pkgJson from '../../package.json' with { type: 'json' };
+ export const MODULE_NAME = 'sdk-js-core';
+ export const VERSION = pkgJson.version;
+diff --git a/dist/clientinfo/default.browser.js b/dist/clientinfo/default.browser.js
+index 5420da5b7137260c50af5179049b1e5d44989a68..5fbdadf0ed4eae9de2ece9df6b36ea9e0ebcd9ab 100644
+--- a/dist/clientinfo/default.browser.js
++++ b/dist/clientinfo/default.browser.js
+@@ -6,8 +6,8 @@
+  *
+  * @module
+  */
+-import { ClientInfo } from './clientinfo';
+-import { MODULE_NAME, VERSION, getBase } from './base';
++import { ClientInfo } from './clientinfo.js';
++import { MODULE_NAME, VERSION, getBase } from './base.js';
+ /**
+  * Returns a {@link ClientInfo} populated with SDK metadata and segments
+  * registered via {@link addToDefault}. Unlike the Node.js variant, this
+diff --git a/dist/clientinfo/default.js b/dist/clientinfo/default.js
+index b30ca57dbfb747475bfd37a56dca525d8e6f990f..1796458b771d8c17df11baa4e330877010fb03f6 100644
+--- a/dist/clientinfo/default.js
++++ b/dist/clientinfo/default.js
+@@ -1,6 +1,6 @@
+-import { ClientInfo, sanitize } from './clientinfo';
+-import { MODULE_NAME, VERSION, getBase } from './base';
+-import { agentProvider } from './agent';
++import { ClientInfo, sanitize } from './clientinfo.js';
++import { MODULE_NAME, VERSION, getBase } from './base.js';
++import { agentProvider } from './agent.js';
+ const CICD_PROVIDERS = [
+     {
+         name: 'github',
+diff --git a/dist/clientinfo/index.browser.js b/dist/clientinfo/index.browser.js
+index 1c58ef982ae53a3f35f21bdccb2aefb171bc1283..a23930d71eaf04551494d104009b76af530be1b7 100644
+--- a/dist/clientinfo/index.browser.js
++++ b/dist/clientinfo/index.browser.js
+@@ -1,4 +1,4 @@
+-export { ClientInfo, ClientInfoError } from './clientinfo';
+-export { addToDefault, setPartner, setProduct } from './base';
+-export { createDefault } from './default.browser';
++export { ClientInfo, ClientInfoError } from './clientinfo.js';
++export { addToDefault, setPartner, setProduct } from './base.js';
++export { createDefault } from './default.browser.js';
+ //# sourceMappingURL=index.browser.js.map
+\ No newline at end of file
+diff --git a/dist/clientinfo/index.js b/dist/clientinfo/index.js
+index 468021e1d81d0278a78e4e5e214fa32a2434d38d..c7696670be9bee043a5c4c725b0fa1f9a4cc846f 100644
+--- a/dist/clientinfo/index.js
++++ b/dist/clientinfo/index.js
+@@ -1,4 +1,4 @@
+-export { ClientInfo, ClientInfoError } from './clientinfo';
+-export { addToDefault, setPartner, setProduct } from './base';
+-export { createDefault } from './default';
++export { ClientInfo, ClientInfoError } from './clientinfo.js';
++export { addToDefault, setPartner, setProduct } from './base.js';
++export { createDefault } from './default.js';
+ //# sourceMappingURL=index.js.map
+\ No newline at end of file
+diff --git a/dist/http/index.js b/dist/http/index.js
+index 516c0b6316a1641f7e7d3823c06b6d7ffbc08c3b..17bf8cb443ba1a69fd27ea08d9df664a16defcf4 100644
+--- a/dist/http/index.js
++++ b/dist/http/index.js
+@@ -3,5 +3,5 @@
+  *
+  * @packageDocumentation
+  */
+-export { newFetchHttpClient } from './http';
++export { newFetchHttpClient } from './http.js';
+ //# sourceMappingURL=index.js.map
+\ No newline at end of file
+diff --git a/dist/logger/index.js b/dist/logger/index.js
+index 572dc1031d487a10f89262df93edd94a02534d53..42967764cf926714356953c710ca1f0ae95526f2 100644
+--- a/dist/logger/index.js
++++ b/dist/logger/index.js
+@@ -3,5 +3,5 @@
+  *
+  * @packageDocumentation
+  */
+-export { NoOpLogger, LogLevel } from './logger';
++export { NoOpLogger, LogLevel } from './logger.js';
+ //# sourceMappingURL=index.js.map
+\ No newline at end of file
+diff --git a/dist/ops/index.js b/dist/ops/index.js
+index 5d1df297d7c7cddae65d19470c1962252ff906a7..dc717bd551104792df64a5ab3eb559dc122e0ad4 100644
+--- a/dist/ops/index.js
++++ b/dist/ops/index.js
+@@ -4,6 +4,6 @@
+  *
+  * @packageDocumentation
+  */
+-export { execute } from './execute';
+-export { BackoffPolicy, retryOn } from './retrier';
++export { execute } from './execute.js';
++export { BackoffPolicy, retryOn } from './retrier.js';
+ //# sourceMappingURL=index.js.map
+\ No newline at end of file
+diff --git a/dist/profiles/index.browser.js b/dist/profiles/index.browser.js
+index a21509fa66b6d2c6f1840a1eb424b2ed5edb3bc6..7457f8f54c2506485b6989cb953f0e6b12f671dd 100644
+--- a/dist/profiles/index.browser.js
++++ b/dist/profiles/index.browser.js
+@@ -3,6 +3,6 @@
+  *
+  * @packageDocumentation
+  */
+-export { ProfileError } from './errors';
+-export { Secret } from './secret';
++export { ProfileError } from './errors.js';
++export { Secret } from './secret.js';
+ //# sourceMappingURL=index.browser.js.map
+\ No newline at end of file
+diff --git a/dist/profiles/index.js b/dist/profiles/index.js
+index 21a01d7043dd8250784a6e0ee3b105668071dc5b..857a3c21ceffc233bd010607f7b33469d11140b5 100644
+--- a/dist/profiles/index.js
++++ b/dist/profiles/index.js
+@@ -7,7 +7,7 @@
+  *
+  * @packageDocumentation
+  */
+-export { ProfileError } from './errors';
+-export { defaultConfigFile, listProfiles, resolve } from './resolve';
+-export { Secret } from './secret';
++export { ProfileError } from './errors.js';
++export { defaultConfigFile, listProfiles, resolve } from './resolve.js';
++export { Secret } from './secret.js';
+ //# sourceMappingURL=index.js.map
+\ No newline at end of file
+diff --git a/dist/profiles/profile.js b/dist/profiles/profile.js
+index 4bea4845de355b144cf87405e1f38524590783ca..ee3eba3d1612be8550c1354fdd7ed27541c2f3f7 100644
+--- a/dist/profiles/profile.js
++++ b/dist/profiles/profile.js
+@@ -3,7 +3,7 @@
+  *
+  * @module
+  */
+-import { Secret } from './secret';
++import { Secret } from './secret.js';
+ /**
+  * Reserved INI section name for SDK settings. It is never treated as a
+  * profile.
+diff --git a/dist/profiles/resolve.js b/dist/profiles/resolve.js
+index c055b94c9cdd2035ea9168a9d2a7092340c53e6f..8a19d5b46f438b679fe66e6555e967ae102aa3f6 100644
+--- a/dist/profiles/resolve.js
++++ b/dist/profiles/resolve.js
+@@ -6,9 +6,9 @@
+ import { access, readFile } from 'node:fs/promises';
+ import { homedir } from 'node:os';
+ import { join } from 'node:path';
+-import { ProfileError } from './errors';
+-import { parseIni } from './ini';
+-import { PROPERTY_DEFS, SETTINGS_SECTION } from './profile';
++import { ProfileError } from './errors.js';
++import { parseIni } from './ini.js';
++import { PROPERTY_DEFS, SETTINGS_SECTION } from './profile.js';
+ /**
+  * Reports whether a section is an empty DEFAULT section that should be
+  * treated as non-existent.
+diff --git a/dist/wkt/index.js b/dist/wkt/index.js
+index 9966d74316ebf83aa518e22c20e776afc33c0eae..a5bea586c25f05f85cfbc4dd6806bacd16520ed2 100644
+--- a/dist/wkt/index.js
++++ b/dist/wkt/index.js
+@@ -1,2 +1,2 @@
+-export { FieldMask } from './fieldmask';
++export { FieldMask } from './fieldmask.js';
+ //# sourceMappingURL=index.js.map
+\ No newline at end of file
+diff --git a/package.json b/package.json
+index 44eb782a6273933ac95ee33b03ba6ccaab2f6c1f..247a734dd4e342a5c85fdd4af879f5e47709ac22 100644
+--- a/package.json
++++ b/package.json
+@@ -8,53 +8,65 @@
+   "exports": {
+     ".": {
+       "types": "./dist/index.d.ts",
+-      "import": "./dist/index.js"
++      "import": "./dist/index.js",
++      "default": "./dist/index.js"
+     },
+     "./profiles": {
+       "types": "./dist/profiles/index.d.ts",
+-      "import": "./dist/profiles/index.js"
++      "import": "./dist/profiles/index.js",
++      "default": "./dist/profiles/index.js"
+     },
+     "./profiles/browser": {
+       "types": "./dist/profiles/index.browser.d.ts",
+-      "import": "./dist/profiles/index.browser.js"
++      "import": "./dist/profiles/index.browser.js",
++      "default": "./dist/profiles/index.browser.js"
+     },
+     "./wkt": {
+       "types": "./dist/wkt/index.d.ts",
+-      "import": "./dist/wkt/index.js"
++      "import": "./dist/wkt/index.js",
++      "default": "./dist/wkt/index.js"
+     },
+     "./clientinfo": {
+       "browser": {
+         "types": "./dist/clientinfo/index.browser.d.ts",
+-        "import": "./dist/clientinfo/index.browser.js"
++        "import": "./dist/clientinfo/index.browser.js",
++        "default": "./dist/clientinfo/index.browser.js"
+       },
+       "default": {
+         "types": "./dist/clientinfo/index.d.ts",
+-        "import": "./dist/clientinfo/index.js"
++        "import": "./dist/clientinfo/index.js",
++        "default": "./dist/clientinfo/index.js"
+       }
+     },
+     "./clientinfo/browser": {
+       "types": "./dist/clientinfo/index.browser.d.ts",
+-      "import": "./dist/clientinfo/index.browser.js"
++      "import": "./dist/clientinfo/index.browser.js",
++      "default": "./dist/clientinfo/index.browser.js"
+     },
+     "./http": {
+       "types": "./dist/http/index.d.ts",
+-      "import": "./dist/http/index.js"
++      "import": "./dist/http/index.js",
++      "default": "./dist/http/index.js"
+     },
+     "./logger": {
+       "types": "./dist/logger/index.d.ts",
+-      "import": "./dist/logger/index.js"
++      "import": "./dist/logger/index.js",
++      "default": "./dist/logger/index.js"
+     },
+     "./ops": {
+       "types": "./dist/ops/index.d.ts",
+-      "import": "./dist/ops/index.js"
++      "import": "./dist/ops/index.js",
++      "default": "./dist/ops/index.js"
+     },
+     "./apierror": {
+       "types": "./dist/apierror/index.d.ts",
+-      "import": "./dist/apierror/index.js"
++      "import": "./dist/apierror/index.js",
++      "default": "./dist/apierror/index.js"
+     },
+     "./apierror/codes": {
+       "types": "./dist/apierror/codes/index.d.ts",
+-      "import": "./dist/apierror/codes/index.js"
++      "import": "./dist/apierror/codes/index.js",
++      "default": "./dist/apierror/codes/index.js"
+     }
+   },
+   "files": [

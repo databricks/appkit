@@ -1,5 +1,4 @@
 import { STATUS_CODES } from "node:http";
-import type { jobs as jobsTypes } from "@databricks/sdk-experimental";
 import type express from "express";
 import type {
   IAppRequest,
@@ -16,6 +15,7 @@ import type { ExecutionResult } from "../../plugin";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest, ResourceRequirement } from "../../registry";
 import { ResourceType } from "../../registry";
+import type { jobs as jobsTypes } from "../../workspace-client";
 import {
   JOBS_READ_DEFAULTS,
   JOBS_STREAM_DEFAULTS,

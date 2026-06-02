@@ -27,6 +27,26 @@ const logger = createLogger("server");
 const devListenPortSpan = 100;
 
 /**
+ * Compile an Express-style route template (e.g. `/api/files/:volumeKey/upload`)
+ * into a `RegExp` that matches the concrete URL at request time
+ * (e.g. `/api/files/files/upload`). Supports `:param` and `:param?` (optional)
+ * — that's all AppKit route paths use today.
+ *
+ * Anchored (`^...$`) so it matches the full path, not a prefix; otherwise
+ * a `/api/files` template would accidentally match `/api/files/foo/bar`.
+ */
+function routeTemplateToRegExp(template: string): RegExp {
+  const pattern = template
+    // Escape regex metacharacters EXCEPT `:` and `/` which we handle below
+    .replace(/[.+*?^$()[\]{}|\\]/g, "\\$&")
+    // `:name?` → optional path segment (empty or `/<segment>`)
+    .replace(/\/:[A-Za-z_][A-Za-z0-9_]*\?/g, "(?:/[^/]+)?")
+    // `:name` → required non-empty path segment
+    .replace(/:[A-Za-z_][A-Za-z0-9_]*/g, "[^/]+");
+  return new RegExp(`^${pattern}$`);
+}
+
+/**
  * Server plugin for the AppKit.
  *
  * This plugin is responsible for starting the server and serving the static files.
@@ -64,7 +84,18 @@ export class ServerPlugin extends Plugin {
   private resolvedListenPort?: number;
   protected declare config: ServerConfig;
   private serverExtensions: ((app: express.Application) => void)[] = [];
-  private rawBodyPaths: Set<string> = new Set();
+  /**
+   * Compiled regex patterns for route templates that opted out of JSON
+   * body parsing (via `skipBodyParsing: true`). The express.json `type`
+   * callback (below) tests the concrete request URL against each pattern
+   * so templates like `/api/files/:volumeKey/upload` match the actual
+   * `/api/files/files/upload` URL the browser hits.
+   *
+   * Was previously a `Set<string>` of raw templates — that always missed
+   * because Set lookup is exact-string, while the URL at request time
+   * has params substituted.
+   */
+  private rawBodyPathPatterns: RegExp[] = [];
   static phase: PluginPhase = "deferred";
 
   constructor(config: ServerConfig) {
@@ -123,10 +154,17 @@ export class ServerPlugin extends Plugin {
         type: (req) => {
           // Skip JSON parsing for routes that declared skipBodyParsing
           // (e.g. file uploads where the raw body must flow through).
-          // rawBodyPaths is populated by extendRoutes() below; the type
-          // callback runs per-request so the set is already filled.
+          // `rawBodyPathPatterns` is populated by extendRoutes() below;
+          // the type callback runs per-request so the array is already
+          // filled. Pattern matching (not exact-string) is required
+          // because the URL has route params substituted while the
+          // registered path is a template.
           const urlPath = req.url?.split("?")[0];
-          if (urlPath && this.rawBodyPaths.has(urlPath)) return false;
+          if (urlPath) {
+            for (const pattern of this.rawBodyPathPatterns) {
+              if (pattern.test(urlPath)) return false;
+            }
+          }
           const ct = req.headers["content-type"] ?? "";
           return ct.includes("json");
         },
@@ -245,13 +283,14 @@ export class ServerPlugin extends Plugin {
 
         endpoints[plugin.name] = plugin.getEndpoints();
 
-        // Collect paths that should skip body parsing
+        // Collect paths that should skip body parsing. Compile each
+        // template into a regex up-front so per-request matching is cheap.
         if (
           plugin.getSkipBodyParsingPaths &&
           typeof plugin.getSkipBodyParsingPaths === "function"
         ) {
           for (const p of plugin.getSkipBodyParsingPaths()) {
-            this.rawBodyPaths.add(p);
+            this.rawBodyPathPatterns.push(routeTemplateToRegExp(p));
           }
         }
       }

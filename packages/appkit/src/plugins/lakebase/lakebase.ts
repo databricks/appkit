@@ -98,7 +98,13 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
       const isNew = !oboManager.hasPool(userKey);
       const pool = oboManager.getPool(
         userKey,
-        { workspaceClient: ctx.client, user: userKey },
+        // `@databricks/lakebase` still types its `workspaceClient` against the
+        // old SDK; bridge through the wrapper's transitional escape hatch.
+        // TODO(prod): drop when lakebase migrates to the modular SDK.
+        {
+          workspaceClient: ctx.client.toLegacyWorkspaceClient(),
+          user: userKey,
+        },
         ctx.tokenFingerprint,
       );
       if (isNew) {
@@ -278,7 +284,13 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
     const ctx = getUserContext();
     if (ctx) {
       const user = ctx.userEmail ?? ctx.userId;
-      return { ...this.config.pool, workspaceClient: ctx.client, user };
+      // Bridge through the wrapper's transitional escape hatch.
+      // TODO(prod): drop when @databricks/lakebase migrates.
+      return {
+        ...this.config.pool,
+        workspaceClient: ctx.client.toLegacyWorkspaceClient(),
+        user,
+      };
     }
     return this.config.pool;
   }

@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { ApiError, WorkspaceClient } from "@databricks/sdk-experimental";
 import type { CacheConfig, CacheEntry, CacheStorage } from "shared";
 import { createLakebasePool } from "../connectors/lakebase";
 import { AppKitError, ExecutionError, InitializationError } from "../errors";
@@ -7,6 +6,7 @@ import { createLogger } from "../logging/logger";
 import type { Counter, TelemetryProvider } from "../telemetry";
 import { SpanStatusCode, TelemetryManager } from "../telemetry";
 import { deepMerge } from "../utils";
+import { isApiError } from "../workspace-client";
 import { cacheDefaults } from "./defaults";
 import { InMemoryStorage, PersistentStorage } from "./storage";
 
@@ -170,7 +170,14 @@ export class CacheManager {
 
     // try to use lakebase storage
     try {
-      const workspaceClient = new WorkspaceClient({});
+      // Use the legacy SDK directly here: this client is constructed solely
+      // to hand off to `createLakebasePool`, whose `workspaceClient` config
+      // field is still typed against `@databricks/sdk-experimental`. When
+      // `@databricks/lakebase` migrates we'll route through `wrapper.toLegacyWorkspaceClient()`.
+      const { WorkspaceClient: LegacyWorkspaceClient } = await import(
+        "@databricks/sdk-experimental"
+      );
+      const workspaceClient = new LegacyWorkspaceClient({});
       const pool = createLakebasePool({ workspaceClient });
       const persistentStorage = new PersistentStorage(config, pool);
 
@@ -329,7 +336,7 @@ export class CacheManager {
               if (sharedController.signal.aborted) {
                 throw error;
               }
-              if (error instanceof AppKitError || error instanceof ApiError) {
+              if (error instanceof AppKitError || isApiError(error)) {
                 throw error;
               }
               throw ExecutionError.statementFailed(

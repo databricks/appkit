@@ -1,45 +1,7 @@
-import type {
-  CancellationToken,
-  serving,
-  WorkspaceClient,
-} from "@databricks/sdk-experimental";
-import { Context } from "@databricks/sdk-experimental";
 import { createLogger } from "../../logging/logger";
+import type { serving, WorkspaceClient } from "../../workspace-client";
 
 const logger = createLogger("connectors:serving");
-
-/**
- * Bridges {@link AbortSignal} to the SDK's {@link CancellationToken} so
- * `apiClient.request` can abort the outbound HTTP request (and stop pulling
- * the SSE body) when the agent run is cancelled.
- */
-function cancellationTokenFromAbortSignal(
-  signal: AbortSignal,
-): CancellationToken {
-  const listeners = new Set<() => void>();
-  const fire = () => {
-    for (const cb of listeners) {
-      try {
-        cb();
-      } catch {
-        // ignore listener failures — abort must stay best-effort
-      }
-    }
-  };
-  signal.addEventListener("abort", fire, { passive: true });
-
-  return {
-    get isCancellationRequested() {
-      return signal.aborted;
-    },
-    onCancellationRequested(callback: (e?: unknown) => unknown) {
-      listeners.add(callback as () => void);
-      if (signal.aborted) {
-        void callback();
-      }
-    },
-  };
-}
 
 /**
  * Invokes a serving endpoint using the SDK's high-level query API.
@@ -65,9 +27,11 @@ export async function invoke(
  * Returns the raw SSE byte stream from a serving endpoint.
  * No parsing is performed — bytes are passed through as-is.
  *
- * Uses the SDK's low-level `apiClient.request({ raw: true })` because
- * the high-level `servingEndpoints.query()` returns `Promise<QueryEndpointResponse>`
- * and does not support SSE streaming.
+ * Uses the wrapper's low-level `http.request({ raw: true })` (backed by
+ * `@databricks/sdk-core/http`) because the high-level
+ * `servingEndpoints.query()` returns `Promise<QueryEndpointResponse>` and
+ * does not support SSE streaming. Native `AbortSignal` — no SDK
+ * `CancellationToken` bridge required.
  */
 export async function stream(
   client: WorkspaceClient,
@@ -79,25 +43,17 @@ export async function stream(
 
   logger.debug("Streaming from endpoint %s", endpointName);
 
-  const context = signal
-    ? new Context({
-        cancellationToken: cancellationTokenFromAbortSignal(signal),
-      })
-    : undefined;
-
-  const response = (await client.apiClient.request(
-    {
-      path: `/serving-endpoints/${encodeURIComponent(endpointName)}/invocations`,
-      method: "POST",
-      headers: new Headers({
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-      }),
-      payload: { ...cleanBody, stream: true },
-      raw: true,
-    },
-    context,
-  )) as { contents: ReadableStream<Uint8Array> };
+  const response = (await client.http.request({
+    path: `/serving-endpoints/${encodeURIComponent(endpointName)}/invocations`,
+    method: "POST",
+    headers: new Headers({
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+    }),
+    payload: { ...cleanBody, stream: true },
+    raw: true,
+    signal,
+  })) as { contents: ReadableStream<Uint8Array> | null };
 
   if (!response.contents) {
     throw new Error("Response body is null — streaming not supported");
