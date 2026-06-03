@@ -84,6 +84,17 @@ function parseError(raw: string): { code?: string; message: string } {
   return { message: raw };
 }
 
+function isConnectivityError(raw: string): boolean {
+  return (
+    /\b(ECONNREFUSED|ECONNRESET|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|EHOSTUNREACH|ENETUNREACH)\b/i.test(
+      raw,
+    ) ||
+    /\b(connection refused|connection reset|fetch failed|network error|socket hang up|timed? ?out|timeout)\b/i.test(
+      raw,
+    )
+  );
+}
+
 /**
  * Extract parameters from a SQL query
  * @param sql - the SQL query to extract parameters from
@@ -492,31 +503,41 @@ export async function generateQueriesFromDescribe(
             logEntries.push({ queryName, status: "MISS", kind: "empty" });
           }
         } else {
-          // executeStatement rejected → the warehouse was unreachable (down,
-          // network, timeout, auth). This is NOT a query error: reuse the
-          // last-known-good cached type if we have one (the cache only ever
-          // holds good types now), otherwise emit `unknown`. Never cached,
-          // never fatal — so a transient outage can't fail the build.
-          const { sql, index } = uncachedQueries[batchOffset + i];
+          // executeStatement rejected before the warehouse returned a statement
+          // result. Only clear transport failures are treated as offline; auth,
+          // bad warehouse IDs, malformed requests, and SDK/config failures stay
+          // fatal so users fix the underlying setup issue.
+          const { sql, sqlHash, index } = uncachedQueries[batchOffset + i];
           const reason =
             entry.reason instanceof Error
               ? entry.reason.message
               : String(entry.reason);
+          const error = parseError(reason);
+          if (!isConnectivityError(reason)) {
+            spinner.stop("");
+            throw new Error(
+              `DESCRIBE request failed for ${queryName}: ${error.message}`,
+            );
+          }
           const prior = cache.queries[queryName];
-          const type =
-            prior?.type ?? generateUnknownResultQuery(sql, queryName);
+          const canReusePrior = prior?.hash === sqlHash && !prior.retry;
+          const type = canReusePrior
+            ? prior.type
+            : generateUnknownResultQuery(sql, queryName);
           logger.warn(
             "DESCRIBE unreachable for %s: %s — %s",
             queryName,
             reason,
-            prior ? "reusing last cached type" : "emitting unknown (no cache)",
+            canReusePrior
+              ? "reusing last cached type"
+              : "emitting unknown (no matching cache)",
           );
           freshResults.push({ index, schema: { name: queryName, type } });
           logEntries.push({
             queryName,
             status: "MISS",
             kind: "connectivity",
-            error: parseError(reason),
+            error,
           });
         }
       }

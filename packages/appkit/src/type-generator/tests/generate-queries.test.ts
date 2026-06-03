@@ -241,12 +241,13 @@ describe("generateQueriesFromDescribe", () => {
     expect(schemas[0].type).toContain("result: unknown");
   });
 
-  test("connectivity failure reuses the last-known-good cached type", async () => {
+  test("connectivity failure with stale cache emits unknown for the current SQL", async () => {
     const sql = "SELECT id FROM users";
     mocks.readdir.mockResolvedValue(["users.sql"]);
     mocks.readFile.mockResolvedValue(sql);
     // A prior good type cached under a STALE hash: the query is a cache MISS
-    // (so DESCRIBE is attempted) but a known-good type still exists to reuse.
+    // (so DESCRIBE is attempted). If the warehouse is unreachable, do not
+    // publish the stale result columns for different SQL text.
     mocks.loadCache.mockReturnValueOnce({
       version: CACHE_VERSION,
       queries: {
@@ -260,17 +261,32 @@ describe("generateQueriesFromDescribe", () => {
       "wh-123",
     );
 
-    // reused the cached type instead of clobbering it with `result: unknown`
-    expect(schemas[0].type).toBe(CACHED_GOOD_TYPE);
-    expect(schemas[0].type).not.toContain("result: unknown");
+    expect(schemas[0].type).not.toBe(CACHED_GOOD_TYPE);
+    expect(schemas[0].type).toContain("result: unknown");
     // connectivity is never recorded as a syntax error
     expect(syntaxErrors).toEqual([]);
-    // the existing good entry is left intact (not overwritten)
+    // the existing good entry is left intact (not overwritten with unknown)
     expect(lastSavedQueries()?.users).toEqual({
       hash: "stale-hash",
       type: CACHED_GOOD_TYPE,
       retry: false,
     });
+  });
+
+  test("fatal rejected DESCRIBE request is not downgraded to offline", async () => {
+    mocks.readdir.mockResolvedValue(["users.sql"]);
+    mocks.readFile.mockResolvedValue("SELECT id FROM users");
+    mocks.executeStatement.mockRejectedValueOnce(
+      new Error("PERMISSION_DENIED: missing warehouse permission"),
+    );
+
+    await expect(
+      generateQueriesFromDescribe("/queries", "wh-123"),
+    ).rejects.toThrow(
+      "DESCRIBE request failed for users: PERMISSION_DENIED: missing warehouse permission",
+    );
+
+    expect(mocks.saveCache).not.toHaveBeenCalled();
   });
 
   test("empty result (described, no columns) is unknown, not a syntax error, not cached", async () => {
