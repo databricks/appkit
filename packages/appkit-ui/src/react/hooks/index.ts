@@ -12,6 +12,8 @@ export type {
   TypedArrowTable,
   UseAnalyticsQueryOptions,
   UseAnalyticsQueryResult,
+  WarehouseState,
+  WarehouseStatus,
 } from "./types";
 export {
   type AgentChatEvent,
@@ -27,6 +29,16 @@ export {
 } from "./use-chart-data";
 export { useIsMobile } from "./use-mobile";
 export { usePluginClientConfig } from "./use-plugin-config";
+export {
+  type AggregatedResourceStatus,
+  type ResourceSeverity,
+  type ResourceStatus,
+  type ResourceStatusFilter,
+  ResourceStatusProvider,
+  type ResourceStatusProviderProps,
+  useResourceStatus,
+  useResourceStatusPublisher,
+} from "./use-resource-status";
 export {
   type UseServingInvokeOptions,
   type UseServingInvokeResult,

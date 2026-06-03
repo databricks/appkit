@@ -1,4 +1,4 @@
-import { renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 // Mock connectSSE so the hook does not attempt a real network request.
@@ -89,5 +89,119 @@ describe("useAnalyticsQuery", () => {
     rerender();
 
     expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+  });
+
+  describe("warehouse_status", () => {
+    test("surfaces warehouseStatus while waiting and clears loading on result", async () => {
+      // Capture the connectSSE options so we can drive onMessage manually.
+      let capturedOnMessage:
+        | ((msg: { id: string; data: string }) => void)
+        | null = null;
+      mockConnectSSE.mockImplementationOnce((opts: any) => {
+        capturedOnMessage = opts.onMessage;
+        return new Promise<void>(() => {});
+      });
+
+      const { result } = renderHook(() =>
+        // biome-ignore lint/suspicious/noExplicitAny: typed registry not available in tests
+        useAnalyticsQuery("test_query" as any),
+      );
+
+      // Initially: loading, no status, no data.
+      expect(result.current.loading).toBe(true);
+      expect(result.current.warehouseStatus).toBeNull();
+      expect(result.current.data).toBeNull();
+      expect(capturedOnMessage).toBeTruthy();
+
+      // Server emits a STARTING status — UI should show progress, still loading.
+      act(() => {
+        capturedOnMessage?.({
+          id: "1",
+          data: JSON.stringify({
+            type: "warehouse_status",
+            status: { state: "STARTING", elapsedMs: 1200 },
+          }),
+        });
+      });
+
+      await waitFor(() => {
+        expect(result.current.warehouseStatus).toEqual({
+          state: "STARTING",
+          elapsedMs: 1200,
+        });
+      });
+      expect(result.current.loading).toBe(true);
+      expect(result.current.data).toBeNull();
+
+      // Then RUNNING.
+      act(() => {
+        capturedOnMessage?.({
+          id: "2",
+          data: JSON.stringify({
+            type: "warehouse_status",
+            status: { state: "RUNNING", elapsedMs: 4500 },
+          }),
+        });
+      });
+
+      await waitFor(() => {
+        expect(result.current.warehouseStatus?.state).toBe("RUNNING");
+      });
+
+      // Finally the SQL result lands.
+      act(() => {
+        capturedOnMessage?.({
+          id: "3",
+          data: JSON.stringify({
+            type: "result",
+            data: [{ id: 1, name: "row1" }],
+          }),
+        });
+      });
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+      expect(result.current.data).toEqual([{ id: 1, name: "row1" }]);
+      expect(result.current.error).toBeNull();
+      // warehouseStatus is left at its last observed value (RUNNING) so
+      // consumers that gated on `state !== "RUNNING"` flip back to data.
+      expect(result.current.warehouseStatus?.state).toBe("RUNNING");
+    });
+
+    test("surfaces an error when a warehouse_status event has no status payload", async () => {
+      // R2 mitigation: a malformed warehouse_status frame followed by a
+      // clean stream close used to strand the hook in `loading: true`
+      // forever. We now treat it as a malformed terminal frame.
+      let capturedOnMessage:
+        | ((msg: { id: string; data: string }) => void)
+        | null = null;
+      mockConnectSSE.mockImplementationOnce((opts: any) => {
+        capturedOnMessage = opts.onMessage;
+        return new Promise<void>(() => {});
+      });
+
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+
+      const { result } = renderHook(() =>
+        // biome-ignore lint/suspicious/noExplicitAny: typed registry not available in tests
+        useAnalyticsQuery("test_query" as any),
+      );
+
+      act(() => {
+        capturedOnMessage?.({
+          id: "1",
+          data: JSON.stringify({ type: "warehouse_status" }),
+        });
+      });
+
+      expect(result.current.loading).toBe(false);
+      expect(result.current.error).toMatch(/Unable to load data/);
+      expect(result.current.warehouseStatus).toBeNull();
+
+      consoleError.mockRestore();
+    });
   });
 });

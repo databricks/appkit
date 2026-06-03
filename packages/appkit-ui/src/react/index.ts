@@ -4,5 +4,6 @@ export * from "./genie";
 export * from "./hooks";
 export * from "./lib/utils";
 export * from "./portal-container-context";
+export * from "./resource-status-indicator";
 export * from "./table";
 export * from "./ui";

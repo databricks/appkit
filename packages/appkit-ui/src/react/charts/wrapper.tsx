@@ -3,7 +3,7 @@ import { useChartData } from "../hooks/use-chart-data";
 import { ChartErrorBoundary } from "./chart-error-boundary";
 import { EmptyState } from "./empty";
 import { ErrorState } from "./error";
-import { LoadingSkeleton } from "./loading";
+import { LoadingSkeleton, ResourceWaitingPlaceholder } from "./loading";
 import type { ChartData, DataFormat } from "./types";
 import { isArrowTable } from "./types";
 
@@ -65,13 +65,26 @@ function QueryModeContent({
   testId,
   children,
 }: CommonProps & ChartWrapperQueryProps) {
-  const { data, loading, error, isEmpty } = useChartData({
+  const { data, loading, error, isEmpty, warehouseStatus } = useChartData({
     queryKey,
     parameters,
     format,
     transformer,
   });
 
+  // Distinguish "system not ready" (warehouse warming up) from "actually
+  // fetching data". A shimmering skeleton during a 30s–2min cold start is
+  // misleading — render a quieter, non-shimmery placeholder instead. The
+  // global `<ResourceStatusIndicator />` (when mounted) already explains the
+  // "why" once at the app level.
+  if (
+    loading &&
+    warehouseStatus &&
+    warehouseStatus.state !== "RUNNING" &&
+    !data
+  ) {
+    return <ResourceWaitingPlaceholder height={height ?? 300} />;
+  }
   if (loading) return <LoadingSkeleton height={height ?? 300} />;
   if (error) return <ErrorState error={error} />;
   if (isEmpty || !data) return <EmptyState />;

@@ -24,6 +24,7 @@ export {
 } from "../hooks/use-chart-data";
 export { BaseChart, type BaseChartProps } from "./base";
 export { createChart } from "./create-chart";
+export { LoadingSkeleton, ResourceWaitingPlaceholder } from "./loading";
 export { ChartWrapper, type ChartWrapperProps } from "./wrapper";
 
 // ============================================================================

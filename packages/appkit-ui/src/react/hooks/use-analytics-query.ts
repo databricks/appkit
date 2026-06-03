@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { ArrowClient, connectSSE } from "@/js";
 import type {
   AnalyticsFormat,
@@ -7,7 +14,9 @@ import type {
   QueryKey,
   UseAnalyticsQueryOptions,
   UseAnalyticsQueryResult,
+  WarehouseStatus,
 } from "./types";
+import { useAnalyticsWarehousePublisher } from "./use-analytics-warehouse-status";
 import { useQueryHMR } from "./use-query-hmr";
 
 /**
@@ -120,7 +129,17 @@ export function useAnalyticsQuery<
   const [data, setData] = useState<ResultType | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warehouseStatus, setWarehouseStatus] =
+    useState<WarehouseStatus | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Stable id per hook instance so two charts using the same queryKey still
+  // register independently with the warehouse-status context (if mounted).
+  const publisherId = useId();
+  const {
+    publish: publishWarehouseStatus,
+    unpublish: unpublishWarehouseStatus,
+  } = useAnalyticsWarehousePublisher(publisherId, queryKey);
 
   if (!queryKey || queryKey.trim().length === 0) {
     throw new Error(
@@ -168,6 +187,13 @@ export function useAnalyticsQuery<
     setLoading(true);
     setError(null);
     setData(null);
+    setWarehouseStatus(null);
+    // Register with the warehouse-status context (no-op when no provider).
+    // We register with `null` so the aggregate counts this hook as active
+    // even before the first status event arrives — useful e.g. to show a
+    // generic "warehouse warming up" affordance once the second slow query
+    // shows up.
+    publishWarehouseStatus(null);
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
@@ -180,10 +206,42 @@ export function useAnalyticsQuery<
         try {
           const parsed = JSON.parse(message.data);
 
+          // warehouse readiness progress — emitted by the analytics route
+          // while waiting for a STOPPED/STARTING warehouse to reach RUNNING.
+          // Loading stays true; data stays null.
+          if (parsed.type === "warehouse_status") {
+            // Treat a missing/invalid status payload as a malformed terminal
+            // frame instead of silently no-op'ing — otherwise a corrupted
+            // frame followed by a clean stream close strands the hook in
+            // `loading: true` forever (the global indicator would also stay
+            // pinned via the registered slot).
+            if (
+              !parsed.status ||
+              typeof parsed.status !== "object" ||
+              typeof parsed.status.state !== "string"
+            ) {
+              setLoading(false);
+              setError("Unable to load data, please try again");
+              unpublishWarehouseStatus();
+              console.error(
+                "[useAnalyticsQuery] Malformed warehouse_status event",
+                parsed,
+              );
+              return;
+            }
+            const status = parsed.status as WarehouseStatus;
+            setWarehouseStatus(status);
+            publishWarehouseStatus(status);
+            return;
+          }
+
           // success - JSON format
           if (parsed.type === "result") {
             setLoading(false);
             setData(parsed.data as ResultType);
+            // Query reached a terminal state — drop our entry so the global
+            // banner stops counting this hook as waiting.
+            unpublishWarehouseStatus();
             return;
           }
 
@@ -197,6 +255,7 @@ export function useAnalyticsQuery<
               setLoading(false);
               // Table is cast to TypedArrowTable with row type from QueryRegistry
               setData(table as ResultType);
+              unpublishWarehouseStatus();
               return;
             } catch (error) {
               console.error(
@@ -205,6 +264,7 @@ export function useAnalyticsQuery<
               );
               setLoading(false);
               setError("Unable to load data, please try again");
+              unpublishWarehouseStatus();
               return;
             }
           }
@@ -216,6 +276,7 @@ export function useAnalyticsQuery<
 
             setLoading(false);
             setError(errorMsg);
+            unpublishWarehouseStatus();
 
             if (parsed.code) {
               console.error(
@@ -231,6 +292,7 @@ export function useAnalyticsQuery<
       onError: (error) => {
         if (abortController.signal.aborted) return;
         setLoading(false);
+        unpublishWarehouseStatus();
 
         let userMessage = "Unable to load data, please try again";
 
@@ -250,7 +312,13 @@ export function useAnalyticsQuery<
         setError(userMessage);
       },
     });
-  }, [queryKey, payload, urlSuffix]);
+  }, [
+    queryKey,
+    payload,
+    urlSuffix,
+    publishWarehouseStatus,
+    unpublishWarehouseStatus,
+  ]);
 
   useEffect(() => {
     if (autoStart) {
@@ -259,11 +327,14 @@ export function useAnalyticsQuery<
 
     return () => {
       abortControllerRef.current?.abort();
+      // Drop our entry from the global registry on unmount so a permanently
+      // STARTING warehouse doesn't keep the banner pinned after navigation.
+      unpublishWarehouseStatus();
     };
-  }, [start, autoStart]);
+  }, [start, autoStart, unpublishWarehouseStatus]);
 
   // Enable HMR for query updates in dev mode
   useQueryHMR(queryKey, start);
 
-  return { data, loading, error };
+  return { data, loading, error, warehouseStatus };
 }
