@@ -585,6 +585,71 @@ describe("Analytics Plugin", () => {
       );
     });
 
+    test("emits warehouse_status events before the result for a STARTING warehouse", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+
+      const executeMock = vi.fn().mockResolvedValue({
+        result: { data: [{ id: 1, name: "test" }] },
+      });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      plugin.injectRoutes(router);
+
+      const handler = getHandler("POST", "/query/:query_key");
+
+      // Override the default RUNNING mock with a STARTING -> RUNNING sequence
+      // so the route streams a warehouse_status event before the result.
+      const warehouseGet = vi
+        .fn()
+        .mockResolvedValueOnce({ state: "STARTING" })
+        .mockResolvedValueOnce({ state: "RUNNING" });
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {} },
+      });
+      mockReq.serviceWorkspaceClient.warehouses.get = warehouseGet;
+      mockReq.userWorkspaceClient.warehouses.get = warehouseGet;
+      const mockRes = createMockResponse();
+
+      // The connector polls every 3s between warehouse state checks; use fake
+      // timers so the test doesn't actually sleep.
+      vi.useFakeTimers();
+      const handlerPromise = handler(mockReq, mockRes);
+      await vi.runAllTimersAsync();
+      await handlerPromise;
+      vi.useRealTimers();
+
+      // Inspect the SSE writes: a `warehouse_status` event must precede the
+      // `result` event.
+      const eventLines = (mockRes.write as any).mock.calls
+        .map((call: any[]) => call[0] as string)
+        .filter((s: string) => s.startsWith("event: "));
+      const warehouseIdx = eventLines.findIndex(
+        (s: string) => s === "event: warehouse_status\n",
+      );
+      const resultIdx = eventLines.findIndex(
+        (s: string) => s === "event: result\n",
+      );
+      expect(warehouseIdx).toBeGreaterThanOrEqual(0);
+      expect(resultIdx).toBeGreaterThanOrEqual(0);
+      expect(warehouseIdx).toBeLessThan(resultIdx);
+
+      // The status payload should include the state field.
+      expect(mockRes.write).toHaveBeenCalledWith(
+        expect.stringMatching(
+          /"type":"warehouse_status".*"state":"(STARTING|RUNNING)"/,
+        ),
+      );
+
+      expect(executeMock).toHaveBeenCalledTimes(1);
+    });
+
     test("should return 404 when query file is not found", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();

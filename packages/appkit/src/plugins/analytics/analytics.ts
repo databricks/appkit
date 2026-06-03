@@ -10,6 +10,10 @@ import type {
 } from "shared";
 import { z } from "zod";
 import { SQLWarehouseConnector } from "../../connectors";
+import {
+  DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS,
+  type WarehouseStatusUpdate,
+} from "../../connectors/sql-warehouse/client";
 import { getWarehouseId, getWorkspaceClient } from "../../context";
 import { buildToolkitEntries } from "../../core/agent/build-toolkit";
 import {
@@ -18,6 +22,7 @@ import {
   toolsFromRegistry,
 } from "../../core/agent/tools/define-tool";
 import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
+import { ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
@@ -26,8 +31,10 @@ import manifest from "./manifest.json";
 import { QueryProcessor } from "./query";
 import type {
   AnalyticsQueryResponse,
+  AnalyticsStreamMessage,
   IAnalyticsConfig,
   IAnalyticsQueryRequest,
+  WarehouseStatus,
 } from "./types";
 import { normalizeAnalyticsFormat } from "./types";
 
@@ -173,15 +180,18 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
               disposition: "EXTERNAL_LINKS",
               format: "ARROW_STREAM",
             },
-            type: "arrow",
+            type: "arrow" as const,
           }
         : {
-            type: "result",
+            type: "result" as const,
           };
 
     const hashedQuery = this.queryProcessor.hashQuery(query);
 
-    const defaultConfig: PluginExecuteConfig = {
+    // Cache/retry/timeout are scoped to the SQL execution itself (inner
+    // `execute`) so the warehouse-readiness phase isn't subject to retries
+    // and the generator value never leaks into the cache.
+    const sqlConfig: PluginExecuteConfig = {
       ...queryDefaults,
       cache: {
         ...queryDefaults.cache,
@@ -196,26 +206,110 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       },
     };
 
+    // Outer stream: no cache/retry — `executeStream` would otherwise wrap the
+    // generator factory and cache the generator object itself. Telemetry +
+    // user-scoped trace context still apply.
     const streamExecutionSettings: StreamExecutionSettings = {
-      default: defaultConfig,
+      default: {
+        cache: { enabled: false },
+        retry: { enabled: false },
+      },
     };
+
+    const startupTimeoutMs =
+      this.config.warehouseStartupTimeoutMs ??
+      DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS;
+    const autoStartWarehouse = this.config.autoStartWarehouse ?? true;
+
+    const self = this;
 
     await executor.executeStream(
       res,
-      async (signal) => {
-        const processedParams = await this.queryProcessor.processQueryParams(
-          query,
-          parameters,
+      async function* (
+        signal,
+      ): AsyncGenerator<AnalyticsStreamMessage, void, unknown> {
+        const workspaceClient = getWorkspaceClient();
+        const warehouseId = await getWarehouseId();
+
+        // Drain the warehouse-readiness updates as SSE events. The
+        // ensureWarehouseRunning call pushes to `queue` via onStatus; the
+        // generator wakes whenever onStatus fires or the call settles.
+        const queue: WarehouseStatusUpdate[] = [];
+        let wake: (() => void) | null = null;
+        let settled = false;
+        let readinessError: unknown = null;
+
+        // Errors from ensureWarehouseRunning are observed via readinessError
+        // below; the .then(_, err => ...) chain converts the rejection into
+        // a resolved promise so we don't need to await it after the drain.
+        void self.SQLClient.ensureWarehouseRunning(
+          workspaceClient,
+          warehouseId,
+          {
+            signal,
+            timeoutMs: startupTimeoutMs,
+            autoStart: autoStartWarehouse,
+            onStatus: (update) => {
+              queue.push(update);
+              wake?.();
+              wake = null;
+            },
+          },
+        ).then(
+          () => {
+            settled = true;
+            wake?.();
+            wake = null;
+          },
+          (err) => {
+            readinessError = err;
+            settled = true;
+            wake?.();
+            wake = null;
+          },
         );
 
-        const result = await executor.query(
-          query,
-          processedParams,
-          queryParameters.formatParameters,
-          signal,
+        while (!settled || queue.length > 0) {
+          while (queue.length > 0) {
+            const update = queue.shift() as WarehouseStatusUpdate;
+            const status: WarehouseStatus = {
+              state: update.state as WarehouseStatus["state"],
+              elapsedMs: update.elapsedMs,
+            };
+            yield { type: "warehouse_status", status };
+          }
+          if (settled) break;
+          await new Promise<void>((resolve) => {
+            wake = resolve;
+          });
+        }
+
+        if (readinessError) throw readinessError;
+
+        const sqlResult = await executor.execute(
+          async (sig) => {
+            const processedParams =
+              await self.queryProcessor.processQueryParams(query, parameters);
+            const result = await executor.query(
+              query,
+              processedParams,
+              queryParameters.formatParameters,
+              sig,
+            );
+            return { type: queryParameters.type, ...result };
+          },
+          { default: sqlConfig },
+          executorKey,
         );
 
-        return { type: queryParameters.type, ...result };
+        if (!sqlResult.ok) {
+          // Surface a typed AppKitError so StreamManager can categorize via
+          // the structured `code`. The HTTP status code from `execute()`
+          // doesn't apply to SSE error frames.
+          throw ExecutionError.statementFailed(sqlResult.message);
+        }
+
+        yield sqlResult.data as AnalyticsStreamMessage;
       },
       streamExecutionSettings,
       executorKey,
