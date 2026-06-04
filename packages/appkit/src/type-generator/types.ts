@@ -91,6 +91,18 @@ export interface QuerySyntaxError {
 }
 
 /**
+ * A non-SQL fatal error while attempting to describe a query: authentication,
+ * authorization, invalid warehouse/configuration, malformed SDK request, or
+ * any other setup problem that should not be treated as an offline warehouse.
+ * @property name - the query name
+ * @property message - the fatal error message
+ */
+export interface QueryFatalError {
+  name: string;
+  message: string;
+}
+
+/**
  * Result of describing a folder of queries.
  * @property schemas - one schema per query, in original file order. Queries that
  *   could not be described carry `result: unknown` so output stays valid.
@@ -98,8 +110,12 @@ export interface QuerySyntaxError {
  *   warehouse (genuine SQL errors). Connectivity failures are deliberately NOT
  *   included: they degrade silently (reuse last-known-good type or emit
  *   `unknown`) so a transient outage never fails a build.
+ * @property fatalErrors - non-SQL fatal describe request failures. These still
+ *   produce `result: unknown` schemas so callers can write declarations before
+ *   surfacing the error.
  */
 export interface QueryGenerationResult {
   schemas: QuerySchema[];
   syntaxErrors: QuerySyntaxError[];
+  fatalErrors: QueryFatalError[];
 }

@@ -84,7 +84,7 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
     },
 
     buildStart() {
-      generate();
+      return generate();
     },
 
     configureServer(server) {

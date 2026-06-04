@@ -78,10 +78,8 @@ describe("generateQueriesFromDescribe", () => {
       ]),
     );
 
-    const { schemas, syntaxErrors } = await generateQueriesFromDescribe(
-      "/queries",
-      "wh-123",
-    );
+    const { schemas, syntaxErrors, fatalErrors } =
+      await generateQueriesFromDescribe("/queries", "wh-123");
 
     expect(schemas).toHaveLength(1);
     expect(schemas[0].name).toBe("users");
@@ -91,6 +89,7 @@ describe("generateQueriesFromDescribe", () => {
     expect(mocks.saveCache).toHaveBeenCalledTimes(1);
     // clean success: cached, and not flagged as a syntax error
     expect(syntaxErrors).toEqual([]);
+    expect(fatalErrors).toEqual([]);
     expect(lastSavedQueries()?.users.type).toContain("id: number");
   });
 
@@ -176,10 +175,8 @@ describe("generateQueriesFromDescribe", () => {
         status: { state: "FAILED", error: { message: "Table not found" } },
       });
 
-    const { schemas, syntaxErrors } = await generateQueriesFromDescribe(
-      "/queries",
-      "wh-123",
-    );
+    const { schemas, syntaxErrors, fatalErrors } =
+      await generateQueriesFromDescribe("/queries", "wh-123");
 
     expect(schemas).toHaveLength(2);
     expect(schemas[0].name).toBe("a");
@@ -231,7 +228,9 @@ describe("generateQueriesFromDescribe", () => {
     mocks.readFile.mockResolvedValue(
       "-- @param status STRING\nSELECT * FROM t WHERE status = :status AND org = :org",
     );
-    mocks.executeStatement.mockRejectedValueOnce(new Error("timeout"));
+    mocks.executeStatement.mockRejectedValueOnce(
+      Object.assign(new Error("connect ETIMEDOUT"), { code: "ETIMEDOUT" }),
+    );
 
     const { schemas } = await generateQueriesFromDescribe("/queries", "wh-123");
 
@@ -254,17 +253,20 @@ describe("generateQueriesFromDescribe", () => {
         users: { hash: "stale-hash", type: CACHED_GOOD_TYPE, retry: false },
       },
     });
-    mocks.executeStatement.mockRejectedValueOnce(new Error("ECONNREFUSED"));
-
-    const { schemas, syntaxErrors } = await generateQueriesFromDescribe(
-      "/queries",
-      "wh-123",
+    mocks.executeStatement.mockRejectedValueOnce(
+      Object.assign(new Error("connect ECONNREFUSED"), {
+        code: "ECONNREFUSED",
+      }),
     );
+
+    const { schemas, syntaxErrors, fatalErrors } =
+      await generateQueriesFromDescribe("/queries", "wh-123");
 
     expect(schemas[0].type).not.toBe(CACHED_GOOD_TYPE);
     expect(schemas[0].type).toContain("result: unknown");
     // connectivity is never recorded as a syntax error
     expect(syntaxErrors).toEqual([]);
+    expect(fatalErrors).toEqual([]);
     // the existing good entry is left intact (not overwritten with unknown)
     expect(lastSavedQueries()?.users).toEqual({
       hash: "stale-hash",
@@ -280,13 +282,182 @@ describe("generateQueriesFromDescribe", () => {
       new Error("PERMISSION_DENIED: missing warehouse permission"),
     );
 
-    await expect(
-      generateQueriesFromDescribe("/queries", "wh-123"),
-    ).rejects.toThrow(
-      "DESCRIBE request failed for users: PERMISSION_DENIED: missing warehouse permission",
+    const { schemas, fatalErrors } = await generateQueriesFromDescribe(
+      "/queries",
+      "wh-123",
     );
 
-    expect(mocks.saveCache).not.toHaveBeenCalled();
+    expect(schemas[0].type).toContain("result: unknown");
+    expect(fatalErrors).toEqual([
+      {
+        name: "users",
+        message: "PERMISSION_DENIED: missing warehouse permission",
+      },
+    ]);
+    expect(mocks.saveCache).toHaveBeenCalledTimes(1);
+    expect(lastSavedQueries()).not.toHaveProperty("users");
+  });
+
+  test("HTTP 503 wrapper error is classified as connectivity", async () => {
+    mocks.readdir.mockResolvedValue(["users.sql"]);
+    mocks.readFile.mockResolvedValue("SELECT id FROM users");
+    mocks.executeStatement.mockRejectedValueOnce(
+      Object.assign(new Error("Service unavailable"), { statusCode: 503 }),
+    );
+
+    const { schemas, fatalErrors } = await generateQueriesFromDescribe(
+      "/queries",
+      "wh-123",
+    );
+
+    expect(schemas[0].type).toContain("result: unknown");
+    expect(fatalErrors).toEqual([]);
+  });
+
+  test.each([
+    ["HTTP 502", Object.assign(new Error("Bad gateway"), { status: 502 })],
+    [
+      "HTTP 504 response",
+      Object.assign(new Error("Gateway timeout"), {
+        response: { status: 504 },
+      }),
+    ],
+    [
+      "EAI_NODATA",
+      Object.assign(new Error("DNS lookup failed"), { code: "EAI_NODATA" }),
+    ],
+    [
+      "Envoy upstream disconnect",
+      new Error("upstream connect error or disconnect/reset before headers"),
+    ],
+  ])("%s is classified as connectivity", async (_name, error) => {
+    mocks.readdir.mockResolvedValue(["users.sql"]);
+    mocks.readFile.mockResolvedValue("SELECT id FROM users");
+    mocks.executeStatement.mockRejectedValueOnce(error);
+
+    const { schemas, fatalErrors } = await generateQueriesFromDescribe(
+      "/queries",
+      "wh-123",
+    );
+
+    expect(schemas[0].type).toContain("result: unknown");
+    expect(fatalErrors).toEqual([]);
+  });
+
+  test("mixed syntax and fatal failures are both returned", async () => {
+    mocks.readdir.mockResolvedValue(["syntax.sql", "fatal.sql"]);
+    mocks.readFile
+      .mockResolvedValueOnce("SELECT * FROM missing")
+      .mockResolvedValueOnce("SELECT * FROM auth_blocked");
+    mocks.executeStatement
+      .mockResolvedValueOnce({
+        statement_id: "stmt-syntax",
+        status: {
+          state: "FAILED",
+          error: { message: "Table not found" },
+        },
+      })
+      .mockRejectedValueOnce(new Error("PERMISSION_DENIED"));
+
+    const { schemas, syntaxErrors, fatalErrors } =
+      await generateQueriesFromDescribe("/queries", "wh-123");
+
+    expect(schemas).toHaveLength(2);
+    expect(syntaxErrors).toEqual([
+      { name: "syntax", message: "Table not found" },
+    ]);
+    expect(fatalErrors).toEqual([
+      { name: "fatal", message: "PERMISSION_DENIED" },
+    ]);
+  });
+
+  test("undici cause code is classified as connectivity even when wrapper message is generic fetch failed", async () => {
+    mocks.readdir.mockResolvedValue(["users.sql"]);
+    mocks.readFile.mockResolvedValue("SELECT id FROM users");
+    mocks.executeStatement.mockRejectedValueOnce(
+      Object.assign(new TypeError("fetch failed"), {
+        cause: { code: "UND_ERR_CONNECT_TIMEOUT" },
+      }),
+    );
+
+    const { schemas, fatalErrors } = await generateQueriesFromDescribe(
+      "/queries",
+      "wh-123",
+    );
+
+    expect(schemas[0].type).toContain("result: unknown");
+    expect(fatalErrors).toEqual([]);
+  });
+
+  test("TLS certificate message is classified as connectivity", async () => {
+    mocks.readdir.mockResolvedValue(["users.sql"]);
+    mocks.readFile.mockResolvedValue("SELECT id FROM users");
+    mocks.executeStatement.mockRejectedValueOnce(
+      new Error("unable to verify the first certificate"),
+    );
+
+    const { fatalErrors } = await generateQueriesFromDescribe(
+      "/queries",
+      "wh-123",
+    );
+
+    expect(fatalErrors).toEqual([]);
+  });
+
+  test("bare timeout and fetch failed messages are not overmatched as connectivity", async () => {
+    mocks.readdir.mockResolvedValue(["timeout.sql", "oauth.sql"]);
+    mocks.readFile
+      .mockResolvedValueOnce("SELECT id FROM timeout")
+      .mockResolvedValueOnce("SELECT id FROM oauth");
+    mocks.executeStatement
+      .mockRejectedValueOnce(
+        new Error("INVALID_PARAMETER_VALUE: timeout must be > 0"),
+      )
+      .mockRejectedValueOnce(
+        Object.assign(new TypeError("fetch failed"), {
+          cause: { code: "EXPIRED_OAUTH_TOKEN", message: "token expired" },
+        }),
+      );
+
+    const { schemas, fatalErrors } = await generateQueriesFromDescribe(
+      "/queries",
+      "wh-123",
+    );
+
+    expect(schemas).toHaveLength(2);
+    expect(fatalErrors).toEqual([
+      {
+        name: "timeout",
+        message: "INVALID_PARAMETER_VALUE: timeout must be > 0",
+      },
+      {
+        name: "oauth",
+        message: "fetch failed: token expired: EXPIRED_OAUTH_TOKEN",
+      },
+    ]);
+  });
+
+  test("successful describes in a fatal batch are saved", async () => {
+    mocks.readdir.mockResolvedValue(["good.sql", "bad_auth.sql"]);
+    mocks.readFile
+      .mockResolvedValueOnce("SELECT id FROM good")
+      .mockResolvedValueOnce("SELECT id FROM bad_auth");
+    mocks.executeStatement
+      .mockResolvedValueOnce(succeededResult([["id", "INT", null]]))
+      .mockRejectedValueOnce(new Error("PERMISSION_DENIED"));
+
+    const { schemas, fatalErrors } = await generateQueriesFromDescribe(
+      "/queries",
+      "wh-123",
+    );
+
+    expect(schemas[0].type).toContain("id: number");
+    expect(schemas[1].type).toContain("result: unknown");
+    expect(fatalErrors).toEqual([
+      { name: "bad_auth", message: "PERMISSION_DENIED" },
+    ]);
+    expect(lastSavedQueries()?.good.type).toContain("id: number");
+    expect(lastSavedQueries()).not.toHaveProperty("bad_auth");
   });
 
   test("empty result (described, no columns) is unknown, not a syntax error, not cached", async () => {

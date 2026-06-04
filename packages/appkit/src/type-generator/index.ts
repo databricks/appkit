@@ -9,7 +9,7 @@ import {
 } from "./migration";
 import { generateQueriesFromDescribe } from "./query-registry";
 import { generateServingTypes as generateServingTypesImpl } from "./serving/generator";
-import type { QuerySchema, QuerySyntaxError } from "./types";
+import type { QueryFatalError, QuerySchema, QuerySyntaxError } from "./types";
 
 dotenv.config();
 
@@ -24,20 +24,58 @@ const logger = createLogger("type-generator");
  */
 export class TypegenSyntaxError extends Error {
   readonly queries: QuerySyntaxError[];
+  readonly fatalQueries: QueryFatalError[];
 
-  constructor(queries: QuerySyntaxError[], warehouseId?: string) {
+  constructor(
+    queries: QuerySyntaxError[],
+    warehouseId?: string,
+    fatalQueries: QueryFatalError[] = [],
+  ) {
     const names = queries.map((q) => q.name).join(", ");
+    const fatalNames = fatalQueries.map((q) => q.name).join(", ");
     super(
       [
         `Type generation failed: ${queries.length} ${queries.length === 1 ? "query" : "queries"} could not be described: ${names}.`,
         `DESCRIBE QUERY failed for these queries — see the error codes above for details.`,
+        fatalQueries.length > 0
+          ? `Additionally, ${fatalQueries.length} ${fatalQueries.length === 1 ? "query" : "queries"} could not request DESCRIBE QUERY because of non-SQL fatal errors: ${fatalNames}.`
+          : undefined,
         `Common causes: SQL syntax errors, missing tables/views, or warehouse format incompatibilities.`,
         warehouseId
           ? `To debug: run the failing query directly in a SQL editor against warehouse ${warehouseId}.`
           : `To debug: run the failing query directly in a SQL editor.`,
-      ].join("\n"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     );
     this.name = "TypegenSyntaxError";
+    this.queries = queries;
+    this.fatalQueries = fatalQueries;
+  }
+}
+
+/**
+ * Thrown when DESCRIBE QUERY could not be requested because of a non-SQL fatal
+ * setup/request problem, such as missing permissions, invalid warehouse IDs, or
+ * malformed SDK configuration. Like TypegenSyntaxError, this is thrown only
+ * after the declaration file has been written with `result: unknown` entries.
+ */
+export class TypegenFatalError extends Error {
+  readonly queries: QueryFatalError[];
+
+  constructor(queries: QueryFatalError[], warehouseId?: string) {
+    const names = queries.map((q) => q.name).join(", ");
+    super(
+      [
+        `Type generation failed: ${queries.length} ${queries.length === 1 ? "query" : "queries"} could not be described: ${names}.`,
+        `DESCRIBE QUERY could not be requested for these queries — see the error details above.`,
+        `Common causes: missing warehouse permissions, invalid warehouse ID, authentication failure, or SDK configuration errors.`,
+        warehouseId
+          ? `To debug: verify access to warehouse ${warehouseId} and rerun type generation.`
+          : `To debug: verify warehouse access and rerun type generation.`,
+      ].join("\n"),
+    );
+    this.name = "TypegenFatalError";
     this.queries = queries;
   }
 }
@@ -92,12 +130,14 @@ export async function generateFromEntryPoint(options: {
 
   let queryRegistry: QuerySchema[] = [];
   let syntaxErrors: QuerySyntaxError[] = [];
+  let fatalErrors: QueryFatalError[] = [];
   if (queryFolder) {
     const result = await generateQueriesFromDescribe(queryFolder, warehouseId, {
       noCache,
     });
     queryRegistry = result.schemas;
-    syntaxErrors = result.syntaxErrors;
+    syntaxErrors = result.syntaxErrors ?? [];
+    fatalErrors = result.fatalErrors ?? [];
   }
 
   const typeDeclarations = generateTypeDeclarations(queryRegistry);
@@ -110,12 +150,14 @@ export async function generateFromEntryPoint(options: {
   await migrateProjectConfig(projectRoot);
 
   // Types are always written above — including `result: unknown` for any query
-  // that could not be described — so a transient warehouse outage never blocks a
-  // build. Only a genuine SQL error against a REACHABLE warehouse is surfaced as
-  // a throw; the Vite plugin / CLI apply the prod-fails / dev-warns gate.
-  // Connectivity failures are absent from `syntaxErrors`, so they pass silently.
+  // that could not be described. Connectivity failures pass silently so a
+  // transient warehouse outage never blocks a build; genuine SQL errors and
+  // non-connectivity fatal request failures surface after the file write.
   if (syntaxErrors.length > 0) {
-    throw new TypegenSyntaxError(syntaxErrors, warehouseId);
+    throw new TypegenSyntaxError(syntaxErrors, warehouseId, fatalErrors);
+  }
+  if (fatalErrors.length > 0) {
+    throw new TypegenFatalError(fatalErrors, warehouseId);
   }
 
   logger.debug("Type generation complete!");

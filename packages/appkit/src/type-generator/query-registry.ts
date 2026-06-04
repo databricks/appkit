@@ -7,6 +7,7 @@ import { CACHE_VERSION, hashSQL, loadCache, saveCache } from "./cache";
 import { Spinner } from "./spinner";
 import {
   type DatabricksStatementExecutionResponse,
+  type QueryFatalError,
   type QueryGenerationResult,
   type QuerySchema,
   type QuerySyntaxError,
@@ -84,15 +85,126 @@ function parseError(raw: string): { code?: string; message: string } {
   return { message: raw };
 }
 
-function isConnectivityError(raw: string): boolean {
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (isObject(error) && typeof error.message === "string") {
+    return error.message;
+  }
+  return String(error);
+}
+
+function getErrorDiagnostic(error: unknown): string {
+  const seen = new Set<unknown>();
+  const messages: string[] = [];
+  const stack = [error];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (current === undefined || seen.has(current)) continue;
+    seen.add(current);
+
+    const message = getErrorMessage(current);
+    if (
+      message &&
+      message !== "[object Object]" &&
+      !messages.includes(message)
+    ) {
+      messages.push(message);
+    }
+
+    const code = getErrorCode(current);
+    if (code && !messages.includes(code)) messages.push(code);
+
+    stack.push(...getErrorChildren(current));
+  }
+
+  return messages.length > 0 ? messages.join(": ") : getErrorMessage(error);
+}
+
+function getErrorCode(error: unknown): string | undefined {
+  if (!isObject(error)) return undefined;
+  const code = error.code ?? error.errno;
+  return typeof code === "string" ? code : undefined;
+}
+
+function getErrorStatus(error: unknown): number | undefined {
+  if (!isObject(error)) return undefined;
+  const direct = error.status ?? error.statusCode;
+  if (typeof direct === "number") return direct;
+  if (isObject(error.response) && typeof error.response.status === "number") {
+    return error.response.status;
+  }
+  return undefined;
+}
+
+function getErrorChildren(error: unknown): unknown[] {
+  if (!isObject(error)) return [];
+  const children: unknown[] = [];
+  if ("cause" in error) children.push(error.cause);
+  if (error instanceof AggregateError) children.push(...error.errors);
+  return children;
+}
+
+const CONNECTIVITY_ERROR_CODES = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ENOTFOUND",
+  "ETIMEDOUT",
+  "EAI_AGAIN",
+  "EAI_NODATA",
+  "EAI_NONAME",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "CERT_HAS_EXPIRED",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "ERR_TLS_CERT_ALTNAME_INVALID",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+]);
+
+function isConnectivityMessage(message: string): boolean {
   return (
-    /\b(ECONNREFUSED|ECONNRESET|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|EHOSTUNREACH|ENETUNREACH)\b/i.test(
-      raw,
-    ) ||
-    /\b(connection refused|connection reset|fetch failed|network error|socket hang up|timed? ?out|timeout)\b/i.test(
-      raw,
+    /\bconnection (?:refused|reset|timed out)\b/i.test(message) ||
+    /\bsocket hang up\b/i.test(message) ||
+    /\bnetwork error\b/i.test(message) ||
+    /\bcertificate has expired\b/i.test(message) ||
+    /\bunable to verify the first certificate\b/i.test(message) ||
+    /\bupstream connect error or disconnect\/reset before headers\b/i.test(
+      message,
     )
   );
+}
+
+function isConnectivityError(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  const stack = [error];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (current === undefined || seen.has(current)) continue;
+    seen.add(current);
+
+    const code = getErrorCode(current);
+    if (
+      code &&
+      (CONNECTIVITY_ERROR_CODES.has(code) || code.startsWith("UND_ERR_"))
+    ) {
+      return true;
+    }
+
+    const status = getErrorStatus(current);
+    if (status === 502 || status === 503 || status === 504) return true;
+
+    if (isConnectivityMessage(getErrorMessage(current))) return true;
+
+    stack.push(...getErrorChildren(current));
+  }
+
+  return false;
 }
 
 /**
@@ -328,8 +440,9 @@ export async function generateQueriesFromDescribe(
     queryName: string;
     status: "HIT" | "MISS";
     // Absent for clean hits/misses. "syntax" = bad SQL on a reachable warehouse;
-    // "connectivity" = warehouse unreachable; "empty" = described but no columns.
-    kind?: "syntax" | "connectivity" | "empty";
+    // "connectivity" = warehouse unreachable; "empty" = described but no columns;
+    // "fatal" = non-SQL setup/request failure surfaced after .d.ts emission.
+    kind?: "syntax" | "connectivity" | "empty" | "fatal";
     error?: { code?: string; message: string };
   }> = [];
 
@@ -410,6 +523,7 @@ export async function generateQueriesFromDescribe(
   // Genuine SQL errors (reachable warehouse). Connectivity failures are NOT
   // recorded here — they degrade silently so a transient outage isn't fatal.
   const syntaxErrors: QuerySyntaxError[] = [];
+  const fatalErrors: QueryFatalError[] = [];
 
   if (uncachedQueries.length > 0) {
     let completed = 0;
@@ -503,27 +617,36 @@ export async function generateQueriesFromDescribe(
             logEntries.push({ queryName, status: "MISS", kind: "empty" });
           }
         } else {
-          // executeStatement rejected before the warehouse returned a statement
-          // result. Only clear transport failures are treated as offline; auth,
-          // bad warehouse IDs, malformed requests, and SDK/config failures stay
-          // fatal so users fix the underlying setup issue.
+          // executeStatement rejected without a normal StatementExecution result.
+          // Only structured transport/connectivity failures are treated as
+          // offline; auth, bad warehouse IDs, malformed requests, and SDK/config
+          // failures stay fatal so users fix the underlying setup issue.
+          completed++;
+          spinner.update(
+            `Describing ${total} ${total === 1 ? "query" : "queries"} (${completed}/${total})`,
+          );
+
           const { sql, sqlHash, index } = uncachedQueries[batchOffset + i];
-          const reason =
-            entry.reason instanceof Error
-              ? entry.reason.message
-              : String(entry.reason);
+          const reason = getErrorDiagnostic(entry.reason);
           const error = parseError(reason);
-          if (!isConnectivityError(reason)) {
-            spinner.stop("");
-            throw new Error(
-              `DESCRIBE request failed for ${queryName}: ${error.message}`,
-            );
-          }
           const prior = cache.queries[queryName];
           const canReusePrior = prior?.hash === sqlHash && !prior.retry;
           const type = canReusePrior
             ? prior.type
             : generateUnknownResultQuery(sql, queryName);
+          freshResults.push({ index, schema: { name: queryName, type } });
+
+          if (!isConnectivityError(entry.reason)) {
+            fatalErrors.push({ name: queryName, message: error.message });
+            logEntries.push({
+              queryName,
+              status: "MISS",
+              kind: "fatal",
+              error,
+            });
+            continue;
+          }
+
           logger.warn(
             "DESCRIBE unreachable for %s: %s — %s",
             queryName,
@@ -532,7 +655,6 @@ export async function generateQueriesFromDescribe(
               ? "reusing last cached type"
               : "emitting unknown (no matching cache)",
           );
-          freshResults.push({ index, schema: { name: queryName, type } });
           logEntries.push({
             queryName,
             status: "MISS",
@@ -584,6 +706,9 @@ export async function generateQueriesFromDescribe(
         case "empty":
           tag = pc.dim("EMPTY  ");
           break;
+        case "fatal":
+          tag = pc.bold(pc.red("FATAL "));
+          break;
         default:
           tag =
             entry.status === "HIT"
@@ -594,7 +719,9 @@ export async function generateQueriesFromDescribe(
       // Only genuine SQL errors are struck through. Connectivity/empty kept a
       // usable type (reused or unknown), so they read as degraded, not broken.
       const name =
-        entry.kind === "syntax" ? pc.dim(pc.strikethrough(rawName)) : rawName;
+        entry.kind === "syntax" || entry.kind === "fatal"
+          ? pc.dim(pc.strikethrough(rawName))
+          : rawName;
       const errorCode = entry.error?.message.match(/\[([^\]]+)\]/)?.[1];
       const reason = errorCode ? `  ${pc.dim(errorCode)}` : "";
       console.log(`  ${tag}  ${name}${reason}`);
@@ -608,6 +735,7 @@ export async function generateQueriesFromDescribe(
       (e) => e.kind === "connectivity",
     ).length;
     const emptyCount = logEntries.filter((e) => e.kind === "empty").length;
+    const fatalCount = logEntries.filter((e) => e.kind === "fatal").length;
     console.log(`  ${separator}`);
     const parts = [`${newCount} new`, `${cacheCount} from cache`];
     if (syntaxCount > 0)
@@ -616,6 +744,10 @@ export async function generateQueriesFromDescribe(
       );
     if (offlineCount > 0) parts.push(`${offlineCount} unreachable`);
     if (emptyCount > 0) parts.push(`${emptyCount} empty`);
+    if (fatalCount > 0)
+      parts.push(
+        `${fatalCount} fatal ${fatalCount === 1 ? "error" : "errors"}`,
+      );
     console.log(`  ${parts.join(", ")}. ${pc.dim(`${elapsed}s`)}`);
     console.log("");
   }
@@ -625,7 +757,7 @@ export async function generateQueriesFromDescribe(
     .sort((a, b) => a.index - b.index)
     .map((r) => r.schema);
 
-  return { schemas, syntaxErrors };
+  return { schemas, syntaxErrors, fatalErrors };
 }
 
 /**
