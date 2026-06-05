@@ -162,7 +162,7 @@ export function AppShell({ children }) {
 }
 ```
 
-`useAnalyticsQuery` registers itself with the nearest provider, so no per-chart wiring is needed. The indicator renders nothing while every resource is healthy; it pops up as a floating card (bottom-right by default) the moment a publisher reports a non-ready state, and disappears when they all settle. Because the same provider is shared across resource kinds (warehouse, lakebase, model serving, …), a single indicator covers every plugin.
+`useAnalyticsQuery` registers itself with the nearest provider, so no per-chart wiring is needed. The indicator renders nothing while every resource is healthy; it pops up as a floating card (top-right by default) the moment a publisher reports a non-ready state, and disappears when they all settle. Because the same provider is shared across resource kinds (warehouse, lakebase, model serving, …), a single indicator covers every plugin.
 
 The default card is rendered through a React portal into `document.body` so its `position: fixed` anchoring is immune to ancestor `transform` / `filter` / `will-change` / `contain` (which would otherwise turn it into the containing block) and to ancestor stacking contexts (which would otherwise trap `z-index`). Pass `container={someElement}` to portal into a custom node, or `container={null}` to opt out and render inline.
 

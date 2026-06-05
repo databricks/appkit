@@ -50,7 +50,7 @@ export type ResourceStatusIndicatorPosition =
 export interface ResourceStatusIndicatorProps {
   /** Restrict to a single resource kind. Otherwise shows the worst across all kinds. */
   kind?: string;
-  /** Where to anchor the floating indicator. @default "bottom-right" */
+  /** Where to anchor the floating indicator. @default "top-right" */
   position?: ResourceStatusIndicatorPosition;
   /** Per-kind copy + icon overrides. */
   renderers?: Record<string, ResourceKindRenderer>;
@@ -151,7 +151,7 @@ const DEFAULT_KIND_RENDERERS: Record<string, ResourceKindRenderer> = {
  */
 export function ResourceStatusIndicator({
   kind,
-  position = "bottom-right",
+  position = "top-right",
   renderers,
   className,
   container,
