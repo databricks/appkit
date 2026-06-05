@@ -23,6 +23,8 @@ import {
   TelemetryManager,
 } from "../../telemetry";
 import { executeStatementDefaults } from "./defaults";
+import { WarehousePollBackoff } from "./warehouse-poll-backoff";
+import { WarehouseStatusEmitter } from "./warehouse-status-emitter";
 
 const logger = createLogger("connectors:sql-warehouse");
 
@@ -39,13 +41,6 @@ interface SQLWarehouseConfig {
  * serverless typically reaches RUNNING within ~30s.
  */
 export const DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS = 5 * 60 * 1000;
-
-/**
- * Polling backoff bounds for the warehouse readiness loop. Backoff is
- * exponential with ±15% jitter to spread retries across concurrent waiters.
- */
-const WAREHOUSE_POLL_INITIAL_MS = 1_000;
-const WAREHOUSE_POLL_MAX_MS = 30_000;
 
 /**
  * Window during which a recent `RUNNING` observation lets subsequent calls
@@ -102,10 +97,9 @@ export class SQLWarehouseConnector {
   private _arrowProcessor: ArrowStreamProcessor | null = null;
 
   /**
-   * Per-warehouse "recently observed RUNNING" cache. Lets warm-path
-   * requests skip the readiness loop (and its `warehouses.get` round-trip)
-   * entirely. Map values are the timestamp of the last RUNNING observation;
-   * see {@link WAREHOUSE_RUNNING_CACHE_TTL_MS}.
+   * Per-warehouse cache of the last RUNNING observation timestamp. Used by
+   * {@link ensureWarehouseRunning} to short-circuit warm-path callers; see
+   * {@link WAREHOUSE_RUNNING_CACHE_TTL_MS}.
    */
   private _recentlyRunning = new Map<string, number>();
   // telemetry
@@ -351,19 +345,27 @@ export class SQLWarehouseConnector {
 
   /**
    * Wait until the SQL warehouse is in the `RUNNING` state, auto-starting it
-   * if currently `STOPPED`. Emits one {@link WarehouseStatusUpdate} per
-   * observation so callers can surface progress (e.g. over SSE) instead of
-   * letting the UI freeze on a cold warehouse.
+   * if currently `STOPPED`. Emits a {@link WarehouseStatusUpdate} whenever
+   * the observed state changes, so callers can surface progress (e.g. over
+   * SSE) instead of letting the UI freeze on a cold warehouse. Equal
+   * successive observations are de-duplicated.
+   *
+   * Fast path: if this connector recently observed the warehouse RUNNING
+   * (within {@link WAREHOUSE_RUNNING_CACHE_TTL_MS}), the call returns
+   * immediately without any SDK round-trip or status emission. This keeps
+   * cache-hit analytics requests off the Databricks control plane.
    *
    * Behaviour by initial state:
-   * - `RUNNING`: emits one update and returns immediately.
-   * - `STOPPED`: emits a `STARTING` update, calls
+   * - `RUNNING`: emits one update, caches the observation, returns.
+   * - `STOPPED`: emits a synthetic `STARTING` update, calls
    *   `workspaceClient.warehouses.start`, then polls until `RUNNING`.
+   *   When `autoStart: false`, throws `ConfigurationError` instead.
    * - `STARTING` / `STOPPING`: polls until `RUNNING`.
    * - `DELETED` / `DELETING`: throws `ConfigurationError.resourceNotFound`.
    *
-   * Aborts and timeouts surface as `ExecutionError`. The whole loop runs
-   * inside a `sql.warehouseReady` telemetry span.
+   * Aborts and timeouts surface as `ExecutionError`. The poll loop uses
+   * exponential backoff with ±15% jitter (1s → 30s cap) and runs inside a
+   * `sql.warehouseReady` telemetry span.
    */
   async ensureWarehouseRunning(
     workspaceClient: WorkspaceClient,
@@ -377,26 +379,9 @@ export class SQLWarehouseConnector {
       autoStart = true,
     } = opts;
 
-    if (signal?.aborted) {
-      throw ExecutionError.canceled();
-    }
-
-    if (!warehouseId) {
-      throw ValidationError.missingField("warehouse_id");
-    }
-
-    // Fast path: skip the readiness loop entirely (no SDK round-trip, no
-    // SSE warehouse_status events) when this connector recently observed
-    // the warehouse RUNNING. Keeps the steady-state hot path off the
-    // Databricks control plane so cache-hit analytics requests aren't
-    // taxed an extra ~50–200 ms RTT per call.
-    const observedAt = this._recentlyRunning.get(warehouseId);
-    if (
-      observedAt !== undefined &&
-      Date.now() - observedAt < WAREHOUSE_RUNNING_CACHE_TTL_MS
-    ) {
-      return;
-    }
+    if (signal?.aborted) throw ExecutionError.canceled();
+    if (!warehouseId) throw ValidationError.missingField("warehouse_id");
+    if (this._isRecentlyRunning(warehouseId)) return;
 
     return this.telemetry.startActiveSpan(
       "sql.warehouseReady",
@@ -410,51 +395,14 @@ export class SQLWarehouseConnector {
       },
       async (span: Span) => {
         const startTime = Date.now();
-        let attempt = 0;
+        const emitter = new WarehouseStatusEmitter(span, startTime, onStatus);
         let didStart = false;
-        let lastEmittedState: sql.State | null = null;
-        let pollIntervalMs = WAREHOUSE_POLL_INITIAL_MS;
-
-        const emit = (state: sql.State, summary: string | undefined): void => {
-          attempt += 1;
-          // Record the raw SDK summary on the span for server-side debugging
-          // only — never on the wire (R1: SDK health.summary contains
-          // operator-oriented internals like cluster IDs and capacity
-          // reasons that must not reach end users).
-          span.addEvent("warehouse.status", {
-            "db.warehouse.state": state,
-            "db.warehouse.attempt": attempt,
-            "db.warehouse.elapsed_ms": Date.now() - startTime,
-            ...(summary ? { "db.warehouse.summary": summary } : {}),
-          });
-          // De-dup successive equal states. A cold-start that takes 60s no
-          // longer fans out 20 redundant SSE frames + 20 client re-renders.
-          if (state === lastEmittedState) return;
-          lastEmittedState = state;
-          const update: WarehouseStatusUpdate = {
-            state,
-            elapsedMs: Date.now() - startTime,
-            attempt,
-          };
-          try {
-            onStatus(update);
-          } catch (err) {
-            // The status callback is provided by the route; if it throws we
-            // still need to complete the readiness wait. Just log via span.
-            span.addEvent("warehouse.onStatus.error", {
-              "exception.message":
-                err instanceof Error ? err.message : String(err),
-            });
-          }
-        };
+        const backoff = new WarehousePollBackoff();
 
         try {
           while (true) {
-            if (signal?.aborted) {
-              throw ExecutionError.canceled();
-            }
-            const elapsed = Date.now() - startTime;
-            if (elapsed > timeoutMs) {
+            if (signal?.aborted) throw ExecutionError.canceled();
+            if (Date.now() - startTime > timeoutMs) {
               throw ExecutionError.statementFailed(
                 `Warehouse ${warehouseId} did not reach RUNNING within ${timeoutMs}ms`,
               );
@@ -469,9 +417,9 @@ export class SQLWarehouseConnector {
 
             switch (state) {
               case "RUNNING":
-                emit(state, summary);
+                emitter.emit(state, summary);
                 this._recentlyRunning.set(warehouseId, Date.now());
-                span.setAttribute("db.warehouse.attempts", attempt);
+                span.setAttribute("db.warehouse.attempts", emitter.attempt);
                 span.setStatus({ code: SpanStatusCode.OK });
                 return;
               case "DELETED":
@@ -488,68 +436,75 @@ export class SQLWarehouseConnector {
                   );
                 }
                 if (!didStart) {
-                  emit("STARTING", summary);
+                  emitter.emit("STARTING", summary);
                   await workspaceClient.warehouses.start(
                     { id: warehouseId },
                     this._createContext(signal),
                   );
                   didStart = true;
                 } else {
-                  // Already attempted to start but the warehouse went back to
-                  // STOPPED — surface the state and keep polling so the user
-                  // sees what's happening.
-                  emit(state, summary);
+                  // Warehouse fell back to STOPPED after our start attempt —
+                  // surface the state and keep polling.
+                  emitter.emit(state, summary);
                 }
                 break;
               case "STARTING":
               case "STOPPING":
-                emit(state, summary);
+                emitter.emit(state, summary);
                 break;
               default:
                 throw ExecutionError.unknownState(String(state ?? "unknown"));
             }
 
-            // Exponential backoff with ±15% jitter, capped at WAREHOUSE_POLL_MAX_MS.
-            const jitterFactor = 0.85 + Math.random() * 0.3;
-            await this._sleepRespectingAbort(
-              pollIntervalMs * jitterFactor,
-              signal,
-            );
-            pollIntervalMs = Math.min(
-              WAREHOUSE_POLL_MAX_MS,
-              pollIntervalMs * 2,
-            );
+            await this._sleepRespectingAbort(backoff.next(), signal);
           }
         } catch (error) {
-          // R1: never put raw SDK message text on the rethrown error. Keep
-          // structured AppKitErrors as-is (their messages are curated);
-          // wrap everything else in a fixed-text ExecutionError and put the
-          // original on the span only.
-          if (error instanceof AppKitError) {
-            span.recordException(error);
-            span.setStatus({
-              code: SpanStatusCode.ERROR,
-              message: error.code,
-            });
-            throw error;
-          }
-          span.recordException(
-            error instanceof Error ? error : new Error(String(error)),
-          );
-          const wrapped = ExecutionError.statementFailed(
-            `Warehouse readiness check failed for ${warehouseId}`,
-          );
-          span.setStatus({
-            code: SpanStatusCode.ERROR,
-            message: wrapped.code,
-          });
-          throw wrapped;
+          this._throwSanitizedReadinessError(error, warehouseId, span);
         } finally {
           span.end();
         }
       },
       { name: this.name, includePrefix: true },
     );
+  }
+
+  /**
+   * `true` if this connector observed `warehouseId` in the RUNNING state
+   * within the recent-cache TTL.
+   */
+  private _isRecentlyRunning(warehouseId: string): boolean {
+    const observedAt = this._recentlyRunning.get(warehouseId);
+    return (
+      observedAt !== undefined &&
+      Date.now() - observedAt < WAREHOUSE_RUNNING_CACHE_TTL_MS
+    );
+  }
+
+  /**
+   * Final landing for any error thrown by the readiness poll loop. Records
+   * the original on the span (so server-side debugging keeps the raw text)
+   * and rethrows either the structured AppKitError unchanged or a curated
+   * ExecutionError — never the raw SDK message, which can contain operator
+   * internals.
+   */
+  private _throwSanitizedReadinessError(
+    error: unknown,
+    warehouseId: string,
+    span: Span,
+  ): never {
+    if (error instanceof AppKitError) {
+      span.recordException(error);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error.code });
+      throw error;
+    }
+    span.recordException(
+      error instanceof Error ? error : new Error(String(error)),
+    );
+    const wrapped = ExecutionError.statementFailed(
+      `Warehouse readiness check failed for ${warehouseId}`,
+    );
+    span.setStatus({ code: SpanStatusCode.ERROR, message: wrapped.code });
+    throw wrapped;
   }
 
   /**

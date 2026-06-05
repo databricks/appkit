@@ -40,6 +40,54 @@ import { normalizeAnalyticsFormat } from "./types";
 
 const logger = createLogger("analytics");
 
+/**
+ * Bridges a callback-emitting async function into an async iterable.
+ *
+ * `start(emit)` runs concurrently; every value passed to `emit` is yielded
+ * in order. The iterable completes when `start`'s promise resolves and
+ * re-throws (after draining) if it rejects. Lets a callback-based progress
+ * API (e.g. SQL warehouse readiness) be consumed with `for await`.
+ */
+async function* streamCallbacks<T>(
+  start: (emit: (value: T) => void) => Promise<void>,
+): AsyncGenerator<T, void, unknown> {
+  const queue: T[] = [];
+  let wake: (() => void) | null = null;
+  let settled = false;
+  let error: unknown = null;
+
+  const notify = (): void => {
+    wake?.();
+    wake = null;
+  };
+
+  // The .then(_, err => ...) chain converts a rejection into a resolved
+  // promise; the consumer surfaces `error` after draining the queue.
+  void start((value) => {
+    queue.push(value);
+    notify();
+  }).then(
+    () => {
+      settled = true;
+      notify();
+    },
+    (err) => {
+      error = err;
+      settled = true;
+      notify();
+    },
+  );
+
+  while (!settled || queue.length > 0) {
+    while (queue.length > 0) yield queue.shift() as T;
+    if (settled) break;
+    await new Promise<void>((resolve) => {
+      wake = resolve;
+    });
+  }
+  if (error) throw error;
+}
+
 export class AnalyticsPlugin extends Plugin implements ToolProvider {
   /** Plugin manifest declaring metadata and resource requirements */
   static manifest = manifest as PluginManifest<"analytics">;
@@ -231,60 +279,29 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         const workspaceClient = getWorkspaceClient();
         const warehouseId = await getWarehouseId();
 
-        // Drain the warehouse-readiness updates as SSE events. The
-        // ensureWarehouseRunning call pushes to `queue` via onStatus; the
-        // generator wakes whenever onStatus fires or the call settles.
-        const queue: WarehouseStatusUpdate[] = [];
-        let wake: (() => void) | null = null;
-        let settled = false;
-        let readinessError: unknown = null;
-
-        // Errors from ensureWarehouseRunning are observed via readinessError
-        // below; the .then(_, err => ...) chain converts the rejection into
-        // a resolved promise so we don't need to await it after the drain.
-        void self.SQLClient.ensureWarehouseRunning(
-          workspaceClient,
-          warehouseId,
-          {
-            signal,
-            timeoutMs: startupTimeoutMs,
-            autoStart: autoStartWarehouse,
-            onStatus: (update) => {
-              queue.push(update);
-              wake?.();
-              wake = null;
-            },
-          },
-        ).then(
-          () => {
-            settled = true;
-            wake?.();
-            wake = null;
-          },
-          (err) => {
-            readinessError = err;
-            settled = true;
-            wake?.();
-            wake = null;
-          },
+        // Stream warehouse-readiness updates as SSE events, then run SQL.
+        const readinessUpdates = streamCallbacks<WarehouseStatusUpdate>(
+          (emit) =>
+            self.SQLClient.ensureWarehouseRunning(
+              workspaceClient,
+              warehouseId,
+              {
+                signal,
+                timeoutMs: startupTimeoutMs,
+                autoStart: autoStartWarehouse,
+                onStatus: emit,
+              },
+            ),
         );
-
-        while (!settled || queue.length > 0) {
-          while (queue.length > 0) {
-            const update = queue.shift() as WarehouseStatusUpdate;
-            const status: WarehouseStatus = {
+        for await (const update of readinessUpdates) {
+          yield {
+            type: "warehouse_status",
+            status: {
               state: update.state as WarehouseStatus["state"],
               elapsedMs: update.elapsedMs,
-            };
-            yield { type: "warehouse_status", status };
-          }
-          if (settled) break;
-          await new Promise<void>((resolve) => {
-            wake = resolve;
-          });
+            },
+          };
         }
-
-        if (readinessError) throw readinessError;
 
         const sqlResult = await executor.execute(
           async (sig) => {
