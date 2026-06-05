@@ -19,14 +19,7 @@ import type {
 import { useAnalyticsWarehousePublisher } from "./use-analytics-warehouse-status";
 import { useQueryHMR } from "./use-query-hmr";
 
-/**
- * Shallow structural equality for analytics query parameter objects.
- *
- * Analytics query parameters are produced by the `sql.*` builders and are
- * always plain objects keyed to primitive values (string | number | boolean
- * | null | undefined), so shallow equality is sufficient and substantially
- * cheaper than a full deep-equal.
- */
+/** Shallow equality for plain-object query parameters (primitive values only). */
 function shallowEqualParams(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;
   if (
@@ -54,12 +47,7 @@ function shallowEqualParams(a: unknown, b: unknown): boolean {
   return true;
 }
 
-/**
- * Stabilize a value's identity across renders when it is structurally equal
- * to the previous value. Used to make object-literal parameters safe to pass
- * directly to `useAnalyticsQuery` without forcing every consumer to wrap
- * params in `useMemo`.
- */
+/** Keep structurally-equal params referentially stable across renders. */
 function useStableParams<T>(value: T): T {
   const ref = useRef<T>(value);
   if (!shallowEqualParams(ref.current, value)) {
@@ -68,16 +56,93 @@ function useStableParams<T>(value: T): T {
   return ref.current;
 }
 
-function getDevMode() {
-  const url = new URL(window.location.href);
-  const searchParams = url.searchParams;
-  const dev = searchParams.get("dev");
-
+function getDevMode(): string {
+  const dev = new URL(window.location.href).searchParams.get("dev");
   return dev ? `?dev=${dev}` : "";
 }
 
-function getArrowStreamUrl(id: string) {
+function getArrowStreamUrl(id: string): string {
   return `/api/analytics/arrow-result/${id}`;
+}
+
+const GENERIC_LOAD_ERROR = "Unable to load data, please try again";
+
+interface AnalyticsQuerySseContext<ResultType> {
+  setLoading: (loading: boolean) => void;
+  setError: (error: string | null) => void;
+  setData: (data: ResultType | null) => void;
+  setWarehouseStatus: (status: WarehouseStatus | null) => void;
+  publishWarehouseStatus: (status: WarehouseStatus | null) => void;
+  unpublishWarehouseStatus: () => void;
+}
+
+function isWarehouseStatusPayload(value: unknown): value is WarehouseStatus {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as WarehouseStatus).state === "string"
+  );
+}
+
+async function handleAnalyticsSseMessage<ResultType>(
+  parsed: Record<string, unknown>,
+  ctx: AnalyticsQuerySseContext<ResultType>,
+): Promise<void> {
+  if (parsed.type === "warehouse_status") {
+    if (!isWarehouseStatusPayload(parsed.status)) {
+      ctx.setLoading(false);
+      ctx.setError(GENERIC_LOAD_ERROR);
+      ctx.unpublishWarehouseStatus();
+      console.error(
+        "[useAnalyticsQuery] Malformed warehouse_status event",
+        parsed,
+      );
+      return;
+    }
+    ctx.setWarehouseStatus(parsed.status);
+    ctx.publishWarehouseStatus(parsed.status);
+    return;
+  }
+
+  if (parsed.type === "result") {
+    ctx.setLoading(false);
+    ctx.setData(parsed.data as ResultType);
+    ctx.unpublishWarehouseStatus();
+    return;
+  }
+
+  if (parsed.type === "arrow") {
+    try {
+      const arrowData = await ArrowClient.fetchArrow(
+        getArrowStreamUrl(parsed.statement_id as string),
+      );
+      const table = await ArrowClient.processArrowBuffer(arrowData);
+      ctx.setLoading(false);
+      ctx.setData(table as ResultType);
+      ctx.unpublishWarehouseStatus();
+    } catch (error) {
+      console.error("[useAnalyticsQuery] Failed to fetch Arrow data", error);
+      ctx.setLoading(false);
+      ctx.setError(GENERIC_LOAD_ERROR);
+      ctx.unpublishWarehouseStatus();
+    }
+    return;
+  }
+
+  if (parsed.type === "error" || parsed.error || parsed.code) {
+    const errorMsg =
+      (parsed.error as string | undefined) ||
+      (parsed.message as string | undefined) ||
+      "Unable to execute query";
+    ctx.setLoading(false);
+    ctx.setError(errorMsg);
+    ctx.unpublishWarehouseStatus();
+    if (parsed.code) {
+      console.error(
+        `[useAnalyticsQuery] Code: ${parsed.code}, Message: ${errorMsg}`,
+      );
+    }
+  }
 }
 
 /**
@@ -133,7 +198,6 @@ export function useAnalyticsQuery<
     useState<WarehouseStatus | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Stable per-instance id so two charts sharing a queryKey register independently.
   const publisherId = useId();
   const {
     publish: publishWarehouseStatus,
@@ -146,10 +210,6 @@ export function useAnalyticsQuery<
     );
   }
 
-  // Stabilize the parameters reference across renders. Without this, a fresh
-  // object literal at the call site (e.g. `useAnalyticsQuery("k", { limit: 10 })`)
-  // would change identity every render, invalidating the `payload` memo and
-  // re-running `start` -> infinite refetch loop.
   const stableParameters = useStableParams(parameters);
 
   const payload = useMemo(() => {
@@ -178,102 +238,34 @@ export function useAnalyticsQuery<
       return;
     }
 
-    // Abort previous request if exists
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+    abortControllerRef.current?.abort();
 
     setLoading(true);
     setError(null);
     setData(null);
     setWarehouseStatus(null);
-    // Register with no status yet so the aggregate counts this hook as
-    // active before the first warehouse_status event arrives.
     publishWarehouseStatus(null);
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
+    const sseContext: AnalyticsQuerySseContext<ResultType> = {
+      setLoading,
+      setError,
+      setData,
+      setWarehouseStatus,
+      publishWarehouseStatus,
+      unpublishWarehouseStatus,
+    };
+
     connectSSE({
       url: urlSuffix,
-      payload: payload,
+      payload,
       signal: abortController.signal,
       onMessage: async (message) => {
         try {
-          const parsed = JSON.parse(message.data);
-
-          // Warehouse readiness progress while waiting for RUNNING.
-          if (parsed.type === "warehouse_status") {
-            // Treat a malformed payload as a terminal error so a corrupted
-            // frame doesn't strand the hook in `loading: true` forever.
-            if (
-              !parsed.status ||
-              typeof parsed.status !== "object" ||
-              typeof parsed.status.state !== "string"
-            ) {
-              setLoading(false);
-              setError("Unable to load data, please try again");
-              unpublishWarehouseStatus();
-              console.error(
-                "[useAnalyticsQuery] Malformed warehouse_status event",
-                parsed,
-              );
-              return;
-            }
-            const status = parsed.status as WarehouseStatus;
-            setWarehouseStatus(status);
-            publishWarehouseStatus(status);
-            return;
-          }
-
-          // success - JSON format
-          if (parsed.type === "result") {
-            setLoading(false);
-            setData(parsed.data as ResultType);
-            unpublishWarehouseStatus();
-            return;
-          }
-
-          // success - Arrow format
-          if (parsed.type === "arrow") {
-            try {
-              const arrowData = await ArrowClient.fetchArrow(
-                getArrowStreamUrl(parsed.statement_id),
-              );
-              const table = await ArrowClient.processArrowBuffer(arrowData);
-              setLoading(false);
-              // Table is cast to TypedArrowTable with row type from QueryRegistry
-              setData(table as ResultType);
-              unpublishWarehouseStatus();
-              return;
-            } catch (error) {
-              console.error(
-                "[useAnalyticsQuery] Failed to fetch Arrow data",
-                error,
-              );
-              setLoading(false);
-              setError("Unable to load data, please try again");
-              unpublishWarehouseStatus();
-              return;
-            }
-          }
-
-          // error
-          if (parsed.type === "error" || parsed.error || parsed.code) {
-            const errorMsg =
-              parsed.error || parsed.message || "Unable to execute query";
-
-            setLoading(false);
-            setError(errorMsg);
-            unpublishWarehouseStatus();
-
-            if (parsed.code) {
-              console.error(
-                `[useAnalyticsQuery] Code: ${parsed.code}, Message: ${errorMsg}`,
-              );
-            }
-            return;
-          }
+          const parsed = JSON.parse(message.data) as Record<string, unknown>;
+          await handleAnalyticsSseMessage(parsed, sseContext);
         } catch (error) {
           console.warn("[useAnalyticsQuery] Malformed message received", error);
         }
@@ -283,15 +275,13 @@ export function useAnalyticsQuery<
         setLoading(false);
         unpublishWarehouseStatus();
 
-        let userMessage = "Unable to load data, please try again";
-
+        let userMessage = GENERIC_LOAD_ERROR;
         if (error instanceof Error) {
           if (error.name === "AbortError") {
             userMessage = "Request timed out, please try again";
           } else if (error.message.includes("Failed to fetch")) {
             userMessage = "Network error. Please check your connection.";
           }
-
           console.error("[useAnalyticsQuery] Error", {
             queryKey,
             error: error.message,
@@ -316,12 +306,10 @@ export function useAnalyticsQuery<
 
     return () => {
       abortControllerRef.current?.abort();
-      // Drop our slot on unmount so a stuck STARTING doesn't pin the banner.
       unpublishWarehouseStatus();
     };
   }, [start, autoStart, unpublishWarehouseStatus]);
 
-  // Enable HMR for query updates in dev mode
   useQueryHMR(queryKey, start);
 
   return { data, loading, error, warehouseStatus };

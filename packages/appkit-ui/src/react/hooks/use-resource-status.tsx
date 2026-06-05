@@ -104,14 +104,16 @@ class ResourceStatusStore {
     if (this.entries.delete(id)) this.bump();
   }
 
-  subscribe = (listener: () => void): (() => void) => {
+  subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
     };
-  };
+  }
 
-  getSnapshot = (): AggregatedResourceStatus => this.snapshot;
+  getSnapshot(): AggregatedResourceStatus {
+    return this.snapshot;
+  }
 
   /** Exposed for the kind-filter path so it can pick up status-less `kindHint` slots. */
   getEntries(): Map<string, RegistryEntry> {
@@ -162,6 +164,43 @@ function aggregate(
     byKind,
     affectedLabels: [...affectedLabels].sort(),
     activeCount: entries.size,
+    elapsedMs: worst ? Math.max(0, Date.now() - worst.startedAt) : 0,
+    version,
+  };
+}
+
+/** Kind-scoped aggregate; walks entries directly to include status-less `kindHint` slots. */
+function aggregateForKind(
+  entries: Map<string, RegistryEntry>,
+  kind: string,
+  version: number,
+): AggregatedResourceStatus {
+  const affectedLabels = new Set<string>();
+  let activeCount = 0;
+  let worst: ResourceStatus | null = null;
+
+  for (const entry of entries.values()) {
+    const entryKind = entry.status?.kind ?? entry.kindHint;
+    if (entryKind !== kind) continue;
+    activeCount++;
+    const status = entry.status;
+    if (!status) continue;
+    affectedLabels.add(entry.label);
+    if (!worst || isWorse(status, worst)) {
+      worst = status;
+    }
+  }
+
+  if (activeCount === 0) return { ...EMPTY_SNAPSHOT, version };
+
+  const byKind: Record<string, ResourceStatus> = {};
+  if (worst) byKind[kind] = worst;
+
+  return {
+    worst,
+    byKind,
+    affectedLabels: [...affectedLabels].sort(),
+    activeCount,
     elapsedMs: worst ? Math.max(0, Date.now() - worst.startedAt) : 0,
     version,
   };
@@ -229,49 +268,27 @@ export function useResourceStatus(
   filter?: ResourceStatusFilter,
 ): AggregatedResourceStatus {
   const ctx = useResourceStatusContext();
-  const subscribe = ctx?.store.subscribe ?? NOOP_SUBSCRIBE;
-  const getSnapshot = ctx?.store.getSnapshot ?? GET_EMPTY_SNAPSHOT;
+  const store = ctx?.store;
 
-  const aggregate = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const subscribe = useMemo(
+    () =>
+      store
+        ? (listener: () => void) => store.subscribe(listener)
+        : NOOP_SUBSCRIBE,
+    [store],
+  );
+  const getSnapshot = useMemo(
+    () => (store ? () => store.getSnapshot() : GET_EMPTY_SNAPSHOT),
+    [store],
+  );
+
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   return useMemo(() => {
-    if (!filter?.kind) return aggregate;
-    const kind = filter.kind;
-
-    // Walk entries directly to capture status-less `kindHint` slots
-    // (e.g. charts that registered before their first SSE event).
-    const affectedLabels = new Set<string>();
-    let activeCount = 0;
-    let worst: ResourceStatus | null = null;
-    if (ctx) {
-      for (const entry of ctx.store.getEntries().values()) {
-        const entryKind = entry.status?.kind ?? entry.kindHint;
-        if (entryKind !== kind) continue;
-        activeCount++;
-        const status = entry.status;
-        if (!status) continue;
-        affectedLabels.add(entry.label);
-        if (!worst || isWorse(status, worst)) {
-          worst = status;
-        }
-      }
-    }
-
-    if (activeCount === 0)
-      return { ...EMPTY_SNAPSHOT, version: aggregate.version };
-
-    const byKind: Record<string, ResourceStatus> = {};
-    if (worst) byKind[kind] = worst;
-
-    return {
-      worst,
-      byKind,
-      affectedLabels: [...affectedLabels].sort(),
-      activeCount,
-      elapsedMs: worst ? Math.max(0, Date.now() - worst.startedAt) : 0,
-      version: aggregate.version,
-    };
-  }, [aggregate, ctx, filter?.kind]);
+    if (!filter?.kind) return snapshot;
+    if (!store) return { ...EMPTY_SNAPSHOT, version: snapshot.version };
+    return aggregateForKind(store.getEntries(), filter.kind, snapshot.version);
+  }, [snapshot, store, filter?.kind]);
 }
 
 /**
