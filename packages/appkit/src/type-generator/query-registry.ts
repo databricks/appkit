@@ -15,7 +15,11 @@ import {
   sqlTypeToHelper,
   sqlTypeToMarker,
 } from "./types";
-import { getWarehouseState, waitUntilRunning } from "./warehouse-status";
+import {
+  getWarehouseState,
+  startWarehouse,
+  waitUntilRunning,
+} from "./warehouse-status";
 
 const logger = createLogger("type-generator:query-registry");
 
@@ -422,8 +426,9 @@ export function inferParameterTypes(
  * @param options.noCache - if true, skip the cache and regenerate all types
  * @param options.mode - preflight policy: "non-blocking" never probes the
  *   warehouse and never describes (emits cached/`unknown` types and returns
- *   immediately), "blocking" waits for a startable warehouse and treats a
- *   stopped one as fatal. Defaults to "non-blocking".
+ *   immediately), "blocking" waits for a starting warehouse and starts (then
+ *   waits for) a stopped one, treating only a deleted/deleting warehouse as
+ *   fatal. Defaults to "non-blocking".
  * @returns an array of query schemas
  */
 export async function generateQueriesFromDescribe(
@@ -595,6 +600,23 @@ export async function generateQueriesFromDescribe(
         decision = decidePreflight(state, mode);
         if (decision === "fatal") {
           fatalMessage = `warehouse ${warehouseId} is ${state}`;
+        }
+        if (decision === "startWaitProceed") {
+          // Stopped/stopping warehouse: nudge it out of the stopped state, then
+          // poll to RUNNING. treatStoppedAsTransient rides out the stale
+          // pre-start STOPPED/STOPPING reading the start hasn't propagated past
+          // yet — only DELETED/DELETING (or the deadline) ends the wait early.
+          await startWarehouse(client, warehouseId);
+          const final = await waitUntilRunning(client, warehouseId, {
+            maxMs: PREFLIGHT_WAIT_MAX_MS,
+            treatStoppedAsTransient: true,
+          });
+          if (final === "RUNNING") {
+            decision = "proceed";
+          } else {
+            decision = "fatal";
+            fatalMessage = `warehouse ${warehouseId} did not reach RUNNING (now ${final})`;
+          }
         }
         if (decision === "waitThenProceed") {
           const final = await waitUntilRunning(client, warehouseId, {

@@ -7,7 +7,7 @@ import type { WarehouseState } from "./warehouse-status";
  *    return at once. The default for interactive/foreground runs that can't
  *    afford to block on (or fail because of) a warehouse, even a RUNNING one.
  *  - `blocking`: a startable warehouse is worth waiting for, and a stopped one
- *    is a hard failure.
+ *    is worth starting — only a deleted/deleting warehouse is a hard failure.
  */
 export type PreflightMode = "non-blocking" | "blocking";
 
@@ -16,12 +16,15 @@ export type PreflightMode = "non-blocking" | "blocking";
  *  - `proceed`: run DESCRIBE now.
  *  - `degradeAll`: skip DESCRIBE; emit degraded (cached/`unknown`) types.
  *  - `waitThenProceed`: wait for the warehouse to start, then run DESCRIBE.
+ *  - `startWaitProceed`: start the stopped warehouse, wait for RUNNING, then
+ *    run DESCRIBE.
  *  - `fatal`: stop — the warehouse can't serve this run.
  */
 export type PreflightDecision =
   | "proceed"
   | "degradeAll"
   | "waitThenProceed"
+  | "startWaitProceed"
   | "fatal";
 
 /**
@@ -41,8 +44,8 @@ export function decidePreflight(
   // self-contained.
   if (mode === "non-blocking") return "degradeAll";
 
-  // `blocking`: a startable warehouse is worth waiting for, a stopped one is
-  // fatal, and a deleted one is always fatal.
+  // `blocking`: a starting warehouse is worth waiting for, a stopped one is
+  // worth starting (then waiting), and only a deleted/deleting one is fatal.
   switch (state) {
     case "RUNNING":
       return "proceed";
@@ -50,7 +53,7 @@ export function decidePreflight(
       return "waitThenProceed";
     case "STOPPED":
     case "STOPPING":
-      return "fatal";
+      return "startWaitProceed";
     case "DELETED":
     case "DELETING":
       return "fatal";

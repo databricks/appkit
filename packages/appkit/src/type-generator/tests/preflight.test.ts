@@ -17,9 +17,11 @@ const cases: Array<{
 
   { state: "STARTING", mode: "blocking", expected: "waitThenProceed" },
 
-  { state: "STOPPED", mode: "blocking", expected: "fatal" },
-  { state: "STOPPING", mode: "blocking", expected: "fatal" },
+  // Stopped/stopping in blocking mode is worth starting + waiting, not fatal.
+  { state: "STOPPED", mode: "blocking", expected: "startWaitProceed" },
+  { state: "STOPPING", mode: "blocking", expected: "startWaitProceed" },
 
+  // Only a deleted/deleting warehouse is a hard failure.
   { state: "DELETED", mode: "blocking", expected: "fatal" },
   { state: "DELETING", mode: "blocking", expected: "fatal" },
 

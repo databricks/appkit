@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   // test takes the "proceed" path unchanged; override per-test to exercise
   // stopped/starting/unreachable preflight branches.
   getWarehouse: vi.fn(() => ({ state: "RUNNING" })),
+  // warehouses.start — only the blocking startWaitProceed path calls this.
+  startWarehouse: vi.fn(),
   spinnerStop: vi.fn(),
   spinnerPrintDetail: vi.fn(),
   loadCache: vi.fn(() => ({ version: "2", queries: {} })),
@@ -24,7 +26,7 @@ vi.mock("node:fs/promises", () => ({
 vi.mock("@databricks/sdk-experimental", () => ({
   WorkspaceClient: vi.fn(() => ({
     statementExecution: { executeStatement: mocks.executeStatement },
-    warehouses: { get: mocks.getWarehouse },
+    warehouses: { get: mocks.getWarehouse, start: mocks.startWarehouse },
   })),
 }));
 
@@ -649,28 +651,106 @@ describe("generateQueriesFromDescribe", () => {
   });
 
   describe("warehouse preflight", () => {
-    test("STOPPED + blocking mode — fatal per query, never describes", async () => {
-      mocks.readdir.mockResolvedValue(["a.sql", "b.sql"]);
-      mocks.readFile
-        .mockResolvedValueOnce("SELECT id FROM a")
-        .mockResolvedValueOnce("SELECT id FROM b");
-      mocks.getWarehouse.mockReturnValue({ state: "STOPPED" });
+    test("STOPPED + blocking mode — starts the warehouse, waits for RUNNING, then describes", async () => {
+      vi.useFakeTimers();
+      try {
+        mocks.readdir.mockResolvedValue(["a.sql"]);
+        mocks.readFile.mockResolvedValue("SELECT id FROM a");
+        // Preflight sees STOPPED (→ startWaitProceed): warehouses.start fires,
+        // then waitUntilRunning polls the stale STOPPED once more before RUNNING.
+        // After RUNNING, DESCRIBE runs normally.
+        mocks.getWarehouse
+          .mockReturnValueOnce({ state: "STOPPED" })
+          .mockReturnValueOnce({ state: "STOPPED" })
+          .mockReturnValue({ state: "RUNNING" });
+        mocks.executeStatement.mockResolvedValue(
+          succeededResult([["id", "INT", null]]),
+        );
 
-      const { schemas, syntaxErrors, fatalErrors } =
-        await generateQueriesFromDescribe("/queries", "wh-123", {
+        const promise = generateQueriesFromDescribe("/queries", "wh-123", {
           mode: "blocking",
         });
+        // Drive the wait loop's backoff sleep(s) so it can re-poll and observe
+        // RUNNING. Run pending timers until the work settles.
+        await vi.runAllTimersAsync();
+        const { schemas, syntaxErrors, fatalErrors } = await promise;
 
-      // One fatal entry per uncached query; the whole describe batch is skipped.
-      expect(mocks.executeStatement).not.toHaveBeenCalled();
-      expect(fatalErrors).toEqual([
-        { name: "a", message: "warehouse wh-123 is STOPPED" },
-        { name: "b", message: "warehouse wh-123 is STOPPED" },
-      ]);
-      expect(syntaxErrors).toEqual([]);
-      expect(schemas).toHaveLength(2);
-      expect(schemas[0].type).toContain("result: unknown");
-      expect(schemas[1].type).toContain("result: unknown");
+        // The stopped warehouse was started, then described once it came up.
+        expect(mocks.startWarehouse).toHaveBeenCalledTimes(1);
+        expect(mocks.startWarehouse).toHaveBeenCalledWith({ id: "wh-123" });
+        expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
+        expect(schemas).toHaveLength(1);
+        expect(schemas[0].name).toBe("a");
+        expect(schemas[0].type).toContain("id: number");
+        expect(syntaxErrors).toEqual([]);
+        expect(fatalErrors).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    test.each(["DELETED", "DELETING"] as const)(
+      "%s + blocking mode — fatal per query after schemas are written, never describes",
+      async (state) => {
+        mocks.readdir.mockResolvedValue(["a.sql", "b.sql"]);
+        mocks.readFile
+          .mockResolvedValueOnce("SELECT id FROM a")
+          .mockResolvedValueOnce("SELECT id FROM b");
+        mocks.getWarehouse.mockReturnValue({ state });
+
+        const { schemas, syntaxErrors, fatalErrors } =
+          await generateQueriesFromDescribe("/queries", "wh-123", {
+            mode: "blocking",
+          });
+
+        // A deleted/deleting warehouse is the only fatal case: never started,
+        // never described; one fatal entry per uncached query.
+        expect(mocks.startWarehouse).not.toHaveBeenCalled();
+        expect(mocks.executeStatement).not.toHaveBeenCalled();
+        expect(fatalErrors).toEqual([
+          { name: "a", message: `warehouse wh-123 is ${state}` },
+          { name: "b", message: `warehouse wh-123 is ${state}` },
+        ]);
+        expect(syntaxErrors).toEqual([]);
+        // Schemas are still produced (degraded) so the .d.ts is written before
+        // generateFromEntryPoint throws on the recorded fatalErrors.
+        expect(schemas).toHaveLength(2);
+        expect(schemas[0].type).toContain("result: unknown");
+        expect(schemas[1].type).toContain("result: unknown");
+      },
+    );
+
+    test("STOPPED + blocking — start succeeds but warehouse never reaches RUNNING is fatal", async () => {
+      vi.useFakeTimers();
+      try {
+        mocks.readdir.mockResolvedValue(["a.sql"]);
+        mocks.readFile.mockResolvedValue("SELECT id FROM a");
+        // Preflight sees STOPPED → start fires, but the warehouse then reports
+        // DELETED (a genuinely terminal state even with treatStoppedAsTransient).
+        // The wait resolves non-RUNNING → fatal; schemas still written.
+        mocks.getWarehouse
+          .mockReturnValueOnce({ state: "STOPPED" })
+          .mockReturnValue({ state: "DELETED" });
+
+        const promise = generateQueriesFromDescribe("/queries", "wh-123", {
+          mode: "blocking",
+        });
+        await vi.runAllTimersAsync();
+        const { schemas, syntaxErrors, fatalErrors } = await promise;
+
+        expect(mocks.startWarehouse).toHaveBeenCalledTimes(1);
+        expect(mocks.executeStatement).not.toHaveBeenCalled();
+        expect(syntaxErrors).toEqual([]);
+        expect(fatalErrors).toEqual([
+          {
+            name: "a",
+            message: "warehouse wh-123 did not reach RUNNING (now DELETED)",
+          },
+        ]);
+        expect(schemas[0].type).toContain("result: unknown");
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     test("non-blocking mode — degrades silently without probing, even when STOPPED", async () => {
