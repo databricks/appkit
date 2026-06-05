@@ -720,15 +720,21 @@ describe("generateQueriesFromDescribe", () => {
       },
     );
 
-    test("STOPPED + blocking — start succeeds but warehouse never reaches RUNNING is fatal", async () => {
+    test("STOPPED + blocking — start succeeds but warehouse becomes DELETED mid-wait is fatal", async () => {
       vi.useFakeTimers();
       try {
         mocks.readdir.mockResolvedValue(["a.sql"]);
         mocks.readFile.mockResolvedValue("SELECT id FROM a");
         // Preflight sees STOPPED → start fires, but the warehouse then reports
         // DELETED (a genuinely terminal state even with treatStoppedAsTransient).
-        // The wait resolves non-RUNNING → fatal; schemas still written.
+        // ensureRunning surfaces the deleted state as the fatal reason; schemas
+        // are still written so the .d.ts exists before the caller throws.
+        //
+        // Two STOPPED reads precede DELETED: the executor probes once (for
+        // decidePreflight → startWaitProceed), then ensureRunning re-reads STOPPED
+        // (and starts the warehouse) before its wait surfaces DELETED.
         mocks.getWarehouse
+          .mockReturnValueOnce({ state: "STOPPED" })
           .mockReturnValueOnce({ state: "STOPPED" })
           .mockReturnValue({ state: "DELETED" });
 
@@ -741,11 +747,10 @@ describe("generateQueriesFromDescribe", () => {
         expect(mocks.startWarehouse).toHaveBeenCalledTimes(1);
         expect(mocks.executeStatement).not.toHaveBeenCalled();
         expect(syntaxErrors).toEqual([]);
+        // A deleted warehouse is reported as terminal (not a generic timeout),
+        // and the message carries no raw SDK/host diagnostic text.
         expect(fatalErrors).toEqual([
-          {
-            name: "a",
-            message: "warehouse wh-123 did not reach RUNNING (now DELETED)",
-          },
+          { name: "a", message: "warehouse wh-123 is DELETED" },
         ]);
         expect(schemas[0].type).toContain("result: unknown");
       } finally {
@@ -901,6 +906,134 @@ describe("generateQueriesFromDescribe", () => {
       expect(schemas[0].type).toBe(CACHED_GOOD_TYPE);
       expect(syntaxErrors).toEqual([]);
       expect(fatalErrors).toEqual([]);
+    });
+
+    test("STARTING→STOPPED regression + blocking — restarts the warehouse and proceeds once RUNNING (NOT fatal)", async () => {
+      vi.useFakeTimers();
+      try {
+        mocks.readdir.mockResolvedValue(["a.sql"]);
+        mocks.readFile.mockResolvedValue("SELECT id FROM a");
+        // The regression the unified ensureRunning fixes: a warehouse seen
+        // STARTING drops back to STOPPED mid-wait. The old code treated that
+        // non-RUNNING final state as fatal. Now it must (re)start the warehouse
+        // and keep waiting under the same deadline, then describe once RUNNING.
+        //
+        // Probe sequence (the executor probes once for decidePreflight, then
+        // ensureRunning owns the rest):
+        //   1) STARTING  — executor's preflight probe → waitThenProceed
+        //   2) STARTING  — ensureRunning's initial read (no start; it's coming up)
+        //   3) STOPPED   — waitUntilRunning's first poll surfaces the regression
+        //                  (terminal with treatStoppedAsTransient off) → loop
+        //   4) STOPPED   — ensureRunning re-reads → now startWarehouse fires
+        //   5) STOPPED   — stale post-start read, ridden out (transient on)
+        //   6) RUNNING   — warehouse is up → proceed → DESCRIBE
+        mocks.getWarehouse
+          .mockReturnValueOnce({ state: "STARTING" })
+          .mockReturnValueOnce({ state: "STARTING" })
+          .mockReturnValueOnce({ state: "STOPPED" })
+          .mockReturnValueOnce({ state: "STOPPED" })
+          .mockReturnValueOnce({ state: "STOPPED" })
+          .mockReturnValue({ state: "RUNNING" });
+        mocks.executeStatement.mockResolvedValue(
+          succeededResult([["id", "INT", null]]),
+        );
+
+        const promise = generateQueriesFromDescribe("/queries", "wh-123", {
+          mode: "blocking",
+        });
+        await vi.runAllTimersAsync();
+        const { schemas, syntaxErrors, fatalErrors } = await promise;
+
+        // Exactly one (re)start — the regression triggers a single restart, not
+        // one per poll — and DESCRIBE runs after the warehouse reaches RUNNING.
+        expect(mocks.startWarehouse).toHaveBeenCalledTimes(1);
+        expect(mocks.startWarehouse).toHaveBeenCalledWith({ id: "wh-123" });
+        expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
+        expect(schemas).toHaveLength(1);
+        expect(schemas[0].type).toContain("id: number");
+        // The regression is NOT fatal: it recovered and described.
+        expect(syntaxErrors).toEqual([]);
+        expect(fatalErrors).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    test("blocking — a genuine wait-timeout is a distinct, sanitized fatal (no raw SDK/host text)", async () => {
+      vi.useFakeTimers();
+      try {
+        mocks.readdir.mockResolvedValue(["a.sql"]);
+        mocks.readFile.mockResolvedValue("SELECT id FROM a");
+        // The warehouse is STARTING forever — it never reaches RUNNING, so the
+        // 5-minute preflight budget elapses. This is the only non-deleted fatal:
+        // a genuine timeout. (No start: a STARTING warehouse is already coming up.)
+        mocks.getWarehouse.mockReturnValue({ state: "STARTING" });
+
+        const promise = generateQueriesFromDescribe("/queries", "wh-123", {
+          mode: "blocking",
+        });
+        // Drive the polling/backoff clock until the deadline trips and the wait
+        // throws its (caught) timeout.
+        await vi.runAllTimersAsync();
+        const { schemas, syntaxErrors, fatalErrors } = await promise;
+
+        expect(mocks.executeStatement).not.toHaveBeenCalled();
+        expect(syntaxErrors).toEqual([]);
+        // Distinct, sanitized timeout message: seconds only, derived from the
+        // 5-minute ceiling — never the raw "(last state: …)" diagnostic.
+        expect(fatalErrors).toEqual([
+          {
+            name: "a",
+            message: "warehouse wh-123 did not reach RUNNING within 300s",
+          },
+        ]);
+        // Belt-and-suspenders: the surfaced message leaks none of the raw
+        // wait-timeout internals (its "(last state: …)" detail or the raw `Nms`
+        // budget) nor any host/SDK URL.
+        const message = fatalErrors[0].message;
+        expect(message).not.toContain("last state");
+        expect(message).not.toMatch(/within \d+ms/);
+        expect(message).not.toMatch(/https?:\/\//);
+        expect(schemas[0].type).toContain("result: unknown");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    test("blocking cold start — emits the reporter line exactly once", async () => {
+      vi.useFakeTimers();
+      try {
+        mocks.readdir.mockResolvedValue(["a.sql"]);
+        mocks.readFile.mockResolvedValue("SELECT id FROM a");
+        // Cold start: STOPPED → start → a couple of waiting reads → RUNNING. The
+        // CLI `--wait` path threads a `report` sink; it must fire exactly once
+        // (before the first wait), even though the warehouse is polled several
+        // times and ensureRunning may loop.
+        mocks.getWarehouse
+          .mockReturnValueOnce({ state: "STOPPED" })
+          .mockReturnValueOnce({ state: "STOPPED" })
+          .mockReturnValueOnce({ state: "STARTING" })
+          .mockReturnValue({ state: "RUNNING" });
+        mocks.executeStatement.mockResolvedValue(
+          succeededResult([["id", "INT", null]]),
+        );
+
+        const report = vi.fn();
+        const promise = generateQueriesFromDescribe("/queries", "wh-123", {
+          mode: "blocking",
+          report,
+        });
+        await vi.runAllTimersAsync();
+        const { fatalErrors } = await promise;
+
+        expect(fatalErrors).toEqual([]);
+        // Exactly one line, and it's the "still waiting" notice for this warehouse.
+        expect(report).toHaveBeenCalledTimes(1);
+        expect(report.mock.calls[0][0]).toContain("wh-123");
+        expect(report.mock.calls[0][0]).toContain("RUNNING");
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });

@@ -73,6 +73,12 @@ async function runGenerateTypes(
           warehouseId: resolvedWarehouseId,
           noCache,
           mode,
+          // Surface the blocking-mode cold-start wait so a `--wait` run (CI or a
+          // deliberate refresh) isn't silent for up to ~5 minutes while the
+          // warehouse warms up. The generator only ever invokes this once, and
+          // only in blocking mode, so it's a no-op for the default non-blocking
+          // path. Print to stdout so it interleaves with the other progress.
+          report: (msg) => console.log(msg),
         });
         console.log(`Generated query types: ${resolvedOutFile}`);
       }

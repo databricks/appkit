@@ -18,6 +18,8 @@ import {
 import {
   getWarehouseState,
   startWarehouse,
+  WAREHOUSE_WAIT_TIMEOUT,
+  type WarehouseState,
   waitUntilRunning,
 } from "./warehouse-status";
 
@@ -219,6 +221,147 @@ function isConnectivityError(error: unknown): boolean {
   }
 
   return false;
+}
+
+/**
+ * Outcome of {@link ensureRunning}: either the warehouse is RUNNING and the
+ * caller should DESCRIBE (`ok: true`), or it can't serve this run and the caller
+ * should fail with `reason`. Connectivity failures are NOT represented here —
+ * they propagate as thrown errors so the caller's existing `isConnectivityError`
+ * branch degrades them silently (a transient outage must never fail a build).
+ */
+type EnsureRunningResult = { ok: true } | { ok: false; reason: string };
+
+/**
+ * Single owner of "get this warehouse to RUNNING (or decide it can't)" for the
+ * blocking preflight. Collapses what used to be two near-duplicate branches
+ * (start-then-wait for a stopped warehouse, wait for a starting one) into one
+ * routine, fixing two problems they shared:
+ *
+ *  1. Correctness: a STARTING→STOPPED regression mid-wait used to be treated as
+ *     fatal, even though the warehouse merely needs (re)starting. Here, a
+ *     non-terminal STOPPED/STOPPING reading loops back to a fresh start + wait
+ *     under the SAME overall deadline, so the only blocking-mode fatals are a
+ *     genuinely terminal warehouse (DELETED/DELETING) and a real wait-timeout.
+ *  2. Security (CWE-209): the fatal messages here are sanitized — a deleted
+ *     warehouse or a timeout, never a raw SDK/host diagnostic dump. Auth/config
+ *     errors (and connectivity) are surfaced as throws for the caller to
+ *     classify, so this routine never embeds untrusted error text.
+ *
+ * Classification per observed state:
+ *  - DELETED / DELETING → fatal (can't be started; terminal).
+ *  - RUNNING → ok (describe now).
+ *  - STOPPED / STOPPING → nudge it with {@link startWarehouse}, then wait. We
+ *    pass `treatStoppedAsTransient` so the stale pre-start STOPPED reading the
+ *    start hasn't propagated past yet rides out instead of bailing the wait.
+ *  - STARTING (or any other non-RUNNING state) → already coming up; wait without
+ *    a redundant start. If it regresses to STOPPED, the wait surfaces it and the
+ *    loop restarts it on the next pass.
+ *
+ * Everything runs under one `maxMs` deadline shared across loop iterations, so a
+ * regression-driven restart can't extend the budget. A genuine timeout resolves
+ * to a fatal with a distinct, sanitized message (no raw error text).
+ *
+ * @param report - optional caller sink for a one-time "still waiting" notice
+ *   (console for the CLI `--wait` path; `logger.debug`/no-op for dev). Wrapped in
+ *   a once-guard here so it fires at most once even across restart loops.
+ * @throws any non-timeout error from the SDK (auth, connectivity, abort) — the
+ *   caller classifies it (connectivity → degrade, otherwise → sanitized fatal).
+ */
+async function ensureRunning(
+  client: WorkspaceClient,
+  warehouseId: string,
+  opts: { maxMs: number; signal?: AbortSignal; report?: (msg: string) => void },
+): Promise<EnsureRunningResult> {
+  const { maxMs, signal, report } = opts;
+  const deadline = Date.now() + maxMs;
+
+  // Fire the caller's "still waiting" notice at most once across the whole
+  // routine, even if a regression makes us loop through several waitUntilRunning
+  // calls (each of which would otherwise report on its own first poll).
+  let reported = false;
+  const reportOnce = report
+    ? (msg: string) => {
+        if (reported) return;
+        reported = true;
+        report(msg);
+      }
+    : undefined;
+
+  // Distinct, sanitized timeout fatal: seconds only, no last-observed state or
+  // raw SDK text (CWE-209). Used both for the between-iteration budget check and
+  // for a timeout thrown from inside waitUntilRunning.
+  const timeoutReason = (): EnsureRunningResult => ({
+    ok: false,
+    reason: `warehouse ${warehouseId} did not reach RUNNING within ${Math.round(
+      maxMs / 1000,
+    )}s`,
+  });
+
+  while (true) {
+    const state = await getWarehouseState(client, warehouseId);
+
+    // Terminal: a deleted/deleting warehouse genuinely can't reach RUNNING.
+    if (state === "DELETED" || state === "DELETING") {
+      return { ok: false, reason: `warehouse ${warehouseId} is ${state}` };
+    }
+
+    if (state === "RUNNING") return { ok: true };
+
+    // Out of budget before we could even (re)start it → sanitized timeout fatal.
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return timeoutReason();
+
+    // Stopped/stopping won't come up on its own — nudge it, and ride out the
+    // stale pre-start STOPPED reading. STARTING (or any other non-RUNNING state)
+    // is already coming up, so wait without a redundant start.
+    const startedByUs = state === "STOPPED" || state === "STOPPING";
+    if (startedByUs) {
+      await startWarehouse(client, warehouseId);
+    }
+
+    let final: WarehouseState;
+    try {
+      final = await waitUntilRunning(client, warehouseId, {
+        maxMs: remaining,
+        signal,
+        treatStoppedAsTransient: startedByUs,
+        report: reportOnce,
+      });
+    } catch (err) {
+      // A genuine wait-timeout becomes the sanitized timeout fatal here, so the
+      // raw "(last state: …)" detail never escapes. Every other error
+      // (connectivity, auth, abort) propagates to the caller's preflight catch,
+      // which degrades connectivity and sanitizes the rest.
+      if (err instanceof Error && err.name === WAREHOUSE_WAIT_TIMEOUT) {
+        return timeoutReason();
+      }
+      throw err;
+    }
+
+    if (final === "RUNNING") return { ok: true };
+
+    // A deleted/deleting warehouse surfaced mid-wait is terminal.
+    if (final === "DELETED" || final === "DELETING") {
+      return { ok: false, reason: `warehouse ${warehouseId} is ${final}` };
+    }
+
+    // Otherwise `final` is a STOPPED/STOPPING regression (only reachable when we
+    // did NOT start it this pass — a STARTING→STOPPED drop). Loop: the next pass
+    // re-reads, restarts it, and keeps waiting under the same deadline.
+  }
+}
+
+/**
+ * Build a sanitized fatal message for a blocking-preflight error that is neither
+ * connectivity (degraded) nor a clean {@link ensureRunning} decision — i.e. an
+ * auth, permission, bad-warehouse-id, or SDK-config failure. Deliberately does
+ * NOT embed {@link getErrorDiagnostic} (which can leak SDK/host internals,
+ * CWE-209): the actionable next step is the same regardless of the raw text, and
+ * the full diagnostic is already available via debug logging.
+ */
+function sanitizedPreflightFatal(warehouseId: string): string {
+  return `warehouse ${warehouseId} is not accessible (check the warehouse ID, permissions, and authentication)`;
 }
 
 /**
@@ -429,6 +572,11 @@ export function inferParameterTypes(
  *   immediately), "blocking" waits for a starting warehouse and starts (then
  *   waits for) a stopped one, treating only a deleted/deleting warehouse as
  *   fatal. Defaults to "non-blocking".
+ * @param options.report - optional sink for the one-time "still waiting for the
+ *   warehouse" notice during a blocking cold start. The CLI `--wait` path passes
+ *   a console printer so a multi-minute wait isn't silent; dev/non-CLI callers
+ *   omit it and fall back to `logger.debug` (quiet on stdout). Caller-supplied so
+ *   the library stays pure.
  * @returns an array of query schemas
  */
 export async function generateQueriesFromDescribe(
@@ -438,12 +586,16 @@ export async function generateQueriesFromDescribe(
     noCache?: boolean;
     concurrency?: number;
     mode?: PreflightMode;
+    report?: (msg: string) => void;
   } = {},
 ): Promise<QueryGenerationResult> {
   const {
     noCache = false,
     concurrency: rawConcurrency = 10,
     mode = "non-blocking",
+    // Default to debug logging so a dev/watch caller that doesn't wire a reporter
+    // stays quiet on stdout but the notice is still discoverable with DEBUG on.
+    report = (msg: string) => logger.debug("%s", msg),
   } = options;
   const concurrency =
     typeof rawConcurrency === "number" && Number.isFinite(rawConcurrency)
@@ -601,43 +753,40 @@ export async function generateQueriesFromDescribe(
         if (decision === "fatal") {
           fatalMessage = `warehouse ${warehouseId} is ${state}`;
         }
-        if (decision === "startWaitProceed") {
-          // Stopped/stopping warehouse: nudge it out of the stopped state, then
-          // poll to RUNNING. treatStoppedAsTransient rides out the stale
-          // pre-start STOPPED/STOPPING reading the start hasn't propagated past
-          // yet — only DELETED/DELETING (or the deadline) ends the wait early.
-          await startWarehouse(client, warehouseId);
-          const final = await waitUntilRunning(client, warehouseId, {
+        // Both "start a stopped warehouse then wait" and "wait for a starting
+        // one" collapse into a single readiness owner: ensureRunning starts the
+        // warehouse if needed, polls to RUNNING under one deadline, restarts on a
+        // STARTING→STOPPED regression, and treats only a deleted warehouse or a
+        // genuine timeout as fatal (with a sanitized message — no raw SDK text).
+        if (decision === "startWaitProceed" || decision === "waitThenProceed") {
+          const result = await ensureRunning(client, warehouseId, {
             maxMs: PREFLIGHT_WAIT_MAX_MS,
-            treatStoppedAsTransient: true,
+            report,
           });
-          if (final === "RUNNING") {
+          if (result.ok) {
             decision = "proceed";
           } else {
             decision = "fatal";
-            fatalMessage = `warehouse ${warehouseId} did not reach RUNNING (now ${final})`;
-          }
-        }
-        if (decision === "waitThenProceed") {
-          const final = await waitUntilRunning(client, warehouseId, {
-            maxMs: PREFLIGHT_WAIT_MAX_MS,
-          });
-          if (final === "RUNNING") {
-            decision = "proceed";
-          } else {
-            decision = "fatal";
-            fatalMessage = `warehouse ${warehouseId} did not reach RUNNING (now ${final})`;
+            fatalMessage = result.reason;
           }
         }
       } catch (err) {
         if (isConnectivityError(err)) {
           // Warehouse unreachable (transient outage): degrade silently like a
-          // per-query connectivity failure — never fail a build on a blip.
+          // per-query connectivity failure — never fail a build on a blip. The
+          // raw diagnostic is still available at debug level for investigation.
+          logger.debug("Warehouse preflight connectivity failure: %O", err);
           decision = "degradeAll";
         } else {
-          // Auth, bad warehouse id, malformed config, or a timed-out wait: fatal.
+          // Auth, bad warehouse id, or malformed SDK config: fatal. Keep the
+          // user-facing message sanitized (no raw SDK/host diagnostic dump,
+          // CWE-209) and route the full diagnostic to debug logging instead.
+          logger.debug(
+            "Warehouse preflight fatal: %s",
+            getErrorDiagnostic(err),
+          );
           decision = "fatal";
-          fatalMessage = `warehouse ${warehouseId}: ${getErrorDiagnostic(err)}`;
+          fatalMessage = sanitizedPreflightFatal(warehouseId);
         }
       }
     }

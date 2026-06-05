@@ -10,6 +10,11 @@ declare module "@databricks/appkit/type-generator" {
     // "blocking" waits for a startable warehouse and treats a stopped one as
     // fatal.
     mode?: "non-blocking" | "blocking";
+    // Optional sink for the blocking-mode cold-start "still waiting" notice,
+    // invoked at most once (and only in blocking mode). The CLI passes a console
+    // printer so a `--wait` run isn't silent during a multi-minute warehouse
+    // warm-up.
+    report?: (msg: string) => void;
   }): Promise<void>;
 
   export class TypegenSyntaxError extends Error {

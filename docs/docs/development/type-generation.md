@@ -82,7 +82,7 @@ Pass `--wait` for CI and production builds, where accurate types must be present
 npx @databricks/appkit generate-types --wait
 ```
 
-In blocking mode the generator starts a stopped warehouse, waits (bounded) for it to reach `RUNNING`, and then describes your queries. It fails only when the configured warehouse no longer exists (deleted/deleting), so a transient outage or a cold warehouse degrades gracefully rather than breaking the build. The app template wires this up for you: `postinstall` and `predev` run the non-blocking default, while `prebuild` runs `--wait`.
+In blocking mode the generator starts a stopped warehouse and waits — up to a bounded **5-minute** ceiling — for it to reach `RUNNING`, then describes your queries. It fails when the configured warehouse is **deleted/deleting** (it can't be started) **or when the wait times out** before the warehouse reaches `RUNNING`. A transient outage or an unreachable warehouse still degrades gracefully rather than breaking the build. The app template wires this up for you: `postinstall` and `predev` run the non-blocking default, while `prebuild` runs `--wait`.
 
 ## How it works
 

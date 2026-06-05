@@ -17,6 +17,15 @@ export type WarehouseState =
 const INITIAL_POLL_MS = 1000;
 const MAX_POLL_MS = 15000;
 
+/**
+ * `name` on the Error {@link waitUntilRunning} throws when its deadline elapses
+ * before the warehouse reaches RUNNING. Exported so callers can distinguish a
+ * genuine wait-timeout (worth a dedicated, sanitized message) from any other
+ * failure surfaced during polling (connectivity/auth), without string-matching
+ * the message — whose `(last state: …)` detail should never reach end users.
+ */
+export const WAREHOUSE_WAIT_TIMEOUT = "WarehouseWaitTimeoutError";
+
 /** States from which the warehouse will not transition to RUNNING on its own. */
 const NOT_COMING_UP: ReadonlySet<WarehouseState> = new Set<WarehouseState>([
   "STOPPED",
@@ -116,6 +125,13 @@ export async function startWarehouse(
  * down): the next deadline/abort check throws an `AbortError`, and a pending
  * backoff sleep resolves immediately rather than holding the process open.
  *
+ * Pass `opts.report` to surface a single "still waiting" line to the caller (a
+ * cold start can take minutes; without it a `--wait` build looks hung). It is
+ * invoked EXACTLY ONCE, before the first poll/sleep, and only when the first
+ * read is not already RUNNING/terminal — i.e. only when we're actually about to
+ * wait. The library stays pure: the message is handed to a caller-supplied sink
+ * (console for the CLI, `logger.debug`/no-op for dev), never written here.
+ *
  * @throws Error if `maxMs` elapses before the warehouse reaches RUNNING.
  * @throws Error (`name === "AbortError"`) if `opts.signal` is or becomes aborted.
  */
@@ -127,9 +143,10 @@ export async function waitUntilRunning(
     pollMs?: number;
     signal?: AbortSignal;
     treatStoppedAsTransient?: boolean;
+    report?: (msg: string) => void;
   },
 ): Promise<WarehouseState> {
-  const { maxMs, signal, treatStoppedAsTransient } = opts;
+  const { maxMs, signal, treatStoppedAsTransient, report } = opts;
   const start = Date.now();
   let pollMs = opts.pollMs ?? INITIAL_POLL_MS;
 
@@ -139,6 +156,11 @@ export async function waitUntilRunning(
     ? NEVER_COMING_UP
     : NOT_COMING_UP;
 
+  // Fire the "still waiting" notice at most once, and only once we know the first
+  // read settled into an actual wait (not already RUNNING/terminal). Hoisted so
+  // the guard survives every loop iteration.
+  let reported = false;
+
   while (true) {
     throwIfAborted(signal);
 
@@ -146,10 +168,19 @@ export async function waitUntilRunning(
     if (state === "RUNNING") return "RUNNING";
     if (terminalStates.has(state)) return state;
 
-    if (Date.now() - start >= maxMs) {
-      throw new Error(
-        `Warehouse ${warehouseId} did not reach RUNNING within ${maxMs}ms (last state: ${state})`,
+    // First non-terminal read: we're committing to wait, so tell the caller once
+    // before the very first backoff sleep. Subsequent polls stay quiet.
+    if (!reported) {
+      reported = true;
+      report?.(
+        `Waiting for warehouse ${warehouseId} to reach RUNNING (up to ${Math.round(
+          maxMs / 1000,
+        )}s)…`,
       );
+    }
+
+    if (Date.now() - start >= maxMs) {
+      throw timeoutError(warehouseId, maxMs, state);
     }
 
     await delay(pollMs, signal);
@@ -158,9 +189,7 @@ export async function waitUntilRunning(
     // Re-check the deadline after sleeping so we don't issue another poll past
     // the budget purely because we napped through it.
     if (Date.now() - start >= maxMs) {
-      throw new Error(
-        `Warehouse ${warehouseId} did not reach RUNNING within ${maxMs}ms (last state: ${state})`,
-      );
+      throw timeoutError(warehouseId, maxMs, state);
     }
 
     pollMs = Math.min(pollMs * 2, MAX_POLL_MS);
@@ -173,4 +202,23 @@ function throwIfAborted(signal?: AbortSignal): void {
   const error = new Error("The warehouse wait was aborted.");
   error.name = "AbortError";
   throw error;
+}
+
+/**
+ * Build the deadline-elapsed error, tagged with {@link WAREHOUSE_WAIT_TIMEOUT}
+ * so callers can recognise a genuine timeout (vs. a connectivity/auth failure
+ * thrown mid-poll) without parsing the message. The message keeps the last
+ * observed state for debug/log use; callers that surface text to end users
+ * should compose their own sanitized message instead.
+ */
+function timeoutError(
+  warehouseId: string,
+  maxMs: number,
+  lastState: WarehouseState,
+): Error {
+  const error = new Error(
+    `Warehouse ${warehouseId} did not reach RUNNING within ${maxMs}ms (last state: ${lastState})`,
+  );
+  error.name = WAREHOUSE_WAIT_TIMEOUT;
+  return error;
 }

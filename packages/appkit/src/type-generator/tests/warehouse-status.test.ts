@@ -164,6 +164,60 @@ describe("waitUntilRunning", () => {
     expect(get).not.toHaveBeenCalled();
   });
 
+  test("report fires exactly once, before the first wait", async () => {
+    // STARTING then RUNNING: the first poll commits us to a wait, so report
+    // fires once before the first backoff sleep; the second poll (post-sleep)
+    // resolves RUNNING and must NOT report again.
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce(stateResponse("STARTING"))
+      .mockResolvedValueOnce(stateResponse("RUNNING"));
+    const client = makeClient(get);
+    const report = vi.fn();
+
+    const promise = waitUntilRunning(client, "wh-1", { maxMs: 60000, report });
+
+    // After the first poll resolves but before advancing the clock (no sleep
+    // elapsed yet), report must already have fired exactly once.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report.mock.calls[0][0]).toContain("wh-1");
+    expect(report.mock.calls[0][0]).toContain("RUNNING");
+    // get has been called once (first poll); the wait is parked on its backoff.
+    expect(get).toHaveBeenCalledTimes(1);
+
+    // Let the backoff elapse so the second poll fires and resolves RUNNING.
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(promise).resolves.toBe("RUNNING");
+    // Still exactly one report across the whole wait.
+    expect(report).toHaveBeenCalledTimes(1);
+  });
+
+  test("report does NOT fire when the warehouse is already RUNNING", async () => {
+    // First poll is RUNNING, so no wait happens — the notice would be spurious.
+    const get = vi.fn().mockResolvedValue(stateResponse("RUNNING"));
+    const client = makeClient(get);
+    const report = vi.fn();
+
+    await expect(
+      waitUntilRunning(client, "wh-1", { maxMs: 60000, report }),
+    ).resolves.toBe("RUNNING");
+    expect(report).not.toHaveBeenCalled();
+  });
+
+  test("report does NOT fire when the first read is already terminal", async () => {
+    // STOPPED (terminal with the flag off) resolves on the first poll without
+    // waiting, so the "still waiting" notice must not fire.
+    const get = vi.fn().mockResolvedValue(stateResponse("STOPPED"));
+    const client = makeClient(get);
+    const report = vi.fn();
+
+    await expect(
+      waitUntilRunning(client, "wh-1", { maxMs: 60000, report }),
+    ).resolves.toBe("STOPPED");
+    expect(report).not.toHaveBeenCalled();
+  });
+
   test("stops promptly when aborted mid-wait", async () => {
     const get = vi.fn().mockResolvedValue(stateResponse("STARTING"));
     const client = makeClient(get);

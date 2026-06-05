@@ -207,6 +207,14 @@ export async function generateFromEntryPoint(options: {
   warehouseId: string;
   noCache?: boolean;
   mode?: PreflightMode;
+  /**
+   * Optional sink for the blocking-mode "still waiting for the warehouse" cold
+   * start notice. The CLI `--wait` path passes a console printer (so a
+   * multi-minute wait isn't silent); dev/non-CLI callers omit it and the
+   * generator falls back to `logger.debug`. Caller-supplied to keep the library
+   * free of direct stdout writes.
+   */
+  report?: (msg: string) => void;
 }) {
   const {
     outFile,
@@ -214,6 +222,7 @@ export async function generateFromEntryPoint(options: {
     warehouseId,
     noCache,
     mode = "non-blocking",
+    report,
   } = options;
   const projectRoot = resolveProjectRoot(outFile);
 
@@ -226,6 +235,7 @@ export async function generateFromEntryPoint(options: {
     const result = await generateQueriesFromDescribe(queryFolder, warehouseId, {
       noCache,
       mode,
+      report,
     });
     queryRegistry = result.schemas;
     syntaxErrors = result.syntaxErrors ?? [];
