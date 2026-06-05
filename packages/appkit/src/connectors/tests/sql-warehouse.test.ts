@@ -432,6 +432,37 @@ describe("SQLWarehouseConnector", () => {
       expect(get).toHaveBeenCalledTimes(2);
     });
 
+    test("StrictMode remount rejoins in-flight readiness before shared abort", async () => {
+      const get = vi
+        .fn()
+        .mockResolvedValueOnce({ state: "STARTING" })
+        .mockResolvedValueOnce({ state: "RUNNING" });
+      const wsClient = { warehouses: { get, start: vi.fn() } };
+      const mount1 = new AbortController();
+
+      const first = connector.ensureWarehouseRunning(
+        wsClient as any,
+        "wh-strict",
+        {
+          onStatus: () => {},
+          signal: mount1.signal,
+          timeoutMs: 60_000,
+        },
+      );
+      mount1.abort();
+
+      const remount = connector.ensureWarehouseRunning(
+        wsClient as any,
+        "wh-strict",
+        { onStatus: () => {}, timeoutMs: 60_000 },
+      );
+
+      await expect(first).rejects.toThrow(/canceled/i);
+      await vi.runAllTimersAsync();
+      await expect(remount).resolves.toBeUndefined();
+      expect(get).toHaveBeenCalledTimes(2);
+    });
+
     test("continues the readiness loop when onStatus callback throws", async () => {
       // A consumer crash mid-poll must not abort the readiness contract;
       // the emitter swallows the throw onto the OTel span and the loop

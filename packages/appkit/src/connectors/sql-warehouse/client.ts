@@ -52,6 +52,13 @@ export const DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS = 5 * 60 * 1000;
 const WAREHOUSE_RUNNING_CACHE_TTL_MS = 30_000;
 
 /**
+ * Delay before aborting a shared readiness poll when the last waiter leaves.
+ * Matches {@link CacheManager}'s grace period so a React StrictMode
+ * unmount→remount can rejoin the in-flight poll before it is cancelled.
+ */
+const WAREHOUSE_READINESS_ABORT_GRACE_MS = 100;
+
+/**
  * A single observation of the warehouse state, emitted by
  * {@link SQLWarehouseConnector.ensureWarehouseRunning} so callers can stream
  * progress to clients (e.g. over SSE).
@@ -96,6 +103,8 @@ interface WarehouseReadinessInFlight {
   subscribers: Set<(update: WarehouseStatusUpdate) => void>;
   /** Last emitted update; replayed to late joiners. */
   lastUpdate: WarehouseStatusUpdate | null;
+  /** Pending delayed abort when the last waiter left (StrictMode grace). */
+  abortTimer?: ReturnType<typeof setTimeout>;
 }
 
 export class SQLWarehouseConnector {
@@ -419,7 +428,13 @@ export class SQLWarehouseConnector {
     join: boolean,
   ): Promise<void> {
     if (signal?.aborted) throw ExecutionError.canceled();
-    if (join) entry.refCount++;
+    if (join) {
+      entry.refCount++;
+      if (entry.abortTimer) {
+        clearTimeout(entry.abortTimer);
+        entry.abortTimer = undefined;
+      }
+    }
     entry.subscribers.add(onStatus);
     if (entry.lastUpdate) onStatus(entry.lastUpdate);
     return this._joinWarehouseReadiness(entry, signal);
@@ -473,6 +488,10 @@ export class SQLWarehouseConnector {
         { name: this.name, includePrefix: true },
       )
       .finally(() => {
+        if (entry.abortTimer) {
+          clearTimeout(entry.abortTimer);
+          entry.abortTimer = undefined;
+        }
         if (this._readinessInFlight.get(warehouseId) === entry) {
           this._readinessInFlight.delete(warehouseId);
         }
@@ -528,7 +547,15 @@ export class SQLWarehouseConnector {
   private _releaseReadinessWaiter(entry: WarehouseReadinessInFlight): void {
     if (entry.refCount > 0) entry.refCount--;
     if (entry.refCount <= 0 && !entry.sharedController.signal.aborted) {
-      entry.sharedController.abort("all warehouse readiness waiters aborted");
+      // Grace period: delay abort so a StrictMode remount can rejoin the
+      // in-flight poll before the shared loop is cancelled.
+      entry.abortTimer = setTimeout(() => {
+        if (entry.refCount <= 0 && !entry.sharedController.signal.aborted) {
+          entry.sharedController.abort(
+            "all warehouse readiness waiters aborted",
+          );
+        }
+      }, WAREHOUSE_READINESS_ABORT_GRACE_MS);
     }
   }
 
