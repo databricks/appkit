@@ -3,7 +3,7 @@
 Minimal AppKit app demonstrating the **TaskFlow private-preview CUJ**:
 durable analytics queries that survive a server crash.
 
-The app exposes two long-running TPC-H queries through the analytics
+The app exposes two long-running analytics queries through the analytics
 plugin. Each query runs as a TaskFlow durable task, so the engine writes
 a WAL entry checkpointing the warehouse `statement_id` before polling.
 If the Node process is killed while a query is still executing on the
@@ -16,8 +16,8 @@ and returns the same result — without re-submitting the statement.
 
 - `server.ts` — `createApp({ plugins: [server(), analytics({})] })` with
   TaskFlow timings tightened for a snappy demo.
-- `config/queries/` — two SQL files: a single-table aggregate and a
-  3-way join over `samples.tpch.*`.
+- `config/queries/` — two SQL files: a synthetic hash aggregate tuned
+  for small warehouses and a heavier join-style stress query.
 - `src/App.tsx` — React UI with two panels using
   `useAnalyticsQuery(...)`. Each panel shows status (`idle` / `task
   active` / `complete` / `failed`) and a running timer.
@@ -54,7 +54,7 @@ when phase 2 reuses the same idempotency key and reaches a terminal event.
 
 1. **Start the server**: `pnpm --filter=app-with-task dev`.
 2. **Open the browser** at `http://localhost:8000`.
-3. **Click "Run query"** on the TPC-H Q1 panel. The status flips to
+3. **Click "Run query"** on the synthetic aggregate panel. The status flips to
    `task active` and the timer starts.
 4. **In another terminal, kill the server hard**:
    ```bash

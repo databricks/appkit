@@ -96,11 +96,15 @@ function QueryPanel({
   queryKey,
   title,
   description,
+  badge,
+  disabled = false,
   onLog,
 }: {
   queryKey: QueryKey;
   title: string;
   description: string;
+  badge: "Preview" | "Later";
+  disabled?: boolean;
   onLog: (line: string) => void;
 }) {
   const [run, setRun] = useState(0);
@@ -108,15 +112,22 @@ function QueryPanel({
   return (
     <section className="panel">
       <header>
-        <h2>{title}</h2>
+        <h2>
+          {title}
+          <span className={`badge badge-${badge.toLowerCase()}`}>{badge}</span>
+        </h2>
         <p className="muted">{description}</p>
       </header>
       <div className="controls">
-        <button type="button" onClick={() => setRun((n) => n + 1)}>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => setRun((n) => n + 1)}
+        >
           {run === 0 ? "Run query" : "Run again"}
         </button>
       </div>
-      {run > 0 ? (
+      {run > 0 && !disabled ? (
         <QueryRunner key={run} queryKey={queryKey} onLog={onLog} />
       ) : null}
     </section>
@@ -140,49 +151,72 @@ export default function App() {
   }, []);
 
   return (
-    <main className="app">
-      <header className="hero">
-        <h1>AppKit × TaskFlow</h1>
-        <p>
-          Durable analytics queries. Run a query, kill the server with
-          <code>kill -9</code>, restart, re-run the same query — the engine
-          deduplicates by idempotency key, recovers the task, polls the original
-          warehouse <code>statement_id</code>, and returns the same result.
-        </p>
-      </header>
+    <>
+      <output className="notice">
+        <span className="notice-dot" aria-hidden="true" />
+        <span className="notice-copy">
+          <strong>SQL Warehouse is warming up</strong> — a freshly deployed
+          warehouse takes a moment to start. Empty results at first are the
+          warehouse spinning up, not an app error.
+        </span>
+        <a
+          className="notice-link"
+          href="/sql/warehouses"
+          target="_blank"
+          rel="noreferrer"
+        >
+          View warehouse →
+        </a>
+      </output>
 
-      <div className="grid">
-        <QueryPanel
-          queryKey="slow_aggregate"
-          title="TPC-H Q1 aggregate"
-          description="Full scan + multi-aggregate over samples.tpch.lineitem (~6M rows)."
-          onLog={appendLog}
-        />
-        <QueryPanel
-          queryKey="heavy_join"
-          title="3-way TPC-H join"
-          description="orders × lineitem × customer, grouped by segment × year."
-          onLog={appendLog}
-        />
-      </div>
+      <main className="app">
+        <header className="hero">
+          <h1>AppKit × TaskFlow</h1>
+          <p>
+            Durable analytics queries. Run a query, kill the server with
+            <code>kill -9</code>, restart, re-run the same query — the engine
+            deduplicates by idempotency key, recovers the task, polls the
+            original warehouse <code>statement_id</code>, and returns the same
+            result.
+          </p>
+        </header>
 
-      <section className="logs">
-        <h3>Client log</h3>
-        {logs.length === 0 ? (
-          <p className="muted">No events yet.</p>
-        ) : (
-          <ul>
-            {logs.map((line) => (
-              <li key={`${line.ts}-${line.msg}`}>
-                <span className="muted">
-                  {new Date(line.ts).toLocaleTimeString()}{" "}
-                </span>
-                {line.msg}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </main>
+        <div className="grid">
+          <QueryPanel
+            queryKey="slow_aggregate"
+            title="Synthetic aggregate"
+            badge="Preview"
+            description="CPU-heavy hash aggregate over 300M synthetic rows, tuned for small warehouses."
+            onLog={appendLog}
+          />
+          <QueryPanel
+            queryKey="heavy_join"
+            title="3-way TPC-H join"
+            badge="Later"
+            description="Stress query for larger warehouses; not part of the private-preview golden path."
+            disabled
+            onLog={appendLog}
+          />
+        </div>
+
+        <section className="logs">
+          <h3>Client log</h3>
+          {logs.length === 0 ? (
+            <p className="muted">No events yet.</p>
+          ) : (
+            <ul>
+              {logs.map((line) => (
+                <li key={`${line.ts}-${line.msg}`}>
+                  <span className="muted">
+                    {new Date(line.ts).toLocaleTimeString()}{" "}
+                  </span>
+                  {line.msg}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </main>
+    </>
   );
 }

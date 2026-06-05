@@ -274,9 +274,8 @@ describe("Analytics Plugin Integration", () => {
       );
       const data2 = await parseSSEResponse(response2, { eventType: "data" });
 
-      // Identical IK → identical wire payload. We don't assert the
-      // submit count: `at_least_once` dedupes in-flight only, so
-      // sequential requests after a terminal state may re-execute.
+      // Identical IK → identical wire payload. Storage-backed dedup protects
+      // active crash-recovery paths; terminal reruns may start fresh work.
       expect(data1.data).toEqual([{ value: "cached_value" }]);
       expect(data2.data).toEqual([{ value: "cached_value" }]);
     });

@@ -29,4 +29,5 @@ if (!native) {
 export const Engine = native.Engine;
 export const Taskflow = native.Taskflow;
 export const workflow = native.workflow;
+export const Suspend = native.Suspend;
 export default native;

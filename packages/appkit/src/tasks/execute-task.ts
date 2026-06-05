@@ -110,6 +110,7 @@ export async function executeTask<TInput>(
         userId,
         context: userCtx ?? undefined,
         executeMode: settings.executeMode,
+        maxAttempts: settings.maxAttempts,
       });
       idempotencyKey = handle.idempotencyKey;
       startSpan?.setAttribute("task.idempotency_key", idempotencyKey);
@@ -370,6 +371,11 @@ export interface ExecuteTaskSettings {
    * coordinate.
    */
   executeMode?: "at_least_once" | "at_most_once";
+  /**
+   * Per-task retry budget. The count includes the first attempt, so
+   * `1` disables handler retry for externally visible work.
+   */
+  maxAttempts?: number;
   telemetry?: {
     /** Default: true. */
     traces?: boolean;
@@ -380,7 +386,7 @@ export interface ExecuteTaskSettings {
   // Typed `never`: rejected at compile time so a settings object copied
   // from `execute()` / `executeStream()` errors clearly.
 
-  /** Forbidden: the task engine handles retry via `recover` on `TaskDefinition`. */
+  /** Forbidden: use `maxAttempts` for the task-engine retry budget. */
   retry?: never;
   /** Forbidden: the task engine dedupes by idempotency key. */
   cache?: never;

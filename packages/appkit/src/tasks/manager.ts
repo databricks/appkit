@@ -24,7 +24,11 @@ import {
   TelemetryManager,
   type TelemetryProvider,
 } from "../telemetry";
-import { mergeTaskDefaults, type TaskOption } from "./defaults";
+import {
+  mergeTaskDefaults,
+  type TaskConfig,
+  type TaskOption,
+} from "./defaults";
 import type {
   ActiveBridge,
   TaskDefinition,
@@ -194,25 +198,22 @@ export class TaskManager {
       }
       logger.warn(`${message} (allowed in non-production)`);
     }
-    // TODO(taskflow#engine-binding-reconciliation): vendored
-    // `registerTask` is positional at runtime even though the .d.ts
-    // documents the object form. `TypedTaskContext` is compile-time
-    // only — at runtime emit is unconstrained `(string, any)`.
     const recoverFn = definition.recover ?? null;
     const registerOpts = buildRegisterOpts(definition);
     (
       this.engine as unknown as {
         registerTask(
           n: string,
+          opts: { autoRecover?: boolean; recoveryMaxAgeMs?: number } | null,
           exec: (input: unknown, ctx: TaskContext) => Promise<unknown>,
           recover:
             | ((input: unknown, ctx: TaskContext) => Promise<unknown>)
             | null,
-          opts: { autoRecover?: boolean; recoveryMaxAgeMs?: number } | null,
         ): void;
       }
     ).registerTask(
       definition.name,
+      registerOpts,
       definition.execute as unknown as (
         input: unknown,
         ctx: TaskContext,
@@ -220,7 +221,6 @@ export class TaskManager {
       recoverFn as unknown as
         | ((input: unknown, ctx: TaskContext) => Promise<unknown>)
         | null,
-      registerOpts,
     );
     this.registrations.set(definition.name, {
       autoRecover: definition.autoRecover ?? true,

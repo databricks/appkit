@@ -6,19 +6,19 @@
   "platforms": {
     "darwin-arm64": {
       "file": "taskflow-darwin-arm64.node",
-      "sha256": "80e602504b0b0f4403ccaa95aaf8420be6e8ab9237a47ab17c9ef438af975e52"
+      "sha256": "7b674232afc45116764ed4d68914c48c98303c713ae9b227ecc950c18af830fd"
     },
     "linux-x64": {
       "file": "taskflow-linux-x64.node",
-      "sha256": "fa3783f8e91b5bc58d5059c4946bf2437aaea9b24d3d3c48afcc1c8c872b9044"
+      "sha256": "3822b7c8e64ebb6a44cf78d0563a3821551cc50f17e0c8c35468fd6aa1002507"
     }
   },
   "loader": {
     "file": "taskflow.js",
-    "sha256": "eb3018ede76ff68a7980ba3578cdc3557fe15ed41171c2aad056bd7c86ea8618"
+    "sha256": "2f7500685a85ca3696fd603c2633cc5bd1fc47d9a866a149d1250f9990bd5fec"
   },
   "types": {
     "file": "taskflow.d.ts",
-    "sha256": "4d30bbb49368e52587260941e02eb599f73b9f1a266bbad6024c42b67f77fe1b"
+    "sha256": "ce7bd1390eea94930f87cecb77f5340593bbaa01946f4341471caab122425891"
   }
 }

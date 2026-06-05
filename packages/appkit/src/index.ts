@@ -14,15 +14,6 @@ export type {
   StreamExecutionSettings,
 } from "shared";
 export { isSQLTypeMarker, sql } from "shared";
-export type {
-  ResumeOptions,
-  StopOptions,
-  StreamEvent,
-  SubmitOptions,
-  Task,
-  TaskEvent,
-  TaskHandle,
-} from "../vendor/taskflow/taskflow.js";
 export { CacheManager } from "./cache";
 export type { JobsConnectorConfig } from "./connectors/jobs";
 export type {

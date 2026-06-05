@@ -374,8 +374,8 @@ describe("Analytics Plugin", () => {
       const mockRes2 = createMockResponse();
       await handler(mockReq, mockRes2);
 
-      // We don't assert `submitMock.callCount` — `at_least_once` dedupes
-      // in-flight only, so terminal-state re-execution is legitimate.
+      // Storage-backed dedup protects active crash-recovery paths; once a
+      // task reaches terminal state, a later identical request may run again.
       expect(mockRes1.write).toHaveBeenCalledWith("event: data\n");
       expect(mockRes2.write).toHaveBeenCalledWith("event: data\n");
       expect(mockRes1.write).toHaveBeenCalledWith(

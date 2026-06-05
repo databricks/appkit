@@ -203,6 +203,15 @@ export interface StorageRetryConfig {
     backoffMultiplier?: number;
 }
 
+/**
+ * Thrown from inside a handler (or `workflow.awaitSignal` / `workflow.waitAll`)
+ * to cooperatively suspend the running task. The engine moves the task to
+ * `Suspended`; revive it with `resume`. Mirrors Python's `taskflow.Suspend`.
+ */
+export declare class Suspend extends Error {
+    constructor();
+}
+
 // Low-level API: native `Engine` bindings.
 
 export declare class Engine {
@@ -245,6 +254,10 @@ export declare class Engine {
      * config; production deployments must leave this disabled.
      */
     simulateCrash(idempotencyKey: string): void;
+    /** Engine metrics report as a JSON string. */
+    metricsJson(): string;
+    /** Engine metrics report as a human-readable string. */
+    metricsPretty(): string;
 }
 
 // High-level SDK: same shape as the Python `Taskflow` helpers.
@@ -270,9 +283,22 @@ export declare class Taskflow {
         lastSeq?: number,
         userId?: string,
     ): Promise<AsyncIterableIterator<StreamEvent>>;
+    /**
+     * Block until the task reaches a terminal state or emits a completion
+     * event, resolving with its result. Polls `subscribe` + `reconnect`;
+     * rejects with a `TimeoutError` if `options.timeoutMs` elapses first.
+     */
+    static wait(
+        idempotencyKey: string,
+        options?: { timeoutMs?: number; userId?: string },
+    ): Promise<any>;
     /** Test-only. See `Engine.simulateCrash`. */
     static simulateCrash(idempotencyKey: string): Promise<void>;
     static shutdown(): Promise<void>;
+    /** Engine metrics report as a JSON string. */
+    static metricsJson(): Promise<string>;
+    /** Engine metrics report as a human-readable string. */
+    static metricsPretty(): Promise<string>;
 }
 
 // Workflow primitives: opinionated helpers; callers may extend them.
@@ -286,4 +312,25 @@ export declare namespace workflow {
     ): StepFn<TArgs, TResult>;
 
     function findEvent(ctx: TaskContext, eventType: string): TaskEvent | null;
+
+    /**
+     * Durable signal receive. Resolves with the signal body when
+     * `ctx.context.payload` matches `topic`; otherwise suspends the task (throws
+     * `Suspend`) to be revived by a later `resume`. `options.timeoutMs` is
+     * reserved for durable timers and currently ignored.
+     */
+    function awaitSignal(
+        ctx: TaskContext,
+        topic: string,
+        options?: { timeoutMs?: number },
+    ): Promise<any>;
+
+    /**
+     * Resolve once every child key has emitted `child_done:{key}`; suspends
+     * (throws `Suspend`) until all are present.
+     */
+    function waitAll(
+        ctx: TaskContext,
+        childKeys: string[],
+    ): Promise<Record<string, any>>;
 }

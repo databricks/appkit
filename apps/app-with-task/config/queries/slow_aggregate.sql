@@ -1,22 +1,23 @@
--- Hash + COUNT(DISTINCT) over 500M synthetic rows.
--- `MD5` is row-by-row CPU; `COUNT(DISTINCT)` forces a shuffle that
--- Photon can't shortcut. Result cache is defeated by
--- `current_timestamp()` in the projection. Reliably 30-90s on a Small
--- warehouse — a wide-enough window to kill the Node process between
--- `CHECKPOINT PERSISTED` and final completion.
+-- CPU-heavy aggregate over 300M synthetic rows.
+-- Row-by-row MD5 keeps the query long enough for the crash-recovery
+-- demo, while bounded per-bucket aggregates avoid shuffle-memory spikes
+-- on Small SQL warehouses. `current_timestamp()` keeps the result cache
+-- out of the path.
 WITH src AS (
     SELECT
         id,
-        MD5(CAST(id           AS STRING)) AS h1,
-        MD5(CAST(id * 31      AS STRING)) AS h2
-    FROM RANGE(500000000)
+        SUBSTR(MD5(CAST(id AS STRING)), 1, 2) AS bucket,
+        CAST(id % 1000000 AS BIGINT) AS metric
+    FROM RANGE(300000000)
 )
 SELECT
-    SUBSTR(h1, 1, 4)        AS bucket,
-    COUNT(DISTINCT h2)      AS unique_h2,
-    COUNT(*)                AS total,
-    current_timestamp()     AS cache_buster
+    bucket,
+    COUNT(*) AS total_rows,
+    SUM(metric) AS metric_sum,
+    AVG(metric) AS metric_avg,
+    APPROX_COUNT_DISTINCT(metric) AS approx_unique_metric,
+    current_timestamp() AS cache_buster
 FROM src
-GROUP BY SUBSTR(h1, 1, 4)
-ORDER BY unique_h2 DESC
+GROUP BY bucket
+ORDER BY total_rows DESC
 LIMIT 100;

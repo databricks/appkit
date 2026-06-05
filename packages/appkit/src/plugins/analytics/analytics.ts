@@ -407,9 +407,9 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       return;
     }
 
-    // OBO uses `at_most_once` to prevent two pods double-submitting the
-    // same warehouse statement (DML side effects, billing). SP stays on
-    // `at_least_once` for latency since results are read-only.
+    // Warehouse statements are externally visible work: duplicate
+    // submission changes cost and breaks crash-recovery reattach.
+    // Storage-backed dedup is worth the small submit latency here.
     await target.executeTask<AnalyticsQueryTaskInput>(
       res,
       this.queryTaskName,
@@ -423,7 +423,8 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         formatType,
       },
       {
-        executeMode: isAsUser ? "at_most_once" : "at_least_once",
+        executeMode: "at_most_once",
+        maxAttempts: 1,
       },
     );
   }
@@ -501,12 +502,13 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     };
 
     // OBO: forward the live UserContext via the engine sidecar so the
-    // handler can re-enter `runInUserContext` without re-parsing
-    // headers. `at_most_once` to avoid double-submit across pods.
+    // handler can re-enter `runInUserContext` without re-parsing headers.
+    // SP uses the same storage-backed dedup to avoid duplicate warehouse work.
     const handle = await this.task.start(this.queryTaskName, input, {
       userId: isAsUser ? executorKey : undefined,
       context: getCurrentUserContext() ?? undefined,
-      executeMode: isAsUser ? "at_most_once" : "at_least_once",
+      executeMode: "at_most_once",
+      maxAttempts: 1,
     });
 
     for await (const evt of this.task.subscribe(handle.idempotencyKey)) {

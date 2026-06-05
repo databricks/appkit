@@ -1,24 +1,26 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-const { engineSubmit, engineShutdown, engineCreate } = vi.hoisted(() => {
-  const engineSubmit = vi.fn(async () => ({
-    taskId: "t-1",
-    idempotencyKey: "ik-1",
-  }));
-  const engineShutdown = vi.fn(async () => {});
-  const engineCreate = vi.fn(async (_config: unknown) => ({
-    submit: engineSubmit,
-    reconnect: vi.fn(),
-    resume: vi.fn(),
-    stop: vi.fn(),
-    cancelTask: vi.fn(),
-    subscribe: vi.fn(),
-    shutdown: engineShutdown,
-    simulateCrash: vi.fn(),
-    registerTask: vi.fn(),
-  }));
-  return { engineSubmit, engineShutdown, engineCreate };
-});
+const { engineSubmit, engineShutdown, engineCreate, engineRegisterTask } =
+  vi.hoisted(() => {
+    const engineSubmit = vi.fn(async () => ({
+      taskId: "t-1",
+      idempotencyKey: "ik-1",
+    }));
+    const engineShutdown = vi.fn(async () => {});
+    const engineRegisterTask = vi.fn();
+    const engineCreate = vi.fn(async (_config: unknown) => ({
+      submit: engineSubmit,
+      reconnect: vi.fn(),
+      resume: vi.fn(),
+      stop: vi.fn(),
+      cancelTask: vi.fn(),
+      subscribe: vi.fn(),
+      shutdown: engineShutdown,
+      simulateCrash: vi.fn(),
+      registerTask: engineRegisterTask,
+    }));
+    return { engineSubmit, engineShutdown, engineCreate, engineRegisterTask };
+  });
 
 vi.mock("../vendor-loader", () => ({
   loadVendorModule: vi.fn(async () => ({
@@ -68,6 +70,7 @@ describe("TaskManager", () => {
     engineSubmit.mockClear();
     engineShutdown.mockClear();
     engineCreate.mockClear();
+    engineRegisterTask.mockClear();
   });
 
   afterEach(async () => {
@@ -146,6 +149,29 @@ describe("TaskManager", () => {
       await instance.shutdown();
       await expect(instance.start("foo", {})).rejects.toThrow(
         /has been shut down/,
+      );
+    });
+  });
+
+  describe("task registration", () => {
+    test("passes native registerTask arguments in binding order", async () => {
+      const instance = (await TaskManager.initialize(true)) as TaskManager;
+      const execute = vi.fn(async () => ({ ok: true }));
+      const recover = vi.fn(async () => ({ ok: true }));
+
+      instance.task({
+        name: "analytics:query",
+        execute,
+        recover,
+        autoRecover: false,
+        recoveryMaxAgeMs: 1000,
+      });
+
+      expect(engineRegisterTask).toHaveBeenCalledWith(
+        "analytics:query",
+        { autoRecover: false, recoveryMaxAgeMs: 1000 },
+        execute,
+        recover,
       );
     });
   });
